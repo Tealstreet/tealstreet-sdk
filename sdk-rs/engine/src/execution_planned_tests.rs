@@ -10,6 +10,8 @@ mod planned_execution {
     const FOLLOWER: CommandId = 8;
     const SHORT_FOLLOWER: CommandId = 9;
     const LATE: CommandId = 10;
+    /// Issues its own command-owned read; its delivery probes the execution.
+    const PROBE: CommandId = 6;
 
     fn credential() -> crate::request_context::Credential {
         crate::request_context::Credential {
@@ -95,6 +97,12 @@ mod planned_execution {
         accept_resend: bool,
         grants: Vec<bool>,
         resends: Vec<Result<(), Error>>,
+        /// Each accepted write publishes its identity to the observers.
+        progress: bool,
+        /// Receipts per accepted write (one when zero).
+        progress_batch: usize,
+        /// After the Plan terminal, publish once more (non-empty, then empty).
+        after_terminal: bool,
     }
 
     impl Shared {
@@ -104,6 +112,7 @@ mod planned_execution {
             let leg = cx.plan_leg_context(&plan, &slot).unwrap();
             cx.request_signed_managed(
                 leg.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -162,15 +171,15 @@ mod planned_execution {
                 std::slice::from_ref(&step)
             };
             if self.invalid_steps {
-                let ids = cx.io.next_id;
-                let actions = cx.io.actions.len();
-                let contexts = cx.io.request_contexts.plan_context_storage();
+                let ids = cx.io.core.next_id;
+                let actions = cx.io.core.actions.len();
+                let contexts = cx.io.core.request_contexts.plan_context_storage();
                 self.refusals
                     .push(share(cx, &preflight, &[], self.read).unwrap_err());
-                assert_eq!(cx.io.next_id, ids, "refusal spends no identity");
-                assert_eq!(cx.io.actions.len(), actions);
-                assert_eq!(cx.io.request_contexts.plan_context_storage(), contexts);
-                assert_eq!(cx.io.request_contexts.execution_count(), 0);
+                assert_eq!(cx.io.core.next_id, ids, "refusal spends no identity");
+                assert_eq!(cx.io.core.actions.len(), actions);
+                assert_eq!(cx.io.core.request_contexts.plan_context_storage(), contexts);
+                assert_eq!(cx.io.core.request_contexts.execution_count(), 0);
                 cx.fail_preflight(&preflight, "refused admission").unwrap();
                 return;
             }
@@ -181,6 +190,7 @@ mod planned_execution {
             if self.read {
                 cx.request_managed(
                     leg.clone(),
+                    None,
                     Method::Get,
                     "https://venue.test/read".into(),
                     None,
@@ -190,6 +200,7 @@ mod planned_execution {
             } else {
                 cx.request_signed_managed(
                     leg.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/write".into(),
                     None,
@@ -199,6 +210,11 @@ mod planned_execution {
                 .unwrap();
             }
             self.founder = founder;
+            if self.progress {
+                // Identities are published only from one of the execution's deliveries.
+                self.refusals
+                    .push(cx.execution_progress(&execution, Vec::new()).unwrap_err());
+            }
             if self.probe_handle {
                 self.refusals
                     .push(cx.abort_execution(&execution, "direct").unwrap_err());
@@ -234,6 +250,7 @@ mod planned_execution {
                 // A member's only physical work is the Plan's.
                 let sent = cx.request_signed_managed(
                     root.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/own-root".into(),
                     None,
@@ -263,12 +280,44 @@ mod planned_execution {
         ) {
             match command {
                 FOUNDER => self.found(cx),
+                PROBE => {
+                    let root = cx
+                        .admit_http_command(Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 60_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        })
+                        .unwrap();
+                    cx.request_managed(
+                        root.clone(),
+                        None,
+                        Method::Get,
+                        "https://venue.test/probe".into(),
+                        None,
+                        root,
+                    )
+                    .unwrap();
+                }
                 FOLLOWER | LATE.. => self.follow(cx, 60_000),
                 SHORT_FOLLOWER => self.follow(cx, 100),
                 _ => unreachable!(),
             }
         }
         fn on_response(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: Response<'_>) {
+            if matches!(context.owner(), crate::request_context::Owner::Command { .. }) {
+                // A command-owned delivery is not one of the execution's legs.
+                let receipt = crate::OrderIdentityReceipt {
+                    symbol: "BTC-USD".into(),
+                    kind: crate::OrderIdentityKind::ClientOrderId,
+                    identity: "probe".into(),
+                };
+                let execution = self.execution.clone().unwrap();
+                self.refusals
+                    .push(cx.execution_progress(&execution, vec![receipt]).unwrap_err());
+                return;
+            }
             self.delivered += 1;
             let plan = self.plan.clone().unwrap();
             let slot = self.slot.clone().unwrap();
@@ -321,6 +370,7 @@ mod planned_execution {
                     if let Ok(leg) = resent {
                         cx.request_signed_managed(
                             leg.clone(),
+                            None,
                             Method::Post,
                             "https://venue.test/write".into(),
                             None,
@@ -363,12 +413,39 @@ mod planned_execution {
             )
             .unwrap();
             cx.validate_http_write_effects(&context).unwrap();
+            if self.progress {
+                let receipts = (0..self.progress_batch.max(1))
+                    .map(|n| crate::OrderIdentityReceipt {
+                        symbol: "BTC-USD".into(),
+                        kind: crate::OrderIdentityKind::ClientOrderId,
+                        identity: if n == 0 {
+                            format!("native-{}", self.delivered)
+                        } else {
+                            format!("native-{}-{n}", self.delivered)
+                        },
+                    })
+                    .collect();
+                cx.execution_progress(self.execution.as_ref().unwrap(), receipts)
+                    .unwrap();
+            }
             cx.finish_plan_call(&plan, &slot, &context).unwrap();
             if self.two_steps && self.delivered == 1 {
                 self.queue_next(cx);
                 return;
             }
             cx.done_plan(&plan, "placed".into()).unwrap();
+            if self.after_terminal {
+                let execution = self.execution.clone().unwrap();
+                let receipt = crate::OrderIdentityReceipt {
+                    symbol: "BTC-USD".into(),
+                    kind: crate::OrderIdentityKind::ClientOrderId,
+                    identity: "after-terminal".into(),
+                };
+                for receipts in [vec![receipt], Vec::new()] {
+                    self.refusals
+                        .push(cx.execution_progress(&execution, receipts).unwrap_err());
+                }
+            }
         }
         fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, Context>, _: &Plan) {
             if self.reject_first && self.delivered == 1 {
@@ -560,11 +637,11 @@ mod planned_execution {
         let (e, token, _) = shared_write(&[FOLLOWER]);
         let request = token.attempt().request;
         assert!(matches!(
-            e.io.managed_http.get(&request).unwrap().lifecycle.context().owner(),
+            e.io.core.managed_http.get(&request).unwrap().lifecycle.context().owner(),
             crate::request_context::Owner::Execution { .. }
         ));
         assert!(
-            e.io.http_responses.contains(request),
+            e.io.core.http_responses.contains(request),
             "a physical execution write keeps its reconciliation record"
         );
     }
@@ -596,7 +673,7 @@ mod planned_execution {
             );
         }
         assert!(prepared(&actions).is_empty());
-        assert!(!e.io.request_contexts.is_observer(FOLLOWER));
+        assert!(!e.io.core.request_contexts.is_observer(FOLLOWER));
     }
 
     #[test]
@@ -1107,6 +1184,175 @@ mod planned_execution {
         }
     }
 
+    /// Q2: an accepted write's identities reach every live observer as
+    /// progress, and a later joiner replays them; outside a delivery they are
+    /// refused.
+    #[test]
+    fn execution_progress_reaches_every_observer_and_late_joiners_replay_it() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            progress: true,
+            two_steps: true,
+            ..Shared::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        assert_eq!(e.venue.refusals, vec![Error::Revoked]);
+        let tokens = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, tokens[0], 0.);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            1_000.,
+            Event::HttpResponse {
+                request: tokens[0].attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let receipt = crate::OrderIdentityReceipt {
+            symbol: "BTC-USD".into(),
+            kind: crate::OrderIdentityKind::ClientOrderId,
+            identity: "native-1".into(),
+        };
+        for owner in [FOUNDER, FOLLOWER] {
+            let progress: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandProgress { command, receipts })
+                        if *command == owner =>
+                    {
+                        Some(receipts.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(progress, vec![vec![receipt.clone()]], "owner {owner}");
+        }
+        command(&mut e, 1_000., LATE);
+        assert_eq!(
+            e.venue.joined.last(),
+            Some(&Ok(crate::engine::Joined::Live(vec![receipt])))
+        );
+    }
+
+    fn progress_notices(actions: &[Action], owner: CommandId) -> Vec<usize> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandProgress { command, receipts })
+                    if *command == owner =>
+                {
+                    Some(receipts.len())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn accept(e: &mut Engine<Shared>, token: Preparation) -> Vec<Action> {
+        e.handle(
+            1_000.,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        e.drain_actions().collect()
+    }
+
+    /// After the Plan terminal commits, progress (empty or not) is refused and
+    /// reaches no observer.
+    #[test]
+    fn execution_progress_after_the_plan_terminal_is_revoked() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            progress: true,
+            after_terminal: true,
+            ..Shared::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        let tokens = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, tokens[0], 0.);
+        e.drain_actions().for_each(drop);
+        let actions = accept(&mut e, tokens[0]);
+        assert_eq!(
+            e.venue.refusals,
+            vec![Error::Revoked, Error::Revoked, Error::Revoked]
+        );
+        for owner in [FOUNDER, FOLLOWER] {
+            assert_eq!(progress_notices(&actions, owner), vec![1], "owner {owner}");
+        }
+    }
+
+    /// Past the replay bound live observers still receive every identity, but
+    /// a later joiner is refused rather than given a truncated replay.
+    #[test]
+    fn execution_progress_overflow_keeps_live_observers_and_refuses_late_joiners() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            progress: true,
+            progress_batch: 257,
+            two_steps: true,
+            ..Shared::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., FOLLOWER);
+        let tokens = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, tokens[0], 0.);
+        e.drain_actions().for_each(drop);
+        let actions = accept(&mut e, tokens[0]);
+        for owner in [FOUNDER, FOLLOWER] {
+            assert_eq!(progress_notices(&actions, owner), vec![257], "owner {owner}");
+        }
+        command(&mut e, 1_000., LATE);
+        assert_eq!(e.venue.joined.last(), Some(&Err(Error::Capacity)));
+    }
+
+    /// Another command's delivery cannot publish the execution's identities.
+    #[test]
+    fn execution_progress_from_a_command_owned_delivery_is_revoked() {
+        let mut e = crate::test_support::seeded_engine(Shared {
+            progress: true,
+            ..Shared::default()
+        });
+        e.start(0.);
+        command(&mut e, 0., FOUNDER);
+        command(&mut e, 0., PROBE);
+        let tokens = prepared(&e.drain_actions().collect::<Vec<_>>());
+        let probe = *tokens.last().unwrap();
+        e.http_prepared(
+            0.,
+            probe,
+            Prepared {
+                id: probe.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let permit = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("probe binding");
+        assert!(matches!(e.claim_http(0., permit), Ok(Claim::Released(_))));
+        let actions = accept(&mut e, probe);
+        assert_eq!(e.venue.refusals, vec![Error::Revoked, Error::Revoked]);
+        assert!(progress_notices(&actions, FOUNDER).is_empty());
+    }
+
     fn outcome(actions: &[Action], owner: CommandId) -> Option<crate::Outcome> {
         let terminal = terminals(actions, owner);
         assert_eq!(terminal.len(), 1, "owner {owner}");
@@ -1151,7 +1397,7 @@ mod planned_execution {
             });
             e.start(0.);
             command(&mut e, 0., FOUNDER);
-            let ids = e.io.next_id;
+            let ids = e.io.core.next_id;
             e.drain_actions().for_each(drop);
             detach_founder(&mut e, 1.);
             let actions = e.drain_actions().collect::<Vec<_>>();
@@ -1159,7 +1405,7 @@ mod planned_execution {
                 outcome(&actions, FOUNDER),
                 expected(inherited, crate::Outcome::NotSent)
             );
-            assert_eq!(e.io.next_id, ids, "the carry spends no identity");
+            assert_eq!(e.io.core.next_id, ids, "the carry spends no identity");
         }
     }
 

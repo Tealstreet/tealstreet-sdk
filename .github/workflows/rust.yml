@@ -24,6 +24,7 @@ on:
       - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
       - '.github/actions/prepare-yarn/**'
+      - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
   pull_request:
     paths:
@@ -32,6 +33,7 @@ on:
       - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
       - '.github/actions/prepare-yarn/**'
+      - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
 
 permissions:
@@ -48,6 +50,10 @@ concurrency:
 # including the wasm stack size. Warnings are denied per command instead.
 env:
   CARGO_INCREMENTAL: 0
+  # libgit2 has dropped git-dependency fetches on transient TLS errors; the git CLI
+  # plus cargo's own retries ride those out.
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+  CARGO_NET_RETRY: '10'
 
 defaults:
   run:
@@ -78,10 +84,10 @@ jobs:
           - check: fmt
             command: cargo fmt --all --check
           - check: clippy
-            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr -- -D warnings
+            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 -- -D warnings
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
-            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr --lib signer::'
+            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
           # Workspace resolution unifies family features. Exercise each
           # standalone engine closure, including both Plan configurations.
           - check: engine-feature-modes
@@ -109,6 +115,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-${{ matrix.check }}-
       - name: Install pinned toolchain
         run: rustup show
+      - uses: ./.github/actions/prefetch-cargo
       - uses: actions/setup-node@v4
         if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers'
         with:
@@ -132,6 +139,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-wasm-
       - name: Install pinned toolchain
         run: rustup show
+      - uses: ./.github/actions/prefetch-cargo
       - name: Build every crate for wasm32
         run: cargo build --locked --workspace --target wasm32-unknown-unknown
       - name: Lint every crate for wasm32
@@ -170,6 +178,7 @@ jobs:
           if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
+      - uses: ./.github/actions/prefetch-cargo
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
       - name: Build and measure both capabilities from this checkout
@@ -182,7 +191,7 @@ jobs:
           import { createHash } from 'node:crypto';
           import { createRequire } from 'node:module';
           import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-          import { WASM_BUDGETS, wasmBudgetError } from './sdk-rs/harness/wasm-budget.mjs';
+          import { wasmBudgetBytes, wasmBudgetError } from './sdk-rs/harness/wasm-budget.mjs';
           const mode = process.env.MODE;
           const { WasmEngine } = createRequire(import.meta.url)('./sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm.js');
           for (const method of ['httpGroupPending', 'httpClaimGroup']) {
@@ -194,9 +203,9 @@ jobs:
             const path = `sdk-rs/hosts/wasm/pkg/${target}/safe_cex_wasm_bg.wasm`;
             const bytes = readFileSync(path);
             copyFileSync(path, `${out}/${target}.wasm`);
-            return { target, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), error: wasmBudgetError(bytes.length, 'venue') ?? null };
+            return { target, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), error: wasmBudgetError(bytes.length, 'venue', 'bybit') ?? null };
           });
-          const report = { revision: process.env.GITHUB_SHA, mode, budgetBytes: WASM_BUDGETS.venue, artifacts };
+          const report = { revision: process.env.GITHUB_SHA, mode, budgetBytes: wasmBudgetBytes('venue', 'bybit'), artifacts };
           writeFileSync(`${out}/report.json`, JSON.stringify(report, null, 2) + '\n');
           console.log(JSON.stringify(report, null, 2));
           JS
@@ -214,7 +223,7 @@ jobs:
             if (!enabled) throw new Error('comparison target missing');
             console.log(`${artifact.target}: off=${artifact.bytes}, on=${enabled.bytes}, delta=${enabled.bytes - artifact.bytes}`);
           }
-          if (off.artifacts.some(({ error }) => error)) throw new Error('ordinary Bybit exceeds its unchanged budget');
+          if (off.artifacts.some(({ error }) => error)) throw new Error('ordinary Bybit exceeds its venue budget');
           JS
       - name: Retain same-head capability measurements
         if: always()
@@ -259,6 +268,7 @@ jobs:
           if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
+      - uses: ./.github/actions/prefetch-cargo
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
       - uses: ./.github/actions/install-yarn
@@ -460,6 +470,7 @@ jobs:
           if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
+      - uses: ./.github/actions/prefetch-cargo
       - name: Install pinned binaryen (wasm-opt)
         run: bash sdk-rs/harness/install-binaryen.sh
       - uses: ./.github/actions/install-yarn
@@ -530,7 +541,7 @@ jobs:
         run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
       - name: Check the wasm size budget
         if: inputs.replay_artifact != 'combined'
-        run: corepack yarn -s rust:wasm-budget
+        run: corepack yarn -s rust:wasm-budget --venue '${{ matrix.venue }}'
       - name: Replay request normalization
         run: corepack yarn rust:test-harness
       - name: Credentialed lifecycle runner (scripted transport only)
@@ -594,6 +605,9 @@ jobs:
       - name: Breakout compiled account, startup and polling controls
         if: matrix.venue == 'breakoutprop'
         run: corepack yarn rust:test-breakoutprop-parity
+      - name: Backpack selected public-only history contracts
+        if: matrix.venue == 'backpack'
+        run: corepack yarn -s node --test sdk-rs/harness/backpack-history.integration.mjs
       - name: Aster V3 wallet auth, builder, STP and native query contracts
         if: matrix.venue == 'asterdex'
         run: |
@@ -721,7 +735,7 @@ jobs:
     needs: gate
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 32
     outputs:
       has_eligible: ${{ steps.plan.outputs.has_eligible }}
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -762,7 +776,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.cpu-plan.outputs.matrix) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 42
     defaults:
       run:
         working-directory: .
@@ -790,7 +804,7 @@ jobs:
     needs: [gate, cpu-plan, cpu-second]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 42
     outputs:
       results: ${{ steps.certify.outputs.results }}
     defaults:

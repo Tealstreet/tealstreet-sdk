@@ -57,6 +57,7 @@ function fixture(name: ExchangeName, now: () => number, legacyClock?: boolean, h
     },
     wsOpen: (_id, time) => record('open', time),
     wsMessage: (_id, _text, time) => record('message', time),
+    wsRouteExhausted: () => '',
     wsClose: (_id, _code, time) => record('close', time),
     httpStart: (_id, _status, _headers, time) => record('httpStart', time),
     httpChunk: (_id, _data, time) => record('httpChunk', time),

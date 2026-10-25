@@ -8,20 +8,28 @@ import { parseArgs } from 'node:util';
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
 // total package size; overseer 2026-10-21 raised it to 13.5 MiB for the Bitunix family.
 export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_155_776 });
-export const wasmBudgetError = (bytes, profile) => {
+// Bitget allowance (venue + 132 KiB): overseer ruling 2026-10-25 under Sam's no-TS-fallback directive; shrink-only; ih35js engine cuts to reduce.
+// Bybit: Sam approved 2026-10-25 (venue + 60 KiB) for the Plan-adoption stack, whose top measured
+// 1,398,660 on 9b05c9ac452; it can only go down.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_478_656, bitgetusdc: 1_478_656, bybit: 1_404_928 });
+export const wasmBudgetBytes = (profile, venue) =>
+  profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
+export const wasmBudgetError = (bytes, profile, venue) => {
   if (!Object.hasOwn(WASM_BUDGETS, profile) || !Number.isSafeInteger(bytes) || bytes <= 0) return 'invalid wasm budget input';
-  return bytes > WASM_BUDGETS[profile] ? `${profile} wasm ${bytes} exceeds ${WASM_BUDGETS[profile]} bytes` : undefined;
+  const budget = wasmBudgetBytes(profile, venue);
+  return bytes > budget ? `${profile} wasm ${bytes} exceeds ${budget} bytes` : undefined;
 };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  const { values } = parseArgs({ options: { combined: { type: 'boolean', default: false } } });
+  const { values } = parseArgs({ options: { combined: { type: 'boolean', default: false }, venue: { type: 'string' } } });
   const profile = values.combined ? 'combined' : 'venue';
+  const { venue } = values;
   const artifacts = ['web', 'node'].map((target) => {
     const path = `sdk-rs/hosts/wasm/pkg/${target}/safe_cex_wasm_bg.wasm`;
     const bytes = readFileSync(path);
-    return { path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), error: wasmBudgetError(bytes.length, profile) };
+    return { path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), error: wasmBudgetError(bytes.length, profile, venue) };
   });
-  const report = { profile, budgetBytes: WASM_BUDGETS[profile], artifacts };
+  const report = { profile, venue, budgetBytes: wasmBudgetBytes(profile, venue), artifacts };
   mkdirSync('sdk-rs/harness/out', { recursive: true });
   writeFileSync(`sdk-rs/harness/out/wasm-budget-${profile}.json`, JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify(report, null, 2));

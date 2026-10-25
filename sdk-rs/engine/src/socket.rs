@@ -143,6 +143,33 @@ impl Supervisor {
         }
     }
 
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn authentication_progress<P>(&mut self, cx: &mut Cx<'_, P>) {
+        let Some(timeout) = self.config.auth_timeout_ms else {
+            return;
+        };
+        let deadline = cx.now + timeout;
+        if self.phase != Phase::Authenticating
+            || !cx.now.is_finite()
+            || !deadline.is_finite()
+            || deadline <= cx.now
+            || self.expired(cx.now).is_some()
+        {
+            return;
+        }
+        let Some(at) = self.next_watch_at_from(cx.now, cx.now) else {
+            return;
+        };
+        // Allocate before replacing the old origin/watch; exhaustion keeps the
+        // old bound intact and uses the existing fatal engine boundary.
+        let timer = cx.set_timer(at - cx.now);
+        if let Some(old) = self.watch.replace(timer) {
+            cx.clear_timer(old);
+        }
+        self.since = cx.now;
+        self.watch_at = Some(at);
+    }
+
     /// Call only for traffic belonging to the current connection.
     pub fn received(&mut self, now: f64) {
         if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
@@ -267,6 +294,17 @@ impl Supervisor {
         self.retry = Some(cx.set_timer(delay));
     }
 
+    /// Reconnect at once without counting a failure: the venue refused this
+    /// route, not the transport. The caller bounds how often it skips backoff.
+    pub fn retry_now<P>(&mut self, cx: &mut Cx<'_, P>) {
+        if self.retry.is_some() {
+            return;
+        }
+        self.cancel(cx);
+        self.phase = Phase::Waiting;
+        self.retry = Some(cx.set_timer(0.0));
+    }
+
     pub fn cancel<P>(&mut self, cx: &mut Cx<'_, P>) {
         if let Some(timer) = self.watch.take() {
             cx.clear_timer(timer);
@@ -332,13 +370,16 @@ impl Supervisor {
         }
     }
     fn next_watch_at(&self, now: f64) -> Option<f64> {
+        self.next_watch_at_from(now, self.since)
+    }
+    fn next_watch_at_from(&self, now: f64, since: f64) -> Option<f64> {
         let idle = self
             .idle_enabled
             .then_some(self.received + self.config.idle_timeout_ms);
         let deadline = match self.phase {
-            Phase::Connecting => Some(self.since + self.config.connect_timeout_ms),
+            Phase::Connecting => Some(since + self.config.connect_timeout_ms),
             Phase::Authenticating => {
-                let auth = self.config.auth_timeout_ms.map(|ms| self.since + ms);
+                let auth = self.config.auth_timeout_ms.map(|ms| since + ms);
                 match (auth, idle) {
                     (Some(a), Some(i)) => Some(a.min(i)),
                     (auth, idle) => auth.or(idle),

@@ -427,6 +427,17 @@ fails at an assertion.
   truncation marker, a provider-refused Read that cannot retry, and a
   Mutation failure that never takes the Read retry.
 
+## Feature gate (overseer ruling)
+
+The streamed serial Plan is linked only by adopting families, behind the
+non-default engine feature `serial-plans` (it implies `http-plans`). With the
+feature off, the shared journal and Plan paths compile exactly as before
+#2092, so non-adopting families keep their pre-#2092 WASM sizes. #2092 first
+broke Bitget's budget by 1,335 bytes without using the feature. An adopter
+(Bitget, OKX) enables the feature in its own slice, with its own budget
+review. CI covers the gated code through an explicit engine feature-mode
+control in `scripts/test-http-plan-feature-modes.py`.
+
 ## Gates
 
 - Engine focused tests in plans, locks, sockets and default feature modes, the

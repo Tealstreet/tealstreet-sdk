@@ -44,6 +44,7 @@ impl SignStep for Recipe {
     ) -> Result<SignRequest, SignError> {
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: Some(cx.stamp_ms() + 3_000.),
             },
@@ -110,6 +111,7 @@ impl NativeAmend {
         }
         cx.request_signed_managed(
             context.clone(),
+            None,
             Method::Post,
             format!(
                 "https://venue.test/{}",
@@ -652,6 +654,7 @@ impl Venue for ReadProbe {
         let context = cx.plan_leg_context(&plan, &slot).unwrap();
         cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             "https://venue.test/read".into(),
             None,
@@ -739,6 +742,7 @@ impl OrdinalProbe {
             self.slots.insert(context.leg(), slot);
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 format!("https://venue.test/call-{}", self.requests),
                 None,

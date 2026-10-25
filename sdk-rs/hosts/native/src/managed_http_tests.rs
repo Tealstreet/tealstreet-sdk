@@ -52,6 +52,7 @@ impl Venue for Probe {
             if self.signed {
                 cx.request_signed_managed(
                     context.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/read".into(),
                     Some("{}".into()),
@@ -61,6 +62,7 @@ impl Venue for Probe {
             } else {
                 cx.request_managed(
                     context.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/read".into(),
                     Some("{}".into()),
@@ -70,13 +72,11 @@ impl Venue for Probe {
             .unwrap();
         }
     }
-    fn on_http_release(
-        &mut self,
-        _: &mut Pending,
-        release: &HttpRelease,
-    ) -> Result<safe_cex_engine::request_context::Admission, Error> {
-        self.releases.push(*release);
-        Ok(safe_cex_engine::request_context::Admission::Unscheduled)
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::Mutable(|this, _, release| {
+            this.releases.push(*release);
+            Ok(safe_cex_engine::request_context::Admission::Unscheduled)
+        })
     }
     fn on_http_preparation_failed(
         &mut self,
@@ -347,6 +347,7 @@ impl safe_cex_engine::SignStep for Recipe {
     ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
         Ok(safe_cex_engine::signing::SignRequest {
             receipt: safe_cex_engine::signing::SignReceipt {
+                nonce: None,
                 stamp_ms: Some(context.stamp_ms()),
                 expiry_ms: None,
             },
@@ -558,3 +559,7 @@ async fn parked_resources_stop_control(fatal: bool) {
     assert!(host.managed_http.resources.is_empty());
     assert!(sent.lock().unwrap().is_empty());
 }
+
+#[path = "managed_http_nonce_tests.rs"]
+#[cfg(feature = "dispatch-nonce")]
+mod nonce_tests;

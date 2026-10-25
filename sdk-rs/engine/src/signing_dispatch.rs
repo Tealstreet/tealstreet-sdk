@@ -1,23 +1,94 @@
 //! Shared bounded park/resume state for HTTP, WS messages and WS upgrades.
+#[cfg(feature = "dispatch-nonce")]
+use crate::nonce::NonceReservation;
+use crate::nonce::{ClaimAuthority, NonceClaim, NonceError};
 use crate::signing::{SignError, SignReceipt, SignRequest, SignResult, validate_result_shape};
 use crate::signing_headers::ResultHeaderPolicy;
 use crate::{Action, HttpRequest, RequestId, SocketId, TimerId};
+#[cfg(feature = "dispatch-nonce")]
+use std::cell::{Cell, RefCell};
+use std::sync::Arc;
 
 /// Narrow send-time view: protocol clock and injected signing entropy only.
 /// Identity replay seeding never supplies nonce bytes to this context.
 pub struct DispatchContext<'a> {
     pub now_ms: f64,
     entropy: Option<&'a crate::entropy::Entropy>,
+    #[cfg(feature = "dispatch-nonce")]
+    nonce: Option<PrepareNonce<'a>>,
+    #[cfg(feature = "dispatch-nonce")]
+    nonce_invalid: Cell<bool>,
+}
+#[cfg(feature = "dispatch-nonce")]
+struct PrepareNonce<'a> {
+    expected: &'a Arc<ClaimAuthority>,
+    raw_now: f64,
+    reservation: RefCell<Option<NonceReservation>>,
 }
 impl<'a> DispatchContext<'a> {
     pub(crate) fn new(now_ms: f64, entropy: Option<&'a crate::entropy::Entropy>) -> Self {
-        Self { now_ms, entropy }
+        Self {
+            now_ms,
+            entropy,
+            #[cfg(feature = "dispatch-nonce")]
+            nonce: None,
+            #[cfg(feature = "dispatch-nonce")]
+            nonce_invalid: Cell::new(false),
+        }
+    }
+    /// Reserve once for this exact selected recipe and preparation. Never a clock stamp.
+    #[cfg(feature = "dispatch-nonce")]
+    pub fn reserve_nonce(&self, claim: &NonceClaim) -> Result<u64, NonceError> {
+        let result = (|| {
+            let Some(record) = &self.nonce else {
+                return Err(NonceError::InvalidClaim);
+            };
+            let authority = claim.authority();
+            if !Arc::ptr_eq(record.expected, &authority) {
+                return Err(NonceError::InvalidClaim);
+            }
+            let mut slot = record
+                .reservation
+                .try_borrow_mut()
+                .map_err(|_| NonceError::InvalidClaim)?;
+            if slot.is_some() {
+                return Err(NonceError::InvalidClaim);
+            }
+            let reservation = authority.reserve(record.raw_now, self.now_ms)?;
+            let nonce = reservation.nonce;
+            *slot = Some(reservation);
+            Ok(nonce)
+        })();
+        if result.is_err() {
+            self.nonce_invalid.set(true);
+        }
+        result
+    }
+    #[cfg(not(feature = "dispatch-nonce"))]
+    pub fn reserve_nonce(&self, _: &NonceClaim) -> Result<u64, NonceError> {
+        Err(NonceError::InvalidClaim)
     }
     /// Integer protocol milliseconds captured for this signing attempt.
     /// Use this for wire timestamps; `now_ms` retains submillisecond precision
     /// for protocol freshness calculations.
     pub fn stamp_ms(&self) -> f64 {
         crate::time::wire_stamp_ms(self.now_ms)
+    }
+    /// A wire stamp never negative and, with a floor, strictly after the
+    /// released stamp it came from, even on a fixed or backward clock. Without
+    /// a floor it is `stamp_ms()` on valid nonnegative clocks.
+    pub fn stamp_after(&self, floor: Option<crate::StampFloor>) -> Result<f64, SignError> {
+        const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.;
+        let current = self.stamp_ms();
+        if !current.is_finite() {
+            return Err(SignError::InvalidRequest);
+        }
+        let next = floor.map_or(0., |floor| floor.millis() + 1.);
+        let stamp = current.max(0.).max(next);
+        if stamp > MAX_SAFE_INTEGER {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(stamp)
     }
     /// Draw anew on every preparation. Failure clears even partial output.
     pub fn signing_bytes(&self, bytes: &mut [u8]) -> Result<(), SignError> {
@@ -35,6 +106,11 @@ impl<'a> DispatchContext<'a> {
 
 /// Canonicalisation and result insertion only; no keys or I/O.
 pub trait SignStep: Send {
+    /// Declare the immutable selected authority before any signing or I/O admission.
+    fn nonce_claim(&self) -> Option<&NonceClaim> {
+        None
+    }
+
     /// Static public codec data for the unsigned managed transport intent.
     /// Credentials and signatures belong exclusively to provider/apply results.
     /// The managed queue snapshots this once; it grants no callback authority.
@@ -54,6 +130,9 @@ pub trait SignStep: Send {
     }
 }
 
+#[cfg(feature = "dispatch-nonce")]
+pub(crate) const MAX_NONCE_REPREPARES: u8 = 8;
+
 pub(crate) struct Pending {
     /// Always unsigned while stored in Dispatch, including completed metadata.
     pub outbound: Action,
@@ -72,8 +151,22 @@ pub(crate) struct Pending {
     pub receipt: SignReceipt,
     prepared_protocol_at: Option<f64>,
     header_policy: ResultHeaderPolicy,
+    #[cfg(feature = "dispatch-nonce")]
+    nonce_claim: Option<Arc<ClaimAuthority>>,
+    #[cfg(feature = "dispatch-nonce")]
+    pub(crate) nonce: Option<NonceReservation>,
+    #[cfg(feature = "dispatch-nonce")]
+    pub(crate) nonce_repairs: u8,
 }
 impl Pending {
+    #[cfg(all(test, feature = "dispatch-nonce"))]
+    pub(crate) fn install_test_nonce_claim(&mut self, authority: Arc<ClaimAuthority>) {
+        self.nonce_claim = Some(authority);
+    }
+    #[cfg(feature = "dispatch-nonce")]
+    pub(crate) fn has_nonce_claim(&self) -> bool {
+        self.nonce_claim.is_some()
+    }
     fn receipt_expired(&self, raw_now: f64) -> bool {
         self.receipt.expiry_ms.is_some_and(|expiry| {
             let protocol_now = self.prepared_protocol_at.unwrap_or(f64::NAN)
@@ -106,10 +199,17 @@ pub(crate) struct Dispatch {
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: crate::IdMap<RequestId, Pending>,
     next: crate::resource_ids::ResourceIds,
+    /// A preparation that named a missing credential ref, and whether that
+    /// was primary material; taken once.
+    credential_refused: Option<bool>,
+    /// A missing primary key latched signing: every later staging refuses.
+    refused: bool,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
     Stale(Pending),
+    #[cfg_attr(not(feature = "dispatch-nonce"), allow(dead_code))]
+    NonceStale(Pending),
     Failed(Pending, SignError),
 }
 impl Dispatch {
@@ -118,6 +218,16 @@ impl Dispatch {
         self.pending.is_empty() && self.outbound.is_empty()
     }
 
+    /// Latch signing; false when it already was.
+    pub fn refuse(&mut self) -> bool {
+        !std::mem::replace(&mut self.refused, true)
+    }
+    pub fn refused(&self) -> bool {
+        self.refused
+    }
+    pub fn take_credential_refusal(&mut self) -> Option<bool> {
+        self.credential_refused.take()
+    }
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
     }
@@ -238,7 +348,8 @@ impl Dispatch {
     }
     pub fn hold(&mut self, outbound: Action) -> Result<(), SignError> {
         let id = self.next_id();
-        self.stage(id, outbound, Box::new(Plain), TimerId(0), 0.)?;
+        // A held frame is unsigned, so a signing latch never refuses it.
+        self.admit(id, outbound, Box::new(Plain), TimerId(0), 0., false)?;
         if let Some(p) = self.pending.get_mut(&id) {
             p.deadline = f64::MAX;
             p.plain = true;
@@ -253,6 +364,7 @@ impl Dispatch {
         pending.timer = timer;
         Some(pending.deadline)
     }
+    #[inline]
     pub fn stage(
         &mut self,
         id: RequestId,
@@ -261,6 +373,21 @@ impl Dispatch {
         timer: TimerId,
         now: f64,
     ) -> Result<f64, SignError> {
+        self.admit(id, outbound, step, timer, now, true)
+    }
+    /// One staging body; only a signed action is refused once latched.
+    fn admit(
+        &mut self,
+        id: RequestId,
+        outbound: Action,
+        step: Box<dyn SignStep>,
+        timer: TimerId,
+        now: f64,
+        signed: bool,
+    ) -> Result<f64, SignError> {
+        if signed && self.refused {
+            return Err(SignError::MissingKey);
+        }
         if self.pending.len() + self.outbound.len() >= 256 || !now.is_finite() {
             return Err(SignError::Unavailable);
         }
@@ -274,6 +401,12 @@ impl Dispatch {
         }
         let deadline = now + f64::from(timeout);
         let header_policy = step.result_header_policy();
+        #[cfg(feature = "dispatch-nonce")]
+        let nonce_claim = step.nonce_claim().map(NonceClaim::authority);
+        #[cfg(not(feature = "dispatch-nonce"))]
+        if step.nonce_claim().is_some() {
+            return Err(SignError::InvalidRequest);
+        }
         if !matches!(header_policy, ResultHeaderPolicy::Deny)
             && !matches!(outbound, Action::Http(_))
         {
@@ -298,6 +431,12 @@ impl Dispatch {
                 receipt: Default::default(),
                 prepared_protocol_at: None,
                 header_policy,
+                #[cfg(feature = "dispatch-nonce")]
+                nonce_claim,
+                #[cfg(feature = "dispatch-nonce")]
+                nonce: None,
+                #[cfg(feature = "dispatch-nonce")]
+                nonce_repairs: 0,
             },
         );
         Ok(deadline)
@@ -309,10 +448,19 @@ impl Dispatch {
         step: Box<dyn SignStep>,
         now: f64,
         deadline: f64,
+        nonce_claim: Option<Arc<ClaimAuthority>>,
     ) -> Result<(), SignError> {
         self.stage(id, outbound, step, TimerId(0), now)?;
         let p = self.pending.get_mut(&id).expect("staged recipe");
         p.managed = true;
+        #[cfg(feature = "dispatch-nonce")]
+        {
+            p.nonce_claim = nonce_claim;
+        }
+        #[cfg(not(feature = "dispatch-nonce"))]
+        if nonce_claim.is_some() {
+            return Err(SignError::InvalidRequest);
+        }
         p.route_ready = false;
         p.deadline = deadline;
         Ok(())
@@ -381,6 +529,7 @@ impl Dispatch {
         now: f64,
         context: &DispatchContext<'_>,
         clock_revision: u64,
+        identities: &crate::signing::Identities,
     ) -> Result<SignRequest, SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
         if !now.is_finite() || now >= p.deadline {
@@ -394,7 +543,97 @@ impl Dispatch {
             original.timeout_ms = current.timeout_ms;
         }
         p.outbound = p.unsigned.clone();
-        let work = p.step.prepare(&mut p.outbound, context)?;
+        #[cfg(feature = "dispatch-nonce")]
+        let work = {
+            let current = p.step.nonce_claim().map(NonceClaim::authority);
+            match (&p.nonce_claim, &current) {
+                (None, None) => {}
+                (Some(expected), Some(actual)) if p.managed && Arc::ptr_eq(expected, actual) => {}
+                _ => return Err(SignError::InvalidRequest),
+            }
+            let invocation = DispatchContext {
+                now_ms: context.now_ms,
+                entropy: context.entropy,
+                #[cfg(feature = "dispatch-nonce")]
+                nonce_invalid: Cell::new(false),
+                nonce: p.nonce_claim.as_ref().map(|expected| PrepareNonce {
+                    expected,
+                    raw_now: now,
+                    reservation: RefCell::new(None),
+                }),
+            };
+            let work = match p.step.prepare(&mut p.outbound, &invocation) {
+                Ok(work) => work,
+                Err(error) => {
+                    // A login refused before naming refs uses the primary.
+                    if error == SignError::MissingKey {
+                        let login =
+                            matches!(p.outbound, Action::WsSend { .. } | Action::WsConnect { .. });
+                        self.credential_refused = Some(login || identities.secondary.is_none());
+                    }
+                    return Err(error);
+                }
+            };
+            if invocation.nonce_invalid.get() {
+                return Err(SignError::InvalidRequest);
+            }
+            p.nonce = invocation
+                .nonce
+                .and_then(|record| record.reservation.into_inner());
+            match (&p.nonce_claim, &p.nonce) {
+                (None, None) if work.receipt.nonce.is_none() => {}
+                (Some(_), Some(reservation)) if work.receipt.nonce == Some(reservation.nonce) => {
+                    for operation in &work.operations {
+                        let payload = match operation {
+                            crate::signing::Operation::Sign { key, payload, .. }
+                                if *key == reservation.authority.signing =>
+                            {
+                                Some(payload)
+                            }
+                            crate::signing::Operation::Sha256 { payload } => Some(payload),
+                            crate::signing::Operation::Present { key }
+                                if *key == reservation.authority.credential.reference =>
+                            {
+                                None
+                            }
+                            _ => return Err(SignError::InvalidRequest),
+                        };
+                        if payload.is_some_and(|parts| {
+                            parts.iter().any(|part| {
+                                matches!(part, crate::signing::PayloadPart::Credential { key }
+                            if *key != reservation.authority.credential.reference)
+                            })
+                        }) {
+                            return Err(SignError::InvalidRequest);
+                        }
+                    }
+                }
+                _ => return Err(SignError::InvalidRequest),
+            }
+            work
+        };
+        #[cfg(not(feature = "dispatch-nonce"))]
+        let work = {
+            if p.step.nonce_claim().is_some() {
+                return Err(SignError::InvalidRequest);
+            }
+            let work = match p.step.prepare(&mut p.outbound, context) {
+                Ok(work) => work,
+                Err(error) => {
+                    // A login refused before naming refs uses the primary.
+                    if error == SignError::MissingKey {
+                        let login =
+                            matches!(p.outbound, Action::WsSend { .. } | Action::WsConnect { .. });
+                        self.credential_refused = Some(login || identities.secondary.is_none());
+                    }
+                    return Err(error);
+                }
+            };
+            if work.receipt.nonce.is_some() {
+                return Err(SignError::InvalidRequest);
+            }
+            work
+        };
         if !matches!(p.header_policy, ResultHeaderPolicy::Deny)
             && !matches!(p.outbound, Action::Http(_))
         {
@@ -410,7 +649,13 @@ impl Dispatch {
         {
             return Err(SignError::InvalidRequest);
         }
-        work.validate()?;
+        if let Err(error) = work.validate() {
+            if !work.has_invalid_key_ref() {
+                return Err(error);
+            }
+            self.credential_refused = Some(identities.primary_owns(&work));
+            return Err(SignError::MissingKey);
+        }
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
         if work
@@ -452,10 +697,29 @@ impl Dispatch {
         if !now.is_finite() || now >= p.deadline {
             return Some(Completion::Failed(p, SignError::TimedOut));
         }
+        #[cfg(feature = "dispatch-nonce")]
+        if p.nonce_claim.is_some()
+            && result
+                .as_ref()
+                .is_ok_and(|result| result.receipt.nonce != p.receipt.nonce)
+        {
+            return Some(Completion::Failed(p, SignError::InvalidResult));
+        }
         // A stale provider error belongs to the old canonical payload too.
         // Reprepare with a new attempt identity before interpreting any result.
         if p.prepared_revision.is_some_and(|at| at != clock_revision) {
             return Some(Completion::Stale(p));
+        }
+        #[cfg(feature = "dispatch-nonce")]
+        if let Some(reservation) = &p.nonce {
+            match reservation.fresh() {
+                Ok(true) => {}
+                Ok(false) => {
+                    drop(result);
+                    return Some(Completion::NonceStale(p));
+                }
+                Err(_) => return Some(Completion::Failed(p, SignError::Unavailable)),
+            }
         }
         let result = match result {
             Ok(result) => result,
@@ -495,6 +759,10 @@ impl Dispatch {
         pending.prepared_revision = None;
         pending.prepared_protocol_at = None;
         pending.receipt = Default::default();
+        #[cfg(feature = "dispatch-nonce")]
+        {
+            pending.nonce = None;
+        }
         pending.route_ready = !pending.managed;
         self.pending.insert(id, pending);
     }
@@ -530,16 +798,12 @@ impl Dispatch {
 pub(crate) fn wipe(action: &mut Action) {
     use zeroize::Zeroize;
     match action {
-        Action::Http(http) => {
-            http.url.zeroize();
-            for (_, value) in &mut http.headers {
-                value.zeroize();
-            }
-            for (_, value) in &mut http.signer_headers {
-                value.zeroize();
-            }
-            if let Some(body) = &mut http.body {
-                body.zeroize();
+        Action::Http(http) => wipe_http(http),
+        // A Bind may carry the Session Bearer, the engine's one token copy.
+        #[cfg(feature = "session-bearer")]
+        Action::ManagedHttp(managed) => {
+            if let crate::request_context::HttpAction::Bind { request, .. } = &mut **managed {
+                wipe_http(request);
             }
         }
         Action::WsSend { text, .. } => text.zeroize(),
@@ -550,6 +814,19 @@ pub(crate) fn wipe(action: &mut Action) {
             }
         }
         _ => {}
+    }
+}
+fn wipe_http(http: &mut crate::HttpRequest) {
+    use zeroize::Zeroize;
+    http.url.zeroize();
+    for (_, value) in &mut http.headers {
+        value.zeroize();
+    }
+    for (_, value) in &mut http.signer_headers {
+        value.zeroize();
+    }
+    if let Some(body) = &mut http.body {
+        body.zeroize();
     }
 }
 struct Plain;
@@ -590,6 +867,7 @@ mod header_tests {
         ) -> Result<SignRequest, SignError> {
             Ok(SignRequest {
                 receipt: SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(1000.),
                     expiry_ms: None,
                 },
@@ -646,7 +924,13 @@ mod header_tests {
             )
             .unwrap();
         let work = dispatch
-            .prepare(RequestId(10), 1000., &DispatchContext::new(1000., None), 3)
+            .prepare(
+                RequestId(10),
+                1000.,
+                &DispatchContext::new(1000., None),
+                3,
+                &Default::default(),
+            )
             .unwrap();
         let mut result = SignResult::new(vec![vec![7; 32]], work.receipt);
         result.headers = vec![("x-mbx-apikey".into(), "callback".into())];

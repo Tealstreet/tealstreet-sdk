@@ -19,8 +19,8 @@ fn public_engine() -> Engine<BitgetFutures> {
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/contracts") => Some(request),
             _ => None,
@@ -35,7 +35,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
                 error: "scripted network failure",
             },
         );
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, now);
         assert!(
             !actions
                 .iter()
@@ -51,8 +51,8 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
             .expect("shared exponential retry timer");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) if request.url.contains("/contracts") => Some(request),
                 _ => None,
@@ -72,7 +72,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     );
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
-    assert!(engine.drain_actions().any(|action| matches!(action,
+    assert!(safe_cex_engine::test_support::prepared_actions(&mut engine, now).into_iter().any(|action| matches!(action,
         Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message.contains("Skipped malformed public discovery row"))));
 }
 
@@ -85,8 +85,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
         ..Default::default()
     });
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/contracts") => Some(request),
             _ => None,
@@ -105,8 +105,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
     );
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
-    let reads = engine
-        .drain_actions()
+    let reads = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -135,8 +135,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -153,8 +153,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
             },
         },
     );
-    let ticker = engine
-        .drain_actions()
+    let ticker = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -171,8 +171,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
             },
         },
     );
-    let timer = engine
-        .drain_actions()
+    let timer = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
@@ -180,8 +180,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
         .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine
-        .drain_actions()
+    let retry = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url == ticker.url => Some(r),
             _ => None,
@@ -194,15 +194,15 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
 fn valid_live_ticker_recovers_a_catalogue_market_missing_from_the_rest_seed() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
         })
         .unwrap();
     engine.handle(0.0, Event::HttpResponse { request: catalogue.id, response: Response { status: 200, headers: "", body: r###"{"code":"00000","data":[{"broken":true},{"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","symbolStatus":"normal","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"},{"symbol":"ETHUSDT","baseCoin":"ETH","quoteCoin":"USDT","symbolStatus":"normal","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"}]}"### }});
-    let mut actions = engine.drain_actions().collect::<Vec<_>>();
+    let mut actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0);
     let ticker = actions
         .iter()
         .find_map(|a| match a {
@@ -211,7 +211,10 @@ fn valid_live_ticker_recovers_a_catalogue_market_missing_from_the_rest_seed() {
         })
         .unwrap();
     engine.handle(0.0, Event::HttpResponse { request: ticker.id, response: Response { status: 200, headers: "", body: r###"{"code":"00000","data":[{"symbol":"BTCUSDT","bidPr":"99.9","askPr":"100.1","lastPr":"100","indexPrice":"99","changeUtc24h":"0.01","baseVolume":"1000","quoteVolume":"100000","fundingRate":"0.0001"}]}"### }});
-    actions.extend(engine.drain_actions());
+    actions.extend(safe_cex_engine::test_support::prepared_actions(
+        &mut engine,
+        0.0,
+    ));
 
     assert!(engine.store().market("ETHUSDT").is_some());
     assert!(engine.store().ticker("ETHUSDT").is_none());
@@ -223,7 +226,9 @@ fn valid_live_ticker_recovers_a_catalogue_market_missing_from_the_rest_seed() {
         })
         .unwrap();
     engine.handle(0.0, Event::WsOpened { socket });
-    engine.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
+        .for_each(drop);
     engine.handle(1.0, Event::WsMessage { socket, text: r###"{"arg":{"channel":"ticker"},"data":[{"instId":"ETHUSDT","lastPr":"201","bidPr":"200","askPr":"202"},{"instId":"UNKNOWN","lastPr":"999"}]}"### });
     assert_eq!(engine.store().ticker("ETHUSDT").unwrap().last, 201.0);
     assert!(engine.store().ticker("UNKNOWN").is_none());
@@ -248,8 +253,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
         for cached in [false, true] {
             let mut engine = public_engine();
             engine.start(0.0);
-            let catalogue = engine
-                .drain_actions()
+            let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) => Some(request),
                     _ => None,
@@ -266,8 +271,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
                     },
                 },
             );
-            let ticker = engine
-                .drain_actions()
+            let ticker = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url.contains("/tickers") => Some(request),
                     _ => None,
@@ -298,16 +303,16 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
             );
             assert_eq!(engine.store().tickers(), before);
             assert_eq!(engine.store().loaded().tickers, cached);
-            let timer = engine
-                .drain_actions()
+            let timer = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
                     _ => None,
                 })
                 .expect("unusable successful HTTP body must back off");
             engine.handle(1000.0, Event::TimerFired { timer });
-            let retry = engine
-                .drain_actions()
+            let retry = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url == ticker.url => Some(request),
                     _ => None,

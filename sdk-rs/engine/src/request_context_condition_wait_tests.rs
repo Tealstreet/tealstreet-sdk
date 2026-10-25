@@ -109,6 +109,7 @@ mod condition_waits {
         let result = if context.credential().is_some() {
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -118,6 +119,7 @@ mod condition_waits {
         } else {
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -134,9 +136,9 @@ mod condition_waits {
     );
     fn snapshot(cx: &Cx<'_, Context>) -> Snapshot {
         (
-            cx.io.next_id,
-            cx.io.actions.len(),
-            cx.io.request_contexts.plan_context_storage(),
+            cx.io.core.next_id,
+            cx.io.core.actions.len(),
+            cx.io.core.request_contexts.plan_context_storage(),
         )
     }
 
@@ -182,7 +184,7 @@ mod condition_waits {
         fn issue(&mut self, cx: &mut Cx<'_, Context>, id: CommandId) {
             let (plan, slot) = self.plan(id).expect("admitted Plan");
             self.storage
-                .push(cx.io.request_contexts.plan_context_storage());
+                .push(cx.io.core.request_contexts.plan_context_storage());
             if let Ok(context) = cx.plan_leg_context(&plan, &slot) {
                 self.issued.push(context.operation());
                 queue(cx, context);
@@ -700,7 +702,7 @@ mod condition_waits {
             "a definitive fact parks the Plan"
         );
         assert!(prepared(&actions).is_none(), "no live call while parked");
-        let parked = e.io.request_contexts.plan_context_storage();
+        let parked = e.io.core.request_contexts.plan_context_storage();
         let actions = borrowed_read(&mut e, now + 1_000.);
         assert_eq!(e.venue.plan_ready, 1, "released into on_http_plan_ready");
         let (actions, _) = drive(&mut e, actions, now + 1_000., ["ok:b"]);
@@ -866,7 +868,7 @@ mod condition_waits {
         let result = terminals(&actions, 7);
         assert!(matches!(&result[..], [Err(error)] if error.message.starts_with(NATIVE)));
         #[cfg(feature = "order-locks")]
-        assert!(!e.io.order_locks.uncertain("BTCUSD"), "nothing was live");
+        assert!(!e.io.core.order_locks.uncertain("BTCUSD"), "nothing was live");
     }
 
     // RED7's stops have no engine entry for a parked owner today (shutdown and
@@ -995,7 +997,7 @@ mod condition_waits {
         }
         assert_eq!(done, [7, 8, 9]);
         assert!(
-            !e.io.request_contexts.has_plans(),
+            !e.io.core.request_contexts.has_plans(),
             "no owner, wait or timer leaks"
         );
     }
@@ -1132,7 +1134,7 @@ mod condition_waits {
             matches!(&result[..], [Err(error)] if error.outcome == Some(crate::Outcome::NotSent)),
             "{result:?}"
         );
-        assert!(!e.io.request_contexts.has_plans());
+        assert!(!e.io.core.request_contexts.has_plans());
     }
 
     #[test]
@@ -1162,8 +1164,8 @@ mod condition_waits {
             "nothing was live"
         );
         #[cfg(feature = "order-locks")]
-        assert!(!e.io.order_locks.uncertain("BTCUSD"), "no fence");
-        assert!(!e.io.request_contexts.has_plans());
+        assert!(!e.io.core.order_locks.uncertain("BTCUSD"), "no fence");
+        assert!(!e.io.core.request_contexts.has_plans());
     }
 
     /// The order-lock scope limit (64 active) binds Bitget's queued placements
@@ -1188,16 +1190,16 @@ mod condition_waits {
         let actions = e.drain_actions().collect::<Vec<_>>();
         let result = terminals(&actions, 65);
         assert!(
-            // The existing order-lock entry refusal: no outcome, nothing sent.
-            matches!(&result[..], [Err(error)] if error.message
-                == "Order amendment or cancellation is already in flight"
-                && error.outcome.is_none()),
+            // The order-lock capacity refusal (#2095): Internal, NotSent, nothing sent.
+            matches!(&result[..], [Err(error)] if error.message == crate::order_locks::CAPACITY_REACHED
+                && error.kind == Some(ErrorKind::Internal)
+                && error.outcome == Some(crate::Outcome::NotSent)),
             "{result:?}"
         );
         assert!(prepared(&actions).is_none());
         assert_eq!(e.venue.parks.len(), 64, "the parked 64 are unaffected");
         for id in 1..=64 {
-            assert!(e.io.order_locks.contains(id));
+            assert!(e.io.core.order_locks.contains(id));
         }
     }
 
@@ -1218,15 +1220,15 @@ mod condition_waits {
             [Ok(()), Ok(())],
             "the later command parks behind"
         );
-        assert!(e.io.order_locks.contains(7) && e.io.order_locks.contains(8));
+        assert!(e.io.core.order_locks.contains(7) && e.io.core.order_locks.contains(8));
         let timer = timer_at(&actions, 1_000.).unwrap();
         e.handle(1_000., Event::TimerFired { timer });
         assert!(
-            !e.io.order_locks.contains(7),
+            !e.io.core.order_locks.contains(7),
             "released through its terminal"
         );
-        assert!(e.io.order_locks.contains(8));
-        assert!(!e.io.order_locks.uncertain("BTCUSD"), "no fence");
+        assert!(e.io.core.order_locks.contains(8));
+        assert!(!e.io.core.order_locks.uncertain("BTCUSD"), "no fence");
     }
 
     #[test]
@@ -1323,20 +1325,20 @@ mod condition_waits {
         place(&mut e, 10., 8);
         e.drain_actions().for_each(drop);
         assert_eq!(e.venue.parks, [Ok(()), Ok(())]);
-        assert!(e.io.order_locks.contains(7) && e.io.order_locks.contains(8));
+        assert!(e.io.core.order_locks.contains(7) && e.io.core.order_locks.contains(8));
         e.venue.parked.retain(|id| *id == 7);
         let actions = borrowed_read(&mut e, 100.);
         e.venue.parked.push(8);
         let (actions, now) = drive(&mut e, actions, 100., ["ok:a"]);
         assert_eq!(terminals(&actions, 7), [Ok("[a]".to_owned())]);
         assert!(
-            !e.io.order_locks.contains(7),
+            !e.io.core.order_locks.contains(7),
             "the first releases only its own scope"
         );
         assert_eq!(e.venue.ready, [7, 8], "the job's end wakes the next");
         let (actions, _) = drive(&mut e, actions, now, ["ok:b"]);
         assert_eq!(terminals(&actions, 8), [Ok("[a,b]".to_owned())]);
-        assert!(!e.io.order_locks.contains(8));
-        assert!(!e.io.order_locks.uncertain("BTCUSD"));
+        assert!(!e.io.core.order_locks.contains(8));
+        assert!(!e.io.core.order_locks.uncertain("BTCUSD"));
     }
 }

@@ -262,6 +262,7 @@ impl Lighter {
         };
         match cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!("{}/api/v1/{path}", self.host()),
             None,
@@ -335,6 +336,7 @@ impl Lighter {
         };
         match cx.request_managed(
             context,
+            None,
             Method::Get,
             format!("{}/api/v1/exchangeStats", self.host()),
             None,
@@ -390,6 +392,7 @@ impl Lighter {
         };
         if let Err((pending, error)) = cx.request_managed(
             context,
+            None,
             Method::Get,
             format!("{}/api/v1/orderBookOrders?market_id={}&limit=100", host, id),
             None,
@@ -485,7 +488,7 @@ impl Lighter {
             generation,
         };
         match result {
-            Ok(url) => match cx.request_managed(context, Method::Get, url, None, pending) {
+            Ok(url) => match cx.request_managed(context, None, Method::Get, url, None, pending) {
                 Ok(request) => cx.stream_response(
                     request,
                     ArrayAt::Envelope(&[&["c"], &["candles"], &["candlesticks"]]),
@@ -1396,8 +1399,27 @@ impl Venue for Lighter {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         self.public_failed(cx, pending, error);
     }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
+            other => self.on_request_failed(cx, other, &error.message),
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: VenueError,
+    ) {
+        match pending {
+            Pending::Identity(request) => self.identity_rejected(cx, request, error),
+            other => self.on_sign_error(cx, other, error),
+        }
+    }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
+            Pending::Identity(request) => self.identity_rejected(cx, request, error),
             Pending::Candles {
                 context,
                 command,
@@ -1519,7 +1541,7 @@ impl Venue for Lighter {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
-            Command::FetchAccount { command } => self.fetch_identity(cx, command),
+            Command::FetchAccount { .. } => self.fetch_identity(cx),
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {

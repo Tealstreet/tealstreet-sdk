@@ -5,12 +5,22 @@ use crate::sign::Params;
 use crate::wire::*;
 use crate::{Backpack, Pending};
 use safe_cex_engine::Level;
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
+use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, OffsetStep, OffsetWalk, Stall};
-use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Query, Response, VenueError};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
+};
+use safe_cex_engine::{CommandId, CommandWait, Cx, ErrorKind, Method, Query, Response, VenueError};
 use serde::Serialize;
+
+#[cfg(test)]
+#[path = "../tests/support/history_retirement.rs"]
+mod retirement_tests;
 
 /// Requests per read before paging that still reports more is incomplete.
 const MAX_PAGES: u32 = 50;
@@ -23,7 +33,9 @@ enum Kind {
     Trades,
 }
 pub struct Request {
-    owner: Box<CursorHistory<Row>>,
+    owner: Box<ReadCursorHistory<Row>>,
+    root: Root,
+    leg: Option<Leg>,
     kind: Kind,
     symbol: Option<String>,
     order_id: Option<String>,
@@ -39,6 +51,30 @@ pub struct Request {
     skipped_fills: Vec<String>,
     page_skipped_fills: Vec<String>,
     invalid: bool,
+}
+enum Root {
+    Private(ReadRoot),
+    Public(Context),
+}
+impl Root {
+    fn context(&self) -> &Context {
+        match self {
+            Self::Private(root) => root.context(),
+            Self::Public(root) => root,
+        }
+    }
+}
+enum Leg {
+    Private(ReadLeg),
+    Public(Context),
+}
+impl Leg {
+    fn context(&self) -> &Context {
+        match self {
+            Self::Private(leg) => leg.context(),
+            Self::Public(leg) => leg,
+        }
+    }
 }
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -107,9 +143,6 @@ fn side_name(text: &str) -> &'static str {
     if text == "Bid" { "buy" } else { "sell" }
 }
 impl Request {
-    pub(crate) fn command(&self) -> CommandId {
-        self.owner.command()
-    }
     fn accepts(&self, symbol: &str, time: f64) -> bool {
         self.symbol.as_ref().is_none_or(|s| s == symbol)
             && self.from.is_none_or(|t| time >= t)
@@ -121,12 +154,35 @@ impl Request {
                 }
             })
     }
-    fn append(&mut self, id: String, time: f64, row: Row) {
+    fn delivery_current(&self, cx: &Cx<'_, Pending>) -> bool {
+        let Some(leg) = &self.leg else {
+            return false;
+        };
+        let selected = match (&self.root, leg) {
+            (Root::Private(root), Leg::Private(leg)) => root.validate_delivery(cx, leg),
+            (Root::Public(root), Leg::Public(leg)) => cx.validate_read_http_delivery(root, leg),
+            _ => return false,
+        };
+        selected.is_ok() && self.owner.validate_delivery(cx, leg.context()).is_ok()
+    }
+    fn retire_leg(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = self.leg.take() {
+            let _ = cx.finish_http_context(leg.context());
+        }
+    }
+    fn append(&mut self, cx: &Cx<'_, Pending>, id: String, time: f64, row: Row) {
+        let Some(leg) = &self.leg else {
+            return;
+        };
+        let stage = self.owner.accepted_len() + self.owner.staged_len() < self.limit;
+        let Ok(mut page) = self.owner.admit(cx, leg.context()) else {
+            return;
+        };
         self.oldest = self.oldest.min(time);
-        if self.owner.fresh(id) {
+        if page.fresh(id) {
             self.page_fresh += 1;
-            if self.owner.accepted_len() + self.owner.staged_len() < self.limit {
-                self.owner.stage(row);
+            if stage {
+                page.stage(row);
             }
         }
     }
@@ -138,6 +194,30 @@ fn stalled_page(_: Stall) -> String {
     "Backpack history is incomplete: paging made no progress".into()
 }
 impl Backpack {
+    fn reject_history_query(cx: &mut Cx<'_, Pending>, message: &str) {
+        match cx.command_wait() {
+            Some(CommandWait::Remaining(_)) => {}
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Read);
+                return;
+            }
+        }
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let _ = cx.fail_context(&context, message);
+    }
+
     pub(crate) fn history_command(
         &self,
         cx: &mut Cx<'_, Pending>,
@@ -146,7 +226,7 @@ impl Backpack {
     ) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "Backpack client-order-ID lookup is unsupported");
+                Self::reject_history_query(cx, "Backpack client-order-ID lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -186,8 +266,8 @@ impl Backpack {
                 if kind.as_ref().is_some_and(|k| {
                     !matches!(k.to_ascii_uppercase().as_str(), "FUNDING_FEE" | "FUNDING")
                 }) {
-                    cx.fail(
-                        command,
+                    Self::reject_history_query(
+                        cx,
                         "Backpack income query supports funding payments only",
                     );
                     return;
@@ -216,16 +296,82 @@ impl Backpack {
             .any(|t| !t.is_finite() || t < 0.0)
             || from.zip(to).is_some_and(|(a, b)| a > b)
         {
-            cx.fail(command, "Backpack invalid history time range");
+            Self::reject_history_query(cx, "Backpack invalid history time range");
             return;
         }
         if symbol
             .as_ref()
             .is_some_and(|s| cx.store.market(s).is_none())
         {
-            cx.fail(command, "Backpack history market not found");
+            Self::reject_history_query(cx, "Backpack history market not found");
             return;
         }
+        match cx.command_wait() {
+            Some(CommandWait::Remaining(_)) => {}
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Read);
+                return;
+            }
+        }
+        let root = if kind == Kind::Trades {
+            let Ok(root) = cx.admit_caller_read_root(None, None) else {
+                return;
+            };
+            Root::Public(root)
+        } else {
+            if let Some(Err(error)) = self.options.read_credentials_status {
+                Self::reject_history_query(cx, error.message());
+                return;
+            }
+            let primary = self
+                .account
+                .credentials
+                .as_ref()
+                .and(self.options.identity.clone());
+            let slots = Slots::new(
+                primary,
+                self.options.read_identity.clone(),
+                SlotPolicy::default(),
+            );
+            if self.options.read_credentials_status.is_some()
+                && self.options.read_identity.is_none()
+            {
+                Self::reject_history_query(
+                    cx,
+                    "Backpack managed read signing identity unavailable",
+                );
+                return;
+            }
+            let selected = match SelectedRead::select(&slots, ReadRole::Read { scope: None }) {
+                Ok(selected) => selected,
+                Err(_) => {
+                    Self::reject_history_query(cx, "Backpack credentials unavailable");
+                    return;
+                }
+            };
+            let Ok(root) = SelectedRead::command_root(
+                cx,
+                Ok(selected),
+                LocalRefusal {
+                    diagnostic: None,
+                    error: "Backpack credentials unavailable".into(),
+                },
+            ) else {
+                return;
+            };
+            Root::Private(root)
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.context().clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(root.context(), error.read_venue_error());
+                return;
+            }
+        };
         let limit = limit.clamp(1, 1000) as usize;
         let page_size =
             if matches!(kind, Kind::Orders | Kind::Funding) && (from.is_some() || to.is_some()) {
@@ -236,12 +382,14 @@ impl Backpack {
         self.history_request(
             cx,
             Request {
-                owner: Box::new(CursorHistory::new(
-                    Completion::new(command),
+                owner: Box::new(ReadCursorHistory::new(
+                    completion,
                     CursorWalk::new(MAX_PAGES),
                     stalled_page,
                     encode_rows,
                 )),
+                root,
+                leg: None,
                 kind,
                 symbol,
                 order_id,
@@ -282,28 +430,103 @@ impl Backpack {
             Kind::Funding => "/wapi/v1/history/funding",
             Kind::Trades => "/api/v1/trades",
         };
-        if request.kind == Kind::Trades {
-            self.get(cx, path, params, Pending::History(Box::new(request)), true);
-        } else {
+        if request.kind != Kind::Trades {
             params.insert("sortDirection".into(), "Desc".into());
             if request.walk.offset() > 0 {
                 params.insert("offset".into(), request.walk.offset().to_string());
             }
-            let command = request.command();
-            if let Err(e) = self.signed(
-                cx,
-                Method::Get,
-                path,
-                params,
-                None,
-                Pending::History(Box::new(request)),
-                true,
-            ) {
-                cx.fail(command, e);
+        }
+        let leg = match &request.root {
+            Root::Private(root) => root
+                .leg(
+                    cx,
+                    ReadLegPolicy {
+                        timeout_ms: 20_000,
+                        pacing: None,
+                    },
+                )
+                .map(Leg::Private),
+            Root::Public(root) => cx
+                .http_leg_context(
+                    root,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .map(Leg::Public),
+        };
+        let leg = match leg {
+            Ok(leg) => leg,
+            Err(error) => {
+                Self::history_finish(cx, request, Err(error.read_venue_error()));
+                return;
+            }
+        };
+        let query = crate::sign::query(&params);
+        let url = format!("https://api.backpack.exchange{path}?{query}");
+        let queued = match leg {
+            Leg::Private(leg) => {
+                let declaration = crate::sign::Request {
+                    method: Method::Get,
+                    path: path.into(),
+                    rows: vec![params],
+                    body: None,
+                    window: self
+                        .account
+                        .credentials
+                        .as_ref()
+                        .map_or(60000, |primary| primary.window),
+                };
+                leg.queue(
+                    cx,
+                    ReadRequest {
+                        method: Method::Get,
+                        url,
+                        body: None,
+                        stream: Some(ArrayAt::Root),
+                    },
+                    |identity| Box::new(crate::sign::Http::new(identity.clone(), declaration)),
+                    |leg| {
+                        let mut request = request;
+                        request.leg = Some(Leg::Private(leg));
+                        Pending::History(Box::new(request))
+                    },
+                )
+            }
+            Leg::Public(context) => {
+                let mut request = request;
+                request.leg = Some(Leg::Public(context.clone()));
+                let queued = cx.request_managed_with_headers(
+                    context,
+                    None,
+                    Method::Get,
+                    url,
+                    &[("X-Broker-Id", "1200")],
+                    None,
+                    Pending::History(Box::new(request)),
+                );
+                if let Ok(id) = queued {
+                    cx.stream_response(id, ArrayAt::Root);
+                }
+                queued
+            }
+        };
+        if let Err((pending, error)) = queued {
+            if let Pending::History(request) = pending {
+                Self::history_finish(cx, *request, Err(error.read_venue_error()));
+            } else {
+                unreachable!("history queue retains its own owner");
             }
         }
     }
     pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, r: &mut Request, item: &str) {
+        if !r.delivery_current(cx) {
+            return;
+        }
         r.page_count += 1;
         for byte in item.bytes() {
             r.page_hash = (r.page_hash ^ u64::from(byte)).wrapping_mul(1099511628211);
@@ -328,6 +551,7 @@ impl Backpack {
                     }
                     let key = format!("{}:{}", d.order_id, d.trade_id);
                     r.append(
+                        cx,
                         key,
                         time,
                         Row::Fill(Execution {
@@ -371,6 +595,7 @@ impl Backpack {
                         .map(|q| q / d.executed_quantity);
                     let id = d.id.into_owned();
                     r.append(
+                        cx,
                         id.clone(),
                         time,
                         Row::Order(HistoricalOrder {
@@ -402,6 +627,7 @@ impl Backpack {
                     let key = format!("{}:{time:.0}", d.symbol);
                     let symbol = d.symbol.into_owned();
                     r.append(
+                        cx,
                         key.clone(),
                         time,
                         Row::Income(Income {
@@ -418,6 +644,7 @@ impl Backpack {
                 Kind::Trades => {
                     let d: PublicTrade = serde_json::from_str(item).map_err(|e| e.to_string())?;
                     r.append(
+                        cx,
                         d.id.to_string(),
                         d.timestamp,
                         Row::Trade(Trade {
@@ -449,7 +676,7 @@ impl Backpack {
             }
             Err(e) => {
                 r.invalid = true;
-                cx.command_error(r.command(), e);
+                let _ = cx.command_error_context(r.root.context(), e);
             }
             Ok(()) => {}
         }
@@ -460,11 +687,19 @@ impl Backpack {
         mut r: Request,
         response: Response<'_>,
     ) {
+        if !r.delivery_current(cx) {
+            r.retire_leg(cx);
+            let _ = cx.finish_http_context(r.root.context());
+            return;
+        }
         if !(200..300).contains(&response.status) || r.invalid {
             self.history_failed(
                 cx,
                 r,
-                &format!("Backpack history read failed: HTTP {}", response.status),
+                VenueError::new(format!(
+                    "Backpack history read failed: HTTP {}",
+                    response.status
+                )),
             );
             return;
         }
@@ -474,17 +709,27 @@ impl Backpack {
             && !r.from.is_some_and(|from| r.oldest < from);
         let gap = (!r.page_skipped_fills.is_empty())
             .then(|| "Backpack history is incomplete: malformed fill rows were skipped".into());
-        r.skipped_fills.append(&mut r.page_skipped_fills);
         // Native page identity, not an increasing offset, proves progress.
-        let step = r.owner.advance_with_coverage(
-            CursorPage {
-                next: more.then(|| r.page_hash.to_string()),
-                rows: r.page_count,
-                fresh: r.page_fresh,
-                want_more: more,
-            },
-            gap,
-        );
+        let step = {
+            let Some(leg) = &r.leg else {
+                return;
+            };
+            let Ok(mut page) = r.owner.admit(cx, leg.context()) else {
+                r.retire_leg(cx);
+                return;
+            };
+            page.advance_with_coverage(
+                CursorPage {
+                    next: more.then(|| r.page_hash.to_string()),
+                    rows: r.page_count,
+                    fresh: r.page_fresh,
+                    want_more: more,
+                },
+                gap,
+            )
+        };
+        r.skipped_fills.append(&mut r.page_skipped_fills);
+        r.retire_leg(cx);
         if matches!(step, CursorStep::More(_)) {
             // Only the owner can authorize continuation. This existing helper
             // supplies raw-row offset arithmetic after that decision; at most
@@ -493,7 +738,7 @@ impl Backpack {
                 r.walk.advance(r.page_count, r.page_count, true),
                 OffsetStep::More(_)
             ) {
-                r.owner.reject(
+                let _ = r.owner.reject(
                     cx,
                     VenueError::new("Backpack history offset invariant failed")
                         .kind(ErrorKind::Internal),
@@ -509,7 +754,15 @@ impl Backpack {
             Self::history_finish(cx, r, Ok(()));
         }
     }
-    fn history_finish(cx: &mut Cx<'_, Pending>, r: Request, result: Result<(), VenueError>) {
+    fn history_finish(cx: &mut Cx<'_, Pending>, mut r: Request, result: Result<(), VenueError>) {
+        r.retire_leg(cx);
+        if cx
+            .validate_read_completion_context(r.root.context())
+            .is_err()
+        {
+            let _ = cx.finish_http_context(r.root.context());
+            return;
+        }
         if (result.is_ok() || r.owner.accepted_len() > 0) && !r.skipped_fills.is_empty() {
             cx.notice(
                 Level::Warn,
@@ -521,9 +774,9 @@ impl Backpack {
                 ),
             );
         }
-        r.owner.finish(cx, result);
+        let _ = r.owner.finish(cx, result);
     }
-    pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
-        Self::history_finish(cx, r, Err(VenueError::new(error)));
+    pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, r: Request, error: VenueError) {
+        Self::history_finish(cx, r, Err(error));
     }
 }

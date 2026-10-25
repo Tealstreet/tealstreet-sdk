@@ -1,6 +1,7 @@
 //! Legacy Breakout DXtrade: authenticated REST polling, with no exchange socket.
 mod account;
 mod history;
+mod local_context;
 mod session;
 mod trading;
 pub(crate) mod wire;
@@ -10,6 +11,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::Operation as RequestOperation;
 use safe_cex_engine::{
     Command, Cx, ErrorKind, Method, Outcome, Response, SocketId, TimerId, Venue, VenueError,
 };
@@ -53,6 +55,12 @@ impl Default for Options {
 pub struct BreakoutProp {
     pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) session: session::Session,
+    /// Engine session owning password logins. Not repeat-safe: a login that
+    /// does not succeed retires it, so a reissue is a new generation and the
+    /// engine drops late answers to the abandoned one.
+    login_session: Option<safe_cex_engine::request_context::Session>,
+    /// A 2xx login awaiting body acceptance; only an accepted token proves it.
+    answered_login: Option<safe_cex_engine::request_context::Context>,
     auth_failed: bool,
     auth_error: String,
     auth_draining: bool,
@@ -81,6 +89,8 @@ pub struct Pending {
     auth_retried: bool,
     network_attempt: u8,
     ready_at: f64,
+    /// Engine authority of a dispatched session login; None for legacy work.
+    context: Option<safe_cex_engine::request_context::Context>,
 }
 
 pub(crate) enum Operation {
@@ -196,6 +206,8 @@ impl BreakoutProp {
         Self {
             options,
             session: session::Session::default(),
+            login_session: None,
+            answered_login: None,
             auth_failed: false,
             auth_error: String::new(),
             auth_draining: false,
@@ -242,6 +254,7 @@ impl BreakoutProp {
             auth_retried: false,
             network_attempt: 0,
             ready_at: cx.now,
+            context: None,
         });
         self.drive(cx);
     }
@@ -264,6 +277,7 @@ impl BreakoutProp {
                 auth_retried: false,
                 network_attempt: 0,
                 ready_at: cx.now,
+                context: None,
             });
         }
     }
@@ -356,8 +370,19 @@ impl BreakoutProp {
         if let Operation::Trade(request) = &pending.operation {
             request.report_progress(cx);
         }
-        let id = cx.request(method, url, headers, body, pending);
-        cx.request_timeout(id, self.options.timeout_ms);
+        let id = if matches!(pending.operation, Operation::Login) {
+            match self.send_login(cx, url, body, pending) {
+                Some(id) => id,
+                None => {
+                    self.drive(cx);
+                    return;
+                }
+            }
+        } else {
+            let id = cx.request(method, url, headers, body, pending);
+            cx.request_timeout(id, self.options.timeout_ms);
+            id
+        };
         if let Some(stream) = stream {
             cx.stream_response(id, stream);
         }
@@ -366,6 +391,85 @@ impl BreakoutProp {
             cx.clear_timer(timer);
         }
         self.drive(cx);
+    }
+
+    /// One session operation per physical login; reissues are new operations.
+    /// The legacy password body rides the primary private session egress;
+    /// provider send-time presentation remains a separate obligation.
+    fn send_login(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        url: String,
+        body: Option<String>,
+        mut pending: Pending,
+    ) -> Option<safe_cex_engine::RequestId> {
+        use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, SessionPolicy};
+        const HEADERS: &[(&str, &str)] = &[("Content-Type", "application/json")];
+        let session = match self.login_session.take() {
+            Some(session) if cx.session_live(&session) => Ok(session),
+            _ => {
+                let slots = Slots::new(
+                    (!self.options.key.is_empty()).then_some(()),
+                    None,
+                    SlotPolicy::default(),
+                );
+                let private_egress = slots
+                    .select(CredentialRole::SessionAuth)
+                    .ok()
+                    .and_then(|(selection, _)| selection.session_egress());
+                cx.open_session(SessionPolicy {
+                    credential: None,
+                    repeat_safe: false,
+                    private_egress,
+                })
+            }
+        };
+        let context = session.and_then(|session| {
+            let context = cx.session_context(
+                &session,
+                Policy {
+                    operation: Operation::Mutation,
+                    credential: None,
+                    timeout_ms: self.options.timeout_ms,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            );
+            self.login_session = Some(session);
+            context
+        });
+        let refused = match context {
+            Ok(context) => {
+                pending.context = Some(context.clone());
+                match cx.request_managed_with_headers(
+                    context,
+                    None,
+                    Method::Post,
+                    url,
+                    HEADERS,
+                    body,
+                    pending,
+                ) {
+                    Ok(id) => return Some(id),
+                    Err((pending, _)) => pending,
+                }
+            }
+            Err(_) => pending,
+        };
+        self.retire_login_session(cx);
+        self.fail_operation(
+            cx,
+            refused.operation,
+            not_sent("DXtrade session login unavailable"),
+        );
+        None
+    }
+
+    fn retire_login_session(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(session) = self.login_session.take() {
+            let _ = cx.retire_session(&session);
+        }
     }
 
     fn request_spec(
@@ -708,7 +812,8 @@ impl BreakoutProp {
             Some(ErrorKind::AuthInvalid | ErrorKind::AuthPermission) => code::AUTH_REJECTED,
             _ => code::REQUEST_FAILED,
         };
-        let error = error.message.as_str();
+        let failure = error;
+        let error = failure.message.as_str();
         match operation {
             Operation::Trade(_) => unreachable!("trade failures return above"),
             Operation::Portfolio { .. } => {
@@ -735,11 +840,17 @@ impl BreakoutProp {
                 let was_draining = std::mem::replace(&mut self.auth_draining, true);
                 let queued = std::mem::take(&mut self.queue);
                 for pending in queued {
-                    self.fail_operation(cx, pending.operation, not_sent(error));
+                    let mut unsent = not_sent(error);
+                    // Only a credential refusal types the work it never sent.
+                    unsent.kind = failure.kind.filter(|kind| {
+                        matches!(kind, ErrorKind::AuthInvalid | ErrorKind::AuthPermission)
+                    });
+                    self.fail_operation(cx, pending.operation, unsent);
                 }
                 self.auth_draining = was_draining;
                 cx.notice(Level::Error, session_code, error);
                 if self.auth_failed {
+                    self.retire_login_session(cx);
                     self.session.token = None;
                     self.session.expires_at = 0.0;
                     self.session.login_pending = false;
@@ -769,7 +880,18 @@ impl BreakoutProp {
                 cx.notice(Level::Error, code::REQUEST_FAILED, error);
                 self.arm_poll(cx);
             }
-            Operation::Candles { command, .. } => cx.fail(command, error),
+            Operation::Candles { command, .. } => {
+                // A session refusal keeps its type; other failures stay text.
+                let error = if matches!(
+                    failure.kind,
+                    Some(ErrorKind::AuthInvalid | ErrorKind::AuthPermission)
+                ) {
+                    failure
+                } else {
+                    VenueError::new(failure.message)
+                };
+                cx.fail(command, error)
+            }
         }
     }
 }
@@ -805,15 +927,27 @@ impl Venue for BreakoutProp {
         mut pending: Pending,
         response: Response<'_>,
     ) {
+        if let Some(context) = pending.context.take() {
+            if (200..300).contains(&response.status) {
+                self.answered_login = Some(context);
+            } else {
+                self.retire_login_session(cx);
+            }
+        }
         if self.auth_failed {
+            self.answered_login = None;
+            self.retire_login_session(cx);
             let error = unanswered(&pending.operation, self.auth_error.clone());
             self.fail_operation(cx, pending.operation, error);
             return;
         }
         if matches!(pending.operation, Operation::Login) && matches!(response.status, 401 | 403) {
             self.auth_failed = true;
-            self.auth_error = format!("DXtrade HTTP {}", response.status);
-            self.fail_operation(cx, pending.operation, self.auth_error.as_str().into());
+            self.retire_login_session(cx);
+            // Typed (AuthInvalid/AuthPermission); the body is never echoed.
+            let error = http_failure(response.status);
+            self.auth_error = error.message.clone();
+            self.fail_operation(cx, pending.operation, error);
             cx.deactivate();
             return;
         }
@@ -884,8 +1018,25 @@ impl Venue for BreakoutProp {
                 }
             }
             Operation::Login => {
-                if let Err(error) = self.session.accept(response.body, cx.now) {
-                    self.fail_operation(cx, Operation::Login, error.into());
+                let context = self.answered_login.take();
+                match self.session.accept(response.body, cx.now) {
+                    Ok(()) => {
+                        if let Some(context) = context {
+                            let _ = cx.http_write_fact(
+                                &context,
+                                safe_cex_engine::classify::WriteFact::Accepted {
+                                    order_ids: vec![],
+                                },
+                                None,
+                            );
+                            let _ = cx.finish_http_context(&context);
+                        }
+                    }
+                    Err(error) => {
+                        // Unproven: the next login must be a new generation.
+                        self.retire_login_session(cx);
+                        self.fail_operation(cx, Operation::Login, error.into());
+                    }
                 }
             }
             Operation::Discover => {
@@ -1102,6 +1253,9 @@ impl Venue for BreakoutProp {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, _error: &str) {
+        if pending.context.take().is_some() {
+            self.retire_login_session(cx);
+        }
         if self.auth_failed {
             let error = unanswered(&pending.operation, self.auth_error.clone());
             self.fail_operation(cx, pending.operation, error);
@@ -1134,11 +1288,6 @@ impl Venue for BreakoutProp {
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
-            Command::FetchOptionChain { command, .. }
-            | Command::FetchOptionExpiries { command, .. }
-            | Command::FetchAccountGreeks { command } => {
-                cx.fail(command, "Options are not enabled on this account");
-            }
             Command::SetTickerSymbols { .. } => {}
             Command::Venue { command, .. } => {
                 safe_cex_engine::unsupported_venue_action(cx, command)
@@ -1184,11 +1333,19 @@ impl Venue for BreakoutProp {
                 ..
             } => {
                 if wire::interval(interval).is_none() {
-                    cx.fail(command, interval.unsupported("DXtrade"));
+                    local_context::complete(
+                        cx,
+                        RequestOperation::Read,
+                        Err(interval.unsupported("DXtrade").into()),
+                    );
                 } else if from_ms.is_some_and(|value| wire::iso_time(value).is_err())
                     || to_ms.is_some_and(|value| wire::iso_time(value).is_err())
                 {
-                    cx.fail(command, "Invalid DXtrade candle request");
+                    local_context::complete(
+                        cx,
+                        RequestOperation::Read,
+                        Err("Invalid DXtrade candle request".into()),
+                    );
                 } else {
                     self.schedule(
                         cx,
@@ -1215,17 +1372,37 @@ impl Venue for BreakoutProp {
                 self.on_trade_command(cx, command);
             }
             Command::Query { command, query } => history::query(cx, command, query),
-            Command::FetchLeverage { command, .. } => cx.done(command, "null".into()),
-            Command::FetchMaxLeverage { command, .. } => cx.fail(
-                command,
-                "Maximum leverage queries are unavailable for DXtrade",
+            Command::FetchLeverage { .. } => {
+                local_context::complete(cx, RequestOperation::Read, Ok("null".into()))
+            }
+            Command::FetchMaxLeverage { .. } => local_context::complete(
+                cx,
+                RequestOperation::Read,
+                Err("Maximum leverage queries are unavailable for DXtrade".into()),
             ),
-            Command::AmendOrderWithSymbol { command, .. }
-            | Command::FetchStpMode { command }
-            | Command::SetStpMode { command, .. }
-            | Command::FetchAccount { command }
-            | Command::FetchOrderBook { command, .. } => {
-                cx.fail(command, "Unsupported BreakoutProp command");
+            // Options never reach the venue: the engine refuses them before
+            // entry because BreakoutProp declares no options capability.
+            unsupported @ (Command::AmendOrderWithSymbol { .. }
+            | Command::FetchStpMode { .. }
+            | Command::SetStpMode { .. }
+            | Command::FetchAccount { .. }
+            | Command::FetchOrderBook { .. }
+            | Command::FetchOptionChain { .. }
+            | Command::FetchOptionExpiries { .. }
+            | Command::FetchAccountGreeks { .. }) => {
+                let operation = if matches!(
+                    unsupported,
+                    Command::AmendOrderWithSymbol { .. } | Command::SetStpMode { .. }
+                ) {
+                    RequestOperation::Mutation
+                } else {
+                    RequestOperation::Read
+                };
+                local_context::complete(
+                    cx,
+                    operation,
+                    Err("Unsupported BreakoutProp command".into()),
+                );
             }
         }
     }

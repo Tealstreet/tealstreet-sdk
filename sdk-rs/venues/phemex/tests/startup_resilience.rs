@@ -1,8 +1,8 @@
 //! Scripted discovery regressions; no network or account credentials.
 mod support;
-use safe_cex_engine::{Action, Engine, Event, Response};
+use safe_cex_engine::{Action, Event, Response};
 use safe_cex_venue_phemex::PhemexPerpetuals;
-use support::Options;
+use support::{Options, PreparedEngine as Engine};
 
 /// A jittered retry delay lands in `[0.75, 1.0] * nominal`.
 fn jittered(actual: f64, nominal: f64) -> bool {
@@ -10,7 +10,7 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 }
 const CATALOGUE: &str = r###"{"code":0,"data":{"perpProductsV2":[{"broken":true},{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"500","maxLeverage":"100"}]}}"###;
 fn public_engine() -> Engine<PhemexPerpetuals> {
-    support::engine(Options {
+    support::prepared_engine(Options {
         public_data_only: true,
         ..Default::default()
     })
@@ -78,7 +78,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = support::engine(Options {
+    let mut engine = support::prepared_engine(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()

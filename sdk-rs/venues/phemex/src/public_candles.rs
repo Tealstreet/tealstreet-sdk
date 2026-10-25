@@ -52,6 +52,7 @@ impl PhemexPerpetuals {
         );
         match cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             url,
             None,

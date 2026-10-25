@@ -23,10 +23,14 @@ fn seeded(options: Options) -> TestEngine {
 }
 fn ask(engine: &mut TestEngine) -> Vec<Action> {
     engine.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    engine.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(engine, NOW)
 }
 fn identity_request(engine: &mut TestEngine) -> HttpRequest {
-    let actions = ask(engine);
+    // The managed read also arms its shared deadline timer.
+    let actions: Vec<_> = ask(engine)
+        .into_iter()
+        .filter(|action| !matches!(action, Action::SetTimer { .. }))
+        .collect();
     assert_eq!(
         actions.len(),
         1,
@@ -98,7 +102,7 @@ fn respond(engine: &mut TestEngine, request: &HttpRequest, status: u16, body: &s
             },
         },
     );
-    engine.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(engine, NOW)
 }
 fn options(read: bool, product: Product) -> Options {
     Options {
@@ -223,7 +227,7 @@ fn failures_reject_once_preserve_state_and_do_not_start_account_detection() {
                     error: "connection lost",
                 },
             );
-            engine.drain_actions().collect()
+            safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
         } else {
             respond(&mut engine, &request, 503, "unavailable")
         };

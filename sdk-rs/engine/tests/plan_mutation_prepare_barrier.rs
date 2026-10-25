@@ -127,6 +127,7 @@ impl SignStep for Recipe {
         }
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: Some(cx.stamp_ms() + self.1),
             },
@@ -172,6 +173,14 @@ struct Consumer {
     placing: bool,
     stagger_freshness: bool,
     entropy_log: Option<EntropyLog>,
+    /// The first group member binds this Session (refused until R11).
+    bind_session: bool,
+    session: Option<safe_cex_engine::request_context::Session>,
+    issue_errors: Vec<safe_cex_engine::request_context::Error>,
+    /// The pending each refused issue returned, and whether the context matched.
+    returned_own_pending: Vec<bool>,
+    /// A following non-group request bound to the same Session.
+    follow_up: Option<Result<safe_cex_engine::RequestId, safe_cex_engine::request_context::Error>>,
 }
 impl Consumer {
     fn issue(&mut self, cx: &mut Cx<'_, Context>) {
@@ -207,8 +216,10 @@ impl Consumer {
             let reference = context.credential().unwrap().reference.clone();
             self.slots.insert(context.leg(), slot);
             self.contexts.push(context.clone());
-            cx.request_signed_managed(
+            let bearer = self.session.clone().filter(|_| self.bind_session);
+            let issued = cx.request_signed_managed(
                 context.clone(),
+                bearer.as_ref(),
                 method,
                 format!("https://openapi.blofin.com{path}"),
                 body,
@@ -222,8 +233,39 @@ impl Consumer {
                     self.entropy_log.clone(),
                 )),
                 context,
-            )
-            .unwrap();
+            );
+            if let Err((returned, error)) = issued {
+                assert!(self.bind_session, "unexpected issue refusal: {error:?}");
+                self.issue_errors.push(error);
+                self.returned_own_pending
+                    .push(self.contexts.last() == Some(&returned));
+                // The refusal left the Session's index usable: an ordinary
+                // bound read on it issues.
+                let read = cx
+                    .http_context(
+                        safe_cex_engine::request_context::Scope::Background,
+                        safe_cex_engine::request_context::Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 20_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap();
+                self.follow_up = Some(
+                    cx.request_managed(
+                        read.clone(),
+                        self.session.as_ref(),
+                        Method::Get,
+                        "https://venue.test/after".into(),
+                        None,
+                        read,
+                    )
+                    .map_err(|(_, error)| error),
+                );
+                return;
+            }
         }
     }
 }
@@ -236,6 +278,16 @@ impl Venue for Consumer {
         }]
     }
     fn start(&mut self, cx: &mut Cx<'_, Context>) {
+        if self.bind_session {
+            self.session = Some(
+                cx.open_session(safe_cex_engine::request_context::SessionPolicy {
+                    credential: None,
+                    repeat_safe: true,
+                    private_egress: None,
+                })
+                .unwrap(),
+            );
+        }
         if self.warmup {
             let context = cx
                 .http_context(
@@ -254,6 +306,7 @@ impl Venue for Consumer {
                 .unwrap();
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 "https://venue.test/clock".into(),
                 None,
@@ -1428,4 +1481,48 @@ fn non_first_reprepare_wakes_with_the_first_member_already_permitted() {
         engine.claim_http_group(152., old),
         Err(Error::Revoked)
     ));
+}
+
+/// #2069 R11 deferral (overseer ruling): a Session-bound request cannot join a
+/// Mutation group. It is refused at issue, before any effect: nothing reaches
+/// the host, and the command fails once, NotSent, with a message naming the
+/// restriction.
+#[cfg(feature = "session-bearer")]
+#[test]
+fn a_session_bound_group_member_is_refused_not_sent_before_any_effect() {
+    let mut engine = start_consumer(Consumer {
+        pair: true,
+        bind_session: true,
+        ..Default::default()
+    });
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(
+        engine.venue().issue_errors,
+        [safe_cex_engine::request_context::Error::Invalid]
+    );
+    assert_eq!(
+        engine.venue().returned_own_pending,
+        [true],
+        "its own pending back"
+    );
+    assert!(
+        matches!(engine.venue().follow_up, Some(Ok(_))),
+        "a following bound issue on the same Session succeeds"
+    );
+    // Only the follow-up read prepares; nothing of the group member does.
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Sign { .. })
+            || matches!(a, Action::ManagedHttp(managed) if matches!(
+                managed.as_ref(),
+                safe_cex_engine::request_context::HttpAction::Prepare { request, .. }
+                    if request.url.contains("blofin")
+            ))),
+        "a refused group member reached the host"
+    );
+    let error = failed_once(&actions, safe_cex_engine::Outcome::NotSent);
+    assert_eq!(
+        error.message,
+        "Session-bound requests cannot join a Mutation group"
+    );
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
 }

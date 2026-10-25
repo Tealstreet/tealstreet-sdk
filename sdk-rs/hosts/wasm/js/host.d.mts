@@ -66,7 +66,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
+    handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean; rejectRoute?: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void; onRouteExhausted?(): void },
   ): Socket;
   /** Explicit prepare/bind/claim support is mandatory for managed HTTP. */
   prepareHttp?(request: HttpPacket & { intent: 'public' | 'primary' | 'secondary' }): PreparedHttp | Promise<PreparedHttp>;
@@ -271,7 +271,7 @@ export interface LocalIdentityMetadata {
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */
 export interface LocalSignerMetadata { primary?: LocalIdentityMetadata; secondary?: LocalIdentityMetadata }
 /** Canonical facts in protocol UTC milliseconds; neither field is fabricated. */
-export interface SignReceipt { stampMs?: number; expiryMs?: number }
+export interface SignReceipt { stampMs?: number; expiryMs?: number; nonce?: string }
 export interface SignResult {
   values: number[][];
   receipt: SignReceipt;
@@ -379,6 +379,8 @@ export interface EngineBridgeConstruction {
   apiKeyIndexRequired: boolean;
   isolatedBookSubscriptions: boolean;
   dispatchSigning:boolean;
+  /** Declared read-key policy; absent installs the read key as before. */
+  readCredentials?: 'validateOnly' | 'publicRead';
 }
 
 export interface EngineConstruction {
@@ -417,6 +419,7 @@ export interface WasmEngineLike {
   wsMessageBytes?(socket: number, bytes: Uint8Array, now: number): string | undefined;
   wsBinary?(socket: number, data: Uint8Array, now: number): string;
   wsClose(socket: number, code: number, now: number): string;
+  wsRouteExhausted(socket: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;
   httpEnd(request: number, now: number): string;

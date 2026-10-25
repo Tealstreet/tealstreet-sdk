@@ -40,6 +40,8 @@ struct Rule {
 #[serde(rename_all = "camelCase")]
 enum SetupMapping {
     Asterdex,
+    #[serde(rename = "apexomni")]
+    ApexOmni,
 }
 
 #[derive(Default, Deserialize)]
@@ -119,6 +121,7 @@ enum SigningAlgorithm {
     Es256,
     Secp256k1Digest,
     StarkDigest,
+    SchnorrDigest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,6 +178,17 @@ struct BridgeRule {
     api_key_index_required: bool,
     isolated_book_subscriptions: bool,
     dispatch_signing: bool,
+    read_credentials: ReadCredentialsPolicy,
+}
+
+/// What trusted setup does with a family's read key; absent installs it.
+#[derive(Default, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum ReadCredentialsPolicy {
+    #[default]
+    Install,
+    ValidateOnly,
+    PublicRead,
 }
 
 #[derive(Default, Debug, Deserialize)]
@@ -219,14 +233,15 @@ fn rule(value: &Rule) -> String {
     };
     let bridge = &value.bridge;
     let bridge = format!(
-        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {} }}",
+        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {}, read_credentials: ReadCredentialsPolicy::{:?} }}",
         bridge.spot,
         bridge.demo,
         bridge.primary_credentials_only,
         bridge.payload_signing,
         bridge.api_key_index_required,
         bridge.isolated_book_subscriptions,
-        bridge.dispatch_signing
+        bridge.dispatch_signing,
+        bridge.read_credentials
     );
     let slot = |value: &Option<IdentitySetupPolicy>| match value {
         Some(value) => {
@@ -395,6 +410,8 @@ mod tests {
         assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }) }"));
         assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: None }"));
         assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest) }), secondary: None }"));
+        // Lighter's Schnorr key is declarable for Sign typing.
+        assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"schnorrDigest"}}}}}"#).unwrap().contains("Algorithm::SchnorrDigest"));
         // MAC algorithms are never declarable.
         assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"hmacSha256"}}}}}"#).is_err());
         assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
@@ -451,6 +468,29 @@ mod tests {
                 r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"signerSetup":{{"primary":{field}}}}}}}}}"#
             );
             assert!(generate(&rules).is_err());
+        }
+    }
+
+    #[test]
+    fn read_credentials_policy_compiles_and_unknown_values_fail_closed() {
+        let output = generate(
+            r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "validated":{"bridge":{"readCredentials":"validateOnly"}},
+            "public":{"bridge":{"readCredentials":"publicRead"}},
+            "plain":{}
+        }}"#,
+        )
+        .unwrap();
+        for variant in ["ValidateOnly", "PublicRead", "Install"] {
+            assert!(output.contains(&format!(
+                "read_credentials: ReadCredentialsPolicy::{variant}"
+            )));
+        }
+        for value in [r#""ignore""#, "true", "null"] {
+            let rules = format!(
+                r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"bridge":{{"readCredentials":{value}}}}}}}}}"#
+            );
+            assert!(generate(&rules).is_err(), "{value}");
         }
     }
 

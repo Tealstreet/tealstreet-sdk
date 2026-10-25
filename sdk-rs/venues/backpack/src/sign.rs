@@ -67,7 +67,7 @@ impl SignStep for Http {
         let is_batch = declaration.method == Method::Post && declaration.path == "/api/v1/orders";
         if declaration.rows.is_empty()
             || (!is_batch && declaration.rows.len() != 1)
-            || declaration.window == 0
+            || (declaration.window == 0 && declaration.method != Method::Get)
             || http.method != declaration.method
             || http.body != declaration.body
         {
@@ -98,6 +98,7 @@ impl SignStep for Http {
         let text = payload(instruction, &declaration.rows, stamp, declaration.window);
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(stamp),
                 expiry_ms: None,
             },
@@ -245,16 +246,46 @@ pub struct Credentials {
     pub window: u32,
 }
 
+fn decode_seed(secret: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, &'static str> {
+    let seed = zeroize::Zeroizing::new(
+        STANDARD
+            .decode(secret)
+            .map_err(|_| "Invalid Backpack base64 seed")?,
+    );
+    if seed.len() != 32 {
+        return Err("Ed25519 seed must be 32 bytes");
+    }
+    Ok(seed)
+}
+
+pub fn validate_seed(secret: &str) -> Result<(), &'static str> {
+    decode_seed(secret).map(drop)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ReadCredentialsError {
+    Configuration(&'static str),
+    Seed(&'static str),
+}
+impl ReadCredentialsError {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Configuration(message) | Self::Seed(message) => message,
+        }
+    }
+}
+
+pub fn validate_read_credentials(
+    configuration: Result<(), &'static str>,
+    secret: &str,
+) -> Result<(), ReadCredentialsError> {
+    configuration.map_err(ReadCredentialsError::Configuration)?;
+    validate_seed(secret).map_err(ReadCredentialsError::Seed)
+}
+
 impl Credentials {
     pub fn new(key: String, secret: &str) -> Result<Self, String> {
-        let seed = zeroize::Zeroizing::new(
-            STANDARD
-                .decode(secret)
-                .map_err(|_| "Invalid Backpack base64 seed")?,
-        );
-        if seed.len() != 32 {
-            return Err("Ed25519 seed must be 32 bytes".into());
-        }
+        let seed = decode_seed(secret).map_err(str::to_owned)?;
         Ok(Self {
             key,
             seed,

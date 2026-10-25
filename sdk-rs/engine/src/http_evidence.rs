@@ -8,7 +8,7 @@ const ID_COUNT: usize = 4_096;
 const ID_BYTES: usize = 256 * 1024;
 const ID_FIELD: usize = 1_024;
 const TEXT_BYTES: usize = 64 * 1024;
-#[cfg(feature = "http-plans")]
+#[cfg(feature = "serial-plans")]
 pub(super) const RETAINED_TEXT_BYTES: usize = TEXT_BYTES;
 const TEXT_FIELD: usize = 4_096;
 const TRUNCATED: &str = "[truncated]";
@@ -188,7 +188,7 @@ impl EvidenceBudget {
 
     /// A settled serial attempt's identities move to the command's streamed
     /// list, so they stop counting against the per-attempt identity budget.
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "serial-plans")]
     pub(super) fn release_identities(&mut self, ids: &[String]) {
         for id in ids {
             self.ids = self
@@ -199,6 +199,16 @@ impl EvidenceBudget {
                 .checked_sub(std::mem::size_of::<String>() + id.len())
                 .expect("released identity bytes were admitted");
         }
+    }
+
+    /// Append a venue's terminal note within the same text budget.
+    #[cfg(feature = "http-plans")]
+    pub(super) fn note(&mut self, message: &mut String, note: &str) {
+        if note.is_empty() {
+            return;
+        }
+        let note = self.text(note);
+        *message = format!("{message}; {note}").into_boxed_str().into_string();
     }
 
     fn admit_identity(&mut self, id: &str) -> bool {
@@ -250,7 +260,8 @@ impl EvidenceBudget {
         let prefix = utf8_prefix(source, remaining.min(TEXT_FIELD - TRUNCATED.len()));
         self.text_bytes += prefix.len();
         // Marker bytes have a separate fixed ceiling: three fields per bounded
-        // attempt plus one terminal fallback. No text is charged twice at seal.
+        // attempt, one terminal fallback and one terminal note. No text is
+        // charged twice at seal.
         format!("{prefix}{TRUNCATED}")
             .into_boxed_str()
             .into_string()
@@ -263,6 +274,12 @@ fn utf8_prefix(source: &str, limit: usize) -> &str {
         end -= 1;
     }
     &source[..end]
+}
+
+/// A note on an error that no journal projects, under a fresh text budget.
+#[cfg(feature = "http-plans")]
+pub(super) fn note_unprojected(error: &mut VenueError, note: &str) {
+    EvidenceBudget::default().note(&mut error.message, note);
 }
 
 pub(super) fn default_report(message: &str) -> String {

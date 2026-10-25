@@ -299,6 +299,7 @@ fn prepare_jwt(
         .map_err(|_| SignError::InvalidRequest)?;
     let request = SignRequest {
         receipt: SignReceipt {
+            nonce: None,
             stamp_ms: Some(stamp),
             expiry_ms: Some(((nbf + 120) * 1000) as f64),
         },

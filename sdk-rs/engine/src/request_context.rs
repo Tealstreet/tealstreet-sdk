@@ -14,10 +14,11 @@ pub mod plan;
 #[cfg(feature = "http-plans")]
 #[path = "request_context_owner.rs"]
 mod ownership;
+#[cfg(feature = "condition-waits")]
+pub use ownership::{ConditionOwner, ConditionWait};
 #[cfg(feature = "http-plans")]
 pub use ownership::{
-    ConditionOwner, ConditionWait, HttpOwnerRetirement, Plan, PlanPolicy, Preflight,
-    PreflightPolicy, PreflightPurpose,
+    HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
 };
 
 #[path = "http_evidence.rs"]
@@ -121,6 +122,140 @@ impl Session {
             generation: self.generation,
         }
     }
+}
+
+/// One full session header value (a token, cookie or session id).
+/// Bounded, redacted in `Debug` and wiped on drop; it never enters a Context.
+pub struct SecretHeaderValue(String);
+
+impl SecretHeaderValue {
+    /// Refuses (and wipes) an empty, oversized or non-header-safe value.
+    pub fn new(mut value: String) -> Result<Self, Error> {
+        if value.is_empty()
+            || crate::signing_headers::validate_unsigned(&[("Authorization", &value)]).is_err()
+        {
+            zeroize::Zeroize::zeroize(&mut value);
+            return Err(Error::Invalid);
+        }
+        Ok(Self(value))
+    }
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Drop for SecretHeaderValue {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
+impl std::fmt::Debug for SecretHeaderValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretHeaderValue(<redacted>)")
+    }
+}
+
+/// The headers one Session generation attaches to a bound request, e.g. a
+/// lone `Authorization`, or a session id plus its cookie. At most
+/// `MAX_SESSION_HEADERS` distinct venue-declared names; transport-owned names
+/// are refused. Values stay secret; the engine inserts them at prepare, where
+/// the venue's declared `SessionPlacement` puts them in its native order.
+#[derive(Debug)]
+pub struct SessionHeaders {
+    entries: Vec<(&'static str, SecretHeaderValue)>,
+    placement: SessionPlacement,
+}
+
+/// Where shared assembly puts the Session headers among a packet's own: a
+/// venue-wide wire property declared with the bundle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SessionPlacement {
+    #[default]
+    First,
+    /// Immediately after the first packet header with this name (ignoring
+    /// case), or first when the packet carries none.
+    After(&'static str),
+}
+
+pub const MAX_SESSION_HEADERS: usize = 4;
+
+impl SessionHeaders {
+    /// Refuses an empty or oversized set, a duplicate (case-insensitive) or
+    /// invalid name, or a transport-owned name. Refused values are wiped on drop.
+    pub fn new(entries: Vec<(&'static str, SecretHeaderValue)>) -> Result<Self, Error> {
+        const TRANSPORT: [&str; 13] = [
+            "Host",
+            "Content-Length",
+            "Transfer-Encoding",
+            "Connection",
+            "Content-Type",
+            "Keep-Alive",
+            "Proxy-Authorization",
+            "Proxy-Authenticate",
+            "Proxy-Connection",
+            "TE",
+            "Trailer",
+            "Upgrade",
+            "Expect",
+        ];
+        if entries.is_empty() || entries.len() > MAX_SESSION_HEADERS {
+            return Err(Error::Invalid);
+        }
+        let distinct = entries.iter().enumerate().all(|(index, (name, _))| {
+            entries[..index]
+                .iter()
+                .all(|(earlier, _)| !earlier.eq_ignore_ascii_case(name))
+        });
+        let valid = distinct
+            && entries.iter().all(|(name, value)| {
+                !TRANSPORT
+                    .iter()
+                    .any(|owned| owned.eq_ignore_ascii_case(name))
+                    && crate::signing_headers::validate_unsigned(&[(name, value.expose())]).is_ok()
+            });
+        if valid {
+            Ok(Self {
+                entries,
+                placement: SessionPlacement::First,
+            })
+        } else {
+            Err(Error::Invalid)
+        }
+    }
+
+    /// The common single-header case.
+    pub fn authorization(value: SecretHeaderValue) -> Self {
+        Self {
+            entries: vec![("Authorization", value)],
+            placement: SessionPlacement::First,
+        }
+    }
+
+    pub fn placed(mut self, placement: SessionPlacement) -> Self {
+        self.placement = placement;
+        self
+    }
+
+    pub(crate) fn entries(&self) -> &[(&'static str, SecretHeaderValue)] {
+        &self.entries
+    }
+
+    pub(crate) fn placement(&self) -> SessionPlacement {
+        self.placement
+    }
+}
+
+/// A venue's answer for one Session generation at managed prepare.
+#[derive(Debug)]
+pub enum SessionBearer {
+    /// `revision` is monotonic within the generation and never reused; it
+    /// covers the whole header set.
+    Ready {
+        headers: SessionHeaders,
+        revision: u64,
+    },
+    NotReady,
 }
 
 /// A continuation parked behind a session, returned when the venue drains it.
@@ -1182,13 +1317,14 @@ pub struct CommandWrites {
     evidence: evidence::EvidenceBudget,
     // An earlier attempt of this intent may have reached the venue.
     inherited_uncertain: bool,
+    #[cfg(feature = "serial-plans")]
     stream: Option<Box<StreamedWrites>>,
 }
 
 /// A streamed serial Plan's settled calls: accepted IDs exactly as received,
 /// refusals counted, and refusal reports kept only while the text budget lasts.
+#[cfg(feature = "serial-plans")]
 #[derive(Default)]
-#[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
 struct StreamedWrites {
     refusals_complete: bool,
     ids: Vec<String>,
@@ -1251,6 +1387,7 @@ impl CommandWrites {
             report_messages: 0,
             evidence: evidence::EvidenceBudget::default(),
             inherited_uncertain: false,
+            #[cfg(feature = "serial-plans")]
             stream: None,
         })
     }
@@ -1761,6 +1898,7 @@ impl CommandWrites {
     }
 
     fn validate_success(&self) -> Result<(), Error> {
+        #[cfg(feature = "serial-plans")]
         if let Some(stream) = &self.stream {
             return self.validate_streamed_success(stream);
         }
@@ -1791,7 +1929,7 @@ impl CommandWrites {
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.
     pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
-        let (error, budget) = self.failure_projection(fallback)?;
+        let (error, budget) = self.failure_projection(fallback, None)?;
         self.evidence = budget;
         self.sealed = true;
         Ok(error)
@@ -1801,19 +1939,24 @@ impl CommandWrites {
     /// evidence. This grants no completion, retry or observer authority. The
     /// execution owner supplies presentation-only observer termination errors.
     pub fn project_failure(&self, fallback: VenueError) -> Result<VenueError, Error> {
-        self.failure_projection(fallback).map(|(error, _)| error)
+        self.failure_projection(fallback, None)
+            .map(|(error, _)| error)
     }
 
     fn failure_projection(
         &self,
         fallback: VenueError,
+        note: Option<&str>,
     ) -> Result<(VenueError, evidence::EvidenceBudget), Error> {
         if self.sealed {
             return Err(Error::State);
         }
         let mut projected_budget = self.evidence;
-        let settled = self.streamed().map_or(0, |stream| stream.settled);
-        let any_released = settled > 0 || self.attempts.iter().any(|a| a.released);
+        #[cfg(feature = "serial-plans")]
+        let any_released = self.streamed().is_some_and(|stream| stream.settled > 0)
+            || self.attempts.iter().any(|a| a.released);
+        #[cfg(not(feature = "serial-plans"))]
+        let any_released = self.attempts.iter().any(|a| a.released);
         let uncertain = self.attempts.iter().enumerate().any(|(index, a)| {
             a.released
                 && (matches!(
@@ -1833,7 +1976,6 @@ impl CommandWrites {
                 })
         });
         let all_rejected = any_released
-            && !self.streamed().is_some_and(|stream| stream.effects)
             && self
                 .attempts
                 .iter()
@@ -1841,6 +1983,8 @@ impl CommandWrites {
                 .all(|a| {
                     matches!(&a.result, Some(WriteResult::Rejected(error)) if effects_free(error))
                 });
+        #[cfg(feature = "serial-plans")]
+        let all_rejected = all_rejected && !self.streamed().is_some_and(|stream| stream.effects);
         let error = |a: &WriteAttempt| match &a.result {
             Some(
                 WriteResult::Rejected(error)
@@ -1861,12 +2005,15 @@ impl CommandWrites {
                 .map(|(_, error)| error)
         };
         // Settled serial refusals precede every live call in planning order.
+        #[cfg(feature = "serial-plans")]
         let selected = self
             .streamed()
             .and_then(|stream| stream.retained.first())
             .map(|(_, error, _)| error.clone())
             .or_else(|| select(true))
             .or_else(|| select(false));
+        #[cfg(not(feature = "serial-plans"))]
+        let selected = select(true).or_else(|| select(false));
         let mut overflow = self.attempts.iter().any(|attempt| attempt.id_overflow);
         let mut error = match selected {
             Some(error) => error, // Already-budgeted facts are never charged again.
@@ -1900,6 +2047,7 @@ impl CommandWrites {
         // Preserve the selected native/fallback evidence prefix exactly. Append
         // additional facts in logical replacement order, without charging known
         // IDs again or reordering a bounded retained prefix.
+        #[cfg(feature = "serial-plans")]
         let mut ids = if let Some(stream) = self.streamed() {
             // Native appends every identity exactly as received.
             let mut ids = stream.ids.clone();
@@ -1915,7 +2063,16 @@ impl CommandWrites {
                 .as_ref()
                 .map_or_else(Vec::new, |partial| partial.order_ids.clone())
         };
-        if self.streamed().is_none() {
+        #[cfg(feature = "serial-plans")]
+        let streamed = self.streamed().is_some();
+        #[cfg(not(feature = "serial-plans"))]
+        let mut ids = error
+            .partial
+            .as_ref()
+            .map_or_else(Vec::new, |partial| partial.order_ids.clone());
+        #[cfg(not(feature = "serial-plans"))]
+        let streamed = false;
+        if !streamed {
             for attempt in self.ordered_attempts() {
                 let order_ids = attempt.result.as_ref().map(WriteResult::order_ids);
                 if let Some(order_ids) = order_ids {
@@ -1937,6 +2094,7 @@ impl CommandWrites {
         if overflow {
             evidence::mark_id_overflow(&mut error);
         }
+        #[cfg(feature = "serial-plans")]
         if let Some(dropped) = self
             .streamed()
             .map(|stream| stream.refused - stream.retained.len())
@@ -1944,6 +2102,12 @@ impl CommandWrites {
         {
             error.message = format!("{} [truncated: {dropped} more refusals]", error.message);
         }
+        #[cfg(feature = "http-plans")]
+        if let Some(note) = note {
+            projected_budget.note(&mut error.message, note);
+        }
+        #[cfg(not(feature = "http-plans"))]
+        let _ = note;
         Ok((error, projected_budget))
     }
 
@@ -1951,6 +2115,7 @@ impl CommandWrites {
     pub(crate) fn prepare_seal(
         &self,
         error: Option<VenueError>,
+        note: Option<&str>,
     ) -> Result<PreparedWriteSeal, Error> {
         if error.is_none() && self.validate_success().is_ok() {
             return Ok(PreparedWriteSeal {
@@ -1958,10 +2123,12 @@ impl CommandWrites {
                 evidence: self.evidence,
             });
         }
-        let (error, evidence) =
-            self.failure_projection(error.unwrap_or_else(|| {
+        let (error, evidence) = self.failure_projection(
+            error.unwrap_or_else(|| {
                 VenueError::new("Command writes are not all confirmed accepted")
-            }))?;
+            }),
+            note,
+        )?;
         Ok(PreparedWriteSeal {
             failure: Some(error),
             evidence,
@@ -1976,7 +2143,7 @@ impl CommandWrites {
         prepared.failure
     }
 
-    #[cfg(all(test, feature = "http-plans"))]
+    #[cfg(all(test, feature = "serial-plans"))]
     pub(crate) fn holds_attempt(&self, id: RequestId) -> bool {
         self.attempts.iter().any(|attempt| attempt.id == id)
     }
@@ -1984,23 +2151,31 @@ impl CommandWrites {
     /// Retain each terminal logical-leg refusal for the existing reporting path.
     /// A refusal recovered by a later attempt is history, not a rejected leg.
     /// Reading evidence never reopens a sealed command or emits another result.
+    #[cfg(feature = "serial-plans")]
     pub fn rejections(&self) -> impl Iterator<Item = (RequestId, &VenueError)> {
         self.streamed_retained()
             .map(|(id, error, _)| (*id, error))
-            .chain(
-                self.ordered_attempts()
-                    .into_iter()
-                    .filter(|attempt| self.terminal(attempt))
-                    .filter_map(|attempt| match &attempt.result {
-                        Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
-                            Some((attempt.id, error))
-                        }
-                        _ => None,
-                    }),
-            )
+            .chain(self.terminal_rejections())
+    }
+    #[cfg(not(feature = "serial-plans"))]
+    pub fn rejections(&self) -> impl Iterator<Item = (RequestId, &VenueError)> {
+        self.terminal_rejections()
+    }
+
+    fn terminal_rejections(&self) -> impl Iterator<Item = (RequestId, &VenueError)> {
+        self.ordered_attempts()
+            .into_iter()
+            .filter(|attempt| self.terminal(attempt))
+            .filter_map(|attempt| match &attempt.result {
+                Some(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
+                    Some((attempt.id, error))
+                }
+                _ => None,
+            })
     }
 
     /// Every definitive refusal, including streamed ones past the retained text.
+    #[cfg(feature = "serial-plans")]
     pub fn refusal_count(&self) -> usize {
         self.streamed()
             .map_or(0, |stream| stream.refused - stream.retained.len())
@@ -2009,17 +2184,27 @@ impl CommandWrites {
 
     /// Engine-issued logical leg ids carry planning order, independently of
     /// physical registration/callback order and the position of a later retry.
+    #[cfg(feature = "serial-plans")]
     pub fn reports(&self) -> impl Iterator<Item = &str> {
         self.streamed_retained()
             .flat_map(|(_, _, reports)| reports.messages.iter().map(String::as_str))
-            .chain(
-                self.ordered_attempts()
-                    .into_iter()
-                    .filter(|attempt| self.terminal(attempt))
-                    .flat_map(|last| last.reports.messages.iter().map(String::as_str)),
-            )
+            .chain(self.terminal_reports())
+    }
+    #[cfg(not(feature = "serial-plans"))]
+    pub fn reports(&self) -> impl Iterator<Item = &str> {
+        self.terminal_reports()
     }
 
+    fn terminal_reports(&self) -> impl Iterator<Item = &str> {
+        self.ordered_attempts()
+            .into_iter()
+            .filter(|attempt| self.terminal(attempt))
+            .flat_map(|last| last.reports.messages.iter().map(String::as_str))
+    }
+}
+
+#[cfg(feature = "serial-plans")]
+impl CommandWrites {
     fn streamed(&self) -> Option<&StreamedWrites> {
         self.stream.as_deref()
     }
@@ -2069,7 +2254,7 @@ impl CommandWrites {
     }
 }
 
-#[cfg(feature = "http-plans")]
+#[cfg(feature = "serial-plans")]
 impl CommandWrites {
     /// Journal one serial Plan call at a time: each settled call is compacted
     /// into the streamed history before the next one registers.
@@ -2126,9 +2311,10 @@ impl CommandWrites {
             if let Some(result) = attempt.result {
                 self.evidence.release_identities(result.order_ids());
                 if terminal {
+                    stream.effects |= matches!(result, WriteResult::KnownPartial(_));
                     match result {
                         WriteResult::Accepted { order_ids } => {
-                            stream.effects |= !order_ids.is_empty();
+                            stream.effects = true;
                             stream.ids.extend(order_ids);
                         }
                         WriteResult::Rejected(mut error) | WriteResult::KnownPartial(mut error) => {
@@ -2165,6 +2351,12 @@ impl CommandWrites {
             .expect("streamed serial journal")
             .settled += 1;
     }
+}
+
+/// A venue note on a Plan failure that has no write journal to project it.
+#[cfg(feature = "http-plans")]
+pub(crate) fn note_unprojected(error: &mut VenueError, note: &str) {
+    evidence::note_unprojected(error, note);
 }
 
 fn effects_free(error: &VenueError) -> bool {

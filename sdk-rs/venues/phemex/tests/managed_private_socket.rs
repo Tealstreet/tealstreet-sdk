@@ -62,7 +62,7 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.e.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.e, self.now) {
             match action {
                 Action::SetTimer { timer, at_ms } => {
                     self.timers.insert(timer, at_ms);

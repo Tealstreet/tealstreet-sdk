@@ -340,7 +340,13 @@ fn polling_is_reference_counted_and_old_generation_cannot_restart_it() {
     let current = h.take("klines");
     let before = h.actions.len();
     h.respond(old, 200, r#"{"results":[[1699999980000,1,2,0.5,1.5,3]]}"#);
-    assert_eq!(h.actions.len(), before);
+    let retired = &h.actions[before..];
+    assert_eq!(
+        retired.len(),
+        1,
+        "only the retired HTTP deadline is cleared"
+    );
+    assert!(matches!(retired[0], Action::ClearTimer { .. }));
     h.respond(current, 200, r#"{"results":[]}"#);
     assert!(
         h.actions

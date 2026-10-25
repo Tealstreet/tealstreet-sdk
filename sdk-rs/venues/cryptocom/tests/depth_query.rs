@@ -1,14 +1,16 @@
 //! REST queries must work without subscription/cached account state.
+mod support;
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, Response,
     Venue,
 };
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
+use safe_cex_venue_cryptocom::Cryptocom;
+use support::fixture::Options;
 fn engine(testnet: bool) -> Engine<Cryptocom> {
-    safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    support::fixture::engine(Options {
         testnet,
         ..Default::default()
-    }))
+    })
 }
 fn ask(e: &mut Engine<Cryptocom>, command: u32, symbol: &str, limit: Option<u32>) -> HttpRequest {
     e.handle(
@@ -102,7 +104,7 @@ const BOOK: &str = r#"{"code":0,"result":{"data":[{"bids":[["001.20","2.5","7"],
 #[test]
 fn capability_and_standalone_json_admit_real_rest_queries() {
     assert!(
-        Cryptocom::new(Options::default())
+        support::fixture::venue(Options::default())
             .capabilities()
             .order_book_query
     );

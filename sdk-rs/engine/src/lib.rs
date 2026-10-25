@@ -19,6 +19,8 @@ mod id_map;
 pub(crate) use id_map::IdMap;
 pub mod json;
 pub mod log;
+#[cfg(feature = "metadata-freshness")]
+pub mod metadata;
 pub mod model;
 pub mod nonce;
 pub mod num;
@@ -39,7 +41,7 @@ pub mod signing_headers;
 pub mod signing_policy;
 mod signing_release;
 pub use signing_dispatch::{DispatchContext, SignStep};
-pub use signing_release::SigningRelease;
+pub use signing_release::{SigningRelease, StampFloor};
 pub mod socket;
 #[cfg(feature = "managed-sockets")]
 mod socket_driver;
@@ -60,10 +62,11 @@ pub use capabilities::{
 pub use credentials::ReadCredentials;
 pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CommandWait, CredentialSlot, Cx,
-    DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpRequest, MAX_COMMAND_WAIT_MS,
-    MergedScopeAuth, Method, Notice, PayloadSignRequest, PollTimerBounds, Query, RequestId,
-    RequestRoute, Response, SignatureTarget, SigningTarget, SocketChannel, SocketContext, SocketId,
-    SocketSpec, TimerId, Venue, VenueAction, unsupported_venue_action,
+    DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpRelease, HttpRequest,
+    MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PayloadSignRequest, PollTimerBounds,
+    Query, ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SignatureTarget,
+    SigningTarget, SocketChannel, SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction,
+    unsupported_venue_action,
 };
 pub use error::{
     BuilderAuthorization, BuilderAuthorizationReason, ErrorKind, Outcome, Partial, VenueError,

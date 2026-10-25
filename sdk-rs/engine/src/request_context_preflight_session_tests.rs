@@ -35,6 +35,9 @@ struct Reads {
     expired: Vec<(u32, VenueError, bool)>,
     park_in_ready: Option<Session>,
     ready_park_result: Option<Result<(), Error>>,
+    /// The ended hook tries to bind a read to this (retired) Session (#2069).
+    bind_in_ended: Option<Session>,
+    bind_result: Option<Result<RequestId, Error>>,
 }
 
 fn preflight_policy() -> PreflightPolicy {
@@ -62,14 +65,21 @@ fn terms() -> CallTerms {
     }
 }
 fn queue(cx: &mut Cx<'_, u32>, read: Context) -> Result<RequestId, (u32, Error)> {
-    cx.request_managed(read, Method::Get, "https://venue.test/read".into(), None, 0)
+    cx.request_managed(
+        read,
+        None,
+        Method::Get,
+        "https://venue.test/read".into(),
+        None,
+        0,
+    )
 }
 
 impl Reads {
     fn live(&self, cx: &Cx<'_, u32>) -> bool {
         self.preflight
             .as_ref()
-            .is_some_and(|handle| cx.io.request_contexts.preflight_state(handle).is_ok())
+            .is_some_and(|handle| cx.io.core.request_contexts.preflight_state(handle).is_ok())
     }
     fn entry_refusals(&mut self, cx: &mut Cx<'_, u32>, handle: &Preflight, live: &Session) {
         let stale = self.stale.clone().unwrap();
@@ -87,12 +97,20 @@ impl Reads {
             (live, read_policy(), mismatched),
         ];
         for (session, policy, terms) in attempts {
-            let before = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
+            let before = (
+                cx.io.core.next_id,
+                cx.io.core.timers.len(),
+                cx.io.core.actions.len(),
+            );
             let error = cx
                 .preflight_session_wait(handle, policy, terms, session, 9)
                 .map_err(|(_, error)| error)
                 .unwrap_err();
-            let after = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
+            let after = (
+                cx.io.core.next_id,
+                cx.io.core.timers.len(),
+                cx.io.core.actions.len(),
+            );
             self.entry_refusals.push((error, before == after));
         }
     }
@@ -174,10 +192,27 @@ impl Venue for Reads {
     ) {
         let own = cx
             .io
+            .core
             .http_preflight_ready
             .as_ref()
             .is_some_and(|ready| ready.owner() == handle.owner());
         self.ended.push((pending, error, own));
+        if let Some(session) = self.bind_in_ended.take() {
+            let read = cx
+                .preflight_read_context(handle, read_policy(), terms())
+                .unwrap();
+            self.bind_result = Some(
+                cx.request_managed(
+                    read,
+                    Some(&session),
+                    Method::Get,
+                    "https://venue.test/read".into(),
+                    None,
+                    pending,
+                )
+                .map_err(|(_, error)| error),
+            );
+        }
         if let Some(session) = self.repark_on.take() {
             let parked = if self.repark_retry {
                 let read = self.read.clone().unwrap();
@@ -448,7 +483,8 @@ fn a_parked_preflight_read_expires_at_the_receipt_cap() {
     );
     let handle = e.venue.preflight.clone().unwrap();
     let cap =
-        e.io.request_contexts
+        e.io.core
+            .request_contexts
             .preflight_receipt_cap(&handle)
             .unwrap()
             .expect("caller receipt cap")
@@ -530,6 +566,29 @@ fn an_ended_preflight_wait_without_progress_fails_once() {
     );
 }
 
+/// #2069 R10b': the ended hook tries to bind a read to the retired Session.
+/// The binding is refused Revoked before any effect, and that refused issue
+/// in the Preflight's custody is its one terminal (the owned-admission
+/// failure, NotSent). Nothing is sent.
+#[cfg(feature = "session-bearer")]
+#[test]
+fn an_ended_preflight_hook_cannot_bind_its_retired_session() {
+    let (mut e, old, _) = parked(Reads::default(), 60_000);
+    e.venue.bind_in_ended = Some(old.clone());
+    let _ = cx(&mut e, 1.).retire_session(&old).unwrap();
+    let actions = flush(&mut e, 2.);
+    assert_eq!(e.venue.ended.len(), 1);
+    assert_eq!(e.venue.bind_result, Some(Err(Error::Revoked)));
+    assert!(prepares(&actions).is_empty());
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let terminals = terminals(&actions);
+    assert_eq!(terminals.len(), 1, "one terminal");
+    let error = terminals[0].as_ref().unwrap_err();
+    assert_eq!(error.message, "HTTP read admission failed");
+    assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
+    assert_eq!(error.kind, Some(crate::ErrorKind::InvalidInput));
+}
+
 /// N7 sealed: a Preflight failed while its read is parked returns the
 /// pending once with no custody, and its Session's drain finds nothing.
 #[test]
@@ -573,10 +632,10 @@ fn preflight_session_wait_refusals_spend_nothing() {
     assert_eq!(e.venue.park_result, Some(Ok(())));
     let handle = e.venue.preflight.clone().unwrap();
     let mut cx = cx(&mut e, 1.);
-    let before = (cx.io.next_id, cx.io.timers.len());
+    let before = (cx.io.core.next_id, cx.io.core.timers.len());
     let outside = cx.preflight_session_wait(&handle, read_policy(), terms(), &session, 5);
     assert_eq!(outside.map_err(|(_, error)| error), Err(Error::Revoked));
-    assert_eq!((cx.io.next_id, cx.io.timers.len()), before);
+    assert_eq!((cx.io.core.next_id, cx.io.core.timers.len()), before);
 }
 
 /// N7 with #1896: parking inside the Preflight's own ready callback is
@@ -615,7 +674,8 @@ fn a_resumed_capped_read_cannot_release_after_the_receipt_cap() {
     );
     let handle = e.venue.preflight.clone().unwrap();
     let cap =
-        e.io.request_contexts
+        e.io.core
+            .request_contexts
             .preflight_receipt_cap(&handle)
             .unwrap()
             .unwrap()
@@ -654,10 +714,11 @@ fn a_resumed_capped_read_cannot_release_after_the_receipt_cap() {
     }
 }
 
-/// N7 cap, without a park: a capped Preflight's ordinary read is bounded by
-/// the same receipt. An uncapped Preflight keeps its declared window.
+/// Without a park, a capped Preflight's ordinary read keeps its declared
+/// window, capped or not: a valid handoff past the receipt still delivers
+/// (`engine/tests/plan_receipt_cap.rs`). Only a parked read is bounded.
 #[test]
-fn a_capped_preflight_read_window_ends_at_the_receipt_cap() {
+fn an_ordinary_preflight_read_keeps_its_declared_window_when_capped() {
     for capped in [true, false] {
         let mut e = engine(Reads {
             capped,
@@ -665,17 +726,6 @@ fn a_capped_preflight_read_window_ends_at_the_receipt_cap() {
         });
         command(&mut e, 0., 1_000);
         let read = e.venue.read.clone().unwrap();
-        if capped {
-            let handle = e.venue.preflight.clone().unwrap();
-            let cap =
-                e.io.request_contexts
-                    .preflight_receipt_cap(&handle)
-                    .unwrap()
-                    .unwrap()
-                    .1;
-            assert!(read.deadline() <= cap);
-        } else {
-            assert!(read.deadline() > 1_000., "the declared 2 x 20 s window");
-        }
+        assert!(read.deadline() > 1_000., "the declared 2 x 20 s window");
     }
 }

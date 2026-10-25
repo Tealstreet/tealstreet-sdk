@@ -88,7 +88,11 @@ impl<P> Cx<'_, P> {
         context: &Context,
         result: String,
     ) -> Result<(), Error> {
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         if body.policy.operation != Operation::Mutation {
             return Err(Error::Invalid);
         }
@@ -108,6 +112,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::State);
         }
         self.io
+            .core
             .request_contexts
             .owner_entry(plan.owner())
             .ok_or(Error::Revoked)?
@@ -117,7 +122,7 @@ impl<P> Cx<'_, P> {
             .validate_housekeeping(call.admission.attempt.request)?;
         // No journal or structural mutation before all fallible projection and
         // report storage preparation succeeds. No callback may intervene.
-        let prepared = self.prepare_plan_terminal(plan, None, Some(&result))?;
+        let prepared = self.prepare_plan_terminal(plan, None, None, Some(&result))?;
         self.finish_plan_call(plan, slot, context)
             .expect("validated conditional DATA settlement");
         self.commit_plan_terminal(plan, Some(result), prepared)

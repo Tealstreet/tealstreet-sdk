@@ -886,7 +886,6 @@ impl Backpack {
                 targets,
                 leverage_revision: self.account.leverage_revision,
             }),
-            false,
         );
         if let Err(error) = result {
             if let Some(job) = self.trading.jobs.remove(&command) {
@@ -929,6 +928,7 @@ impl Backpack {
         );
         if let Err((Pending::Trade(delivery), error)) = cx.request_signed_managed(
             delivery.managed.as_ref().unwrap().context.clone(),
+            None,
             method,
             format!("{REST}{path}"),
             Some(body),

@@ -1513,6 +1513,7 @@ impl Venue for Hyperliquid {
                 }));
                 match cx.request_managed_with_headers(
                     context.clone(),
+                    None,
                     Method::Post,
                     format!("{}/info", self.rest()),
                     &[("Content-Type", "application/json")],

@@ -173,8 +173,20 @@ impl Harness {
         self.collect();
     }
 
+    /// Dispatch with an explicit caller wait.
+    pub fn command_waiting(&mut self, command: Command, wait_ms: u32) {
+        self.engine
+            .handle_command(self.now, command, Some(wait_ms))
+            .expect("valid caller receipt");
+        self.collect();
+    }
+
+    /// Dispatch with the caller's default wait, as the host does.
     pub fn command(&mut self, command: Command) {
-        self.event(Event::Command(command));
+        self.engine
+            .handle_command(self.now, command, None)
+            .expect("valid caller receipt");
+        self.collect();
     }
 
     /// The most recent socket whose URL contains `path`.
@@ -257,6 +269,34 @@ impl Harness {
         self.now = until;
     }
 
+    /// An Unknown write seal reconciles with exactly one fresh order read (one
+    /// page per settle coin) and nothing else: no write, resend or refresh.
+    pub fn reconcile_once(&mut self, empty: &str) {
+        assert!(!self.requests.is_empty(), "one reconcile order read");
+        assert!(
+            self.requests
+                .iter()
+                .all(|r| r.method == safe_cex_engine::Method::Get
+                    && r.url.contains("/v5/order/realtime")),
+            "only the reconcile order read: {:?}",
+            self.paths()
+        );
+        let mut urls: Vec<&str> = self.requests.iter().map(|r| r.url.as_str()).collect();
+        let issued = urls.len();
+        urls.sort_unstable();
+        urls.dedup();
+        assert_eq!(urls.len(), issued, "the reconcile read is issued once");
+        let reads: Vec<RequestId> = self.requests.drain(..).map(|r| r.id).collect();
+        for read in reads {
+            self.reply(read, 200, empty);
+        }
+        assert!(
+            self.requests.is_empty(),
+            "nothing follows: {:?}",
+            self.paths()
+        );
+    }
+
     pub fn result(&self, command: u32) -> Option<&Result<String, String>> {
         self.done
             .iter()
@@ -271,4 +311,45 @@ impl Harness {
             .find(|(k, _)| *k == name)
             .map(|(_, v)| v.clone())
     }
+}
+
+pub fn order() -> safe_cex_engine::model::PlaceOrderOpts {
+    safe_cex_engine::model::PlaceOrderOpts {
+        symbol: "BTCUSDT".into(),
+        kind: safe_cex_engine::model::OrderType::Limit,
+        side: safe_cex_engine::model::OrderSide::Buy,
+        amount: 0.01,
+        price: Some(100.0),
+        trigger_price: None,
+        stop_loss: None,
+        take_profit: None,
+        reduce_only: None,
+        time_in_force: None,
+        trigger_type: None,
+        tp_trigger_type: None,
+        sl_trigger_type: None,
+        client_order_id: None,
+        close: None,
+        stp_mode: None,
+        implied_volatility: None,
+        max_slippage_pct: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
+    }
+}
+
+/// Park the engine's command owners with ordinary placements whose mode
+/// reads stay unanswered; returns the parked mode reads.
+pub fn park_owners(h: &mut Harness) -> Vec<HttpRequest> {
+    let mut reads = Vec::new();
+    for command in 1_000..1_256 {
+        h.command(Command::PlaceOrders {
+            command,
+            orders: vec![order()],
+        });
+        if h.has_request("/v5/position/list") {
+            reads.push(h.take("/v5/position/list"));
+        }
+    }
+    reads
 }

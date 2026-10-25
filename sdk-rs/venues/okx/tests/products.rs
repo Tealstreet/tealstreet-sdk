@@ -39,7 +39,7 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
     let private = options.key.is_some();
     let mut e = crate::support::engine(options);
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     assert!(is_get(&a, "instruments?instType=SWAP"));
     if eea {
         assert!(
@@ -49,7 +49,7 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
     reply(&mut e, &a, &rows(&[MARKET, &inverse()]), 1.0);
     if eea {
         assert!(!e.store().loaded().markets);
-        let a = prepared(&mut e, 1.0).remove(0);
+        let a = take_http(&mut prepared(&mut e, 1.0));
         assert!(is_get(&a, "instruments?instType=FUTURES"));
         let unsupported = future()
             .replace("\"xperp\"", "\"normal\"")
@@ -63,12 +63,12 @@ fn catalog(options: Options) -> (Engine<Okx>, Vec<Action>) {
     }
     assert!(e.store().loaded().markets);
     let mut out = prepared(&mut e, if eea { 2.0 } else { 1.0 });
-    let a = out.remove(0);
+    let a = take_http(&mut out);
     assert!(is_get(&a, "tickers?instType=SWAP"));
     reply(&mut e, &a, &rows(&[TICKER, &ticker("BTC-USD-SWAP")]), 3.0);
     if eea {
         assert!(!e.store().loaded().tickers);
-        let a = prepared(&mut e, 3.0).remove(0);
+        let a = take_http(&mut prepared(&mut e, 3.0));
         assert!(is_get(&a, "tickers?instType=FUTURES"));
         reply(
             &mut e,
@@ -329,9 +329,9 @@ fn malformed_xperp_row_is_skipped_without_withholding_the_catalog() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = prepared(&mut e, 1.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 1.0));
     reply(
         &mut e,
         &a,
@@ -363,9 +363,9 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = prepared(&mut e, 1.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 1.0));
     reply(
         &mut e,
         &a,
@@ -381,10 +381,10 @@ fn failed_xperp_catalog_read_retries_the_whole_union_without_publishing_swap() {
     );
     let timer = retry_timer(&out, 2.0, 1_000.0).expect("startup retry timer");
     e.handle(1002.0, Event::TimerFired { timer });
-    let a = prepared(&mut e, 1002.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 1002.0));
     assert!(is_get(&a, "/api/v5/public/instruments?instType=SWAP"));
     reply(&mut e, &a, &envelope(MARKET), 1003.0);
-    let a = prepared(&mut e, 1003.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 1003.0));
     reply(&mut e, &a, &envelope(&future()), 1004.0);
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 2);
@@ -397,9 +397,9 @@ fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = prepared(&mut e, 1.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 1.0));
     reply(
         &mut e,
         &a,
@@ -554,13 +554,13 @@ fn blank_untraded_xperp_ticker_fields_do_not_abort_other_seeded_markets() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = prepared(&mut e, 1.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 1.0));
     reply(&mut e, &a, &envelope(&future()), 2.0);
-    let a = prepared(&mut e, 2.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 2.0));
     reply(&mut e, &a, &envelope(TICKER), 3.0);
-    let a = prepared(&mut e, 3.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 3.0));
     let ticker = ticker("BTC-USD-261225")
         .replace(r#""last":"40000""#, r#""last":"""#)
         .replace(r#""open24h":"40000""#, r#""open24h":"""#);
@@ -593,13 +593,13 @@ fn malformed_xperp_seed_values_start_at_zero_without_withholding_other_tickers()
             ..Options::default()
         });
         e.start(0.0);
-        let a = actions(&mut e).remove(0);
+        let a = take_http(&mut prepared(&mut e, 0.0));
         reply(&mut e, &a, &envelope(MARKET), 1.0);
-        let a = prepared(&mut e, 1.0).remove(0);
+        let a = take_http(&mut prepared(&mut e, 1.0));
         reply(&mut e, &a, &envelope(&future()), 2.0);
-        let a = prepared(&mut e, 2.0).remove(0);
+        let a = take_http(&mut prepared(&mut e, 2.0));
         reply(&mut e, &a, &envelope(TICKER), 3.0);
-        let a = prepared(&mut e, 3.0).remove(0);
+        let a = take_http(&mut prepared(&mut e, 3.0));
         let row = ticker("BTC-USD-261225").replace(good, bad);
         reply(&mut e, &a, &envelope(&row), 4.0);
         assert!(e.store().loaded().tickers, "{bad}");
@@ -628,13 +628,13 @@ fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = actions(&mut e).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let a = prepared(&mut e, 1.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 1.0));
     reply(&mut e, &a, &envelope(&future()), 2.0);
-    let a = prepared(&mut e, 2.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 2.0));
     reply(&mut e, &a, &envelope(TICKER), 3.0);
-    let a = prepared(&mut e, 3.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 3.0));
     reply(
         &mut e,
         &a,
@@ -957,7 +957,7 @@ mod product_semantics {
             ..Options::default()
         });
         e.start(0.0);
-        let request = prepared(&mut e, 0.0).remove(0);
+        let request = take_http(&mut prepared(&mut e, 0.0));
         assert!(
             matches!(&request, Action::Http(r) if r.url.contains(if eea && private { "/account/instruments?" } else { "/public/instruments?" }))
         );
@@ -969,7 +969,7 @@ mod product_semantics {
         );
         if eea {
             assert!(!e.store().loaded().markets);
-            let request = prepared(&mut e, 1.0).remove(0);
+            let request = take_http(&mut prepared(&mut e, 1.0));
             assert!(matches!(&request, Action::Http(r) if r.url.ends_with("instType=FUTURES")));
             let dated = XPERP
                 .replace("xperp", "normal")
@@ -985,7 +985,7 @@ mod product_semantics {
             );
         }
         let mut initial = prepared(&mut e, if eea { 1.5 } else { 1.0 });
-        let request = initial.remove(0);
+        let request = take_http(&mut initial);
         reply(
             &mut e,
             &request,
@@ -994,7 +994,7 @@ mod product_semantics {
         );
         if eea {
             assert!(!e.store().loaded().tickers);
-            let request = prepared(&mut e, 2.0).remove(0);
+            let request = take_http(&mut prepared(&mut e, 2.0));
             reply(&mut e, &request, &envelope(&ticker("BTC-USD-UM")), 2.5);
         }
         initial.extend(prepared(&mut e, if eea { 2.5 } else { 2.0 }));
@@ -1098,9 +1098,9 @@ mod product_semantics {
             ..Options::default()
         });
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 0.0));
         reply(&mut e, &request, &envelope(INVERSE), 1.0);
-        let request = prepared(&mut e, 1.0).remove(0);
+        let request = take_http(&mut prepared(&mut e, 1.0));
         reply(
             &mut e,
             &request,
@@ -1455,6 +1455,59 @@ mod product_semantics {
     }
 
     #[test]
+    fn eea_composite_failed_later_page_stays_a_strict_failure() {
+        let (mut e, _) = startup(true, true);
+        e.handle(
+            4.0,
+            Event::Command(Command::Query {
+                command: 1,
+                query: Query::OrderHistory {
+                    symbol: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+            }),
+        );
+        let request = prepared(&mut e, 4.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
+        let rows = (0..100)
+            .map(|index| format!(r#"{{"instId":"BTC-USD-SWAP","ordId":"{}","side":"buy","ordType":"limit","state":"filled","px":"50000","sz":"1","accFillSz":"1","cTime":"1700000000000"}}"#, 1000 - index))
+            .collect::<Vec<_>>()
+            .join(",");
+        reply(&mut e, &request, &envelope(&rows), 5.0);
+        let timer = prepared(&mut e, 5.0)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, .. } => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(105.0, Event::TimerFired { timer });
+        let request = prepared(&mut e, 105.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .expect("prepared native history HTTP");
+        reply(
+            &mut e,
+            &request,
+            r#"{"code":"51000","msg":"bad request","data":[]}"#,
+            106.0,
+        );
+        let out = prepared(&mut e, 106.0);
+        assert!(
+            out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. })))
+        );
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+        );
+    }
+
+    #[test]
     fn eea_composite_history_stall_is_an_explicit_incomplete_failure() {
         let (mut e, _) = startup(true, true);
         e.handle(
@@ -1550,7 +1603,7 @@ mod product_semantics {
         let row = include_str!("fixtures/crml-preopen.json");
         let mut e = crate::support::engine(Options::default());
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 0.0));
         reply(
             &mut e,
             &request,
@@ -1578,7 +1631,7 @@ mod product_semantics {
             row["maxTriggerSz"] = value.into();
             let mut e = crate::support::engine(Options::default());
             e.start(0.0);
-            let request = actions(&mut e).remove(0);
+            let request = take_http(&mut prepared(&mut e, 0.0));
             reply(
                 &mut e,
                 &request,
@@ -1603,7 +1656,7 @@ mod product_semantics {
         }
         let mut e = crate::support::engine(Options::default());
         e.start(0.0);
-        let request = prepared(&mut e, 1.0).remove(0);
+        let request = take_http(&mut prepared(&mut e, 1.0));
         reply(&mut e, &request, &envelope(&row.to_string()), 1.0);
         assert!(!e.store().loaded().markets);
         assert!(retry_timer(&prepared(&mut e, 1.0), 1.0, 1_000.0).is_some());
@@ -1617,18 +1670,18 @@ mod product_semantics {
             ..Options::default()
         });
         e.start(0.0);
-        let request = actions(&mut e).remove(0);
+        let request = take_http(&mut prepared(&mut e, 0.0));
         reply(&mut e, &request, &envelope(MARKET), 1.0);
-        let request = prepared(&mut e, 1.0).remove(0);
+        let request = take_http(&mut prepared(&mut e, 1.0));
         reply(
             &mut e,
             &request,
             &envelope(&XPERP.replace("BTC-USD-UM", "TEST002-USD_UM_XPERP-310822")),
             1.5,
         );
-        let request = prepared(&mut e, 1.0).remove(0);
+        let request = take_http(&mut prepared(&mut e, 1.0));
         reply(&mut e, &request, &envelope(TICKER), 2.0);
-        let request = prepared(&mut e, 2.0).remove(0);
+        let request = take_http(&mut prepared(&mut e, 2.0));
         reply(
             &mut e,
             &request,
@@ -1672,9 +1725,9 @@ mod product_semantics {
         for last in ["garbage", "NaN", "inf"] {
             let mut e = crate::support::engine(Options::default());
             e.start(0.0);
-            let request = actions(&mut e).remove(0);
+            let request = take_http(&mut prepared(&mut e, 0.0));
             reply(&mut e, &request, &envelope(MARKET), 1.0);
-            let request = prepared(&mut e, 1.0).remove(0);
+            let request = take_http(&mut prepared(&mut e, 1.0));
             reply(
                 &mut e,
                 &request,
@@ -2350,7 +2403,7 @@ fn open_position_on_a_skipped_instrument_is_reported_not_silently_hidden() {
         ..Options::default()
     });
     e.start(0.0);
-    let a = prepared(&mut e, 0.0).remove(0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
     let broken = r#"{"instType":"SWAP","instId":"ETH-USDT-SWAP","ctType":"linear","ctVal":"bad"}"#;
     reply(&mut e, &a, &envelope(&format!("{MARKET},{broken}")), 1.0);
     // Private startup begins with the catalogue, alongside the ticker seed.

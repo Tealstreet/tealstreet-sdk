@@ -113,6 +113,7 @@ fn every_compiled_alias_uses_the_owned_primary_refs_for_exact_complete_http_prei
             assert_eq!(
                 work.receipt,
                 SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(STAMP),
                     expiry_ms: None
                 }
@@ -193,10 +194,10 @@ fn no_primary_never_selects_secondary_and_removed_material_fails_atomically() {
     // back to the still-available secondary secret or publish partial Present.
     signer.remove(&primary.signing);
     let failed = signer.sign_now(&prepared.work);
-    assert!(matches!(failed, Err(SignError::Unavailable)));
+    assert!(matches!(failed, Err(SignError::MissingKey)));
     assert!(matches!(
         captures.finish(prepared.id, 101., STAMP + 1., 7, failed),
-        Err(SignError::Unavailable)
+        Err(SignError::MissingKey)
     ));
     assert!(captures.is_empty());
     let (read, _) = hosted_signing::prepare(venue, &ids, Input::Credential {}).unwrap();
@@ -205,10 +206,7 @@ fn no_primary_never_selects_secondary_and_removed_material_fails_atomically() {
         vec![b"hosted-primary".to_vec()]
     );
     signer.remove(&primary.credential);
-    assert!(matches!(
-        signer.sign_now(&read),
-        Err(SignError::Unavailable)
-    ));
+    assert!(matches!(signer.sign_now(&read), Err(SignError::MissingKey)));
 }
 
 #[test]
@@ -279,6 +277,7 @@ fn trusted_capture_bounds_receipt_and_single_use_checks_apply_before_output_form
         SignResult::new(
             vec![b"hosted-primary".to_vec()],
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(STAMP),
                 expiry_ms: None,
             },
@@ -286,6 +285,7 @@ fn trusted_capture_bounds_receipt_and_single_use_checks_apply_before_output_form
         SignResult::new(
             vec![b"hosted-primary".to_vec(), vec![1; 31]],
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(STAMP),
                 expiry_ms: None,
             },
@@ -293,6 +293,7 @@ fn trusted_capture_bounds_receipt_and_single_use_checks_apply_before_output_form
         SignResult::new(
             vec![b"hosted-primary".to_vec(), vec![1; 32]],
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(STAMP + 1.),
                 expiry_ms: None,
             },
