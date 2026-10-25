@@ -97,13 +97,17 @@ count as a behavioral RED. Make the adoption target default once implemented.
   all public/private subscription/ACK/book behavior. Spot token Session retires
   on socket epoch close; stale token responses never subscribe.
 
-## Decisions required before activation
+## Source and activation prerequisites
 
 1. **Namespace continuity (uufub4):** legacy reservations use a decoded-secret
    digest; dispatch uses a tagged trusted stable subject. Sharing the same map
-   is insufficient. Pin a shared continuity mechanism or an explicitly approved
-   coordinated transition proving no higher outstanding legacy reservation can
-   be overtaken, including still-live legacy engines. Equal API keys must share
+   is insufficient. The separately reviewed takeover must enforce a legacy
+   issuance fence and drain all outstanding prepared/sent legacy work at its
+   owning host boundary, then atomically import BOTH reserved and released
+   high-water maxima into the trusted subject before activation. A namespace
+   alias or an assumed deployment drain proves neither. Its shared mechanism
+   and host protocol remain OPEN; no source until approved and controlled.
+   Equal API keys must share
    the trusted subject even with different secrets. No secret/key-hash fallback,
    response seed, venue counter or mixed account-only adoption. Separate memories
    and processes remain a deployment coordination boundary.
@@ -111,9 +115,14 @@ count as a behavioral RED. Make the adoption target default once implemented.
    never a no-op fixture callback. Check serial Mutation/journal/barrier and
    retained queue semantics against landed APIs: mutable scheduler callbacks
    cannot run inside the nonce commit. Any missing shared seam goes to its core
-   owner, not a Kraken bypass. Spot's physical 20s is native; proposed Futures
-   physical Read/write windows, logical root/serial bounds and typed prerelease
-   changes require explicit disposition and CALLERS disclosure before source.
+   owner, not a Kraken bypass. Nonempty barriers are currently refused by
+   admit_plan_root for NonceUnscheduled; protective amendment/replacement
+   barriers remain mandatory, so a genuine nonce-compatible shared seam is a
+   prerequisite, not a barrier deletion. Ordinary no-barrier serial plans still
+   need real release/journal/reconciliation controls. Spot physical20s is native;
+   Futures physical20s is only a proposal. Numeric logical command/history/serial
+   root bounds, retry windows and typed prerelease policy remain OPEN. Pin a
+   per-operation owner/window table and CALLERS disposition before source.
 3. **Construction/socket/host fit:** obtain exact setup and whole-family socket
    review before deleting the last native signer. Hosted adapters must forward
    the exact engine-reserved decimal nonce and signed bytes, never re-reserve or
@@ -131,7 +140,9 @@ budgets unchanged. If any own generic engine code is needed, also measure Bybit
 and Bitget on that composition. Serial JOBS=4; delete each own scratch target
 after measurement, retain sources/logs/receipts. No size estimate is a pass.
 
-After plan disposition: originals, source, scoped Kraken checks/strict Clippy,
+Docs-only direction CLEAR permits compiling originals while production remains
+HELD on the prerequisites above. It approves no new core seam or numeric policy.
+After prerequisite closure: source, scoped Kraken checks/strict Clippy,
 required workspace compatibility check, fmt/full bans/ratchets/selection and
 preservation receipts; uufub4 dispatch review plus setup/HMAC/socket fit for the
 changed surfaces. One freeze push and one PR-triggered run; READY to 8x5tm1 only
