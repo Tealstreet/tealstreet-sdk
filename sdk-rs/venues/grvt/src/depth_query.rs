@@ -275,6 +275,7 @@ impl Grvt {
         let body = Some(pending.body.clone());
         if let Err((pending, error)) = cx.request_managed_with_headers(
             context,
+            None,
             Method::Post,
             format!("{}/lite/v1/book", self.mdg()),
             &[("Content-Type", "application/json")],

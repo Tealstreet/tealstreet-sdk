@@ -168,7 +168,7 @@ impl Kraken {
         request.failed = None;
         request.current = Some(child.clone());
         let pending = Pending::PublicTrades(Box::new(request), child.clone());
-        match cx.request_managed(child, Method::Get, url, None, pending) {
+        match cx.request_managed(child, None, Method::Get, url, None, pending) {
             Ok(id) => cx.stream_response(id, ArrayAt::Field("history")),
             Err((Pending::PublicTrades(request, child), reason)) => {
                 self.public_trades_preparation_failed(

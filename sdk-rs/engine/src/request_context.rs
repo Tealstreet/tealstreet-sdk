@@ -124,6 +124,140 @@ impl Session {
     }
 }
 
+/// One full session header value (a token, cookie or session id).
+/// Bounded, redacted in `Debug` and wiped on drop; it never enters a Context.
+pub struct SecretHeaderValue(String);
+
+impl SecretHeaderValue {
+    /// Refuses (and wipes) an empty, oversized or non-header-safe value.
+    pub fn new(mut value: String) -> Result<Self, Error> {
+        if value.is_empty()
+            || crate::signing_headers::validate_unsigned(&[("Authorization", &value)]).is_err()
+        {
+            zeroize::Zeroize::zeroize(&mut value);
+            return Err(Error::Invalid);
+        }
+        Ok(Self(value))
+    }
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Drop for SecretHeaderValue {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
+impl std::fmt::Debug for SecretHeaderValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SecretHeaderValue(<redacted>)")
+    }
+}
+
+/// The headers one Session generation attaches to a bound request, e.g. a
+/// lone `Authorization`, or a session id plus its cookie. At most
+/// `MAX_SESSION_HEADERS` distinct venue-declared names; transport-owned names
+/// are refused. Values stay secret; the engine inserts them at prepare, where
+/// the venue's declared `SessionPlacement` puts them in its native order.
+#[derive(Debug)]
+pub struct SessionHeaders {
+    entries: Vec<(&'static str, SecretHeaderValue)>,
+    placement: SessionPlacement,
+}
+
+/// Where shared assembly puts the Session headers among a packet's own: a
+/// venue-wide wire property declared with the bundle.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SessionPlacement {
+    #[default]
+    First,
+    /// Immediately after the first packet header with this name (ignoring
+    /// case), or first when the packet carries none.
+    After(&'static str),
+}
+
+pub const MAX_SESSION_HEADERS: usize = 4;
+
+impl SessionHeaders {
+    /// Refuses an empty or oversized set, a duplicate (case-insensitive) or
+    /// invalid name, or a transport-owned name. Refused values are wiped on drop.
+    pub fn new(entries: Vec<(&'static str, SecretHeaderValue)>) -> Result<Self, Error> {
+        const TRANSPORT: [&str; 13] = [
+            "Host",
+            "Content-Length",
+            "Transfer-Encoding",
+            "Connection",
+            "Content-Type",
+            "Keep-Alive",
+            "Proxy-Authorization",
+            "Proxy-Authenticate",
+            "Proxy-Connection",
+            "TE",
+            "Trailer",
+            "Upgrade",
+            "Expect",
+        ];
+        if entries.is_empty() || entries.len() > MAX_SESSION_HEADERS {
+            return Err(Error::Invalid);
+        }
+        let distinct = entries.iter().enumerate().all(|(index, (name, _))| {
+            entries[..index]
+                .iter()
+                .all(|(earlier, _)| !earlier.eq_ignore_ascii_case(name))
+        });
+        let valid = distinct
+            && entries.iter().all(|(name, value)| {
+                !TRANSPORT
+                    .iter()
+                    .any(|owned| owned.eq_ignore_ascii_case(name))
+                    && crate::signing_headers::validate_unsigned(&[(name, value.expose())]).is_ok()
+            });
+        if valid {
+            Ok(Self {
+                entries,
+                placement: SessionPlacement::First,
+            })
+        } else {
+            Err(Error::Invalid)
+        }
+    }
+
+    /// The common single-header case.
+    pub fn authorization(value: SecretHeaderValue) -> Self {
+        Self {
+            entries: vec![("Authorization", value)],
+            placement: SessionPlacement::First,
+        }
+    }
+
+    pub fn placed(mut self, placement: SessionPlacement) -> Self {
+        self.placement = placement;
+        self
+    }
+
+    pub(crate) fn entries(&self) -> &[(&'static str, SecretHeaderValue)] {
+        &self.entries
+    }
+
+    pub(crate) fn placement(&self) -> SessionPlacement {
+        self.placement
+    }
+}
+
+/// A venue's answer for one Session generation at managed prepare.
+#[derive(Debug)]
+pub enum SessionBearer {
+    /// `revision` is monotonic within the generation and never reused; it
+    /// covers the whole header set.
+    Ready {
+        headers: SessionHeaders,
+        revision: u64,
+    },
+    NotReady,
+}
+
 /// A continuation parked behind a session, returned when the venue drains it.
 #[derive(Debug)]
 pub enum Waiter<P> {
@@ -2166,9 +2300,10 @@ impl CommandWrites {
             if let Some(result) = attempt.result {
                 self.evidence.release_identities(result.order_ids());
                 if terminal {
+                    stream.effects |= matches!(result, WriteResult::KnownPartial(_));
                     match result {
                         WriteResult::Accepted { order_ids } => {
-                            stream.effects |= !order_ids.is_empty();
+                            stream.effects = true;
                             stream.ids.extend(order_ids);
                         }
                         WriteResult::Rejected(mut error) | WriteResult::KnownPartial(mut error) => {

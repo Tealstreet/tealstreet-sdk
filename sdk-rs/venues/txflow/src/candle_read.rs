@@ -57,6 +57,7 @@ impl Read {
         };
         match cx.request_managed_with_headers(
             context,
+            None,
             Method::Post,
             format!("{}/info", crate::REST_URL),
             HEADERS,

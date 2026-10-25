@@ -285,6 +285,7 @@ impl Venue for PublicMetadata {
         };
         cx.request_managed(
             context,
+            None,
             Method::Get,
             "https://metadata.invalid/public".into(),
             None,
@@ -373,6 +374,7 @@ impl Venue for PublicMetadata {
             };
             cx.request_managed(
                 context,
+                None,
                 Method::Get,
                 "https://metadata.invalid/public-margin".into(),
                 None,

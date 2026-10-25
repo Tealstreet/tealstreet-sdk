@@ -301,6 +301,7 @@ impl Hyperliquid {
                     history.leg = Some(leg.clone());
                     match cx.request_managed_with_headers(
                         leg,
+                        None,
                         Method::Post,
                         format!("{}/info", self.rest()),
                         &[("Content-Type", "application/json")],

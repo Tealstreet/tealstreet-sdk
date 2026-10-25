@@ -415,11 +415,13 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// `refusal` names a specific issue-time refusal for the Plan's terminal.
     #[inline(never)]
     pub(in super::super::super) fn fail_owned_admission(
         &mut self,
         admission: &Admission,
         reason: Error,
+        refusal: Option<&'static str>,
     ) {
         let Ok(Some(current)) = self.owned_http_admission(&admission.context) else {
             return;
@@ -432,12 +434,16 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .plan_from_context(&admission.context)
         {
-            let error =
-                VenueError::new("HTTP plan admission failed").kind(if reason == Error::TimedOut {
-                    crate::ErrorKind::Timeout
-                } else {
-                    crate::ErrorKind::Internal
-                });
+            let error = match refusal {
+                Some(refusal) => VenueError::new(refusal).kind(crate::ErrorKind::InvalidInput),
+                None => VenueError::new("HTTP plan admission failed").kind(
+                    if reason == Error::TimedOut {
+                        crate::ErrorKind::Timeout
+                    } else {
+                        crate::ErrorKind::Internal
+                    },
+                ),
+            };
             if admission.context.operation() == Operation::Mutation {
                 let delivery = Delivery {
                     context: admission.context.clone(),
