@@ -52,7 +52,7 @@ async function fixture(name: ExchangeName = 'bybit', options: Partial<ExchangeOp
     capabilities: () => engineCapabilities(name),
     start: () => '[{"op":"wsConnect","socket":7,"url":"wss://fixture.test"}]',
     wsOpen: idle,
-    wsClose: idle,
+    wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,
