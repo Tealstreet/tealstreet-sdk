@@ -293,7 +293,7 @@ impl Venue for PublicMetadata {
         .unwrap();
     }
     fn http_release() -> crate::HttpRelease<Self> {
-        crate::HttpRelease::Mutable(|this, pending, release| {
+        crate::HttpRelease::Mutable(|this, pending: &mut Pending, release| {
             if this.pause_on_release {
                 this.scheduler
                     .pause(&0, release.time.raw_ms + 1_000.)
