@@ -16,6 +16,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Request-context inventory precision | Implementation and rebaseline; review pending | Before changing `check-request-context.py`, its manifests, or what counts as a legacy `Cx` call. | [RUST_REQUEST_CONTEXT_PRECISION.md](RUST_REQUEST_CONTEXT_PRECISION.md) |
 | BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
 | BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
+| WEEX public discovery and ticker-seed custody | Source/native review CLEAR; local checks and paired/current sizes PASS; frozen-head CI pending | Before managing Markets, Daily and BookTickers or changing their publication/retirement order. | [RUST_WEEX_PUBLIC_SEED_CONTEXT.md](RUST_WEEX_PUBLIC_SEED_CONTEXT.md) |
 | WEEX candle query Read custody | Draft source; scoped controls pass | Before managing candle HTTP/completions or interpreting caller deadline and streamed failure changes. | [RUST_WEEX_CANDLE_CONTEXT.md](RUST_WEEX_CANDLE_CONTEXT.md) |
 | WEEX local leverage refusal custody | Draft conversion; source review/CI pending | Before replacing three synchronous FetchLeverage refusals; selection and signed read remain unchanged. | [RUST_WEEX_LOCAL_LEVERAGE_CONTEXT.md](RUST_WEEX_LOCAL_LEVERAGE_CONTEXT.md) |
 | WEEX leverage initial managed admission | Draft implementation; source review pending | Before replacing the one numeric setup fallback; key choice and physical bound are unchanged. | [RUST_WEEX_LEVERAGE_ADMISSION_CONTEXT.md](RUST_WEEX_LEVERAGE_ADMISSION_CONTEXT.md) |
@@ -269,6 +270,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | BreakoutProp legacy DXtrade RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_BREAKOUTPROP_REQUEST_CONTEXT.md](RUST_BREAKOUTPROP_REQUEST_CONTEXT.md) |
 | ApeX Omni RequestContext adoption | Inventory and phased migration plan | Before migrating ApeX HTTP/completion sites or pruning its legacy inventory. | [RUST_APEXOMNI_REQUEST_CONTEXT.md](RUST_APEXOMNI_REQUEST_CONTEXT.md) |
 | BloFin managed requests | Inventory and phased adoption plan | Before BloFin HTTP/completion migration; exact legacy map, caller effects and shared API dependencies. | [RUST_BLOFIN_REQUEST_CONTEXT.md](RUST_BLOFIN_REQUEST_CONTEXT.md) |
+| BloFin private read funnel | Plan and original controls | Before managing BloFin history, closed-position or account reads, or pruning their ten request fingerprints. | [RUST_BLOFIN_READ_FUNNEL.md](RUST_BLOFIN_READ_FUNNEL.md) |
 | Lighter RequestContext adoption | Inventory and phased plan | Before migrating Lighter or Robinhood HTTP/completion sites; single-request candles first, shared multi-request/signing prerequisites later. | [RUST_LIGHTER_REQUEST_CONTEXT.md](RUST_LIGHTER_REQUEST_CONTEXT.md) |
 | Paradex startup Read Contexts | Planned | Independent public catalog/ticker GET adoption and proof | [RUST_PARADEX_SEED_CONTEXT.md](RUST_PARADEX_SEED_CONTEXT.md) |
 | BloFin candle command entry | Focused adoption plan | Before removing the candle pre-Context numeric refusal or changing initial command ownership. | [RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md](RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md) |
@@ -447,3 +449,13 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Backpack account GET Read custody | Plan CLEAR; originals reproduced, review pending | Before managing Info, Positions, Balance and Orders observations; preserve native snapshots and continuation order. | [RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md](RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md) |
 | Kraken Futures and Spot dispatch recipes | Draft recipes on nonce prerequisite; native caller adoption held | Before adding HMAC-SHA512 programs, trusted Base64 setup or nonce-bound selection. | [RUST_KRAKEN_DISPATCH_SIGNER.md](RUST_KRAKEN_DISPATCH_SIGNER.md) |
+
+| Serial single-call schedule construction | Local cut; paired measurements and exact-patch review pending | Before changing serial topology construction or declared-admission error precedence. | [RUST_SERIAL_SINGLE_CALL_SCHEDULE.md](RUST_SERIAL_SINGLE_CALL_SCHEDULE.md) |
+
+| Journal report iterator simplification | [RUST_JOURNAL_REPORT_ITERATORS.md](RUST_JOURNAL_REPORT_ITERATORS.md) | codex-ih35js | Local measured cut after Bitget slice 3; exact review required. |
+
+| Phemex remaining request funnel | [RUST_PHEMEX_REMAINING_FUNNEL.md](RUST_PHEMEX_REMAINING_FUNNEL.md) | codex-ih35js | Source correction: native gate precedence and income prefix recovery; source review/CI and composed landing size gates pending; four named repair holdouts. |
+
+| Shared hosted-signing envelope | Docs-only companion; required m26ps4 review | Before shared Kraken HMAC or Paradex Stark structured-preimage transport, provider/capture or capability changes. | [RUST_HOSTED_SIGNING_ENVELOPE.md](RUST_HOSTED_SIGNING_ENVELOPE.md) |
+
+| OKX ordered write ownership | Source GO (dazzy3); exact-head CI green | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |
