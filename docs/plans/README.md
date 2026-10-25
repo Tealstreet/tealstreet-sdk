@@ -467,4 +467,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Hyperliquid trading ownership and EIP-712 dispatch | Plan first; 15 frozen entries, actual-agent nonce/setup/pacing gates OPEN | Before adopting the shared trading FIFO, signed /exchange, amendment or journal terminals. | [RUST_HYPERLIQUID_TRADING_CONTEXT.md](RUST_HYPERLIQUID_TRADING_CONTEXT.md) |
 
 | WOO managed socket adoption | Native codec over shared lifecycle | Before modifying WOO epoch, auth, interest replay, retirement or supervision. | [RUST_WOO_MANAGED_SOCKETS.md](RUST_WOO_MANAGED_SOCKETS.md) |
-| WOO socket adoption and request funnel | Plan/API carry CLEAR; async-Capacity original RED and exact source review pending | Before importing reviewed WOO sockets or converting its 30 request / 20 signing sites. | [RUST_WOO_ADOPTION_AND_FUNNEL.md](RUST_WOO_ADOPTION_AND_FUNNEL.md) |
+| WOO socket adoption and request funnel | Committed source/API/native/control carry CLEAR; WOO size fits, combined and CI pending | Before importing reviewed WOO sockets or converting its 30 request / 20 signing sites. | [RUST_WOO_ADOPTION_AND_FUNNEL.md](RUST_WOO_ADOPTION_AND_FUNNEL.md) |

@@ -113,9 +113,11 @@ Do not represent this sequence as implementation approval for all 30 sites:
    caller conversion. Preserve public-only and missing-primary native gates;
    do not infer Backpack's eligibility or policy for WOO.
 2. Convert keyless catalogue/ticker/funding observations and depth seeds in
-   bounded blocks. Use genuine Background Read custody, DATA before Store,
-   exact retirement before native recovery/successors, and retain socket handoff
-   ownership separately from HTTP ownership. Caller candles retain their own
+   bounded blocks. Preserve Primary egress and the native unspecified route
+   (None) for unsigned background requests; do not infer a PublicCors route.
+   Use genuine Background Read custody, DATA before Store, exact retirement
+   before native recovery/successors, and retain socket handoff ownership
+   separately from HTTP ownership. Caller candles retain their own
    genuine receipt/root and physical leg, never a background replacement.
 3. Adopt identity and private account GETs after the reviewed recipe/provider
    prerequisites. Select once per owner, preserve native key/window/headers,
