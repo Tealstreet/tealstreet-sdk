@@ -19,6 +19,8 @@ pub use transport::{
     BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PayloadSigner,
     PayloadSignerFuture, PayloadSignerResult, PreparedHttp, Transport,
 };
+#[cfg(feature = "nonce-drain")]
+pub use transport::{DrainFuture, Drained};
 
 use safe_cex_engine::{
     Action, Command, Engine, Event, Notice, RequestId, SocketId, TimerId, Venue, VenueError,

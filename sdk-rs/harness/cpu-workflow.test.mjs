@@ -20,7 +20,7 @@ function verifyWorkflow(text) {
   assert.match(collect, /--command collect --suite '\$\{\{ matrix\.venue \}\}'/);
   assert.doesNotMatch(collect, /^          (?:if|else)\b|rust:gate:verify/m, 'no suite bypass of shared collection');
   assert.match(first, /name: Retain the eligible original runtime bytes\n        if: steps\.cpu_collect\.outputs\.has_eligible == 'true'/);
-  assert.match(plan, /needs: gate\n    if: always\(\)/);
+  assert.match(plan, /needs: \[gate, bitget-paired\]\n    if: always\(\)/);
   assert.match(plan, /matrix: \$\{\{ steps\.plan\.outputs\.matrix \}\}/);
   assert.match(plan, /--command plan --out /);
   assert.doesNotMatch(plan, /--suite /, 'planner covers the entire registered suite set');
@@ -30,7 +30,7 @@ function verifyWorkflow(text) {
   assert.match(second, /--command second --suite '\$\{\{ matrix\.suite \}\}'/);
   assert.match(second, /name: cpu-second-\$\{\{ matrix\.suite \}\}/);
   assert.match(final, /name: Rust \/ replay gate \(\$\{\{ matrix\.suite \}\}\)/);
-  assert.match(certify, /needs: \[gate, cpu-plan, cpu-second\]\n    if: always\(\)/);
+  assert.match(certify, /needs: \[gate, bitget-paired, cpu-plan, cpu-second\]\n    if: always\(\)/);
   assert.match(final, /needs: cpu-certify\n    if: always\(\)/);
   const suites = /suite: \[([^\]]+)\]/.exec(final);
   assert(suites);
@@ -54,6 +54,8 @@ function verifyWorkflow(text) {
     assert.match(coordinator, /cache-key: \$\{\{ steps\.yarn\.outputs\.cache-key \}\}/);
     assert.match(coordinator, /cache-hit: \$\{\{ steps\.yarn\.outputs\.cache-hit \}\}/);
   }
+  for (const authorityConsumer of [plan, second, certify])
+    assert.match(authorityConsumer, /uses: actions\/checkout@v7\n        with:\n          fetch-depth: 0/, 'independent composition proof needs complete Git history');
   for (const installFree of [second, final])
     assert.doesNotMatch(installFree, /uses: \.\/\.github\/actions\/(?:prepare-yarn|install-yarn)/);
   assert.doesNotMatch(first, /continue-on-error/);
@@ -61,15 +63,32 @@ function verifyWorkflow(text) {
 
 test('all required suite names certify unconditionally, with an eligible-only separate runner matrix', () => verifyWorkflow(source));
 
+test('Bitget paired producer is mandatory, bounded, source-selected and independently certified', () => {
+  const paired = job(source, 'bitget-paired');
+  assert.match(paired, /name: Rust \/ Bitget counterbalanced steady CPU/);
+  assert.match(paired, /fetch-depth: 0/);
+  assert.match(paired, /CARGO_BUILD_JOBS: 4/);
+  assert.match(paired, /node-version: 22/);
+  assert.match(paired, /Public counterbalanced Bitget steady CPU/);
+  assert.match(paired, /bitget-paired-ci\.mjs --out/);
+  assert.match(paired, /name: bitget-paired-steady/);
+  assert.match(paired, /name: Retain counterbalanced Bitget steady evidence\n        if: always\(\)/);
+  assert.doesNotMatch(paired, /--baseline|--candidate|--tolerance|--threshold|continue-on-error|workflow_dispatch:/);
+  assert.match(job(source, 'cpu-plan'), /needs: \[gate, bitget-paired\]/);
+  assert.match(job(source, 'cpu-certify'), /needs: \[gate, bitget-paired, cpu-plan, cpu-second\]/);
+});
+
 test('workflow controls reject skipped final checks, unconditional second jobs and suite/local bypasses', () => {
   const changes = [
+    ...['cpu-plan', 'cpu-second', 'cpu-certify'].map(name => text =>
+      text.replace(job(text, name), job(text, name).replace('fetch-depth: 0', 'fetch-depth: 1'))),
     text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('uses: ./.github/actions/install-yarn', 'uses: actions/checkout@v7')),
     text => text.replace(job(text, 'cpu-certify'), job(text, 'cpu-certify').replace('uses: ./.github/actions/prepare-yarn', 'uses: actions/checkout@v7')),
     text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('cache-key: ${{ steps.yarn.outputs.cache-key }}', 'cache-key: unbound')),
     text => text.replace(job(text, 'cpu-second'), job(text, 'cpu-second') + '      - uses: ./.github/actions/install-yarn\n'),
     text => text.replace(job(text, 'cpu-final'), job(text, 'cpu-final') + '      - uses: ./.github/actions/prepare-yarn\n'),
     text => text.replace("needs: cpu-plan\n    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'", 'needs: cpu-plan\n    if: always()'),
-    text => text.replace('needs: [gate, cpu-plan, cpu-second]\n    if: always()', 'needs: [gate, cpu-plan, cpu-second]\n    if: success()'),
+    text => text.replace('needs: [gate, bitget-paired, cpu-plan, cpu-second]\n    if: always()', 'needs: [gate, bitget-paired, cpu-plan, cpu-second]\n    if: success()'),
     text => text.replace('needs: cpu-certify\n    if: always()', 'needs: cpu-certify\n    if: success()'),
     text => text.replace('timeout-minutes: 5\n    defaults:\n      run:\n        working-directory: .', 'timeout-minutes: 5'),
     text => text.replace('suite: [breakoutprop,', 'suite: ['),
