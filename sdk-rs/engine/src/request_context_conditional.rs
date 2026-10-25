@@ -1,20 +1,28 @@
 //! Declared mutation terminals and shared synchronous seal preparation.
 use super::*;
 use crate::request_context::PreparedWriteSeal;
-use crate::request_context::plan::MutationTerminalBound;
+use crate::request_context::plan::{MutationBarrierBound, MutationTerminalBound};
 
 pub(super) struct AdmissionDeclaration<'s, 'd, 't> {
     pub steps: &'s [StepBound<'d>],
     pub policy: PlanPolicy,
     pub terminals: &'t [MutationTerminalBound],
+    pub barriers: &'t [MutationBarrierBound],
 }
 
 pub(super) struct PreparedPlanSeal {
-    pub id: CommandId,
-    pub generation: u64,
+    /// The Plan's physical owner: a command generation or an execution.
+    pub owner: Owner,
     pub journal: Option<PreparedWriteSeal>,
     pub legacy: Option<VenueError>,
     pub reports: Vec<String>,
+    /// One prepared terminal and report set per surviving execution observer,
+    /// cloned before commit so the no-fail commit only moves them.
+    pub fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
+    /// Reserved for exactly those observers' seals.
+    pub sealed: Vec<crate::execution_group::Sealed>,
+    /// The physical owner's live requests, listed before the seal.
+    pub retired: Vec<RequestId>,
 }
 
 pub(super) fn terminal_ordinals(
@@ -66,6 +74,7 @@ impl<P> Cx<'_, P> {
                 steps,
                 policy,
                 terminals,
+                barriers: &[],
             },
         )
     }
@@ -98,17 +107,17 @@ impl<P> Cx<'_, P> {
         }) {
             return Err(Error::State);
         }
-        let Owner::Command { id, .. } = plan.owner() else {
-            return Err(Error::Invalid);
-        };
-        self.io.request_contexts.commands[&id]
+        self.io
+            .request_contexts
+            .owner_entry(plan.owner())
+            .ok_or(Error::Revoked)?
             .writes
             .as_ref()
             .ok_or(Error::State)?
             .validate_housekeeping(call.admission.attempt.request)?;
         // No journal or structural mutation before all fallible projection and
         // report storage preparation succeeds. No callback may intervene.
-        let prepared = self.prepare_plan_terminal(plan, None)?;
+        let prepared = self.prepare_plan_terminal(plan, None, Some(&result))?;
         self.finish_plan_call(plan, slot, context)
             .expect("validated conditional DATA settlement");
         self.commit_plan_terminal(plan, Some(result), prepared)

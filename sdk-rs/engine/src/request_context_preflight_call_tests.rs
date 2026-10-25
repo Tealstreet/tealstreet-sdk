@@ -1,3 +1,5 @@
+// Probe pendings are whole Contexts, returned by refused managed requests.
+#[allow(clippy::result_large_err)]
 mod preflight_calls {
     use super::*;
     use crate::request_context::{Preflight, PreflightPolicy, PreflightPurpose, RetryEvidence,
@@ -426,5 +428,55 @@ mod preflight_calls {
         cx(&mut e, 50_000., |cx| cx.fail_preflight(&owner, "cancelled")).unwrap();
         assert_eq!(terminal(&e.drain_actions().collect::<Vec<_>>()), 1);
         assert_eq!(e.venue.retired, 1);
+    }
+
+    fn failure_outcome(actions: &[Action]) -> Option<crate::Outcome> {
+        actions.iter().find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error.outcome),
+            _ => None,
+        }).expect("command failure")
+    }
+    fn write_preflight(e: &mut Engine<Calls>, inherited: bool) -> (Preflight, Context) {
+        let owner = cx(e, 0., |cx| cx.issue_preflight(7, PreflightPolicy {
+            purpose: PreflightPurpose::WriteAfterReads,
+            read_credential: None, write_credential: policy(true).credential,
+        })).unwrap();
+        if inherited {
+            cx(e, 0., |cx| cx.inherit_preflight_uncertainty(&owner)).unwrap();
+        }
+        let context = cx(e, 0., |cx| cx.preflight_read_context(&owner, policy(false), terms(false))).unwrap();
+        (owner, context)
+    }
+
+    #[test]
+    fn inherited_uncertainty_survives_the_central_read_admission_refusal() {
+        for inherited in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Calls::default());
+            let (_, context) = write_preflight(&mut e, inherited);
+            let refusal = cx(&mut e, 0., |cx| cx.request_signed_managed(context.clone(), Method::Get,
+                "https://venue.test/read".into(), None, Box::new(BadStaticHeaders), context));
+            assert_eq!(refusal.unwrap_err().1, Error::Invalid);
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert!(actions.iter().all(|a| !matches!(a, Action::ManagedHttp(_) | Action::Sign { .. })));
+            assert_eq!(failure_outcome(&actions), Some(if inherited {
+                crate::Outcome::Unknown } else { crate::Outcome::NotSent }));
+        }
+    }
+
+    #[test]
+    fn inherited_uncertainty_survives_an_engine_sealed_read_failure() {
+        for inherited in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Calls::default());
+            let (owner, context) = write_preflight(&mut e, inherited);
+            cx(&mut e, 0., |cx| queue(cx, context, false)).unwrap();
+            e.venue.owner = Some(owner);
+            let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, first, 0.);
+            e.handle(25_000., Event::HttpFailed { request: first.attempt().request, error: "network lost" });
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert_eq!(terminal(&actions), 1);
+            assert_eq!(failure_outcome(&actions), Some(if inherited {
+                crate::Outcome::Unknown } else { crate::Outcome::NotSent }));
+        }
     }
 }

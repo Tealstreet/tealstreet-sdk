@@ -1,6 +1,10 @@
 //! A rare primary-signed identity read, separate from live reconciliation.
 use crate::{Cryptocom, Pending, sign::Params, wire::RestEnvelope};
-use safe_cex_engine::{CommandId, Cx, Response};
+use safe_cex_engine::request_context::{Context, Operation};
+use safe_cex_engine::selected_read::{
+    LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
+};
+use safe_cex_engine::{CommandId, CommandWait, Cx, Method, Response, VenueError};
 use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -24,21 +28,36 @@ struct Identity {
     user_id: String,
     affiliate_id: Option<String>,
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
-    let result =
-        result.and_then(|identity| serde_json::to_string(&identity).map_err(|e| e.to_string()));
+fn finish(cx: &mut Cx<'_, Pending>, root: &Context, result: Result<Identity, VenueError>) {
+    let result = result.and_then(|identity| {
+        serde_json::to_string(&identity).map_err(|e| VenueError::new(e.to_string()))
+    });
     match result {
-        Ok(data) => cx.done(command, data),
+        Ok(data) => {
+            let _ = cx.done_context(root, data);
+        }
         Err(error) => {
-            cx.command_error(command, &error);
-            cx.fail(command, error);
+            let _ = cx.command_error_context(root, error.message.clone());
+            let _ = cx.fail_context(root, error);
         }
     }
 }
-
 pub struct Request {
-    command: CommandId,
+    root: ReadRoot,
+    leg: Option<ReadLeg>,
     retries: u8,
+}
+impl Request {
+    pub(crate) fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg
+            .as_ref()
+            .is_some_and(|leg| self.root.validate_delivery(cx, leg).is_ok())
+    }
+    fn retire_leg(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = self.leg.take() {
+            let _ = cx.finish_http_context(leg.context());
+        }
+    }
 }
 #[derive(Deserialize)]
 struct Body {
@@ -49,37 +68,95 @@ struct Account {
     uuid: Id,
 }
 impl Cryptocom {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read.validate()
-        {
-            finish(cx, command, Err(error.into()));
+    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, _command: CommandId) {
+        if matches!(cx.command_wait(), Some(CommandWait::Expired)) {
+            let _ = cx.reject_expired_command(Operation::Read);
             return;
         }
-        if self.options.public_data_only || self.credentials.is_none() {
-            finish(
-                cx,
-                command,
-                Err("Crypto.com account identity requires credentials".into()),
-            );
+        let refusal = self
+            .options
+            .secondary_validation
+            .and_then(Result::err)
+            .or_else(|| {
+                (self.options.public_data_only || self.credentials.is_none())
+                    .then_some("Crypto.com account identity requires credentials")
+            });
+        let selected = if refusal.is_some() {
+            Err(safe_cex_engine::credential_selection::CredentialUnavailable::Missing)
+        } else {
+            self.selected_read()
+        };
+        let error =
+            VenueError::new(refusal.unwrap_or("Crypto.com account identity requires credentials"));
+        let Ok(root) = SelectedRead::command_root(
+            cx,
+            selected,
+            LocalRefusal {
+                diagnostic: Some(error.message.clone()),
+                error,
+            },
+        ) else {
             return;
-        }
+        };
         self.identity_request(
             cx,
             Request {
-                command,
+                root,
+                leg: None,
                 retries: 0,
             },
         );
     }
     fn identity_request(&self, cx: &mut Cx<'_, Pending>, request: Request) {
-        self.signed(
+        let leg = match request.root.leg(
             cx,
-            "private/get-accounts",
-            &Params::default(),
-            Pending::Identity(request),
-            false,
-        );
+            ReadLegPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+            },
+        ) {
+            Ok(leg) => leg,
+            Err(error) => {
+                finish(cx, request.root.context(), Err(error.read_venue_error()));
+                return;
+            }
+        };
+        let path = "private/get-accounts";
+        let url = format!("{}/{path}", self.rest);
+        if let Err((Pending::Identity(request), error)) = leg.queue(
+            cx,
+            ReadRequest {
+                method: Method::Post,
+                url: url.clone(),
+                body: None,
+                stream: None,
+            },
+            |identity| {
+                Box::new(crate::sign::Envelope::http(
+                    identity.clone(),
+                    path,
+                    Params::default(),
+                    &url,
+                ))
+            },
+            |leg| {
+                Pending::Identity(Request {
+                    leg: Some(leg),
+                    ..request
+                })
+            },
+        ) {
+            self.identity_reject(cx, request, error.read_venue_error());
+        }
+    }
+    pub(crate) fn identity_reject(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        error: VenueError,
+    ) {
+        request.retire_leg(cx);
+        finish(cx, request.root.context(), Err(error));
     }
     pub(crate) fn identity_response(
         &self,
@@ -87,6 +164,7 @@ impl Cryptocom {
         mut request: Request,
         response: Response<'_>,
     ) {
+        request.retire_leg(cx);
         let result = (|| {
             let envelope: RestEnvelope<'_> = serde_json::from_str(response.body)
                 .map_err(|_| "Invalid Crypto.com account identity response".to_owned())?;
@@ -121,21 +199,36 @@ impl Cryptocom {
                 request.retries += 1;
                 self.identity_request(cx, request);
             }
-            Ok(Some(identity)) => finish(cx, request.command, Ok(identity)),
-            Err(error) => finish(cx, request.command, Err(error)),
+            Ok(Some(identity)) => finish(cx, request.root.context(), Ok(identity)),
+            Err(error) => finish(
+                cx,
+                request.root.context(),
+                Err(crate::reads::response_failure(response, error)),
+            ),
         }
     }
     pub(crate) fn identity_failed(
         &self,
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
-        error: &str,
+        error: VenueError,
     ) {
-        if request.retries < 3 {
+        request.retire_leg(cx);
+        if cx
+            .validate_read_root_context(request.root.context())
+            .is_err()
+        {
+            return;
+        }
+        if matches!(
+            crate::reads::FailureRecovery::released(&error),
+            crate::reads::FailureRecovery::Transport
+        ) && request.retries < 3
+        {
             request.retries += 1;
             self.identity_request(cx, request);
         } else {
-            finish(cx, request.command, Err(error.into()));
+            finish(cx, request.root.context(), Err(error));
         }
     }
 }

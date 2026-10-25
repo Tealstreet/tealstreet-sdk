@@ -37,6 +37,7 @@ struct Harness {
     errors: Vec<String>,
     done: Vec<(u32, Result<String, String>)>,
     command_errors: Vec<(u32, String)>,
+    failures: Vec<(u32, safe_cex_engine::VenueError)>,
 }
 impl Harness {
     fn new() -> Self {
@@ -47,12 +48,21 @@ impl Harness {
         h
     }
     fn unstarted() -> Self {
+        Self::unstarted_with_provider(|provider| provider)
+    }
+    fn unstarted_with_provider(
+        wrap: impl FnOnce(safe_cex_engine::signing::Provider) -> safe_cex_engine::signing::Provider,
+    ) -> Self {
+        let (venue, provider) = Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            ..Options::default()
+        }
+        .build();
+        let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+        engine.set_signer(Some(wrap(provider))).unwrap();
         let mut h = Self {
-            engine: support::engine(Options {
-                key: Some("key".into()),
-                secret: Some("secret".into()),
-                ..Options::default()
-            }),
+            engine,
             now: 1000.0,
             requests: Vec::new(),
             sockets: Vec::new(),
@@ -63,6 +73,7 @@ impl Harness {
             errors: Vec::new(),
             done: Vec::new(),
             command_errors: Vec::new(),
+            failures: Vec::new(),
         };
         h.engine.start(h.now);
         h.collect();
@@ -87,7 +98,8 @@ impl Harness {
                     self.done.push((command, Ok(result)))
                 }
                 Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.done.push((command, Err(error.legacy_text())))
+                    self.done.push((command, Err(error.legacy_text())));
+                    self.failures.push((command, error));
                 }
                 Action::Notice(Notice::CommandError { command, message }) => {
                     self.command_errors.push((command, message))
@@ -206,7 +218,9 @@ impl Harness {
         Self::ready_with_orders(OPEN)
     }
     fn ready_with_orders(orders: &str) -> Self {
-        let mut h = Self::new();
+        Self::finish_ready(Self::new(), orders)
+    }
+    fn finish_ready(mut h: Self, orders: &str) -> Self {
         h.respond(KEY, 200, r#"{"listenKey":"key-one"}"#);
         h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
         h.respond(POSITIONS, 200, POSITION);
@@ -514,12 +528,12 @@ fn hedge_position_snapshots_preserve_both_leverage_rails_in_either_order() {
 fn hedge_snapshot_does_not_erase_the_configured_flat_opposite_leg() {
     let mut h = Harness::ready();
     h.engine.store_mut().set_hedged(true);
-    h.fire_at(3000.0);
     h.engine.store_mut().update_setting("BTCUSDT", |s| {
         s.leverage = 2.0;
         s.buy_leverage = Some(2.0);
         s.sell_leverage = Some(7.0);
     });
+    h.fire_at(3000.0);
     h.respond(POSITIONS, 200, r#"{"code":0,"data":[{"symbol":"BTC-USDT","positionAmt":"0.1","positionSide":"LONG","avgPrice":"60000","unrealizedProfit":"0","leverage":5,"isolated":true,"liquidationPrice":0}]}"#);
     let setting = h.engine.store().setting("BTCUSDT").unwrap();
     assert_eq!(setting.leverage, 5.0);
@@ -1731,6 +1745,66 @@ fn malformed_position_update_keeps_valid_peers_and_requests_repair() {
 
 const RAILS: &str = r#"{"code":0,"data":{"longLeverage":12,"shortLeverage":34}}"#;
 const ISOLATED: &str = r#"{"code":0,"data":{"marginType":"ISOLATED"}}"#;
+
+fn joined_metadata(h: &mut Harness, first: u32, second: u32) -> HttpRequest {
+    fetch_leverage(h, first, "BTCUSDT");
+    fetch_leverage(h, second, "BTCUSDT");
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|request| request.url.contains(LEVERAGE))
+            .count(),
+        1,
+        "same-revision metadata callers share one leverage leg"
+    );
+    h.take(LEVERAGE)
+}
+
+#[test]
+fn metadata_owner_coalesces_each_native_leg_and_completes_both_callers() {
+    let mut h = Harness::ready();
+    let read = joined_metadata(&mut h, 950, 951);
+    h.reply(read.id, 200, FRESH_RAILS);
+    assert!(
+        h.done.is_empty(),
+        "leverage alone cannot finish either owner"
+    );
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|request| request.url.contains("/trade/marginType"))
+            .count(),
+        1,
+        "the joined group shares one margin leg too"
+    );
+    let margin = h.take("/trade/marginType");
+    h.reply(margin.id, 200, ISOLATED);
+    for command in [950, 951] {
+        assert_eq!(metadata_rails(&h, command), (8.0, 12.0));
+    }
+    assert_eq!(h.done.len(), 2);
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(MarginType::Isolated)
+    );
+}
+
+#[test]
+fn metadata_owner_fails_both_joined_callers_and_keeps_good_settings() {
+    let mut h = Harness::ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    let read = joined_metadata(&mut h, 952, 953);
+    h.reply(read.id, 503, "unavailable");
+    for command in [952, 953] {
+        failed_metadata(&h, command);
+    }
+    assert_eq!(h.done.len(), 2);
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    assert!(!h.requests.iter().any(|request| {
+        request.url.contains(LEVERAGE) || request.url.contains("/trade/marginType")
+    }));
+}
+
 fn metadata(h: &mut Harness, command: u32) -> HttpRequest {
     h.event(Event::Command(Command::FetchLeverage {
         command,
@@ -1800,6 +1874,89 @@ fn metadata_race_with_newer_settings_returns_current_rails_without_publication()
                 .iter()
                 .any(|r| r.url.contains("/trade/marginType"))
         );
+    }
+}
+
+#[test]
+fn metadata_read_started_during_any_pending_write_never_publishes() {
+    for kind in 0..3 {
+        for finish_before_data in [false, true] {
+            let mut h = Harness::ready();
+            if kind == 2 {
+                h.engine.store_mut().set_positions(Vec::new());
+                h.engine.store_mut().set_orders(Vec::new());
+            }
+            let before = h.engine.store().setting("BTCUSDT").unwrap();
+            let (command, path) = match kind {
+                0 => (
+                    Command::SetLeverage {
+                        command: 947,
+                        symbol: "BTCUSDT".into(),
+                        leverage: 25.,
+                        side: None,
+                    },
+                    "/trade/leverage",
+                ),
+                1 => (
+                    Command::SetMarginType {
+                        command: 947,
+                        symbol: "BTCUSDT".into(),
+                        isolated: true,
+                    },
+                    "/trade/marginType",
+                ),
+                _ => (
+                    Command::SetPositionMode {
+                        command: 947,
+                        symbol: None,
+                        hedged: true,
+                    },
+                    "/positionSide/dual",
+                ),
+            };
+            h.event(Event::Command(command));
+            let write = h.take(path);
+            assert!(h.engine.store().metadata_write_pending("BTCUSDT"));
+            let read = metadata(&mut h, 948);
+            assert_eq!(read.method, Method::Get);
+            if finish_before_data {
+                h.event(Event::HttpFailed {
+                    request: write.id,
+                    error: "scripted write failure",
+                });
+                assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+            }
+            h.reply(read.id, 200, RAILS);
+            if h.requests
+                .iter()
+                .any(|request| request.url.contains("/trade/marginType"))
+            {
+                let margin = h.take("/trade/marginType");
+                h.reply(margin.id, 200, ISOLATED);
+            }
+            if !finish_before_data {
+                h.event(Event::HttpFailed {
+                    request: write.id,
+                    error: "scripted write failure",
+                });
+            }
+            assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+            assert_eq!(
+                h.engine.store().setting("BTCUSDT"),
+                Some(before),
+                "a read issued during pending write {kind} must stay nonpublishing after write retirement"
+            );
+            assert_eq!(
+                metadata_rails(&h, 948),
+                (before.buy_leverage.unwrap(), before.sell_leverage.unwrap())
+            );
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 948).count(), 1);
+            assert!(
+                !h.requests
+                    .iter()
+                    .any(|r| r.url.contains("/trade/marginType"))
+            );
+        }
     }
 }
 
@@ -1960,7 +2117,7 @@ fn newer_settings_writes_and_snapshots_fence_metadata() {
     assert_eq!(metadata_rails(&h, 907), (20.0, 20.0));
 }
 #[test]
-fn metadata_cannot_race_pending_writes_or_a_newer_query() {
+fn metadata_pending_write_is_sticky_and_eligible_queries_coalesce() {
     let mut h = Harness::ready();
     h.event(Event::Command(Command::SetLeverage {
         command: 908,
@@ -1979,8 +2136,12 @@ fn metadata_cannot_race_pending_writes_or_a_newer_query() {
     assert!(!h.requests.iter().any(|r| r.url.contains("/trade/leverage")));
     h.reply(write.id, 200, r#"{"code":0,"data":{}}"#);
     let first = margin_stage(&mut h, 910);
-    let second = margin_stage(&mut h, 911);
-    h.reply(second.id, 200, ISOLATED);
+    fetch_leverage(&mut h, 911, "BTCUSDT");
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/trade/leverage") || r.url.contains("/trade/marginType"))
+    );
     h.reply(first.id, 200, ISOLATED);
     assert_eq!(metadata_rails(&h, 910), (12.0, 34.0));
     assert!(h.done.iter().any(|(id, r)| *id == 911 && r.is_ok()));
@@ -2117,4 +2278,566 @@ fn metadata_preflight_emits_one_not_sent_failure_on_the_new_completion_api() {
     assert!(
         matches!(&out[0],Action::Notice(Notice::CommandFailed {command:917,error}) if error.outcome==Some(safe_cex_engine::Outcome::NotSent))
     );
+}
+
+const SIGNATURE_MISMATCH: &str = r#"{"code":100001,"msg":"signature mismatch"}"#;
+/// Signed query bytes, without the per-attempt timestamp and signature.
+fn native_query(r: &HttpRequest) -> String {
+    let (path, query) = r.url.split_once('?').unwrap_or((&r.url, ""));
+    let kept = query
+        .split('&')
+        .filter(|p| !p.starts_with("timestamp=") && !p.starts_with("signature="))
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{path}?{kept}")
+}
+
+#[test]
+fn plan_metadata_keeps_one_fresh_signature_retry_per_read_and_native_bytes() {
+    let mut h = Harness::ready();
+    let first = metadata(&mut h, 930);
+    h.reply(first.id, 200, SIGNATURE_MISMATCH);
+    let retry = h.take("/trade/leverage");
+    assert_eq!(native_query(&retry), native_query(&first));
+    assert_eq!((retry.method, &retry.body), (first.method, &first.body));
+    assert_ne!(retry.id, first.id, "a fresh physical attempt");
+    h.reply(retry.id, 200, RAILS);
+    let margin = h.take("/trade/marginType");
+    h.reply(margin.id, 200, SIGNATURE_MISMATCH);
+    let margin_retry = h.take("/trade/marginType");
+    assert_eq!(native_query(&margin_retry), native_query(&margin));
+    h.reply(margin_retry.id, 200, ISOLATED);
+    assert_eq!(metadata_rails(&h, 930), (12.0, 34.0));
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(
+        (
+            setting.buy_leverage,
+            setting.sell_leverage,
+            setting.margin_type
+        ),
+        (Some(12.0), Some(34.0), Some(MarginType::Isolated))
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/trade/leverage") || r.url.contains("/trade/marginType"))
+    );
+}
+
+#[test]
+fn a_second_signature_rejection_fails_the_plan_without_a_third_attempt() {
+    for margin in [false, true] {
+        let mut h = Harness::ready();
+        let before = h.engine.store().setting("BTCUSDT");
+        let (read, path) = if margin {
+            (margin_stage(&mut h, 931), "/trade/marginType")
+        } else {
+            (metadata(&mut h, 931), "/trade/leverage")
+        };
+        h.reply(read.id, 200, SIGNATURE_MISMATCH);
+        let retry = h.take(path);
+        h.reply(retry.id, 200, SIGNATURE_MISMATCH);
+        failed_metadata(&h, 931);
+        assert!(!h.requests.iter().any(|r| r.url.contains(path)));
+        assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    }
+}
+
+#[test]
+fn a_signature_retry_gets_a_fresh_native_window_after_the_first_attempt_deadline() {
+    let mut h = Harness::ready();
+    let start = h.now;
+    let first = metadata(&mut h, 932);
+    h.now = start + 15_000.0;
+    h.reply(first.id, 200, SIGNATURE_MISMATCH);
+    let retry = h.take("/trade/leverage");
+    // Past the first attempt's 20s window, inside the retry's own fresh one.
+    h.now = start + 25_000.0;
+    h.reply(retry.id, 200, RAILS);
+    let margin = h.take("/trade/marginType");
+    h.reply(margin.id, 200, ISOLATED);
+    assert_eq!(metadata_rails(&h, 932), (12.0, 34.0));
+}
+
+#[test]
+fn a_silent_metadata_read_times_out_the_plan_once() {
+    let mut h = Harness::ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    let start = h.now;
+    let _read = metadata(&mut h, 933);
+    let due: Vec<_> = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at <= start + 20_000.0)
+        .cloned()
+        .collect();
+    h.now = start + 20_000.0;
+    for (timer, _) in due {
+        h.event(Event::TimerFired { timer });
+    }
+    failed_metadata(&h, 933);
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn metadata_plan_entry_duplicate_unknown_market_cannot_fail_an_active_owner() {
+    let mut h = Harness::ready();
+    let _first = metadata(&mut h, 940);
+    h.engine.handle(
+        h.now,
+        Event::Command(Command::FetchLeverage {
+            command: 940,
+            symbol: "MISSING".into(),
+        }),
+    );
+    let out = h.engine.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !out.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandFailed { command: 940, .. })
+                | Action::Notice(Notice::CommandDone { command: 940, .. })
+        )),
+        "a duplicate entry cannot numerically terminate the active metadata owner"
+    );
+}
+
+#[test]
+fn metadata_plan_entry_requires_prepare_before_native_http_release() {
+    let mut h = Harness::ready();
+    h.engine.handle(
+        h.now,
+        Event::Command(Command::FetchLeverage {
+            command: 941,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let out = h.engine.drain_actions().collect::<Vec<_>>();
+    assert!(
+        !out.iter().any(|action| matches!(action, Action::Http(_))),
+        "metadata cannot release legacy HTTP before managed preparation"
+    );
+    assert!(
+        out.iter().any(|action| matches!(
+            action,
+            Action::ManagedHttp(action)
+                if matches!(action.as_ref(), safe_cex_engine::request_context::HttpAction::Prepare { .. })
+        )),
+        "the metadata owner must issue a real managed preparation"
+    );
+}
+
+#[test]
+fn metadata_plan_entry_distinct_unknown_market_keeps_native_refusal() {
+    let mut h = Harness::ready();
+    h.engine.handle(
+        h.now,
+        Event::Command(Command::FetchLeverage {
+            command: 942,
+            symbol: "MISSING".into(),
+        }),
+    );
+    let out = h.engine.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        out.iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 942, error })
+                    if error.legacy_text() == "Unknown BingX market"
+            ))
+            .count(),
+        1
+    );
+    assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
+}
+
+#[test]
+fn metadata_plan_entry_native_pair_keeps_the_rails_result() {
+    let mut h = Harness::ready();
+    let margin = margin_stage(&mut h, 943);
+    h.reply(margin.id, 200, ISOLATED);
+    assert_eq!(metadata_rails(&h, 943), (12.0, 34.0));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 943).count(), 1);
+}
+
+#[test]
+fn metadata_write_provider_refusal_releases_pending_owner_before_next_read() {
+    struct Refusing {
+        inner: safe_cex_engine::signing::Provider,
+        refuse: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl safe_cex_engine::signing::Signer for Refusing {
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn sign(
+            &self,
+            request: safe_cex_engine::signing::SignRequest,
+        ) -> safe_cex_engine::signing::SignFuture {
+            self.inner.sign(request)
+        }
+        fn sign_ready(
+            &self,
+            request: &safe_cex_engine::signing::SignRequest,
+        ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+        {
+            if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+                Some(Err(safe_cex_engine::signing::SignError::Refused))
+            } else {
+                self.inner.sign_ready(request)
+            }
+        }
+    }
+    for margin in [false, true] {
+        let refuse = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = refuse.clone();
+        let mut h = Harness::unstarted_with_provider(|inner| {
+            std::sync::Arc::new(Refusing {
+                inner,
+                refuse: flag,
+            })
+        });
+        h.respond("/quote/contracts", 200, MARKETS);
+        h.respond("/quote/ticker", 200, DAILY);
+        h.respond("/quote/premiumIndex", 200, PREMIUM);
+        let mut h = Harness::finish_ready(h, OPEN);
+        refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+        let requests = h.requests.len();
+        let auth_failures = h.engine.health().auth_failures;
+        h.event(Event::Command(if margin {
+            Command::SetMarginType {
+                command: 944,
+                symbol: "BTCUSDT".into(),
+                isolated: true,
+            }
+        } else {
+            Command::SetLeverage {
+                command: 944,
+                symbol: "BTCUSDT".into(),
+                leverage: 25.0,
+                side: None,
+            }
+        }));
+        assert_eq!(
+            h.done
+                .iter()
+                .filter(|(id, result)| *id == 944 && result.is_err())
+                .count(),
+            1
+        );
+        assert_eq!(
+            h.requests.len(),
+            requests,
+            "provider refusal releases no HTTP"
+        );
+        assert_eq!(
+            h.failures
+                .iter()
+                .filter(|(id, _)| *id == 944)
+                .collect::<Vec<_>>(),
+            vec![&(
+                944,
+                safe_cex_engine::signing::SignError::Refused.venue_error()
+            )]
+        );
+        assert_eq!(
+            h.engine.health().auth_failures,
+            auth_failures,
+            "provider refusal emits neither auth.rejected nor deactivation"
+        );
+        assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+        refuse.store(false, std::sync::atomic::Ordering::SeqCst);
+        let read = margin_stage(&mut h, 945);
+        let mut normal = Harness::ready();
+        let expected = margin_stage(&mut normal, 946);
+        assert_eq!(
+            (&read.url, &read.headers, &read.body),
+            (&expected.url, &expected.headers, &expected.body),
+            "refusal-off delegates to the unchanged native signing recipe"
+        );
+        h.reply(read.id, 200, ISOLATED);
+        assert_eq!(metadata_rails(&h, 945), (12.0, 34.0));
+        let setting = h.engine.store().setting("BTCUSDT").unwrap();
+        assert_eq!(
+            (setting.buy_leverage, setting.sell_leverage),
+            (Some(12.0), Some(34.0))
+        );
+        assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == 944).count(), 1);
+    }
+}
+
+mod metadata_entry_capacity {
+    use super::*;
+    use safe_cex_engine::Venue;
+    use safe_cex_engine::request_context::{
+        CommandEntryError, Context, Error, Operation, Policy, PreflightPolicy, PreflightPurpose,
+        RetryPolicy,
+    };
+
+    struct Probe {
+        native: Bingx,
+        markets: Vec<safe_cex_engine::model::Market>,
+        roots: Vec<Context>,
+        release: Option<TimerId>,
+        admission: Option<Result<(), CommandEntryError>>,
+    }
+    fn policy() -> Policy {
+        Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }
+    }
+    impl Venue for Probe {
+        type Pending = safe_cex_venue_bingx::Pending;
+        fn capabilities(&self) -> safe_cex_engine::Capabilities {
+            self.native.capabilities()
+        }
+
+        fn start(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>) {
+            // Only pre-admission metadata refusals run here; native startup I/O
+            // is outside this fixture, which supplies the ready market catalogue.
+            cx.store.set_markets(self.markets.clone());
+            self.release = Some(cx.set_timer(1001.));
+        }
+        fn on_command(
+            &mut self,
+            cx: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            command: Command,
+        ) {
+            if let Command::FetchAccount { command: id } = command {
+                if (1000..1256).contains(&id) {
+                    self.roots.push(cx.admit_http_command(policy()).unwrap());
+                    return;
+                }
+                for root in &self.roots {
+                    cx.validate_read_root_context(root).unwrap();
+                    cx.validate_http_context(root).unwrap();
+                }
+                let result = cx.begin_preflight(PreflightPolicy {
+                    purpose: PreflightPurpose::ReadOnly,
+                    read_credential: None,
+                    write_credential: None,
+                });
+                self.admission = Some(result.as_ref().map(|_| ()).map_err(|e| *e));
+                if let Ok(preflight) = result {
+                    cx.done_preflight(&preflight, "admission-control".into())
+                        .unwrap();
+                }
+            } else {
+                self.native.on_command(cx, command);
+            }
+        }
+        fn on_timer(&mut self, cx: &mut safe_cex_engine::Cx<'_, Self::Pending>, timer: TimerId) {
+            assert_eq!(self.release.take(), Some(timer));
+            cx.done_context(&self.roots.pop().unwrap(), "released-one-owner".into())
+                .unwrap();
+        }
+        fn on_response(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            _: Self::Pending,
+            _: Response<'_>,
+        ) {
+            panic!("entry proof releases no HTTP");
+        }
+        fn on_request_failed(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            _: Self::Pending,
+            _: &str,
+        ) {
+            panic!("entry proof has no transport");
+        }
+        fn on_open(&mut self, _: &mut safe_cex_engine::Cx<'_, Self::Pending>, _: SocketId) {}
+        fn on_close(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            _: SocketId,
+            _: u16,
+        ) {
+        }
+        fn on_message(
+            &mut self,
+            _: &mut safe_cex_engine::Cx<'_, Self::Pending>,
+            _: SocketId,
+            _: &str,
+        ) {
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    fn failed(actions: &[Action], id: u32) -> safe_cex_engine::VenueError {
+        let terminals = actions.iter().filter(|a| matches!(a,
+            Action::Notice(Notice::CommandDone { command, .. } | Notice::CommandFailed { command, .. }) if *command == id
+        )).collect::<Vec<_>>();
+        assert_eq!(terminals.len(), 1, "one correlated terminal");
+        match terminals[0] {
+            Action::Notice(Notice::CommandFailed { error, .. }) => error.clone(),
+            other => panic!("expected failure, got {other:?}"),
+        }
+    }
+    fn no_native_effects(actions: &[Action]) {
+        assert!(!actions.iter().any(|action| matches!(action,
+            Action::Http(_) | Action::Sign { .. } | Action::ManagedHttp(_) | Action::Notice(Notice::Deactivate)
+        ) || matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::AUTH_REJECTED
+        )));
+    }
+    fn check(missing_key: bool) {
+        let markets = Harness::ready().engine.store().markets().to_vec();
+        let (native, provider) = Options {
+            key: (!missing_key).then(|| "key".into()),
+            secret: (!missing_key).then(|| "secret".into()),
+            ..Options::default()
+        }
+        .build();
+        let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
+            native,
+            markets,
+            roots: Vec::new(),
+            release: None,
+            admission: None,
+        });
+        engine.set_signer(Some(provider)).unwrap();
+        engine.start(1000.);
+        for id in 1000..1256 {
+            engine.handle(1000., Event::Command(Command::FetchAccount { command: id }));
+            no_native_effects(&engine.drain_actions().collect::<Vec<_>>());
+        }
+        assert_eq!(engine.venue().roots.len(), 256);
+        no_native_effects(&engine.drain_actions().collect::<Vec<_>>());
+        engine.handle(
+            1000.,
+            Event::Command(Command::FetchAccount { command: 976 }),
+        );
+        assert_eq!(
+            engine.venue().admission,
+            Some(Err(CommandEntryError::Rejected(Error::Capacity)))
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        no_native_effects(&actions);
+        let capacity = failed(&actions, 976);
+        assert_eq!(
+            capacity.outcome, None,
+            "Read admission does not invent a write outcome"
+        );
+        let symbol = if missing_key { "BTCUSDT" } else { "MISSING" };
+        engine.handle(
+            1000.,
+            Event::Command(Command::FetchLeverage {
+                command: 977,
+                symbol: symbol.into(),
+            }),
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        no_native_effects(&actions);
+        let exhausted = failed(&actions, 977);
+        let timer = engine.venue().release.unwrap();
+        engine.handle(1001., Event::TimerFired { timer });
+        assert_eq!(engine.venue().roots.len(), 255);
+        no_native_effects(&engine.drain_actions().collect::<Vec<_>>());
+        engine.handle(
+            1001.,
+            Event::Command(Command::FetchAccount { command: 978 }),
+        );
+        assert_eq!(engine.venue().admission, Some(Ok(())));
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        no_native_effects(&actions);
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 978, result }) if result == "admission-control")).count(), 1);
+        engine.handle(
+            1001.,
+            Event::Command(Command::FetchLeverage {
+                command: 979,
+                symbol: symbol.into(),
+            }),
+        );
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        no_native_effects(&actions);
+        let native = failed(&actions, 979);
+        assert_eq!(
+            native.legacy_text(),
+            if missing_key {
+                "BingX metadata requires credentials"
+            } else {
+                "Unknown BingX market"
+            }
+        );
+        assert_eq!(engine.health().auth_failures, 0);
+        assert_eq!(
+            exhausted, capacity,
+            "metadata pre-admission refusal must not bypass genuine engine capacity"
+        );
+    }
+    #[test]
+    fn unknown_market_cannot_bypass_entry_capacity() {
+        check(false);
+    }
+    #[test]
+    fn missing_key_cannot_bypass_entry_capacity() {
+        check(true);
+    }
+}
+
+fn retired_metadata_token(margin: bool) {
+    let mut h = Harness::ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    let packet = if margin {
+        margin_stage(&mut h, 980)
+    } else {
+        metadata(&mut h, 980)
+    };
+    let live = h.engine.store().metadata_executions();
+    assert_eq!(live.len(), 1);
+    h.engine.store_mut().retire_metadata_work(&live[0].0);
+    assert!(h.engine.store().metadata_executions().is_empty());
+    h.reply(packet.id, 200, if margin { ISOLATED } else { RAILS });
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/trade/marginType"))
+    );
+    let terminal = h
+        .done
+        .iter()
+        .filter(|(id, _)| *id == 980)
+        .cloned()
+        .collect::<Vec<_>>();
+    let failure = h
+        .failures
+        .iter()
+        .filter(|(id, _)| *id == 980)
+        .cloned()
+        .collect::<Vec<_>>();
+    let fresh = margin_stage(&mut h, 981);
+    h.reply(fresh.id, 200, ISOLATED);
+    assert_eq!(metadata_rails(&h, 981), (12.0, 34.0));
+    assert_eq!(
+        terminal.len(),
+        1,
+        "missing Store custody cannot strand a live Plan"
+    );
+    assert!(terminal[0].1.is_err());
+    assert_eq!(failure.len(), 1);
+    assert_eq!(
+        failure[0].1.kind,
+        Some(safe_cex_engine::ErrorKind::Internal)
+    );
+    h.reply(packet.id, 200, ISOLATED);
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 980).count(), 1);
+}
+#[test]
+fn retired_metadata_token_rejects_current_settings_fallback_once() {
+    retired_metadata_token(false);
+}
+#[test]
+fn retired_metadata_token_rejects_final_margin_publication_once() {
+    retired_metadata_token(true);
 }

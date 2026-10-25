@@ -1,8 +1,41 @@
 //! ApeX API canonicalization and zkLink contract bytes; no provider or JS runtime.
-use crate::Options;
+/// Raw API credentials for the legacy canonicalization oracle only. The venue
+/// never builds one: production signs through `Http` and `WsLogin` at dispatch.
+#[derive(Clone, Default)]
+pub struct LegacyCredentials {
+    pub key: Option<String>,
+    pub secret: Option<String>,
+    pub passphrase: Option<String>,
+}
+safe_cex_crypto::redacted_debug!(LegacyCredentials);
+impl safe_cex_crypto::secrets::EraseSecrets for LegacyCredentials {
+    fn erase_secrets(&mut self) {
+        safe_cex_crypto::secrets::erase(&mut self.key);
+        safe_cex_crypto::secrets::erase(&mut self.secret);
+        safe_cex_crypto::secrets::erase(&mut self.passphrase);
+    }
+}
 use safe_cex_crypto::{Encoding, encode as crypto_encode, hex, hmac_sha256, sha256, zklink};
+use safe_cex_engine::signing::{
+    Algorithm, Context, Encoding as PartEncoding, ExtraKey, Identity, KeyUse, Need, Operation,
+    PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
+};
 pub use safe_cex_engine::url::encode;
-use safe_cex_engine::{Method, num};
+use safe_cex_engine::{Action, DispatchContext, Method, SignStep, num};
+
+/// Capability each ApeX command needs before its first release (Cx::can_sign).
+pub const REST_NEEDS: &[Need] = &[Need {
+    key: KeyUse::Signing,
+    algorithm: Algorithm::HmacSha256,
+}];
+/// Order placement and amend: the HMAC request plus every zkLink contract.
+pub const CONTRACT_NEEDS: &[Need] = &[
+    REST_NEEDS[0],
+    Need {
+        key: KeyUse::Extra(ExtraKey::ZklinkSeed),
+        algorithm: Algorithm::ZkLinkContract,
+    },
+];
 
 #[derive(Clone)]
 pub enum Body {
@@ -93,7 +126,7 @@ fn body_canonical(body: &Body, legacy: bool) -> String {
 }
 
 pub fn request(
-    options: &Options,
+    options: &LegacyCredentials,
     now: f64,
     request: &Request,
     legacy: bool,
@@ -101,13 +134,8 @@ pub fn request(
     if !now.is_finite() || now < 0.0 {
         return Err("Invalid ApeX timestamp".into());
     }
-    let serialized_query = query(&request.params);
-    let path = if serialized_query.is_empty() {
-        request.path.clone()
-    } else {
-        format!("{}?{serialized_query}", request.path)
-    };
-    if request.path == "/v3/klines" && request.method == Method::Get {
+    let path = request_path(request);
+    if is_unsigned(request) {
         return Ok(Signed {
             path,
             headers: vec![],
@@ -122,11 +150,55 @@ pub fn request(
     {
         return Err("ApeX API key, secret and passphrase are required".into());
     }
-    let timestamp = num::format(if legacy {
+    let timestamp = num::format(stamp(now, legacy));
+    let text = canonical_text(request, legacy, &timestamp);
+    let mut headers = vec![
+        (
+            "APEX-SIGNATURE",
+            hmac(options.secret.as_deref().unwrap_or(""), &text),
+        ),
+        ("APEX-API-KEY", options.key.clone().unwrap_or_default()),
+        (
+            "APEX-PASSPHRASE",
+            options.passphrase.clone().unwrap_or_default(),
+        ),
+        ("APEX-TIMESTAMP", timestamp),
+    ];
+    let (content_type, body) = transport(&request.body)?;
+    headers.push(("Content-Type", content_type));
+    Ok(Signed {
+        path,
+        headers,
+        body,
+    })
+}
+
+/// The request target the venue stages: path plus serialized query.
+pub fn request_path(request: &Request) -> String {
+    let serialized_query = query(&request.params);
+    if serialized_query.is_empty() {
+        request.path.clone()
+    } else {
+        format!("{}?{serialized_query}", request.path)
+    }
+}
+
+/// Klines are the sole authentication exception: no ApeX headers at all.
+pub fn is_unsigned(request: &Request) -> bool {
+    request.path == "/v3/klines" && request.method == Method::Get
+}
+
+/// Integer protocol milliseconds; the legacy retry floors to whole seconds.
+fn stamp(now: f64, legacy: bool) -> f64 {
+    if legacy {
         (now / 1000.0).floor() * 1000.0
     } else {
         safe_cex_engine::time::wire_stamp_ms(now)
-    });
+    }
+}
+
+/// The exact HMAC preimage after the timestamp prefix.
+fn canonical_text(request: &Request, legacy: bool, timestamp: &str) -> String {
     let query_method = matches!(request.method, Method::Get | Method::Delete);
     let canonical = if query_method {
         if legacy {
@@ -144,7 +216,7 @@ pub fn request(
                     .collect::<Vec<_>>(),
             )
         } else {
-            serialized_query
+            query(&request.params)
         }
     } else {
         body_canonical(&request.body, legacy)
@@ -167,37 +239,21 @@ pub fn request(
             Body::Form(_) | Body::Multipart(_) => text.push_str("[object Object]"),
         }
     }
-    let mut headers = vec![
-        (
-            "APEX-SIGNATURE",
-            hmac(options.secret.as_deref().unwrap_or(""), &text),
+    text
+}
+
+/// Transport bytes and content type. Multipart differs from the signed text.
+fn transport(body: &Body) -> Result<(String, Option<String>), String> {
+    Ok(match body {
+        Body::None => ("application/json, charset=utf-8".into(), None),
+        Body::Raw(raw) => (
+            "application/x-www-form-urlencoded; charset=UTF-8".into(),
+            Some(raw.clone()),
         ),
-        ("APEX-API-KEY", options.key.clone().unwrap_or_default()),
-        (
-            "APEX-PASSPHRASE",
-            options.passphrase.clone().unwrap_or_default(),
+        Body::Form(params) => (
+            "application/x-www-form-urlencoded; charset=UTF-8".into(),
+            Some(query(params)),
         ),
-        ("APEX-TIMESTAMP", timestamp),
-    ];
-    let body = match &request.body {
-        Body::None => {
-            headers.push(("Content-Type", "application/json, charset=utf-8".into()));
-            None
-        }
-        Body::Raw(raw) => {
-            headers.push((
-                "Content-Type",
-                "application/x-www-form-urlencoded; charset=UTF-8".into(),
-            ));
-            Some(raw.clone())
-        }
-        Body::Form(params) => {
-            headers.push((
-                "Content-Type",
-                "application/x-www-form-urlencoded; charset=UTF-8".into(),
-            ));
-            Some(query(params))
-        }
         Body::Multipart(params) => {
             const BOUNDARY: &str = "safe-cex-apexomni";
             let mut body = String::new();
@@ -208,21 +264,15 @@ pub fn request(
                 body.push_str(&format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n"));
             }
             body.push_str(&format!("--{BOUNDARY}--\r\n"));
-            headers.push((
-                "Content-Type",
+            (
                 format!("multipart/form-data; boundary={BOUNDARY}"),
-            ));
-            Some(body)
+                Some(body),
+            )
         }
-    };
-    Ok(Signed {
-        path,
-        headers,
-        body,
     })
 }
 
-pub fn ws_login(options: &Options, now: f64) -> Result<String, String> {
+pub fn ws_login(options: &LegacyCredentials, now: f64) -> Result<String, String> {
     let key = options
         .key
         .as_deref()
@@ -241,6 +291,26 @@ pub fn ws_login(options: &Options, now: f64) -> Result<String, String> {
     if !now.is_finite() || now < 0.0 {
         return Err("Invalid ApeX timestamp".into());
     }
+    let timestamp = safe_cex_engine::time::wire_stamp_ms(now);
+    login_frame(
+        key,
+        passphrase,
+        timestamp as u64,
+        &hmac(secret, &ws_login_text(timestamp)),
+    )
+}
+
+fn ws_login_text(timestamp: f64) -> String {
+    format!("{}GET/ws/accounts", num::format(timestamp))
+}
+
+/// The `args` element is a JSON string, not an object, in this field order.
+fn login_frame(
+    key: &str,
+    passphrase: &str,
+    timestamp: u64,
+    signature: &str,
+) -> Result<String, String> {
     #[derive(serde::Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Login<'a> {
@@ -250,7 +320,7 @@ pub fn ws_login(options: &Options, now: f64) -> Result<String, String> {
         api_key: &'a str,
         passphrase: &'a str,
         timestamp: u64,
-        signature: String,
+        signature: &'a str,
     }
     #[derive(serde::Serialize)]
     struct Envelope {
@@ -263,14 +333,8 @@ pub fn ws_login(options: &Options, now: f64) -> Result<String, String> {
         request_path: "/ws/accounts",
         api_key: key,
         passphrase,
-        timestamp: safe_cex_engine::time::wire_stamp_ms(now) as u64,
-        signature: hmac(
-            secret,
-            &format!(
-                "{}GET/ws/accounts",
-                num::format(safe_cex_engine::time::wire_stamp_ms(now))
-            ),
-        ),
+        timestamp,
+        signature,
     };
     let args = [serde_json::to_string(&login).map_err(|e| e.to_string())?];
     serde_json::to_string(&Envelope { op: "login", args }).map_err(|e| e.to_string())
@@ -546,4 +610,262 @@ pub fn contract_signature(
     zklink::sign(&seed, &payload)
         .map(|signature| hex(&signature.signature))
         .map_err(str::to_owned)
+}
+
+/// Placeholder for the hex zkLink signature of contract `index` inside a raw
+/// order body. Alphanumeric, so form encoding leaves it unchanged.
+pub fn zk_placeholder(index: usize) -> String {
+    format!("ZKLINKSIGNATUREPLACEHOLDER{index}X")
+}
+
+fn request_context(verb: &str, url: &str) -> Context {
+    let (host, path) = url
+        .split_once("://")
+        .map(|(_, rest)| rest.split_once('/').unwrap_or((rest, "")))
+        .unwrap_or(("", ""));
+    Context {
+        venue: "apexomni".into(),
+        method: verb.into(),
+        host: host.into(),
+        path: format!("/{}", path.split('?').next().unwrap_or_default()),
+    }
+}
+
+/// Atomic presentation plus HMAC over `exact` text, preceded by any zkLink
+/// contract signatures that the text references as hex results.
+fn work(
+    identity: &Identity,
+    contracts: &[[u8; 36]],
+    text: &str,
+    stamp_ms: f64,
+    context: Context,
+) -> Result<SignRequest, SignError> {
+    let passphrase = identity.passphrase.clone().ok_or(SignError::Unavailable)?;
+    let mut operations = Vec::with_capacity(contracts.len() + 3);
+    if !contracts.is_empty() {
+        let seed = identity
+            .extra
+            .get(&safe_cex_engine::signing::ExtraKey::ZklinkSeed)
+            .ok_or(SignError::Unavailable)?;
+        for payload in contracts {
+            operations.push(Operation::Sign {
+                algorithm: Algorithm::ZkLinkContract,
+                key: seed.clone(),
+                payload: vec![PayloadPart::Bytes {
+                    bytes: payload.to_vec(),
+                }],
+            });
+        }
+    }
+    // Each placeholder occurs exactly once; sorted keys decide the text order.
+    let mut positions = Vec::with_capacity(contracts.len());
+    for index in 0..contracts.len() {
+        let marker = zk_placeholder(index);
+        let mut found = text.match_indices(&marker);
+        let (Some((position, _)), None) = (found.next(), found.next()) else {
+            return Err(SignError::InvalidRequest);
+        };
+        positions.push((position, index, marker.len()));
+    }
+    positions.sort_unstable();
+    let mut payload = Vec::with_capacity(positions.len() * 2 + 1);
+    let mut start = 0;
+    for (position, index, length) in positions {
+        payload.push(PayloadPart::Bytes {
+            bytes: text.as_bytes()[start..position].to_vec(),
+        });
+        payload.push(PayloadPart::Result {
+            index,
+            encoding: PartEncoding::Hex,
+        });
+        start = position + length;
+    }
+    payload.push(PayloadPart::Bytes {
+        bytes: text.as_bytes()[start..].to_vec(),
+    });
+    operations.extend([
+        Operation::Present {
+            key: identity.credential.clone(),
+        },
+        Operation::Present { key: passphrase },
+        Operation::Sign {
+            algorithm: Algorithm::HmacSha256,
+            key: identity.signing.clone(),
+            payload,
+        },
+    ]);
+    Ok(SignRequest {
+        receipt: SignReceipt {
+            stamp_ms: Some(stamp_ms),
+            expiry_ms: None,
+        },
+        operations,
+        context,
+    })
+}
+
+/// Presented header values: credential, passphrase, then the raw MAC.
+fn presented(result: &SignResult, contracts: usize) -> Result<(&str, &str, &[u8]), SignError> {
+    let text = |index: usize| {
+        result
+            .values
+            .get(index)
+            .and_then(|value| std::str::from_utf8(value).ok())
+            .filter(|value| !value.is_empty() && !value.contains(['\r', '\n']))
+            .ok_or(SignError::InvalidResult)
+    };
+    let mac = result
+        .values
+        .get(contracts + 2)
+        .filter(|mac| mac.len() == 32)
+        .ok_or(SignError::InvalidResult)?;
+    Ok((text(contracts)?, text(contracts + 1)?, mac))
+}
+
+/// Dispatch recipe for one private REST request. Order writes carry their
+/// zkLink contracts: each is signed in the same atomic batch and its hex
+/// signature replaces `zk_placeholder(index)` in the raw body and preimage.
+/// Keep the default `Deny` result-header policy: delegated callback headers
+/// admit only single-signature batches, and an order batch has several.
+pub struct Http {
+    identity: Identity,
+    unsigned: Request,
+    legacy: bool,
+    contracts: Vec<[u8; 36]>,
+    timestamp: String,
+}
+impl Http {
+    /// `legacy` selects the one signature-rejection resend canonicalization.
+    pub fn new(identity: Identity, request: Request, legacy: bool) -> Self {
+        Self::with_contracts(identity, request, legacy, vec![])
+    }
+    pub fn with_contracts(
+        identity: Identity,
+        request: Request,
+        legacy: bool,
+        contracts: Vec<[u8; 36]>,
+    ) -> Self {
+        Self {
+            identity,
+            unsigned: request,
+            legacy,
+            contracts,
+            timestamp: String::new(),
+        }
+    }
+}
+impl SignStep for Http {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        // Klines are public; a credential-bearing recipe must never cover them.
+        // The outbound must be exactly the request this recipe canonicalises.
+        if is_unsigned(&self.unsigned)
+            || http.method != self.unsigned.method
+            || !http.url.ends_with(&request_path(&self.unsigned))
+            || (!self.contracts.is_empty() && !matches!(self.unsigned.body, Body::Raw(_)))
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        // Validate transport bytes before any credential is presented.
+        transport(&self.unsigned.body).map_err(|_| SignError::InvalidRequest)?;
+        let stamp_ms = stamp(dispatch.stamp_ms(), self.legacy);
+        self.timestamp = num::format(stamp_ms);
+        let text = canonical_text(&self.unsigned, self.legacy, &self.timestamp);
+        work(
+            &self.identity,
+            &self.contracts,
+            &text,
+            stamp_ms,
+            request_context(http.method.as_str(), &http.url),
+        )
+    }
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        let Action::Http(http) = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let (key, passphrase, mac) = presented(result, self.contracts.len())?;
+        let mut body = self.unsigned.body.clone();
+        for index in 0..self.contracts.len() {
+            let signature = result
+                .values
+                .get(index)
+                .filter(|value| value.len() == 64)
+                .ok_or(SignError::InvalidResult)?;
+            if let Body::Raw(raw) = &mut body {
+                *raw = raw.replacen(&zk_placeholder(index), &hex(signature), 1);
+            }
+        }
+        let (content_type, body) = transport(&body).map_err(|_| SignError::InvalidRequest)?;
+        http.headers = vec![
+            ("APEX-SIGNATURE", crypto_encode(mac, Encoding::Base64)),
+            ("APEX-API-KEY", key.into()),
+            ("APEX-PASSPHRASE", passphrase.into()),
+            ("APEX-TIMESTAMP", self.timestamp.clone()),
+            ("Content-Type", content_type),
+        ];
+        http.body = body;
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
+/// Dispatch recipe for the private WS login frame on each socket generation.
+pub struct WsLogin {
+    identity: Identity,
+    url: String,
+    timestamp: u64,
+}
+impl WsLogin {
+    pub fn new(identity: Identity, url: impl Into<String>) -> Self {
+        Self {
+            identity,
+            url: url.into(),
+            timestamp: 0,
+        }
+    }
+}
+impl SignStep for WsLogin {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        if !matches!(outbound, Action::WsSend { .. }) {
+            return Err(SignError::InvalidRequest);
+        }
+        let stamp_ms = dispatch.stamp_ms();
+        self.timestamp = stamp_ms as u64;
+        work(
+            &self.identity,
+            &[],
+            &ws_login_text(stamp_ms),
+            stamp_ms,
+            request_context("WS", &self.url),
+        )
+    }
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        let Action::WsSend { text, .. } = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        let (key, passphrase, mac) = presented(result, 0)?;
+        *text = login_frame(
+            key,
+            passphrase,
+            self.timestamp,
+            &crypto_encode(mac, Encoding::Base64),
+        )
+        .map_err(|_| SignError::InvalidResult)?;
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
 }

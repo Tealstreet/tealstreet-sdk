@@ -37,6 +37,7 @@ fn plan(cx: &mut Cx<'_, Context>, wait_ms: u32) -> Plan {
             calls: &calls,
         }],
         PlanPolicy {
+            independent_calls: false,
             operation: Operation::Read,
             credential: None,
             pacing: None,

@@ -221,8 +221,9 @@ Agreed split (codex-hcmq3f, claude-55ao7t, 2026-10-23):
 1. **Setup.**
    - The wallet key is `ExtraKey::L1Wallet` on the primary identity (declared
      hex, required for private).
-   - A non-secret provider derivation (P4) returns its address. The venue
-     never derives it.
+   - Its address arrives through P4's one channel: `fetch_public` for a
+     local provider, or bound account metadata for host/remote. There is no
+     other path. The venue never derives it.
    - L1 `ClobAuth` EIP-712 is a recipe: `Secp256k1Digest` over the venue
      digest, with the `l1Wallet` role.
 2. **Import request.**
@@ -339,6 +340,78 @@ create fallback, and this plan adds none.
 - malformed, oversized and duplicate-field bodies fail closed;
 - import is refused when the provider lacks it;
 - the L2 HMAC through the imported refs matches the upstream base64url vector.
+
+### P6b part 1: the `l1Wallet` role and its address
+
+Plan, 2026-10-24. Owner claude-19pt8s, stacked on #1963 (P4). Reviewers:
+codex-uufub4 (engine) and codex-hcmq3f (consumer; the Polymarket
+conversion, #1882, adopts it).
+
+**Scope.** Engine and crypto only. No Polymarket venue edits, and no
+construction-rules row for Polymarket; the conversion adds its admission.
+Keyless/hosted Polymarket stays unsupported (section 5 above), so only the
+local provider answers. There is no host/remote metadata path in this part.
+
+**Role table** (engine `signing.rs`). This is one closed table: each
+`ExtraKey` names exactly one algorithm.
+- `ZklinkSeed → ZkLinkContract`: no public form, as today.
+- `L1Wallet → Secp256k1Digest`: name `l1Wallet`; the raw 32-byte wallet
+  scalar, declared hex by family policy (`ExtraKeyPolicy`).
+
+**Provider** (`LocalSigner`).
+- A role ref is usable only through its role's algorithm, by `Sign` and by
+  public operations alike. An `l1Wallet` ref answers `PublicAddress` and signs
+  `Secp256k1Digest` (the later ClobAuth recipe).
+- The ref is refused everywhere else:
+  - `Present`;
+  - a `Credential` payload part;
+  - HMAC/MAC algorithms;
+  - `PublicKey` of any algorithm;
+  - `ZkLinkContract`.
+- A `zklinkSeed` ref keeps its existing rules and answers no public operation.
+- An ordinary `Sign` keeps today's behaviour: an untyped ref still signs
+  `Secp256k1Digest` until the cross-family key-typing follow-up.
+- The role is the declaration. A role ref needs no `signing_algorithm`, and
+  `insert`/`remove` keep the role semantics they have today.
+
+**Address channel.** P4's `fetch_public` with
+`PublicAddress { key: identity.extra[l1Wallet] }` at trusted setup. The
+venue never derives it. The result is the *actual* L1 signer. It never
+becomes the account subject or `stable_id` by itself (condition 6). The
+funder, maker and imported L2 API identity are distinct values, and none is
+compared with it as if it were the wallet.
+
+**Codegen and TS.** `build_support` `ExtraKey` and the TS `ExtraKeyPolicy.key`
+union gain `l1Wallet`, and `host.d.mts` `SigningIdentity.extra` gains
+`l1Wallet?`. Generated policy only; no family declares it yet.
+
+**REDs** (existing decode, shown failing first):
+- R1: a setup with policy `extra: {key: l1Wallet, encoding: hex}` and
+  `PublicAddress` on the extra ref equals the pinned ethers address. Today
+  `l1Wallet` is an unknown variant.
+- R2: role isolation. An `l1Wallet` ref is refused for each of `Present`,
+  a `Credential` part, `HmacSha256`, `PublicKey{Ed25519}` and `ZkLinkContract`.
+  A `zklinkSeed` ref is refused for `PublicAddress` and `Secp256k1Digest`.
+  It fails today at decode.
+- R3: codegen emits `ExtraKey::L1Wallet` for a rule declaring it. Today the
+  rule is refused.
+
+**Tests.**
+- `fetch_public` returns the role's address.
+- A secondary-slot `l1Wallet` is refused at setup even when policy declares
+  it, because import and L1 are primary-only (condition 6). The engine
+  enforces this in `apply_to_identities`.
+- Required-for-private absent or empty fails setup.
+- Disabled `secp256k1` arm: `Unsupported`.
+
+**Later parts** (each planned and reviewed separately):
+- 2: the ClobAuth L1 recipe, signed with the `l1Wallet` role.
+- 3: `Cx::request_import` and `Signer::import`/`drop_imported` (sections 2-7).
+- 4: the Polymarket conversion, codex-hcmq3f.
+
+**Architecture gate.** Is this a per-venue fix of a cross-cutting concern?
+No. It adds one shared role table for every extra key and reuses P4's
+channel. Polymarket gets no special case in the provider.
 
 ## Sequencing
 

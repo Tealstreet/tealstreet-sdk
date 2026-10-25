@@ -124,3 +124,36 @@ fn injected_refs_work_without_flat_credentials_and_missing_provider_is_refused()
     .unwrap();
     assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if r.headers.iter().any(|(k,v)| *k == "X-BAPI-API-KEY" && v == "injected-key"))));
 }
+
+struct Registered;
+impl Visit for Registered {
+    type Output = safe_cex_engine::signing::Identities;
+    fn visit<V: Venue + 'static>(self, engine: Engine<V>) -> Self::Output {
+        engine.identities().clone()
+    }
+}
+
+#[test]
+fn trusted_construction_registers_the_venue_identities_for_capability_admission() {
+    let mut input = options("bybit");
+    input.key = Some("primary-key".into());
+    input.secret = Some("primary-secret".into());
+    input.read_credentials = Some(safe_cex_engine::ReadCredentials {
+        key: "secondary-key".into(),
+        secret: "secondary-secret".into(),
+        passphrase: None,
+    });
+    let registered = build(
+        "bybit",
+        input,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Registered,
+    )
+    .unwrap();
+    let primary = registered.primary.expect("primary refs registered");
+    let secondary = registered.secondary.expect("secondary refs registered");
+    assert_ne!(primary.signing, secondary.signing);
+    // Refs only: no key material is registered with the engine.
+    let serialized = serde_json::to_string(&(primary, secondary)).unwrap();
+    assert!(!serialized.contains("primary-secret") && !serialized.contains("secondary-secret"));
+}

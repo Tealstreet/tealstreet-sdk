@@ -234,10 +234,10 @@ fn private_connection_that_never_opens_is_closed_and_backed_off() {
         }),
     );
     e.start(0.0);
-    let request = support::requests(&mut e).remove(0);
+    let request = support::public_requests(&mut e, 0.).remove(0);
     support::response(&mut e, &request, support::MARKETS);
     // Private startup begins at markets, so its socket may connect before tickers.
-    let mut actions: Vec<_> = e.drain_actions().collect();
+    let mut actions = support::prepared(&mut e, 100.);
     let request = actions
         .iter()
         .find_map(|a| match a {

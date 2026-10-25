@@ -30,7 +30,8 @@ pub fn reply_at(e: &mut Engine<TxFlow>, r: &HttpRequest, now: f64, status: u16, 
     );
 }
 pub fn requests(e: &mut Engine<TxFlow>) -> Vec<HttpRequest> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -64,7 +65,7 @@ pub fn bootstrap_with_meta(
     e.start(NOW);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, meta);
-    let mut actions = e.drain_actions().collect::<Vec<_>>();
+    let mut actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     let index = actions
         .iter()
         .position(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetCtx"))
@@ -77,7 +78,7 @@ pub fn bootstrap_with_meta(
         &r,
         r#"{"success":true,"code":0,"data":{"instrumentId":1,"lastPrice":"100","markPx":"100","oraclePx":"100"}}"#,
     );
-    actions.extend(e.drain_actions());
+    actions.extend(safe_cex_engine::test_support::prepared_actions(&mut e, NOW));
     let timer = actions
         .iter()
         .find_map(|a| match a {
@@ -86,7 +87,10 @@ pub fn bootstrap_with_meta(
         })
         .unwrap();
     e.handle(NOW + 25.0, Event::TimerFired { timer });
-    actions.extend(e.drain_actions());
+    actions.extend(safe_cex_engine::test_support::prepared_actions(
+        &mut e,
+        NOW + 25.0,
+    ));
     let socket = actions
         .iter()
         .find_map(|a| match a {

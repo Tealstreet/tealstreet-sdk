@@ -2,10 +2,15 @@ use crate::wire::*;
 use crate::{BitgetFutures, Pending, paths, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
+use safe_cex_engine::credential_selection::{
+    CredentialRole, CredentialUnavailable, PrimaryReason, SlotPolicy, Slots,
+};
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Credential, Scope};
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor};
 use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
@@ -147,11 +152,14 @@ impl Account {
 impl BitgetFutures {
     pub(crate) fn private_enabled(&self) -> bool {
         !self.options.public_data_only
-            && self.options.key.as_ref().is_some_and(|k| !k.is_empty())
-            && self.options.secret.as_ref().is_some_and(|s| !s.is_empty())
+            && self
+                .options
+                .credentials
+                .as_ref()
+                .is_some_and(|id| id.validate().is_ok())
     }
 
-    fn primary_balance_read(&self, path: &str) -> bool {
+    pub(crate) fn primary_balance_read(&self, path: &str) -> bool {
         self.account.degraded
             && matches!(
                 path.split('?').next().unwrap_or(path),
@@ -159,91 +167,97 @@ impl BitgetFutures {
             )
     }
 
-    pub(crate) fn signed_headers(
-        &self,
-        now: f64,
-        method: Method,
-        path: &str,
-        body: &str,
-    ) -> Result<Vec<(&'static str, String)>, String> {
-        let read = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get && !self.primary_balance_read(path));
-        let key = self
-            .options
-            .key
-            .as_deref()
-            .map(|primary| read.map_or(primary, |r| r.key.as_str()))
-            .filter(|k| !k.is_empty())
-            .ok_or("Bitget API key is required")?;
-        let secret = self
-            .options
-            .secret
-            .as_deref()
-            .map(|primary| read.map_or(primary, |r| r.secret.as_str()))
-            .filter(|k| !k.is_empty())
-            .ok_or("Bitget secret is required")?;
-        let passphrase = self
-            .options
-            .passphrase
-            .as_deref()
-            .map(|primary| {
-                read.and_then(|r| r.passphrase.as_deref())
-                    .unwrap_or(primary)
-            })
-            .filter(|k| !k.is_empty())
-            .ok_or("Bitget passphrase is required")?;
-        Ok(sign::headers(
-            key,
-            secret,
-            passphrase,
-            now,
-            method.as_str(),
-            path,
-            body,
-        ))
+    /// Both keys, reachable only through a declared role.
+    fn credential_slots(&self) -> Slots<&Identity> {
+        Slots::new(
+            self.options.credentials.as_ref(),
+            self.options.read_credentials.as_ref(),
+            SlotPolicy::default(),
+        )
     }
 
+    /// The read key serves every GET except a degraded balance read, which
+    /// keeps the primary key (and primary egress); the primary key is the fallback.
+    fn read_role(&self, path: &str) -> CredentialRole {
+        if self.primary_balance_read(path) {
+            CredentialRole::PrimaryRead {
+                reason: PrimaryReason::DegradedRead,
+                scope: None,
+            }
+        } else {
+            CredentialRole::Read { scope: None }
+        }
+    }
+
+    pub(crate) fn signing_identity(&self, method: Method, path: &str) -> Option<&Identity> {
+        let role = if method == Method::Get {
+            self.read_role(path)
+        } else {
+            CredentialRole::Mutation
+        };
+        self.credential_slots()
+            .select(role)
+            .ok()
+            .map(|(_, identity)| *identity)
+    }
+
+    /// The managed read credential and the identity that signs it, from one selection.
+    pub(crate) fn read_selection(&self, path: &str) -> (Option<Credential>, Option<Identity>) {
+        match self.credential_slots().select(self.read_role(path)) {
+            Ok((selection, identity)) => (
+                Some(selection.credential(identity.credential.clone())),
+                Some((*identity).clone()),
+            ),
+            Err(CredentialUnavailable::Missing) => (None, None),
+        }
+    }
+
+    /// One physical account read under its own Background Read Context. An
+    /// issuance or queue refusal is a pre-send failure, as a provider refusal is.
     fn account_request(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         path: String,
         at: Option<ArrayAt>,
         request: Request,
     ) {
-        match self.signed_headers(cx.now, Method::Get, &path, "") {
-            Ok(headers) => {
-                let url = format!("{}{path}", paths::REST);
-                let id = if let Some(at) = at {
-                    cx.request_streamed(
-                        Method::Get,
-                        url,
-                        headers,
-                        at,
-                        Pending::Account {
-                            generation: self.account.generation,
-                            request,
-                        },
-                    )
-                } else {
-                    cx.request(
-                        Method::Get,
-                        url,
-                        headers,
-                        None,
-                        Pending::Account {
-                            generation: self.account.generation,
-                            request,
-                        },
-                    )
-                };
-                if self.primary_balance_read(&path) {
-                    cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
+        let (credential, identity) = self.read_selection(&path);
+        let policy = crate::read_policy(credential);
+        let context = match cx.http_context(Scope::Background, policy) {
+            Ok(context) => context,
+            Err(reason) => {
+                return self.account_sign_failed(cx, request, &reason.venue_error().message);
+            }
+        };
+        let recipe = sign::Http::new(identity, path.clone());
+        let pending = Pending::Account {
+            generation: self.account.generation,
+            context: context.clone(),
+            request,
+        };
+        match cx.request_signed_managed(
+            context,
+            Method::Get,
+            format!("{}{path}", paths::REST),
+            None,
+            Box::new(recipe),
+            pending,
+        ) {
+            Ok(id) => {
+                if let Some(at) = at {
+                    cx.stream_response(id, at);
                 }
             }
-            Err(error) => cx.retried_failure("bitget.account:241", error),
+            // Synchronous, so no trade resume here: the caller's callback continues.
+            Err((pending, reason)) => {
+                if let Pending::Account {
+                    context, request, ..
+                } = pending
+                {
+                    let _ = cx.finish_http_context(&context);
+                    self.account_sign_failed(cx, request, &reason.venue_error().message);
+                }
+            }
         }
     }
 
@@ -254,7 +268,13 @@ impl BitgetFutures {
             cx.store.set_orders(vec![]);
             return;
         }
-        if self.options.passphrase.as_deref().is_none_or(str::is_empty) {
+        if self
+            .options
+            .credentials
+            .as_ref()
+            .and_then(|id| id.passphrase.as_ref())
+            .is_none_or(|key| key.0.is_empty())
+        {
             let error =
                 VenueError::new("Bitget requires a passphrase").kind(ErrorKind::InvalidInput);
             self.reject_startup(cx, error, false);
@@ -282,35 +302,21 @@ impl BitgetFutures {
         socket: safe_cex_engine::SocketId,
     ) {
         self.account.authenticated = false;
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Login<'a> {
-            api_key: &'a str,
-            passphrase: &'a str,
-            timestamp: String,
-            sign: String,
+        if let Some(identity) = self.options.credentials.clone() {
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(sign::WsLogin::new(
+                    identity,
+                    if self.account.uta {
+                        paths::UTA_PRIVATE
+                    } else {
+                        paths::PRIVATE
+                    }
+                    .into(),
+                )),
+            );
         }
-        #[derive(Serialize)]
-        struct Auth<'a> {
-            op: &'static str,
-            args: [Login<'a>; 1],
-        }
-        let timestamp = safe_cex_engine::num::format((cx.now / 1000.0).floor());
-        let secret = self.options.secret.as_deref().unwrap_or_default();
-        let signature = sign::signature(secret, &timestamp, "GET", "/user/verify", "");
-        cx.send(
-            socket,
-            serde_json::to_string(&Auth {
-                op: "login",
-                args: [Login {
-                    api_key: self.options.key.as_deref().unwrap_or_default(),
-                    passphrase: self.options.passphrase.as_deref().unwrap_or_default(),
-                    timestamp,
-                    sign: signature,
-                }],
-            })
-            .expect("login"),
-        );
         self.refresh_positions(cx);
         self.refresh_balance(cx);
         self.refresh_orders(cx, false);
@@ -485,7 +491,7 @@ impl BitgetFutures {
         );
     }
 
-    fn order_page(&self, cx: &mut Cx<'_, Pending>, mut snapshot: Box<OrderSnapshot>) {
+    fn order_page(&mut self, cx: &mut Cx<'_, Pending>, mut snapshot: Box<OrderSnapshot>) {
         snapshot.page_count = 0;
         let source = snapshot.source;
         let mut path = if self.account.uta {
@@ -870,6 +876,19 @@ impl BitgetFutures {
     ) {
         self.clear_in_flight(&request);
         cx.retried_failure("bitget.account:870", error);
+    }
+
+    pub(crate) fn account_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+    ) {
+        match request {
+            // Provider refusal is not transport evidence for Classic fallback.
+            Request::Probe => self.probe_failed(cx, error, 0.0),
+            request => self.account_failed(cx, request, error),
+        }
     }
 
     pub(crate) fn account_transport_failed(
@@ -2705,31 +2724,19 @@ mod secondary_policy_tests {
     use super::*;
     #[test]
     fn degraded_balance_uses_primary_fast_client_but_other_gets_use_read_identity() {
-        let mut venue = BitgetFutures::new(crate::Options {
-            key: Some("primary-key".into()),
-            secret: Some("primary-secret".into()),
-            passphrase: Some("primary-pass".into()),
-            read_credentials: Some(safe_cex_engine::ReadCredentials {
-                key: "read-key".into(),
-                secret: "read-secret".into(),
-                passphrase: Some("read-pass".into()),
-            }),
-            ..crate::Options::default()
-        });
         for degraded in [false, true] {
-            venue.account.degraded = degraded;
             for path in [paths::BALANCE, paths::UTA_ASSETS, paths::POSITIONS] {
-                let headers = venue.signed_headers(1.0, Method::Get, path, "").unwrap();
+                let (mut venue, provider) = crate::secondary_tests::setup();
+                venue.account.degraded = degraded;
+                let primary = venue.primary_balance_read(path);
+                let headers = crate::secondary_tests::headers(venue, provider, Method::Get, path);
                 let expected = if degraded && path != paths::POSITIONS {
                     "primary-key"
                 } else {
                     "read-key"
                 };
                 assert!(headers.contains(&("ACCESS-KEY", expected.into())));
-                assert_eq!(
-                    venue.primary_balance_read(path),
-                    degraded && path != paths::POSITIONS
-                );
+                assert_eq!(primary, degraded && path != paths::POSITIONS);
             }
         }
     }

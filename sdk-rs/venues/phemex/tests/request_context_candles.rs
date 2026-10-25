@@ -1,4 +1,5 @@
 //! Unsigned candle authority must survive preparation and asynchronous delivery.
+mod support;
 use safe_cex_engine::model::Interval;
 use safe_cex_engine::request_context::{
     Claim, Error, HttpAction, Preparation, Prepared, RoutingIntent,
@@ -7,12 +8,13 @@ use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Notice, Outcome, Response, TimerId,
     VenueError,
 };
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use safe_cex_venue_phemex::PhemexPerpetuals;
+use support::Options;
 type TestEngine = Engine<PhemexPerpetuals>;
 const ROWS: &str = r#"{"code":0,"data":{"rows":[[120,60,0,"105","115","95","110","3",0],[60,60,0,"100","110","90","105","2",0]]}}"#;
 
 fn engine(options: Options) -> TestEngine {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(options));
+    let mut e = support::engine(options);
     e.start(0.);
     e.drain_actions().for_each(drop);
     e

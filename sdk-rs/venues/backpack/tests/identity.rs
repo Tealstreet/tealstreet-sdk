@@ -3,8 +3,33 @@ use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notic
 use safe_cex_venue_backpack::{Backpack, Options};
 const NOW: f64 = 1000.0;
 fn engine(read: bool, public: bool) -> Engine<Backpack> {
+    engine_window(read, public, None)
+}
+fn engine_window(read: bool, public: bool, recv_window: Option<f64>) -> Engine<Backpack> {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    let (provider, identities) = if public {
+        (None, safe_cex_engine::signing::Identities::default())
+    } else {
+        let local = |key: &str, seed| LocalIdentity {
+            key: Secret::new(key.into()),
+            secret: Secret::new(STANDARD.encode([seed; 32])),
+            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+            ..Default::default()
+        };
+        let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+            primary: Some(local("primary-key", 7u8)),
+            secondary: read.then(|| local("read-key", 8u8)),
+        })
+        .unwrap();
+        (
+            Some(std::sync::Arc::new(provider) as safe_cex_engine::signing::Provider),
+            identities,
+        )
+    };
     let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
+        identity: identities.primary.clone(),
+        read_identity: identities.secondary.clone(),
         key: Some("primary-key".into()),
         secret: Some(STANDARD.encode([7u8; 32])),
         read_credentials: read.then(|| safe_cex_engine::ReadCredentials {
@@ -13,8 +38,11 @@ fn engine(read: bool, public: bool) -> Engine<Backpack> {
             passphrase: None,
         }),
         public_data_only: public,
+        recv_window,
         ..Default::default()
     }));
+    e.set_signer(provider).unwrap();
+    e.set_identities(identities).unwrap();
     e.start(NOW);
     for _ in 0..12 {
         let reads: Vec<_> = e
@@ -64,7 +92,7 @@ fn engine(read: bool, public: bool) -> Engine<Backpack> {
 }
 fn ask(e: &mut Engine<Backpack>) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
 }
 fn request(e: &mut Engine<Backpack>) -> HttpRequest {
     let actions = ask(e);
@@ -244,4 +272,20 @@ fn identity_rejects_incomplete_saved_read_credentials_without_primary_fallback()
     }));
     let error = result(ask(&mut e), true).unwrap_err();
     assert!(error.contains("Secondary read credentials"));
+}
+
+#[test]
+fn identity_secondary_read_inherits_the_primary_native_window() {
+    let mut e = engine_window(true, false, Some(12_345.));
+    let r = request(&mut e);
+    assert!(
+        r.headers
+            .iter()
+            .any(|(name, value)| *name == "X-Window" && value == "12345")
+    );
+    assert!(
+        r.headers
+            .iter()
+            .any(|(name, value)| *name == "X-API-Key" && value == "read-key")
+    );
 }
