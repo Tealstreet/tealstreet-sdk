@@ -437,7 +437,10 @@ fn a_command_read_timestamp_rejection_resyncs_then_resends_once_re_signed() {
     );
     let results = terminals(&refused, COMMAND);
     assert_eq!(results.len(), 1);
-    assert!(results[0].is_err());
+    // A read keeps the native venue text and carries no money outcome.
+    let error = results[0].as_ref().unwrap_err();
+    assert!(error.message.contains("Timestamp"), "{error:?}");
+    assert_eq!((error.kind, error.outcome), (None, None));
 }
 
 #[test]
