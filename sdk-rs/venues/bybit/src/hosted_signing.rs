@@ -39,6 +39,7 @@ pub fn http_work(
         ],
         context,
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(stamp_ms),
             expiry_ms,
         },
@@ -106,6 +107,7 @@ mod tests {
         assert_eq!(
             work.receipt,
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(1_709_209_849_123.),
                 expiry_ms: Some(1_709_209_854_123.)
             }
