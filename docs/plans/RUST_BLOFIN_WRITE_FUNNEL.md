@@ -229,6 +229,13 @@ W1 (each fails on the base):
   the command seals Unknown; a long refusal means short is never prepared and
   Rejected; long Accepted then short refused or 503 keeps long's accepted
   effect in the journal (never NotSent, no commit); both Accepted commits once.
+- half-applied join (long Accepted, then short refused, or short 503): the terminal
+  keeps long's effect (outcome None, or Unknown for the 503), applies no hedged
+  setting commit, and runs native's join-failure `refresh_account` (one RED
+  per short outcome);
+- re-plan flip: a SetLeverage queued behind another job is planned at its
+  preflight-ready wake against the current hedged/isolated state, so a flip
+  while queued never issues a stale one- or two-leg plan.
 
 W2:
 
