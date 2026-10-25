@@ -893,13 +893,7 @@ impl Lifecycle {
             .ok_or(SocketError::Capacity)?
             .max(desired_bytes.checked_mul(2).ok_or(SocketError::Capacity)?);
         let other_interest = self
-            .feeds
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != feed.0)
-            .try_fold(0usize, |sum, (_, f)| {
-                sum.checked_add(f.interests.budget_bytes())
-            })
+            .other_feed_bytes(feed, Interests::budget_bytes)
             .ok_or(SocketError::Capacity)?;
         if other_interest
             .checked_add(reserved)
@@ -909,13 +903,7 @@ impl Lifecycle {
             return Err(SocketError::Capacity);
         }
         let other_queue = self
-            .feeds
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != feed.0)
-            .try_fold(0usize, |sum, (_, f)| {
-                sum.checked_add(f.interests.queued_bytes())
-            })
+            .other_feed_bytes(feed, Interests::queued_bytes)
             .ok_or(SocketError::Capacity)?;
         let available_queue = MAX_QUEUED_BYTES
             .checked_sub(other_queue)
@@ -958,20 +946,8 @@ impl Lifecycle {
         if forced.len() != repair.len() || forced.iter().any(|k| !desired.contains_key(*k)) {
             return Err(SocketError::InvalidInterest);
         }
-        let removed: Vec<_> = f
-            .interests
-            .released
-            .values()
-            .filter(|i| desired.get(&i.key) != Some(i) || forced.contains(i.key.as_ref()))
-            .map(|i| i.as_ref().clone())
-            .collect();
-        let added: Vec<_> = desired
-            .values()
-            .filter(|i| {
-                f.interests.released.get(&i.key) != Some(i) || forced.contains(i.key.as_ref())
-            })
-            .map(|i| i.as_ref().clone())
-            .collect();
+        let removed = changed_rows(&f.interests.released, &desired, &forced);
+        let added = changed_rows(&desired, &f.interests.released, &forced);
         let mut queue = VecDeque::new();
         let mut queued_bytes = 0usize;
         for (subscribe, items) in [(false, removed), (true, added)] {
@@ -1054,6 +1030,16 @@ impl Lifecycle {
         self.pending_frames = pending_frames;
         Ok(revision)
     }
+    /// Checked sum of `bytes` over every feed except `feed`; the interest and
+    /// queue budgets share this one copy.
+    #[inline(never)]
+    fn other_feed_bytes(&self, feed: FeedId, bytes: fn(&Interests) -> usize) -> Option<usize> {
+        self.feeds
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != feed.0)
+            .try_fold(0usize, |sum, (_, f)| sum.checked_add(bytes(&f.interests)))
+    }
     /// Only the engine's final action handoff calls this, after all expiry and
     /// signer barriers are checked. Staging a frame is NOT release progress.
     pub(crate) fn release_batch(&mut self, epoch: Epoch, signer_barrier: bool) -> Option<String> {
@@ -1081,6 +1067,19 @@ impl Lifecycle {
     }
 }
 
+/// Rows of `rows` whose key and arguments are not in `other`, or forced: the
+/// unsubscribe and subscribe sides share this one copy.
+#[inline(never)]
+fn changed_rows(
+    rows: &Map<Arc<str>, Arc<Interest>>,
+    other: &Map<Arc<str>, Arc<Interest>>,
+    forced: &Set<&str>,
+) -> Vec<Interest> {
+    rows.values()
+        .filter(|i| other.get(&i.key) != Some(i) || forced.contains(i.key.as_ref()))
+        .map(|i| i.as_ref().clone())
+        .collect()
+}
 /// Whether two keys are equal; sorts `keys` in place.
 fn has_duplicate(keys: &mut [&str]) -> bool {
     keys.sort_unstable();

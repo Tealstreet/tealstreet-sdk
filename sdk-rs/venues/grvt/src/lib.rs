@@ -336,16 +336,7 @@ impl Grvt {
         }
     }
     fn unsupported_command(cx: &mut Cx<'_, Pending>, operation: Operation) {
-        let Ok(context) = cx.admit_http_command(Policy {
-            operation,
-            credential: None,
-            timeout_ms: 20_000,
-            pacing: None,
-            retry: RetryPolicy::Never,
-        }) else {
-            return;
-        };
-        let _ = cx.fail_context(&context, "Unsupported GRVT command");
+        cx.refuse_command(operation, "Unsupported GRVT command");
     }
     fn fetch_markets(&mut self, cx: &mut Cx<'_, Pending>) {
         let context = match cx.http_context(
