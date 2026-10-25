@@ -214,9 +214,16 @@ impl<P> Cx<'_, P> {
         policy: PreflightPolicy,
     ) -> Result<Preflight, crate::request_context::CommandEntryError> {
         use crate::request_context::CommandEntryError;
+        #[cfg(feature = "write-preflight-wait")]
         let operation = match policy.purpose {
             PreflightPurpose::ReadOnly => Operation::Read,
             PreflightPurpose::WriteAfterReads => Operation::Mutation,
+        };
+        #[cfg(not(feature = "write-preflight-wait"))]
+        let operation = if policy.purpose == PreflightPurpose::ReadOnly {
+            Operation::Read
+        } else {
+            return Err(CommandEntryError::Revoked);
         };
         if !self.io.fresh_command_entry() {
             return Err(CommandEntryError::Revoked);

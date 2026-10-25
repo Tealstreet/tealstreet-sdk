@@ -16,6 +16,7 @@ pub(super) enum Activation {
 }
 
 impl ContextRegistry {
+    #[cfg(feature = "write-preflight-wait")]
     /// Whether this Preflight still waits in its park, woken or not, so its
     /// caller's cap still governs it.
     pub(in crate::engine) fn preflight_waiting(&self, handle: &Preflight) -> bool {
@@ -185,10 +186,12 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         // A capped write Preflight's caller wait keeps running while it is parked.
+        #[cfg(feature = "write-preflight-wait")]
         let cap = state
             .receipt_cap
             .filter(|_| state.policy.purpose == PreflightPurpose::WriteAfterReads)
             .map(|(_, cap)| cap);
+        #[cfg(feature = "write-preflight-wait")]
         let timer = match cap {
             Some(_) => Some(crate::TimerId(
                 self.io.reserve_ids(1).ok_or(Error::Capacity)?.start,
@@ -200,6 +203,7 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .preflight_state_mut(handle)?
             .activation = Activation::Parked;
+        #[cfg(feature = "write-preflight-wait")]
         if let (Some(at_ms), Some(timer)) = (cap, timer) {
             self.io
                 .core

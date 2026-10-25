@@ -32,7 +32,7 @@ impl<P> Io<P> {
     }
 }
 
-#[cfg(feature = "http-plans")]
+#[cfg(feature = "write-preflight-wait")]
 impl<P> Io<P> {
     /// A parked write Preflight's cap timer; an early fire re-arms for the
     /// exact cap (true: consumed here).
@@ -72,7 +72,7 @@ impl<V: Venue> Engine<V> {
     /// A parked write Preflight past its caller's cap fails exactly as an
     /// expired entry does, through the owner-aware Preflight seal; one that left
     /// its park is no longer bounded. Runs outside every command loan.
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "write-preflight-wait")]
     fn expire_write_preflights(&mut self, now: f64) {
         if self.io.core.write_preflight_waits.is_empty() || !now.is_finite() {
             return;
@@ -102,7 +102,7 @@ impl<V: Venue> Engine<V> {
     /// codec or lend authority: prepare all, mark all, then per owner discard,
     /// hand back its continuations without a Cx, and seal once.
     pub(super) fn expire_read_roots(&mut self, now: f64) {
-        #[cfg(feature = "http-plans")]
+        #[cfg(feature = "write-preflight-wait")]
         self.expire_write_preflights(now);
         if self.io.core.read_roots.is_empty()
             || !now.is_finite()

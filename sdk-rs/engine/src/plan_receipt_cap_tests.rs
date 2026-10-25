@@ -7,6 +7,8 @@ use crate::{
 
 #[derive(Clone, Copy)]
 enum Mode {
+    #[cfg(not(feature = "write-preflight-wait"))]
+    RefuseWrite,
     Spent,
     Borrowed,
     Exhausted,
@@ -76,6 +78,19 @@ impl Venue for Probe {
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
         self.calls += 1;
         match self.mode {
+            #[cfg(not(feature = "write-preflight-wait"))]
+            Mode::RefuseWrite => {
+                self.refuse(
+                    cx,
+                    PreflightPurpose::WriteAfterReads,
+                    CommandEntryError::Revoked,
+                );
+                assert!(cx.io.fresh_command_entry());
+                let owner = cx
+                    .begin_preflight(policy(PreflightPurpose::ReadOnly))
+                    .unwrap();
+                cx.done_preflight(&owner, "native-control".into()).unwrap();
+            }
             Mode::Spent => {
                 cx.set_timer(100.);
                 self.refuse(cx, PreflightPurpose::ReadOnly, CommandEntryError::Revoked);
@@ -184,14 +199,20 @@ fn failures(e: &mut Engine<Probe>) -> Vec<VenueError> {
         .collect()
 }
 #[test]
-// A WriteAfterReads capture now binds its cap (docs/plans/RUST_WRITE_PREFLIGHT_WAIT.md;
-// write_preflight_wait_tests); only a spent entry still refuses with no effects.
-fn resource_spent_capture_leaves_every_pool_unchanged() {
-    let mut e = engine(Mode::Spent);
-    e.drain_actions().for_each(drop);
-    e.handle_command(0., query(), Some(100)).unwrap();
-    assert_eq!(e.venue.checked, 1);
-    assert!(failures(&mut e).is_empty());
+fn write_policy_and_resource_spent_capture_leave_every_pool_unchanged() {
+    // With write-preflight-wait a WriteAfterReads capture binds its cap instead
+    // (docs/plans/RUST_WRITE_PREFLIGHT_WAIT.md, write_preflight_wait_tests).
+    #[cfg(not(feature = "write-preflight-wait"))]
+    let modes = [Mode::RefuseWrite, Mode::Spent];
+    #[cfg(feature = "write-preflight-wait")]
+    let modes = [Mode::Spent];
+    for mode in modes {
+        let mut e = engine(mode);
+        e.drain_actions().for_each(drop);
+        e.handle_command(0., query(), Some(100)).unwrap();
+        assert_eq!(e.venue.checked, 1);
+        assert!(failures(&mut e).is_empty());
+    }
 }
 #[test]
 fn borrowed_timer_cannot_capture_or_emit_a_terminal() {

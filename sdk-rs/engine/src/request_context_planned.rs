@@ -480,10 +480,15 @@ impl<P> Cx<'_, P> {
             .core
             .request_contexts
             .preflight_receipt_cap(preflight)?;
+        #[cfg(not(feature = "write-preflight-wait"))]
+        if receipt_cap.is_some() && operation != Operation::Read {
+            return Err(Error::Invalid);
+        }
         if receipt_cap.is_some_and(|(_, cap)| !self.now.is_finite() || cap - self.now < 1.) {
             return Err(Error::TimedOut);
         }
         // A write Plan never inherits the caller cap: it bounded the Preflight only.
+        #[cfg(feature = "write-preflight-wait")]
         let receipt_cap = receipt_cap.filter(|_| operation == Operation::Read);
         #[cfg(feature = "serial-plans")]
         let schedule = schedule?;

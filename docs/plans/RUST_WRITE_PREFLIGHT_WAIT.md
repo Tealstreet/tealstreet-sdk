@@ -154,10 +154,21 @@ and the FIFO advances".
 
 ## Sizes and checks
 
-- **Size:** generic engine code. Paired Bybit, Bitget and combined on the
-  composed tip. A non-adopting family should be about 0, since the new index
-  sits on the existing preflight path. If it is not, gate it behind
-  `serial-plans`.
-- **Checks:** engine tests in default, `serial-plans`, `condition-waits` and
-  `http-mutation-barriers` modes; the feature-modes script; clippy in three
-  modes; wasm32 clippy; bans.
+- **Feature gate (measured).** Ungated on f895d0d7018, the first source cost
+  Bybit +993, Bitget +751 and combined +15,792: every family monomorphizes the
+  sweep and its `fail_preflight` call. A `serial-plans` gate would still charge
+  Bitget, whose trading uses serial Plans. So the whole mechanism sits behind a
+  dedicated non-default `write-preflight-wait = ["http-plans"]`, and only an
+  adopter (BloFin) enables it.
+- **Feature OFF** is today's engine, and the original `RefuseWrite` pin still
+  holds there.
+- **Feature-modes script:** it gains a `write Preflight wait control` row.
+- **Size:** paired Bybit, Bitget and combined with the feature off must be
+  identical to the composed tip. The feature-on cost is measured with BloFin's
+  adoption.
+- **Checks:**
+  - engine tests with the feature off and on;
+  - the feature-modes script;
+  - clippy in every mode;
+  - wasm32 clippy;
+  - bans.

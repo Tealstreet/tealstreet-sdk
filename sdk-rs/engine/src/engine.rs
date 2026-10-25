@@ -1600,7 +1600,7 @@ struct IoCore {
     read_roots_expiring: bool,
     /// Parked WriteAfterReads Preflights bounded by their caller's receipt:
     /// (cap, owner, its timer).
-    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "write-preflight-wait")]
     write_preflight_waits: Vec<(f64, crate::request_context::Preflight, TimerId)>,
     /// Action capacity right after the sweep's reservation, for tests.
     #[cfg(test)]
@@ -1726,7 +1726,7 @@ impl Default for IoCore {
             placement_acks: Default::default(),
             execution_timer: None,
             read_roots: Vec::with_capacity(256),
-            #[cfg(feature = "http-plans")]
+            #[cfg(feature = "write-preflight-wait")]
             write_preflight_waits: Vec::new(),
             read_roots_expiring: false,
             #[cfg(test)]
@@ -3952,7 +3952,7 @@ impl<V: Venue> Engine<V> {
         {
             return;
         }
-        #[cfg(feature = "http-plans")]
+        #[cfg(feature = "write-preflight-wait")]
         if let Event::TimerFired { timer } = &event
             && self.io.write_preflight_timer(*timer, now)
         {
