@@ -71,11 +71,12 @@ public option is implemented or considered approved by this plan.
 2. Hosted: inject a payloadSigner adapter which forwards Stark work to the
    configured signing authority. Exchange options carry the public subkey and
    account addresses, not the private Stark scalar. remoteSigner remains
-   available for the existing HTTP contract. If both callbacks are configured,
-   route by phase; do not apply generic remote-over-payload precedence in a way
-   that suppresses Paradex's required order-signing callback. Ambiguous ownership
-   or unsupported capabilities must refuse before private work, never fallback
-   to a local key.
+   available for the existing legacy HTTP contract. Legacy TS may keep both
+   adapters until cutover; that compatibility wiring must not suppress required
+   Stark payload work. The shared route uses one Signer provider and dispatches
+   each operation by its declared algorithm, without callback phase precedence.
+   Ambiguous ownership or unsupported capabilities refuse before private work,
+   never falling back to a local key.
 3. Server-subkey: trusted exchange-server construction injects an in-process
    Stark payloadSigner backed by its subkey store. Browser account/wire options
    carry only public metadata. Select this through trusted account configuration,
@@ -95,6 +96,75 @@ Keep remote HTTP/WS support and public-only mode separately testable. A missing
 Stark capability is not an authentication rejection from Paradex. The precise
 shared typed setup/admission error and callback-combination rules need owner
 review before source. Existing valid remote configurations cannot be dropped.
+
+## Shared setup, admission and lifecycle pins
+
+The shared setup/transport plan (delivery step 2) must resolve these pins using
+existing constructs. The mode matrix authorizes no new callback or provider API.
+
+| Mode | Shared construction target |
+| --- | --- |
+| Local | Trusted LocalSetup installs opaque refs into Rust LocalSigner, declaring StarkDigest on the signing ref through IdentitySetupPolicy.signing_algorithm. |
+| Hosted | Inject Identities through EngineOptions.signing; injected slots carry valid signing refs, and the host Signer advertises StarkDigest for the selected ref. Do not install a local private key in this mode. |
+| Server-subkey | Trusted native build_with_signer construction supplies an in-process Signer backed by the authorized subkey store. Do not serialize a callback or private scalar. |
+
+Action::Sign / Signer is the single shared provider surface. A provider dispatches
+HmacSha256 and StarkDigest operations by algorithm-declared refs. The current
+hosted Input::Credential/Http/WsAuth and remote_signing_policy are HMAC-shaped;
+Stark adoption uses the shared Sign route, or an independently reviewed new
+Input. Extending a HMAC policy table does not add hosted Stark support.
+
+Identity.validate requires a valid credential ref as well as a signing ref.
+Paradex has no API-key credential, so the shared setup owner must define the real
+credential-presentation subject (for example an account/public-subkey reference
+used by auth) before source. This remains OPEN; no empty or fake ref is allowed.
+Public key/addresses are public metadata, not refs to secret material. Shared
+setup selects by trusted mode and eliminates the legacy private/public key
+option overload. Startup verifies the configured public subkey by issuing
+Operation::PublicKey { algorithm: StarkDigest, key: selected signing ref } and
+comparing the provider result to the account/network's expected public subkey
+before any private work.
+
+Algorithm admission has two lines. At genuine command or Preflight admission,
+check the selected ref's declared StarkDigest against the provider capability
+through Cx::can_sign, before queueing or provisional effects; Unsupported refuses
+with NotSent. Prepare checks again. At this tip, signing_algorithm is a trusted
+IdentitySetupPolicy field, not an Identity field; the declaration must follow the
+selected opaque ref. Paradex is a Required signing family: auth itself needs
+Stark, so absent capability means no private Session can be created. Setup or
+construction refusal is consistent with GRVT G6's per-operation rule because
+Paradex has no credential-only/Optional private path. The landed #2109 MissingKey
+ownership latch applies when an installed required primary Stark ref is missing.
+Do not import GRVT's deliberate Optional absence exception into Paradex.
+
+Adoption uses managed dispatch signing, receipt attestation and existing Attempt
+custody for duplicate/late results. After the attempt window a signature is
+Stale; the owner ends as the window's Timeout/NotSent terminal with nothing sent.
+No venue-side late-result mechanism is added. Before adoption, controls must
+reject a noncanonical felt pair, out-of-range r/s or a signature that does not
+verify against the expected public subkey for that account/network, with NotSent.
+Pin wrong account, network and public key as well as malformed encoding.
+
+Paradex JWT maps to the landed #2069 Session bearer hook. The Stark-signed
+/v1/auth operation is Session login, not a managed command. The JWT is the Bearer
+bundle, its revision moves on every refresh, and session_ready follows refresh.
+NotReady parks bound calls only inside their original windows. Rotation or
+revocation retires the Session with retire_session; queued/parked calls end or
+re-park through the shared fence and never send under an old JWT or key. Private
+WS auth uses that same Session identity/lifetime; the socket owner must pin its
+binding, since the REST bearer hook does not automatically bind a socket epoch.
+No venue-local JWT resend/repair path replaces the shared revision fence.
+
+Signed order/amend payloads freeze signature_timestamp and all signed fields at
+native operation construction (trading.rs prepares once; account.rs queues the
+same body/digest behind auth). Native writes do not gain an automatic resend from
+this plan. A separately authorized retry or attempt-2 resend re-signs the exact
+frozen digest/fields inside the original window; neither provider nor transport
+recomputes timestamps, expiry or economics. If the original window or declared
+signed validity has expired, refuse before send instead of resending a stale
+timestamp. A new logical command constructs fresh fields. Controls compare the
+original and re-prepared digest/body/timestamp, deny an expired resend with no
+transport, and verify the provider cannot substitute fresh signed fields.
 
 ## Hosted Stark and subkey completion
 
@@ -148,8 +218,17 @@ and nonce/session fit, not a venue-specific Stark workaround.
    source. Exercise real local and external signers through actual EngineHost /
    WASM and final transport, including server-subkey rotation and stale results.
 4. Implement only after setup/algorithm/session/venue source scopes are reviewed.
-   A generic engine PR measures Bybit and Bitget on the composed tree. Measure
-   family and combined size and CPU/replay with unchanged budgets/profiles.
+   Paradex managed Stark adoption measures Paradex family, combined, Bybit and
+   Bitget on the composed tree, even when the consumer is the entry to new engine
+   paths. Preserve fixed budgets/profiles and require qualifying CPU/replay.
 5. Source reviews, one intended freeze push/run, READY notification and the
    auditor's exact-tree GO remain required. This plan changes no runtime, Cargo,
    manifest, original fixture, hosted service, provisioning flow or CI.
+
+## Bounded plan review
+
+m26ps4 and fe7lgm independently CLEAR the plan-first direction at 381eadfc2bb.
+This supplement folds their shared-construct, algorithm-admission, public-key,
+Required-family, Session/JWT, managed receipt/late-result, immutable resend and
+composed-size pins. The credential-ref meaning and external service source pins
+remain explicit setup/implementation gates; neither review authorizes source.
