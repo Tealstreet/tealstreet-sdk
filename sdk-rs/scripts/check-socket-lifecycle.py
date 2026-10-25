@@ -19,6 +19,8 @@ ROOT = lex.ROOT
 SITES = 'scripts/socket-legacy-sites.json'
 FAMILIES = 'scripts/socket-legacy-families.json'
 # Reviewed, single-use edits of an existing site's arguments: never a new site.
+# Once every baseline carries the new digest (the edit landed), an entry is only
+# reported for removal: its old digest is gone, so it can never be reused.
 REPLACEMENTS = 'scripts/socket-legacy-replacements.json'
 
 
@@ -80,16 +82,21 @@ def previous(path, parser):
         lex.MANIFEST, lex.manifest = old_path, old_parser
 
 
-def check(current, allowed, families, old_sites=(), old_families=(), replacements=None):
+def check(current, allowed, families, old_sites=(), old_families=(), replacements=None,
+          notices=None):
     failures = []
     replacements = replacements or {}
     used = set()
+    landed = set()
     if current != allowed:
         failures.append('legacy socket references must exactly match inventory; prune removals')
     for label, baseline in old_sites:
         for path, counts in allowed.items():
             base = baseline.get(path, {})
             if lex.subset(counts, base):
+                if any(base.get(entry['new'], 0) > 0 and base.get(entry['old'], 0) <= 0
+                       for entry in replacements.get(path, [])):
+                    landed.add(path)
                 continue
             # An argument edit of a site that exists at this baseline, count unchanged.
             effective = replaced(counts, base, replacements.get(path, []))
@@ -98,7 +105,11 @@ def check(current, allowed, families, old_sites=(), old_families=(), replacement
                 continue
             failures.append(f'{path}: legacy socket inventory grew against {label}')
     for path in replacements:
-        if path not in used:
+        if path in used:
+            continue
+        if path in landed and notices is not None:
+            notices.append(f'{path}: legacy socket replacement landed; remove its entry')
+        elif path not in landed:
             failures.append(f'{path}: stale or unusable legacy socket replacement')
     roots = families['sourceRoots']
     present = set()
@@ -139,18 +150,21 @@ def temporary_feature_present(source):
 
 
 def main():
+    notices = []
     try:
         families = family_manifest((ROOT / FAMILIES).read_text())
         failures = check(
             lex.sites(), lex.manifest((ROOT / SITES).read_text()),
             families,
             previous(SITES, lex.manifest), previous(FAMILIES, family_manifest),
-            replacement_manifest((ROOT / REPLACEMENTS).read_text()))
+            replacement_manifest((ROOT / REPLACEMENTS).read_text()), notices)
         if not families['sourceRoots'] and temporary_feature_present(
                 (ROOT / 'engine/Cargo.toml').read_text()):
             failures.append('all socket families migrated: remove the temporary engine feature')
     except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError) as error:
         failures = [f'cannot verify legacy socket inventory: {type(error).__name__}']
+    for notice in notices:
+        print('NOTICE: socket lifecycle: ' + notice)
     for failure in failures:
         print('BANNED: socket lifecycle: ' + failure)
     return bool(failures)
