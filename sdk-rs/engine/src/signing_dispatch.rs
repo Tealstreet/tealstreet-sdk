@@ -88,7 +88,8 @@ pub(crate) struct Pending {
     pub receipt: SignReceipt,
     prepared_protocol_at: Option<f64>,
     header_policy: ResultHeaderPolicy,
-    refs: Vec<crate::signing::KeyRef>,
+    /// Whether the prepared request names primary material (`primary_owns`).
+    primary: bool,
 }
 impl Pending {
     fn receipt_expired(&self, raw_now: f64) -> bool {
@@ -123,14 +124,9 @@ pub(crate) struct Dispatch {
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: crate::IdMap<RequestId, Pending>,
     next: crate::resource_ids::ResourceIds,
-    /// A preparation that named a missing credential ref; taken once.
-    credential_refused: Option<CredentialRefusal>,
-}
-/// The refs a refused preparation named, when it got far enough to name any.
-pub(crate) struct CredentialRefusal {
-    pub refs: Vec<crate::signing::KeyRef>,
-    /// A socket login refused before naming refs; logins use the primary.
-    pub socket_login: bool,
+    /// A preparation that named a missing credential ref, and whether that
+    /// was primary material; taken once.
+    credential_refused: Option<bool>,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
@@ -143,12 +139,12 @@ impl Dispatch {
         self.pending.is_empty() && self.outbound.is_empty()
     }
 
-    pub fn take_credential_refusal(&mut self) -> Option<CredentialRefusal> {
+    pub fn take_credential_refusal(&mut self) -> Option<bool> {
         self.credential_refused.take()
     }
-    /// The refs the attempt's prepared request names.
-    pub fn prepared_refs(&self, id: RequestId) -> &[crate::signing::KeyRef] {
-        self.pending.get(&id).map_or(&[], |p| &p.refs)
+    /// Whether the attempt's prepared request names primary material.
+    pub fn prepared_primary(&self, id: RequestId) -> bool {
+        self.pending.get(&id).is_some_and(|p| p.primary)
     }
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
@@ -330,7 +326,7 @@ impl Dispatch {
                 receipt: Default::default(),
                 prepared_protocol_at: None,
                 header_policy,
-                refs: Vec::new(),
+                primary: true,
             },
         );
         Ok(deadline)
@@ -414,6 +410,7 @@ impl Dispatch {
         now: f64,
         context: &DispatchContext<'_>,
         clock_revision: u64,
+        identities: &crate::signing::Identities,
     ) -> Result<SignRequest, SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
         if !now.is_finite() || now >= p.deadline {
@@ -430,14 +427,11 @@ impl Dispatch {
         let work = match p.step.prepare(&mut p.outbound, context) {
             Ok(work) => work,
             Err(error) => {
+                // A login refused before naming refs uses the primary.
                 if error == SignError::MissingKey {
-                    self.credential_refused = Some(CredentialRefusal {
-                        refs: Vec::new(),
-                        socket_login: matches!(
-                            p.outbound,
-                            Action::WsSend { .. } | Action::WsConnect { .. }
-                        ),
-                    });
+                    let login =
+                        matches!(p.outbound, Action::WsSend { .. } | Action::WsConnect { .. });
+                    self.credential_refused = Some(login || identities.secondary.is_none());
                 }
                 return Err(error);
             }
@@ -461,13 +455,10 @@ impl Dispatch {
             if !work.has_invalid_key_ref() {
                 return Err(error);
             }
-            self.credential_refused = Some(CredentialRefusal {
-                refs: work.key_refs().cloned().collect(),
-                socket_login: false,
-            });
+            self.credential_refused = Some(identities.primary_owns(&work));
             return Err(SignError::MissingKey);
         }
-        p.refs = work.key_refs().cloned().collect();
+        p.primary = identities.primary_owns(&work);
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
         if work
@@ -712,7 +703,13 @@ mod header_tests {
             )
             .unwrap();
         let work = dispatch
-            .prepare(RequestId(10), 1000., &DispatchContext::new(1000., None), 3)
+            .prepare(
+                RequestId(10),
+                1000.,
+                &DispatchContext::new(1000., None),
+                3,
+                &Default::default(),
+            )
             .unwrap();
         let mut result = SignResult::new(vec![vec![7; 32]], work.receipt);
         result.headers = vec![("x-mbx-apikey".into(), "callback".into())];

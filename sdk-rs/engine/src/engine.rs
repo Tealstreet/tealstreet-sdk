@@ -4523,11 +4523,8 @@ impl<V: Venue> Engine<V> {
         if let Err(crate::signing::SignError::MissingKey) = result {
             let startup = self.startup_watch_at.is_some();
             let io = &mut self.io;
-            let refs = io.signing.prepared_refs(attempt);
             io.signing_latch.missing_key(
-                &io.identities,
-                refs,
-                false,
+                io.signing.prepared_primary(attempt),
                 startup,
                 &mut io.actions,
                 &mut io.health,
@@ -5022,17 +5019,16 @@ impl<V: Venue> Engine<V> {
                                 self.io.entropy.as_ref(),
                             ),
                             self.io.protocol_clock.revision(),
+                            &self.io.identities,
                         ) {
                             Ok(work) => work,
                             Err(error) => {
                                 let emitted = self.io.actions.len();
-                                if let Some(refusal) = self.io.signing.take_credential_refusal() {
+                                if let Some(primary) = self.io.signing.take_credential_refusal() {
                                     let startup = self.startup_watch_at.is_some();
                                     let io = &mut self.io;
                                     io.signing_latch.missing_key(
-                                        &io.identities,
-                                        &refusal.refs,
-                                        refusal.socket_login,
+                                        primary,
                                         startup,
                                         &mut io.actions,
                                         &mut io.health,
@@ -5498,28 +5494,17 @@ impl SigningLatch {
         true
     }
 
-    /// A key missing from the credentials can never sign: fail once, visibly,
-    /// and during startup fail `start`. A secondary read slot's missing key
-    /// never stops primary trading, so it latches only on primary refs (a
-    /// socket login refused before naming refs uses the primary).
+    /// A key missing from primary material can never sign: fail once,
+    /// visibly, and during startup fail `start` (`Identities::primary_owns`).
     #[inline(never)]
-    #[allow(clippy::too_many_arguments)]
     fn missing_key(
         &mut self,
-        identities: &crate::signing::Identities,
-        refs: &[crate::signing::KeyRef],
-        login: bool,
+        primary: bool,
         startup: bool,
         actions: &mut Vec<Action>,
         health: &mut Health,
         min_level: Level,
     ) {
-        let primary = login
-            || identities.secondary.is_none()
-            || identities
-                .primary
-                .as_ref()
-                .is_some_and(|primary| refs.iter().any(|key| primary.owns(key)));
         if !primary || self.refused.is_some() {
             return;
         }

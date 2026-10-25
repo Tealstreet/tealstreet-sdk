@@ -265,6 +265,18 @@ fn valid_key_ref(key: &KeyRef) -> bool {
     !key.0.is_empty() && key.0.len() <= 256
 }
 
+impl Identities {
+    /// A secondary read slot's failure must never stop primary trading: with
+    /// a secondary, only a request naming a primary ref is primary.
+    pub fn primary_owns(&self, work: &SignRequest) -> bool {
+        self.secondary.is_none()
+            || self
+                .primary
+                .as_ref()
+                .is_some_and(|primary| work.key_refs().any(|key| primary.owns(key)))
+    }
+}
+
 /// Only opaque identities cross into registry/engine options.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Identities {
