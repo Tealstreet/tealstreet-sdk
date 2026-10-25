@@ -1589,10 +1589,7 @@ struct Io<P> {
     host_algorithms: Option<Vec<crate::signing::Algorithm>>,
     dispatch_now: f64,
     signing_admission: Vec<(Action, crate::signing::SignError)>,
-    /// A provider's first permanent refusal; later signed actions fail with it.
-    signing_refused: Option<crate::signing::SignError>,
-    /// Socket roles whose signing was refused; they are never reconnected.
-    refused_roles: u8,
+    signing_latch: SigningLatch,
     streams: crate::IdMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: crate::IdMap<RequestId, Incoming>,
     timers: crate::IdMap<TimerId, ()>,
@@ -1700,8 +1697,7 @@ impl<P> Default for Io<P> {
             host_algorithms: None,
             dispatch_now: 0.,
             signing_admission: Vec::new(),
-            signing_refused: None,
-            refused_roles: 0,
+            signing_latch: SigningLatch::default(),
             streams: Default::default(),
             incoming: Default::default(),
             timers: Default::default(),
@@ -1918,7 +1914,7 @@ impl<P> Cx<'_, P> {
     fn inert_socket(&self, socket: SocketId) -> bool {
         socket.0 == 0
             && (self.io.public_feed_policy != PublicFeedPolicy::Direct
-                || self.io.refused_roles != 0)
+                || self.io.signing_latch.roles != 0)
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
@@ -1926,9 +1922,7 @@ impl<P> Cx<'_, P> {
         if self.io.managed_socket_active()
             || spec.channel == Some(SocketChannel::Public)
                 && self.io.public_feed_policy != PublicFeedPolicy::Direct
-            || spec.channel.as_ref().is_some_and(|channel| {
-                self.io.refused_roles & (1 << SocketRoles::role(channel)) != 0
-            })
+            || self.io.signing_latch.blocks(spec.channel.as_ref())
         {
             return SocketId(0);
         }
@@ -2183,7 +2177,7 @@ impl<P> Cx<'_, P> {
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
         self.io.opaque_entry_activity();
         self.io.assert_action_safe(&outbound);
-        if let Some(error) = self.io.signing_refused {
+        if let Some(error) = self.io.signing_latch.refused {
             self.io.signing_admission.push((outbound, error));
             return;
         }
@@ -3646,7 +3640,7 @@ impl<V: Venue> Engine<V> {
         };
         if let Event::Signed { attempt, result } = event {
             if !self.io.signing.is_managed(attempt) || self.signing_pending(attempt) {
-                self.provider_refused(now, attempt, &result);
+                self.provider_refused(attempt, &result);
                 self.sign_completed(now, attempt, result);
             }
             if self.venue.cancel_needs_stored_order() {
@@ -4520,49 +4514,25 @@ impl<V: Venue> Engine<V> {
         }
     }
 
-    /// A missing credential ref, from the provider or from preparation, means
-    /// these credentials can never sign; every other error stays per request.
-    /// It fails once, visibly, and later signed actions and reconnects stop.
+    /// A missing key on primary material latches signing (`SigningLatch`).
     fn provider_refused(
         &mut self,
-        now: f64,
         attempt: RequestId,
         result: &Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
-        if let Err(error @ crate::signing::SignError::MissingKey) = result
-            && self.primary_refs(self.io.signing.prepared_refs(attempt))
-        {
-            self.refuse_signing(now, *error);
-        }
-    }
-
-    /// A secondary read slot's failure must never stop primary trading, so
-    /// only a request naming a primary ref latches when a secondary exists.
-    fn primary_refs(&self, refs: &[crate::signing::KeyRef]) -> bool {
-        let identities = &self.io.identities;
-        identities.secondary.is_none()
-            || identities
-                .primary
-                .as_ref()
-                .is_some_and(|primary| refs.iter().any(|key| primary.owns(key)))
-    }
-
-    fn refuse_signing(&mut self, now: f64, error: crate::signing::SignError) {
-        if self.io.signing_refused.replace(error).is_some() {
-            return;
-        }
-        let mut cx = Cx {
-            now,
-            store: &mut self.store,
-            io: &mut self.io,
-        };
-        cx.notice(
-            Level::Error,
-            log_code::CONFIG_INVALID,
-            format!("Signing cannot succeed with the installed credentials: {error}"),
-        );
-        if self.startup_watch_at.is_some() {
-            cx.startup_failed(error.venue_error());
+        if let Err(crate::signing::SignError::MissingKey) = result {
+            let startup = self.startup_watch_at.is_some();
+            let io = &mut self.io;
+            let refs = io.signing.prepared_refs(attempt);
+            io.signing_latch.missing_key(
+                &io.identities,
+                refs,
+                false,
+                startup,
+                &mut io.actions,
+                &mut io.health,
+                io.min_level,
+            );
         }
     }
 
@@ -4583,10 +4553,10 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
-                let refused = cx.io.signing_refused.is_some();
-                if refused && let Some(role) = cx.io.sockets.role_of(socket) {
-                    cx.io.refused_roles |= 1 << role;
-                }
+                let io = &mut *cx.io;
+                // Records the role; managed feeds also stop on it.
+                #[cfg_attr(not(feature = "managed-sockets"), allow(unused_variables))]
+                let refused = io.signing_latch.socket_failed(&io.sockets, socket);
                 #[cfg(feature = "managed-sockets")]
                 if refused
                     && cx.io.managed_socket_active()
@@ -5056,10 +5026,18 @@ impl<V: Venue> Engine<V> {
                             Ok(work) => work,
                             Err(error) => {
                                 let emitted = self.io.actions.len();
-                                if let Some(refusal) = self.io.signing.take_credential_refusal()
-                                    && (refusal.socket_login || self.primary_refs(&refusal.refs))
-                                {
-                                    self.refuse_signing(now, error);
+                                if let Some(refusal) = self.io.signing.take_credential_refusal() {
+                                    let startup = self.startup_watch_at.is_some();
+                                    let io = &mut self.io;
+                                    io.signing_latch.missing_key(
+                                        &io.identities,
+                                        &refusal.refs,
+                                        refusal.socket_login,
+                                        startup,
+                                        &mut io.actions,
+                                        &mut io.health,
+                                        io.min_level,
+                                    );
                                 }
                                 self.sign_completed(now, attempt, Err(error));
                                 self.queue_dispatch_callback_actions(&mut queued, emitted);
@@ -5070,7 +5048,7 @@ impl<V: Venue> Engine<V> {
                             self.io.signer.as_ref().and_then(|s| s.sign_ready(&work))
                         {
                             let emitted = self.io.actions.len();
-                            self.provider_refused(now, attempt, &result);
+                            self.provider_refused(attempt, &result);
                             self.sign_completed(now, attempt, result);
                             // Inline local completion retains original mixed action order.
                             self.queue_dispatch_callback_actions(&mut queued, emitted);
@@ -5491,6 +5469,80 @@ fn apply_signature(
 /// The longest a repeating retried-read failure goes without an Error. Below the
 /// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
 pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
+
+/// Credential-level signing refusal. Non-generic, so the combined build holds
+/// one copy rather than one per venue engine.
+#[derive(Default)]
+struct SigningLatch {
+    /// The first missing-key refusal; later signed actions fail with it.
+    refused: Option<crate::signing::SignError>,
+    /// Socket roles whose signing was refused; they are never reconnected.
+    roles: u8,
+}
+
+impl SigningLatch {
+    #[inline(never)]
+    fn blocks(&self, channel: Option<&SocketChannel>) -> bool {
+        channel.is_some_and(|channel| self.roles & (1 << SocketRoles::role(channel)) != 0)
+    }
+
+    /// Whether signing is latched; if so, the failed socket's role is too.
+    #[inline(never)]
+    fn socket_failed(&mut self, sockets: &SocketRoles, socket: SocketId) -> bool {
+        if self.refused.is_none() {
+            return false;
+        }
+        if let Some(role) = sockets.role_of(socket) {
+            self.roles |= 1 << role;
+        }
+        true
+    }
+
+    /// A key missing from the credentials can never sign: fail once, visibly,
+    /// and during startup fail `start`. A secondary read slot's missing key
+    /// never stops primary trading, so it latches only on primary refs (a
+    /// socket login refused before naming refs uses the primary).
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    fn missing_key(
+        &mut self,
+        identities: &crate::signing::Identities,
+        refs: &[crate::signing::KeyRef],
+        login: bool,
+        startup: bool,
+        actions: &mut Vec<Action>,
+        health: &mut Health,
+        min_level: Level,
+    ) {
+        let primary = login
+            || identities.secondary.is_none()
+            || identities
+                .primary
+                .as_ref()
+                .is_some_and(|primary| refs.iter().any(|key| primary.owns(key)));
+        if !primary || self.refused.is_some() {
+            return;
+        }
+        let error = crate::signing::SignError::MissingKey;
+        self.refused = Some(error);
+        push_event(
+            actions,
+            health,
+            min_level,
+            LogEvent {
+                level: Level::Error,
+                code: log_code::CONFIG_INVALID,
+                message: format!("Signing cannot succeed with the installed credentials: {error}"),
+                fields: Vec::new(),
+            },
+        );
+        if startup {
+            actions.push(Action::Notice(Notice::StartupFailed {
+                error: error.venue_error(),
+            }));
+        }
+    }
+}
 
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
 #[derive(Default)]
