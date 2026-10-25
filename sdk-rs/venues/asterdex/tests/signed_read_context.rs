@@ -393,3 +393,72 @@ fn keyless_public_trades_are_a_managed_unsigned_read() {
     let done = stream(&mut engine, START, &trades, "[]");
     assert_eq!(terminals(&done, COMMAND).len(), 1);
 }
+
+const TIMESTAMP: &str =
+    r#"{"code":-1021,"msg":"Timestamp for this request was outside of the recvWindow."}"#;
+
+/// After a -1021, the resync's /time and then exactly one re-signed resend.
+fn resynced(engine: &mut Engine<AsterDex>, rejected: &Output) -> Output {
+    let clock = find(rejected, "/time").clone();
+    answer(
+        engine,
+        START,
+        &clock,
+        200,
+        r#"{"serverTime":1700000009000}"#,
+    )
+}
+
+#[test]
+fn a_command_read_timestamp_rejection_resyncs_then_resends_once_re_signed() {
+    let (mut engine, _) = private();
+    let sent = command(&mut engine, START, account());
+    let read = find(&sent, "/account").clone();
+    let rejected = answer(&mut engine, START, &read, 400, TIMESTAMP);
+    assert!(
+        rejected
+            .requests
+            .iter()
+            .all(|r| !r.url.contains("/account")),
+        "nothing signs before the resync"
+    );
+    let released = resynced(&mut engine, &rejected);
+    managed(&released, 1);
+    let resent = find(&released, "/account").clone();
+    assert!(
+        resent.url.contains("timestamp=1700000009000"),
+        "{}",
+        resent.url
+    );
+    let refused = answer(&mut engine, START, &resent, 400, TIMESTAMP);
+    assert!(
+        refused.requests.iter().all(|r| !r.url.contains("/account")),
+        "exactly one resend"
+    );
+    let results = terminals(&refused, COMMAND);
+    assert_eq!(results.len(), 1);
+    assert!(results[0].is_err());
+}
+
+#[test]
+fn a_background_snapshot_timestamp_rejection_resyncs_then_releases_its_resend() {
+    let (mut engine, startup) = private();
+    let snapshot = find(&startup, "/positionRisk").clone();
+    let rejected = stream(&mut engine, START, &snapshot, TIMESTAMP);
+    let released = resynced(&mut engine, &rejected);
+    managed(&released, 1);
+    let resent = find(&released, "/positionRisk").clone();
+    assert!(
+        resent.url.contains("timestamp=1700000009000"),
+        "{}",
+        resent.url
+    );
+    let again = stream(&mut engine, START, &resent, TIMESTAMP);
+    assert!(
+        again
+            .requests
+            .iter()
+            .all(|r| !r.url.contains("/positionRisk")),
+        "exactly one resend"
+    );
+}

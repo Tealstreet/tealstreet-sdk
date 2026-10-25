@@ -635,17 +635,8 @@ impl WeexFutures {
         let mut requests = VecDeque::new();
         let (kind, order_id, symbol) = match read {
             Query::OrderByClientId { .. } => {
-                let Ok(context) = cx.admit_http_command(Policy {
-                    operation: Operation::Read,
-                    credential: None,
-                    timeout_ms: 20_000,
-                    pacing: None,
-                    retry: RetryPolicy::Never,
-                }) else {
-                    return;
-                };
-                let _ = cx.fail_context(
-                    &context,
+                cx.refuse_command(
+                    Operation::Read,
                     "WEEX client order lookup is not supported by the Rust engine",
                 );
                 return;
@@ -658,16 +649,7 @@ impl WeexFutures {
                 limit,
             } => {
                 if !valid_range(from_ms, to_ms) {
-                    let Ok(context) = cx.admit_http_command(Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    }) else {
-                        return;
-                    };
-                    let _ = cx.fail_context(&context, "invalid WEEX fill range");
+                    cx.refuse_command(Operation::Read, "invalid WEEX fill range");
                     return;
                 }
                 for window in windows(from_ms, to_ms, 7.0 * DAY) {
@@ -696,16 +678,7 @@ impl WeexFutures {
                 limit,
             } => {
                 if !valid_range(from_ms, to_ms) {
-                    let Ok(context) = cx.admit_http_command(Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    }) else {
-                        return;
-                    };
-                    let _ = cx.fail_context(&context, "invalid WEEX order range");
+                    cx.refuse_command(Operation::Read, "invalid WEEX order range");
                     return;
                 }
                 for window in windows(from_ms, to_ms, 90.0 * DAY) {
@@ -757,30 +730,12 @@ impl WeexFutures {
                 limit,
             } => {
                 if !valid_range(from_ms, to_ms) {
-                    let Ok(context) = cx.admit_http_command(Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    }) else {
-                        return;
-                    };
-                    let _ = cx.fail_context(&context, "invalid WEEX income range");
+                    cx.refuse_command(Operation::Read, "invalid WEEX income range");
                     return;
                 }
                 if matches!((from_ms,to_ms),(Some(from),Some(to)) if (to-from)/INCOME_WINDOW>f64::from(INCOME_BUDGET))
                 {
-                    let Ok(context) = cx.admit_http_command(Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    }) else {
-                        return;
-                    };
-                    let _ = cx.fail_context(&context, "WEEX income range exceeds chunk budget");
+                    cx.refuse_command(Operation::Read, "WEEX income range exceeds chunk budget");
                     return;
                 }
                 let ranged = matches!((from_ms,to_ms),(Some(a),Some(b)) if b>a);
@@ -838,16 +793,7 @@ impl WeexFutures {
             }
         };
         if requests.is_empty() {
-            let Ok(context) = cx.admit_http_command(Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            }) else {
-                return;
-            };
-            let _ = cx.fail_context(&context, "WEEX history range exceeds request budget");
+            cx.refuse_command(Operation::Read, "WEEX history range exceeds request budget");
             return;
         }
         let Some(root) = self.history_root(cx, kind) else {

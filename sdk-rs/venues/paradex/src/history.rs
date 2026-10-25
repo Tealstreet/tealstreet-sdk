@@ -313,16 +313,7 @@ impl History {
                 || client_order_id.chars().count() > 64
                 || client_order_id.contains(['\r', '\n']))
         {
-            let Ok(context) = cx.admit_http_command(Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            }) else {
-                return;
-            };
-            let _ = cx.fail_context(&context, "invalid Paradex client order ID");
+            cx.refuse_command(Operation::Read, "invalid Paradex client order ID");
             return;
         }
         let bounds = match &query {
@@ -338,16 +329,7 @@ impl History {
             .any(|v| !v.is_finite() || v < 0.)
             || matches!(bounds, (Some(a),Some(b)) if a>b)
         {
-            let Ok(context) = cx.admit_http_command(Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            }) else {
-                return;
-            };
-            let _ = cx.fail_context(&context, "invalid Paradex history time range");
+            cx.refuse_command(Operation::Read, "invalid Paradex history time range");
             return;
         }
         if matches!(query, Query::Fills { symbol: None, .. }) {
