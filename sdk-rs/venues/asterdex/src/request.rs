@@ -18,6 +18,7 @@ use crate::{AsterDex, Pending, reset_pending};
 const CLOCK_INTERVAL_MS: f64 = 300_000.0;
 /// One `/time` attempt's own bound, as the host timeout it replaces.
 const CLOCK_TIMEOUT_MS: u32 = 5_000;
+const CLOCK_ADMISSION_RETRY_MS: f64 = 1_000.0;
 const READ_TIMEOUT_MS: u32 = 20_000;
 
 /// Unsigned public reads: the engine owns the bound and retry eligibility.
@@ -37,6 +38,8 @@ pub struct RequestState {
     clock_running: bool,
     startup_pending: bool,
     clock_timer: Option<TimerId>,
+    /// A refused clock admission retries the same attempt; it is not a failure.
+    clock_admission: Option<(TimerId, u8)>,
     retries: HashMap<TimerId, Box<SignedRequest>>,
     awaiting_clock: VecDeque<Box<SignedRequest>>,
 }
@@ -613,7 +616,7 @@ impl AsterDex {
             Egress::PublicCors
         };
         let Ok(context) = cx.http_context_with_egress(Scope::Background, policy, egress) else {
-            self.clock_settled(cx, attempt, None);
+            self.clock_refused(cx, attempt);
             return;
         };
         let url = format!("{}{}/time", self.urls.rest, version.prefix());
@@ -626,8 +629,13 @@ impl AsterDex {
             .is_err()
         {
             let _ = cx.finish_http_context(&context);
-            self.clock_settled(cx, attempt, None);
+            self.clock_refused(cx, attempt);
         }
+    }
+
+    fn clock_refused(&mut self, cx: &mut Cx<'_, Pending>, attempt: u8) {
+        let timer = cx.set_timer(CLOCK_ADMISSION_RETRY_MS);
+        self.requests.clock_admission = Some((timer, attempt));
     }
 
     pub(crate) fn on_clock_response(
@@ -676,9 +684,23 @@ impl AsterDex {
         }
     }
 
+    /// Fixtures that saturate managed capacity start with a fresh clock, so
+    /// their writes are not gated behind a clock read waiting for a slot.
+    #[cfg(test)]
+    pub(crate) fn mark_clock_synced(&mut self, now: f64) {
+        self.requests.last_sync_success = Some(now);
+    }
+
     pub(crate) fn on_request_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if let Some(request) = self.requests.retries.remove(&timer) {
             self.dispatch_signed(cx, request);
+            return true;
+        }
+        if let Some((pending, attempt)) = self.requests.clock_admission
+            && pending == timer
+        {
+            self.requests.clock_admission = None;
+            self.issue_clock(cx, attempt);
             return true;
         }
         if self.requests.clock_timer == Some(timer) {

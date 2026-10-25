@@ -8633,6 +8633,12 @@ until their own slices.
   messages for negative envelopes, malformed rows and HTTP status are unchanged.
 - **Clock.** Each of the four `/time` attempts is its own 5 s Background read.
   Attempts 1-2 go direct and 3-4 through the public CORS egress, as before.
-  A full or refused context counts as a failed attempt.
+  If the engine refuses to admit an attempt (for example at full capacity), the
+  same attempt retries after 1 s and is not counted as failed. Work waiting
+  for the clock waits with it.
 - **Completion.** FetchOrderBook and FetchCandles complete once, through their
   command Context. A late or duplicate response completes nothing.
+
+Follow-up (engine owner): a shared ReadFailure backoff. The engine grants read
+resends but has no delay policy, so AsterDEX keeps its own 1/2/3 s timer, as
+other families do. That timer goes away when the shared backoff lands.
