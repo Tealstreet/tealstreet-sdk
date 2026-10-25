@@ -195,14 +195,10 @@ after_refusal: []}`.
   before the barrier opens, there is zero HTTP and the command is NotSent,
   including a refusal on short after long prepared. That's native's "either
   header fails, neither is sent".
-- **Join.** Each leg's answer records exactly one fact through W1's
-  `write_answer` Setting arm, then `finish_plan_call`. The venue counts settled
-  legs and keeps the first error. When both have settled: if there's no error,
-  `done_plan` and commit; otherwise `fail_plan` with the first error, no commit,
-  and native's join-failure `refresh_account`. A released 408 or 5xx on either
-  leg is Unknown by the journal. One 503 plus one Accepted is Unknown with
-  long's effect kept and no commit. A refusal of one leg after the other was
-  Accepted projects to outcome None, as native's `succeeded` edit did.
+- **Join.** One rule, stated under "Join versus seal" below: each slot
+  settles once, and the terminal follows both. Commit only after `done_plan`
+  returns Ok, with native's `refresh_account` on any failure. The venue
+  carries no error choice of its own (see "Which error is reported").
 - **Retirement.** Unchanged from W1: the engine-sealed join moves to
   `retired`, restores, reconciles and refreshes the account.
 - **Join versus seal (dazzy3 P1, fe7lgm P1, 4yjlw0 2, hcmq3f P2).** Under
@@ -222,17 +218,27 @@ after_refusal: []}`.
 - Pre-commit group abort (a preparation, signing or deadline failure before the
   barrier opens) goes through the shared NotSent owner-retirement path and never
   waits for a second callback that cannot come.
-- **Which error is reported (fe7lgm P3, 4yjlw0 1).** Native's `finish_join`
-  overwrites `joined.error` on each failing leg, so it reports the LAST failing
-  leg's text, kept Unknown if any leg was unproven. W2 keeps that rule (the
-  last failing fact by arrival), per fe7lgm's "pin whichever native does".
-  fe7lgm confirms native-last. The outcome and kind are the journal's
-  projection, never the venue's, and the last leg's text never selects them
-  (fe7lgm pin 1). W1 showed that the recorded facts' messages drive the
-  projected terminal text, so the REDs pin the exact string the projection
-  emits for both-refused and for refusal plus Accepted, in both orders. If the
-  projection takes one fact's message whatever `fail_plan` carries, CALLERS
-  says so instead of claiming native-last parity (dazzy3).
+- **Which error is reported: OPEN, routed for a ruling (hcmq3f).** Native
+  (`9977ccf1aa6` trading.rs:1603-1635) overwrites `joined.error` on every
+  failing callback, keeping Unknown sticky, so it reports the LAST failing
+  callback by arrival. fe7lgm, 4yjlw0 and hcmq3f confirm that reading. The
+  journal cannot express it: `failure_projection` (request_context.rs,
+  "terminal physical attempt of the earliest logical leg … Callback order is
+  irrelevant") selects the earliest logical failing leg's error, and
+  `fail_plan` → `prepare_seal` reaches that projection. The engine test
+  `partial_unknown_survives_earlier_error_selection_and_keeps_explicit_reports`
+  pins it. With both legs refused, native reports the later arrival, while the
+  journal reports long's (slot 0) in either order. The venue will not force
+  native-last by editing outcome or kind, forging or omitting facts,
+  reordering logical legs or appending text. Options for the classifier, core
+  and overseer ruling:
+  (a) a documented diagnostic divergence: the terminal text is the earliest
+      logical failing leg (long), while kind, outcome, IDs and reports are
+      unchanged. Recommended: both texts refuse the same setting, and the
+      difference is diagnostic only.
+  (b) a separately authorized shared message-selection seam that preserves the
+      journal's kind, outcome, IDs and reports.
+  The both-refused RED uses full message equality against the ruled oracle.
 - **Outcome of one refusal plus one Accepted (fe7lgm P2).** This must be the
   journal's projection through `fail_plan`. The engine's `failure_projection`
   gives None when a leg was released, none is uncertain and not all were
@@ -340,7 +346,8 @@ W2 (each fails on W1's serial interim):
   nothing, and root expiry retires the job once and the FIFO proceeds;
 - reported error: a short refusal before long's Accepted, and after it, gives
   outcome None and the refusal's text and kind. Both refused, in both orders,
-  reports the last refusal's text;
+  is asserted by full message equality against the native oracle (the last
+  failing arrival) until the ruling above says otherwise;
 - a short transport loss after long's Accepted gives Unknown, no commit, and the
   refresh (a failure counts as settled);
 - both legs released and neither answering until the call bound gives one
