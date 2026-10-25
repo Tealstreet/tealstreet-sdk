@@ -52,7 +52,8 @@ No engine cargo feature is needed. `admit_caller_read_root`, `SelectedRead`, `Re
    - Rows are admitted only after `validate_delivery`, then `finish_http_context`.
 5. **Hooks.**
    - An `on_http_failed` override keeps the typed Timeout. Binance has none today, so the default would drop the kind.
-   - `read_root_retired` drops the queued native state for that owner. It also finds that owner's parked ranged-income state, which is venue state rather than a pending, removes it and `clear_timer`s the 2 s chunk timer (as WEEX does on Revoked, `history.rs:485-493`).
+   - `read_root_retired` drops that owner's state, including parked ranged-income state, which is venue state rather than a pending. The hook has no `Cx`, so it cannot clear the 2 s timer; the timer fires later, finds no state and does nothing. A Revoked page or timer path does clear it, as WEEX does (`history.rs:485-493`).
+   - **Failure custody.** A failed delivery (timeout, transport, signing refusal) carries no body, so it is current when its leg belongs to the query's root owner, as in WEEX `history_end`. Body deliveries also pass `validate_delivery` on the root and the owner.
    - **Chunk timer (fe7lgm).** The 2 s timer is a venue timer, not root custody. During the gap no leg is in flight, but the 120 s root wait keeps running. The timer path checks `cx.validate_read_root_context(root)` before calling `root.leg(..)`. If the root is Revoked, it drops the state and the timer silently, because a timer queued just before expiry can fire after retirement.
    - `Pending::History` is boxed.
 
@@ -103,7 +104,7 @@ A new target, `venues/binance/tests/history_context.rs`, run against the unchang
 4. **Root expiry.** Root expiry mid-walk is a strict Timeout with no rows and no marker.
 5. **Expiry in the chunk gap.** The root expires during the 2 s gap. When the timer then fires, there is no HTTP and exactly one terminal (fe7lgm).
 
-A command with no wait receipt is refused NotSent before any I/O. This cannot be driven through the public `Engine::handle`, which stamps the default wait, so it is a source-stage control.
+A command with no wait receipt is refused NotSent before any I/O. This cannot be driven through the public engine: `Engine::handle` and `handle_command` both stamp a wait. The refusal is the engine's `reject_unstamped_command`, covered by its own tests; no venue test drives it.
 
 GREEN native controls, from `history_owned.rs`, `lookup.rs` and `queries_variants.rs`, are kept and re-pinned:
 
@@ -132,3 +133,24 @@ Scoped Binance tests and strict checks only, with `CARGO_BUILD_JOBS=4`.
 
 The existing native controls in `history_owned.rs`, `lookup.rs` and `queries_variants.rs` are unchanged and stay GREEN.
 
+## Executed source checkpoint
+
+Commit `6e689b35e25`, composed with tip `f8534cd0cb6` at `9bd1c38ddcc`.
+
+- **REDs.** All five are GREEN, plus the generous-wait control and one source pin, `a_fills_page_uses_the_read_key_on_its_own_route`. That pin covers the exact page URL and query, `RoutingIntent::Secondary`, the read-key header and the 20 s bound.
+- **Lookup RED.** The harness now loads public markets first. Without a market, the lookup answers `UNKNOWN` locally before any I/O, so on the base the RED was failing on that rather than on custody. With markets loaded, the base still fails it: the base emits a legacy signed lookup, not a managed preparation.
+- **Re-pinned native controls.**
+  - `lookup.rs`: routes now assert `None`, since the prepared fixture transport carries no route override (as in OKX `history_selected_identity.rs`). The Primary intent is pinned by the lookup RED, and the primary key header is still asserted.
+  - `secondary_tests.rs`: drives `request_signed_managed` on a Background leg, and reads each request's routing intent from its preparation.
+- **Inventory.** `history.rs` goes from 11F/15O to 0. `lib.rs` loses `29866cd3` only. The signing, credential-selection and socket checkers are unchanged and pass, as do the bans.
+- **Checks.** Binance tests all pass, and `cargo clippy -p safe-cex-venue-binance --all-targets -D warnings` is clean.
+- **Size.** Measured locally with wasm-opt (`SAFE_CEX_WASM_OPT=required`), bare tip `f8534cd0cb6` against composed `9bd1c38ddcc`:
+
+| Bundle | Bare tip | Composed | Delta | Budget room left |
+| --- | ---: | ---: | ---: | ---: |
+| Binance family | 1,227,439 | 1,240,922 | +13,483 | 102,566 of 1,343,488 |
+| Combined | 13,909,229 | 13,920,021 | +10,792 | 235,755 of 14,155,776 |
+| Bybit family | 1,405,589 | 1,405,589 | +0 | unchanged |
+| Bitget family | 1,358,752 | 1,358,752 | +0 | unchanged |
+
+Both deltas fall inside the estimates (+6K to +25K for the family, +3K to +20K combined). Under the standing rule, Bybit and Bitget are byte-identical.

@@ -235,3 +235,52 @@ fn a_chunk_timer_firing_after_expiry_sends_nothing() {
         1
     );
 }
+
+// ---- Source pins ----
+
+#[test]
+fn a_fills_page_uses_the_read_key_on_its_own_route() {
+    let keyed = || {
+        let mut h = Harness::started(Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            read_credentials: Some(safe_cex_engine::ReadCredentials {
+                key: "read-key".into(),
+                secret: "read-secret".into(),
+                passphrase: None,
+            }),
+            ..Options::default()
+        });
+        h.requests.clear();
+        h
+    };
+    let (managed, _) = prepared(&mut keyed(), fills());
+    assert_eq!(
+        managed
+            .iter()
+            .map(|(_, intent)| *intent)
+            .collect::<Vec<_>>(),
+        [RoutingIntent::Secondary]
+    );
+    let mut h = keyed();
+    h.event(Event::Command(Command::Query {
+        command: 903,
+        query: fills(),
+    }));
+    let page = h.take("/fapi/v1/userTrades");
+    assert!(
+        page.url.starts_with(
+            "https://fapi.binance.com/fapi/v1/userTrades?symbol=BTCUSDT&limit=1&startTime=0&endTime=10&timestamp="
+        ),
+        "{}",
+        page.url
+    );
+    assert!(
+        page.headers
+            .iter()
+            .any(|(name, value)| *name == "X-MBX-APIKEY" && value == "read-key"),
+        "{:?}",
+        page.headers
+    );
+    assert_eq!(page.timeout_ms, Some(20_000));
+}
