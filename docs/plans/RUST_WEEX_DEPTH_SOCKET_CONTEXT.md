@@ -235,3 +235,28 @@ actual518d while #2153 CI remains active, superseding only the earlier
 actual2153-before-originals prerequisite. Actual2153 landing still precedes
 production source and first-source measurement. Merge review changes forward;
 production, old fixtures, maps and Cargo remain unchanged during originals.
+
+
+## First compiling originals checkpoint
+
+On requested actual518d, the new depth_socket_context target executes19 tests:
+13 intended assertion RED /6 native GREEN /0ignored, with no compile or fixture
+setup failure. Strict scoped Clippy and formatting pass. An initial fixture-only
+copy lint was corrected without changing runtime code; both review-build targets
+were deleted. All production, existing fixtures, providers, Cargo and inventories
+remain incoming-exact.
+
+The six GREENs pin native snapshot-before-depth-topic ordering, independent
+pre-open books, exact primary signed upgrade/no-ACK subscribe bytes, disabled
+public/private-positive startup, private sibling PONG survival and inert closed
+public ingress. The13 REDs reach real early wire/capacity,20s equality expiry,
+stale429, all3 nonfinite admission and returned-failure clocks, and duplicate
+public/private Opened effects. The private sibling control directly proves PONG
+liveness; it is not a new financial reducer oracle.
+
+Deeper managed-Prepare/release/owned-cleanup/all-credit suffixes are honestly
+unexecuted where the first native raw-wire RED stops the test. Real physical
+TimerFired/preparation-failure controls, reconnect/gap/retained-last calibration,
+transactional interest capacity/quota/burst/not-before controls and complete
+source-stage action/resource proofs remain gates. This is a bounded first
+originals checkpoint, not full originals/source/readiness clearance.
