@@ -30,6 +30,17 @@ class CredentialOnlyBans(unittest.TestCase):
         self.assertEqual(check.violations('engine/src/signing.rs', text), [])
         self.assertEqual(len(check.violations('registry/src/lib.rs', text)), 2)
 
+    def test_a_gated_field_hides_only_that_field(self):
+        text = ('struct S {\n    #[cfg(test)]\n    probe: u8,\n    real: u8,\n}\n'
+                'impl S { fn f(i: &Identity) { i.signing_opt(); } }\n'
+                'fn g() -> S { S {\n    #[cfg(test)]\n    probe: 0,\n    real: 1 } }\n')
+        self.assertEqual(len(check.violations('venues/x/src/lib.rs', text)), 1)
+
+    def test_raw_strings_do_not_unbalance_a_test_module(self):
+        text = ('#[cfg(test)]\nmod tests {\n    const J: &str = r#"{\"a\":1}"#;\n}\n'
+                'fn f(i: &Identity) { i.signing_opt(); }\n')
+        self.assertEqual(len(check.violations('venues/x/src/lib.rs', text)), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

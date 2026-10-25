@@ -30,8 +30,24 @@ RULES = [
 TEST_ATTR = re.compile(r'^[ \t]*#\[cfg\(test\)\][ \t]*\n', re.M)
 
 
+ITEM = re.compile(r'(?:pub(?:\([^)]*\))?\s+)?(?:mod|fn|impl|use|struct|enum|const|static|type|trait|macro_rules!|unsafe|async|extern)\b')
+RAW_STRING = re.compile(r'r(#*)"')
+
+
+def skip_literal(text, j):
+    """Offset just past a string or raw-string literal starting at `j`."""
+    raw = RAW_STRING.match(text, j)
+    if raw:
+        close = '"' + raw.group(1)
+        return text.find(close, raw.end()) + len(close)
+    j += 1
+    while j < len(text) and text[j] != '"':
+        j += 2 if text[j] == '\\' else 1
+    return j + 1
+
+
 def item_end(text, start):
-    """End offset of the item starting at `start` (after its attributes)."""
+    """End offset of the item, field or field initializer after `start`."""
     i = start
     while True:
         line_end = text.find('\n', i)
@@ -40,25 +56,23 @@ def item_end(text, start):
             i = line_end + 1
             continue
         break
-    semi, brace = text.find(';', i), text.find('{', i)
-    if brace < 0 or (0 <= semi < brace):
-        return semi + 1
-    depth, j, quote = 0, brace, False
+    item = ITEM.match(text[i:].lstrip())
+    depth, j = 0, i
     while j < len(text):
         c = text[j]
-        if quote:
-            if c == '\\':
-                j += 1
-            elif c == '"':
-                quote = False
-        elif c == '"':
-            quote = True
-        elif c == '{':
+        if c == '"' or RAW_STRING.match(text, j):
+            j = skip_literal(text, j)
+            continue
+        if c in '([{':
             depth += 1
-        elif c == '}':
-            depth -= 1
+        elif c in ')]}':
             if depth == 0:
+                return j
+            depth -= 1
+            if depth == 0 and c == '}' and item:
                 return j + 1
+        elif depth == 0 and (c == ';' or (c == ',' and not item)):
+            return j + 1
         j += 1
     return len(text)
 
