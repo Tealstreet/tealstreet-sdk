@@ -3136,9 +3136,15 @@ pub trait Venue {
     fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, text: &str);
     fn on_close(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, code: u16);
     /// Opts in to `on_route_exhausted`; every other venue sees today's close.
-    const ROUTE_EXHAUSTION: bool = false;
+    #[inline]
+    fn route_exhaustion() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
     /// Every route was refused, so the host dialled nothing. Called only when
-    /// `ROUTE_EXHAUSTION` is set.
+    /// `route_exhaustion` returns true.
     fn on_route_exhausted(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId) {}
     fn on_response(
         &mut self,
@@ -4134,7 +4140,7 @@ impl<V: Venue> Engine<V> {
                 if !exhausted {
                     cx.io.core.health.count(log_code::WS_CLOSED);
                 }
-                if exhausted && V::ROUTE_EXHAUSTION {
+                if exhausted && V::route_exhaustion() {
                     self.venue.on_route_exhausted(&mut cx, socket)
                 } else {
                     self.venue.on_close(&mut cx, socket, code)
