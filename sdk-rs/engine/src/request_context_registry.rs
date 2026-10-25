@@ -233,13 +233,59 @@ pub(super) struct ContextRegistry {
     /// Plan-backed executions' physical owners, keyed by execution identity.
     /// They hold the Plan, its slots and journal; no command observes them.
     #[cfg(feature = "http-plans")]
-    physical: crate::IdMap<u64, CommandOwner>,
+    physical: PhysicalOwners,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
     read_marks: Vec<(Owner, u64)>,
+}
+
+/// Plan-backed executions' physical owners. Few live at once, so a vector
+/// keeps the map shape without another hash table instantiation.
+#[cfg(feature = "http-plans")]
+#[derive(Default)]
+struct PhysicalOwners(Vec<(u64, CommandOwner)>);
+
+#[cfg(feature = "http-plans")]
+impl PhysicalOwners {
+    fn get(&self, identity: &u64) -> Option<&CommandOwner> {
+        self.0
+            .iter()
+            .find(|(held, _)| held == identity)
+            .map(|(_, owner)| owner)
+    }
+    fn get_mut(&mut self, identity: &u64) -> Option<&mut CommandOwner> {
+        self.0
+            .iter_mut()
+            .find(|(held, _)| held == identity)
+            .map(|(_, owner)| owner)
+    }
+    fn contains_key(&self, identity: &u64) -> bool {
+        self.0.iter().any(|(held, _)| held == identity)
+    }
+    /// Identities are engine-issued and unique, so this never replaces.
+    fn insert(&mut self, identity: u64, owner: CommandOwner) {
+        debug_assert!(!self.contains_key(&identity));
+        self.0.push((identity, owner));
+    }
+    fn remove(&mut self, identity: &u64) -> Option<CommandOwner> {
+        let index = self.0.iter().position(|(held, _)| held == identity)?;
+        Some(self.0.swap_remove(index).1)
+    }
+    fn try_reserve(&mut self, additional: usize) -> Result<(), std::collections::TryReserveError> {
+        self.0.try_reserve(additional)
+    }
+    fn values(&self) -> impl Iterator<Item = &CommandOwner> {
+        self.0.iter().map(|(_, owner)| owner)
+    }
+    fn iter(&self) -> impl Iterator<Item = (&u64, &CommandOwner)> {
+        self.0.iter().map(|(identity, owner)| (identity, owner))
+    }
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl ContextRegistry {

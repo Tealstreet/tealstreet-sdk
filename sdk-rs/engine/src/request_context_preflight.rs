@@ -218,7 +218,7 @@ impl<P> Cx<'_, P> {
         }
         let cap = match self.io.command_receipt() {
             Ok(cap) => cap,
-            Err(reason) => return self.with_command_entry(Operation::Read, |_, _| Err(reason)),
+            Err(reason) => return Err(self.reject_command_entry(Operation::Read, reason)),
         };
         if !self.now.is_finite() || cap.1 - self.now < 1. {
             return Err(CommandEntryError::Revoked);
