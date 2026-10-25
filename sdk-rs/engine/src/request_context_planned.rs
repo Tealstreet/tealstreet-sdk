@@ -149,12 +149,13 @@ impl ContextRegistry {
         now: f64,
         delivery: Option<&Delivery>,
         error: Option<VenueError>,
+        note: Option<&str>,
     ) -> Result<conditional::PreparedPlanSeal, Error> {
         self.validate_plan_seal_origin(plan, now, delivery)?;
         let owner = self.owner_entry(plan.owner()).expect("live Plan owner");
         let mut reports = Vec::new();
         let (journal, legacy) = if let Some(writes) = owner.writes.as_ref() {
-            let prepared = writes.prepare_seal(error)?;
+            let prepared = writes.prepare_seal(error, note)?;
             if prepared.is_failure() {
                 for message in writes.reports() {
                     reports.try_reserve(1).map_err(|_| Error::Capacity)?;
@@ -168,6 +169,12 @@ impl ContextRegistry {
             }
             (Some(prepared), None)
         } else {
+            let error = error.map(|mut error| {
+                if let Some(note) = note {
+                    crate::request_context::note_unprojected(&mut error, note);
+                }
+                error
+            });
             (None, error)
         };
         Ok(conditional::PreparedPlanSeal {
@@ -1268,7 +1275,7 @@ impl<P> Cx<'_, P> {
         if !body.schedule.is_complete() {
             return Err(Error::State);
         }
-        self.seal_plan(plan, Some(result), None)
+        self.seal_plan(plan, Some(result), None, None)
     }
 
     /// Complete a Read from the current validated DATA call, retiring only
@@ -1304,27 +1311,55 @@ impl<P> Cx<'_, P> {
         // All recoverable refusals precede settlement. The existing DATA
         // settlement records exact handoff custody for the terminal operation.
         self.finish_plan_call(plan, slot, context)?;
-        self.seal_plan(plan, Some(result), None)
+        self.seal_plan(plan, Some(result), None, None)
     }
 
     /// Failure-only retirement; expired authority never creates fresh sends.
     pub fn fail_plan(&mut self, plan: &Plan, error: impl Into<VenueError>) -> Result<(), Error> {
-        if self
+        self.fail_plan_checked(plan, error.into(), None)
+    }
+
+    /// `fail_plan` whose `note` is appended to the projected terminal message.
+    /// The note never selects the error or changes its kind, outcome or IDs.
+    pub fn fail_plan_noted(
+        &mut self,
+        plan: &Plan,
+        error: impl Into<VenueError>,
+        note: &str,
+    ) -> Result<(), Error> {
+        self.fail_plan_checked(plan, error.into(), Some(note))
+    }
+
+    fn fail_plan_checked(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        note: Option<&str>,
+    ) -> Result<(), Error> {
+        if !self
             .io
             .http_plan_expiring
             .as_ref()
             .is_some_and(|current| current.same_plan(plan))
         {
-            return self.fail_plan_owned(plan, error.into());
+            self.io.request_contexts.validate_unbound_plan(plan)?;
         }
-        self.io.request_contexts.validate_unbound_plan(plan)?;
-        self.fail_plan_owned(plan, error.into())
+        self.fail_plan_noted_owned(plan, error, note)
     }
 
     pub(in crate::engine) fn fail_plan_owned(
         &mut self,
         plan: &Plan,
         error: VenueError,
+    ) -> Result<(), Error> {
+        self.fail_plan_noted_owned(plan, error, None)
+    }
+
+    fn fail_plan_noted_owned(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        note: Option<&str>,
     ) -> Result<(), Error> {
         if self
             .io
@@ -1339,7 +1374,7 @@ impl<P> Cx<'_, P> {
             )?;
             return Ok(());
         }
-        self.seal_plan(plan, None, Some(error))
+        self.seal_plan(plan, None, Some(error), note)
     }
 
     fn seal_plan(
@@ -1347,8 +1382,9 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         result: Option<String>,
         error: Option<VenueError>,
+        note: Option<&str>,
     ) -> Result<(), Error> {
-        let prepared = self.prepare_plan_terminal(plan, error, result.as_deref())?;
+        let prepared = self.prepare_plan_terminal(plan, error, note, result.as_deref())?;
         self.commit_plan_terminal(plan, result, prepared)
     }
 
@@ -1356,6 +1392,7 @@ impl<P> Cx<'_, P> {
         &mut self,
         plan: &Plan,
         error: Option<VenueError>,
+        note: Option<&str>,
         result: Option<&str>,
     ) -> Result<conditional::PreparedPlanSeal, Error> {
         // Ready-loop custody first: no effect before the owner is confirmed.
@@ -1371,6 +1408,7 @@ impl<P> Cx<'_, P> {
             self.now,
             self.io.http_delivery.as_ref(),
             error,
+            note,
         )?;
         if physical {
             // Every observer's terminal and reports, cloned before the seal.
@@ -1723,7 +1761,7 @@ impl ContextRegistry {
                 })
             })
     }
-    #[cfg(all(test, feature = "serial-plans"))]
+    #[cfg(test)]
     pub(in super::super) fn command_writes(&self, command: CommandId) -> Option<&CommandWrites> {
         self.commands.get(&command)?.writes.as_ref()
     }

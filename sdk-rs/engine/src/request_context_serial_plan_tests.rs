@@ -106,6 +106,8 @@ mod serial_plans {
         read_preflight: bool,
         no_credential: bool,
         code1: bool,
+        /// A stopping venue fails the Plan with this note on the message.
+        note: Option<&'static str>,
         partial_terminal: bool,
         on_refused: OnRefusedContinue,
         delay_ms: Option<u32>,
@@ -305,6 +307,8 @@ mod serial_plans {
             }
             self.terminal = Some(if done {
                 cx.done_plan(&plan, format!("[{}]", self.job_ids.join(",")))
+            } else if let Some(note) = self.note {
+                cx.fail_plan_noted(&plan, "venue stopped", note)
             } else {
                 cx.fail_plan(&plan, "venue stopped")
             });
@@ -1082,6 +1086,26 @@ mod serial_plans {
         let error = failed(&refusals(false, false, &["mixed:", "reject"]))
             .expect("a refusal without the flag fails");
         assert_eq!(error.outcome, None, "the known-partial call took effect");
+    }
+
+    #[test]
+    fn serial_20_a_failure_note_extends_the_retained_refusal() {
+        let mut e = engine(Serial {
+            total: 2,
+            code1: true,
+            note: Some("protection rollback failed: provider refused"),
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let actions = drive(&mut e, 0., ["ok:a", "reject"]).0;
+        let error = failed(&actions).expect("code1 fails the Plan");
+        assert_eq!(
+            error.message,
+            "row refused; protection rollback failed: provider refused"
+        );
+        assert_eq!(error.outcome, None, "the accepted call took effect");
+        assert_eq!(error.partial.unwrap().order_ids, ["a"]);
     }
 
     #[test]

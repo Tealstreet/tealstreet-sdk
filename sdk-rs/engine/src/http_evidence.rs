@@ -201,6 +201,16 @@ impl EvidenceBudget {
         }
     }
 
+    /// Append a venue's terminal note within the same text budget.
+    #[cfg(feature = "http-plans")]
+    pub(super) fn note(&mut self, message: &mut String, note: &str) {
+        if note.is_empty() {
+            return;
+        }
+        let note = self.text(note);
+        *message = format!("{message}; {note}").into_boxed_str().into_string();
+    }
+
     fn admit_identity(&mut self, id: &str) -> bool {
         let bytes = std::mem::size_of::<String>() + id.len();
         if self.ids == ID_COUNT || id.len() > ID_FIELD || bytes > ID_BYTES - self.id_bytes {
@@ -250,7 +260,8 @@ impl EvidenceBudget {
         let prefix = utf8_prefix(source, remaining.min(TEXT_FIELD - TRUNCATED.len()));
         self.text_bytes += prefix.len();
         // Marker bytes have a separate fixed ceiling: three fields per bounded
-        // attempt plus one terminal fallback. No text is charged twice at seal.
+        // attempt, one terminal fallback and one terminal note. No text is
+        // charged twice at seal.
         format!("{prefix}{TRUNCATED}")
             .into_boxed_str()
             .into_string()
@@ -263,6 +274,12 @@ fn utf8_prefix(source: &str, limit: usize) -> &str {
         end -= 1;
     }
     &source[..end]
+}
+
+/// A note on an error that no journal projects, under a fresh text budget.
+#[cfg(feature = "http-plans")]
+pub(super) fn note_unprojected(error: &mut VenueError, note: &str) {
+    EvidenceBudget::default().note(&mut error.message, note);
 }
 
 pub(super) fn default_report(message: &str) -> String {
