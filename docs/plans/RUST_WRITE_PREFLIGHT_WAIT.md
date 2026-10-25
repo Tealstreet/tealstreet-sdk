@@ -1,7 +1,7 @@
 # Caller wait for parked WriteAfterReads Preflights
 
 Owner: claude-dazzy3 (overseer follow-up from #2157, after fe7lgm's note).
-Reviewers: claude-fe7lgm (receipt custody, plan CLEAR), codex-uufub4 (Plan core).
+Reviewers: claude-fe7lgm (receipt custody, plan CLEAR), codex-uufub4 (Plan core, CLEAR after P2).
 Base: `feat/rust-rewrite` `f895d0d7018`. **Plan only; no source.**
 
 ## Problem
@@ -113,6 +113,44 @@ and the FIFO advances".
 - **P3, entry.** Binding the cap on WriteAfterReads keeps `fresh_command_entry`
   and consumes the one entry loan exactly as ReadOnly does. RED: a second begin
   in the same callback is Revoked and allocates nothing.
+
+## Review dispositions (uufub4, Plan core)
+
+- **P2, inherited uncertainty.** A sendless Preflight may carry
+  `inherit_preflight_uncertainty`, and `seal_preflight` already projects
+  Unknown for it (`inherited_uncertainty_seals_a_sendless_write_preflight_unknown`).
+  So cap expiry does not use a universal NotSent. It seals through the existing
+  owner-aware mutation seal and projection:
+  - an uninherited owner gives Timeout/NotSent;
+  - an inherited owner stays Unknown, keeping the existing fence and
+    reconciliation disposition.
+  No new execution fact is introduced. Original:
+  `cap_expiry_keeps_the_owner_aware_mutation_seal`, which covers both cases.
+- **Admission.** The cap is checked, then dropped from both the Body and the
+  deadline before the Plan is admitted. RED18, the read-only refusal and the
+  nonce and barrier checks are all retained.
+- The separate expiry index and the seal-before-hook order, with no Cx, are
+  confirmed. Early, non-finite, duplicate, equality, current-generation and
+  capacity controls remain source gates. The hook already takes no Cx, so P1 is
+  tested by handing the expired handle back for a wake, not with a fabricated
+  hook Cx.
+
+## Originals (`engine/src/write_preflight_wait_tests.rs`, executed on f895d0d7018)
+
+`--features http-plans,order-locks`: **6 assertion REDs, 1 GREEN, 0 ignored.**
+- REDs:
+  - `a_write_preflight_binds_the_caller_cap_and_spends_its_one_entry`: today the
+    entry is Revoked;
+  - `a_parked_capped_write_preflight_fails_at_its_cap_without_a_wake`;
+  - `a_hook_cannot_wake_the_preflight_that_just_expired`;
+  - `a_ready_wake_at_the_cap_loses_to_expiry_in_either_order`;
+  - `cap_expiry_keeps_the_owner_aware_mutation_seal`;
+  - `cap_expiry_releases_the_order_lock_for_the_next_command_on_the_symbol`.
+  Each of the last five fails because no cap timer exists today.
+- GREEN: `an_uncapped_parked_write_preflight_stays_timer_free`.
+- The existing pin `plan_receipt_cap_tests` `Mode::RefuseWrite` (a WriteAfterReads
+  wait is Revoked) is the ruled behaviour change. The source commit flips it
+  explicitly; it is not silently carried.
 
 ## Sizes and checks
 

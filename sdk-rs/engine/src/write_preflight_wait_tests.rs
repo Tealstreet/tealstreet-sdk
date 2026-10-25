@@ -1,0 +1,301 @@
+//! Caller wait for parked WriteAfterReads Preflights
+//! (docs/plans/RUST_WRITE_PREFLIGHT_WAIT.md). Every control enters through a
+//! genuine command callback with a stamped caller wait.
+use super::*;
+use crate::book::Book;
+use crate::request_context::{CommandEntryError, HttpOwnerRetirement};
+use crate::{Action, Command, Engine, Event, Notice, Response, SocketId, TimerId, Venue};
+
+const WAIT_MS: u32 = 1_000;
+
+fn write_policy() -> PreflightPolicy {
+    PreflightPolicy {
+        purpose: PreflightPurpose::WriteAfterReads,
+        read_credential: None,
+        write_credential: Some(crate::request_context::Credential {
+            slot: crate::CredentialSlot::Primary,
+            reference: crate::signing::KeyRef("wait-primary".into()),
+        }),
+    }
+}
+
+#[derive(Default)]
+struct Probe {
+    /// The command ahead: an uncapped parked Preflight that holds the queue.
+    ahead: Option<Preflight>,
+    /// Capped Preflights parked behind it, in arrival order.
+    queued: Vec<Preflight>,
+    entries: Vec<Result<(), CommandEntryError>>,
+    second_begin: Option<Result<(), CommandEntryError>>,
+    ids_unchanged_after_second_begin: Option<bool>,
+    retired: usize,
+    /// P1: hand the expired Preflight itself back as the one to wake.
+    wake_expired: bool,
+    /// uufub4 P2: the queued command inherits an earlier maybe-sent write.
+    inherit: bool,
+    ready: Vec<Preflight>,
+}
+
+impl Venue for Probe {
+    type Pending = ();
+    fn start(&mut self, _: &mut Cx<'_, ()>) {}
+    fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
+        if self.ahead.is_none() {
+            let preflight = cx.begin_preflight(write_policy()).unwrap();
+            cx.park_preflight(&preflight).unwrap();
+            self.ahead = Some(preflight);
+            return;
+        }
+        match cx.begin_preflight_with_command_wait(write_policy()) {
+            Ok(preflight) => {
+                self.entries.push(Ok(()));
+                let ids = cx.io.core.next_id;
+                self.second_begin = Some(
+                    cx.begin_preflight_with_command_wait(write_policy())
+                        .map(drop),
+                );
+                self.ids_unchanged_after_second_begin = Some(cx.io.core.next_id == ids);
+                if self.inherit {
+                    cx.inherit_preflight_uncertainty(&preflight).unwrap();
+                }
+                cx.park_preflight(&preflight).unwrap();
+                self.queued.push(preflight);
+            }
+            Err(error) => self.entries.push(Err(error)),
+        }
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &HttpOwnerRetirement,
+    ) -> Option<Preflight> {
+        self.retired += 1;
+        let expired = self
+            .queued
+            .iter()
+            .position(|preflight| owner.matches_preflight(preflight))?;
+        let preflight = self.queued.remove(expired);
+        self.wake_expired.then_some(preflight)
+    }
+    fn on_http_preflight_ready(&mut self, _: &mut Cx<'_, ()>, preflight: &Preflight) {
+        self.ready.push(preflight.clone());
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+    fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+    fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+    fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+    fn book(&self, _: &str) -> Option<&Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+
+fn place(command: u32) -> Command {
+    Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_str(
+                r#"{"symbol":"BTCUSD","type":"limit","side":"buy","amount":1,"price":1}"#,
+            )
+            .unwrap(),
+        ],
+    }
+}
+
+/// An uncapped job ahead (command 1), then a capped command 2 parked behind it.
+fn queued(probe: Probe) -> (Engine<Probe>, Vec<Action>) {
+    let mut engine = crate::test_support::seeded_engine(probe);
+    engine.start(0.);
+    engine.drain_actions().for_each(drop);
+    engine.handle_command(0., place(1), None).unwrap();
+    engine.drain_actions().for_each(drop);
+    engine.handle_command(10., place(2), Some(WAIT_MS)).unwrap();
+    let actions = engine.drain_actions().collect();
+    (engine, actions)
+}
+
+fn cap_timer(actions: &[Action]) -> TimerId {
+    actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 10. + f64::from(WAIT_MS) => Some(*timer),
+            _ => None,
+        })
+        .expect("a parked capped Preflight arms one timer at its cap")
+}
+
+fn failures(actions: &[Action], command: u32) -> Vec<crate::VenueError> {
+    actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: c, error }) if *c == command => {
+                Some(error.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_write_preflight_binds_the_caller_cap_and_spends_its_one_entry() {
+    let (engine, _) = queued(Probe::default());
+    assert_eq!(engine.venue.entries, vec![Ok(())]);
+    let cap = engine
+        .io
+        .core
+        .request_contexts
+        .preflight_receipt_cap(&engine.venue.queued[0])
+        .unwrap()
+        .expect("bound receipt cap");
+    assert_eq!(cap.1, 10. + f64::from(WAIT_MS));
+    // P3: the one entry loan is spent; a second begin allocates nothing.
+    assert_eq!(
+        engine.venue.second_begin,
+        Some(Err(CommandEntryError::Revoked))
+    );
+    assert_eq!(engine.venue.ids_unchanged_after_second_begin, Some(true));
+}
+
+#[test]
+fn a_parked_capped_write_preflight_fails_at_its_cap_without_a_wake() {
+    let (mut engine, actions) = queued(Probe::default());
+    let timer = cap_timer(&actions);
+    // Early fire re-arms for the exact cap and settles nothing.
+    engine.handle(10. + f64::from(WAIT_MS) - 1., Event::TimerFired { timer });
+    let early: Vec<_> = engine.drain_actions().collect();
+    assert!(failures(&early, 2).is_empty());
+    assert_eq!(engine.venue.retired, 0);
+    engine.handle(10. + f64::from(WAIT_MS), Event::TimerFired { timer });
+    let settled: Vec<_> = engine.drain_actions().collect();
+    let errors = failures(&settled, 2);
+    assert_eq!(errors.len(), 1, "one terminal at the cap");
+    assert_eq!(errors[0].kind, Some(crate::ErrorKind::Timeout));
+    assert_eq!(errors[0].outcome, Some(crate::Outcome::NotSent));
+    assert_eq!(engine.venue.retired, 1, "the venue hook fires once");
+    assert!(
+        engine.venue.queued.is_empty(),
+        "the venue dropped it from its FIFO"
+    );
+    assert!(
+        engine.venue.ready.is_empty(),
+        "no wake for the expired command"
+    );
+}
+
+#[test]
+fn a_hook_cannot_wake_the_preflight_that_just_expired() {
+    let (mut engine, actions) = queued(Probe {
+        wake_expired: true,
+        ..Probe::default()
+    });
+    engine.handle(
+        10. + f64::from(WAIT_MS),
+        Event::TimerFired {
+            timer: cap_timer(&actions),
+        },
+    );
+    engine.prepare_dispatch(10. + f64::from(WAIT_MS));
+    let settled: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(failures(&settled, 2).len(), 1);
+    assert!(
+        engine.venue.ready.is_empty(),
+        "the expired Preflight is Revoked"
+    );
+}
+
+#[test]
+fn a_ready_wake_at_the_cap_loses_to_expiry_in_either_order() {
+    for wake_first in [true, false] {
+        let (mut engine, actions) = queued(Probe::default());
+        let timer = cap_timer(&actions);
+        let at = 10. + f64::from(WAIT_MS);
+        let wake = |engine: &mut Engine<Probe>| {
+            let parked = engine.venue.queued.first().cloned();
+            if let Some(parked) = parked {
+                let mut cx = Cx {
+                    now: at,
+                    store: &mut engine.store,
+                    io: &mut engine.io,
+                };
+                let _ = cx.request_preflight_ready(&parked);
+            }
+            engine.prepare_dispatch(at);
+        };
+        if wake_first {
+            wake(&mut engine);
+        }
+        engine.handle(at, Event::TimerFired { timer });
+        if !wake_first {
+            wake(&mut engine);
+        }
+        let settled: Vec<_> = engine.drain_actions().collect();
+        assert_eq!(failures(&settled, 2).len(), 1, "wake_first={wake_first}");
+        assert!(
+            engine.venue.ready.is_empty(),
+            "expiry wins at equality, wake_first={wake_first}"
+        );
+    }
+}
+
+#[test]
+fn an_uncapped_parked_write_preflight_stays_timer_free() {
+    let mut engine = crate::test_support::seeded_engine(Probe::default());
+    engine.start(0.);
+    engine.drain_actions().for_each(drop);
+    let timers = engine.io.core.timers.len();
+    engine.handle_command(0., place(1), None).unwrap();
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(engine.io.core.timers.len(), timers);
+    assert!(!actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+}
+
+#[test]
+fn cap_expiry_keeps_the_owner_aware_mutation_seal() {
+    for inherit in [false, true] {
+        let (mut engine, actions) = queued(Probe {
+            inherit,
+            ..Probe::default()
+        });
+        engine.handle(
+            10. + f64::from(WAIT_MS),
+            Event::TimerFired {
+                timer: cap_timer(&actions),
+            },
+        );
+        let settled: Vec<_> = engine.drain_actions().collect();
+        let errors = failures(&settled, 2);
+        assert_eq!(errors.len(), 1, "inherit={inherit}");
+        let expected = if inherit {
+            crate::Outcome::Unknown
+        } else {
+            crate::Outcome::NotSent
+        };
+        assert_eq!(errors[0].outcome, Some(expected), "inherit={inherit}");
+        assert_eq!(engine.venue.retired, 1, "inherit={inherit}");
+    }
+}
+
+#[cfg(feature = "order-locks")]
+#[test]
+fn cap_expiry_releases_the_order_lock_for_the_next_command_on_the_symbol() {
+    let (mut engine, actions) = queued(Probe::default());
+    let at = 10. + f64::from(WAIT_MS);
+    engine.handle(
+        at,
+        Event::TimerFired {
+            timer: cap_timer(&actions),
+        },
+    );
+    engine.drain_actions().for_each(drop);
+    engine
+        .handle_command(at + 1., place(3), Some(WAIT_MS))
+        .unwrap();
+    assert_eq!(
+        engine.venue.entries,
+        vec![Ok(()), Ok(())],
+        "an unsent expired command leaves no fence on BTCUSD"
+    );
+}
