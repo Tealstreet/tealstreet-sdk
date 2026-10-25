@@ -38,6 +38,28 @@ impl Venue for Probe {
     fn fence_uncertain_cancel_all(&self) -> bool {
         self.venue.fence_uncertain_cancel_all()
     }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        self.venue.capture_http_reconciliation(pending)
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.venue.on_http_owner_retired(owner);
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        pending: Vec<Pending>,
+    ) {
+        self.venue.read_root_retired(owner, pending);
+    }
     fn capabilities(&self) -> Capabilities {
         self.venue.capabilities()
     }
@@ -100,7 +122,7 @@ impl Venue for Probe {
         release: safe_cex_engine::SigningRelease,
     ) {
         if let safe_cex_engine::SigningTarget::Http { request, pending } = &target
-            && matches!(pending, Pending::Trade(_))
+            && matches!(pending, Pending::Trade(_) | Pending::PlannedTrade(_))
         {
             self.releases.lock().unwrap().push((*request, release));
         }
@@ -263,6 +285,9 @@ fn drive_routes(e: &mut Engine<Probe>, now: f64, initial: Vec<Action>) -> Vec<Ac
         count += 1;
         assert!(count < 65_536);
         if let Action::ManagedHttp(action) = action {
+            if matches!(action.as_ref(), HttpAction::Prepare { .. }) {
+                out.push(Action::ManagedHttp(action.clone()));
+            }
             match *action {
                 HttpAction::Prepare {
                     preparation,
@@ -529,9 +554,11 @@ fn native_identity_get_uses_secondary_and_client_lookup_uses_primary() {
             },
         }),
     );
-    let lookup = physical(&actions(&mut e, NOW), "/by-order-id");
+    let output = actions(&mut e, NOW);
+    assert!(output.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(),safe_cex_engine::request_context::HttpAction::Prepare { request, intent:safe_cex_engine::request_context::RoutingIntent::Primary,.. } if request.url.contains("/by-order-id")))));
+    let lookup = physical(&output, "/by-order-id");
     assert_eq!(token(&lookup), "key");
-    assert_eq!(lookup.route, Some(safe_cex_engine::RequestRoute::Primary));
+    assert_eq!(lookup.route, None);
     assert!(lookup.url.contains("clOrdID=caller%2Fa%2Cb%20%2B"));
 }
 #[test]
