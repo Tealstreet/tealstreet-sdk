@@ -753,7 +753,7 @@ impl Venue for Blofin {
             Pending::Trade(_) => {}
             Pending::PublicTrades(request) => self.public_trades_item(cx, request, item),
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Closed(request) => Self::closed_item(request, item),
+            Pending::Closed(request) => Self::closed_item(cx, request, item),
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Leverage(_) => {}
             Pending::Markets { rows, malformed } => {
@@ -960,6 +960,7 @@ impl Venue for Blofin {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
             Pending::Managed(context, pending) => self.public_failure(cx, context, *pending, error),
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
+            Pending::Closed(request) => Self::closed_failed(cx, request, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -968,6 +969,7 @@ impl Venue for Blofin {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
             // The shared Network/Timeout kind stays; its text is the native message.
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
+            Pending::Closed(request) => Self::closed_failed(cx, request, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -991,7 +993,7 @@ impl Venue for Blofin {
                 return;
             }
             Pending::Closed(request) => {
-                Self::closed_failed(cx, request, error);
+                Self::closed_failed(cx, request, VenueError::new(error));
                 return;
             }
             Pending::Trade(request) => {

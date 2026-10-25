@@ -236,6 +236,34 @@ impl Blofin {
             Err(error) => cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline")),
         }
     }
+    /// The signed-GET selection every private read shares, with its native
+    /// refusal text. A configured Secondary serves GETs beside a Primary; the
+    /// refusal inspects the same immutable Slots that SelectedRead selects from.
+    pub(crate) fn read_selection(
+        &self,
+    ) -> (Result<SelectedRead, CredentialUnavailable>, &'static str) {
+        let identities = &self.options.identities;
+        let slots = Slots::new(
+            identities
+                .primary
+                .clone()
+                .filter(|_| !self.options.public_data_only),
+            identities.secondary.clone(),
+            SlotPolicy {
+                secondary_requires_primary: true,
+            },
+        );
+        let refusal = match slots.select(CredentialRole::Read { scope: None }) {
+            Ok((_, identity)) if identity.passphrase.is_some() => None,
+            Ok(_) => Some("BloFin requires a passphrase"),
+            Err(_) => Some("BloFin requires API credentials"),
+        };
+        let selected = match refusal {
+            Some(_) => Err(CredentialUnavailable::Missing),
+            None => SelectedRead::select(&slots, ReadRole::Read { scope: None }),
+        };
+        (selected, refusal.unwrap_or("BloFin requires API credentials"))
+    }
     pub(crate) fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
         let Some(market) = cx.store.market(&symbol) else {
             let Ok(context) = cx.admit_http_command(Self::read_policy()) else {
@@ -260,30 +288,7 @@ impl Blofin {
                 "cross"
             }
         );
-        // A configured Secondary serves this GET beside a Primary. The refusal
-        // inspects the same immutable Slots that SelectedRead then selects from,
-        // a deterministic repeat; native refusal text and precedence are unchanged.
-        let identities = &self.options.identities;
-        let slots = Slots::new(
-            identities
-                .primary
-                .clone()
-                .filter(|_| !self.options.public_data_only),
-            identities.secondary.clone(),
-            SlotPolicy {
-                secondary_requires_primary: true,
-            },
-        );
-        let refusal = match slots.select(CredentialRole::Read { scope: None }) {
-            Ok((_, identity)) if identity.passphrase.is_some() => None,
-            Ok(_) => Some("BloFin requires a passphrase"),
-            Err(_) => Some("BloFin requires API credentials"),
-        };
-        let selected = match refusal {
-            Some(_) => Err(CredentialUnavailable::Missing),
-            None => SelectedRead::select(&slots, ReadRole::Read { scope: None }),
-        };
-        let message = refusal.unwrap_or("BloFin requires API credentials");
+        let (selected, message) = self.read_selection();
         let Ok(read) = SelectedRead::command(
             cx,
             selected,

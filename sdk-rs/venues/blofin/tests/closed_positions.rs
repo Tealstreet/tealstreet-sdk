@@ -16,7 +16,8 @@ fn fetch(h: &mut Harness, symbol: Option<&str>, from: Option<f64>, to: Option<f6
             },
         }),
     );
-    h.collect();
+    // The managed page releases through Prepare/Bind/Claim.
+    h.collect_at(1.0);
 }
 
 fn result(h: &Harness) -> Option<Result<String, String>> {
