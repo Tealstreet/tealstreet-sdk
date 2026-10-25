@@ -13,7 +13,6 @@ use safe_cex_engine::request_context::{Context, RetryPolicy};
 use safe_cex_engine::selected_read::{
     BackgroundReadError, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
 };
-use safe_cex_engine::socket::{Supervisor, Tick};
 use safe_cex_engine::store::{MarketSetting, Store};
 use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
@@ -181,7 +180,6 @@ pub struct State {
     order_floor: Option<f64>,
     position_updates: HashMap<String, f64>,
     socket: Option<SocketId>,
-    supervisor: Supervisor,
     next_id: u32,
     unreconciled_fills: bool,
     fills: HashSet<String>,
@@ -191,10 +189,7 @@ pub struct State {
 }
 impl State {
     pub fn new() -> Self {
-        Self {
-            supervisor: crate::socket_supervisor(),
-            ..Self::default()
-        }
+        Self::default()
     }
     pub(crate) fn has_unreconciled_fills(&self) -> bool {
         self.unreconciled_fills
@@ -334,13 +329,20 @@ impl WeexFutures {
         }
         self.account_cycle(cx);
     }
-    fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(primary) = &self.credentials.primary {
-            // The upgrade is signed with the primary identity at dispatch time.
+    pub(crate) fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let (Some(primary), Some(feed)) = (&self.credentials.primary, self.sockets.private) {
             let step = crate::dispatch_signing::Upgrade::new(primary.clone());
-            self.account.socket = Some(cx.connect_signed(step.unsigned(), Box::new(step)));
-            self.account.supervisor.connecting(cx);
+            if let Ok(epoch) = cx.connect_socket_signed(feed, step.unsigned(), Box::new(step)) {
+                self.account.socket = Some(epoch.socket());
+            }
         }
+    }
+    pub(crate) fn account_ping(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        self.account.next_id += 1;
+        cx.send(
+            socket,
+            format!(r#"{{"method":"PING","id":{}}}"#, self.account.next_id),
+        );
     }
     fn account_cycle(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.pending != 0 {
@@ -890,7 +892,6 @@ impl WeexFutures {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.supervisor.opened(cx);
         self.account.next_id += 1;
         cx.send(socket,format!(r#"{{"method":"SUBSCRIBE","params":["account","positions","orders","fill"],"id":{}}}"#,self.account.next_id));
         self.refresh_account(cx);
@@ -905,7 +906,6 @@ impl WeexFutures {
         if self.account.socket != Some(socket) {
             return false;
         }
-        self.account.supervisor.received(cx.now);
         #[derive(Deserialize)]
         struct Event<'a> {
             #[serde(borrow, default)]
@@ -1048,7 +1048,7 @@ impl WeexFutures {
     }
     pub(crate) fn account_close(
         &mut self,
-        cx: &mut Cx<'_, Pending>,
+        _cx: &mut Cx<'_, Pending>,
         socket: SocketId,
         _code: u16,
     ) -> bool {
@@ -1056,7 +1056,6 @@ impl WeexFutures {
             return false;
         }
         self.account.socket = None;
-        self.account.supervisor.retry(cx);
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -1092,27 +1091,7 @@ impl WeexFutures {
             self.account_cycle(cx);
             return true;
         }
-        match self.account.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => return false,
-            Tick::Reconnect => self.connect_account(cx),
-            Tick::Ping => {
-                if let Some(socket) = self.account.socket {
-                    self.account.next_id += 1;
-                    cx.send(
-                        socket,
-                        format!(r#"{{"method":"PING","id":{}}}"#, self.account.next_id),
-                    );
-                }
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.account.socket {
-                    cx.close(socket);
-                    self.account_close(cx, socket, 1006);
-                }
-            }
-            Tick::Handled => (),
-        }
-        true
+        false
     }
 }
 

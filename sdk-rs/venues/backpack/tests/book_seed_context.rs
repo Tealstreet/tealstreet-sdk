@@ -8,9 +8,43 @@ type Driver = Engine<Backpack>;
 const SYMBOL: &str = "SOL_USDC_PERP";
 const SNAP: &str =
     r#"{"lastUpdateId":10,"bids":[["140","1"],["139","2"]],"asks":[["142","1"],["143","2"]]}"#;
-fn actions(e: &mut Driver, now: f64) -> Vec<Action> {
-    safe_cex_engine::test_support::prepared_actions(e, now)
+fn snapshot_handoff<V: Venue>(
+    e: &mut Engine<V>,
+    now: f64,
+    mut queued: Vec<Action>,
+    excluded: Option<safe_cex_engine::TimerId>,
+) -> Vec<Action> {
+    let timers: Vec<_> = queued
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == now && Some(*timer) != excluded => {
+                Some(*timer)
+            }
+            _ => None,
+        })
+        .collect();
+    for timer in timers {
+        e.handle(now, Event::TimerFired { timer });
+        queued.extend(e.drain_actions());
+    }
+    queued
 }
+fn actions(e: &mut Driver, now: f64) -> Vec<Action> {
+    let mut queued = safe_cex_engine::test_support::prepared_actions(e, now);
+    let timers: Vec<_> = queued
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == now => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    for timer in timers {
+        e.handle(now, Event::TimerFired { timer });
+        queued.extend(safe_cex_engine::test_support::prepared_actions(e, now));
+    }
+    queued
+}
+
 fn http(e: &mut Driver, needle: &str, now: f64) -> HttpRequest {
     actions(e, now)
         .into_iter()
@@ -169,6 +203,7 @@ fn subscribed_seed_cannot_release_before_provider_prepare_bind_claim() {
     let (mut e, _) = seed();
     subscribe(&mut e, 0.);
     let queued: Vec<_> = e.drain_actions().collect();
+    let queued = snapshot_handoff(&mut e, 0., queued, None);
     assert!(
         !queued
             .iter()
@@ -260,6 +295,35 @@ mod lifecycle {
             self.reserve(cx);
             self.evidence.timer.set(Some(cx.set_timer(0.)));
             self.native.start(cx);
+        }
+        fn on_socket_event(
+            &mut self,
+            cx: &mut Cx<'_, Self::Pending>,
+            event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+            self.native.on_socket_event(cx, event)
+        }
+        fn on_socket_interests_released(
+            &mut self,
+            cx: &mut Cx<'_, Self::Pending>,
+            epoch: safe_cex_engine::socket_lifecycle::Epoch,
+            pending: Self::Pending,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+            self.native.on_socket_interests_released(cx, epoch, pending)
+        }
+        fn encode_socket_interests(
+            &self,
+            store: &safe_cex_engine::Store,
+            feed: safe_cex_engine::socket_lifecycle::FeedId,
+            subscribe: bool,
+            items: &[safe_cex_engine::socket_lifecycle::Interest],
+            emit: &mut dyn FnMut(
+                safe_cex_engine::socket_lifecycle::EncodedBatch,
+            )
+                -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+            self.native
+                .encode_socket_interests(store, feed, subscribe, items, emit)
         }
         fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, id: SocketId) {
             self.native.on_open(cx, id)
@@ -405,7 +469,9 @@ mod lifecycle {
                 symbol: SYMBOL.into(),
             }),
         );
-        e.drain_actions().collect()
+        let excluded = e.venue().evidence.timer.get();
+        let queued = e.drain_actions().collect();
+        snapshot_handoff(e, now, queued, excluded)
     }
     fn preparation(actions: &[Action]) -> Preparation {
         actions
@@ -493,7 +559,9 @@ mod lifecycle {
             })
             .expect("original1000ms recovery delay");
         e.handle(1001., Event::TimerFired { timer });
-        let retry: Vec<_> = e.drain_actions().collect();
+        let excluded = e.venue().evidence.timer.get();
+        let retry = e.drain_actions().collect();
+        let retry = snapshot_handoff(&mut e, 1001., retry, excluded);
         let new = preparation(&retry);
         assert_ne!(new, token);
     }
