@@ -301,7 +301,7 @@ reports **23 fingerprints / 32 occurrences**:
 | `request.rs` | 207 `format!` over `request.path`; 210/213 public `request_streamed`/`request`; 256/257 signed `request_streamed`/`request`; 351 `matches!(&request.pending, ..)`; 468 clock `request` | The shared transport: every public read, every signed read and write, and the clock. |
 | `lib.rs` | 811/812 DepthRead `done`/`fail`; 892/893 Klines `done`/`fail`; 1003 DepthRead `fail`; 1013 Klines `fail(.. to_owned())` | Public command terminals. |
 | `account.rs` | 736/737 Info `done`/`fail` | FetchAccount terminal. |
-| `history.rs` | 660-891: 15 `done`/`fail` | Fills, Orders, Income and Trades terminals, including the strict "no partial result" refusals. |
+| `history.rs` | 660-891: 13 `done`/`fail` | Fills, Orders, Income and Trades terminals, including the strict "no partial result" refusals. |
 | `trading.rs` | 473/475 job `fail`/`done`; 489 and 501 `matches!(&request.call, ..)` | Multi-step trade jobs. |
 
 Every site is accounted for; no Aster `sign_http` remains, and the listenKey
