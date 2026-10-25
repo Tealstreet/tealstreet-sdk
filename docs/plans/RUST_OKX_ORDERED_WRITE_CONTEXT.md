@@ -219,3 +219,15 @@ performed. Readiness now explicitly asserts the requested market is absent,
 so the not-ready result demonstrates precedence over a real planning error.
 The refreshed dedicated target executes thirteen controls: **two original
 assertion REDs, eleven GREEN, zero ignored**; scoped strict Clippy and fmt pass.
+
+## Source-stage REDs checkpoint
+
+`request_context_ordered_writes` adds dazzy3's three source-stage REDs. Run against the unchanged base, all three fail at their managed-preparation assertion, as intended.
+
+To confirm the behaviour each one pins, the same three were run once with that assertion disabled (not committed):
+
+- `a_managed_code_one_cancel_fails_the_plan_without_continuing` passes natively. The code-1 stop and restore are native parity.
+- `a_dependent_replacement_never_runs_after_its_cancel_is_refused` passes natively. A refused prerequisite cancel issues no replacement.
+- `a_lost_create_fences_cancel_all_until_the_reconcile_snapshot` fails natively, at 'a fresh reconcile read'. A lost create does fence cancel-all, but OKX never issues the reconcile read, because it has no `reconcile_uncertain` hook. That is gap 3, so the fence never clears.
+
+The target now runs 16 controls: 5 REDs, 11 GREEN, 0 ignored.

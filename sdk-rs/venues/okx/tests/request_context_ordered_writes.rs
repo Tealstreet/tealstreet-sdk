@@ -608,3 +608,185 @@ fn native_50004_stops_protective_chain_and_starts_reconciliation_without_retry()
             if error.outcome == Some(safe_cex_engine::Outcome::Unknown)
     )));
 }
+
+// ---- Source-stage REDs (dazzy3, plan review of dbf746ef6bf) ----
+
+/// Releases through the fixture host, recording whether any POST write was a
+/// managed preparation rather than a legacy signed request.
+fn release(engine: &mut Engine<Okx>, now: f64) -> (Vec<Action>, bool) {
+    use safe_cex_engine::request_context::{Claim, Prepared};
+    engine.prepare_dispatch(now);
+    let (mut out, mut managed_write) = (Vec::new(), false);
+    loop {
+        let actions: Vec<_> = engine.drain_actions().collect();
+        if actions.is_empty() {
+            return (out, managed_write);
+        }
+        for action in actions {
+            let Action::ManagedHttp(action) = action else {
+                out.push(action);
+                continue;
+            };
+            match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => {
+                    managed_write |= request.method == safe_cex_engine::Method::Post;
+                    let id = request.id.0;
+                    let prepared = Prepared {
+                        id,
+                        expires_at: None,
+                    };
+                    engine.http_prepared(now, preparation, prepared);
+                }
+                HttpAction::Bind {
+                    permit, request, ..
+                } => {
+                    if let Ok(Claim::Released(_)) = engine.claim_http(now, permit) {
+                        out.push(Action::Http(request));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn failed(output: &[Action], command: u32) -> Vec<&safe_cex_engine::VenueError> {
+    output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_managed_code_one_cancel_fails_the_plan_without_continuing() {
+    let mut engine = trading_engine();
+    let ids: Vec<_> = (1..=21).map(|i| i.to_string()).collect();
+    for id in &ids {
+        engine.store_mut().upsert_order(stored(id));
+    }
+    engine.handle(
+        5.,
+        Event::Command(Command::CancelOrders {
+            command: OWNER,
+            ids: ids.clone(),
+        }),
+    );
+    let (first, managed) = release(&mut engine, 5.);
+    assert!(managed, "the cancel batch is a managed Plan call");
+    let rows = [r#"{"sCode":"51400","sMsg":"Order does not exist"}"#; 20].join(",");
+    reply(
+        &mut engine,
+        post(&first),
+        &format!(r#"{{"code":"1","msg":"All operations failed","data":[{rows}]}}"#),
+        6.,
+    );
+    let (output, continued) = release(&mut engine, 6.);
+    assert!(!continued, "code 1 never continues to the sibling batch");
+    assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        ids.iter()
+            .all(|id| engine.store().order(id).unwrap().status == OrderStatus::Open),
+        "native optimistic status is restored"
+    );
+    let errors = failed(&output, OWNER);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Rejected));
+}
+
+#[test]
+fn a_dependent_replacement_never_runs_after_its_cancel_is_refused() {
+    let mut engine = trading_engine();
+    // A standalone stop with no limit price amends as cancel-then-replace.
+    let mut stop = stored("stop");
+    stop.kind = OrderType::StopLoss;
+    engine.store_mut().upsert_order(stop);
+    engine.handle(
+        5.,
+        Event::Command(Command::AmendOrder {
+            command: OWNER,
+            id: "stop".into(),
+            price: Some(37000.),
+            amount: None,
+        }),
+    );
+    let (first, managed) = release(&mut engine, 5.);
+    assert!(managed, "the prerequisite cancel is a managed Plan call");
+    let cancel = post(&first);
+    assert!(
+        matches!(cancel, Action::Http(r) if r.url.contains("cancel")),
+        "the cancel goes first: {cancel:?}"
+    );
+    reply(
+        &mut engine,
+        cancel,
+        r#"{"code":"1","msg":"All operations failed","data":[{"sCode":"51400","sMsg":"Order does not exist"}]}"#,
+        6.,
+    );
+    let (output, replaced) = release(&mut engine, 6.);
+    assert!(!replaced, "no replacement is prepared after the refusal");
+    assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
+    let errors = failed(&output, OWNER);
+    assert_eq!(errors.len(), 1, "the cancel's refusal ends the command");
+}
+
+#[test]
+fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let (first, managed) = release(&mut engine, 5.);
+    assert!(managed, "the create is a managed Plan call");
+    let Action::Http(write) = post(&first) else {
+        unreachable!()
+    };
+    let write = write.id;
+    engine.handle(
+        6.,
+        Event::HttpFailed {
+            request: write,
+            error: "lost",
+        },
+    );
+    let (output, _) = release(&mut engine, 6.);
+    assert_eq!(
+        failed(&output, OWNER)[0].outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    let cancel_all = |engine: &mut Engine<Okx>, command, now| {
+        engine.handle(
+            now,
+            Event::Command(Command::CancelSymbolOrders {
+                command,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let (output, _) = release(engine, now);
+        failed(&output, command).first().map(|e| e.message.clone())
+    };
+    assert_eq!(
+        cancel_all(&mut engine, 50, 7.).as_deref(),
+        Some("Placement outcome is uncertain; reconcile before cancel-all")
+    );
+    // The venue answers the engine's uncertain reconcile with a fresh order read.
+    let (mut reads, _) = release(&mut engine, 8.);
+    let read = reads
+        .iter()
+        .position(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders-pending")))
+        .map(|i| reads.remove(i))
+        .expect("a fresh reconcile read");
+    reply(&mut engine, &read, &support::envelope(""), 9.);
+    let _ = release(&mut engine, 9.);
+    assert_ne!(
+        cancel_all(&mut engine, 51, 10.).as_deref(),
+        Some("Placement outcome is uncertain; reconcile before cancel-all"),
+        "the fresh snapshot clears the fence"
+    );
+}
