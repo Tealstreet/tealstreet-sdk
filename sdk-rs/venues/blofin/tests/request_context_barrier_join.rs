@@ -1,6 +1,7 @@
 //! Original controls for the hedged leverage barrier join
 //! (`docs/plans/RUST_BLOFIN_WRITE_FUNNEL.md`, W2): both legs prepare and sign
 //! before either is released, then answer independently into one terminal.
+#![allow(dead_code)]
 mod support;
 use safe_cex_engine::request_context::{Claim, GroupClaim, HttpAction, Prepared};
 use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, Outcome, VenueError};
@@ -49,8 +50,11 @@ fn release(h: &mut Harness) {
                 }
             }
             HttpAction::BindGroup { permit, members } => {
-                let packets: Vec<HttpRequest> =
-                    members.into_iter().filter_map(|m| m.request).collect();
+                // GroupPacket wipes on drop; take each packet out first.
+                let packets: Vec<HttpRequest> = members
+                    .into_iter()
+                    .filter_map(|mut member| member.request.take())
+                    .collect();
                 if let Ok(GroupClaim::Released(_)) = h.e.claim_http_group(now, permit) {
                     actions.extend(packets.into_iter().map(Action::Http));
                 }
@@ -270,7 +274,11 @@ fn one_refusal_beside_one_accepted_keeps_its_effect_and_refreshes() {
     answer(&mut h, &short, 200, REFUSED);
     assert_eq!(failure(&h, 7).outcome, None);
     assert_ne!(leverage(&h), 30.0);
-    assert_eq!(count(&h, "account/positions"), positions + 1, "native join refresh");
+    assert_eq!(
+        count(&h, "account/positions"),
+        positions + 1,
+        "native join refresh"
+    );
 }
 
 #[test]
