@@ -17,6 +17,16 @@ use std::{
 use support::{BALANCE, MARKETS, ORDER, POSITIONS, SYMBOL};
 const START: f64 = 1000.;
 const INFO: &str = r#"{"leverageLimit":"10"}"#;
+fn ed25519_seeds() -> safe_cex_engine::signing::CredentialSetupPolicy {
+    let slot = safe_cex_engine::signing::IdentitySetupPolicy {
+        signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+        ..Default::default()
+    };
+    safe_cex_engine::signing::CredentialSetupPolicy {
+        primary: Some(slot),
+        secondary: Some(slot),
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Route {
     Info,
@@ -343,10 +353,13 @@ fn fresh_material(secondary: bool, different_raw: bool) -> (Driver, Rc<State>) {
         secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
         ..Default::default()
     };
-    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-        primary: Some(local("test-public-key", &primary)),
-        secondary: secondary.then(|| local("account-read-key", &read)),
-    })
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(local("test-public-key", &primary)),
+            secondary: secondary.then(|| local("account-read-key", &read)),
+        },
+        ed25519_seeds(),
+    )
     .unwrap();
     let options = Options {
         identity: identities.primary.clone(),
@@ -1182,5 +1195,106 @@ fn native_duplicate_response_cannot_republish_or_replay_continuation() {
             a,
             Action::SetTimer { .. } | Action::Notice(Notice::Event(_))
         )));
+    }
+}
+
+#[test]
+fn native_public_only_with_real_saved_primary_and_secondary_never_starts_account() {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    for secondary in [false, true] {
+        let primary = STANDARD.encode([7; 32]);
+        let read = STANDARD.encode([9; 32]);
+        let local = |key: &str, seed: &str| LocalIdentity {
+            key: Secret::new(key.into()),
+            secret: Secret::new(seed.into()),
+            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+            ..Default::default()
+        };
+        let (provider, identities) = LocalSigner::from_setup_with_policy(
+            LocalSetup {
+                primary: Some(local("saved-primary", &primary)),
+                secondary: secondary.then(|| local("saved-read", &read)),
+            },
+            ed25519_seeds(),
+        )
+        .unwrap();
+        assert!(identities.primary.is_some());
+        assert_eq!(identities.secondary.is_some(), secondary);
+        let options = Options {
+            public_data_only: true,
+            identity: identities.primary.clone(),
+            read_identity: identities.secondary.clone(),
+            key: Some("saved-primary".into()),
+            secret: Some(primary),
+            read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
+                key: "saved-read".into(),
+                secret: read,
+                passphrase: None,
+            }),
+            read_credentials_status: secondary.then_some(Ok(())),
+            ..Default::default()
+        };
+        let state = Rc::new(State::default());
+        let mut e = safe_cex_engine::test_support::seeded_engine(Audit {
+            native: Backpack::new(options),
+            peers: vec![],
+            state,
+        });
+        e.set_signer(Some(Arc::new(provider))).unwrap();
+        e.set_identities(identities).unwrap();
+        e.start(START);
+        let market = drain(&mut e).pop().unwrap();
+        assert!(market.request.url.ends_with("/markets"));
+        release(&mut e, &market, START);
+        respond(&mut e, &market, START, 200, MARKETS);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::WsConnect {
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            }
+        )));
+        assert!(polls(&actions, START).is_empty());
+        let work = packets(actions);
+        assert_eq!(work.len(), 2);
+        for packet in work {
+            assert!(
+                packet.request.url.ends_with("/tickers")
+                    || packet.request.url.ends_with("/markPrices")
+            );
+            assert!(
+                !packet
+                    .request
+                    .headers
+                    .iter()
+                    .any(|(key, _)| key.eq_ignore_ascii_case("X-API-Key"))
+            );
+            release(&mut e, &packet, START);
+            respond(
+                &mut e,
+                &packet,
+                START,
+                200,
+                if packet.request.url.ends_with("/tickers") {
+                    r#"[{"symbol":"SOL_USDC_PERP","lastPrice":"141","priceChangePercent":"0.01","volume":"10","quoteVolume":"1410"}]"#
+                } else {
+                    "[]"
+                },
+            );
+            let after = e.drain_actions().collect::<Vec<_>>();
+            no_physical(&after);
+            assert!(!after.iter().any(|a| matches!(
+                a,
+                Action::WsConnect {
+                    channel: Some(safe_cex_engine::SocketChannel::Private),
+                    ..
+                }
+            )));
+            assert!(polls(&after, START).is_empty());
+        }
+        assert!(e.store().loaded().markets && e.store().loaded().tickers);
+        assert_eq!(e.store().balance().total, 0.);
+        assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
     }
 }
