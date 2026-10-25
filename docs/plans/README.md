@@ -433,3 +433,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Polymarket Gamma catalogue custody | Managed adoption; original and pressure controls pass, review/CI pending | Before adopting unsigned streamed catalogue pages; retain atomic cursor walk and native retry. | [RUST_POLYMARKET_CATALOGUE_CONTEXT.md](RUST_POLYMARKET_CATALOGUE_CONTEXT.md) |
 
 | Backpack supported-history Read custody | Source reviews CLEAR; full CI next | Before moving four history routes onto one caller-bound Read owner and activating publicRead. | [RUST_BACKPACK_HISTORY_READ_CUSTODY.md](RUST_BACKPACK_HISTORY_READ_CUSTODY.md) |
+
+| Backpack public-seed Read custody | Plan before originals; runtime gated | Before managing Markets, tickers and MarkPrices startup/recovery observations. | [RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md](RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md) |
