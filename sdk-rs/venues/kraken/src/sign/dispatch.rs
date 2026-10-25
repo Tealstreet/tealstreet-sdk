@@ -3,7 +3,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::credential_selection::{CredentialRole, Selection};
 use safe_cex_engine::request_context::Credential;
 use safe_cex_engine::signing::{
-    Algorithm, Context, Encoding, Identities, Identity, Operation, PayloadPart, SignError,
+    Algorithm, Context, Encoding, Identities, Identity, KeyRef, Operation, PayloadPart, SignError,
     SignReceipt, SignRequest, SignResult,
 };
 use safe_cex_engine::{Action, CredentialSlot, DispatchContext, HttpRequest, Method, SignStep};
@@ -222,7 +222,8 @@ impl Http {
             ..Default::default()
         };
         let mut work = hash_work(
-            &self.identity,
+            &self.identity.credential,
+            self.identity.signing_ref()?,
             hash_input.into_bytes(),
             self.spot.then_some(self.path.as_bytes()),
             receipt,
@@ -334,7 +335,8 @@ impl SignStep for Http {
     }
 }
 fn hash_work(
-    identity: &Identity,
+    credential: &KeyRef,
+    signing: &KeyRef,
     input: Vec<u8>,
     prefix: Option<&[u8]>,
     receipt: SignReceipt,
@@ -353,14 +355,14 @@ fn hash_work(
         receipt,
         operations: vec![
             Operation::Present {
-                key: identity.credential.clone(),
+                key: credential.clone(),
             },
             Operation::Sha256 {
                 payload: vec![PayloadPart::Bytes { bytes: input }],
             },
             Operation::Sign {
                 algorithm: Algorithm::HmacSha512,
-                key: identity.signing.clone(),
+                key: signing.clone(),
                 payload,
             },
         ],
@@ -378,7 +380,8 @@ pub fn challenge_work(ids: &Identities, challenge: &str) -> Result<SignRequest, 
         .map_err(|_| SignError::Unavailable)?;
     identity.validate().map_err(|_| SignError::InvalidRequest)?;
     Ok(hash_work(
-        identity,
+        &identity.credential,
+        identity.signing_ref()?,
         challenge.as_bytes().to_vec(),
         None,
         SignReceipt::default(),

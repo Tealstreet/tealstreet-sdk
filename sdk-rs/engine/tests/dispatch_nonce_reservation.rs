@@ -194,13 +194,10 @@ impl<const SUPPORTED: bool, const CAPABILITY: u8> Venue for NonceProbe<SUPPORTED
         let bearer = None;
         for owner in 0..self.count {
             let slots = Slots::new(
-                Some(Identity {
-                    credential: KeyRef(KEY.into()),
-                    signing: KeyRef(KEY.into()),
-                    passphrase: None,
-                    stable_id: Some(self.subject.into()),
-                    extra: Default::default(),
-                }),
+                Some(
+                    Identity::new(KeyRef(KEY.into()), Some(KeyRef(KEY.into())))
+                        .with_stable_id(Some(self.subject.into())),
+                ),
                 None,
                 SlotPolicy::default(),
             );
@@ -263,13 +260,10 @@ impl<const SUPPORTED: bool, const CAPABILITY: u8> Venue for NonceProbe<SUPPORTED
             panic!("fixture command");
         };
         let slots = Slots::new(
-            Some(Identity {
-                credential: KeyRef(KEY.into()),
-                signing: KeyRef(KEY.into()),
-                passphrase: None,
-                stable_id: Some(self.subject.into()),
-                extra: Default::default(),
-            }),
+            Some(
+                Identity::new(KeyRef(KEY.into()), Some(KeyRef(KEY.into())))
+                    .with_stable_id(Some(self.subject.into())),
+            ),
             None,
             SlotPolicy::default(),
         );
@@ -430,13 +424,10 @@ fn unstarted_fixture<const CAPABILITY: u8>(
     });
     engine
         .set_identities(safe_cex_engine::signing::Identities {
-            primary: Some(Identity {
-                credential: KeyRef(KEY.into()),
-                signing: KeyRef(KEY.into()),
-                passphrase: None,
-                stable_id: Some(subject.into()),
-                extra: Default::default(),
-            }),
+            primary: Some(
+                Identity::new(KeyRef(KEY.into()), Some(KeyRef(KEY.into())))
+                    .with_stable_id(Some(subject.into())),
+            ),
             secondary: None,
         })
         .unwrap();
@@ -890,13 +881,10 @@ fn unsupported_release_registration_refuses_before_reservation_or_provider() {
     });
     engine
         .set_identities(safe_cex_engine::signing::Identities {
-            primary: Some(Identity {
-                credential: KeyRef(KEY.into()),
-                signing: KeyRef(KEY.into()),
-                passphrase: None,
-                stable_id: Some(subject.into()),
-                extra: Default::default(),
-            }),
+            primary: Some(
+                Identity::new(KeyRef(KEY.into()), Some(KeyRef(KEY.into())))
+                    .with_stable_id(Some(subject.into())),
+            ),
             secondary: None,
         })
         .unwrap();
@@ -934,13 +922,10 @@ fn forged_selected_subject_refuses_against_the_installed_identity() {
     });
     engine
         .set_identities(safe_cex_engine::signing::Identities {
-            primary: Some(Identity {
-                credential: KeyRef(KEY.into()),
-                signing: KeyRef(KEY.into()),
-                passphrase: None,
-                stable_id: Some("nonce-source/installed".into()),
-                extra: Default::default(),
-            }),
+            primary: Some(
+                Identity::new(KeyRef(KEY.into()), Some(KeyRef(KEY.into())))
+                    .with_stable_id(Some("nonce-source/installed".into())),
+            ),
             secondary: None,
         })
         .unwrap();

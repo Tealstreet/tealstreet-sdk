@@ -55,13 +55,10 @@ impl Options {
         let (local, mut identities) =
             LocalSigner::from_setup(LocalSetup { primary, secondary }).unwrap();
         if invalid_secondary {
-            identities.secondary = Some(safe_cex_engine::signing::Identity {
-                credential: safe_cex_engine::signing::KeyRef(String::new()),
-                signing: safe_cex_engine::signing::KeyRef(String::new()),
-                passphrase: None,
-                stable_id: None,
-                extra: Default::default(),
-            });
+            identities.secondary = Some(safe_cex_engine::signing::Identity::new(
+                safe_cex_engine::signing::KeyRef(String::new()),
+                Some(safe_cex_engine::signing::KeyRef(String::new())),
+            ));
         }
         (
             PhemexPerpetuals::new(NativeOptions {

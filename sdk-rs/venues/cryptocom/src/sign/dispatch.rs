@@ -104,7 +104,8 @@ impl SignStep for Envelope {
             .map(Params::signing_text)
             .unwrap_or_default();
         let work = hmac_sha256_work(
-            &self.credentials,
+            &self.credentials.credential,
+            self.credentials.signing_ref()?,
             vec![
                 PayloadPart::Bytes {
                     bytes: format!("{}{nonce}", self.method).into_bytes(),

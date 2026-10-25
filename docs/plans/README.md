@@ -57,7 +57,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Credential selection and nonce authority | Active shared-core plan; review pending | Before choosing a credential slot, read key, account subject, auth evidence tag or signing nonce in venue code. | [RUST_CREDENTIAL_SELECTION.md](RUST_CREDENTIAL_SELECTION.md) |
 | Ordinary Bybit Plan adoption | Plan + original REDs; child of #1873 | Before migrating ordinary Bybit trading onto Preflight/Plan, its code table, ACK proofs or resend paths. | [RUST_BYBIT_PLAN_ADOPTION.md](RUST_BYBIT_PLAN_ADOPTION.md) |
 | Bybit options adoption | Plan + original REDs; slice 4 | Before moving Bybit option trading, option queries or option seeds, or deleting the legacy trading executor. | [RUST_BYBIT_OPTIONS.md](RUST_BYBIT_OPTIONS.md) |
-| Credential-only trusted setup | Plan revision 3 CLEAR (kuhwxi); REDs next; phase 2 after the socket sign-failure lane; phase 3 gated on G3 | Before installing a key-only identity (no signing ref), reading key presence (Absent/Empty/Blank/Nonblank) or changing `Identity.signing`. | [RUST_CREDENTIAL_ONLY_SETUP.md](RUST_CREDENTIAL_ONLY_SETUP.md) |
+| Credential-only trusted setup | Phase 2 (D1 + D2, D4 `MissingKey`) in review on `feat/rust-credential-only-identity`; phase 3 gated on G3 and G6 | Before installing a key-only identity (no signing ref), reading key presence (Absent/Empty/Blank/Nonblank) or changing `Identity.signing`. | [RUST_CREDENTIAL_ONLY_SETUP.md](RUST_CREDENTIAL_ONLY_SETUP.md) |
 | Error classification | Active engine standardization plan; inventory ranked | Before classifying venue errors, native code tables, status-to-outcome rules, partial batch failures or error-driven resends. | [RUST_ERROR_CLASSIFICATION.md](RUST_ERROR_CLASSIFICATION.md) |
 | HTTP command entry | Planned shared pre-authority rejection seam | Before removing numeric failure when initial Context issuance can refuse. | [RUST_HTTP_COMMAND_ENTRY.md](RUST_HTTP_COMMAND_ENTRY.md) |
 | Background read delivery | Additive shared delivery guard plan | Before publishing a one-leg Background Read response or treating logical liveness as callback identity. | [RUST_BACKGROUND_READ_DELIVERY.md](RUST_BACKGROUND_READ_DELIVERY.md) |
@@ -455,5 +455,9 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Journal report iterator simplification | [RUST_JOURNAL_REPORT_ITERATORS.md](RUST_JOURNAL_REPORT_ITERATORS.md) | codex-ih35js | Local measured cut after Bitget slice 3; exact review required. |
 
 | Phemex remaining request funnel | [RUST_PHEMEX_REMAINING_FUNNEL.md](RUST_PHEMEX_REMAINING_FUNNEL.md) | codex-ih35js | Source correction: native gate precedence and income prefix recovery; source review/CI and composed landing size gates pending; four named repair holdouts. |
+
+| Shared hosted-signing envelope | Docs-only companion; required m26ps4 review | Before shared Kraken HMAC or Paradex Stark structured-preimage transport, provider/capture or capability changes. | [RUST_HOSTED_SIGNING_ENVELOPE.md](RUST_HOSTED_SIGNING_ENVELOPE.md) |
+
+| OKX ordered write ownership | Source GO (dazzy3); exact-head CI green | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |
 
 | Serial Session resend | Originals CLEAR; source review and paired size gates pending | Before a serial call's one authentication resend waits for a login round trip (GRVT code 1000). | [RUST_SERIAL_SESSION_RESEND.md](RUST_SERIAL_SESSION_RESEND.md) |

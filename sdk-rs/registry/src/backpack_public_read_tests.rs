@@ -68,7 +68,10 @@ fn public_only_installs_a_provider_holding_only_the_valid_read_identity() {
         // Independent oracle: the same Ed25519 signature over the read seed.
         let expected =
             safe_cex_crypto::ed25519::sign(b"instruction=fillHistoryQueryAll", &[9u8; 32]).unwrap();
-        assert_eq!(signature(&setup, &read.signing), expected.to_vec());
+        assert_eq!(
+            signature(&setup, read.signing_ref().unwrap()),
+            expected.to_vec()
+        );
         assert!(matches!(setup.read_status, Some(Ok(()))));
     }
 }
@@ -232,7 +235,10 @@ fn valid_read_status_always_installs_the_real_secondary() {
             let expected =
                 safe_cex_crypto::ed25519::sign(b"instruction=fillHistoryQueryAll", &[9u8; 32])
                     .unwrap();
-            assert_eq!(signature(&setup, &read.signing), expected.to_vec());
+            assert_eq!(
+                signature(&setup, read.signing_ref().unwrap()),
+                expected.to_vec()
+            );
         }
     }
 }

@@ -110,13 +110,10 @@ mod tests {
     use super::*;
     use crate::signing::KeyRef;
     fn key() -> WorkKey {
-        let identity = Identity {
-            credential: KeyRef("ref:credential".into()),
-            signing: KeyRef("ref:signing".into()),
-            passphrase: None,
-            stable_id: None,
-            extra: Default::default(),
-        };
+        let identity = Identity::new(
+            KeyRef("ref:credential".into()),
+            Some(KeyRef("ref:signing".into())),
+        );
         WorkKey {
             symbol: "BTC".into(),
             subject: CredentialSubject::ConfiguredPrimary(identity.clone()),
@@ -167,7 +164,9 @@ mod tests {
         different!(intent, RoutingIntent::Secondary);
         different!(operation, Operation::Mutation);
         let mut other = original.clone();
-        other.identity.signing = KeyRef("ref:other".into());
+        other
+            .identity
+            .set_signing_ref(Some(KeyRef("ref:other".into())));
         alternatives.push(other);
         let mut other = original.clone();
         let CredentialSubject::ConfiguredPrimary(subject) = &mut other.subject;

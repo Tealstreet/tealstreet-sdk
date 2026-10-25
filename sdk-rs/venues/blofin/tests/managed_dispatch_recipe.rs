@@ -398,7 +398,7 @@ fn selected_identity_intent_preimage_headers_and_independent_vectors_match() {
             assert_eq!(w.operations.len(), 3);
             assert!(matches!(&w.operations[0],Work::Present{key} if *key==id.credential));
             assert!(
-                matches!(&w.operations[1],Work::Sign{algorithm,key,..} if *algorithm==safe_cex_engine::signing::Algorithm::HmacSha256 && *key==id.signing)
+                matches!(&w.operations[1],Work::Sign{algorithm,key,..} if *algorithm==safe_cex_engine::signing::Algorithm::HmacSha256 && *key==id.signing_ref().unwrap().clone())
             );
             assert!(
                 matches!(&w.operations[2],Work::Present{key} if Some(key)==id.passphrase.as_ref())
@@ -596,7 +596,8 @@ fn missing_passphrase_ref_and_invalid_identity_refuse_before_entropy_or_provider
             |ids| {
                 let mut p = probe(ids, CredentialSlot::Primary);
                 if invalid {
-                    p.identity.signing.0 = String::new();
+                    p.identity
+                        .set_signing_ref(Some(safe_cex_engine::signing::KeyRef(String::new())));
                 } else {
                     p.identity.passphrase = None;
                 }
