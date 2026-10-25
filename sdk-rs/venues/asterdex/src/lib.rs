@@ -17,11 +17,11 @@ use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue, VenueError,
     json, num,
 };
 use serde_json::value::RawValue;
@@ -92,7 +92,7 @@ pub struct MarketRule {
 
 pub enum Pending {
     DepthRead {
-        command: CommandId,
+        context: Context,
     },
     MarketBrackets {
         rows: HashMap<String, f64>,
@@ -116,7 +116,7 @@ pub enum Pending {
         single: bool,
     },
     Klines {
-        command: CommandId,
+        context: Context,
         rows: Vec<Candle>,
         /// The first row that did not decode.
         invalid: Option<String>,
@@ -745,7 +745,7 @@ impl Venue for AsterDex {
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         match pending {
-            Pending::DepthRead { command } => {
+            Pending::DepthRead { context } => {
                 #[derive(serde::Serialize)]
                 struct Level {
                     price: f64,
@@ -807,9 +807,9 @@ impl Venue for AsterDex {
                         .map_err(|e| e.to_string())
                     })
                 };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                let _ = match result {
+                    Ok(data) => cx.done_context(&context, data),
+                    Err(error) => cx.fail_context(&context, error),
                 };
             }
             Pending::MarketBrackets { rows } => {
@@ -871,7 +871,7 @@ impl Venue for AsterDex {
                 single,
             } => self.finish_interest(cx, rows, initial, single, Some(response)),
             Pending::Klines {
-                command,
+                context,
                 rows,
                 invalid,
             } => {
@@ -888,9 +888,9 @@ impl Venue for AsterDex {
                         response.status
                     )),
                 };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                let _ = match result {
+                    Ok(data) => cx.done_context(&context, data),
+                    Err(error) => cx.fail_context(&context, error),
                 };
             }
         }
@@ -976,6 +976,13 @@ impl Venue for AsterDex {
         }
     }
 
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Signed(req) => self.on_signed_failed(cx, req, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+
     fn on_stream_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1000,7 +1007,9 @@ impl Venue for AsterDex {
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::DepthRead { command } => cx.fail(command, error),
+            Pending::DepthRead { context } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::MarketBrackets { .. } => self.seed_daily(cx),
             Pending::Signed(req) => self.on_signed_response(cx, req, Err(error)),
             Pending::Clock(req) => self.on_clock_response(cx, req, Err(error)),
@@ -1010,7 +1019,9 @@ impl Venue for AsterDex {
             Pending::OpenInterest {
                 initial, single, ..
             } => self.finish_interest(cx, HashMap::new(), initial, single, None),
-            Pending::Klines { command, .. } => cx.fail(command, error.to_owned()),
+            Pending::Klines { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
             Pending::ExchangeInfo { .. } => self.startup.failed(cx, true),
             Pending::Daily { .. } => self.startup.failed(cx, false),
         }
@@ -1141,7 +1152,7 @@ impl Venue for AsterDex {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval,
                 limit,
@@ -1159,19 +1170,22 @@ impl Venue for AsterDex {
                 if let Some(to) = to_ms {
                     path.push_str(&format!("&endTime={}", num::format(to)));
                 }
+                let Ok(context) = cx.admit_http_command(request::public_read_policy()) else {
+                    return;
+                };
                 self.get_streamed(
                     cx,
                     &path,
                     ArrayAt::Root,
                     Pending::Klines {
-                        command,
+                        context,
                         rows: Vec::new(),
                         invalid: None,
                     },
                 );
             }
             Command::FetchOrderBook {
-                command,
+                command: _,
                 symbol,
                 limit,
             } => {
@@ -1183,7 +1197,10 @@ impl Venue for AsterDex {
                         .num("limit", f64::from(limit.unwrap_or(100)))
                         .as_str()
                 );
-                self.get(cx, &path, Pending::DepthRead { command });
+                let Ok(context) = cx.admit_http_command(request::public_read_policy()) else {
+                    return;
+                };
+                self.get(cx, &path, Pending::DepthRead { context });
             }
             Command::FetchAccount { command } => self.fetch_account_info(cx, command),
             Command::Query { command, query } => self.start_query(cx, command, query),
@@ -1228,6 +1245,23 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
                 skipped.join(", ")
             ),
         );
+    }
+}
+
+impl AsterDex {
+    /// A managed read's typed failure: a command read keeps its error kind.
+    pub(crate) fn on_read_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: VenueError,
+    ) {
+        match pending {
+            Pending::DepthRead { context } | Pending::Klines { context, .. } => {
+                let _ = cx.fail_context(&context, error);
+            }
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
     }
 }
 

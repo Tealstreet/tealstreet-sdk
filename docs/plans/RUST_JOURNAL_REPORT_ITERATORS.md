@@ -89,3 +89,9 @@ and 6/6 with declared/nonce features. Strict all-target Clippy passes both
 compositions; scoped formatting and full bans/ratchets pass. The earlier full
 feature-matrix evidence remains recorded above. This integration enables the
 PR-triggered Rust workflow previously blocked by the README conflict.
+
+Full Rust run 40211927978 (74 success, three configured skips) and general
+run 40211928021 are green on `231cd805454`. The subsequent README-only fix
+keeps incoming bytes plus one own row. Plain-merging `094a1fb836f` adds only
+the landed AsterDEX and repair-plan changes; the two own SDK blobs remain
+byte-exact to that green head. The measured Bitget/Bybit inputs are unchanged.
