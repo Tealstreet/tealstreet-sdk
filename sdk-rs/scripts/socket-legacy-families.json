@@ -22,7 +22,6 @@
     "orderly": "venues/orderly/src/",
     "paradex": "venues/paradex/src/",
     "polymarket": "venues/polymarket/src/",
-    "weex": "venues/weex/src/",
     "woo": "venues/woo/src/"
   }
 }
