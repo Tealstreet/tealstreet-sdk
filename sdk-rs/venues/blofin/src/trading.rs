@@ -380,6 +380,9 @@ impl Step {
     fn read(&self) -> bool {
         matches!(self.effect, Effect::Verify(_))
     }
+    fn is_place(&self) -> bool {
+        matches!(self.effect, Effect::Place { .. })
+    }
     fn intent(&self) -> Intent {
         match self.effect {
             Effect::Place { .. } => Intent::Place,
@@ -1754,7 +1757,7 @@ impl Blofin {
         if !request.step.read() {
             if released {
                 error.outcome = Some(Outcome::Unknown);
-                if matches!(request.step.effect, Effect::Place { .. }) {
+                if request.step.is_place() {
                     self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
                 }
             }
@@ -1811,7 +1814,7 @@ impl Blofin {
             };
         }
         if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
-            if matches!(request.step.effect, Effect::Place { .. }) {
+            if request.step.is_place() {
                 self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
             }
             return self.end(cx, active, current, error);
