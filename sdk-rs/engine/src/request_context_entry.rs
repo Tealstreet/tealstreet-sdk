@@ -347,7 +347,23 @@ impl<P> Cx<'_, P> {
     /// registry or invalid clock yields the engine's typed admission refusal.
     #[inline(never)]
     pub fn refuse_command(&mut self, operation: Operation, error: impl Into<crate::VenueError>) {
-        let _ = (operation, error.into());
+        let error = error.into();
+        let context = match self.admit_http_command(Policy {
+            operation,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: crate::request_context::RetryPolicy::Never,
+        }) {
+            Ok(context) => context,
+            Err(CommandEntryError::Rejected(_)) => return,
+            Err(CommandEntryError::Revoked) => {
+                debug_assert!(false, "refuse_command outside a genuine command entry");
+                return;
+            }
+        };
+        let settled = self.fail_context(&context, error);
+        debug_assert!(settled.is_ok(), "a fresh refusal Context settles");
     }
 
     /// One initial command transaction shared by Context and opaque Preflight
