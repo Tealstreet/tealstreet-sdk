@@ -57,6 +57,21 @@ transport retry or auth/deactivation inference. A subsequent native backoff is
 a fresh physical request and fresh20s bound, preserving the existing cadence.
 Typed causes must not be projected into Network to gain retry permission.
 
+Nonfinite clocks (NaN, +Inf and -Inf) have a separate denial path. Check clock
+finiteness before the pause/defer gate and before invoking any native failure
+follow-up for these adopted task kinds. An invalid-clock admission returns
+without creating custody, a timer, HTTP, socket or private-start work. For an
+issued request returned by preparation or transport failure at a nonfinite
+clock, retire/drop only that exact issued custody, with no DATA decode, row,
+status, diagnostic, seed, rate, Store or readiness effects and no NEW timer,
+HTTP, socket or account startup. Existing unrelated finite work stays live.
+Cleanup cancellation or clearing the issued request's existing timer is allowed;
+no replacement timeout/backoff may be created. This must not suppress genuine
+finite owned Timeout recovery: at finite physical-timeout equality, retire the
+current request and run its native failure/backoff/account-start path exactly
+once, even though DATA validation has expired. Old ticker generations remain
+cleanup-only. A later eligible finite observation can attempt normal startup.
+
 ## Original controls before runtime
 
 First add a new public_seed_context target against unchanged production.
@@ -66,7 +81,11 @@ Primary intent and final route/header/body/stream bytes. Positive fixtures
 retain native catalogue/ticker output and bid/ask precedence.
 
 Use genuine256-peer Background pressure, with no fabricated contexts or IDs.
-Pin admission refusal and all-credit recovery. For Markets completion,254 peers
+Pin admission refusal and all-credit recovery. Add NaN/+Inf/-Inf admission,
+released-request failure and preparation-failure controls for each adopted task
+kind; assert no new timers/HTTP/sockets, no native state/diagnostic effects, exact
+owned cleanup and a working unrelated finite peer. Keep finite Timeout/backoff
+recovery as a distinct positive so invalid-clock handling cannot mask it. For Markets completion,254 peers
 must permit the two successors only after its own credit retires. Pin ticker
 success/failure retirement before account/socket/native-backoff successors.
 Exercise physical TimerFired equality at20s, held preparation, late streamed
@@ -82,9 +101,20 @@ record the timing conflict before proposing an explicit fixture correction.
 
 ## Inventory, review and validation
 
-The shared raw get helper remains for Depth, so this narrow semantic adoption
-claims ZERO lexical request-site prunes. Do not delete a same-hash legacy site,
-change STAGING_BOOTSTRAPS or touch signing/credential inventories/checkers.
+The shared raw get helper remains for NONSTREAM Depth only. All current
+get(Some(stream)) production callers are the three adopted task kinds; remove
+the now-orphan raw request_streamed branch after their direct cutover. Remove
+the unused get stream argument and DeferredGet stream field where proven dead;
+the candle deferral initializer merely drops that unused field, while its replay
+still calls send_candle_query unchanged. Preserve the surviving raw nonstream
+Depth request tokens and behavior exactly; no Depth custody adoption is claimed.
+
+The canonical raw streamed fingerprint is
+067aa233d0ebbb24c837ae5cb4549d6aa68e9f29bf4bdde0ba0630bda9f466c1,
+count1 in venues/weex/src/lib.rs. Recount actual source before source freeze and
+remove ONLY that singleton from the production manifest when absent. On this
+base that is WEEX16F/22O to15F/21O; no sibling or foreign prune. Keep the raw
+nonstream sender, STAGING_BOOTSTRAPS, signing/credential inventories and checkers.
 Source scope is lib.rs plus a new test target, narrowly needed fixture drains,
 and plan/index/CALLERS docs. No engine/host/Cargo/profile/budget changes.
 
@@ -98,3 +128,11 @@ measurement. Re-measure on a later composition when engine/feature/build input
 overlap requires it under the auditor rule. One freeze
 push/PR-triggered run after exact source and preservation review. Exact-tree
 8x5tm1 GO remains required for landing.
+
+## Bounded plan correction
+
+Reviewer codex-hcmq3f cleared native/API direction at b9673d1ba86 and requested
+these two P2 corrections before originals: invalid clocks must not feed native
+backoff/private startup, and the orphan raw streamed branch must be removed and
+recounted rather than retained for a zero-prune claim. This successor changes
+only the plan; originals and runtime still await bounded plan clearance.
