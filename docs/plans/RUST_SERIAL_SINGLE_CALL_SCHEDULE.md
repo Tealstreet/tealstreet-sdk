@@ -68,3 +68,27 @@ existing ignored tests. Strict Clippy passes with serial/barriers enabled, with
 serial disabled, and with serial disabled plus barriers. Scoped formatting
 passes. Full bans currently report foreign Backpack inventory drift from the old composition;
 actual-tip integration must recheck that ratchet before a PR is ready.
+
+
+## Actual slice-3 landing composition
+
+Plain-merge of actual `ae3f8b47cc1` into the reviewed cut gives source
+`8ae3b21200c`. The only manual source hunk retains #2093's incoming
+`nonce_unscheduled` refusal in the shared `has_barriers` check. The reviewer
+carried exact-patch CLEAR; `validate_call` and all other own source deltas are
+unchanged. README keeps the incoming rows plus this plan row once.
+
+| Family | Before on ae3 | After on the same composition | Delta |
+| --- | ---: | ---: | ---: |
+| Bitget | 1,475,547 | 1,473,607 | -1,940 |
+| Bybit | 1,397,889 | 1,397,892 | +3 |
+
+Rust 1.99.0, Binaryen 132 and unchanged profiles; Web and Node agree. Raw Bybit
+shrinks by one byte, retaining the overseer's accepted three-byte shipped
+tolerance. No allowance change and no unmeasured sum with cut 2.
+
+Fresh composed engine library rows pass 1,232 serial/condition/barrier/nonce,
+1,155 declared/nonce, and 1,167 declared/barrier/nonce tests. Each retains the
+same ten existing ignored tests. Strict all-target Clippy passes all three
+rows; scoped formatting and full bans/ratchets pass. The incoming unscheduled
+nonce barrier refusal and ordinary-plan positive controls run in these rows.
