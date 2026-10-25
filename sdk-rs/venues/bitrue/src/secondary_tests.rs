@@ -99,7 +99,10 @@ fn secondary_get_keeps_primary_mutations() {
 #[test]
 fn invalid_secondary_identity_stops_startup_before_io() {
     let (mut opts, _) = options();
-    opts.read_credentials.as_mut().unwrap().signing.0.clear();
+    opts.read_credentials
+        .as_mut()
+        .unwrap()
+        .set_signing_ref(Some(safe_cex_engine::signing::KeyRef(String::new())));
     let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(opts));
     engine.start(1700000000000.0);
     assert!(

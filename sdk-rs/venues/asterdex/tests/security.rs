@@ -39,13 +39,10 @@ impl Signer for Recording {
 }
 
 fn identity(slot: &str) -> Identity {
-    Identity {
-        credential: KeyRef(format!("{slot}.credential")),
-        signing: KeyRef(format!("{slot}.signing")),
-        passphrase: None,
-        stable_id: None,
-        extra: Default::default(),
-    }
+    Identity::new(
+        KeyRef(format!("{slot}.credential")),
+        Some(KeyRef(format!("{slot}.signing"))),
+    )
 }
 
 fn requests(engine: &mut safe_cex_engine::Engine<AsterDex>, now: f64) -> Vec<HttpRequest> {
@@ -136,7 +133,7 @@ fn venue_signs_only_through_the_injected_provider_with_the_selected_slot() {
             };
             assert!(
                 refs.iter()
-                    .any(|id| *key == id.credential || *key == id.signing)
+                    .any(|id| *key == id.credential || *key == id.signing_ref().unwrap().clone())
             );
         }
     }

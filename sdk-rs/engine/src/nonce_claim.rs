@@ -59,7 +59,10 @@ impl NonceClaim {
                 subject: NonceSubject(NonceKey::stable_id(stable)),
                 selection,
                 credential: selection.credential(identity.credential.clone()),
-                signing: identity.signing.clone(),
+                signing: identity
+                    .signing_ref()
+                    .map_err(|_| NonceSelectionError::InvalidSubject)?
+                    .clone(),
                 bound: AtomicBool::new(false),
             }),
         })
@@ -77,7 +80,7 @@ impl ClaimAuthority {
     pub(crate) fn matches_identity(&self, identity: &Identity) -> bool {
         identity.validate().is_ok()
             && self.credential.reference == identity.credential
-            && self.signing == identity.signing
+            && identity.signing_ref().is_ok_and(|key| *key == self.signing)
             && identity
                 .require_stable_id()
                 .is_ok_and(|id| self.subject.0 == NonceKey::stable_id(id))
@@ -154,13 +157,11 @@ mod tests {
     use crate::credential_selection::{CredentialRole, SlotPolicy, Slots};
     use crate::nonce::KRAKEN;
     fn identity(stable: &str, signing: &str) -> Identity {
-        Identity {
-            credential: KeyRef(format!("credential/{signing}")),
-            signing: KeyRef(signing.into()),
-            passphrase: None,
-            stable_id: Some(stable.into()),
-            extra: Default::default(),
-        }
+        Identity::new(
+            KeyRef(format!("credential/{signing}")),
+            Some(KeyRef(signing.into())),
+        )
+        .with_stable_id(Some(stable.into()))
     }
     fn selected(stable: &str) -> Arc<ClaimAuthority> {
         Slots::new(
@@ -189,7 +190,7 @@ mod tests {
         assert_ne!(p.slot(), s.slot());
         assert_eq!(pc.slot(), p.slot());
         assert_eq!(sc.slot(), s.slot());
-        assert_ne!(pi.signing, si.signing);
+        assert_ne!(pi.signing_ref(), si.signing_ref());
         let a = pc.authority().reserve(1000., 9000.).unwrap();
         let b = sc.authority().reserve(999., 99000.).unwrap();
         assert_eq!((a.nonce, b.nonce), (1000000, 1000001));
