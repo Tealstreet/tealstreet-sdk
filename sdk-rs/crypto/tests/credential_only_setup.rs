@@ -20,7 +20,11 @@ fn c1_key_only_setup_installs_no_signing_ref() {
     assert!(primary.validate().is_err());
     let json = serde_json::to_value(&primary).unwrap();
     assert_eq!(json["credential"], "primary.credential");
-    assert!(json.get("signing").is_none(), "absent, not {}", json["signing"]);
+    assert!(
+        json.get("signing").is_none(),
+        "absent, not {}",
+        json["signing"]
+    );
 }
 
 /// C6: an Identity without `signing` parses as absent and serializes without
@@ -47,7 +51,10 @@ fn c7_signing_policy_declares_optional_and_defaults_to_required() {
         policy(r#"{"primary":{"signing":"required"}}"#).primary,
         Some(IdentitySetupPolicy::default())
     );
-    assert!(serde_json::from_str::<CredentialSetupPolicy>(r#"{"primary":{"signing":"maybe"}}"#).is_err());
+    assert!(
+        serde_json::from_str::<CredentialSetupPolicy>(r#"{"primary":{"signing":"maybe"}}"#)
+            .is_err()
+    );
 }
 
 /// K6: every existing policy shape serializes exactly as before.
@@ -64,6 +71,10 @@ fn k6_existing_setup_policies_serialize_unchanged() {
             r#"{"primary":{"trimCredential":null,"passphrase":null,"secretEncoding":"hex","extra":null,"signingAlgorithm":"secp256k1Digest"},"secondary":null}"#,
         ),
     ] {
-        assert_eq!(serde_json::to_string(&policy(input)).unwrap(), expected, "{input}");
+        assert_eq!(
+            serde_json::to_string(&policy(input)).unwrap(),
+            expected,
+            "{input}"
+        );
     }
 }
