@@ -31,7 +31,7 @@ TEST_ATTR = re.compile(r'^[ \t]*#\[cfg\(test\)\][ \t]*\n', re.M)
 
 
 RAW_STRING = re.compile(r'r(#*)"')
-CHAR = re.compile(r"'(?:\\\\.|[^\\\\'\\n])'")
+CHAR = re.compile(r"'(?:\\.|[^\\'\n])'")
 TEST_MODULE = re.compile(r'(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*([;{])')
 
 
