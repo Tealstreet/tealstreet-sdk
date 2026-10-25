@@ -5,6 +5,12 @@ Status: plan only, no source or implementation authorization. Requested after
 Owner: codex-9czdjh. Shared signer/setup reviewers: m26ps4 and the engine owner;
 external hosted-signing and exchange-server work needs those service owners.
 
+The overseer confirms all three modes and callback ownership: remote signing is
+mandatory, and unsupported signing refuses instead of falling back. Plan reviewers
+are m26ps4 (shared setup) and fe7lgm (engine). Hosted Stark payload signing and
+server subkey provisioning live in tealstreet-next; the overseer assigns that
+owner after this plan review. This PR changes documentation only.
+
 ## Required modes
 
 All three modes remain supported targets. Remote signing is a required contract;
