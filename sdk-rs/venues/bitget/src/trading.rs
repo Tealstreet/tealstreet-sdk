@@ -368,7 +368,16 @@ struct Reply<'a> {
 
 impl BitgetFutures {
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        self.settle_retired_write(cx);
+        // The owed refresh allocates I/O, so it waits until this command has used
+        // its own genuine admission.
+        let refresh = self.restore_retired_write(cx);
+        self.plan_command(cx, command);
+        if refresh {
+            self.refresh_orders(cx, false);
+        }
+    }
+
+    fn plan_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let observed: Vec<_> = self
             .trading
             .acknowledged
@@ -1014,14 +1023,22 @@ impl BitgetFutures {
 
     /// Native restore and reconcile for a write the engine sealed as Unknown.
     pub(crate) fn settle_retired_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.restore_retired_write(cx) {
+            self.refresh_orders(cx, false);
+        }
+    }
+
+    /// The I/O-free half of the settle: exact Store restoration. Returns whether
+    /// the order refresh is still owed.
+    fn restore_retired_write(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
         let Some(call) = self.trading.retired_write.take() else {
-            return;
+            return false;
         };
         restore_canceling(cx, &call);
         if matches!(call.effect, Effect::Place { .. }) {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
         }
-        self.refresh_orders(cx, false);
+        true
     }
 
     fn plan_job(&self, cx: &Cx<'_, Pending>, job: &mut Job) -> Result<(), String> {
