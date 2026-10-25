@@ -55,7 +55,10 @@ pub enum Pending {
     History(history::Request),
     Closed(closed::Request),
     Trade(trading::Request),
-    Account(account::Request),
+    Account(
+        safe_cex_engine::selected_read::AdmittedRead,
+        account::Request,
+    ),
     Leverage(account::Leverage),
     Markets {
         rows: Vec<Market>,
@@ -607,6 +610,40 @@ impl Blofin {
         cx.book_changed(symbol);
     }
 }
+impl Blofin {
+    /// A delivered error (a stream-shape or malformed body) carries a response,
+    /// so a managed read validates its custody first, as `on_response` does: a
+    /// stale or superseded leg only closes its Context and changes nothing.
+    fn delivered_failure(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        match pending {
+            Pending::Account(read, request) => {
+                let current = cx
+                    .validate_background_read_http_delivery(read.context())
+                    .is_ok();
+                let _ = cx.finish_http_context(read.context());
+                if current {
+                    self.account_failed(cx, request, error);
+                }
+            }
+            Pending::History(mut request) => {
+                if request.valid_delivery(cx) {
+                    self.history_failed(cx, request, VenueError::new(error));
+                } else {
+                    request.release(cx);
+                }
+            }
+            Pending::Closed(mut request) => {
+                if request.valid_delivery(cx) {
+                    Self::closed_failed(cx, request, VenueError::new(error));
+                } else {
+                    request.release(cx);
+                }
+            }
+            other => self.on_request_failed(cx, other, error),
+        }
+    }
+}
+
 impl Venue for Blofin {
     fn guard_pending_placements(&self) -> bool {
         true
@@ -753,8 +790,15 @@ impl Venue for Blofin {
             Pending::Trade(_) => {}
             Pending::PublicTrades(request) => self.public_trades_item(cx, request, item),
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Closed(request) => Self::closed_item(request, item),
-            Pending::Account(request) => self.account_item(cx, request, item),
+            Pending::Closed(request) => Self::closed_item(cx, request, item),
+            Pending::Account(read, request) => {
+                if cx
+                    .validate_background_read_http_delivery(read.context())
+                    .is_ok()
+                {
+                    self.account_item(cx, request, item);
+                }
+            }
             Pending::Leverage(_) => {}
             Pending::Markets { rows, malformed } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
@@ -892,8 +936,16 @@ impl Venue for Blofin {
             Pending::Closed(request) => {
                 self.closed_response(cx, request, response);
             }
-            Pending::Account(request) => {
-                self.account_response(cx, request, response);
+            Pending::Account(read, request) => {
+                let current = cx
+                    .validate_background_read_http_delivery(read.context())
+                    .is_ok();
+                // Every terminal finishes the leg: a stale delivery and an answer
+                // the revision drops alike.
+                let _ = cx.finish_http_context(read.context());
+                if current {
+                    self.account_response(cx, request, response);
+                }
             }
             Pending::Leverage(leverage) => self.leverage_response(cx, leverage, response),
             Pending::Trade(request) => {
@@ -923,7 +975,7 @@ impl Venue for Blofin {
                     };
                 self.public_failure(cx, context, *pending, error);
             }
-            other => self.on_request_failed(cx, other, error),
+            other => self.delivered_failure(cx, other, error),
         }
     }
     fn on_stream_error(
@@ -945,7 +997,7 @@ impl Venue for Blofin {
                     };
                 self.public_failure(cx, context, *pending, error);
             }
-            other => self.on_request_failed(
+            other => self.delivered_failure(
                 cx,
                 other,
                 &format!(
@@ -960,14 +1012,20 @@ impl Venue for Blofin {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
             Pending::Managed(context, pending) => self.public_failure(cx, context, *pending, error),
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
+            Pending::Closed(request) => Self::closed_failed(cx, request, error),
+            Pending::History(request) => self.history_refused(cx, request, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
+    /// A failed delivery has no body to validate. History and closed positions
+    /// keep one leg in flight per query, so the failure belongs to that leg.
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
             // The shared Network/Timeout kind stays; its text is the native message.
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
+            Pending::Closed(request) => Self::closed_failed(cx, request, error),
+            Pending::History(request) => self.history_failed(cx, request, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -987,11 +1045,11 @@ impl Venue for Blofin {
                 return;
             }
             Pending::History(request) => {
-                self.history_failed(cx, request, error);
+                self.history_failed(cx, request, VenueError::new(error));
                 return;
             }
             Pending::Closed(request) => {
-                Self::closed_failed(cx, request, error);
+                Self::closed_failed(cx, request, VenueError::new(error));
                 return;
             }
             Pending::Trade(request) => {
@@ -1005,7 +1063,8 @@ impl Venue for Blofin {
             }
             other => other,
         };
-        if let Pending::Account(request) = pending {
+        if let Pending::Account(read, request) = pending {
+            let _ = cx.finish_http_context(read.context());
             self.account_failed(cx, request, error);
             return;
         }

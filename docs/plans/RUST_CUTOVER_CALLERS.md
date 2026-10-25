@@ -3507,6 +3507,27 @@ unconverted paged histories remain open; this follow-on does not close the full
 history fan-out or prove deployed NX behavior.
 
 
+### BloFin private reads: managed history, closed positions and account reads
+
+BloFin fills, order history, income and closed positions now page under the
+caller's Read root at its exact receipt. Each page is one 20 s managed leg,
+capped by the root and signed by the #2084 HMAC recipe (Secondary else Primary
+for GET). Account settings, positions/balance and open/trigger order reads are
+each one Background read.
+- **Root expiry.** The caller's wait bounds the whole walk: expiry is a strict
+  Timeout, with no rows and no marker.
+- **Page failures.** A later-page transport, HTTP, parse or 20 s timeout failure
+  keeps the accepted rows with one `history.incomplete`. A failure before any
+  accepted rows rejects typed.
+- **Typed kinds.** Private history transport loss now reports `Network` rather
+  than `Internal`, as public trades already did.
+- **Closed-position refusals.** A closed-positions leg admission or queue
+  refusal is now strict (rejected with no rows) even after accepted pages, as
+  general history already was. A closed-position signing failure stays a
+  recoverable page failure, and general history's signing refusal stays strict.
+- **Unchanged.** Query bytes, results, row mapping and account Store effects. No
+  new frame or result schema.
+
 ### Bitunix histories: shared cursor and accepted-page completion
 
 Bitunix fills, orders and income now use the existing engine CursorHistory owner.
@@ -8741,6 +8762,24 @@ until their own slices.
 Follow-up (engine owner): a shared ReadFailure backoff. The engine grants read
 resends but has no delay policy, so AsterDEX keeps its own 1/2/3 s timer, as
 other families do. That timer goes away when the shared backoff lands.
+
+## WEEX public discovery and ticker seed custody
+
+Markets, Daily and BookTickers admit independent keyless Background Reads only
+when eligible after the native pause. Each physical observation has a NEW20s
+bound, Never retry, no pacing, explicit Primary intent and unchanged route None.
+Exact DATA plus ticker generation precede row/status/rate/diagnostic effects.
+Publication stays inside live custody; exact retirement precedes both catalogue
+successors, socket/private startup and native retry hooks. Finite owned Timeout
+retires then follows the existing native backoff/startup once. Nonfinite clocks
+allow exact issued cleanup only, without new work or Store/readiness effects.
+Old seed generations cannot publish or affect the current pause/seed. Native
+backoff creates a fresh bounded observation; no aggregate retry cap is implied.
+The orphan streamed legacy sender is removed; nonstream subscription Depth is
+unchanged. Fixture-only admission-clock supersession aligns six catalogue starts
+to their already-existing epoch response time, with all response/event clocks,
+payloads and financial assertions retained and truncated-stream0->1->2 unchanged.
+Standalone custody controls retain genuine delayed/equality expiry coverage.
 
 
 ### Seeded serial Session resend (engine API; GRVT adoption still separate)
