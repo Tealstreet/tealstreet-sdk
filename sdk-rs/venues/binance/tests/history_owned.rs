@@ -187,8 +187,10 @@ fn fills_keep_native_order_duplicate_ids_and_per_window_limit_without_global_cap
             .collect::<Vec<_>>(),
         ["2", "1", "1"]
     );
-    assert!(markers(&h).is_empty());
-    assert_eq!(h.command_notices, [(93, "done")]);
+    // Both limit-1 windows filled their page, so the rows are kept and the
+    // result is marked incomplete once (history_saturation.rs; #2128 finding).
+    assert_eq!(markers(&h).len(), 1);
+    assert_eq!(h.command_notices, [(93, "incomplete"), (93, "done")]);
 }
 
 #[test]
