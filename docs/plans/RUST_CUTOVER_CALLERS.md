@@ -3540,11 +3540,19 @@ projects every outcome.
 - **D-a, documented codes.** The cited BloFin codes (parameter, price/size, balance,
   duplicate client ID, setting and auth refusals) are typed Rejected refusals.
   Native row and setting refusals used to have no outcome. Unlisted codes and
-  shape mismatches are Unknown. HTTP 400/401/403/429 stay Rejected; another 4xx
-  is now Unknown. A 5xx is Unknown with kind `venueUnavailable`, and an unproven
-  acknowledgement is Unknown with kind `internal`. Text is unchanged.
+  shape mismatches are Unknown. BloFin returns its 400 ("Bad Request") and 401
+  ("Invalid signature") codes in a 200 body, so they're code rows. The only
+  documented HTTP statuses are 403 (firewall) and 429, and both stay Rejected.
+  Any other non-2xx without a cited body code is now Unknown; native had
+  Rejected for every 4xx. A 5xx is Unknown with kind `venueUnavailable`, and an
+  unproven acknowledgement is Unknown with kind `internal`. The journal owns
+  every outcome and kind. Text is unchanged.
 - **D-b.** A Verify failure after an accepted cancel is never NotSent.
 - **D-c, cancel "gone".** Code 1000 or 102068 on a plain cancel is satisfied.
+  "Gone" is now decided by code alone: the "does not exist" text is 102068's
+  own message. A row with that text under any other code is classified by its
+  code (unlisted is Unknown) and stops the job with its row kept, where native
+  removed the row and continued.
   That's a behaviour change, under the shared absent-order rule: it now fences the
   symbol and queues one fresh order snapshot (deferred while a placing scope is
   held), and a clean snapshot clears the fence. Under a dependent replacement,
@@ -3553,7 +3561,11 @@ projects every outcome.
 - **D-e, partial IDs.** IDs accepted before a later refusal now survive on the
   failure's `partial` instead of being dropped.
 - **Reconcile.** Any Unknown write seal now queues one fresh order snapshot through
-  `reconcile_uncertain`; the native path had none.
+  `reconcile_uncertain`; the native path had none. That snapshot is
+  Primary-signed (`PostUnknownOrderRead`) on every page, even with a read key
+  configured. Only a clean reconcile snapshot clears an order fence, and one
+  requested while another snapshot is in flight runs right after it. Ordinary
+  refreshes still read Secondary-else-Primary.
 - **Queue.** Commands still run in native FIFO order, each parked on its own
   Preflight. A command whose caller wait lapsed while parked fails once (typed
   Timeout, NotSent) at its turn and sends nothing.

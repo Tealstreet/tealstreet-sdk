@@ -5,7 +5,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::credential_selection::{
-    CredentialRole, CredentialUnavailable, SlotPolicy, Slots,
+    CredentialRole, CredentialUnavailable, PrimaryReason, SlotPolicy, Slots,
 };
 use safe_cex_engine::execution::{
     Arithmetic, CumulativePrice, Cursor, ExecutionRounding, Rejection, Report,
@@ -100,6 +100,8 @@ pub(crate) struct Account {
     startup_started: bool,
     session_started: f64,
     orders_seeded: bool,
+    /// A reconcile snapshot was requested while another was in flight.
+    reconcile_owed: bool,
     reporting_started: f64,
     startup_executions: VecDeque<Execution>,
     account_busy: bool,
@@ -220,8 +222,21 @@ pub enum Request {
         rows: SnapshotBuilder<String, Order>,
         sources: HashMap<String, Source>,
         revision: u64,
+        /// A Primary-signed reconcile snapshot: only it may clear an order fence.
+        reconcile: bool,
         failed: bool,
     },
+}
+impl Request {
+    fn reconciles(&self) -> bool {
+        matches!(
+            self,
+            Self::Orders {
+                reconcile: true,
+                ..
+            }
+        )
+    }
 }
 impl Blofin {
     fn seed_execution_prefix(
@@ -243,15 +258,25 @@ impl Blofin {
     pub(crate) fn read_selection(
         &self,
     ) -> (Result<SelectedRead, CredentialUnavailable>, &'static str) {
+        self.read_selection_for(ReadRole::Read { scope: None })
+    }
+    fn read_selection_for(
+        &self,
+        role: ReadRole,
+    ) -> (Result<SelectedRead, CredentialUnavailable>, &'static str) {
         let slots = self.credential_slots();
-        let refusal = match slots.select(CredentialRole::Read { scope: None }) {
+        let credential = match role {
+            ReadRole::Read { scope } => CredentialRole::Read { scope },
+            ReadRole::Primary { reason, scope } => CredentialRole::PrimaryRead { reason, scope },
+        };
+        let refusal = match slots.select(credential) {
             Ok((_, identity)) if identity.passphrase.is_some() => None,
             Ok(_) => Some("BloFin requires a passphrase"),
             Err(_) => Some("BloFin requires API credentials"),
         };
         let selected = match refusal {
             Some(_) => Err(CredentialUnavailable::Missing),
-            None => SelectedRead::select(&slots, ReadRole::Read { scope: None }),
+            None => SelectedRead::select(&slots, role),
         };
         (
             selected,
@@ -501,7 +526,16 @@ impl Blofin {
         request: Request,
         stream: bool,
     ) {
-        let (selected, message) = self.read_selection();
+        // The snapshot that may clear an order fence reads as the trading account.
+        let role = if request.reconciles() {
+            ReadRole::Primary {
+                reason: PrimaryReason::PostUnknownOrderRead,
+                scope: None,
+            }
+        } else {
+            ReadRole::Read { scope: None }
+        };
+        let (selected, message) = self.read_selection_for(role);
         let read = match SelectedRead::background(
             cx,
             selected,
@@ -749,11 +783,18 @@ impl Blofin {
             true,
         );
     }
+    /// A Primary order snapshot that may clear an order fence; owed when
+    /// another snapshot is in flight.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.reconcile_owed = true;
+        self.refresh_orders(cx, 1);
+    }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>, attempt: u32) {
         if self.account.orders_busy || !self.signed() {
             return;
         }
         self.account.orders_busy = true;
+        let reconcile = std::mem::take(&mut self.account.reconcile_owed);
         self.orders_page(
             cx,
             Request::Orders {
@@ -766,6 +807,7 @@ impl Blofin {
                 rows: SnapshotBuilder::default(),
                 sources: HashMap::new(),
                 revision: self.account.orders_revision,
+                reconcile,
                 failed: false,
             },
         );
@@ -1463,6 +1505,7 @@ impl Blofin {
                 rows,
                 mut sources,
                 revision,
+                reconcile,
                 failed: false,
             } => {
                 if page_rows > 0 {
@@ -1479,6 +1522,7 @@ impl Blofin {
                                 rows,
                                 sources,
                                 revision,
+                                reconcile,
                                 failed: true,
                             },
                             "BloFin pending order pagination did not advance",
@@ -1497,6 +1541,7 @@ impl Blofin {
                             rows,
                             sources,
                             revision,
+                            reconcile,
                             failed: false,
                         },
                     );
@@ -1513,6 +1558,7 @@ impl Blofin {
                             rows,
                             sources,
                             revision,
+                            reconcile,
                             failed: false,
                         },
                     );
@@ -1650,12 +1696,22 @@ impl Blofin {
                         rows.extend(kept);
                         self.account.sources = sources;
                         cx.store.set_orders(rows);
-                        // A rejected row may be an uncertain placement; it proves nothing.
-                        if clean {
+                        // A rejected row may be an uncertain placement; it proves
+                        // nothing. Only a Primary reconcile snapshot clears a fence.
+                        if clean && reconcile {
                             cx.orders_reconciled(None);
+                        } else if reconcile {
+                            self.account.reconcile_owed = true;
                         }
-                    } else if self.account.retry.is_none() {
-                        self.account.retry = Some((cx.set_timer(1_000.0), 1));
+                    } else {
+                        self.account.reconcile_owed |= reconcile;
+                        if self.account.retry.is_none() {
+                            self.account.retry = Some((cx.set_timer(1_000.0), 1));
+                        }
+                    }
+                    // A reconcile requested behind this snapshot runs now.
+                    if !reconcile && self.account.reconcile_owed && self.account.retry.is_none() {
+                        self.refresh_orders(cx, 1);
                     }
                 }
             }
@@ -1679,8 +1735,11 @@ impl Blofin {
         error: &str,
     ) {
         match request {
-            Request::Orders { attempt, .. } => {
+            Request::Orders {
+                attempt, reconcile, ..
+            } => {
                 self.account.orders_busy = false;
+                self.account.reconcile_owed |= reconcile;
                 if attempt < 3 && self.account.auth_failures == 0 {
                     self.account.retry =
                         Some((cx.set_timer(1000.0 * f64::from(attempt)), attempt + 1));

@@ -20,9 +20,13 @@ const CALL_MS: u32 = 20_000;
 
 /// BloFin's documented error codes (docs.blofin.com, "Errors", read
 /// 2026-10-26). Cited refusals are pre-execution; anything unlisted proves
-/// nothing. "Gone" is satisfied only for a cancel.
+/// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
+/// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
 const CODES: CodeTable = CodeTable {
     rows: &[
+        // "Bad Request" and "Invalid signature" body codes.
+        refused(Key::Int(400), ErrorKind::InvalidInput),
+        refused(Key::Int(401), ErrorKind::AuthInvalid),
         // Request parameter validation.
         refused(Key::Range(152001, 152015), ErrorKind::InvalidInput),
         refused(Key::Int(152420), ErrorKind::InvalidInput),
@@ -51,8 +55,8 @@ const CODES: CodeTable = CodeTable {
         refused(Key::Int(110019), ErrorKind::Rejected),
         // Authentication.
         refused(Key::Int(152401), ErrorKind::AuthInvalid),
-        refused(Key::Int(152402), ErrorKind::AuthInvalid),
-        refused(Key::Int(152406), ErrorKind::AuthInvalid),
+        refused(Key::Int(152402), ErrorKind::AuthExpired),
+        refused(Key::Int(152406), ErrorKind::AuthPermission),
         refused(Key::Int(152408), ErrorKind::AuthInvalid),
         refused(Key::Int(152409), ErrorKind::AuthInvalid),
         // Internal error: proves nothing.
@@ -68,8 +72,7 @@ const CODES: CodeTable = CodeTable {
     success: &[Key::Int(0)],
     unlisted: Verdict::Unknown(None),
     status: &[
-        (400, Verdict::Refused(ErrorKind::Rejected)),
-        (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+        // "Network Firewall Restrictions" and "Rate Limits".
         (403, Verdict::Refused(ErrorKind::AuthPermission)),
         (429, Verdict::Refused(ErrorKind::RateLimited)),
     ],
@@ -1644,10 +1647,15 @@ impl Blofin {
     }
     /// The active job ended: wake the oldest queued Preflight (FIFO).
     fn next_job(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.trading.active.is_none()
+        while self.trading.active.is_none()
             && let Some(queued) = self.trading.queue.front()
         {
-            let _ = cx.request_preflight_ready(&queued.preflight);
+            let Err(reason) = cx.request_preflight_ready(&queued.preflight) else {
+                return;
+            };
+            // A front that cannot wake must not stall the FIFO.
+            let queued = self.trading.queue.pop_front().expect("queued front");
+            let _ = cx.fail_preflight(&queued.preflight, not_sent(reason.venue_error().message));
         }
     }
     pub(crate) fn trading_preflight_ready(
@@ -1730,7 +1738,7 @@ impl Blofin {
     }
     /// A half-applied hedged join refreshes the account, as native's join did.
     fn refresh_retired(&mut self, cx: &mut Cx<'_, Pending>, join: bool) {
-        self.refresh_orders(cx, 1);
+        self.reconcile_orders(cx);
         if join {
             self.refresh_account(cx);
         }
@@ -1998,10 +2006,8 @@ impl Blofin {
                     let Some(row) = row else {
                         continue;
                     };
-                    let gone = matches!(&*row.code, "1000" | "102068")
-                        || row
-                            .msg
-                            .contains("filled, triggered, canceled or does not exist");
+                    // Code-only: the "does not exist" text is 102068's own message.
+                    let gone = matches!(&*row.code, "1000" | "102068");
                     let accepted = reply.code == "0" && (row.code.is_empty() || row.code == "0");
                     if gone && !job.replacement_targets.is_empty() {
                         error = Some("BloFin replacement requires a confirmed cancellation".into());
@@ -2083,24 +2089,10 @@ impl Blofin {
 const MULTI_POSITION_CODE: &str = "102143";
 const MULTI_POSITION_MESSAGE: &str = "BloFin Multi-Position mode is not supported in Tealstreet yet. Turn off Multi-Position mode on BloFin, then retry from Tealstreet.";
 
-/// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
+/// A non-2xx answer's native text. Its outcome and kind are the journal's,
+/// from the recorded fact (`CODES`).
 fn http_failure(status: u16, body: &str) -> VenueError {
-    let message = format!("BloFin HTTP {status}: {body}");
-    match status {
-        408 | 500.. => unknown(message),
-        401 => VenueError::new(message)
-            .kind(ErrorKind::AuthInvalid)
-            .outcome(Outcome::Rejected),
-        403 => VenueError::new(message)
-            .kind(ErrorKind::AuthPermission)
-            .outcome(Outcome::Rejected),
-        429 => VenueError::new(message)
-            .kind(ErrorKind::RateLimited)
-            .outcome(Outcome::Rejected),
-        _ => VenueError::new(message)
-            .kind(ErrorKind::Rejected)
-            .outcome(Outcome::Rejected),
-    }
+    VenueError::new(format!("BloFin HTTP {status}: {body}"))
 }
 
 /// The write may have executed; reconcile before resending.
@@ -2141,12 +2133,18 @@ fn record_failed(
     native: Option<Native<'_>>,
     message: &str,
 ) {
-    if let Ok(fact) = cx.classify_write(context, &CODES, native.as_ref(), message.to_owned()) {
-        let failed = WriteFact::Failed {
-            fact,
-            known_effects: false,
-        };
-        let _ = cx.http_write_fact(context, failed, None);
+    match cx.classify_write(context, &CODES, native.as_ref(), message.to_owned()) {
+        Ok(fact) => {
+            let failed = WriteFact::Failed {
+                fact,
+                known_effects: false,
+            };
+            let _ = cx.http_write_fact(context, failed, None);
+        }
+        // A released write never ends factless.
+        Err(_) => {
+            let _ = cx.http_write_unproven(context, message.to_owned());
+        }
     }
 }
 
@@ -2209,7 +2207,24 @@ mod tests {
     }
 
     #[test]
-    fn an_exact_row_beside_a_range_keeps_its_own_verdict() {
+    fn no_exact_row_lies_inside_a_range_of_its_scope() {
+        // So first-match order can never decide a verdict (assert_table also
+        // refuses overlap; this states the reason the table relies on).
+        for row in CODES.rows {
+            let Key::Int(code) = row.key else { continue };
+            for other in CODES.rows {
+                if let Key::Range(low, high) = other.key {
+                    assert!(
+                        row.only != other.only || !(low..=high).contains(&code),
+                        "{code} inside {low}-{high}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn exact_rows_beside_ranges_keep_their_own_kinds() {
         // 102064 sits just past the 102037-102055 range; 102143 is the native
         // Multi-Position refusal, typed Unsupported rather than the range's kind.
         assert_eq!(

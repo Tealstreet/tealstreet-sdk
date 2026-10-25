@@ -687,7 +687,7 @@ impl Venue for Blofin {
     /// through `orders_reconciled`.
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.settle_retired_trade(cx);
-        self.refresh_orders(cx, 1);
+        self.reconcile_orders(cx);
     }
 
     type Pending = Pending;

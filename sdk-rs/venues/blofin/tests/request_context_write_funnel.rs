@@ -473,7 +473,11 @@ fn an_expired_parked_command_fails_once_and_never_sends() {
         "an expired command never sends"
     );
     assert_eq!(terminals(&h, 8).len(), 1, "the expired command fails once");
+    assert_eq!(failure(&h, 8).outcome, Some(Outcome::NotSent));
     managed(&h, &intents, "set-margin-mode");
+    // No engine wait binds a WriteAfterReads Preflight: nothing later adds a second.
+    fire_until(&mut h, 100_000.0);
+    assert_eq!(terminals(&h, 8).len(), 1);
 }
 
 // ---- D-a: documented codes ----
@@ -579,8 +583,25 @@ fn a_plain_cancel_gone_is_satisfied_fences_and_reconciles() {
     reply(&mut h, "cancel-batch-orders", 200, GONE_CANCEL);
     succeeded(&h, 7);
     assert!(h.e.store().order("12").is_none());
-    // The absent-order fence queues one fresh order snapshot.
+    // The absent-order fence queues one fresh order snapshot and holds
+    // cancel-all until it lands.
     assert_eq!(count(&h, "orders-pending?"), 1, "{:?}", h.pending);
+    command(
+        &mut h,
+        Command::CancelSymbolOrders {
+            command: 9,
+            symbol: "BTCUSDT".into(),
+        },
+    );
+    assert_eq!(
+        failure(&h, 9).message,
+        "Placement outcome is uncertain; reconcile before cancel-all"
+    );
+    assert_eq!(
+        count(&h, "cancel-batch-orders"),
+        0,
+        "no cancel write while fenced"
+    );
     // Answer the snapshot's pages until it completes; 13 is still open.
     while let Some(request) = h
         .pending
@@ -854,4 +875,131 @@ fn a_queued_leverage_is_planned_against_the_state_at_its_wake() {
     );
     assert_eq!((leg(&h, "\"long\""), leg(&h, "\"short\"")), (1, 0));
     managed(&h, &intents, "set-leverage");
+}
+
+// ---- Review pins (dazzy3, 4yjlw0, fe7lgm) ----
+
+#[test]
+fn a_text_only_gone_row_is_classified_by_its_code_and_stops() {
+    let mut h = seeded();
+    let ids: Vec<String> = (0..21).map(|i| format!("{}", 100 + i)).collect();
+    for id in &ids {
+        seed_order(&mut h, id, "");
+    }
+    command(
+        &mut h,
+        Command::CancelOrders {
+            command: 7,
+            ids: ids.clone(),
+        },
+    );
+    // Batch 1 (20): one row carries the "gone" text under an unlisted code.
+    let rows: Vec<_> = ids[..20]
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            if i == 3 {
+                serde_json::json!({"orderId": id, "code": "1", "msg": "Cancel failed as the order has been filled, triggered, canceled or does not exist."})
+            } else {
+                serde_json::json!({"orderId": id, "code": "0"})
+            }
+        })
+        .collect();
+    let body = serde_json::json!({"code": "0", "data": rows}).to_string();
+    reply(&mut h, "cancel-batch-orders", 200, &body);
+    fire_until(&mut h, 10_000.0);
+    assert_eq!(
+        count(&h, "cancel-batch-orders"),
+        0,
+        "the job stops at the unproven row"
+    );
+    let error = failure(&h, 7);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(
+        error.message.contains("cancellation rejected"),
+        "{}",
+        error.message
+    );
+    assert!(
+        h.e.store().order(&ids[3]).is_some(),
+        "an unproven row is not removed"
+    );
+}
+
+#[test]
+fn the_reconcile_snapshot_is_primary_signed_with_a_secondary_configured() {
+    let mut h = Harness::with_secondary();
+    h.seed();
+    seed_order(&mut h, "12", "");
+    command(&mut h, cancel(7));
+    let intents = reply(&mut h, "cancel-batch-orders", 200, GONE_CANCEL);
+    let (_, intent) = managed(&h, &intents, "orders-pending?");
+    assert_eq!(
+        intent,
+        RoutingIntent::Primary,
+        "the fence-clearing snapshot"
+    );
+    // Every later page of that snapshot stays Primary.
+    let mut pages = 0;
+    while let Some(request) = h
+        .pending
+        .iter()
+        .find(|r| r.url.contains("/api/v1/trade/orders-"))
+        .cloned()
+    {
+        h.take(&request.url);
+        let intents = answer(&mut h, &request, 200, r#"{"code":"0","data":[]}"#);
+        pages += 1;
+        for next in h
+            .pending
+            .iter()
+            .filter(|r| r.url.contains("/api/v1/trade/orders-"))
+        {
+            assert_eq!(intents.get(&next.id), Some(&RoutingIntent::Primary));
+        }
+    }
+    assert_eq!(pages, 3);
+}
+
+#[test]
+fn the_journal_owns_a_non_2xx_outcome() {
+    for (status, body, outcome) in [
+        // An undocumented status with no native code proves nothing.
+        (404, "not found", Some(Outcome::Unknown)),
+        (400, "Bad Request", Some(Outcome::Unknown)),
+        // A documented native code in the body wins over the status.
+        (
+            400,
+            r#"{"code":"102015","msg":"Order price is not within the price limit"}"#,
+            Some(Outcome::Rejected),
+        ),
+        (429, "{}", Some(Outcome::Rejected)),
+    ] {
+        let mut h = seeded();
+        command(&mut h, place(7, 1.0));
+        reply(&mut h, "batch-orders", status, body);
+        assert_eq!(failure(&h, 7).outcome, outcome, "{status} {body}");
+    }
+}
+
+#[test]
+fn a_verify_detail_in_the_wrong_state_is_never_not_sent() {
+    let mut h = seeded();
+    seed_order(&mut h, "12", "");
+    command(&mut h, amend(7));
+    reply(&mut h, "cancel-batch-orders", 200, ACCEPTED_CANCEL);
+    let at = h.now + 350.0;
+    fire_until(&mut h, at);
+    reply(
+        &mut h,
+        "order-detail",
+        200,
+        r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"live","filledSize":"0"}}"#,
+    );
+    let error = failure(&h, 7);
+    assert!(!matches!(
+        error.outcome,
+        Some(Outcome::NotSent | Outcome::Rejected)
+    ));
+    assert_eq!(count(&h, "/batch-orders"), 0);
 }
