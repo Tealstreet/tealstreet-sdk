@@ -1202,8 +1202,8 @@ impl Venue for AsterDex {
                 };
                 self.get(cx, &path, Pending::DepthRead { context });
             }
-            Command::FetchAccount { command } => self.fetch_account_info(cx, command),
-            Command::Query { command, query } => self.start_query(cx, command, query),
+            Command::FetchAccount { .. } => self.fetch_account_info(cx),
+            Command::Query { query, .. } => self.start_query(cx, query),
             command => self.on_trade_command(cx, command),
         }
     }
@@ -1257,8 +1257,13 @@ impl AsterDex {
         error: VenueError,
     ) {
         match pending {
-            Pending::DepthRead { context } | Pending::Klines { context, .. } => {
-                let _ = cx.fail_context(&context, error);
+            Pending::DepthRead { context: root }
+            | Pending::Klines { context: root, .. }
+            | Pending::Account(account::Request::Info { root }) => {
+                let _ = cx.fail_context(&root, error);
+            }
+            Pending::History(history) => {
+                let _ = cx.fail_context(history.root(), error);
             }
             pending => self.on_request_failed(cx, pending, &error.message),
         }
