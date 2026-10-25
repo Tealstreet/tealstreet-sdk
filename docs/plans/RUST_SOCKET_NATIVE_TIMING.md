@@ -20,8 +20,8 @@ unchanged. This keeps the new implementation out of non-adopter WASM binaries;
 paired builds must still prove zero growth, rather than treating the gate as
 proof. With the feature enabled, old policies retain exact behavior too.
 
-API spelling is provisional for 55ao7t's review. Prefer additive registration
-options over a required new field in public Config or FeedPolicy literals:
+55ao7t plan/API direction CLEAR at c7d95e91877. The additive registration
+carrier is approved instead of a required Config or FeedPolicy field:
 
 ```text
 StableAnchor = Ready (default) | Open
@@ -30,12 +30,12 @@ Cx::register_socket_feed_with_native_timing(policy, timing) -> Result<FeedId, So
 Cx::complete_socket_initial_payload() -> Result<(), SocketError>
 ```
 
-The named stable_anchor setting has the ruled Ready default. Existing Config
-and FeedPolicy callers need no edits under Cargo feature unification. A required
-Config field would break exhaustive downstream struct literals; the additive
-carrier is an API-fit question, not a different policy. If the owner chooses a
-Config field instead, its compatibility and zero-growth proof must be explicit
-before source. The old registration and Phemex snapshot entry remain untouched.
+The stable_anchor setting reaches Supervisor only at registration (constructor
+argument/set-once), outside Config. Default Ready reproduces the old registration
+paths bit-for-bit. Existing full Config literals in Bybit, Phemex and engine tests
+remain untouched, including with feature unification. The timeout is retained in
+Driver Runtime beside snapshot_timeout, validated in the same atomic preflight.
+Old registration and the Phemex snapshot entry remain unchanged.
 
 ## Declared receive refresh
 
@@ -43,7 +43,8 @@ Add Control::Traffic and TrafficPolicy::Declared. Traffic is delivered exactly
 like Other, so valid native data still reaches its reducer. Declared refresh is
 exactly Traffic, Pong, Auth(Accepted) and Auth(Progress). Other, malformed and
 rejected auth evidence do not refresh. Existing policies must ignore the new
-decision and retain their current rules.
+decision and retain their current rules. Declared requires Native controls;
+Declared with ControlPolicy::None refuses InvalidPolicy before mutation.
 
 Kraken's future pure codec supplies Traffic for any successfully decoded native
 Ws envelope, including permissive defaults/empty envelopes. It supplies Other
@@ -51,7 +52,8 @@ for malformed/wrong-type envelopes; valid auth evidence retains its auth effect.
 No generic JSON parser, free-form refresh callback or venue receive timestamp.
 All existing current-epoch, raw-time and expiry checks run before decoding or
 refresh. Progress renews only the ruled auth stage; Declared additionally records
-its genuine receive time, without a second renewal or readiness grant.
+its genuine receive time with one received(now) in finish_control, without a
+second auth renewal or readiness grant; the Ready-only failure reset remains.
 
 ## Independent OPEN initial-payload bound
 
@@ -126,14 +128,20 @@ compiler error, absent API, fake result or ignored test counts as an original.
   queued sends and sibling isolation retain the shared fatal/custody rails.
 
 Source is restricted to engine socket state/driver/ingress, engine feature and
-exports, and controls/docs. No venue dependency or inventory edits. Required
+exports, and controls/docs. No venue dependency or inventory edits. Audit all venue
+Control matches for exhaustive matching under the enabled feature, and record
+that result in the PR; no speculative non_exhaustive change. Add explicit OFF/ON
+rows to existing feature-mode CI with strict Clippy for the enabled mode. Merge
+actual #2161 when landed; the shared engine_socket.rs delivery-match adjacency
+must preserve its handoff capability work, not consume its unlanded source. Required
 review is 55ao7t; uufub4 can review custody where exact completion/epoch semantics
 need it. One shared PR carries the plan, originals and corrected source.
 
 ## Qualification and size gate
 
 Merge actual origin/feat/rust-rewrite before measuring. Pair bare tip and composed
-head with identical current tools/profiles for Bybit, Bitget and combined; each
+head with identical current tools/profiles for Bybit plain and managed-sockets
+linked, Bitget, OKX and combined, with the new feature OFF; each
 non-adopter must show ZERO growth. Record features and hashes, not just byte
 counts. Do not hide growth by changing budgets, profiles, feature declarations
 or the measurement command. Compare the actual shipping feature graph; separately
