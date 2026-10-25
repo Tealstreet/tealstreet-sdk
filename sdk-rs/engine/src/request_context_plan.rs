@@ -157,6 +157,30 @@ impl<'a> Frame<'a> {
 }
 
 impl PlanBound {
+    #[cfg(feature = "serial-plans")]
+    pub(super) fn from_single_call(terms: CallTerms) -> Result<Self, Error> {
+        if terms.timeout_ms == 0 || terms.attempts == 0 {
+            return Err(Error::Invalid);
+        }
+        let physical_attempts = usize::from(terms.attempts);
+        if physical_attempts > MAX_ATTEMPTS {
+            return Err(Error::Capacity);
+        }
+        let span_ms = u64::from(terms.timeout_ms)
+            .checked_mul(match terms.retry_window {
+                RetryWindow::Shared => 1,
+                RetryWindow::FreshAttempt => u64::from(terms.attempts),
+            })
+            .and_then(|ms| ms.checked_add(u64::from(terms.wait_ms)))
+            .ok_or(Error::Capacity)?;
+        Ok(Self {
+            span_ms,
+            logical_calls: 1,
+            physical_attempts,
+            peak_concurrent: 1,
+        })
+    }
+
     /// Count every occurrence, including aliased fallback slices. Charge before
     /// descending so cyclic declarations refuse at the existing journal bound.
     /// Iterative traversal keeps stack use independent of declaration depth.

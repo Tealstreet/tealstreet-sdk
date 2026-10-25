@@ -75,7 +75,10 @@ enum InFlight {
         windows: VecDeque<(Option<f64>, Option<f64>)>,
         history: ReadHistoryRows<Execution>,
     },
-    Orders(ReadHistoryRows<HistoricalOrder>),
+    Orders {
+        history: ReadHistoryRows<HistoricalOrder>,
+        limit: u32,
+    },
     Income {
         symbol: Option<String>,
         kind: Option<String>,
@@ -101,15 +104,27 @@ fn income_incomplete(chunks: u32) -> String {
     )
 }
 
-/// Native rows of one page, parsed before the delivery is admitted.
+/// Native rows of one page, parsed before the delivery is admitted, with the
+/// native row count before any mapping drops a row.
 fn rows<'a, W: Deserialize<'a>, T>(
     body: &'a str,
     mut row: impl FnMut(W) -> Option<T>,
-) -> Result<Vec<T>, VenueError> {
+) -> Result<(Vec<T>, usize), VenueError> {
     let mut rows = Vec::new();
-    json::each::<W>(body, |native| rows.extend(row(native)))
-        .map_err(|error| VenueError::new(format!("Malformed Binance history: {error}")))?;
-    Ok(rows)
+    let mut native = 0;
+    json::each::<W>(body, |item| {
+        native += 1;
+        rows.extend(row(item));
+    })
+    .map_err(|error| VenueError::new(format!("Malformed Binance history: {error}")))?;
+    Ok((rows, native))
+}
+/// One page per window cannot prove the rest of a window empty once the venue
+/// filled the page.
+fn saturated(native: usize, limit: u32, what: &str) -> Option<String> {
+    (limit > 0 && native >= limit as usize).then(|| {
+        format!("Binance {what} history is INCOMPLETE: a page returned its full limit of {limit}; later rows in that range were not fetched.")
+    })
 }
 /// Whole-page admission is the only path which mutates accepted coverage.
 fn accept<T>(
@@ -117,12 +132,13 @@ fn accept<T>(
     cx: &Cx<'_, Pending>,
     leg: &Context,
     rows: Vec<T>,
+    gap: Option<String>,
 ) -> Result<(), Error> {
     let mut page = history.admit(cx, leg)?;
     for row in rows {
         page.stage(row);
     }
-    page.accept_page();
+    page.accept_page_with_coverage(gap);
     Ok(())
 }
 
@@ -145,7 +161,7 @@ impl IncomeHistory {
         rows: Vec<Income>,
     ) -> Result<(), Error> {
         match self {
-            Self::Single(history) => accept(history, cx, leg, rows),
+            Self::Single(history) => accept(history, cx, leg, rows, None),
             Self::Range(history) => {
                 let mut page = history.admit(cx, leg)?;
                 for row in rows {
@@ -180,7 +196,7 @@ impl InFlight {
         match self {
             Self::Lookup { completion, .. } => completion.validate_delivery(cx, leg),
             Self::Fills { history, .. } => history.validate_delivery(cx, leg),
-            Self::Orders(history) => history.validate_delivery(cx, leg),
+            Self::Orders { history, .. } => history.validate_delivery(cx, leg),
             Self::Income { history, .. } => history.validate(cx, leg),
             Self::Trades { history, .. } => history.validate_delivery(cx, leg),
         }
@@ -198,13 +214,15 @@ impl InFlight {
                 Ok(())
             }
             (Self::Fills { history, .. }, Err(error)) if strict => history.reject(cx, error),
-            (Self::Orders(history), Err(error)) if strict => history.reject(cx, error),
+            (Self::Orders { history, .. }, Err(error)) if strict => history.reject(cx, error),
             (Self::Trades { history, .. }, Err(error)) if strict => history.reject(cx, error),
             (Self::Fills { history, .. }, result) => history.finish(cx, result),
-            (Self::Orders(history), result) => history.finish_with(cx, result, |mut rows| {
-                rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
-                encode(&rows)
-            }),
+            (Self::Orders { history, .. }, result) => {
+                history.finish_with(cx, result, |mut rows| {
+                    rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
+                    encode(&rows)
+                })
+            }
             (Self::Trades { history, .. }, result) => history.finish(cx, result),
         };
     }
@@ -482,8 +500,10 @@ impl BinanceFutures {
                     Self::answer(cx, "[]".into());
                     return;
                 };
-                if !self.begin(cx, command, signed, |completion| {
-                    InFlight::Orders(owned(completion))
+                let limit = limit.unwrap_or(PAGE_LIMIT).min(PAGE_LIMIT);
+                if !self.begin(cx, command, signed, |completion| InFlight::Orders {
+                    history: owned(completion),
+                    limit,
                 }) {
                     return;
                 }
@@ -491,10 +511,7 @@ impl BinanceFutures {
                     .str("symbol", &symbol)
                     .opt_num("startTime", from_ms)
                     .opt_num("endTime", to_ms)
-                    .num(
-                        "limit",
-                        f64::from(limit.unwrap_or(PAGE_LIMIT).min(PAGE_LIMIT)),
-                    );
+                    .num("limit", f64::from(limit));
                 self.history_request(cx, command, self.paths.all_orders, query);
             }
             Read::Income {
@@ -976,8 +993,8 @@ impl BinanceFutures {
         .and_then(|body| {
             Ok(match &mut read {
                 InFlight::Lookup { .. } => unreachable!(),
-                InFlight::Fills { history, .. } => {
-                    let rows = rows::<UserTrade, _>(body, |t| {
+                InFlight::Fills { history, limit, .. } => {
+                    let (rows, native) = rows::<UserTrade, _>(body, |t| {
                         Some(Execution {
                             id: t.id.to_string(),
                             timestamp: (t.time / 1000.0).floor(),
@@ -993,10 +1010,10 @@ impl BinanceFutures {
                             maker: t.maker,
                         })
                     })?;
-                    accept(history, cx, leg, rows)
+                    accept(history, cx, leg, rows, saturated(native, *limit, "fill"))
                 }
-                InFlight::Orders(history) => {
-                    let rows = rows::<HistoricalOrderRow, _>(body, |o| {
+                InFlight::Orders { history, limit } => {
+                    let (rows, native) = rows::<HistoricalOrderRow, _>(body, |o| {
                         if o.time == 0.0 || !matches!(o.side.as_ref(), "BUY" | "SELL") {
                             return None;
                         }
@@ -1029,10 +1046,10 @@ impl BinanceFutures {
                             updated_time: (o.update_time > 0.0).then_some(o.update_time),
                         })
                     })?;
-                    accept(history, cx, leg, rows)
+                    accept(history, cx, leg, rows, saturated(native, *limit, "order"))
                 }
                 InFlight::Income { history, .. } => {
-                    let rows = rows::<IncomeRow, _>(body, |r| {
+                    let (rows, _) = rows::<IncomeRow, _>(body, |r| {
                         Some(Income {
                             symbol: r.symbol.into_owned(),
                             category: income_category(&r.income_type),
@@ -1047,7 +1064,7 @@ impl BinanceFutures {
                     history.accept(cx, leg, rows)
                 }
                 InFlight::Trades { symbol, history } => {
-                    let rows = rows::<PublicTrade, _>(body, |t| {
+                    let (rows, _) = rows::<PublicTrade, _>(body, |t| {
                         Some(Trade {
                             id: t.id.to_string(),
                             symbol: symbol.clone(),
@@ -1059,7 +1076,7 @@ impl BinanceFutures {
                             side: if t.is_buyer_maker { "sell" } else { "buy" },
                         })
                     })?;
-                    accept(history, cx, leg, rows)
+                    accept(history, cx, leg, rows, None)
                 }
             })
         });

@@ -1,7 +1,7 @@
 //! Streamed serial Plans: one live call, continued from exact custody, with no
 //! declared length and no root wall-clock.
 use super::*;
-use crate::request_context::plan::{CallBound, RetryWindow, SerialCall, SerialPolicy, StepBound};
+use crate::request_context::plan::{CallTerms, RetryWindow, SerialCall, SerialPolicy};
 use crate::request_context::{Credential, RetryPolicy};
 
 /// A serial root never expires by clock; it ends through custody or a stop.
@@ -132,20 +132,16 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         self.io.core.http_pacing.validate_zero(policy.pacing)?;
-        let calls = [CallBound {
+        let schedule = Schedule::from_single_call(CallTerms {
+            wait_ms: 0,
             timeout_ms: first.timeout_ms,
             attempts: first.attempts.into(),
             retry_window: RetryWindow::FreshAttempt,
-            after_refusal: &[],
-        }];
-        let steps = [StepBound {
-            wait_ms: 0,
-            calls: &calls,
-        }];
+        });
         let (plan, _) = self.admit_plan_root(
             preflight,
-            AdmissionDeclaration {
-                steps: &steps,
+            PreparedAdmission {
+                schedule,
                 policy: PlanPolicy {
                     independent_calls: false,
                     operation: Operation::Mutation,
@@ -153,8 +149,10 @@ impl<P> Cx<'_, P> {
                     pacing: policy.pacing,
                     retry: retry_policy(first),
                 },
-                terminals: &[],
-                barriers: &[],
+                terminals: Ok(Vec::new()),
+                has_barriers: false,
+                #[cfg(feature = "http-mutation-barriers")]
+                barriers: Ok(Vec::new()),
             },
             false,
             Some(Serial {
@@ -281,22 +279,17 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Capacity);
         }
-        let calls = [CallBound {
+        let schedule = Schedule::from_single_call(CallTerms {
             timeout_ms: next.timeout_ms,
             attempts: next.attempts.into(),
             retry_window: RetryWindow::FreshAttempt,
-            after_refusal: &[],
-        }];
-        let steps = [StepBound {
             wait_ms: match wake {
                 Next::After(delay_ms) => delay_ms,
                 Next::Now => 0,
                 #[cfg(feature = "condition-waits")]
                 Next::Parked => 0,
             },
-            calls: &calls,
-        }];
-        let schedule = Schedule::from_steps(&steps)?;
+        })?;
         self.commit_serial_continuation(plan, context, leg, next, schedule, wake)
     }
 
