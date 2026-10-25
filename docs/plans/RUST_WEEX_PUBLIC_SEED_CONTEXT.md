@@ -136,3 +136,34 @@ these two P2 corrections before originals: invalid clocks must not feed native
 backoff/private startup, and the orphan raw streamed branch must be removed and
 recounted rather than retained for a zero-prune claim. This successor changes
 only the plan; originals and runtime still await bounded plan clearance.
+
+## Original-control checkpoint on unchanged production
+
+The corrected plan70b99124bb4 is bounded full PLAN/native/API CLEAR from
+codex-hcmq3f. A new public_seed_context integration target now compiles and runs
+42 controls against unchanged production:34 intended assertion RED,8 GREEN,
+0 ignored. Nine of those REDs stop at the explicit missing-Prepare custody
+assertion; they do not yet demonstrate execution of the nonfinite preparation
+failure suffix. The other failures expose eager release, absent physical bounds,
+capacity bypass, expired publication/rate effects and nonfinite native work.
+No compilation or fixture failure is counted as an assertion RED.
+
+Working controls pin both ticker response orders with blank bid/ask fallback,
+book-only exclusion, valid-row catalogue retention and exact native diagnostics,
+broken streams, current429 pause, sibling delivery before/after seed reset,
+genuine256-peer reuse, and fixture-entry equivalence to actual Engine.start.
+Nonfinite controls invoke the same native start under an engine-issued callback
+without enabling the engine's unrelated startup watchdog; a finite working
+control compares every request's method/URL/header/body/route/timeout to actual
+Engine.start. Returned/preparation failure controls retain an unrelated genuine
+finite peer and require complete credit recovery after exact sibling cleanup.
+There is no fabricated Context, permit, issuer, next ID or preparation token.
+
+The existing public15 and startup_resilience5 controls pass unchanged. The new
+target passes scoped Clippy with -D warnings and rustfmt. A first fixture import
+used Book at the wrong public path; it was corrected to book::Book before the
+qualified evidence. The missing historical Cargo binary path also failed before
+compilation and is excluded. Logs remain under /tmp/codex-weex-public-seed-*,
+not in the repository. Runtime, prior fixtures, Cargo and inventories remain
+byte-exact to c5d7. Source awaits bounded original review; paired WEEX+combined
+measurement remains a gate at the first source commit.

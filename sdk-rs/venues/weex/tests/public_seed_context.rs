@@ -1,0 +1,904 @@
+//! Public seed custody originals; the wrapper only holds genuine peer contexts.
+mod support;
+
+use safe_cex_engine::book::Book;
+use safe_cex_engine::request_context::{
+    Claim, Context, Error, HttpAction, Operation, Policy, Preparation, Prepared, RetryPolicy,
+    RoutingIntent, Scope,
+};
+use safe_cex_engine::{
+    Action, Command, Cx, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Response, SocketId,
+    TimerId, Venue, VenueError,
+};
+use safe_cex_venue_weex::{Pending, WeexFutures};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+use support::setup::Options;
+
+const NOW: f64 = 1_000.;
+const LIMIT: f64 = 20_000.;
+const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
+const DAILY: &str = r#"[{"symbol":"BTCUSDT","lastPrice":"100","priceChangePercent":"2","volume":"3","quoteVolume":"300"}]"#;
+const BOOK: &str = r#"[{"symbol":"BTCUSDT","bidPrice":"99","askPrice":"101"}]"#;
+const BLANK_BOOK: &str = r#"[{"symbol":"BTCUSDT","bidPrice":"","askPrice":""}]"#;
+const PATHS: [&str; 3] = ["exchangeInfo", "24hr", "bookTicker"];
+
+struct Probe {
+    inner: WeexFutures,
+    peers: Vec<Context>,
+    initial_peers: usize,
+    start_native: bool,
+    failures: Arc<Mutex<Vec<VenueError>>>,
+}
+impl Probe {
+    fn fill(&mut self, cx: &mut Cx<'_, Pending>, count: usize) {
+        for _ in 0..count {
+            self.peers.push(
+                cx.http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 100_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .expect("genuine finite Background peer admission"),
+            );
+        }
+    }
+    fn release(&mut self, cx: &mut Cx<'_, Pending>) {
+        for peer in self.peers.drain(..) {
+            cx.finish_http_context(&peer).unwrap();
+        }
+    }
+}
+impl Venue for Probe {
+    type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        self.inner.capabilities()
+    }
+    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.fill(cx, self.initial_peers);
+        if self.start_native {
+            self.inner.start(cx);
+        }
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::SetTickerSymbols { symbols } = &command {
+            match symbols.first().map(String::as_str) {
+                Some("fixture:boot") => self.start(cx),
+                Some("fixture:start") => self.inner.start(cx),
+                Some("fixture:release") => self.release(cx),
+                Some("fixture:validate") => {
+                    for peer in &self.peers {
+                        cx.validate_http_context(peer).unwrap();
+                    }
+                }
+                Some("fixture:credits") => {
+                    assert!(self.peers.is_empty());
+                    self.fill(cx, 256);
+                    assert_eq!(self.peers.len(), 256, "all physical credits returned");
+                    self.release(cx);
+                }
+                _ => self.inner.on_command(cx, command),
+            }
+        } else {
+            self.inner.on_command(cx, command);
+        }
+    }
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, p: &mut Pending, item: &str) {
+        self.inner.on_item(cx, p, item);
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, r: Response<'_>) {
+        self.inner.on_response(cx, p, r);
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: &str) {
+        self.inner.on_request_failed(cx, p, error);
+    }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: VenueError) {
+        self.failures.lock().unwrap().push(error.clone());
+        self.inner.on_http_failed(cx, p, error);
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        p: Pending,
+        reason: Error,
+        error: VenueError,
+    ) {
+        self.failures.lock().unwrap().push(error.clone());
+        self.inner.on_http_preparation_failed(cx, p, reason, error);
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.inner.on_timer(cx, timer);
+    }
+    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        self.inner.on_open(cx, socket);
+    }
+    fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        self.inner.on_message(cx, socket, text);
+    }
+    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
+        self.inner.on_close(cx, socket, code);
+    }
+    fn book(&self, symbol: &str) -> Option<&Book> {
+        self.inner.book(symbol)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        self.inner.books()
+    }
+}
+type Driver = Engine<Probe>;
+fn engine(peers: usize, start_native: bool) -> (Driver, Arc<Mutex<Vec<VenueError>>>) {
+    let failures = Arc::new(Mutex::new(Vec::new()));
+    let errors = failures.clone();
+    let e = support::setup::with_venue(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        |inner| Probe {
+            inner,
+            peers: Vec::new(),
+            initial_peers: peers,
+            start_native,
+            failures: errors,
+        },
+    );
+    (e, failures)
+}
+fn control(e: &mut Driver, now: f64, name: &str) {
+    e.handle(
+        now,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec![format!("fixture:{name}")],
+        }),
+    );
+}
+#[derive(Default)]
+struct Output {
+    requests: Vec<HttpRequest>,
+    prepares: Vec<(Preparation, HttpRequest, RoutingIntent)>,
+    actions: Vec<Action>,
+    legacy: usize,
+    claimed: usize,
+}
+fn drain(e: &mut Driver, now: f64) -> Output {
+    let mut out = Output::default();
+    let mut queue: VecDeque<_> = e.drain_actions().collect();
+    while let Some(a) = queue.pop_front() {
+        match a {
+            Action::Http(r) => {
+                out.legacy += 1;
+                out.requests.push(r);
+            }
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Prepare {
+                    preparation,
+                    intent,
+                    request,
+                } => {
+                    out.prepares.push((preparation, request.clone(), intent));
+                    e.http_prepared(
+                        now,
+                        preparation,
+                        Prepared {
+                            id: request.id.0,
+                            expires_at: None,
+                        },
+                    );
+                }
+                HttpAction::Bind {
+                    permit, request, ..
+                } => {
+                    assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
+                    out.claimed += 1;
+                    out.requests.push(request);
+                }
+                HttpAction::Cancel { .. } => {}
+                HttpAction::BindGroup { .. } => panic!("no seed mutation barriers"),
+            },
+            a => out.actions.push(a),
+        }
+        queue.extend(e.drain_actions());
+    }
+    assert!(
+        !out.actions.iter().any(|a| matches!(
+            a,
+            Action::Sign { .. }
+                | Action::SignPayload { .. }
+                | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+        )),
+        "public seed has no signing or command authority"
+    );
+    out
+}
+fn respond(e: &mut Driver, r: &HttpRequest, now: f64, status: u16, body: &str) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
+fn request(out: &Output, kind: usize) -> HttpRequest {
+    let mut requests = out.requests.iter().filter(|r| r.url.ends_with(PATHS[kind]));
+    let r = requests.next().expect("one native seed request").clone();
+    assert!(requests.next().is_none());
+    r
+}
+fn started(kind: usize) -> (Driver, HttpRequest, Output) {
+    started_with_watch(kind, true)
+}
+fn started_with_watch(kind: usize, watch: bool) -> (Driver, HttpRequest, Output) {
+    started_with_peers(kind, watch, 0)
+}
+fn started_with_peers(kind: usize, watch: bool, peers: usize) -> (Driver, HttpRequest, Output) {
+    let (mut e, _) = engine(peers, true);
+    if watch {
+        e.start(NOW);
+    } else {
+        control(&mut e, NOW, "boot");
+    }
+    let out = drain(&mut e, NOW);
+    let r = request(&out, 0);
+    if kind == 0 {
+        return (e, r, out);
+    }
+    respond(&mut e, &r, NOW + 1., 200, INFO);
+    let out = drain(&mut e, NOW + 1.);
+    let r = request(&out, kind);
+    (e, r, out)
+}
+fn no_new_work(out: &[Action]) {
+    assert!(!out.iter().any(|a| matches!(a,
+        Action::Http(_) | Action::SetTimer { .. } | Action::WsConnect { .. }
+        | Action::WsSend { .. } | Action::Sign { .. } | Action::SignPayload { .. }
+        | Action::Notice(_)
+    ) || matches!(a, Action::ManagedHttp(a) if !matches!(a.as_ref(), HttpAction::Cancel { .. }))),
+    "invalid clock must only clean up its issued request: {out:?}");
+}
+fn retry(out: &[Action], now: f64) -> TimerId {
+    out.iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (750. ..=1000.).contains(&(*at_ms - now)) => {
+                Some(*timer)
+            }
+            _ => None,
+        })
+        .expect("one native first retry, without inline HTTP")
+}
+
+#[test]
+fn catalogue_requires_prepare_before_any_http() {
+    let (mut e, _) = engine(0, true);
+    e.start(NOW);
+    let out: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !out.iter().any(|a| matches!(a, Action::Http(_))),
+        "catalogue escaped before Claim"
+    );
+    assert_eq!(out.iter().filter(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. }))).count(), 1);
+}
+#[test]
+fn ticker_pair_requires_two_prepares_before_any_http() {
+    let (mut e, r, _) = started(0);
+    respond(&mut e, &r, NOW + 1., 200, INFO);
+    let out: Vec<_> = e.drain_actions().collect();
+    assert!(e.store().loaded().markets);
+    assert!(
+        !out.iter().any(|a| matches!(a, Action::Http(_))),
+        "ticker pair escaped before Claim"
+    );
+    assert_eq!(out.iter().filter(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. }))).count(), 2);
+}
+#[test]
+fn released_wire_is_unsigned_primary_with_twenty_second_bound() {
+    for kind in 0..3 {
+        let (_, r, out) = started(kind);
+        assert_eq!(r.method, Method::Get);
+        assert_eq!(
+            r.url,
+            format!(
+                "https://api-contract.weex.com/capi/v3/market/{}",
+                ["exchangeInfo", "ticker/24hr", "ticker/bookTicker"][kind]
+            )
+        );
+        assert!(r.route.is_none());
+        assert!(r.headers.is_empty());
+        assert!(r.signer_headers.is_empty());
+        assert!(r.body.is_none());
+        assert_eq!(r.timeout_ms, Some(20_000));
+        assert_eq!(out.legacy, 0);
+        assert_eq!(out.prepares.len(), out.requests.len());
+        assert_eq!(out.claimed, out.requests.len());
+        assert!(
+            out.prepares
+                .iter()
+                .all(|(_, _, intent)| *intent == RoutingIntent::Primary)
+        );
+    }
+}
+#[test]
+fn native_seed_preserves_both_response_orders_and_blank_book_fallback() {
+    for book_first in [false, true] {
+        for blank in [false, true] {
+            let (mut e, _, out) = started(1);
+            let daily = request(&out, 1);
+            let book = request(&out, 2);
+            let book_body = if blank { BLANK_BOOK } else { BOOK };
+            let order = if book_first {
+                [(&book, book_body), (&daily, DAILY)]
+            } else {
+                [(&daily, DAILY), (&book, book_body)]
+            };
+            respond(&mut e, order[0].0, NOW + 2., 200, order[0].1);
+            let first = drain(&mut e, NOW + 2.);
+            assert!(!e.store().loaded().tickers);
+            assert!(
+                !first
+                    .actions
+                    .iter()
+                    .any(|a| matches!(a, Action::WsConnect { .. }))
+            );
+            respond(&mut e, order[1].0, NOW + 3., 200, order[1].1);
+            let last = drain(&mut e, NOW + 3.);
+            let t = e.store().ticker("BTCUSDT").unwrap();
+            assert_eq!(t.last, 100.);
+            assert_eq!(t.bid, if blank { 100. } else { 99. });
+            assert_eq!(t.ask, if blank { 100. } else { 101. });
+            assert!(e.store().loaded().tickers);
+            assert_eq!(
+                last.actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::WsConnect { .. }))
+                    .count(),
+                1
+            );
+        }
+    }
+}
+#[test]
+fn native_book_only_rows_do_not_publish_a_ticker_seed() {
+    let (mut e, _, out) = started(1);
+    respond(&mut e, &request(&out, 1), NOW + 2., 200, "[]");
+    drain(&mut e, NOW + 2.);
+    respond(&mut e, &request(&out, 2), NOW + 3., 200, BOOK);
+    let out = drain(&mut e, NOW + 3.);
+    assert!(!e.store().loaded().tickers);
+    assert!(e.store().tickers().is_empty());
+    assert!(
+        !out.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    retry(&out.actions, NOW + 3.);
+}
+#[test]
+fn finite_fixture_entry_matches_real_start_without_the_engine_watchdog() {
+    // Invalid-clock controls isolate native custody from the engine's independent
+    // startup watchdog; the same native start runs under an engine-issued Cx.
+    for kind in 0..3 {
+        let (_, actual, _) = started(kind);
+        let (_, isolated, _) = started_with_watch(kind, false);
+        assert_eq!(actual.method, isolated.method);
+        assert_eq!(actual.url, isolated.url);
+        assert_eq!(actual.headers, isolated.headers);
+        assert_eq!(actual.body, isolated.body);
+        assert_eq!(actual.route, isolated.route);
+        assert_eq!(actual.timeout_ms, isolated.timeout_ms);
+    }
+}
+#[test]
+fn fixture_peers_are_finite_and_all_256_credits_are_reusable() {
+    let (mut e, _) = engine(256, false);
+    e.start(NOW);
+    let out = drain(&mut e, NOW);
+    assert!(out.requests.is_empty());
+    assert!(out.prepares.is_empty());
+    control(&mut e, NOW + 1., "validate");
+    control(&mut e, NOW + 1., "release");
+    control(&mut e, NOW + 1., "credits");
+    drain(&mut e, NOW + 1.);
+}
+#[test]
+fn partial_catalogue_retains_valid_peers_and_native_skip_diagnostics() {
+    let (mut e, r, _) = started(0);
+    let body = INFO.replace("\"symbols\":[", "\"symbols\":[{\"broken\":true},");
+    respond(&mut e, &r, NOW + 1., 200, &body);
+    let out = drain(&mut e, NOW + 1.);
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 1);
+    assert!(e.store().market("BTCUSDT").is_some());
+    assert_eq!(out.requests.len(), 2);
+    assert!(out.actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.message.contains("WEEX skipped 1 malformed market row(s): unknown")
+    )));
+}
+#[test]
+fn broken_catalogue_stream_does_not_publish_or_start_tickers() {
+    let (mut e, r, _) = started(0);
+    e.handle(
+        NOW + 1.,
+        Event::HttpStart {
+            request: r.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        NOW + 1.,
+        Event::HttpChunk {
+            request: r.id,
+            data: br#"{"symbols":[{"symbol":"BTCUSDT"}"#,
+        },
+    );
+    e.handle(NOW + 2., Event::HttpEnd { request: r.id });
+    let out = drain(&mut e, NOW + 2.);
+    assert!(e.store().markets().is_empty());
+    assert!(!e.store().loaded().markets);
+    assert!(out.requests.is_empty());
+    retry(&out.actions, NOW + 2.);
+}
+#[test]
+fn current_429_defers_admission_until_the_native_pause_ends() {
+    let (mut e, r, _) = started(0);
+    e.handle(
+        NOW + 1.,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status: 429,
+                headers: "Retry-After: 3",
+                body: "native rate limit",
+            },
+        },
+    );
+    let out = drain(&mut e, NOW + 1.);
+    let first = retry(&out.actions, NOW + 1.);
+    e.handle(NOW + 1001., Event::TimerFired { timer: first });
+    let waiting = drain(&mut e, NOW + 1001.);
+    assert!(waiting.requests.is_empty());
+    assert!(
+        waiting.prepares.is_empty(),
+        "paused work cannot mint or prepare transport"
+    );
+    let deferred = waiting
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 3001. => Some(*timer),
+            _ => None,
+        })
+        .expect("native shared pause deadline");
+    e.handle(NOW + 3001., Event::TimerFired { timer: deferred });
+    let out = drain(&mut e, NOW + 3001.);
+    assert!(request(&out, 0).url.ends_with(PATHS[0]));
+}
+#[test]
+fn failed_seed_sibling_is_inert_before_and_after_generation_reset() {
+    for sibling_first in [false, true] {
+        let (mut e, _, initial) = started(1);
+        let old_book = request(&initial, 2);
+        e.handle(
+            NOW + 2.,
+            Event::HttpFailed {
+                request: request(&initial, 1).id,
+                error: "finite ticker failure",
+            },
+        );
+        let failed = drain(&mut e, NOW + 2.);
+        let timer = retry(&failed.actions, NOW + 2.);
+        if sibling_first {
+            respond(&mut e, &old_book, NOW + 3., 200, BOOK);
+            let out = drain(&mut e, NOW + 3.);
+            assert!(!e.store().loaded().tickers);
+            assert!(
+                !out.actions
+                    .iter()
+                    .any(|a| matches!(a, Action::WsConnect { .. }))
+            );
+        }
+        e.handle(NOW + 1002., Event::TimerFired { timer });
+        let fresh = drain(&mut e, NOW + 1002.);
+        assert_eq!(fresh.requests.len(), 2);
+        if !sibling_first {
+            respond(&mut e, &old_book, NOW + 1003., 200, BOOK);
+            assert!(e.drain_actions().next().is_none());
+            assert!(!e.store().loaded().tickers);
+        }
+        respond(&mut e, &request(&fresh, 1), NOW + 1004., 200, DAILY);
+        drain(&mut e, NOW + 1004.);
+        respond(&mut e, &request(&fresh, 2), NOW + 1005., 200, BOOK);
+        drain(&mut e, NOW + 1005.);
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap().bid, 99.);
+        control(&mut e, NOW + 1006., "credits");
+        drain(&mut e, NOW + 1006.);
+    }
+}
+#[test]
+fn catalogue_final_at_physical_equality_cannot_publish_or_start_tickers() {
+    let (mut e, r, _) = started(0);
+    respond(&mut e, &r, NOW + LIMIT, 200, INFO);
+    let out = drain(&mut e, NOW + LIMIT);
+    assert!(
+        e.store().markets().is_empty(),
+        "expired catalogue published"
+    );
+    assert!(!e.store().loaded().markets);
+    assert!(out.requests.is_empty());
+    retry(&out.actions, NOW + LIMIT);
+}
+#[test]
+fn late_ticker_final_cannot_publish_or_open_a_socket() {
+    let (mut e, _, out) = started(1);
+    respond(&mut e, &request(&out, 1), NOW + 2., 200, DAILY);
+    drain(&mut e, NOW + 2.);
+    respond(&mut e, &request(&out, 2), NOW + 1. + LIMIT, 200, BOOK);
+    let out = drain(&mut e, NOW + 1. + LIMIT);
+    assert!(!e.store().loaded().tickers, "expired ticker published");
+    assert!(e.store().tickers().is_empty());
+    assert!(
+        !out.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    retry(&out.actions, NOW + 1. + LIMIT);
+}
+#[test]
+fn late_429_cannot_pause_an_unrelated_current_book_query() {
+    let (mut e, r, _) = started(0);
+    e.handle(
+        NOW + LIMIT,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status: 429,
+                headers: "Retry-After: 30",
+                body: "untrusted expired payload",
+            },
+        },
+    );
+    drain(&mut e, NOW + LIMIT);
+    e.handle_command(
+        NOW + LIMIT + 1.,
+        Command::FetchOrderBook {
+            command: 91,
+            symbol: "BTCUSDT".into(),
+            limit: Some(1),
+        },
+        Some(100_000),
+    )
+    .unwrap();
+    let out = drain(&mut e, NOW + LIMIT + 1.);
+    assert_eq!(
+        out.requests.len(),
+        1,
+        "expired seed rate signal paused a current independent read"
+    );
+    assert!(out.requests[0].url.contains("/depth?"));
+}
+#[test]
+fn genuine_full_registry_refuses_catalogue_and_recovers_all_credits() {
+    let (mut e, _) = engine(256, true);
+    e.start(NOW);
+    let out = drain(&mut e, NOW);
+    assert!(
+        out.requests.is_empty(),
+        "catalogue bypassed genuine shared capacity"
+    );
+    assert!(out.prepares.is_empty());
+    let timer = retry(&out.actions, NOW);
+    control(&mut e, NOW + 1., "validate");
+    control(&mut e, NOW + 1., "release");
+    drain(&mut e, NOW + 1.);
+    e.handle(NOW + 1000., Event::TimerFired { timer });
+    let out = drain(&mut e, NOW + 1000.);
+    let r = request(&out, 0);
+    respond(&mut e, &r, NOW + 1001., 500, "fixture refusal");
+    drain(&mut e, NOW + 1001.);
+    control(&mut e, NOW + 1002., "credits");
+    drain(&mut e, NOW + 1002.);
+}
+#[test]
+fn catalogue_retires_before_both_ticker_successors_under_pressure() {
+    let (mut e, _) = engine(254, true);
+    e.start(NOW);
+    let out = drain(&mut e, NOW);
+    respond(&mut e, &request(&out, 0), NOW + 1., 200, INFO);
+    let out = drain(&mut e, NOW + 1.);
+    assert_eq!(
+        out.prepares.len(),
+        2,
+        "both successors need the retired catalogue credit"
+    );
+    assert_eq!(out.requests.len(), 2);
+    for kind in [1, 2] {
+        e.handle(
+            NOW + 2.,
+            Event::HttpFailed {
+                request: request(&out, kind).id,
+                error: "finite failure",
+            },
+        );
+        drain(&mut e, NOW + 2.);
+    }
+    control(&mut e, NOW + 3., "validate");
+    control(&mut e, NOW + 3., "release");
+    control(&mut e, NOW + 3., "credits");
+    drain(&mut e, NOW + 3.);
+}
+#[test]
+fn finite_physical_timeout_recovers_through_native_backoff_once() {
+    for kind in 0..3 {
+        let (mut e, r, initial) = started(kind);
+        let issued = if kind == 0 { NOW } else { NOW + 1. };
+        let timer = initial.actions.iter().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == issued + LIMIT => Some(*timer),
+            _ => None,
+        });
+        assert!(timer.is_some(), "physical bound starts before host work");
+        e.handle(
+            issued + LIMIT,
+            Event::TimerFired {
+                timer: timer.unwrap(),
+            },
+        );
+        let out = drain(&mut e, issued + LIMIT);
+        assert!(out.requests.is_empty());
+        let again = retry(&out.actions, issued + LIMIT);
+        e.handle(
+            issued + LIMIT,
+            Event::HttpFailed {
+                request: r.id,
+                error: "late duplicate",
+            },
+        );
+        assert!(e.drain_actions().next().is_none());
+        e.handle(issued + LIMIT + 1000., Event::TimerFired { timer: again });
+        let next = drain(&mut e, issued + LIMIT + 1000.);
+        assert_eq!(next.requests.len(), if kind == 0 { 1 } else { 2 });
+        assert!(!next.requests.iter().any(|new| new.id == r.id));
+    }
+}
+#[test]
+fn held_catalogue_preparation_expires_and_late_completion_is_inert() {
+    let (mut e, _) = engine(0, true);
+    e.start(NOW);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let timer = actions.iter().find_map(|a| match a {
+        Action::SetTimer { timer, at_ms } if *at_ms == NOW + LIMIT => Some(*timer),
+        _ => None,
+    });
+    assert!(
+        timer.is_some(),
+        "admission must bound an unprepared catalogue"
+    );
+    let (token, id) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => Some((*preparation, request.id)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("genuine held preparation");
+    e.handle(
+        NOW + LIMIT,
+        Event::TimerFired {
+            timer: timer.unwrap(),
+        },
+    );
+    let expired: Vec<_> = e.drain_actions().collect();
+    assert!(!e.http_preparation_pending(token));
+    assert!(expired.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { preparation, .. } if *preparation == token))));
+    assert!(!expired.iter().any(|a| matches!(a, Action::Http(_))));
+    let backoff = retry(&expired, NOW + LIMIT);
+    e.http_prepared(
+        NOW + LIMIT + 1.,
+        token,
+        Prepared {
+            id: id.0,
+            expires_at: None,
+        },
+    );
+    assert!(e.drain_actions().next().is_none());
+    e.handle(NOW + LIMIT + 1000., Event::TimerFired { timer: backoff });
+    let fresh = drain(&mut e, NOW + LIMIT + 1000.);
+    assert_ne!(request(&fresh, 0).id, id);
+    assert_eq!(fresh.prepares.len(), 1);
+}
+fn invalid_admission(now: f64) {
+    let (mut e, _) = engine(1, false);
+    control(&mut e, NOW, "boot");
+    drain(&mut e, NOW);
+    control(&mut e, now, "start");
+    no_new_work(&e.drain_actions().collect::<Vec<_>>());
+    assert!(e.store().markets().is_empty());
+    control(&mut e, NOW + 1., "validate");
+    control(&mut e, NOW + 1., "release");
+    control(&mut e, NOW + 1., "credits");
+    drain(&mut e, NOW + 1.);
+}
+fn invalid_released_failure(kind: usize, now: f64) {
+    let (mut e, r, initial) = started_with_peers(kind, false, 1);
+    let markets = e.store().markets().to_vec();
+    e.handle(
+        now,
+        Event::HttpFailed {
+            request: r.id,
+            error: "returned at invalid clock",
+        },
+    );
+    no_new_work(&e.drain_actions().collect::<Vec<_>>());
+    assert_eq!(e.store().markets(), markets);
+    assert!(!e.store().loaded().tickers);
+    control(&mut e, NOW + 2., "validate");
+    if kind != 0 {
+        let sibling = request(&initial, if kind == 1 { 2 } else { 1 });
+        e.handle(
+            NOW + 3.,
+            Event::HttpFailed {
+                request: sibling.id,
+                error: "finite sibling cleanup",
+            },
+        );
+        drain(&mut e, NOW + 3.);
+    }
+    control(&mut e, NOW + 4., "release");
+    control(&mut e, NOW + 4., "credits");
+    drain(&mut e, NOW + 4.);
+}
+fn invalid_preparation_failure(kind: usize, now: f64) {
+    let (mut e, _) = engine(1, true);
+    e.start(NOW);
+    if kind != 0 {
+        let initial = drain(&mut e, NOW);
+        respond(&mut e, &request(&initial, 0), NOW + 1., 200, INFO);
+    }
+    let initial: Vec<_> = e.drain_actions().collect();
+    let found = initial.iter().find_map(|a| match a {
+        Action::ManagedHttp(a) => match a.as_ref() {
+            HttpAction::Prepare {
+                preparation,
+                request,
+                ..
+            } if request.url.ends_with(PATHS[kind]) => Some(*preparation),
+            _ => None,
+        },
+        _ => None,
+    });
+    assert!(
+        found.is_some(),
+        "adopted native request must expose genuine preparation custody"
+    );
+    let p = found.unwrap();
+    e.http_preparation_failed(
+        now,
+        p,
+        Error::Invalid,
+        VenueError::new("invalid host observation").kind(ErrorKind::Internal),
+    );
+    no_new_work(&e.drain_actions().collect::<Vec<_>>());
+    control(&mut e, NOW + 2., "validate");
+    for a in initial {
+        if let Action::ManagedHttp(a) = a
+            && let HttpAction::Prepare { preparation, .. } = *a
+            && preparation != p
+        {
+            e.http_preparation_failed(
+                NOW + 3.,
+                preparation,
+                Error::Invalid,
+                VenueError::new("finite sibling cleanup"),
+            );
+            drain(&mut e, NOW + 3.);
+        }
+    }
+    control(&mut e, NOW + 4., "release");
+    control(&mut e, NOW + 4., "credits");
+    drain(&mut e, NOW + 4.);
+}
+fn invalid_ticker_retry_admission(now: f64) {
+    let (mut e, r, initial) = started_with_peers(1, false, 1);
+    e.handle(
+        NOW + 2.,
+        Event::HttpFailed {
+            request: r.id,
+            error: "finite ticker failure",
+        },
+    );
+    let out = drain(&mut e, NOW + 2.);
+    let timer = retry(&out.actions, NOW + 2.);
+    e.handle(now, Event::TimerFired { timer });
+    no_new_work(&e.drain_actions().collect::<Vec<_>>());
+    assert!(!e.store().loaded().tickers);
+    control(&mut e, NOW + 3., "validate");
+    respond(&mut e, &request(&initial, 2), NOW + 4., 200, BOOK);
+    drain(&mut e, NOW + 4.);
+    control(&mut e, NOW + 5., "release");
+    control(&mut e, NOW + 5., "credits");
+    drain(&mut e, NOW + 5.);
+}
+macro_rules! invalid_clock_tests {
+    ($admission:ident, $retry:ident, $markets:ident, $daily:ident, $book:ident,
+     $prepare_markets:ident, $prepare_daily:ident, $prepare_book:ident, $clock:expr) => {
+        #[test]
+        fn $admission() {
+            invalid_admission($clock);
+        }
+        #[test]
+        fn $retry() {
+            invalid_ticker_retry_admission($clock);
+        }
+        #[test]
+        fn $markets() {
+            invalid_released_failure(0, $clock);
+        }
+        #[test]
+        fn $daily() {
+            invalid_released_failure(1, $clock);
+        }
+        #[test]
+        fn $book() {
+            invalid_released_failure(2, $clock);
+        }
+        #[test]
+        fn $prepare_markets() {
+            invalid_preparation_failure(0, $clock);
+        }
+        #[test]
+        fn $prepare_daily() {
+            invalid_preparation_failure(1, $clock);
+        }
+        #[test]
+        fn $prepare_book() {
+            invalid_preparation_failure(2, $clock);
+        }
+    };
+}
+invalid_clock_tests!(
+    nan_admission,
+    nan_ticker_retry,
+    nan_markets_failure,
+    nan_daily_failure,
+    nan_book_failure,
+    nan_markets_preparation,
+    nan_daily_preparation,
+    nan_book_preparation,
+    f64::NAN
+);
+invalid_clock_tests!(
+    infinity_admission,
+    infinity_ticker_retry,
+    infinity_markets_failure,
+    infinity_daily_failure,
+    infinity_book_failure,
+    infinity_markets_preparation,
+    infinity_daily_preparation,
+    infinity_book_preparation,
+    f64::INFINITY
+);
+invalid_clock_tests!(
+    negative_infinity_admission,
+    negative_infinity_ticker_retry,
+    negative_infinity_markets_failure,
+    negative_infinity_daily_failure,
+    negative_infinity_book_failure,
+    negative_infinity_markets_preparation,
+    negative_infinity_daily_preparation,
+    negative_infinity_book_preparation,
+    f64::NEG_INFINITY
+);
