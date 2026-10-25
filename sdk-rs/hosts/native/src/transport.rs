@@ -306,6 +306,11 @@ impl Transport for NetworkTransport {
         tokio::spawn(async move {
             let canceled = events.clone();
             let operation = async move {
+                // Enqueued as ordinary ingress after connect returned; no open or close follows.
+                if selected.as_ref().is_some_and(|selected| selected.exhausted) {
+                    let _ = events.send(HostEvent::WsRouteExhausted(socket));
+                    return;
+                }
                 let (target, headers, relay, key) = match selected {
                     Some(selected) => (
                         selected.url,

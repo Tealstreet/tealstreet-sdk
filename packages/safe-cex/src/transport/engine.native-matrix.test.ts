@@ -422,8 +422,14 @@ const buildCase = async (input: Case) => {
             ? {}
             : undefined;
   const sockets = socketInputs.map(({ channel, url, context }) => {
+    // TS's Bitget private class routes its UTA (v3) socket through privateUta.
+    const utaRouting =
+      channel === 'private' && url.includes('/v3/ws/private') && routing.wsPrivateUta
+        ? { ...routing.wsPrivateUta, ignoredMessages: routing.wsPrivate.ignoredMessages }
+        : undefined;
     const declared =
       productRouting(url) ??
+      utaRouting ??
       routing[channel === 'public' ? 'wsPublic' : channel === 'private' ? 'wsPrivate' : 'wsBusiness'];
     // TS Bitunix socket classes select fallback immediately on this explicit flag.
     const forced = input.exchange === 'bitunix' && options.tealstreetWsRoute && declared.fallback;

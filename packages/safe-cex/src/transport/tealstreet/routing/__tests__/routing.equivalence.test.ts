@@ -135,15 +135,12 @@ describe('routing table / resolver (Epic 1 net)', () => {
       fallback: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
       initialSilentConnects: 1,
       ignoredMessages: ['pong'],
-      directUrls: ['wss://ws.bitget.com/v3/ws/private'],
       relay: bitgetRelay('v2'),
     });
-    // The Rust engine still opens UTA on the private channel; its v3 URL stays direct
-    // on either resolution until the Rust Bitget venue adopts privateUta.
+    // The Rust engine host routes its UTA (v3) socket through privateUta by URL.
     expect(resolveExchangeRouting('bitget', proxy).wsPrivate).toEqual({
       tunnelled: true,
       host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
-      directUrls: ['wss://ws.bitget.com/v3/ws/private'],
       relay: bitgetRelay('v2'),
     });
     expect(resolveExchangeRouting('bitget', proxy).wsPrivateUta).toEqual({
