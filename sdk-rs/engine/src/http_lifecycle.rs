@@ -1716,12 +1716,16 @@ impl<V: Venue> Engine<V> {
             self.io.core.http_delivery = previous;
         }
         self.io.core.request_contexts.exit_delivery(&delivery);
+        #[cfg(feature = "repair-mutations")]
+        self.repair_delivered(&delivery, now);
         self.finish_event_scope(now);
         self.sweep_executions(now);
         self.flush_preflight_readiness(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }
+        #[cfg(feature = "repair-mutations")]
+        self.flush_repair_notices(now);
     }
 
     /// Fail the attempts a Session retire fenced, each through the common
@@ -2064,6 +2068,13 @@ impl<V: Venue> Engine<V> {
                                 self.io.core.order_locks.note_command_write(id);
                             }
                         }
+                        #[cfg(feature = "repair-mutations")]
+                        Owner::Repair { generation } => super::repair_core::repair_released(
+                            &self.io.core.repairs,
+                            &mut self.io.core.order_locks,
+                            generation,
+                            managed.lifecycle.context(),
+                        ),
                         _ => {}
                     }
                 }
@@ -2521,6 +2532,8 @@ impl<V: Venue> Engine<V> {
                 );
                 self.io.core.http_write_reply =
                     Some((response.status, response.headers.to_owned()));
+                #[cfg(feature = "repair-mutations")]
+                let previous_data = self.begin_repair_data(Some(request));
                 #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
                 let previous_exempt = std::mem::replace(
                     &mut self.io.core.http_status_exempt,
@@ -2535,6 +2548,8 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
+                #[cfg(feature = "repair-mutations")]
+                self.end_repair_data(previous_data);
                 self.io.core.http_write_reply = None;
                 #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
                 {
@@ -2543,6 +2558,8 @@ impl<V: Venue> Engine<V> {
             }
             self.io.core.http_delivery = previous;
             self.io.core.request_contexts.exit_delivery(&delivery);
+            #[cfg(feature = "repair-mutations")]
+            self.repair_delivered(&delivery, now);
             self.io.discard_managed(request);
         }
         drop(record);
@@ -2697,6 +2714,8 @@ mod tests {
     include!("request_context_serial_session_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
+    #[cfg(feature = "repair-mutations")]
+    include!("repair_tests.rs");
 
     /// Bearer bundle attach and Bind-admission units (`session-bearer` only).
     #[cfg(feature = "session-bearer")]
