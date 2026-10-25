@@ -347,10 +347,11 @@ fn private_queries_are_empty_without_credentials() {
     assert_eq!(result(&mut e), "[]");
 }
 #[test]
-fn failed_or_malformed_later_page_does_not_publish_partial_history() {
+fn failed_or_malformed_later_page_publishes_only_accepted_rows_as_incomplete() {
     for body in [
         r#"{"code":"51000","msg":"bad request","data":[]}"#.to_owned(),
         envelope("42"),
+        envelope(&format!("{},42", order("50"))),
     ] {
         let mut e = trading_engine();
         let a = query(&mut e, orders(None));
@@ -361,7 +362,24 @@ fn failed_or_malformed_later_page_does_not_publish_partial_history() {
         reply(&mut e, &a, &envelope(&page), 10.0);
         let a = next_page(&mut e);
         reply(&mut e, &a, &body, 120.0);
-        assert_eq!(result(&mut e), "[]");
+        let out = actions(&mut e);
+        owned_incomplete(&out);
+        let result = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandDone {
+                    command: 991,
+                    result,
+                }) => Some(result.as_str()),
+                _ => None,
+            })
+            .expect("accepted rows are published");
+        let rows: Vec<serde_json::Value> = serde_json::from_str(result).unwrap();
+        assert!(!rows.is_empty());
+        assert!(
+            rows.iter().all(|row| row["id"] != "50"),
+            "the failing page's parsed row is not accepted"
+        );
     }
 }
 
