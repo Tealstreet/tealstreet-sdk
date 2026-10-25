@@ -18,6 +18,7 @@
 - **New source-stage gaps,** found against the landed managed API:
   1. OKX implements no `capture_http_reconciliation`, and the engine refuses managed mutations without it (`engine.rs` default returns Invalid). It must return bounded correlation data, as Bitget's does.
   2. `request_signed_managed` takes no headers. Legacy writes add `Content-Type: application/json`, so the OKX recipe's `apply` must add it, as Bitget's recipe does. The demo header already rides `unsigned_http_headers`.
+  3. An Unknown managed write arms the engine's absent-order fence, which clears only on `cx.orders_reconciled(...)` (dazzy3). OKX's native reconciliation fence must be wired as Bybit's `reconcile_uncertain` is: record the uncertainty on the Unknown, then call `orders_reconciled` on the committed order snapshot. Otherwise one lost write leaves later absent-order handling fenced for good.
 - **`STAGING_BOOTSTRAPS` no longer exists in code,** so that requirement below is void.
 - **No queue.** OKX starts each command's job at once and runs jobs concurrently, ordered only within a job. That stays native: one Preflight and one serial Plan per command, with no `park_preflight` FIFO.
 
@@ -62,12 +63,9 @@ credential entry. (The former `STAGING_BOOTSTRAPS` map no longer exists.)
 
 ## Admission and authority
 
-This section is the interim shared consumer pattern for OKX and Bitget. The
-canonical streamed engine contract will be fe7lgm's plan on
-`feat/rust-plan-serial-stream`; proposed API plan pin is `34b0eb6233c`, with
-the reviewed source pin still pending.
-Earlier bounded `admit_plan(&preflight, &steps, ...)` clearance does not grant
-clearance for that new primitive. The current direction is:
+This follows the landed streamed serial Plan (#2092, `ff219538b30`), the same
+consumer shape as Bitget slice 3 (#2122). Earlier bounded
+`admit_plan(&preflight, &steps, ...)` clearance does not apply to it.
 
 1. At genuine command entry, `begin_preflight(PreflightPolicy { purpose:
    WriteAfterReads, read_credential: None, write_credential: Some(primary) })`.
@@ -82,13 +80,13 @@ clearance for that new primitive. The current direction is:
    Each call has a 20000 ms window, attempts one, Never, and no refusal
    fallback or added wait. Continue only from the previous step's exact DATA
    custody, under the same root. Do not simulate streaming with repeated Plan
-   admission. The proposed constructors are `admit_serial_plan(preflight,
+   admission. The landed constructors are `admit_serial_plan(preflight,
    SerialCall { operation: Mutation, timeout_ms: 20000, attempts: 1 },
-   SerialPolicy { credential: primary, pacing: None, refusals_complete })`
-   and `continue_serial_plan(plan, slot, context, next)`. They await the shared
-   source review. Empty native jobs use `done_empty_plan`, no dummy first call.
+   SerialPolicy { credential: primary, pacing: None, refusals_complete: true })`
+   and `continue_serial_plan(plan, slot, context, next)`. Empty native jobs use
+   `done_empty_plan`, with no dummy first call.
 4. Only after successful admission apply native optimistic status changes.
-   Obtain each call from the reviewed streamed engine API, then send through
+   Obtain each call from the landed streamed engine API, then send through
    `request_signed_managed` with the existing OKX Primary dispatch recipe.
    Preserve exact URL, body, demo header and Primary role; no local remapping.
 5. Validate exact Plan delivery before decoding, response-driven Store/job
@@ -103,7 +101,7 @@ clearance for that new primitive. The current direction is:
 
 `begin_planned_execution` is not the constructor: no other command joins this
 physical operation. It is reserved for joined executions under #1919.
-The OKX crate must opt into `http-plans` explicitly at implementation time.
+The OKX crate opts into `serial-plans`, which implies `http-plans`, at implementation time.
 
 ## Native behavior to preserve
 
@@ -125,45 +123,20 @@ The OKX crate must opt into `http-plans` explicitly at implementation time.
   OKX all-failed response. Native emits diagnostics and can finish `[]` on that
   envelope; preserve it separately from the realistic code-`1` Rejected path.
 
-## Shared and behavior gates before production
+## Shared and behavior gates (all closed by #2092)
 
-1. **Streamed serial primitive:** the current ruling is **no step cap**.
-   The earlier 2048/2049 ruling and tests are superseded and removed. fe7lgm
-   owns the shared primitive: exact-DATA continuation, O(1) resources per active
-   step, one Context, no root deadline, and incremental full IDs.
-   One plain input order permits 10000 split lots, or 500 twenty-row calls;
-   both protections make 30000 calls (entry, stop, take-profit per lot).
-   Important: that bound is per input order. `CommandIn::PlaceOrders.orders`
-   is a Vec decoded directly by serde, and `plan_place` has no input-count cap.
-   Thus 30000 is not a finite whole-command maximum. Report this distinction
-   to the shared owner when sizing retention. No chunking, renewed authority
-   or private step limit is authorized. Stack the consumer on the reviewed
-   engine PR before production and re-review this section against its real API.
-2. **Independent cancellation:** at this actual base `PlanPolicy` has no
-   `independent_calls` field. The prerequisite is #1956 landing (combo-6b),
-   carrying #1939; its non-landing frozen pin is `3745a230887`. Obtain its
-   actual source and disposition for mixed/all-refused cancellation before implementation.
-   Do not copy a proposed flag or simulate journal success in the venue.
-3. **Terminal projection:** preserve native code-`1` rejection and code-`2`
-   continuation as separate paths. The code-`2` all-refused edge retains its
-   diagnostics then `done[]`. The shared owner proposes an admission-declared
-   terminal policy: only when all released facts are definitive, with no Unknown
-   or unreleased fact, `done_plan` may return the consumer result while retaining
-   refusals. Defaults retain current projection. Exact API names are pending;
-   no consumer fallback or fabricated acceptance is authorized. Code `1` still
-   terminates via failure, never that success projection.
-4. **Accepted-ID retention:** current fixed evidence limits cannot reproduce
-   native output. The new primitive must retain and report every accepted ID
-   incrementally, without truncation. The originals complete 30000 and 60000
-   serial calls with every ID in native order. This shared evidence change
-   belongs to the engine owner, not an extra venue journal.
-5. **Whole-command deadline:** native has no receipt-bound whole-funnel cap.
-   A real `handle_command(5, ..., Some(1))` bracket continues and finishes at
-   time 7, after its receipt deadline 6, with all three IDs. Physical requests
-   retain their own 20 s timeouts. The proposed streamed receipt-capped root
-   would stop native work. The overseer has now ruled no root clock, and the
-   shared plan removes it: caller-wait expiry alone is not a serial terminal.
-   No venue-synthesized deadline or renewal is authorized.
+Each gate is checked against the landed engine, `request_context_serial_plan.rs` and `request_context.rs`.
+
+1. **No step cap.** It is closed. `continue_serial` admits each next call against the Plan alone, with O(1) resources per active step, one Context and no declared count.
+   - One plain input order permits 10,000 split lots (500 twenty-row calls), and both protections make 30,000 calls per input. `CommandIn::PlaceOrders.orders` has no input-count cap, so there is no finite whole-command maximum. That stays native.
+   - No chunking, renewed authority or private step limit is used.
+2. **Continuation on definitive facts.** It is closed. `continue_serial` gates on `WriteJournal::validate_serial_continuation` (`request_context.rs` near :2271). The latest released attempt must be Accepted, Rejected or KnownPartial, and the Plan must be neither sealed nor `serial_uncertain`.
+   - So a definitive code-`2` row refusal continues to the sibling batches, and an Unknown stops the chain.
+   - No `independent_calls` field is needed, and the #1956 prerequisite is void.
+   - Because the engine PERMITS continuing after a Rejected fact, two stops are venue decisions with their own REDs (below): code `1` stops, and a dependent replacement never runs after its prerequisite cancel's refusal.
+3. **Terminal projection.** It is closed. `SerialPolicy.refusals_complete` is the all-refused `done []` path for the code-`2` edge, and it never overrides `fail_plan`. Code `1` still ends through `fail_plan`, never that success projection.
+4. **Accepted-ID retention.** It is closed. The serial Plan reports full IDs incrementally, with no truncation. The originals complete 30,000 and 60,000 serial calls with every ID in native order.
+5. **No root clock.** It is closed. A serial Plan has no whole-chain deadline, and caller-wait expiry alone is not a serial terminal. Each physical call keeps its 20 s window. `native_bracket_continues_and_finishes_after_caller_receipt_deadline` pins this.
 
 For sizing, if plain inputs yield P unprotected lots, protected inputs yield
 L_i lots with b_i enabled protections (one or two), and there are A standalone
@@ -173,8 +146,7 @@ Every L_i is individually capped at 10000; input count is not capped here.
 Cancellation uses ceil(R / 20) + ceil(G / 10) for deduplicated regular/algo IDs.
 These formulas describe current job construction, not new admissibility limits.
 
-These gates also apply to the Bitget write consumer. Missing shared machinery
-is reported to its owner and built once; this branch changes no engine source.
+This branch changes no engine source; any missing shared machinery goes to its owner.
 
 ## Original controls and implementation proof
 
@@ -194,6 +166,12 @@ Record actual assertion failures independently from working native witnesses.
   diagnostics, continues and finishes empty. Not-ready wins over planning errors.
 - Code 50004 stops/reconciles without resend. The dedicated target does not yet
   execute network/408/5xx/malformed/row-count cases.
+
+Source-stage REDs, added before source (dazzy3, plan review of `dbf746ef6bf`):
+
+- **Code-1 stops.** A cancel answered with code `1` ('All operations failed') calls `fail_plan`. No `continue_serial_plan` follows, so no sibling batch is sent, and native optimistic status is restored.
+- **A dependent replacement after a refused prerequisite cancel issues nothing.** The replacement is never prepared or sent, and the terminal keeps the cancel's refusal.
+- **The fence clears on reconcile.** A lost create (Unknown) is followed by the order reconcile snapshot. `orders_reconciled` clears the engine's absent-order fence, and later absent-order handling is no longer fenced.
 
 The following remain source-stage gates, not executed claims for this target:
 
