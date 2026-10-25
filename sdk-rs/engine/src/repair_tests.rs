@@ -12,13 +12,10 @@ mod repair {
     use crate::signing::{Identities, Identity, KeyRef};
 
     fn identity(name: &str) -> Identity {
-        Identity {
-            credential: KeyRef(format!("{name}-key")),
-            signing: KeyRef(format!("{name}-sign")),
-            passphrase: None,
-            stable_id: None,
-            extra: Default::default(),
-        }
+        Identity::new(
+            KeyRef(format!("{name}-key")),
+            Some(KeyRef(format!("{name}-sign"))),
+        )
     }
     fn primary() -> Credential {
         Credential {
