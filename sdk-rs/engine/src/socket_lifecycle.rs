@@ -856,23 +856,31 @@ impl Lifecycle {
         }
         // Bound all retained input and eventual released copies before cloning
         // argument state or invoking a native encoder.
-        let mut unique = Set::default();
+        // Duplicate keys are found by one sort, not a per-row ordered insert
+        // (quadratic for up to MAX_INTERESTS rows in descending order). A
+        // duplicate still refuses wherever the per-row check did: before a
+        // later row's Capacity failure, and before the budget checks below.
+        let mut keys = Vec::with_capacity(interests.len());
         let mut desired_bytes = 0usize;
         for item in interests.rows() {
             if item.key.is_empty()
                 || item.key.len() > 1024
                 || item.wire_args.len() > MAX_FRAME_BYTES
-                || !unique.insert(item.key.as_ref())
             {
                 return Err(SocketError::InvalidInterest);
             }
-            desired_bytes = desired_bytes
+            keys.push(item.key.as_ref());
+            match desired_bytes
                 .checked_add(item.key.len())
                 .and_then(|v| v.checked_add(item.wire_args.len()))
-                .ok_or(SocketError::Capacity)?;
-            if desired_bytes > MAX_INTEREST_BYTES / 2 {
-                return Err(SocketError::Capacity);
+            {
+                Some(bytes) if bytes <= MAX_INTEREST_BYTES / 2 => desired_bytes = bytes,
+                _ if has_duplicate(&mut keys) => return Err(SocketError::InvalidInterest),
+                _ => return Err(SocketError::Capacity),
             }
+        }
+        if has_duplicate(&mut keys) {
+            return Err(SocketError::InvalidInterest);
         }
         let old_released: usize = f
             .interests
@@ -1071,6 +1079,12 @@ impl Lifecycle {
         }
         Some(queued.batch.text)
     }
+}
+
+/// Whether two keys are equal; sorts `keys` in place.
+fn has_duplicate(keys: &mut [&str]) -> bool {
+    keys.sort_unstable();
+    keys.windows(2).any(|pair| pair[0] == pair[1])
 }
 
 /// Sorted, deduplicated storage with the `BTreeMap`/`BTreeSet` operations and
@@ -1427,6 +1441,71 @@ mod tests {
         assert_eq!(l.pending_frames, frames);
         assert_eq!(l.feeds[f.0].interests.bytes(), bytes);
         assert!(l.release_batch(e, false).is_some());
+    }
+    /// fe7lgm on #2127: MAX_INTERESTS rows in descending key order (the worst
+    /// case for an ordered insert) complete, and a duplicate among them refuses.
+    #[test]
+    fn max_interests_in_reverse_order_complete_and_refuse_a_duplicate() {
+        let rows: Vec<Interest> = (0..MAX_INTERESTS)
+            .rev()
+            .map(|i| interest(&format!("k{i:05}")))
+            .collect();
+        let (mut l, f, _) = started(AuthMode::None);
+        // Still MAX_INTERESTS rows: the last (k00000) becomes a second k08191.
+        let mut duplicated = rows.clone();
+        duplicated[MAX_INTERESTS - 1] = interest("k08191");
+        assert_eq!(
+            l.replace_interests(f, duplicated, encode),
+            Err(SocketError::InvalidInterest)
+        );
+        assert_eq!(
+            l.feeds[f.0].interests.revision, 0,
+            "a refusal has no effect"
+        );
+        // One frame per 64 keys keeps the 8192 rows under MAX_FRAMES.
+        let batched =
+            |subscribe: bool,
+             values: &[Interest],
+             emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>| {
+                for chunk in values.chunks(64) {
+                    emit(EncodedBatch {
+                        text: format!("{}{}", if subscribe { "+" } else { "-" }, chunk.len()),
+                        covered_keys: chunk.iter().map(|i| i.key.clone()).collect(),
+                    })?;
+                }
+                Ok(())
+            };
+        assert!(l.replace_interests(f, rows, batched).is_ok());
+        assert_eq!(l.feeds[f.0].interests.desired.len(), MAX_INTERESTS);
+    }
+
+    /// A duplicate refuses as InvalidInterest exactly where the per-row check
+    /// did: ahead of a later row's Capacity failure, and Capacity first when
+    /// the overflowing row comes before the duplicate.
+    #[test]
+    fn duplicate_and_capacity_refusals_keep_their_precedence() {
+        let wide = |key: &str| Interest {
+            key: key.into(),
+            wire_args: "x".repeat(MAX_FRAME_BYTES).into(),
+        };
+        let filler: Vec<Interest> = (0..MAX_INTEREST_BYTES / 2 / MAX_FRAME_BYTES)
+            .map(|i| wide(&format!("w{i:05}")))
+            .collect();
+        let (mut l, f, _) = started(AuthMode::None);
+        let mut duplicate_first = vec![interest("A"), interest("A")];
+        duplicate_first.extend(filler.iter().cloned());
+        assert_eq!(
+            l.replace_interests(f, duplicate_first, encode),
+            Err(SocketError::InvalidInterest)
+        );
+        let mut overflow_first = filler.clone();
+        overflow_first.push(wide("over"));
+        overflow_first.push(interest("A"));
+        overflow_first.push(interest("A"));
+        assert_eq!(
+            l.replace_interests(f, overflow_first, encode),
+            Err(SocketError::Capacity)
+        );
     }
     fn encode(
         subscribe: bool,
