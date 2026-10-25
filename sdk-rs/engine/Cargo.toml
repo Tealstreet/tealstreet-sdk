@@ -21,6 +21,8 @@ session-bearer = []
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
 order-locks = []
+# Read-only signing-task metadata for hosted signing; only Kraken and Paradex link it.
+sign-meta = []
 # Per-symbol settings publication and write fences for adopting venue families.
 metadata-freshness = []
 # Prediction venues opt in; other standalone builds omit metadata storage and frames.

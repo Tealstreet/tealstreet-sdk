@@ -475,6 +475,24 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    /// As `request_signed_managed`, recording the exact credential role of
+    /// `selection` for `Engine::sign_meta`.
+    #[cfg(feature = "sign-meta")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn request_selected_managed(
+        &mut self,
+        context: Context,
+        _selection: &crate::credential_selection::Selection,
+        bearer: Option<&Session>,
+        method: Method,
+        url: String,
+        body: Option<String>,
+        step: Box<dyn crate::SignStep>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        self.request_signed_managed(context, bearer, method, url, body, step, pending)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn request_selected_read_managed(
         &mut self,
@@ -2635,6 +2653,8 @@ mod tests {
     include!("request_context_serial_plan_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
+    #[cfg(feature = "sign-meta")]
+    include!("sign_meta_tests.rs");
 
     /// Bearer bundle attach and Bind-admission units (`session-bearer` only).
     #[cfg(feature = "session-bearer")]

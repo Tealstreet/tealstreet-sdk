@@ -5223,6 +5223,12 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    /// Metadata of the current managed signing task `task`, if any.
+    #[cfg(feature = "sign-meta")]
+    pub fn sign_meta(&self, _task: RequestId) -> Option<crate::sign_meta::SignMeta> {
+        None
+    }
+
     pub fn signing_pending(&self, attempt: RequestId) -> bool {
         !self.failed() && self.io.core.signing.signature_pending(attempt)
     }
