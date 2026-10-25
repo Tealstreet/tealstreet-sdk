@@ -198,8 +198,10 @@ Written against #2069 phase 3 (its park and seed), stacked after it.
    a further `serial_plan_session_resend` is RetryForbidden.
 4. Refusals that spend nothing: no grant; an Unknown fact; a foreign or stale
    delivery; `attempts: 1`; an already spent second attempt.
-5. Window expiry while parked: Timeout, NotSent, and the chain stops with the
-   streamed IDs and no fence.
+5. Window expiry while parked: the operation is Timeout/NotSent. The command
+   follows the unchanged journal: a released refusal followed by an unreleased
+   resend projects Timeout/Unknown, with a fence, reconciliation and retained
+   IDs. This corrects the original gated whole-command NotSent assertion.
 6. Session retirement while parked: Revoked, NotSent, and the chain stops.
 7. The order lock is held through the park.
 8. A Read with `attempts: 2` is admitted; `plan_resend_context` and the
@@ -284,3 +286,21 @@ Later source review must additionally pin foreign-grant/slot combinations,
 Read generic-retry exclusion after attempts=2 admission, prior journal effects
 before a parked operation expires, and signed-vs-unsigned revision movement.
 Those are explicit source gates, not claimed coverage from the original run.
+
+
+### Source-stage original correction (claude-fe7lgm confirmed)
+
+The original parked-expiry suffix at 1fe9699c4d8 incorrectly asserted whole-command
+NotSent and no fence. The existing journal deliberately treats a released
+attempt followed by an unreleased selected resend as uncertain. Preserve that
+policy: observe operation Timeout/NotSent through the typed preparation callback,
+and command Timeout/Unknown with a fence, reconciliation and earlier IDs retained.
+The correction changes that gated suffix only; no journal policy changes.
+
+Source controls also pin the exact bound revision against an already-rotated
+cache, NativeCodec statuses never consulting the exemption, all Unproven
+statuses consulting it before evidence, Read attempts=2 retaining generic Never,
+and actual invalid-UTF8 Read ingress staying strict. The last control was RED
+against the initial source: a released integrity failure could otherwise use
+immediate continuation. Immediate retries require engine-recorded Network or
+physical-timeout provenance; existing delayed continuation behavior is preserved.

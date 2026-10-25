@@ -70,6 +70,10 @@ mod serial_session {
         data: usize,
         failures: usize,
         unproven: std::cell::Cell<usize>,
+        exempt_calls: std::cell::Cell<usize>,
+        preparation_errors: Vec<VenueError>,
+        reconciliations: usize,
+        continue_after_success: bool,
         read_fact_absent: bool,
         rejections: Option<usize>,
         lock: bool,
@@ -199,6 +203,7 @@ mod serial_session {
             }
         }
         fn status_exempt_refusal(&self, _: &Context, response: Response<'_>) -> bool {
+            self.exempt_calls.set(self.exempt_calls.get() + 1);
             self.exempt && code(response) == Some(1000)
         }
         fn session_bearer(&self, generation: u64) -> SessionBearer {
@@ -303,6 +308,16 @@ mod serial_session {
                 )
                 .unwrap();
             }
+            if self.continue_after_success {
+                self.continue_after_success = false;
+                let next = cx
+                    .continue_serial_plan(&plan, &slot, &context, call(Operation::Mutation, 2))
+                    .unwrap();
+                self.slot = Some(next.clone());
+                let next_context = cx.plan_leg_context(&plan, &next).unwrap();
+                self.issue(cx, next_context);
+                return;
+            }
             self.rejections = Some(
                 cx.io
                     .core
@@ -314,6 +329,16 @@ mod serial_session {
             );
             cx.finish_plan_call(&plan, &slot, &context).unwrap();
             cx.done_plan(&plan, "[\"id-1\"]".into()).unwrap();
+        }
+        fn on_http_preparation_failed(
+            &mut self,
+            cx: &mut Cx<'_, Context>,
+            context: Context,
+            _: Error,
+            error: VenueError,
+        ) {
+            self.preparation_errors.push(error.clone());
+            self.on_sign_error(cx, context, error);
         }
         fn on_request_failed(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: &str) {
             self.failures += 1;
@@ -373,6 +398,9 @@ mod serial_session {
                 assert!(cx.session_ready(session).is_empty());
             }
             self.timer = Some(cx.set_timer(1.));
+        }
+        fn reconcile_uncertain(&mut self, _: &mut Cx<'_, Context>, _: Option<&[String]>) {
+            self.reconciliations += 1;
         }
         fn guard_pending_placements(&self) -> bool {
             true
@@ -618,9 +646,19 @@ mod serial_session {
         e.handle(20_002., Event::TimerFired { timer });
         let actions = drain(&mut e);
         assert_eq!(failed(&actions).kind, Some(ErrorKind::Timeout));
-        assert_eq!(failed(&actions).outcome, Some(crate::Outcome::NotSent));
+        assert_eq!(failed(&actions).outcome, Some(crate::Outcome::Unknown));
+        let operation = e
+            .venue
+            .preparation_errors
+            .last()
+            .expect("typed parked-operation expiry");
+        assert_eq!(operation.kind, Some(ErrorKind::Timeout));
+        assert_eq!(operation.outcome, Some(crate::Outcome::NotSent));
         #[cfg(feature = "order-locks")]
-        assert!(!e.io.core.order_locks.uncertain("BTCUSD"));
+        {
+            assert!(e.io.core.order_locks.uncertain("BTCUSD"));
+            assert!(e.venue.reconciliations > 0 || !e.io.core.reconcile_due.is_empty());
+        }
         no_http(&actions);
         no_http(&wake(&mut e, 2, 20_003.));
         no_http(&wake(&mut e, 3, 20_004.));
@@ -842,4 +880,5 @@ mod serial_session {
         assert_eq!(e.venue.foreign_result, Some(Err(Error::Revoked)));
         no_http(&actions);
     }
+    include!("request_context_serial_session_source_tests.rs");
 }
