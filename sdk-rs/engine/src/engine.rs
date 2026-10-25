@@ -855,6 +855,9 @@ mod command_wait_tests;
 #[path = "order_lock_capacity_tests.rs"]
 mod order_lock_capacity_tests;
 #[cfg(test)]
+#[path = "pending_drop_tests.rs"]
+mod pending_drop_tests;
+#[cfg(test)]
 #[path = "read_root_expiry_tests.rs"]
 mod read_root_expiry_tests;
 
