@@ -265,3 +265,22 @@ On unchanged runtime target35 compiles and executes12workingGREEN/23assertionRED
 compile failure is excluded from original evidence. The original19 entire prefix
 and the eight earlier source-stage controls are retained. Exact source/control
 review, GREEN suffix execution, fixture preservation and paired sizes remain gates.
+
+The next unapplied preview adds the two narrow42102 corrections: retry custody
+retains its advertised not-before beside the genuine TimerId. Early delivery
+rearms a newly issued timer to that SAME not-before without quota/proposal work;
+consumed IDs are inert, equality spends one observation, and late delivery spends
+one observation before scheduling from its actual delivery time. Nonfinite and
+stale handling remains allocation-free. This is the bounded interest-observation
+cadence, not another socket supervisor or HTTP/auth permission.
+
+The native encoder now preflights MAX_FRAME_BYTES and returns Capacity before
+emit for oversize. Exact65536 and one-extra-byte controls use valid bounded keys;
+healthy private auth/wire and every other key/coverage validation stay unchanged.
+Inherited Ready replay therefore also reports Capacity consistently.
+
+Unchanged-runtime target37 compiles/runs12workingGREEN/25intendedassertRED,
+0ignored. The original19 remain byte-exact. New early/duplicate/equality/late
+and exact-fit/one-over suffixes remain gated until source execution. hcm has
+separately CLEARed pure fixture-forwarding8f89dd21. Source remains UNAPPLIED
+until exact cadence/frame delta CLEAR; paired size and qualification gates stay.

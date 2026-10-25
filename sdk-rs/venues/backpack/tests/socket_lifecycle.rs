@@ -1191,15 +1191,29 @@ fn inherited_engine_ready_replay_capacity_stops_only_its_feed_without_venue_retr
     let new = h.socket(SocketChannel::Public);
     assert_ne!(new, public);
     h.clear_observations();
-    h.open(SocketChannel::Public);
+    h.engine.handle(h.now, Event::WsOpened { socket: new });
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
     assert!(
-        h.closed.contains(&new),
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == new)),
         "inherited Ready replay Capacity remains fail-closed"
     );
-    assert!(!h.closed.contains(&private));
     assert!(
-        h.sent.is_empty(),
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket } if *socket == private))
+    );
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::WsSend { .. })),
         "no partial replay or opening PING handoff"
+    );
+    assert!(
+        actions.iter().any(
+            |a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event))
+        if event.message == "Managed socket operation refused: Capacity")
+        ),
+        "adapter preflight keeps inherited replay label exact"
     );
     assert_eq!(
         h.connects
@@ -1251,4 +1265,174 @@ fn removing_the_only_unarmed_demand_cancels_its_obsolete_recovery_timer() {
         h.sent.is_empty() && h.http.is_empty() && h.notices == 0,
         "obsolete wake cannot mint new work"
     );
+}
+
+#[test]
+fn interest_retry_early_duplicates_equality_and_late_deliveries_keep_original_cadence() {
+    let mut h = pending_books(513);
+    h.clear_observations();
+    let mut timer = h.timers.iter().find(|(_, at)| *at == 2000.).unwrap().0;
+    let mut consumed = vec![];
+    for now in [1001., 1001., 1001., 1001., 1001., 1999.] {
+        h.now = now;
+        fire_timer(&mut h, timer);
+        consumed.push(timer);
+        let current: Vec<_> = h
+            .timers
+            .iter()
+            .filter(|(_, at)| *at == 2000.)
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(
+            current.len(),
+            1,
+            "early wake re-advertises the original not-before"
+        );
+        assert_ne!(
+            current[0], timer,
+            "replacement is an actually issued engine timer"
+        );
+        timer = current[0];
+        assert!(
+            h.notices == 0 && h.sent.is_empty() && h.http.is_empty(),
+            "early delivery consumes no observation"
+        );
+        let writes = h.timer_writes;
+        for old in &consumed {
+            fire_timer(&mut h, *old);
+        }
+        assert_eq!(
+            h.timer_writes, writes,
+            "duplicates of consumed timers are inert"
+        );
+    }
+    h.now = 2000.;
+    fire_timer(&mut h, timer);
+    consumed.push(timer);
+    assert_eq!(
+        h.notices, 1,
+        "first real observation is at exact not-before equality"
+    );
+    let second = h.timers.iter().find(|(_, at)| *at == 3000.).unwrap().0;
+    h.now = 3500.;
+    fire_timer(&mut h, second);
+    consumed.push(second);
+    assert_eq!(h.notices, 2, "late delivery consumes just one observation");
+    let third = h.timers.iter().find(|(_, at)| *at == 4500.).unwrap().0;
+    h.now = 4999.;
+    fire_timer(&mut h, third);
+    consumed.push(third);
+    assert_eq!(
+        h.notices, 4,
+        "third observation plus exactly one exhaustion Warn"
+    );
+    assert!(!h.timers.iter().any(|(_, at)| *at > 4999. && *at < 6000.));
+    h.clear_observations();
+    for timer in consumed {
+        fire_timer(&mut h, timer);
+    }
+    assert!(h.notices == 0 && h.timer_writes == 0 && h.http.is_empty() && h.sent.is_empty());
+}
+
+fn candles_filling_exact_frame(bytes: usize) -> Vec<String> {
+    let frame_len = |symbols: &[String]| {
+        let params: Vec<_> = symbols
+            .iter()
+            .map(|symbol| format!("kline.1m.{symbol}"))
+            .collect();
+        serde_json::to_string(&serde_json::json!({"method":"SUBSCRIBE","params":params}))
+            .unwrap()
+            .len()
+    };
+    let mut symbols = long_candle_symbols(80);
+    while frame_len(&symbols) > bytes {
+        symbols.pop().unwrap();
+    }
+    let mut remaining = bytes - frame_len(&symbols);
+    for symbol in &mut symbols {
+        let extra = remaining.min(1023 - format!("kline.1m.{symbol}").len());
+        symbol.push_str(&"X".repeat(extra));
+        remaining -= extra;
+    }
+    assert_eq!(remaining, 0);
+    assert_eq!(frame_len(&symbols), bytes);
+    assert!(
+        symbols
+            .iter()
+            .all(|symbol| format!("kline.1m.{symbol}").len() < 1024)
+    );
+    symbols
+}
+
+#[test]
+fn native_frame_preflight_allows_exact_limit_and_refuses_one_extra_byte_as_capacity() {
+    use safe_cex_engine::{Command, model::Interval};
+    for bytes in [65_536, 65_537] {
+        let mut h = Harness::new(PublicFeedPolicy::Direct);
+        let public = h.open(SocketChannel::Public);
+        h.clear_observations();
+        let symbols = candles_filling_exact_frame(bytes);
+        for symbol in &symbols {
+            h.engine.handle(
+                h.now,
+                Event::Command(Command::SubscribeCandles {
+                    symbol: symbol.clone(),
+                    interval: Interval::M1,
+                }),
+            );
+        }
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+        let notices: Vec<_> = actions
+            .iter()
+            .filter_map(|a| {
+                if let Action::Notice(safe_cex_engine::Notice::Event(event)) = a {
+                    Some(event)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let frames: Vec<_> = actions
+            .iter()
+            .filter_map(|a| {
+                if let Action::WsSend { socket, text } = a {
+                    assert_eq!(*socket, public);
+                    Some(text)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            frames.len(),
+            1,
+            "prior peer batch remains atomic and releasable"
+        );
+        if bytes == 65_536 {
+            assert!(notices.is_empty());
+            assert_eq!(frames[0].len(), 65_536);
+        } else {
+            assert_eq!(notices.len(), 1);
+            assert_eq!(
+                notices[0].code,
+                safe_cex_engine::log::code::SUBSCRIPTION_REJECTED
+            );
+            assert_eq!(
+                notices[0].message,
+                "Backpack socket interest refused: Capacity"
+            );
+            assert!(frames[0].len() < 65_536);
+            let params = serde_json::from_str::<serde_json::Value>(frames[0]).unwrap()["params"]
+                .as_array()
+                .unwrap()
+                .clone();
+            assert_eq!(params.len(), symbols.len() - 1);
+        }
+        assert!(actions.iter().all(|a| !matches!(
+            a,
+            Action::WsClose { .. } | Action::Http(_) | Action::ManagedHttp(_)
+        )));
+        h.message(public, TICKER);
+        assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
+    }
 }
