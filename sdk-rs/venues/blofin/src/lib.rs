@@ -937,15 +937,15 @@ impl Venue for Blofin {
                 self.closed_response(cx, request, response);
             }
             Pending::Account(read, request) => {
-                if cx
+                let current = cx
                     .validate_background_read_http_delivery(read.context())
-                    .is_err()
-                {
-                    return;
-                }
-                // Every terminal finishes the leg, including an answer the revision drops.
+                    .is_ok();
+                // Every terminal finishes the leg: a stale delivery and an answer
+                // the revision drops alike.
                 let _ = cx.finish_http_context(read.context());
-                self.account_response(cx, request, response);
+                if current {
+                    self.account_response(cx, request, response);
+                }
             }
             Pending::Leverage(leverage) => self.leverage_response(cx, leverage, response),
             Pending::Trade(request) => {
