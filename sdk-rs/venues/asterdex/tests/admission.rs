@@ -26,13 +26,7 @@ fn wallet(byte: u8) -> (String, String) {
 }
 
 fn identity(credential: &str, signing: &str) -> Identity {
-    Identity {
-        credential: KeyRef(credential.into()),
-        signing: KeyRef(signing.into()),
-        passphrase: None,
-        stable_id: None,
-        extra: Default::default(),
-    }
+    Identity::new(KeyRef(credential.into()), Some(KeyRef(signing.into())))
 }
 
 struct Issue(Option<(Method, String, Box<dyn SignStep>)>);

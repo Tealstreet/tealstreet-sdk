@@ -19,9 +19,9 @@ test('only Bitget, Bybit and AsterDEX carry venue allowances, and only for the v
   assert.equal(wasmBudgetError(1_458_176, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(1_458_177, 'venue', 'asterdex'), /exceeds 1458176/);
   for (const venue of ['bitget', 'bitgetusdc']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1_343_488 + 135_168);
-    assert.equal(wasmBudgetError(1_478_656, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_478_657, 'venue', venue), /exceeds 1478656/);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1_478_656 - 2_108);
+    assert.equal(wasmBudgetError(1_476_548, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_476_549, 'venue', venue), /exceeds 1476548/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.bybit, 1_343_488 + 61_440);
   assert.equal(wasmBudgetError(1_404_928, 'venue', 'bybit'), undefined);

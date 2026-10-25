@@ -3,13 +3,13 @@ use safe_cex_venue_bitget::Options;
 #[test]
 fn production_options_retain_only_opaque_identity_refs() {
     let options = Options {
-        credentials: Some(Identity {
-            credential: KeyRef("ref:owned-credential".into()),
-            signing: KeyRef("ref:owned-signing".into()),
-            passphrase: Some(KeyRef("ref:owned-passphrase".into())),
-            stable_id: None,
-            extra: Default::default(),
-        }),
+        credentials: Some(
+            Identity::new(
+                KeyRef("ref:owned-credential".into()),
+                Some(KeyRef("ref:owned-signing".into())),
+            )
+            .with_passphrase(Some(KeyRef("ref:owned-passphrase".into()))),
+        ),
         ..Default::default()
     };
     let text = format!("{options:?}");

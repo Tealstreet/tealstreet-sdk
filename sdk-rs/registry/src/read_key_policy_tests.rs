@@ -9,12 +9,11 @@ fn options(json: &str) -> EngineOptions {
     serde_json::from_str(json).unwrap()
 }
 fn injected(primary: bool, secondary: bool) -> safe_cex_engine::signing::Identities {
-    let identity = |name: &str| safe_cex_engine::signing::Identity {
-        credential: safe_cex_engine::signing::KeyRef(format!("{name}/credential")),
-        signing: safe_cex_engine::signing::KeyRef(format!("{name}/signing")),
-        passphrase: None,
-        stable_id: None,
-        extra: Default::default(),
+    let identity = |name: &str| {
+        safe_cex_engine::signing::Identity::new(
+            safe_cex_engine::signing::KeyRef(format!("{name}/credential")),
+            Some(safe_cex_engine::signing::KeyRef(format!("{name}/signing"))),
+        )
     };
     safe_cex_engine::signing::Identities {
         primary: primary.then(|| identity("primary")),
