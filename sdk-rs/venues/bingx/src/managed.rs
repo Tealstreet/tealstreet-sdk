@@ -123,6 +123,7 @@ pub(crate) fn session_write(
     };
     cx.request_signed_managed(
         context,
+        None,
         method,
         url,
         body,

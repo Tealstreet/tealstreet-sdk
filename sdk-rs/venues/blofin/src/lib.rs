@@ -259,6 +259,7 @@ impl Blofin {
         }
         match cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!("{}{path}", self.host()),
             None,

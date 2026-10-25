@@ -1300,6 +1300,7 @@ impl Okx {
                 if self.options.testnet {
                     cx.request_managed_with_headers(
                         leg,
+                        None,
                         Method::Get,
                         url,
                         sign::DEMO_HEADERS,
@@ -1309,6 +1310,7 @@ impl Okx {
                 } else {
                     cx.request_managed(
                         leg,
+                        None,
                         Method::Get,
                         url,
                         None,
