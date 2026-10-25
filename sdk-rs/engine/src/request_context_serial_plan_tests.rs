@@ -198,9 +198,9 @@ mod serial_plans {
             (usize, usize, usize),
         ) {
             (
-                cx.io.next_id,
-                cx.io.actions.len(),
-                cx.io.request_contexts.plan_context_storage(),
+                cx.io.core.next_id,
+                cx.io.core.actions.len(),
+                cx.io.core.request_contexts.plan_context_storage(),
             )
         }
         fn admit(&mut self, cx: &mut Cx<'_, Context>) {
@@ -267,11 +267,11 @@ mod serial_plans {
             let context = cx.plan_leg_context(&plan, &slot).unwrap();
             self.context = Some(context.clone());
             self.current = Some(call);
-            self.ids_per_step.push(cx.io.next_id);
+            self.ids_per_step.push(cx.io.core.next_id);
             self.storage
-                .push(cx.io.request_contexts.plan_context_storage());
+                .push(cx.io.core.request_contexts.plan_context_storage());
             #[cfg(feature = "order-locks")]
-            self.lock_held.push(cx.io.order_locks.contains(7));
+            self.lock_held.push(cx.io.core.order_locks.contains(7));
             self.read_signers.extend(
                 (call.operation == Operation::Read)
                     .then(|| context.credential().map(|c| c.reference.0.clone())),
@@ -295,7 +295,7 @@ mod serial_plans {
             let slot = self.slot.clone().unwrap();
             cx.finish_plan_call(&plan, &slot, context).unwrap();
             if done {
-                let writes = cx.io.request_contexts.command_writes(7).unwrap();
+                let writes = cx.io.core.request_contexts.command_writes(7).unwrap();
                 self.journal_at_done = Some((
                     self.read_requests
                         .iter()
@@ -315,7 +315,7 @@ mod serial_plans {
             let slot = self.slot.clone().unwrap();
             let attempt = cx
                 .io
-                .http_delivery
+                .core.http_delivery
                 .as_ref()
                 .map_or(RequestId(0), |delivery| delivery.attempt.request);
             let before = Self::snapshot(cx);
@@ -404,7 +404,7 @@ mod serial_plans {
                 Reply::Read => {
                     assert_eq!(self.current.unwrap().operation, Operation::Read);
                     self.read_failures = 0;
-                    let request = cx.io.http_delivery.as_ref().unwrap().attempt.request;
+                    let request = cx.io.core.http_delivery.as_ref().unwrap().attempt.request;
                     self.read_requests.push(request);
                     false
                 }
@@ -763,7 +763,7 @@ mod serial_plans {
             total: 600,
             ..Default::default()
         });
-        let base = e.io.request_contexts.plan_context_storage();
+        let base = e.io.core.request_contexts.plan_context_storage();
         command(&mut e, 0., None);
         admitted(&e);
         let bodies = (0..600).map(|i| format!("ok:id-{i}")).collect::<Vec<_>>();
@@ -893,7 +893,7 @@ mod serial_plans {
         reply(&mut e, token, STEP_MS, "ok:a");
         actions = e.drain_actions().collect();
         let token = prepared(&actions).unwrap();
-        let managed = e.io.managed_http[&token.attempt().request].timer;
+        let managed = e.io.core.managed_http[&token.attempt().request].timer;
         release(&mut e, token, STEP_MS);
         e.handle(STEP_MS + 20_000., Event::TimerFired { timer: managed });
         let names = e
@@ -948,7 +948,7 @@ mod serial_plans {
             "lock held for the Plan"
         );
         assert!(
-            e.io.order_locks.uncertain("BTCUSD"),
+            e.io.core.order_locks.uncertain("BTCUSD"),
             "the lock converts to the fence"
         );
     }
@@ -963,7 +963,7 @@ mod serial_plans {
         admitted(&e);
         let (actions, now) = drive(&mut e, 0., ["ok:a"]);
         let token = prepared(&actions).unwrap();
-        let timer = e.io.managed_http[&token.attempt().request].timer;
+        let timer = e.io.core.managed_http[&token.attempt().request].timer;
         e.handle(now + 20_000., Event::TimerFired { timer });
         let actions = e.drain_actions().collect::<Vec<_>>();
         let error = failed(&actions).expect("one terminal");
@@ -984,14 +984,14 @@ mod serial_plans {
         admitted(&e);
         let (actions, now) = drive(&mut e, 0., ["ok:a"]);
         let token = prepared(&actions).unwrap();
-        let timer = e.io.managed_http[&token.attempt().request].timer;
+        let timer = e.io.core.managed_http[&token.attempt().request].timer;
         release(&mut e, token, now);
         e.handle(now + 20_000., Event::TimerFired { timer });
         let actions = e.drain_actions().collect::<Vec<_>>();
         let error = failed(&actions).expect("one terminal");
         assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
         assert_eq!(error.partial.unwrap().order_ids, ["a"]);
-        assert!(e.io.order_locks.uncertain("BTCUSD"));
+        assert!(e.io.core.order_locks.uncertain("BTCUSD"));
     }
 
     fn ten_thousand(stop_at_501: bool) -> (Engine<Serial>, Vec<Action>, Vec<String>) {
@@ -1095,7 +1095,7 @@ mod serial_plans {
         admitted(&e);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let token = prepared(&actions).unwrap();
-        let timer = e.io.managed_http[&token.attempt().request].timer;
+        let timer = e.io.core.managed_http[&token.attempt().request].timer;
         e.handle(20_000., Event::TimerFired { timer });
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(failed(&actions).is_some());
@@ -1120,7 +1120,7 @@ mod serial_plans {
             reply(&mut e, token, now, "reject");
             actions = e.drain_actions().collect();
         }
-        let writes = e.io.request_contexts.command_writes(7).unwrap();
+        let writes = e.io.core.request_contexts.command_writes(7).unwrap();
         let text = writes
             .rejections()
             .map(|(_, error)| error.message.len())
@@ -1272,7 +1272,7 @@ mod serial_plans {
         let error = failed(&actions).unwrap();
         assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
         assert_eq!(error.partial.unwrap().order_ids, ["a"]);
-        assert!(e.io.order_locks.uncertain("BTCUSD"));
+        assert!(e.io.core.order_locks.uncertain("BTCUSD"));
     }
 
     #[test]
@@ -1338,7 +1338,7 @@ mod serial_plans {
             reply(&mut e, token, now, body);
             actions = e.drain_actions().collect();
         }
-        let writes = e.io.request_contexts.command_writes(7).unwrap();
+        let writes = e.io.core.request_contexts.command_writes(7).unwrap();
         let text = writes
             .rejections()
             .map(|(_, error)| error.message.len())
@@ -1417,7 +1417,7 @@ mod serial_plans {
         assert!(e.venue.resends[0].is_err(), "no grant after a 5xx");
         let error = failed(&actions).expect("fail_plan projects");
         assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
-        assert!(e.io.order_locks.uncertain("BTCUSD"));
+        assert!(e.io.core.order_locks.uncertain("BTCUSD"));
         let mut e = engine(Serial {
             total: 3,
             first: Some(SerialCall {
@@ -1454,7 +1454,7 @@ mod serial_plans {
             failed(&actions).unwrap().outcome,
             Some(crate::Outcome::Unknown)
         );
-        assert!(e.io.order_locks.uncertain("BTCUSD"));
+        assert!(e.io.core.order_locks.uncertain("BTCUSD"));
     }
 
     #[test]
@@ -1470,14 +1470,14 @@ mod serial_plans {
         let (actions, now) = drive(&mut e, 0., ["ok:a"]);
         assert!(prepared(&actions).is_none(), "the delay is not a live call");
         let timer =
-            e.io.request_contexts
+            e.io.core.request_contexts
                 .plan_timer(7)
                 .expect("the Plan's one timer");
         assert!(actions.iter().any(|a| matches!(a, Action::SetTimer { timer: t, at_ms } if *t == timer && *at_ms == now + 250.)));
         e.handle(now + 250., Event::TimerFired { timer });
         assert_eq!(e.venue.ready, 1);
         let (_, now) = drive(&mut e, now + 250., ["read"]);
-        let timer = e.io.request_contexts.plan_timer(7).unwrap();
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
         e.handle(now + 250., Event::TimerFired { timer });
         let (actions, _) = drive(&mut e, now + 250., ["ok:b"]);
         assert_eq!(done(&actions).as_deref(), Some("[a,b]"));
@@ -1513,7 +1513,7 @@ mod serial_plans {
                 },
             );
             let set = e.drain_actions().collect::<Vec<_>>();
-            let timer = e.io.request_contexts.plan_timer(7).unwrap();
+            let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
             let delay = 250. * f64::from(n);
             assert!(set.iter().any(|a| matches!(a, Action::SetTimer { timer: t, at_ms } if *t == timer && *at_ms == now + delay)));
             now += delay;
@@ -1546,7 +1546,7 @@ mod serial_plans {
         admitted(&e);
         let (actions, now) = drive(&mut e, 0., ["ok:a"]);
         let token = prepared(&actions).unwrap();
-        let timer = e.io.managed_http[&token.attempt().request].timer;
+        let timer = e.io.core.managed_http[&token.attempt().request].timer;
         release(&mut e, token, now);
         e.handle(now + 20_000., Event::TimerFired { timer });
         assert_eq!(
@@ -1554,7 +1554,7 @@ mod serial_plans {
             Some(&Ok(())),
             "failure-only ownership at the equality boundary"
         );
-        let timer = e.io.request_contexts.plan_timer(7).unwrap();
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
         e.handle(now + 20_250., Event::TimerFired { timer });
         let (actions, _) = drive(&mut e, now + 20_250., ["read", "ok:b"]);
         assert_eq!(done(&actions).as_deref(), Some("[a,b]"));
@@ -1574,10 +1574,10 @@ mod serial_plans {
                         write_credential: Some(credential()),
                     })
                     .unwrap();
-                let storage = cx.io.request_contexts.plan_context_storage();
+                let storage = cx.io.core.request_contexts.plan_context_storage();
                 cx.done_empty_plan(&preflight, "[]".into()).unwrap();
-                assert_eq!(cx.io.request_contexts.plan_context_storage().2, storage.2);
-                assert!(!cx.io.request_contexts.has_plans());
+                assert_eq!(cx.io.core.request_contexts.plan_context_storage().2, storage.2);
+                assert!(!cx.io.core.request_contexts.has_plans());
             }
             fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
             fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {
@@ -1656,7 +1656,7 @@ mod serial_plans {
             "nothing after the stop is sent"
         );
         assert!(
-            e.io.request_contexts.plan_timer(7).is_none(),
+            e.io.core.request_contexts.plan_timer(7).is_none(),
             "the Plan is gone"
         );
     }

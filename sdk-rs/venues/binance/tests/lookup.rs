@@ -109,7 +109,10 @@ fn secondary_account_cache_never_answers_primary_lookup() {
             query(&mut h, "BTCUSDT", "caller:/1");
             assert_eq!(h.requests.len(), 1, "{pm}/{outcome}");
             let r = h.requests.pop().unwrap();
-            assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+            assert_eq!(
+                r.route, None,
+                "prepared fixture transport carries no route override"
+            );
             assert!(
                 r.headers
                     .iter()
@@ -196,7 +199,10 @@ fn lookup_routes_signed_primary_usdm_and_pm_and_keeps_native_identity() {
         assert_eq!(h.requests.len(), 1);
         let r = h.requests.pop().unwrap();
         assert_eq!(r.method, Method::Get);
-        assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+        assert_eq!(
+            r.route, None,
+            "prepared fixture transport carries no route override"
+        );
         assert!(r.url.starts_with(if pm { "https://papi.binance.com/papi/v1/um/order?symbol=BTCUSDT&origClientOrderId=caller%3A%2F1&" } else { "https://fapi.binance.com/fapi/v1/order?symbol=BTCUSDT&origClientOrderId=caller%3A%2F1&" }));
         let (_, signed) = r.url.split_once('?').unwrap();
         let (payload, signature) = signed.rsplit_once("&signature=").unwrap();
@@ -405,7 +411,10 @@ fn primary_lookup_signs_the_configured_recv_window_without_using_read_keys() {
                 .set_orders(vec![cached_order("secondary-order", "caller:/1")]);
             query(&mut h, "BTCUSDT", "caller:/1");
             let request = h.requests.pop().unwrap();
-            assert_eq!(request.route, Some(safe_cex_engine::RequestRoute::Primary));
+            assert_eq!(
+                request.route, None,
+                "prepared fixture transport carries no route override"
+            );
             assert!(
                 request
                     .headers

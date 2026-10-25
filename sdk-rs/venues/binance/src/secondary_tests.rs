@@ -1,8 +1,10 @@
 use super::*;
 use crate::sign::oracle::Signed;
 use crate::test_config::Options;
-use safe_cex_engine::test_support::{ProbeVenue, http_requests};
-use safe_cex_engine::{Action, HttpRequest, ReadCredentials, RequestRoute};
+use safe_cex_engine::credential_selection::CredentialRole;
+use safe_cex_engine::request_context::{Claim, HttpAction, Prepared, RoutingIntent, Scope};
+use safe_cex_engine::test_support::ProbeVenue;
+use safe_cex_engine::{Action, HttpRequest, Method, ReadCredentials};
 fn options() -> Options {
     Options {
         key: Some("primary-key".into()),
@@ -17,6 +19,81 @@ fn options() -> Options {
     }
 }
 
+/// One signed request on a Background leg, keyed by the declared role.
+fn signed(
+    venue: &BinanceFutures,
+    cx: &mut Cx<'_, Pending>,
+    role: CredentialRole,
+    method: Method,
+    path: &str,
+) {
+    let (selection, credentials) = venue.credentials.select(role).unwrap();
+    let credential = selection.credential(credentials.credential.clone());
+    let context = cx
+        .http_context(Scope::Background, reads::policy(Some(credential)))
+        .unwrap();
+    let recipe = venue.signed_recipe(credentials.clone(), sign::Query::new());
+    let url = format!("{}{path}", venue.urls.account_rest);
+    assert!(
+        cx.request_signed_managed(
+            context,
+            None,
+            method,
+            url,
+            None,
+            Box::new(recipe),
+            Pending::Daily
+        )
+        .is_ok()
+    );
+}
+
+/// Released requests, each with the egress intent it was prepared under.
+fn sent(
+    engine: &mut safe_cex_engine::Engine<impl Venue>,
+    now: f64,
+) -> Vec<(HttpRequest, RoutingIntent)> {
+    engine.prepare_dispatch(now);
+    let mut intents = std::collections::HashMap::new();
+    let mut sent = Vec::new();
+    loop {
+        let actions: Vec<_> = engine.drain_actions().collect();
+        if actions.is_empty() {
+            return sent;
+        }
+        for action in actions {
+            let Action::ManagedHttp(action) = action else {
+                continue;
+            };
+            match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    intent,
+                    ..
+                } => {
+                    intents.insert(request.id, intent);
+                    let id = request.id.0;
+                    let prepared = Prepared {
+                        id,
+                        expires_at: None,
+                    };
+                    engine.http_prepared(now, preparation, prepared);
+                }
+                HttpAction::Bind {
+                    permit, request, ..
+                } => {
+                    if let Ok(Claim::Released(_)) = engine.claim_http(now, permit) {
+                        let intent = intents[&request.id];
+                        sent.push((request, intent));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 fn probe(
     venue: BinanceFutures,
 ) -> ProbeVenue<BinanceFutures, impl FnMut(&mut BinanceFutures, &mut Cx<'_, Pending>)> {
@@ -27,14 +104,7 @@ fn probe(
             } else {
                 CredentialRole::Mutation
             };
-            venue.signed(
-                cx,
-                role,
-                method,
-                "/secondary-test",
-                sign::Query::new(),
-                Pending::Daily,
-            );
+            signed(venue, cx, role, method, "/secondary-test");
         }
     })
 }
@@ -54,12 +124,12 @@ fn secondary_get_keeps_primary_mutations() {
             let mut engine = safe_cex_engine::test_support::seeded_engine(probe(venue));
             engine.set_signer(Some(signer)).unwrap();
             engine.start(1700000000000.0);
-            let requests: Vec<_> = http_requests(&mut engine)
+            let requests: Vec<_> = sent(&mut engine, 1700000000000.0)
                 .into_iter()
-                .filter(|r| r.url.contains("secondary-test"))
+                .filter(|(r, _)| r.url.contains("secondary-test"))
                 .collect();
             assert_eq!(requests.len(), 4);
-            for request in requests {
+            for (request, intent) in requests {
                 let expected = if request.method == Method::Get {
                     "read-key"
                 } else {
@@ -110,12 +180,11 @@ fn secondary_get_keeps_primary_mutations() {
                     request
                 );
                 let route = if request.method == Method::Get {
-                    RequestRoute::Secondary
+                    RoutingIntent::Secondary
                 } else {
-                    RequestRoute::Primary
+                    RoutingIntent::Primary
                 };
-                let declared = request.route;
-                assert_eq!(declared, Some(route));
+                assert_eq!(intent, route);
             }
         }
     }
@@ -128,15 +197,15 @@ fn declared_role_selects_key_and_egress_for_any_method() {
     let probe = ProbeVenue::new(
         venue,
         |venue: &mut BinanceFutures, cx: &mut Cx<'_, Pending>| {
-            venue.signed(
+            signed(
+                venue,
                 cx,
                 CredentialRole::Read { scope: None },
                 Method::Post,
                 "/declared-read",
-                sign::Query::new(),
-                Pending::Daily,
             );
-            venue.signed(
+            signed(
+                venue,
                 cx,
                 CredentialRole::PrimaryRead {
                     reason: safe_cex_engine::credential_selection::PrimaryReason::History,
@@ -144,19 +213,17 @@ fn declared_role_selects_key_and_egress_for_any_method() {
                 },
                 Method::Get,
                 "/declared-primary",
-                sign::Query::new(),
-                Pending::Daily,
             );
         },
     );
     let mut engine = safe_cex_engine::test_support::seeded_engine(probe);
     engine.set_signer(Some(signer)).unwrap();
     engine.start(1700000000000.0);
-    let requests = http_requests(&mut engine);
+    let requests = sent(&mut engine, 1700000000000.0);
     let find = |path: &str| {
         requests
             .iter()
-            .find(|r| r.url.contains(path))
+            .find(|(r, _)| r.url.contains(path))
             .unwrap_or_else(|| panic!("{path} not sent"))
     };
     let key = |request: &HttpRequest| {
@@ -166,15 +233,15 @@ fn declared_role_selects_key_and_egress_for_any_method() {
             .find(|(name, _)| name.eq_ignore_ascii_case("X-MBX-APIKEY"))
             .map(|(_, value)| value.clone())
     };
-    let read = find("/declared-read");
+    let (read, intent) = find("/declared-read");
     assert_eq!(
-        (key(read).as_deref(), read.route),
-        (Some("read-key"), Some(RequestRoute::Secondary))
+        (key(read).as_deref(), *intent),
+        (Some("read-key"), RoutingIntent::Secondary)
     );
-    let primary = find("/declared-primary");
+    let (primary, intent) = find("/declared-primary");
     assert_eq!(
-        (key(primary).as_deref(), primary.route),
-        (Some("primary-key"), Some(RequestRoute::Primary))
+        (key(primary).as_deref(), *intent),
+        (Some("primary-key"), RoutingIntent::Primary)
     );
 }
 
@@ -205,13 +272,12 @@ fn signed_reads_use_the_dispatch_clock_after_queueing_for_all_binance_variants()
         let mut engine = safe_cex_engine::test_support::seeded_engine(probe(venue));
         engine.set_signer(Some(signer)).unwrap();
         engine.start(1_700_000_000_000.0);
-        engine.prepare_dispatch(1_700_000_003_456.0);
-        let requests: Vec<_> = http_requests(&mut engine)
+        let requests: Vec<_> = sent(&mut engine, 1_700_000_003_456.0)
             .into_iter()
-            .filter(|request| request.url.contains("secondary-test"))
+            .filter(|(request, _)| request.url.contains("secondary-test"))
             .collect();
         assert_eq!(requests.len(), 4);
-        for request in requests {
+        for (request, _) in requests {
             assert!(
                 request.url.contains("timestamp=1700000003456"),
                 "{variant:?}: {}",

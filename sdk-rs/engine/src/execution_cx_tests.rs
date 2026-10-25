@@ -223,7 +223,7 @@ impl Run {
             .collect()
     }
     fn fire_execution_timer(&mut self, at: f64) {
-        let timer = self.engine.io.execution_timer.expect("armed").0;
+        let timer = self.engine.io.core.execution_timer.expect("armed").0;
         self.handle(at, Event::TimerFired { timer });
     }
 }
@@ -245,7 +245,7 @@ fn joined_commands_share_one_request_and_each_completes_once() {
         [(1, "\"k1\"".to_owned()), (2, "\"k2\"".to_owned())]
     );
     assert!(run.failed().is_empty());
-    assert_eq!(run.engine.io.execution_timer, None);
+    assert_eq!(run.engine.io.core.execution_timer, None);
 }
 
 #[test]
@@ -258,7 +258,10 @@ fn an_expired_follower_fails_alone_and_the_founder_still_completes() {
     run.handle(1., fetch(1));
     run.handle(2., fetch(2));
     let request = run.release(3.);
-    assert_eq!(run.engine.io.execution_timer.map(|(_, at)| at), Some(102.));
+    assert_eq!(
+        run.engine.io.core.execution_timer.map(|(_, at)| at),
+        Some(102.)
+    );
     run.fire_execution_timer(102.);
     assert_eq!(run.failed(), [(2, Some(ErrorKind::Timeout))]);
     run.respond(110., request);
@@ -273,8 +276,8 @@ fn execution_deadline_with_a_leg_in_flight_seals_through_the_physical_timeout_on
     run.handle(2., fetch(2));
     let request = run.release(3.);
     // The leg owns the execution deadline; no separate execution timer.
-    assert_eq!(run.engine.io.execution_timer, None);
-    let timer = run.engine.io.managed_http[&request].timer;
+    assert_eq!(run.engine.io.core.execution_timer, None);
+    let timer = run.engine.io.core.managed_http[&request].timer;
     run.handle(1_001., Event::TimerFired { timer });
     assert_eq!(run.engine.venue().failures, 1);
     assert_eq!(
@@ -393,7 +396,7 @@ fn a_member_cannot_issue_its_own_physical_request() {
         Err(crate::request_context::Error::Revoked)
     );
     // Nor may it send on the entry root it already holds.
-    let managed = cx.io.managed_http.len();
+    let managed = cx.io.core.managed_http.len();
     let sent = cx.request_managed(
         root.clone(),
         None,
@@ -406,7 +409,7 @@ fn a_member_cannot_issue_its_own_physical_request() {
         sent.map_err(|(_, error)| error),
         Err(crate::request_context::Error::Revoked)
     );
-    assert_eq!(cx.io.managed_http.len(), managed);
+    assert_eq!(cx.io.core.managed_http.len(), managed);
 }
 
 #[test]
@@ -437,7 +440,7 @@ fn abort_before_release_cancels_the_unsent_leg_immediately() {
     };
     cx.abort_execution(&execution, VenueError::new("stop"))
         .unwrap();
-    assert!(run.engine.io.managed_http.is_empty());
+    assert!(run.engine.io.core.managed_http.is_empty());
     run.actions.extend(run.engine.drain_actions());
     assert!(run.actions.iter().any(|action| matches!(
         action,
@@ -462,7 +465,7 @@ fn a_detached_founder_leaves_the_shared_request_to_the_joiner() {
     };
     cx.detach_execution_observer(&root, VenueError::new("cancelled"))
         .unwrap();
-    assert_eq!(run.engine.io.managed_http.len(), 1);
+    assert_eq!(run.engine.io.core.managed_http.len(), 1);
     let request = run.release(4.);
     run.respond(5., request);
     assert_eq!(run.done(), [(2, "\"k2\"".to_owned())]);
@@ -618,10 +621,13 @@ fn a_queued_owner_times_out_once_when_no_next_read_arrives() {
     run.handle(3., fetch(2));
     run.respond(4., first);
     assert!(run.done().is_empty());
-    assert_eq!(run.engine.io.execution_timer.map(|(_, at)| at), Some(103.));
+    assert_eq!(
+        run.engine.io.core.execution_timer.map(|(_, at)| at),
+        Some(103.)
+    );
     run.fire_execution_timer(103.);
     assert_eq!(run.failed(), [(2, Some(ErrorKind::Timeout))]);
-    assert_eq!(run.engine.io.execution_timer, None);
+    assert_eq!(run.engine.io.core.execution_timer, None);
 }
 
 #[test]
@@ -765,13 +771,13 @@ fn a_group_retired_before_its_leg_is_sent_leaves_no_stale_root() {
         };
         cx.detach_execution_observer(&root, VenueError::new("cancelled"))
             .unwrap();
-        assert!(run.engine.io.managed_http.is_empty());
-        assert!(!run.engine.io.request_contexts.has_executions());
+        assert!(run.engine.io.core.managed_http.is_empty());
+        assert!(!run.engine.io.core.request_contexts.has_executions());
         // Any later event retires the stale root.
         run.handle(
             f64::from(round) * 10. + 3.,
             Event::TimerFired { timer: TimerId(1) },
         );
-        assert_eq!(run.engine.io.request_contexts.root_count(), 0);
+        assert_eq!(run.engine.io.core.request_contexts.root_count(), 0);
     }
 }
