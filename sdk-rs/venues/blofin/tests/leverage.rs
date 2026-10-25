@@ -12,7 +12,7 @@ fn flat() -> Harness {
 }
 
 fn lookup(h: &mut Harness) {
-    h.e.handle(
+    h.handle(
         1.0,
         Event::Command(Command::FetchLeverage {
             command: 71,
@@ -137,7 +137,7 @@ fn failed_envelope_or_transport_preserves_setting() {
     assert_eq!(h.e.store().setting("BTCUSDT").unwrap().leverage, 0.0);
     lookup(&mut h);
     let request = h.take("batch-leverage-info");
-    h.e.handle(
+    h.handle(
         2.0,
         Event::HttpFailed {
             request: request.id,
@@ -154,7 +154,7 @@ fn stale_lookup_cannot_overwrite_a_confirmed_setting_change() {
     let mut h = flat();
     lookup(&mut h);
     let old = h.take("batch-leverage-info");
-    h.e.handle(
+    h.handle(
         2.0,
         Event::Command(Command::SetLeverage {
             command: 72,
@@ -183,7 +183,7 @@ fn newer_position_push_supersedes_a_pending_lookup() {
 #[test]
 fn unknown_symbol_does_not_issue_a_request() {
     let mut h = flat();
-    h.e.handle(
+    h.handle(
         1.0,
         Event::Command(Command::FetchLeverage {
             command: 71,
@@ -220,7 +220,7 @@ fn released_network_failure_keeps_its_typed_kind_and_native_text() {
     let mut h = flat();
     lookup(&mut h);
     let request = h.take("batch-leverage-info");
-    h.e.handle(
+    h.handle(
         2.0,
         Event::HttpFailed {
             request: request.id,
@@ -250,7 +250,7 @@ fn exact_read_deadline_is_a_typed_timeout() {
             _ => None,
         })
         .expect("the Read's 20s deadline");
-    h.e.handle(20_001.0, Event::TimerFired { timer });
+    h.handle(20_001.0, Event::TimerFired { timer });
     h.collect();
     let error = typed_failure(&h);
     assert_eq!(
@@ -260,16 +260,21 @@ fn exact_read_deadline_is_a_typed_timeout() {
     late_success_is_inert(&mut h, request, 20_002.0);
 }
 
-#[test]
-fn a_selected_identity_without_a_passphrase_ref_refuses_natively_before_any_work() {
-    // Trusted setup omits the ref wherever native `headers` would refuse.
-    let mut h = Harness::with_identities(|ids| ids.primary.as_mut().unwrap().passphrase = None);
-    h.seed();
-    h.ws(r#"{"arg":{"channel":"positions"},"data":[]}"#);
-    let before = h.pending.len();
-    lookup(&mut h);
-    assert_eq!(result(&h).unwrap_err(), "BloFin requires a passphrase");
-    assert_eq!(h.pending.len(), before, "no HTTP");
+/// Every signed read selects the same identity, so the settings reads refuse
+/// with the native text before any work, and leverage never gets that far.
+fn refuses_every_signed_read(h: &mut Harness, text: &str) {
+    assert!(
+        !h.pending.iter().any(|r| r.url.contains("/account/")),
+        "no signed request"
+    );
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(_)) && format!("{a:?}").contains(text)),
+        "the settings read refusal is visible with the native text"
+    );
+    lookup(h);
+    assert_eq!(result(h).unwrap_err(), "BloFin margin mode is not loaded");
     assert!(
         !h.actions
             .iter()
@@ -278,15 +283,14 @@ fn a_selected_identity_without_a_passphrase_ref_refuses_natively_before_any_work
 }
 
 #[test]
+fn a_selected_identity_without_a_passphrase_ref_refuses_natively_before_any_work() {
+    // Trusted setup omits the ref wherever native `headers` would refuse.
+    let mut h = Harness::with_identities(|ids| ids.primary.as_mut().unwrap().passphrase = None);
+    refuses_every_signed_read(&mut h, "BloFin requires a passphrase");
+}
+
+#[test]
 fn no_selectable_identity_refuses_with_the_native_credentials_text() {
     let mut h = Harness::with_identities(|ids| *ids = Default::default());
-    h.seed();
-    h.ws(r#"{"arg":{"channel":"positions"},"data":[]}"#);
-    lookup(&mut h);
-    assert_eq!(result(&h).unwrap_err(), "BloFin requires API credentials");
-    assert!(
-        !h.actions
-            .iter()
-            .any(|a| matches!(a, Action::ManagedHttp(_) | Action::Sign { .. }))
-    );
+    refuses_every_signed_read(&mut h, "BloFin requires API credentials");
 }

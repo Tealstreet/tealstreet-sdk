@@ -76,4 +76,8 @@ if ! python3 scripts/check-credential-selection.test.py || ! python3 scripts/che
   status=1
 fi
 
+if ! python3 scripts/check-credential-only.test.py || ! python3 scripts/check-credential-only.py; then
+  status=1
+fi
+
 exit $status

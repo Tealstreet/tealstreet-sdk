@@ -210,7 +210,8 @@ fn work(
     };
     receipt.validate()?;
     let mut request = hmac_sha256_work(
-        identity,
+        &identity.credential,
+        identity.signing_ref()?,
         vec![PayloadPart::Bytes {
             bytes: payload.into_bytes(),
         }],

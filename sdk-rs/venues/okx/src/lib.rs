@@ -327,42 +327,6 @@ impl Okx {
         format!("wss://{host}/ws/v5/{path}")
     }
 
-    fn headers(&self, method: Method) -> Vec<(&'static str, String)> {
-        let mut headers = Vec::new();
-        if self.options.testnet {
-            headers.push(("x-simulated-trading", "1".into()));
-        }
-        if method != Method::Get {
-            headers.push(("Content-Type", "application/json".into()));
-        }
-        headers
-    }
-
-    fn sign_request(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        request: safe_cex_engine::RequestId,
-        method: Method,
-        path: &str,
-        private: bool,
-        primary: bool,
-    ) {
-        if private {
-            let identity = if method == Method::Get && !primary {
-                self.options
-                    .read_credentials
-                    .as_ref()
-                    .or(self.credentials.as_ref())
-            } else {
-                self.credentials.as_ref()
-            };
-            cx.sign_http(
-                request,
-                Box::new(sign::Http::new(identity.cloned(), path.into())),
-            );
-        }
-    }
-
     /// One physical discovery read under its own Background Read: public reads
     /// unsigned with the native static headers, the EEA account catalogue on the
     /// selected key. A refused admission or queue is a pre-send discovery failure.
@@ -922,6 +886,32 @@ impl Venue for Okx {
 
     fn guard_pending_placements(&self) -> bool {
         true
+    }
+
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => trading::trade_reconciliation(request),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.retire_trading(owner);
+    }
+
+    /// The engine asks once per uncertain seal; the fresh account snapshot
+    /// reports through `orders_reconciled`.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.account_after_uncertain_write(cx);
     }
 
     fn guard_order_mutations(&self) -> bool {

@@ -318,7 +318,58 @@ fn primary_secondary_and_dual_credentials_keep_the_existing_signed_branch() {
         });
         command(&mut e, 1_000., 13);
         let actions: Vec<_> = e.drain_actions().collect();
-        assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
+        let preparation = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::ManagedHttp(action) => match action.as_ref() {
+                    HttpAction::Prepare {
+                        preparation,
+                        intent,
+                        ..
+                    } => {
+                        assert_eq!(
+                            *intent,
+                            if secondary {
+                                RoutingIntent::Secondary
+                            } else {
+                                RoutingIntent::Primary
+                            }
+                        );
+                        Some(*preparation)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        e.http_prepared(
+            1_000.,
+            preparation,
+            Prepared {
+                id: preparation.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let request = actions
+            .into_iter()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => {
+                        assert!(matches!(
+                            e.claim_http(1_000., permit),
+                            Ok(Claim::Released(_))
+                        ));
+                        Some(request)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        let actions = [Action::Http(request)];
         let request = actions
             .iter()
             .find_map(|a| match a {

@@ -58,7 +58,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Credential selection and nonce authority | Active shared-core plan; review pending | Before choosing a credential slot, read key, account subject, auth evidence tag or signing nonce in venue code. | [RUST_CREDENTIAL_SELECTION.md](RUST_CREDENTIAL_SELECTION.md) |
 | Ordinary Bybit Plan adoption | Plan + original REDs; child of #1873 | Before migrating ordinary Bybit trading onto Preflight/Plan, its code table, ACK proofs or resend paths. | [RUST_BYBIT_PLAN_ADOPTION.md](RUST_BYBIT_PLAN_ADOPTION.md) |
 | Bybit options adoption | Plan + original REDs; slice 4 | Before moving Bybit option trading, option queries or option seeds, or deleting the legacy trading executor. | [RUST_BYBIT_OPTIONS.md](RUST_BYBIT_OPTIONS.md) |
-| Credential-only trusted setup | Plan revision 3 CLEAR (kuhwxi); REDs next; phase 2 after the socket sign-failure lane; phase 3 gated on G3 | Before installing a key-only identity (no signing ref), reading key presence (Absent/Empty/Blank/Nonblank) or changing `Identity.signing`. | [RUST_CREDENTIAL_ONLY_SETUP.md](RUST_CREDENTIAL_ONLY_SETUP.md) |
+| Credential-only trusted setup | Phase 2 (D1 + D2, D4 `MissingKey`) in review on `feat/rust-credential-only-identity`; phase 3 gated on G3 and G6 | Before installing a key-only identity (no signing ref), reading key presence (Absent/Empty/Blank/Nonblank) or changing `Identity.signing`. | [RUST_CREDENTIAL_ONLY_SETUP.md](RUST_CREDENTIAL_ONLY_SETUP.md) |
 | Error classification | Active engine standardization plan; inventory ranked | Before classifying venue errors, native code tables, status-to-outcome rules, partial batch failures or error-driven resends. | [RUST_ERROR_CLASSIFICATION.md](RUST_ERROR_CLASSIFICATION.md) |
 | HTTP command entry | Planned shared pre-authority rejection seam | Before removing numeric failure when initial Context issuance can refuse. | [RUST_HTTP_COMMAND_ENTRY.md](RUST_HTTP_COMMAND_ENTRY.md) |
 | Background read delivery | Additive shared delivery guard plan | Before publishing a one-leg Background Read response or treating logical liveness as callback identity. | [RUST_BACKGROUND_READ_DELIVERY.md](RUST_BACKGROUND_READ_DELIVERY.md) |
@@ -271,6 +271,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | BreakoutProp legacy DXtrade RequestContext | Reviewed inventory and migration plan | Before moving this family from legacy request/completion APIs. | [RUST_BREAKOUTPROP_REQUEST_CONTEXT.md](RUST_BREAKOUTPROP_REQUEST_CONTEXT.md) |
 | ApeX Omni RequestContext adoption | Inventory and phased migration plan | Before migrating ApeX HTTP/completion sites or pruning its legacy inventory. | [RUST_APEXOMNI_REQUEST_CONTEXT.md](RUST_APEXOMNI_REQUEST_CONTEXT.md) |
 | BloFin managed requests | Inventory and phased adoption plan | Before BloFin HTTP/completion migration; exact legacy map, caller effects and shared API dependencies. | [RUST_BLOFIN_REQUEST_CONTEXT.md](RUST_BLOFIN_REQUEST_CONTEXT.md) |
+| BloFin private read funnel | Plan and original controls | Before managing BloFin history, closed-position or account reads, or pruning their ten request fingerprints. | [RUST_BLOFIN_READ_FUNNEL.md](RUST_BLOFIN_READ_FUNNEL.md) |
 | Lighter RequestContext adoption | Inventory and phased plan | Before migrating Lighter or Robinhood HTTP/completion sites; single-request candles first, shared multi-request/signing prerequisites later. | [RUST_LIGHTER_REQUEST_CONTEXT.md](RUST_LIGHTER_REQUEST_CONTEXT.md) |
 | Paradex startup Read Contexts | Planned | Independent public catalog/ticker GET adoption and proof | [RUST_PARADEX_SEED_CONTEXT.md](RUST_PARADEX_SEED_CONTEXT.md) |
 | BloFin candle command entry | Focused adoption plan | Before removing the candle pre-Context numeric refusal or changing initial command ownership. | [RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md](RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md) |
@@ -453,3 +454,9 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Serial single-call schedule construction | Local cut; paired measurements and exact-patch review pending | Before changing serial topology construction or declared-admission error precedence. | [RUST_SERIAL_SINGLE_CALL_SCHEDULE.md](RUST_SERIAL_SINGLE_CALL_SCHEDULE.md) |
 
 | Journal report iterator simplification | [RUST_JOURNAL_REPORT_ITERATORS.md](RUST_JOURNAL_REPORT_ITERATORS.md) | codex-ih35js | Local measured cut after Bitget slice 3; exact review required. |
+
+| Phemex remaining request funnel | [RUST_PHEMEX_REMAINING_FUNNEL.md](RUST_PHEMEX_REMAINING_FUNNEL.md) | codex-ih35js | Source correction: native gate precedence and income prefix recovery; source review/CI and composed landing size gates pending; four named repair holdouts. |
+
+| Shared hosted-signing envelope | Docs-only companion; required m26ps4 review | Before shared Kraken HMAC or Paradex Stark structured-preimage transport, provider/capture or capability changes. | [RUST_HOSTED_SIGNING_ENVELOPE.md](RUST_HOSTED_SIGNING_ENVELOPE.md) |
+
+| OKX ordered write ownership | Source GO (dazzy3); exact-head CI green | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |

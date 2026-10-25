@@ -85,11 +85,11 @@ fn passphrase_only_primary_can_supply_a_complete_secondary() {
         context: Context::default(),
         operations: vec![
             Operation::Present {
-                key: secondary.passphrase.expect("fallback ref"),
+                key: secondary.passphrase.clone().expect("fallback ref"),
             },
             Operation::Sign {
                 algorithm: Algorithm::HmacSha256,
-                key: secondary.signing,
+                key: secondary.signing_ref().unwrap().clone(),
                 payload: vec![PayloadPart::Bytes {
                     bytes: b"message".to_vec(),
                 }],
