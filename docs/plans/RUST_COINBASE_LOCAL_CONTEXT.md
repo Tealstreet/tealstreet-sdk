@@ -28,9 +28,10 @@ or private HTTP path is migrated in this local-only slice.
 
 ### Candle path gates (overseer, 2026-10-25)
 
-The candle read, `public.rs:476`, and its three refusals at `public.rs:1574`,
-`1578` and `1586` need both gates before any managed conversion. Neither is
-enough alone:
+The candle read (the `self.request` with `ArrayAt::Field("candles")` in
+`public.rs`) and its three refusals (`timeframe.unsupported("Coinbase")`,
+"Unknown Coinbase market" and "Invalid Coinbase candle range") need both gates
+before any managed conversion. Neither is enough alone:
 
 1. **Catalogue readiness.** A candle command deferred behind the instruments
    catalogue is dispatched from `public_pending` inside that catalogue's
