@@ -50,10 +50,8 @@ fn drain(engine: &mut Engine<AsterDex>, now: f64) -> Output {
                 HttpAction::Bind {
                     permit, request, ..
                 } => {
-                    assert!(matches!(
-                        engine.claim_http(now, permit),
-                        Ok(Claim::Released(_))
-                    ));
+                    let claim = engine.claim_http(now, permit);
+                    assert!(matches!(claim, Ok(Claim::Released(_))), "{:?}", claim.err());
                     (request, false)
                 }
                 HttpAction::BindGroup { .. } => panic!("Aster plans declare no Mutation barriers"),
@@ -388,7 +386,7 @@ fn a_v3_stp_mode_read_is_a_managed_command_read() {
     let sent = command(&mut e, Command::FetchStpMode { command: COMMAND });
     managed(&sent, 1);
     let read = write(&sent, Method::Get, "/stpMode").clone();
-    let done = answer(&mut e, &read, 200, r#"{"stpMode":"NONE"}"#);
+    let done = answer(&mut e, &read, 200, r#"{"stpMode":"EXPIRE_TAKER"}"#);
     assert!(terminal(&done).expect("one terminal").is_ok());
 }
 
