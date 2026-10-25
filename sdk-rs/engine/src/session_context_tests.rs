@@ -376,13 +376,13 @@ fn session_mutation_releases_without_command_journal_or_reconciliation() {
         "plain background still cannot own a mutation"
     );
     let session = open(&mut engine, true);
-    let revision = engine.io.http_write_revision;
+    let revision = engine.io.core.http_write_revision;
     let request = {
         let token = session_write(&mut engine, &session, 1.);
         release(&mut engine, token, 2.)
     };
-    assert!(!engine.io.http_responses.contains(request));
-    assert_eq!(engine.io.http_write_revision, revision);
+    assert!(!engine.io.core.http_responses.contains(request));
+    assert_eq!(engine.io.core.http_write_revision, revision);
     respond(&mut engine, request, 3., "{\"listenKey\":\"k\"}");
     assert_eq!(
         engine.venue.responses,
@@ -404,6 +404,7 @@ fn session_release_does_not_fence_command_reconciliation() {
     };
     let fence = engine
         .io
+        .core
         .http_responses
         .get_mut(write)
         .unwrap()
@@ -413,7 +414,7 @@ fn session_release_does_not_fence_command_reconciliation() {
         release(&mut engine, token, 4.)
     };
     assert_eq!(
-        engine.io.http_write_revision, fence,
+        engine.io.core.http_write_revision, fence,
         "a keepalive must not supersede an unrelated command write"
     );
 }
@@ -706,7 +707,7 @@ fn bounded_sessions_and_operation_records() {
         unreachable!()
     };
     assert!(
-        engine.io.request_contexts.sessions.live[&generation]
+        engine.io.core.request_contexts.sessions.live[&generation]
             .writes
             .len()
             <= super::super::CAPACITY,
@@ -873,6 +874,7 @@ fn session_writes_supply_no_legacy_placement_evidence() {
     let mut engine = engine();
     engine
         .io
+        .core
         .order_locks
         .acquire(
             &Command::PlaceOrders {
@@ -886,9 +888,9 @@ fn session_writes_supply_no_legacy_placement_evidence() {
     let session = open(&mut engine, true);
     let token = session_write(&mut engine, &session, 1.);
     release(&mut engine, token, 2.);
-    engine.io.order_locks.finish(7, true);
+    engine.io.core.order_locks.finish(7, true);
     assert!(
-        !engine.io.order_locks.uncertain(""),
+        !engine.io.core.order_locks.uncertain(""),
         "a keepalive is not a placement write"
     );
 }
@@ -913,7 +915,7 @@ fn an_absent_order_answer_to_a_session_write_never_fences_or_reconciles() {
     let request = release(&mut engine, token, 2.);
     respond(&mut engine, request, 3., "{\"code\":-2015}");
     assert_eq!(engine.venue.facts.len(), 1);
-    assert!(!engine.io.order_locks.uncertain(""), "no order fence");
+    assert!(!engine.io.core.order_locks.uncertain(""), "no order fence");
     assert_eq!(engine.venue.reconciles, 0, "no reconcile queued");
 }
 
@@ -932,7 +934,7 @@ fn context_capacity_refusal_commits_nothing() {
         unreachable!()
     };
     assert!(
-        engine.io.request_contexts.sessions.live[&generation]
+        engine.io.core.request_contexts.sessions.live[&generation]
             .writes
             .is_empty()
     );
@@ -1172,7 +1174,7 @@ fn a_write_with_an_unproven_release_cannot_park_for_a_resend() {
         engine.venue.command_fact = fact;
         let session = open(&mut engine, false);
         // Issued as during command dispatch, so the classifier knows its intent.
-        engine.io.request_contexts.dispatch = Some((7, crate::classify::Intent::Place));
+        engine.io.core.request_contexts.dispatch = Some((7, crate::classify::Intent::Place));
         let write = with(&mut engine, 1., |cx| {
             cx.http_context(
                 Scope::Command(7),
@@ -1183,7 +1185,7 @@ fn a_write_with_an_unproven_release_cannot_park_for_a_resend() {
             )
         })
         .unwrap();
-        engine.io.request_contexts.dispatch = None;
+        engine.io.core.request_contexts.dispatch = None;
         let token = queue(&mut engine, &write, 1.);
         let request = release(&mut engine, token, 2.);
         if lost {
@@ -1249,8 +1251,14 @@ fn command_entry_cannot_reclaim_a_command_with_a_parked_waiter() {
     let parked = owner(&mut engine, Scope::Command(7), 1_000, 1.);
     wait(&mut engine, &session, &parked, 1.).unwrap();
     let late = parked.deadline() + 1.;
-    assert!(!engine.io.request_contexts.prepare_command_entry(7, late));
-    assert!(engine.io.request_contexts.command_live(7, late));
+    assert!(
+        !engine
+            .io
+            .core
+            .request_contexts
+            .prepare_command_entry(7, late)
+    );
+    assert!(engine.io.core.request_contexts.command_live(7, late));
     let ready = with(&mut engine, late, |cx| cx.session_ready(&session));
     let [Waiter::Failed(context, _, error)] = ready.as_slice() else {
         panic!("expired owner must fail");
@@ -1259,7 +1267,13 @@ fn command_entry_cannot_reclaim_a_command_with_a_parked_waiter() {
         cx.fail_context(context, error.clone())
     })
     .unwrap();
-    assert!(engine.io.request_contexts.prepare_command_entry(7, late));
+    assert!(
+        engine
+            .io
+            .core
+            .request_contexts
+            .prepare_command_entry(7, late)
+    );
 }
 
 #[test]
@@ -1328,7 +1342,7 @@ fn a_held_command_past_its_deadline_cannot_reissue_in_the_old_generation() {
 
 fn entry_root(engine: &mut Engine<Probe>, command: CommandId) -> crate::request_context::Context {
     let root = owner(engine, Scope::Command(command), 20_000, 1.);
-    engine.io.request_contexts.retain_command_entry(&root);
+    engine.io.core.request_contexts.retain_command_entry(&root);
     root
 }
 
@@ -1339,7 +1353,7 @@ fn execution_observers_and_session_waiters_exclude_each_other() {
     let parked = entry_root(&mut engine, 7);
     wait(&mut engine, &session, &parked, 1.).unwrap();
     assert_eq!(
-        engine.io.request_contexts.begin_execution(
+        engine.io.core.request_contexts.begin_execution(
             9_000,
             &parked,
             policy(Operation::Read),
@@ -1353,6 +1367,7 @@ fn execution_observers_and_session_waiters_exclude_each_other() {
     let observer = entry_root(&mut engine, 8);
     engine
         .io
+        .core
         .request_contexts
         .begin_execution(
             9_001,
@@ -1717,13 +1732,13 @@ fn session_egress_exempts_no_write_from_its_journal_or_gate() {
         cx.session_scoped_context(&session, Scope::Command(7), policy(Operation::Mutation))
     })
     .unwrap();
-    let revision = engine.io.http_write_revision;
+    let revision = engine.io.core.http_write_revision;
     let write = {
         let token = queue(&mut engine, &command, 1.);
         release(&mut engine, token, 2.)
     };
-    assert!(engine.io.http_responses.contains(write));
-    assert_ne!(engine.io.http_write_revision, revision);
+    assert!(engine.io.core.http_responses.contains(write));
+    assert_ne!(engine.io.core.http_write_revision, revision);
     // A session write under its egress keeps the one-unresolved-write gate.
     let login = {
         let token = session_write(&mut engine, &session, 3.);
@@ -1742,12 +1757,12 @@ fn retirement_fences_claims_and_retries_but_not_streams_or_facts() {
     let mut engine = engine();
     engine.venue.command_write_fact = true;
     let session = open_private(&mut engine);
-    engine.io.request_contexts.dispatch = Some((7, crate::classify::Intent::Setting));
+    engine.io.core.request_contexts.dispatch = Some((7, crate::classify::Intent::Setting));
     let write = with(&mut engine, 1., |cx| {
         cx.session_scoped_context(&session, Scope::Command(7), policy(Operation::Mutation))
     })
     .unwrap();
-    engine.io.request_contexts.dispatch = None;
+    engine.io.core.request_contexts.dispatch = None;
     let sent = {
         let token = queue(&mut engine, &write, 1.);
         release(&mut engine, token, 1.)
@@ -1845,7 +1860,7 @@ fn session_egress_never_crosses_sessions_or_engines() {
     })
     .unwrap();
     assert_eq!(
-        engine.io.request_contexts.issue_session(
+        engine.io.core.request_contexts.issue_session(
             1 << 40,
             generation(&second),
             policy(Operation::Mutation),
@@ -1861,6 +1876,7 @@ fn session_egress_never_crosses_sessions_or_engines() {
     .unwrap();
     let other = engine
         .io
+        .core
         .request_contexts
         .sessions
         .egress(generation(&second));
@@ -1969,7 +1985,7 @@ fn a_session_callback_settles_like_a_delivery_less_callback() {
         "a session Context is never command authority"
     );
     assert!(
-        engine.io.request_contexts.commands.contains_key(&11),
+        engine.io.core.request_contexts.commands.contains_key(&11),
         "a managed write is never sealed numerically"
     );
 }
@@ -2005,16 +2021,19 @@ fn session_legs_have_their_own_entry_and_generic_legs_refuse_sessions() {
         cx.session_context(&session, policy(Operation::Read))
     })
     .unwrap();
-    let ids = engine.io.next_id;
-    let contexts = engine.io.request_contexts.contexts.len();
+    let ids = engine.io.core.next_id;
+    let contexts = engine.io.core.request_contexts.contexts.len();
     assert_eq!(
         with(&mut engine, 2., |cx| cx
             .http_leg_context(&read, policy(Operation::Read))),
         Err(Error::Invalid),
         "a Session leg never takes the generic path"
     );
-    assert_eq!(engine.io.next_id, ids, "the refusal spends no identity");
-    assert_eq!(engine.io.request_contexts.contexts.len(), contexts);
+    assert_eq!(
+        engine.io.core.next_id, ids,
+        "the refusal spends no identity"
+    );
+    assert_eq!(engine.io.core.request_contexts.contexts.len(), contexts);
 
     let background = with(&mut engine, 2., |cx| {
         cx.http_context(
@@ -2024,14 +2043,14 @@ fn session_legs_have_their_own_entry_and_generic_legs_refuse_sessions() {
     })
     .unwrap();
     {
-        let ids = engine.io.next_id;
+        let ids = engine.io.core.next_id;
         assert_eq!(
             with(&mut engine, 2., |cx| cx
                 .session_leg_context(&background, policy(Operation::Read))),
             Err(Error::Invalid),
             "only a Session parent derives a session leg"
         );
-        assert_eq!(engine.io.next_id, ids);
+        assert_eq!(engine.io.core.next_id, ids);
     }
 
     let leg = with(&mut engine, 2., |cx| {
