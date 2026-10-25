@@ -2300,7 +2300,7 @@ impl CommandWrites {
                 if terminal {
                     match result {
                         WriteResult::Accepted { order_ids } => {
-                            stream.effects |= !order_ids.is_empty();
+                            stream.effects = true;
                             stream.ids.extend(order_ids);
                         }
                         WriteResult::Rejected(mut error) | WriteResult::KnownPartial(mut error) => {
