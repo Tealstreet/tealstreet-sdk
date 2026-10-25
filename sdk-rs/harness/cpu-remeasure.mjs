@@ -6,6 +6,7 @@ import { memoryMetricErrors } from './memory.mjs';
 import { compareSnapshots, snapshotCoverageErrors } from './snapshot-compare.mjs';
 import { sameCommandResults } from './tape.mjs';
 import { CPU_FIELDS, performanceFailures, performanceMetricErrors, performanceObjectives, performanceOrder } from './performance-policy.mjs';
+import { hasPairedBitgetSteady } from './bitget-paired-steady.mjs';
 
 export const CPU_REMEASURE_RULE = 'all-objective-normalized-two-run-mean-v1';
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -19,7 +20,8 @@ const digest = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(val
 const same = isDeepStrictEqual;
 const nonmetric = ({ metrics: _metrics, ...output }) => output;
 const decode = (slot) => JSON.parse(slot.bytes);
-const objectives = (report) => performanceObjectives(report.samples.ts, report.samples.rust).filter(({ field }) => CPU_FIELDS.includes(field));
+const objectives = (report, paired, source) => performanceObjectives(report.samples.ts, report.samples.rust)
+  .filter(({ field }) => CPU_FIELDS.includes(field) && !(field === 'steadyCpuMs' && hasPairedBitgetSteady(paired, report, source)));
 
 /** Validate every raw slot before trusting report samples or failure strings. */
 function validatePublicEvidenceContent(value) {
@@ -86,25 +88,27 @@ export function validatePublicEvidence(value) {
   catch (error) { return [`malformed public evidence: ${error.message}`]; }
 }
 
-function cpuOnlyErrors(value, requireMiss) {
+function cpuOnlyErrors(value, requireMiss, paired) {
   const errors = validatePublicEvidence(value);
   if (errors.length) return errors;
-  const report = value.report;
+  const report = value.report, source = value.execution?.measuredCheckoutSha;
+  if (paired !== undefined && !hasPairedBitgetSteady(paired, report, source)) return ['unissued or mismatched paired steady certificate'];
   const calculated = performanceFailures(report.samples.ts, report.samples.rust).sort();
   // Exact generated failures, not a performance-prefix allowlist. Memory never
   // becomes an averaged objective and declarations cannot excuse correctness.
   const cpuFailures = calculated.filter((failure) => objectives(report).some(({ label }) => failure.startsWith(`performance ${label}:`)));
   if (!same(calculated, cpuFailures) || !same([...report.failures].sort(), cpuFailures))
     errors.push('strict failures include non-CPU diagnostics or omit/repeat computed failures');
-  if (requireMiss && !cpuFailures.length) errors.push('first measurement has no CPU miss');
-  for (const objective of objectives(report)) if (!Number.isFinite(objective.ratio) || objective.ratio >= 1.05)
+  if (requireMiss && !cpuFailures.some(failure => objectives(report, paired, source).some(({ label }) => failure.startsWith(`performance ${label}:`))))
+    errors.push('first measurement has no remaining CPU miss');
+  for (const objective of objectives(report, paired, source)) if (!Number.isFinite(objective.ratio) || objective.ratio >= 1.05)
     errors.push(`${objective.field}: CPU ratio must be strictly below 1.05`);
   return errors;
 }
 
-export function assessEligibility(first) {
-  const errors = cpuOnlyErrors(first, true);
-  return { eligible: errors.length === 0, errors, objectives: errors.length ? [] : objectives(first.report) };
+export function assessEligibility(first, paired) {
+  const errors = cpuOnlyErrors(first, true, paired);
+  return { eligible: errors.length === 0, errors, objectives: errors.length ? [] : objectives(first.report, paired, first.execution?.measuredCheckoutSha) };
 }
 
 export function validateSecondExecution(first, second) {
@@ -133,15 +137,15 @@ export function validateSecondExecution(first, second) {
 
 /** Caller must also authenticate live cohort/artifact provenance. Pure content
  * checks are deliberately insufficient authority to certify a workflow. */
-export function decideRemeasurement(first, second) {
-  const errors = [...cpuOnlyErrors(first, true), ...cpuOnlyErrors(second, false), ...validateSecondExecution(first, second)];
+export function decideRemeasurement(first, second, paired) {
+  const errors = [...cpuOnlyErrors(first, true, paired), ...cpuOnlyErrors(second, false, paired), ...validateSecondExecution(first, second)];
   if (errors.length) return { accepted: false, errors, receipt: null };
   for (const field of ['venue', 'tape', 'books', 'tapeSha256', 'runs', 'correctnessRuns', 'requiredImprovement', 'fixers'])
     if (!same(first.report[field], second.report[field])) errors.push(`second strict report changed ${field}`);
   for (let index = 0; index < first.raw.length; index++)
     if (!same(nonmetric(decode(first.raw[index])), nonmetric(decode(second.raw[index]))))
       errors.push(`nonmetric output differs at slot ${index}`);
-  const a = objectives(first.report), b = objectives(second.report);
+  const a = objectives(first.report, paired, first.execution?.measuredCheckoutSha), b = objectives(second.report, paired, second.execution?.measuredCheckoutSha);
   const aggregate = a.map((objective, index) => {
     const other = b[index], mean = (objective.ratio + other.ratio) / 2;
     if (objective.category !== other.category) errors.push(`${objective.field}: small-window category changed`);
