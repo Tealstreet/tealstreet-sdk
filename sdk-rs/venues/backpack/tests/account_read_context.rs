@@ -1298,3 +1298,274 @@ fn native_public_only_with_real_saved_primary_and_secondary_never_starts_account
         assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
     }
 }
+
+#[test]
+fn typed_precommit_matrix_preserves_permanent_refusal_and_new_delayed_recovery() {
+    use safe_cex_engine::{ErrorKind, request_context::Error};
+    for route in [Route::Info, Route::Positions, Route::Balance, Route::Orders] {
+        for (reason, kind, recovery) in [
+            (Error::Capacity, None, true),
+            (Error::TimedOut, None, true),
+            (Error::Invalid, Some(ErrorKind::Internal), true),
+            (Error::Invalid, Some(ErrorKind::Network), true),
+            (Error::Invalid, Some(ErrorKind::Timeout), true),
+            (Error::Invalid, Some(ErrorKind::InvalidInput), false),
+            (Error::Invalid, Some(ErrorKind::Unsupported), false),
+            (Error::State, Some(ErrorKind::Internal), false),
+            (Error::Revoked, Some(ErrorKind::Network), false),
+            (Error::Stale, None, false),
+            (Error::Duplicate, None, false),
+            (Error::RetryForbidden, None, false),
+        ] {
+            let (mut e, packet, _) = issued(route, false);
+            let preparation = packet.preparation.expect("actual managed preparation");
+            let mut error = VenueError::new("same message for every typed disposition");
+            error.kind = kind;
+            e.http_preparation_failed(START + 1., preparation, reason, error);
+            unpublished(&e, route);
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            no_physical(&actions);
+            assert_eq!(
+                polls(&actions, START + 1.).len(),
+                usize::from(recovery),
+                "{route:?} {reason:?} {kind:?}"
+            );
+            e.http_preparation_failed(
+                START + 2.,
+                preparation,
+                reason,
+                VenueError::new("duplicate"),
+            );
+            let duplicate = e.drain_actions().collect::<Vec<_>>();
+            no_physical(&duplicate);
+            assert!(
+                !duplicate
+                    .iter()
+                    .any(|action| matches!(action, Action::SetTimer { .. }))
+            );
+        }
+    }
+}
+
+#[test]
+fn typed_precommit_nonfinite_clocks_never_schedule_recovery() {
+    use safe_cex_engine::request_context::Error;
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for route in [Route::Info, Route::Positions, Route::Balance, Route::Orders] {
+            let (mut e, packet, _) = issued(route, false);
+            e.http_preparation_failed(
+                now,
+                packet.preparation.unwrap(),
+                Error::Capacity,
+                VenueError::new("capacity"),
+            );
+            unpublished(&e, route);
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            no_physical(&actions);
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::SetTimer { .. }))
+            );
+        }
+    }
+}
+
+struct AccountProviderFailure {
+    inner: safe_cex_engine::signing::Provider,
+    error: safe_cex_engine::signing::SignError,
+}
+impl safe_cex_engine::signing::Signer for AccountProviderFailure {
+    fn sign(
+        &self,
+        _request: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        let error = self.error;
+        Box::pin(async move { Err(error) })
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(
+        &self,
+        _request: &safe_cex_engine::signing::SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
+        Some(Err(self.error))
+    }
+    fn can_sign(
+        &self,
+        key: &safe_cex_engine::signing::KeyRef,
+        algorithm: safe_cex_engine::signing::Algorithm,
+    ) -> safe_cex_engine::signing::Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+}
+fn fresh_provider_failure(error: safe_cex_engine::signing::SignError) -> (Driver, Rc<State>) {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    let secondary = true;
+    let different_raw = false;
+    let primary = STANDARD.encode([7; 32]);
+    let read = STANDARD.encode([9; 32]);
+    let local = |key: &str, seed: &str| LocalIdentity {
+        key: Secret::new(key.into()),
+        secret: Secret::new(seed.into()),
+        secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+        ..Default::default()
+    };
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(local("test-public-key", &primary)),
+            secondary: secondary.then(|| local("account-read-key", &read)),
+        },
+        ed25519_seeds(),
+    )
+    .unwrap();
+    let options = Options {
+        identity: identities.primary.clone(),
+        read_identity: identities.secondary.clone(),
+        read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
+            key: if different_raw {
+                "different-raw-key"
+            } else {
+                "account-read-key"
+            }
+            .into(),
+            secret: if different_raw {
+                STANDARD.encode([8; 32])
+            } else {
+                read
+            },
+            passphrase: None,
+        }),
+        read_credentials_status: secondary.then_some(Ok(())),
+        key: Some("test-public-key".into()),
+        secret: Some(primary),
+        recv_window: Some(5000.),
+        ..Default::default()
+    };
+    let state = Rc::new(State::default());
+    let mut e = safe_cex_engine::test_support::seeded_engine(Audit {
+        native: Backpack::new(options),
+        peers: vec![],
+        state: state.clone(),
+    });
+    e.set_signer(Some(Arc::new(AccountProviderFailure {
+        inner: Arc::new(provider),
+        error,
+    })))
+    .unwrap();
+    e.set_identities(identities).unwrap();
+    e.start(START);
+    (e, state)
+}
+#[test]
+fn real_provider_failures_follow_the_engine_typed_reason_without_renewal() {
+    use safe_cex_engine::signing::SignError;
+    for error in [
+        SignError::Refused,
+        SignError::Unsupported,
+        SignError::InvalidRequest,
+        SignError::MissingKey,
+        SignError::Unavailable,
+        SignError::InvalidResult,
+        SignError::TimedOut,
+    ] {
+        let (mut e, _) = fresh_provider_failure(error);
+        let packet = catalogue(&mut e);
+        let preparation = packet
+            .preparation
+            .expect("actual managed account preparation");
+        e.http_prepared(
+            START + 1.,
+            preparation,
+            Prepared {
+                id: packet.request.id.0,
+                expires_at: None,
+            },
+        );
+        unpublished(&e, Route::Info);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        no_physical(&actions);
+        assert_eq!(
+            polls(&actions, START + 1.).len(),
+            usize::from(error == SignError::TimedOut),
+            "{error:?}"
+        );
+        e.http_prepared(
+            START + 2.,
+            preparation,
+            Prepared {
+                id: packet.request.id.0,
+                expires_at: None,
+            },
+        );
+        let duplicate = e.drain_actions().collect::<Vec<_>>();
+        no_physical(&duplicate);
+        assert!(
+            !duplicate
+                .iter()
+                .any(|action| matches!(action, Action::SetTimer { .. }))
+        );
+    }
+}
+
+#[test]
+fn native_fractional_window_signs_selected_account_get_with_exact_zero_wire() {
+    let seed = STANDARD.encode([7; 32]);
+    let mut e = support::configured_account(Options {
+        key: Some("test-public-key".into()),
+        secret: Some(seed.clone()),
+        recv_window: Some(0.5),
+        ..Default::default()
+    });
+    e.start(START);
+    let markets = safe_cex_engine::test_support::prepared_actions(&mut e, START)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("/markets") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        START,
+        Event::HttpResponse {
+            request: markets.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: MARKETS,
+            },
+        },
+    );
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, START)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with(Route::Info.path()) => Some(request),
+            _ => None,
+        })
+        .expect("genuine selected account GET released");
+    let mut native =
+        safe_cex_venue_backpack::sign::Credentials::new("test-public-key".into(), &seed).unwrap();
+    native.window = 0;
+    let expected = native.headers("accountQuery", &[Default::default()], START);
+    assert_eq!(request.headers, expected);
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| *name == "X-Window" && value == "0")
+    );
+    e.handle(
+        START,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: INFO,
+            },
+        },
+    );
+    assert_eq!(e.store().setting(SYMBOL).unwrap().leverage, 10.);
+}
