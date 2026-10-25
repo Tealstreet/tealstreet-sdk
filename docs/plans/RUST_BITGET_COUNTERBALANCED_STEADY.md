@@ -47,15 +47,29 @@ advance path. The coordinator derives anchor authority from the issued tip
 comparison authority and the checked-in fixed pin; uploaded evidence cannot
 issue either authority.
 
-The old A0 source is checked out directly. Its own checked-in build.sh, tool
-pins, family profile, size checker and ci-wasm archive producer build and seal
-its package. No current runtime source or helper is copied into that checkout.
-The external collection driver retains source seals, raw/web/node artifacts,
-metadata bytes and file hashes before changing checkout. Each cohort executes
-that arm's checked-in gate and validates its independent module package. The
-candidate is independently rebuilt in both comparisons; its package hashes
-must agree. Every cohort uses one canonical module path, and the original
-candidate checkout is restored before final authority authentication.
+The old A0 source is checked out only for BUILD. Its own checked-in build.sh,
+tool pins, family profile, size checker and ci-wasm archive producer build and
+seal its package. No current runtime source is copied into that checkout. The
+external driver retains source seals, raw/web/node artifacts, metadata bytes
+and file hashes before changing checkout.
+
+All sixteen MEASUREMENTS execute from clean tested B source: the same replay.mjs,
+gate.mjs and certifier, TS source and host helpers, tape/books and Node runtime.
+The producer records B's full measurement tree, explicit gate/replay/policy/seal
+file blob hashes and the Node SHA256 in the plan and every cohort, checking them
+before and after each observation. The certifier derives those expected file
+hashes from its own trusted candidate checkout, not an uploaded declaration.
+
+A separate CI-only public Bitget nine-pair module contract validates each old
+archive against its selected source git-tree fingerprint, original run, pinned
+tools/flags and actual package bytes. Normal --ci-wasm validation still requires
+the current HEAD build fingerprint. Selecting an old package does not authorize
+acceptance: the independent tip/anchor provenance and both pooled contrasts
+remain mandatory. No replay timing, sampling, arithmetic or threshold changes.
+
+The candidate is independently rebuilt in both comparisons; its package hashes
+must agree. Every cohort uses one canonical module path. Arm-specific code is
+only compiled Rust/WASM and its sealed JS package; measurement code is common B.
 
 Layout is tip A/B/B/A/B/A/A/B, then A0/B/B/A0/B/A0/A0/B: sixteen cohorts,
 144 alternating performance pairs and sixteen complete audited pairs, four

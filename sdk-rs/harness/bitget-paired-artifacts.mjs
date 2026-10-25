@@ -60,6 +60,7 @@ export function readBitgetPairedEvidence(directory) {
   return { schema: 1, freezeSha256: plan.freezeSha256, protocolSha256: plan.protocolSha256,
     runId: String(plan.runId), attempt: plan.runAttempt, jobId: String(plan.jobId), runnerId: String(plan.runnerId),
     refs: plan.refs, candidateTree: plan.candidateTree, order: plan.order, archives, cohorts,
+    measurementSource: plan.measurementSource, measurementTree: plan.measurementTree, measurementFiles: plan.measurementFiles,
     cpuModel: plan.runner.cpuModel, imageOS: plan.runner.imageOS, imageVersion: plan.runner.imageVersion,
     nodeSha256: plan.nodeSha256 };
 }

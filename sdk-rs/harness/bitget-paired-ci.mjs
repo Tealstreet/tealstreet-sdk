@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { createGithubReader } from './cpu-cohort.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
-import { BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256,
+import { BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256, BITGET_MEASUREMENT_FILES,
   assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
   combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
 
@@ -42,7 +42,8 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
     mergeTree = gitRead('merge-tree', '--write-tree', pull.base.sha, pull.head.sha);
     insist(/^[a-f0-9]{40}$/.test(mergeTree), 'composition is not a clean automatic tree');
   }
-  return bitgetPairedAuthority({ run, pull, landing, job: candidates[0], checkoutSha, checkoutTree, mergeTree });
+  const measurementFiles = Object.fromEntries(BITGET_MEASUREMENT_FILES.map(path => [path, gitRead('rev-parse', `${checkoutSha}:${path}`)]));
+  return bitgetPairedAuthority({ run, pull, landing, job: candidates[0], checkoutSha, checkoutTree, mergeTree, measurementFiles });
 }
 
 export async function collectBitgetPair({ reader, runId, root, destination, env = process.env }) {

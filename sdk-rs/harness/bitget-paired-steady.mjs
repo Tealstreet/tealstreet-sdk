@@ -8,6 +8,9 @@ import { median, performanceFailures, performanceObjectives, REQUIRED_IMPROVEMEN
 export const BITGET_PAIRED_TOLERANCE = 1.023110;
 export const BITGET_PAIRED_FREEZE_SHA256 = 'ee6b8fd762184969b2eacf7a5ef030bc8872acfbc474ca229377f1b181e99b62';
 export const BITGET_CUMULATIVE_ANCHOR = '518d3953c09daf63c1345ea465bbc55bd313f53a';
+export const BITGET_MEASUREMENT_FILES = Object.freeze(['sdk-rs/harness/gate.mjs', 'sdk-rs/harness/replay.mjs',
+  'sdk-rs/harness/performance-policy.mjs', 'sdk-rs/harness/ci-wasm.mjs',
+  'sdk-rs/harness/bitget-paired-steady.mjs', 'sdk-rs/harness/cpu-ci.mjs', 'sdk-rs/harness/revalidate-gate.mjs']);
 export const BITGET_COHORT_ORDER = Object.freeze(['baseline', 'candidate', 'candidate', 'baseline',
   'candidate', 'baseline', 'baseline', 'candidate']);
 export const BITGET_PAIRED_PROTOCOL_SHA256 = createHash('sha256').update(JSON.stringify({
@@ -15,6 +18,7 @@ export const BITGET_PAIRED_PROTOCOL_SHA256 = createHash('sha256').update(JSON.st
   statistic: '(median(B Rust36)/median(B TS36))/(median(A Rust36)/median(A TS36))',
   scope: 'bitget:public:steadyCpuMs', freezeSha256: BITGET_PAIRED_FREEZE_SHA256,
   comparisons: ['tip', 'anchor'], cumulativeAnchor: BITGET_CUMULATIVE_ANCHOR,
+  measurementCheckout: 'candidate', measurementFiles: BITGET_MEASUREMENT_FILES,
 })).digest('hex');
 const authorities = new WeakSet();
 const certificates = new WeakSet();
@@ -34,7 +38,7 @@ const exactCase = report => report?.venue === 'bitget' && report.private === fal
 
 /** Inputs come from authenticated GitHub API responses and a local merge-tree
  * recomputation. A report/PR configuration is never an authority source. */
-export function bitgetPairedAuthority({ run, pull, landing, job, checkoutSha, checkoutTree, mergeTree }) {
+export function bitgetPairedAuthority({ run, pull, landing, job, checkoutSha, checkoutTree, mergeTree, measurementFiles }) {
   insist(run?.repository?.full_name === 'Tealstreet/tealstreet-sdk' && positive(run.id) &&
     run.run_attempt === 1 && ['pull_request', 'workflow_dispatch', 'push'].includes(run.event), 'original repository run required');
   insist(run.event !== 'push' || run.head_branch === 'feat/rust-rewrite', 'push must be the Rust landing branch');
@@ -54,7 +58,9 @@ export function bitgetPairedAuthority({ run, pull, landing, job, checkoutSha, ch
   insist(job?.run_id === run.id && job.run_attempt === 1 && job.head_sha === run.head_sha &&
     job.name === 'Rust / Bitget counterbalanced steady CPU' && positive(job.id) && positive(job.runner_id),
   'missing unique same-run original physical producer');
-  const value = Object.freeze({ runId: String(run.id), attempt: 1, jobId: String(job.id),
+  insist(measurementFiles && same(Object.keys(measurementFiles).sort(), [...BITGET_MEASUREMENT_FILES].sort()) &&
+    Object.values(measurementFiles).every(oid), 'missing trusted common measurement source seals');
+  const value = Object.freeze({ measurementFiles: Object.freeze({ ...measurementFiles }), runId: String(run.id), attempt: 1, jobId: String(job.id),
     runnerId: String(job.runner_id), baseline, candidate: checkoutSha,
     candidateTree: checkoutTree, head: run.head_sha, pullNumber, witness: 'tip' });
   authorities.add(value);
@@ -97,6 +103,8 @@ function assessContent(authority, evidence, manifest) {
     typeof evidence.imageOS === 'string' && evidence.imageOS && typeof evidence.imageVersion === 'string' &&
     evidence.imageVersion && hash(evidence.nodeSha256) && evidence.protocolSha256 === BITGET_PAIRED_PROTOCOL_SHA256,
   'missing or changed runner/runtime/protocol identity');
+  insist(evidence.measurementSource === authority.candidate && evidence.measurementTree === authority.candidateTree &&
+    same(evidence.measurementFiles, authority.measurementFiles), 'measurement harness differs from trusted candidate checkout');
   for (const arm of ['baseline', 'candidate']) checkArchive(evidence.archives?.[arm], authority[arm], authority);
   const semantics = new Map(), pooled = { baseline: { ts: [], rust: [] }, candidate: { ts: [], rust: [] } };
   const retained = [], unchangedFailures = [];
@@ -106,6 +114,9 @@ function assessContent(authority, evidence, manifest) {
     insist(before?.number === index + 1 && before.arm === arm && before.source === authority[arm] &&
       same(before.hashes, evidence.archives[arm].files), 'cohort order/source/module seals differ');
     insist(typeof before.modulePath === 'string' && before.modulePath.startsWith('/'), 'missing canonical module path');
+    insist(before.measurementSource === authority.candidate && before.measurementTree === authority.candidateTree &&
+      same(before.measurementFiles, authority.measurementFiles) && before.nodeSha256 === evidence.nodeSha256,
+    'cohort measurement harness/Node source changed');
     canonicalPath ??= before.modulePath;
     insist(before.modulePath === canonicalPath, 'module path changed between labels');
     const start = Date.parse(before.startedAt), end = Date.parse(cohort.finishedAt);
@@ -154,6 +165,7 @@ function assessContent(authority, evidence, manifest) {
   insist(Number.isFinite(q) && q > 0, 'nonfinite pooled contrast');
   return { schema: 1, rule: 'bitget-public-steady-counterbalanced-pooled', scope: 'bitget:public:steadyCpuMs',
     canonicalModulePath: canonicalPath,
+    measurementIdentity: { source: evidence.measurementSource, tree: evidence.measurementTree, files: evidence.measurementFiles },
     runtimeIdentity: { cpuModel: evidence.cpuModel, imageOS: evidence.imageOS,
       imageVersion: evidence.imageVersion, nodeSha256: evidence.nodeSha256 },
     measurementWindow: { startedAt: evidence.cohorts[0].before.startedAt,
@@ -190,7 +202,7 @@ export function combineBitgetPairedCertificates(tip, anchor) {
   for (const field of ['runId', 'attempt', 'jobId', 'runnerId', 'candidate', 'candidateTree', 'head'])
     insist(tip.authority[field] === anchor.authority[field], 'witnesses belong to different candidates or physical jobs');
   insist(tip.tapeSha256 === anchor.tapeSha256 && same(tip.moduleHashes, anchor.moduleHashes) &&
-    same(tip.runtimeIdentity, anchor.runtimeIdentity) && tip.canonicalModulePath === anchor.canonicalModulePath,
+    same(tip.runtimeIdentity, anchor.runtimeIdentity) && same(tip.measurementIdentity, anchor.measurementIdentity) && tip.canonicalModulePath === anchor.canonicalModulePath,
     'witness tape/module/CPU/canonical path differs');
   insist(Date.parse(tip.measurementWindow.completedAt) <= Date.parse(anchor.measurementWindow.startedAt),
     'tip and anchor measurement windows overlap or are reversed');

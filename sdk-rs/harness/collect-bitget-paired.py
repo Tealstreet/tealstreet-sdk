@@ -59,6 +59,8 @@ insist(authority['attempt'] == 1 and authority['candidateTree'] == output('git',
        'collector composition/attempt differs')
 insist(output('git', 'rev-parse', 'HEAD') == args.candidate, 'collector requires the actual tested checkout')
 plan = {'refs': refs, 'witness': authority['witness'],
+        'measurementSource': args.candidate, 'measurementTree': authority['candidateTree'],
+        'measurementFiles': authority['measurementFiles'],
         'order': ['baseline', 'candidate', 'candidate', 'baseline',
                   'candidate', 'baseline', 'baseline', 'candidate'],
         'blockOrders': ['ABBA', 'BAAB'], 'pairsPerCohort': 9,
@@ -160,16 +162,23 @@ active_module = Path(args.module_path).resolve()
 insist(active_module == result_root.parent.parent / 'active-module', 'unexpected canonical module path')
 cohorts = []
 semantics = {}
-for number, arm in enumerate(plan['order'], 1):
-    subprocess.run(['git', 'checkout', '--detach', refs[arm]], check=True)
-    phase = result_root / f'{number:02d}-{arm}'
-    phase.mkdir()
-    insist(output('git', 'rev-parse', 'HEAD') == refs[arm], 'wrong cohort source')
+subprocess.run(['git', 'checkout', '--detach', args.candidate], check=True)
+def verify_measurement_source():
+    insist(output('git', 'rev-parse', 'HEAD') == args.candidate, 'measurement must use common candidate source')
+    insist(output('git', 'rev-parse', 'HEAD^{tree}') == plan['measurementTree'], 'measurement tree changed')
+    insist(sha(output('node', '-p', 'process.execPath')) == plan['nodeSha256'], 'measurement Node changed')
+    for source_path, seal in plan['measurementFiles'].items():
+        insist(output('git', 'hash-object', source_path) == seal, 'common measurement bytes changed: ' + source_path)
     insist(not output('git', 'status', '--porcelain'), 'dirty cohort source')
     insist(sha(plan['tape']) == tape_sha256, 'changed tape before cohort')
-    for source_path, seal in source_seals[arm].items():
+    for source_path, seal in source_seals['candidate'].items():
         insist(output('git', 'rev-parse', f'HEAD:{source_path}') == seal,
                f'changed source seal: {source_path}')
+
+for number, arm in enumerate(plan['order'], 1):
+    phase = result_root / f'{number:02d}-{arm}'
+    phase.mkdir()
+    verify_measurement_source()
     if active_module.exists():
         shutil.rmtree(active_module)
     shutil.copytree(result_root / arm / 'node', active_module)
@@ -178,12 +187,14 @@ for number, arm in enumerate(plan['order'], 1):
         insist(module_seals[name] == sha(result_root / arm / 'node' / name),
                f'active module differs from selected archive: {name}')
     logged(['node', '--input-type=module', '-e',
-            "import { validateCiWasm } from './sdk-rs/harness/ci-wasm.mjs'; "
-            "validateCiWasm({directory: process.argv[1], venue: 'bitget'});",
-            str(active_module)], phase / 'module-validation.log')
+            "import { validatePairedCiWasm } from './sdk-rs/harness/ci-wasm.mjs'; "
+            "validatePairedCiWasm({directory: process.argv[1], venue: 'bitget', sourceHead: process.argv[2]});",
+            str(active_module), refs[arm]], phase / 'module-validation.log')
     before = {'number': number, 'arm': arm, 'block': (number - 1) // 4 + 1,
               'position': (number - 1) % 4 + 1,
               'source': refs[arm], 'modulePath': str(active_module),
+              'measurementSource': args.candidate, 'measurementTree': plan['measurementTree'],
+              'measurementFiles': plan['measurementFiles'], 'nodeSha256': plan['nodeSha256'],
               'hashes': module_seals, 'startedAt': datetime.now(timezone.utc).isoformat()}
     before['measurementKey'] = hashlib.sha256(('bitget-paired:' + authority['witness'] + ':' + str(number)).encode()).hexdigest()
     write_json(phase / 'before.json', before)
@@ -191,11 +202,12 @@ for number, arm in enumerate(plan['order'], 1):
     report_path = phase / 'gate.json'
     command = ['node', 'sdk-rs/harness/gate.mjs', '--venue', plan['venue'],
                '--tape', plan['tape'], '--books', plan['books'], '--runs', '9',
-               '--ci-wasm', str(active_module), '--report', str(report_path)]
+               '--ci-wasm', str(active_module), '--paired-source', refs[arm], '--report', str(report_path)]
     exit_code = logged(command, phase / 'gate.log', allowed=(0, 1))
     insist(report_path.exists(), f'cohort {number} produced no report')
     finished_at = datetime.now(timezone.utc).isoformat()
     print('\nCPU_CASE_END ' + before['measurementKey'] + ' ' + finished_at, flush=True)
+    verify_measurement_source()
     report = json.loads(report_path.read_text())
     insist(report['ciWasm'] == json.loads((active_module / 'build.json').read_text()),
            'report did not use the exact selected module seal')

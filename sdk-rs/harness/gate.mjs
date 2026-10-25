@@ -5,7 +5,7 @@
 //   corepack yarn rust:gate --tape sdk-rs/harness/tapes/binance.jsonl
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { validateCiWasm } from './ci-wasm.mjs';
+import { validateCiWasm, validatePairedCiWasm } from './ci-wasm.mjs';
 import { verifyRuntime } from './cpu-runtime.mjs';
 import { resolve } from 'node:path';
 import { createRecordedReplay } from './recorded-replay.mjs';
@@ -33,13 +33,19 @@ const { values } = parseArgs({
     runs: { type: 'string' },
     report: { type: 'string' },
     'ci-wasm': { type: 'string' },
+    'paired-source': { type: 'string' },
     'recorded-evidence': { type: 'string' },
     'runtime-capsule': { type: 'string' },
     'no-egress': { type: 'boolean', default: false },
   },
 });
 // Validate before spawning either implementation; a bad artifact has no fallback.
-const ciWasm = values['ci-wasm'] !== undefined ? validateCiWasm({ directory: values['ci-wasm'], venue: values.venue }) : null;
+if (values['paired-source'] !== undefined && (!values['ci-wasm'] || values.venue !== 'bitget' ||
+    values.runs !== '9' || values['runtime-capsule'] || values['recorded-evidence'] || values['no-egress']))
+  throw new Error('Paired source is only a public Bitget nine-pair measurement module contract');
+const ciWasm = values['ci-wasm'] === undefined ? null : values['paired-source'] === undefined
+  ? validateCiWasm({ directory: values['ci-wasm'], venue: values.venue })
+  : validatePairedCiWasm({ directory: values['ci-wasm'], venue: values.venue, sourceHead: values['paired-source'] });
 if (values['runtime-capsule'] && values['ci-wasm']) throw new Error('select one explicit replay module contract');
 const cpuRuntime = values['runtime-capsule'] ? verifyRuntime({ root: process.cwd(), directory: resolve(values['runtime-capsule']) }) : null;
 if (cpuRuntime && resolve(process.execPath) !== cpuRuntime.nodePath) throw new Error('CPU replay must use its sealed Node executable');

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_TOLERANCE, BITGET_PAIRED_PROTOCOL_SHA256,
   assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
-  BITGET_CUMULATIVE_ANCHOR, combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
+  BITGET_CUMULATIVE_ANCHOR, BITGET_MEASUREMENT_FILES, combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
 import { performanceFailures, performanceOrder } from './performance-policy.mjs';
 import { assessEligibility, decideRemeasurement } from './cpu-remeasure.mjs';
 import { classifyInitialCase, pairedCertificateForRuntime } from './cpu-ci.mjs';
@@ -15,7 +15,8 @@ const inputs = () => ({ run: { id: 10, run_attempt: 1, event: 'pull_request', he
   repository: { full_name: 'Tealstreet/tealstreet-sdk' } },
 pull: { number: 20, base: { sha: A, ref: 'feat/rust-rewrite', repo: { full_name: 'Tealstreet/tealstreet-sdk' } }, head: { sha: head } },
 job: { id: 30, runner_id: 40, run_id: 10, run_attempt: 1, head_sha: head, name: 'Rust / Bitget counterbalanced steady CPU' },
-checkoutSha: B, checkoutTree: tree, mergeTree: tree });
+checkoutSha: B, checkoutTree: tree, mergeTree: tree,
+measurementFiles: Object.fromEntries(BITGET_MEASUREMENT_FILES.map(path => [path, 'e'.repeat(40)])) });
 const metrics = (mode, steady, rust) => ({ baselineKind: 'idle-loaded', measuredMode: mode,
   cpuMs: rust ? 160 : 200, processCpuMs: rust ? 160 : 200, steadyCpuMs: steady,
   idleLoadCpuMs: 1, idleLoadProcessCpuMs: 1, idleLoadWallMs: 1,
@@ -53,12 +54,14 @@ function fixture(q = 1, rA = .85, candidate = B) {
       artifacts: raw.map(({ impl, mode, run }) => ({ impl, mode, run, path: `/out/${index}/${impl}-${mode}-${run}` })) };
     return { before: { number: index + 1, arm, source: arm === 'baseline' ? A : candidate,
       hashes: structuredClone(archives[arm].files), modulePath: '/runner/active-module',
+      measurementSource: candidate, measurementTree: tree, measurementFiles: authority.measurementFiles, nodeSha256: sha('node'),
       startedAt: new Date(Date.UTC(2026, 9, 26, 0, index * 2)).toISOString() },
     finishedAt: new Date(Date.UTC(2026, 9, 26, 0, index * 2 + 1)).toISOString(),
     evidence: { report, reportBytes: JSON.stringify(report), raw } };
   });
   return { authority, manifest, evidence: { schema: 1, freezeSha256: BITGET_PAIRED_FREEZE_SHA256,
     runId: '10', jobId: '30', runnerId: '40', attempt: 1, refs: { baseline: A, candidate }, candidateTree: tree,
+    measurementSource: candidate, measurementTree: tree, measurementFiles: authority.measurementFiles,
     order: [...BITGET_COHORT_ORDER], cpuModel: 'fixture EPYC', imageOS: 'ubuntu24', imageVersion: 'fixture-image',
     nodeSha256: sha('node'), protocolSha256: BITGET_PAIRED_PROTOCOL_SHA256, archives, cohorts } };
 }
@@ -132,6 +135,9 @@ test('missing, reordered, duplicated, stale or overlapping observations fail clo
   for (const mutate of [x => { x.cohorts.pop(); }, x => { x.order.reverse(); },
     x => { x.cohorts[2] = x.cohorts[1]; }, x => { x.cohorts[0].before.source = B; },
     x => { x.cohorts[1].before.modulePath += '-B'; }, x => { x.cohorts[1].before.startedAt = x.cohorts[0].before.startedAt; },
+    x => { x.measurementSource = A; }, x => { x.measurementTree = A; },
+    x => { x.cohorts[0].before.measurementSource = A; }, x => { x.cohorts[0].before.nodeSha256 = sha('wrong'); },
+    x => { x.measurementFiles = { ...x.measurementFiles, 'sdk-rs/harness/replay.mjs': A }; },
     x => { x.attempt = 2; }, x => { x.runId = '11'; }, x => { x.runnerId = '41'; },
     x => { x.refs.baseline = B; }, x => { x.candidateTree = A; }, x => { x.freezeSha256 = sha('wrong'); },
     x => { x.cpuModel = ''; }, x => { x.archives.baseline.metadataBytes += ' '; },
