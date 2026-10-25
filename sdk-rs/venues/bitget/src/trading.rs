@@ -98,6 +98,8 @@ struct Job {
     retry: Option<Request>,
     /// The write call in flight, kept for an engine-sealed retirement.
     live: Option<Planned>,
+    /// '; <note>' appended to the projected failure (a failed protection rollback).
+    note: Option<String>,
     intent: Command,
     original: Option<Order>,
     metadata: VecDeque<String>,
@@ -522,6 +524,7 @@ impl BitgetFutures {
             parked: None,
             retry: None,
             live: None,
+            note: None,
             original: if let Command::AmendOrder { id, .. } = &intent {
                 cx.store.order(id).cloned()
             } else {
@@ -775,6 +778,7 @@ impl BitgetFutures {
         self.trading.active = Some(job);
         if let Err((pending, reason)) = cx.request_signed_managed(
             context,
+            None,
             method,
             url,
             body,
@@ -792,7 +796,7 @@ impl BitgetFutures {
     fn end(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        job: Job,
+        mut job: Job,
         current: Option<(&Slot, &Context)>,
         mut error: VenueError,
     ) {
@@ -801,15 +805,22 @@ impl BitgetFutures {
         {
             error.outcome = None;
         }
-        match &job.plan {
-            None => {
+        match (&job.plan, job.note.take()) {
+            (None, note) => {
+                if let Some(note) = note {
+                    error.message = format!("{}; {note}", error.message);
+                }
                 let _ = cx.fail_preflight(&job.preflight, error);
             }
-            Some(plan) => {
+            (Some(plan), note) => {
                 if let Some((slot, context)) = current {
                     let _ = cx.finish_plan_call(plan, slot, context);
                 }
-                let _ = cx.fail_plan(plan, error);
+                // The rollback note is safety text: a protection order may remain.
+                let _ = match note {
+                    Some(note) => cx.fail_plan_noted(plan, error, &note),
+                    None => cx.fail_plan(plan, error),
+                };
             }
         }
         self.next_job(cx);
@@ -2282,7 +2293,8 @@ impl BitgetFutures {
                 job.calls.push_back(rollback);
                 return self.drive(cx, job, At::Data(&request.slot, &request.context));
             }
-            let error = with_rollback(job.error.take(), error);
+            let (error, note) = with_rollback(job.error.take(), error);
+            job.note = note;
             self.end(cx, job, current, error);
             self.refresh_orders(cx, false);
             return;
@@ -2754,7 +2766,8 @@ impl BitgetFutures {
         if released && request.call.is_place() {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
         }
-        let error = with_rollback(job.error.take(), error);
+        let (error, note) = with_rollback(job.error.take(), error);
+        job.note = note;
         let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
         self.end(cx, job, None, error);
         if released {
@@ -3142,24 +3155,24 @@ fn restore_canceling(cx: &mut Cx<'_, Pending>, call: &Planned) {
     }
 }
 
-/// A failed protection rollback keeps the original refusal; a lost or
-/// unproven rollback makes the result Unknown, with its kind.
-fn with_rollback(original: Option<VenueError>, error: VenueError) -> VenueError {
+/// A failed protection rollback keeps the original refusal and returns the
+/// native '; protection rollback failed: …' suffix as a projection note; a lost
+/// or unproven rollback makes the result Unknown, with its kind.
+fn with_rollback(original: Option<VenueError>, error: VenueError) -> (VenueError, Option<String>) {
     match original {
-        None => error,
-        Some(original) => VenueError {
-            message: format!(
-                "{}; protection rollback failed: {}",
-                original.message, error.message
-            ),
-            kind: if error.outcome == Some(Outcome::Unknown) {
-                error.kind
-            } else {
-                original.kind
+        None => (error, None),
+        Some(original) => (
+            VenueError {
+                kind: if error.outcome == Some(Outcome::Unknown) {
+                    error.kind
+                } else {
+                    original.kind
+                },
+                outcome: error.outcome.filter(|o| *o == Outcome::Unknown),
+                ..original
             },
-            outcome: error.outcome.filter(|o| *o == Outcome::Unknown),
-            ..original
-        },
+            Some(format!("protection rollback failed: {}", error.message)),
+        ),
     }
 }
 
