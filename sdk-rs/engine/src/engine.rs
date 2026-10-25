@@ -2407,12 +2407,12 @@ impl<P> Cx<'_, P> {
         bounds: PollTimerBounds,
     ) -> TimerId {
         let now = self.now;
-        let (polls, mut sink) = self.io.core.polls();
+        let (polls, mut sink) = self.io.polls();
         polls.register(now, default_interval_ms, bounds, &mut sink)
     }
 
     pub fn clear_timer(&mut self, timer: TimerId) {
-        let (polls, mut sink) = self.io.core.polls();
+        let (polls, mut sink) = self.io.polls();
         if !polls.clear(timer, &mut sink) {
             sink.clear(timer);
         }
@@ -4062,14 +4062,14 @@ impl<V: Venue> Engine<V> {
                 if scale.is_nan() || scale <= 0. {
                     return;
                 }
-                let (polls, mut sink) = cx.io.core.polls();
+                let (polls, mut sink) = cx.io.polls();
                 let ceiling = polls.ceiling_ms;
                 polls.set_policy(now, Some(scale), ceiling, &mut sink);
                 self.venue.on_poll_scale(&mut cx, scale)
             }
             Event::PollCeilingChanged { ceiling_ms } => {
                 let ceiling_ms = ceiling_ms.filter(|ms| ms.is_finite() && *ms > 0.);
-                let (polls, mut sink) = cx.io.core.polls();
+                let (polls, mut sink) = cx.io.polls();
                 let scale = polls.scale;
                 polls.set_policy(now, scale, ceiling_ms, &mut sink);
             }
