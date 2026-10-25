@@ -3044,10 +3044,11 @@ enum HyroFailure {
     Reconnect,
 }
 
-/// `transient`: this failure was transport or venue, not content. `local`:
-/// this snapshot had a read the engine refused before any I/O.
+/// `transient`: this failure was transport or venue, not content (a local
+/// refusal's own failure is transient). `local`: this snapshot had a read the
+/// engine refused before any I/O; it waives the streak, never content.
 fn hyro_failure(ready: bool, transient: bool, local: bool, streak: u8) -> HyroFailure {
-    if ready && (local || (transient && streak < 3)) {
+    if ready && transient && (local || streak < 3) {
         HyroFailure::Retry { counts: !local }
     } else {
         HyroFailure::Reconnect
