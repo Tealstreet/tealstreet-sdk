@@ -1335,20 +1335,12 @@ mod tests {
     #[test]
     fn read_credentials_are_used_only_for_get_requests() {
         // Signed writes are trade plans, signed with the primary key there.
-        for method in [Method::Get] {
-            let mut h = Harness::new(method, false);
-            let request = h.requests.remove(0);
-            let expected = if method == Method::Get {
-                "read-key"
-            } else {
-                "primary-key"
-            };
-            assert_eq!(request.headers, vec![("X-MBX-APIKEY", expected.into())]);
-            assert!(request.body.is_none());
-            // Reads carry their managed bound; writes keep the host default.
-            let bound = (method == Method::Get).then_some(READ_TIMEOUT_MS);
-            assert_eq!(request.timeout_ms, bound);
-        }
+        let mut h = Harness::new(Method::Get, false);
+        let request = h.requests.remove(0);
+        assert_eq!(request.headers, vec![("X-MBX-APIKEY", "read-key".into())]);
+        assert!(request.body.is_none());
+        // A read carries its managed bound.
+        assert_eq!(request.timeout_ms, Some(READ_TIMEOUT_MS));
     }
 
     #[test]
@@ -1443,7 +1435,11 @@ mod tests {
                 Some(h.now)
             );
             // The drained read arms its own bound after the clock's refresh.
-            assert!(h.timers.iter().any(|(_, delay)| *delay == CLOCK_INTERVAL_MS));
+            assert!(
+                h.timers
+                    .iter()
+                    .any(|(_, delay)| *delay == CLOCK_INTERVAL_MS)
+            );
             assert_eq!(
                 h.requests.len(),
                 1,
