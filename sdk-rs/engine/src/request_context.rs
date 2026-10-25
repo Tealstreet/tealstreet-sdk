@@ -78,7 +78,7 @@ impl<'a> Reconciliation<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Owner {
     Command {
         id: CommandId,
@@ -87,10 +87,70 @@ pub enum Owner {
     Background {
         generation: u64,
     },
+    /// Venue-maintained authentication session (listen key, WS token, login).
+    /// Retiring the session revokes every context and attempt it owns.
+    Session {
+        generation: u64,
+    },
     /// One physical execution serving several command observers.
     Execution {
         generation: u64,
     },
+}
+
+/// Engine-issued session authority. Holds no key, token or credential value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Session {
+    issuer: std::sync::Arc<()>,
+    generation: u64,
+}
+
+impl Session {
+    pub(crate) fn new(issuer: &std::sync::Arc<()>, generation: u64) -> Self {
+        Self {
+            issuer: issuer.clone(),
+            generation,
+        }
+    }
+    pub(crate) fn issued_by(&self, issuer: &std::sync::Arc<()>) -> bool {
+        std::sync::Arc::ptr_eq(&self.issuer, issuer)
+    }
+    pub fn owner(&self) -> Owner {
+        Owner::Session {
+            generation: self.generation,
+        }
+    }
+}
+
+/// A continuation parked behind a session, returned when the venue drains it.
+#[derive(Debug)]
+pub enum Waiter<P> {
+    Ready(Context, P),
+    /// Nothing was sent for this owner; the error's outcome is NotSent.
+    Failed(Context, P, VenueError),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionPolicy {
+    /// Every context issued for the session must use exactly this credential.
+    pub credential: Option<Credential>,
+    /// The venue contract makes a new create/keepalive harmless while an
+    /// earlier one is unresolved (cite it at the declaration site).
+    pub repeat_safe: bool,
+    /// Unsigned requests that carry the primary key's login or session token
+    /// in their body or headers. Only a keyless session may declare it.
+    pub private_egress: Option<PrivateEgress>,
+}
+
+/// Granted only by a `SessionAuth` credential selection
+/// (`Selection::session_egress`); a venue cannot construct it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrivateEgress(());
+
+impl PrivateEgress {
+    pub(crate) fn granted() -> Self {
+        Self(())
+    }
 }
 
 /// Independent of HTTP method: private POST snapshots are still reads.
@@ -107,6 +167,36 @@ pub enum RoutingIntent {
     Public,
     Primary,
     Secondary,
+}
+
+/// Egress declared at trusted issuance, independent of HTTP method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Egress {
+    /// Primary account egress: keyless reads, or confirming a primary credential.
+    Primary,
+    /// Unsigned public reads through the host's public CORS egress.
+    PublicCors,
+    /// Unsigned public reads sent directly, bypassing account proxies.
+    Direct,
+    /// Primary private egress for unsigned requests carrying a session's
+    /// login or token. Minted only by the session core; routing only.
+    Session(SessionEgress),
+}
+
+/// Opaque: no constructor outside the engine, so a venue cannot forge it.
+/// It names no key and grants no write, signing or session authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionEgress {
+    generation: u64,
+}
+
+impl SessionEgress {
+    pub(crate) fn new(generation: u64) -> Self {
+        Self { generation }
+    }
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -164,6 +254,13 @@ pub struct Pacing {
     pub minimum_gap_ms: f64,
 }
 
+/// A flat declaration over primitive pacing groups, resolved at engine construction.
+#[derive(Clone, Copy, Debug)]
+pub struct PacingSet {
+    pub group: u32,
+    pub constraints: &'static [Pacing],
+}
+
 /// Immutable across physical retries of a logical leg.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
@@ -172,6 +269,8 @@ pub struct Context {
     leg: u64,
     operation: Operation,
     credential: Option<Credential>,
+    /// Egress declared at issuance; it may only confirm a credential's intent.
+    egress: Option<Egress>,
     deadline: f64,
     pacing: Option<Pacing>,
     retry: RetryPolicy,
@@ -222,10 +321,55 @@ impl Context {
             leg,
             operation,
             credential,
+            egress: None,
             deadline,
             pacing,
             retry: RetryPolicy::Never,
         })
+    }
+
+    /// Capture egress before issuer binding: unsigned reads declare it, a
+    /// credentialed context may only confirm a primary slot. Descendants keep it;
+    /// it never grants credential, nonce or identity authority.
+    pub(crate) fn with_egress(mut self, egress: Option<Egress>) -> Result<Self, Error> {
+        let Some(egress) = egress else {
+            return Ok(self);
+        };
+        let valid = match (self.credential.as_ref(), egress) {
+            (Some(_), Egress::Session(_)) => false,
+            (Some(credential), egress) => {
+                egress == Egress::Primary && credential.slot == CredentialSlot::Primary
+            }
+            (None, Egress::Session(_)) => true,
+            (None, _) => self.operation == Operation::Read,
+        };
+        if !valid {
+            return Err(Error::Invalid);
+        }
+        self.egress = Some(egress);
+        Ok(self)
+    }
+
+    pub(crate) fn egress(&self) -> Option<Egress> {
+        self.egress
+    }
+
+    /// Explicit host route for the managed Prepare packet; None keeps the
+    /// host's intent-based routing.
+    pub fn route(&self) -> Option<crate::RequestRoute> {
+        match self.egress? {
+            Egress::Primary | Egress::Session(_) => None,
+            Egress::PublicCors => Some(crate::RequestRoute::PublicCors),
+            Egress::Direct => Some(crate::RequestRoute::Direct),
+        }
+    }
+
+    fn credential_intent(&self) -> RoutingIntent {
+        match self.credential.as_ref().map(|credential| credential.slot) {
+            None => RoutingIntent::Public,
+            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
+            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        }
     }
 
     pub fn owner(&self) -> Owner {
@@ -255,10 +399,10 @@ impl Context {
         self.credential.as_ref()
     }
     pub fn routing_intent(&self) -> RoutingIntent {
-        match self.credential.as_ref().map(|credential| credential.slot) {
-            None => RoutingIntent::Public,
-            Some(CredentialSlot::Primary) => RoutingIntent::Primary,
-            Some(CredentialSlot::Secondary) => RoutingIntent::Secondary,
+        match self.egress {
+            Some(Egress::Primary | Egress::Session(_)) => RoutingIntent::Primary,
+            Some(Egress::PublicCors | Egress::Direct) => RoutingIntent::Public,
+            None => self.credential_intent(),
         }
     }
     pub fn deadline(&self) -> f64 {
@@ -328,6 +472,10 @@ pub enum HttpAction {
         permit: Permit,
         request: crate::HttpRequest,
     },
+    BindGroup {
+        permit: GroupPermit,
+        members: Vec<GroupPacket>,
+    },
     Cancel {
         preparation: Preparation,
         signing: Option<RequestId>,
@@ -394,20 +542,9 @@ impl HttpRelease {
         if time.raw_ms >= deadline {
             return Err(Error::TimedOut);
         }
-        signature.validate().map_err(|_| Error::Invalid)?;
-        let signature_valid_until = if let Some(expiry) = signature.expiry_ms {
-            let remaining = expiry - time.protocol_ms;
-            let projected = time.raw_ms + remaining;
-            if !remaining.is_finite() || !projected.is_finite() {
-                return Err(Error::Invalid);
-            }
-            if remaining <= 0. {
-                return Err(Error::Stale);
-            }
-            Some(deadline.min(projected))
-        } else {
-            None
-        };
+        let signature_valid_until = crate::SigningRelease::new(signature, time)?
+            .raw_expiry_ms()
+            .map(|projected| deadline.min(projected));
         if !deadline.is_finite() || deadline <= time.raw_ms {
             return Err(Error::Invalid);
         }
@@ -552,6 +689,13 @@ pub enum Claim {
     WaitUntil(f64),
 }
 
+#[path = "request_context_group_protocol.rs"]
+mod group_protocol;
+pub use group_protocol::{GroupClaim, GroupPacket, GroupPermit, GroupRelease};
+
+#[path = "request_context_group_lifecycle.rs"]
+pub(crate) mod group_lifecycle;
+
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
@@ -683,10 +827,7 @@ impl Lifecycle {
         Ok(permit)
     }
 
-    /// Synchronous final claim, immediately followed by prepared transport
-    /// handoff. `admit` is called only after every other fallible check passes.
-    /// A denied/expired request consumes no pacing slot. There are no fallible
-    /// checks after admission commits; its lease must be validated beforehand.
+    /// Single requests retain their existing mutable admission hook.
     pub fn claim(
         &mut self,
         permit: Permit,
@@ -694,46 +835,18 @@ impl Lifecycle {
         pacing: &mut SendPacing,
         admit: &mut dyn FnMut(&HttpRelease) -> Result<Admission, Error>,
     ) -> Result<Claim, Error> {
-        let State::Permitted(route, expected) = self.state else {
-            return Err(Error::State);
+        let draft = match self.prepare_claim(permit, time, pacing)? {
+            group_lifecycle::ClaimPreparation::WaitUntil(at) => return Ok(Claim::WaitUntil(at)),
+            group_lifecycle::ClaimPreparation::Ready(draft) => draft,
         };
-        if permit != expected {
-            return Err(Error::Revoked);
-        }
-        let mut release = HttpRelease::new(self.attempt, time, self.signature, self.deadline)?;
-        if route.expires_at.is_some_and(|at| time.raw_ms >= at)
-            || self.signed_revision.is_some_and(|rev| rev != time.revision)
-            || time.raw_ms >= self.fresh_until
-        {
-            return Err(Error::Stale);
-        }
-        if let Some(at) = pacing.check(self.context.pacing, time.raw_ms)? {
-            return if at >= self.deadline {
-                Err(Error::TimedOut)
-            } else {
-                Ok(Claim::WaitUntil(at))
-            };
-        }
-        let admission = match admit(&release) {
-            Ok(admission) => admission,
+        let ready = match admit(draft.release()).and_then(|admission| draft.admit(admission)) {
+            Ok(ready) => ready,
             Err(error) => {
                 self.state = State::Settled(None);
                 return Err(error);
             }
         };
-        match admission {
-            Admission::Unscheduled => {}
-            Admission::Scheduled(lease) => {
-                release.response_lease = Some(release.deadline.min(lease.0))
-            }
-            Admission::Denied => {
-                self.state = State::Settled(None);
-                return Err(Error::Revoked);
-            }
-        }
-        pacing.released(self.context.pacing, time.raw_ms);
-        self.state = State::Released(release);
-        Ok(Claim::Released(release))
+        Ok(Claim::Released(self.commit_claim(ready, pacing)))
     }
 
     /// Reprepare after stale route/signature metadata; the old permit becomes
@@ -789,48 +902,167 @@ impl Lifecycle {
 #[derive(Default)]
 pub struct SendPacing {
     groups: Vec<(Pacing, Option<f64>)>,
+    sets: Vec<(u32, Vec<PacingConstraint>)>,
+}
+#[derive(Clone, Copy)]
+struct PacingConstraint {
+    index: usize,
+    minimum_gap_ms: f64,
+}
+struct ResolvedPacing<'a> {
+    single: Option<PacingConstraint>,
+    members: &'a [PacingConstraint],
+    outer_gap_ms: f64,
+}
+impl ResolvedPacing<'_> {
+    fn constraints(&self) -> impl Iterator<Item = PacingConstraint> + '_ {
+        self.single
+            .into_iter()
+            .chain(self.members.iter().copied())
+            .map(|mut member| {
+                member.minimum_gap_ms = member.minimum_gap_ms.max(self.outer_gap_ms);
+                member
+            })
+    }
+}
+fn resolve_pacing<'a>(
+    groups: &[(Pacing, Option<f64>)],
+    sets: &'a [(u32, Vec<PacingConstraint>)],
+    pacing: Option<Pacing>,
+) -> Result<ResolvedPacing<'a>, Error> {
+    let mut resolved = ResolvedPacing {
+        single: None,
+        members: &[],
+        outer_gap_ms: 0.,
+    };
+    let Some(pacing) = pacing else {
+        return Ok(resolved);
+    };
+    if !pacing.minimum_gap_ms.is_finite() || pacing.minimum_gap_ms < 0. {
+        return Err(Error::Invalid);
+    }
+    resolved.outer_gap_ms = pacing.minimum_gap_ms;
+    if let Some(index) = groups
+        .iter()
+        .position(|(group, _)| group.group == pacing.group)
+    {
+        resolved.single = Some(PacingConstraint {
+            index,
+            minimum_gap_ms: groups[index].0.minimum_gap_ms,
+        });
+    } else {
+        resolved.members = &sets
+            .iter()
+            .find(|(id, _)| *id == pacing.group)
+            .ok_or(Error::Invalid)?
+            .1;
+    }
+    Ok(resolved)
 }
 impl SendPacing {
     pub fn new(groups: &[Pacing]) -> Result<Self, Error> {
+        Self::with_sets(groups, &[])
+    }
+
+    pub fn with_sets(groups: &[Pacing], sets: &[PacingSet]) -> Result<Self, Error> {
+        const SET_CAPACITY: usize = 16;
+        if sets.len() > SET_CAPACITY || sets.iter().any(|set| set.constraints.len() > SET_CAPACITY)
+        {
+            return Err(Error::Capacity);
+        }
         if groups
             .iter()
             .any(|p| !p.minimum_gap_ms.is_finite() || p.minimum_gap_ms < 0.)
+            || sets.iter().any(|set| {
+                set.constraints.is_empty()
+                    || set
+                        .constraints
+                        .iter()
+                        .any(|p| !p.minimum_gap_ms.is_finite() || p.minimum_gap_ms < 0.)
+            })
         {
             return Err(Error::Invalid);
         }
         if groups
             .iter()
             .enumerate()
-            .any(|(i, group)| groups[..i].iter().any(|p| p.group == group.group))
+            .any(|(i, p)| groups[..i].iter().any(|q| q.group == p.group))
+            || sets.iter().enumerate().any(|(i, set)| {
+                groups.iter().any(|p| p.group == set.group)
+                    || sets[..i].iter().any(|other| other.group == set.group)
+                    || set
+                        .constraints
+                        .iter()
+                        .enumerate()
+                        .any(|(j, p)| set.constraints[..j].iter().any(|q| q.group == p.group))
+            })
         {
             return Err(Error::Duplicate);
         }
+        let mut registered = Vec::new();
+        registered
+            .try_reserve_exact(groups.len())
+            .map_err(|_| Error::Capacity)?;
+        registered.extend(groups.iter().map(|group| (*group, None)));
+        let mut resolved_sets = Vec::new();
+        resolved_sets
+            .try_reserve_exact(sets.len())
+            .map_err(|_| Error::Capacity)?;
+        for set in sets {
+            let mut members = Vec::new();
+            members
+                .try_reserve_exact(set.constraints.len())
+                .map_err(|_| Error::Capacity)?;
+            for member in set.constraints {
+                let index = groups
+                    .iter()
+                    .position(|p| p.group == member.group)
+                    .ok_or(Error::Invalid)?;
+                members.push(PacingConstraint {
+                    index,
+                    minimum_gap_ms: groups[index].minimum_gap_ms.max(member.minimum_gap_ms),
+                });
+            }
+            resolved_sets.push((set.group, members));
+        }
         Ok(Self {
-            groups: groups.iter().map(|group| (*group, None)).collect(),
+            groups: registered,
+            sets: resolved_sets,
         })
     }
-    fn check(&self, pacing: Option<Pacing>, now: f64) -> Result<Option<f64>, Error> {
-        let Some(pacing) = pacing else {
-            return Ok(None);
-        };
-        let eligible = self
-            .groups
-            .iter()
-            .find(|(group, _)| group.group == pacing.group)
-            .ok_or(Error::Invalid)?
-            .1;
-        Ok(eligible.filter(|at| now < *at))
+    #[cfg(feature = "http-plans")]
+    #[cfg(feature = "http-mutation-barriers")]
+    pub(crate) fn validate_mutation_group(&self, pacing: Option<Pacing>) -> Result<(), Error> {
+        self.validate_zero(pacing)
+    }
+
+    /// Canonical expanded-floor validation for admission paths requiring no pacing.
+    pub fn validate_zero(&self, pacing: Option<Pacing>) -> Result<(), Error> {
+        let resolved = resolve_pacing(&self.groups, &self.sets, pacing)?;
+        if resolved
+            .constraints()
+            .any(|member| member.minimum_gap_ms != 0.)
+        {
+            return Err(Error::Invalid);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check(&self, pacing: Option<Pacing>, now: f64) -> Result<Option<f64>, Error> {
+        let resolved = resolve_pacing(&self.groups, &self.sets, pacing)?;
+        let mut wait: Option<f64> = None;
+        for member in resolved.constraints() {
+            if let Some(at) = self.groups[member.index].1.filter(|at| now < *at) {
+                wait = Some(wait.map_or(at, |previous| previous.max(at)));
+            }
+        }
+        Ok(wait)
     }
     fn released(&mut self, pacing: Option<Pacing>, now: f64) {
-        if let Some(pacing) = pacing {
-            // claim checked the fixed registry before invoking admission.
-            if let Some((group, next)) = self
-                .groups
-                .iter_mut()
-                .find(|(group, _)| group.group == pacing.group)
-            {
-                *next = Some((now + group.minimum_gap_ms.max(pacing.minimum_gap_ms)).min(f64::MAX));
-            }
+        let resolved =
+            resolve_pacing(&self.groups, &self.sets, pacing).expect("Claim prevalidated pacing");
+        for member in resolved.constraints() {
+            self.groups[member.index].1 = Some((now + member.minimum_gap_ms).min(f64::MAX));
         }
     }
 }
@@ -947,6 +1179,8 @@ pub struct CommandWrites {
     report_bytes: usize,
     report_messages: usize,
     evidence: evidence::EvidenceBudget,
+    // An earlier attempt of this intent may have reached the venue.
+    inherited_uncertain: bool,
 }
 // Private synchronous terminal preparation. Never exposed as a venue grant.
 #[cfg(feature = "http-plans")]
@@ -958,6 +1192,10 @@ pub(crate) struct PreparedWriteSeal {
 impl PreparedWriteSeal {
     pub(crate) fn is_failure(&self) -> bool {
         self.failure.is_some()
+    }
+
+    pub(crate) fn failure(&self) -> Option<&VenueError> {
+        self.failure.as_ref()
     }
 }
 impl CommandWrites {
@@ -996,6 +1234,7 @@ impl CommandWrites {
             report_bytes: 0,
             report_messages: 0,
             evidence: evidence::EvidenceBudget::default(),
+            inherited_uncertain: false,
         })
     }
     pub fn register(&mut self, id: RequestId, leg: u64) -> Result<(), Error> {
@@ -1035,30 +1274,10 @@ impl CommandWrites {
     /// Only a typed definitive refusal may authorize another write attempt.
     /// The request context's policy/deadline must also authorize this retry.
     pub fn retry(&mut self, previous: RequestId, id: RequestId) -> Result<(), Error> {
-        if self.sealed {
-            return Err(Error::State);
-        }
-        if self.attempts.iter().any(|a| a.id == id) {
+        if self.attempts.iter().any(|a| a.id == id) && !self.sealed {
             return Err(Error::Duplicate);
         }
-        if self.occupied() >= self.capacity {
-            return Err(Error::Capacity);
-        }
-        let old = self
-            .attempts
-            .iter()
-            .find(|a| a.id == previous)
-            .ok_or(Error::Invalid)?;
-        if !self.active(old.leg)
-            || old.id_overflow
-            || !old.resend_granted
-            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
-            || self.attempts.iter().rposition(|a| a.leg == old.leg)
-                != self.attempts.iter().position(|a| a.id == previous)
-        {
-            return Err(Error::RetryForbidden);
-        }
-        let leg = old.leg;
+        let leg = self.retry_admissible(previous)?;
         // Each grant authorizes exactly one resend.
         if let Some(old) = self.attempts.iter_mut().find(|a| a.id == previous) {
             old.resend_granted = false;
@@ -1239,6 +1458,37 @@ impl CommandWrites {
                 None => return false,
             }
         }
+    }
+
+    /// Journal side of `retry`, without allocating the new attempt.
+    fn retry_admissible(&self, previous: RequestId) -> Result<u64, Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        if self.occupied() >= self.capacity {
+            return Err(Error::Capacity);
+        }
+        let old = self
+            .attempts
+            .iter()
+            .find(|a| a.id == previous)
+            .ok_or(Error::Invalid)?;
+        if !self.active(old.leg)
+            || old.id_overflow
+            || !old.resend_granted
+            || !matches!(&old.result, Some(WriteResult::Rejected(error)) if effects_free(error))
+            || self.attempts.iter().rposition(|a| a.leg == old.leg)
+                != self.attempts.iter().position(|a| a.id == previous)
+        {
+            return Err(Error::RetryForbidden);
+        }
+        Ok(old.leg)
+    }
+
+    /// An owner may park for a re-send only when `retry` would accept it.
+    pub(crate) fn resend_blocked(&self, leg: u64) -> bool {
+        self.latest(leg)
+            .is_some_and(|latest| self.retry_admissible(latest).is_err())
     }
 
     pub(crate) fn leg_attempts(&self, leg: u64) -> usize {
@@ -1446,6 +1696,14 @@ impl CommandWrites {
     /// authority, including for evidence-only IDs on a failed native reply.
     #[cfg(feature = "http-plans")]
     pub(crate) fn validate_failed_attempt(&self, id: RequestId) -> Result<(), Error> {
+        if self.failed_attempt(id)?.id_overflow {
+            return Err(Error::State);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "http-plans")]
+    fn failed_attempt(&self, id: RequestId) -> Result<&WriteAttempt, Error> {
         if self.sealed {
             return Err(Error::State);
         }
@@ -1457,10 +1715,23 @@ impl CommandWrites {
         if self.superseded(attempt.leg) || self.latest(attempt.leg) != Some(id) {
             return Err(Error::Revoked);
         }
-        if attempt.id_overflow || !matches!(attempt.result, Some(WriteResult::Failed(_))) {
+        if !matches!(attempt.result, Some(WriteResult::Failed(_))) {
             return Err(Error::State);
         }
-        Ok(())
+        Ok(attempt)
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn failed_attempt_error(&self, id: RequestId) -> Result<VenueError, Error> {
+        let attempt = self.failed_attempt(id)?;
+        let Some(WriteResult::Failed(error)) = &attempt.result else {
+            return Err(Error::State);
+        };
+        let mut error = error.clone();
+        if attempt.id_overflow {
+            evidence::mark_id_overflow(&mut error);
+        }
+        Ok(error)
     }
 
     /// Seal success only when every terminal logical leg is proven accepted.
@@ -1487,6 +1758,13 @@ impl CommandWrites {
             return Err(Error::State);
         }
         Ok(())
+    }
+
+    /// Carry an owner's inherited maybe-sent fact; it can only raise a failure
+    /// projection to Unknown and never clears.
+    pub(crate) fn inheriting(mut self, uncertain: bool) -> Self {
+        self.inherited_uncertain |= uncertain;
+        self
     }
 
     /// Seal exactly once. A caller's fallback text never chooses the outcome;
@@ -1578,7 +1856,9 @@ impl CommandWrites {
                 error
             }
         };
-        error.outcome = if !any_released {
+        error.outcome = if self.inherited_uncertain {
+            Some(Outcome::Unknown)
+        } else if !any_released {
             Some(Outcome::NotSent)
         } else if uncertain || overflow {
             Some(Outcome::Unknown)

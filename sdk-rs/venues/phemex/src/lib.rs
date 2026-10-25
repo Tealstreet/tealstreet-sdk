@@ -5,7 +5,11 @@ mod history;
 mod identity;
 mod income;
 mod public_candles;
+mod public_trades;
+mod read_owners;
 mod sign;
+pub use sign::dispatch as dispatch_signing;
+mod socket_codec;
 mod trading;
 mod wire;
 use safe_cex_engine::Level;
@@ -14,33 +18,24 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
 use safe_cex_engine::request_context::Context;
-use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
+use safe_cex_engine::socket_lifecycle::{
+    Control, EncodedBatch, FeedId, Interest, LifecycleEvent, SocketError,
+};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::HashMap;
 use wire::*;
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
+    pub read_credentials: Option<safe_cex_engine::signing::Identity>,
 }
 
 pub enum Pending {
-    Identity(CommandId),
+    Identity(Box<identity::Read>),
     Markets(Vec<Market>, bool),
     Tickers(Vec<Ticker>, bool),
     Depth {
@@ -57,18 +52,18 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
-    Account(account::Request),
-    Orders(account::OrdersRead),
+    Account(read_owners::Background<account::Request>),
+    Orders(read_owners::Background<account::OrdersRead>),
     Trade(trading::Request),
     History(history::Request),
     Income(income::Request),
+    PublicTrades(Box<public_trades::Read>),
 }
 #[derive(Default)]
 struct Connection {
-    socket: Option<SocketId>,
-    open: bool,
-    supervisor: Supervisor,
-    request: u32,
+    feed: Option<FeedId>,
+    opening_ping: Option<u64>,
+    rpc_id: std::cell::Cell<u32>,
 }
 struct BookState {
     users: u32,
@@ -95,9 +90,10 @@ impl BookState {
     }
 }
 pub struct PhemexPerpetuals {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
-    credentials: Option<sign::Credentials>,
-    read_credentials: Option<sign::Credentials>,
+    options: Options,
+    credentials: Option<safe_cex_engine::signing::Identity>,
+    read_credentials: Option<safe_cex_engine::signing::Identity>,
+    read_slots: safe_cex_engine::credential_selection::Slots<safe_cex_engine::signing::Identity>,
     public: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), u32>,
@@ -115,35 +111,19 @@ pub struct PhemexPerpetuals {
 }
 impl PhemexPerpetuals {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         let credentials = options
-            .key
+            .credentials
             .as_ref()
-            .zip(options.secret.as_ref())
-            .filter(|(k, s)| !k.is_empty() && !s.is_empty())
-            .map(|(key, secret)| sign::Credentials {
-                key: key.clone(),
-                secret: secret.clone(),
-            });
-        let read_credentials = options
-            .read_credentials
-            .as_ref()
-            .map(|read| sign::Credentials {
-                key: read.key.clone(),
-                secret: read.secret.clone(),
-            });
+            .filter(|identity| identity.validate().is_ok())
+            .cloned();
+        let (read_credentials, read_slots) =
+            read_owners::read_slots(credentials.clone(), options.read_credentials.clone());
         Self {
             options,
             credentials,
             read_credentials,
-            public: Connection {
-                supervisor: Supervisor::new(Config {
-                    idle_timeout_ms: 20_000.,
-                    ping_interval_ms: Some(5_000.),
-                    ..Config::default()
-                }),
-                ..Connection::default()
-            },
+            read_slots,
+            public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
             generation: 0,
@@ -205,16 +185,23 @@ impl PhemexPerpetuals {
         stream: Option<ArrayAt>,
     ) {
         // A definitive lookup must query the account that placed the order.
-        let primary = matches!(&pending, Pending::History(request) if request.is_lookup())
-            || matches!(&pending, Pending::Orders(_));
+        let primary = matches!(&pending, Pending::History(request) if request.is_lookup());
         let credentials = if matches!(method, Method::Get) && !primary {
             self.read_credentials.as_ref().or(self.credentials.as_ref())
         } else {
             self.credentials.as_ref()
         };
-        let headers = credentials
-            .map(|c| c.headers(path, query, body.as_deref().unwrap_or(""), cx.now))
-            .unwrap_or_default();
+        let recipe = credentials.map(|identity| {
+            dispatch_signing::Http::new(
+                identity.clone(),
+                self.options.testnet,
+                method,
+                path.into(),
+                query.into(),
+                body.clone(),
+            )
+        });
+        let headers = Vec::new();
         let url = format!(
             "{}{path}{}",
             self.rest(),
@@ -229,57 +216,17 @@ impl PhemexPerpetuals {
         } else {
             cx.request(method, url, headers, body, pending)
         };
+        if let Some(recipe) = recipe {
+            cx.sign_http(id, Box::new(recipe));
+        }
         if primary {
             cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
-            return;
+        if let Err(error) = self.connect_managed_public(cx) {
+            self.public_socket_error(cx, error);
         }
-        self.public.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(self.ws())
-                    .channel(safe_cex_engine::SocketChannel::Public),
-            ),
-        );
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public.supervisor.connecting(cx);
-        }
-    }
-    fn send(&mut self, cx: &mut Cx<'_, Pending>, method: &str, params: String) {
-        if !self.public.open {
-            return;
-        }
-        if let Some(s) = self.public.socket {
-            self.public.request += 1;
-            cx.send(
-                s,
-                format!(
-                    r#"{{"id":{},"method":"{method}","params":{params}}}"#,
-                    self.public.request
-                ),
-            );
-        }
-    }
-    fn subscribe_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, subscribe: bool) {
-        self.send(
-            cx,
-            if subscribe {
-                "orderbook_p.subscribe"
-            } else {
-                "orderbook_p.unsubscribe"
-            },
-            if subscribe {
-                format!(
-                    "[{},false,0]",
-                    serde_json::to_string(self.native_symbol(symbol)).unwrap()
-                )
-            } else {
-                serde_json::to_string(&[self.native_symbol(symbol)]).unwrap()
-            },
-        );
     }
     fn snapshot(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         let Some(b) = self.books.get_mut(symbol) else {
@@ -356,10 +303,13 @@ impl PhemexPerpetuals {
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Identity(command) => self.identity_failed(cx, command, error),
-            Pending::Account(r) => self.account_failed(cx, r, error),
-            Pending::Orders(r) => self.orders_read_failed(cx, r, error),
+            Pending::Account(r) => self.account_read_failed(cx, r, error),
+            Pending::Orders(r) => self.orders_background_failed(cx, r, error),
             Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Unknown),
             Pending::History(r) => self.history_failed(cx, r, error),
+            Pending::PublicTrades(read) => {
+                self.public_trades_failed(cx, *read, safe_cex_engine::VenueError::new(error));
+            }
             Pending::Income(r) => self.income_failed(cx, r, error),
             Pending::Depth { symbol, generation } => {
                 if self
@@ -433,43 +383,70 @@ impl Venue for PhemexPerpetuals {
             Some(ArrayAt::PathOmitLists(&["data", "perpProductsV2"])),
         );
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account_open(cx, socket) {
-            return;
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        let feed = match &event {
+            LifecycleEvent::Opened(epoch)
+            | LifecycleEvent::Ready { epoch, .. }
+            | LifecycleEvent::Authenticated { epoch, .. }
+            | LifecycleEvent::AuthFailure { epoch, .. }
+            | LifecycleEvent::Retired { epoch, .. }
+            | LifecycleEvent::Ping(epoch)
+            | LifecycleEvent::RetryLogin(epoch) => epoch.feed(),
+            LifecycleEvent::Reconnect(feed)
+            | LifecycleEvent::InterestsCommitted { feed, .. }
+            | LifecycleEvent::InterestsRefused { feed, .. } => *feed,
+        };
+        if self.is_account_feed(feed) {
+            self.account_socket_event(cx, event)
+        } else {
+            self.public_socket_event(cx, event)
         }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = true;
-        self.public.supervisor.opened(cx);
-        self.send(cx, "perp_market24h_pack_p.subscribe", "[]".into());
-        for s in self.books.keys().cloned().collect::<Vec<_>>() {
-            self.subscribe_book(cx, &s, true)
-        }
-        for (s, i) in self.candles.keys().cloned().collect::<Vec<_>>() {
-            let Some(n) = resolution(i) else {
-                continue;
-            };
-            self.send(
-                cx,
-                "kline_p.subscribe",
-                format!(
-                    "[{},{}]",
-                    serde_json::to_string(self.native_symbol(&s)).unwrap(),
-                    n
-                ),
-            );
-        }
-        self.send(cx, "server.ping", "[]".into());
     }
+    fn encode_socket_interests(
+        &self,
+        _store: &safe_cex_engine::Store,
+        feed: FeedId,
+        subscribe: bool,
+        interests: &[Interest],
+        emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+    ) -> Result<(), SocketError> {
+        if self.is_account_feed(feed) {
+            self.encode_account_interests(subscribe, interests, emit)
+        } else {
+            self.encode_public_interests(feed, subscribe, interests, emit)
+        }
+    }
+    fn socket_control(
+        &self,
+        _: &safe_cex_engine::Store,
+        feed: FeedId,
+        _: bool,
+        text: &str,
+    ) -> Control {
+        if self.is_account_feed(feed) {
+            self.account_socket_control(text)
+        } else {
+            Control::Other
+        }
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account_message(cx, socket, text) {
             return;
         }
-        if self.public.socket != Some(socket) {
+        if self
+            .public
+            .feed
+            .and_then(|feed| cx.socket_epoch(feed))
+            .map(|epoch| epoch.socket())
+            != Some(socket)
+        {
             return;
         }
-        self.public.supervisor.received(cx.now);
         let Ok(e) = serde_json::from_str::<Envelope<'_>>(text) else {
             return;
         };
@@ -555,30 +532,7 @@ impl Venue for PhemexPerpetuals {
             }
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
-        if self.account_close(cx, socket, code) {
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.socket = None;
-        self.public.open = false;
-        self.public.supervisor.retry(cx);
-        for b in self.books.values_mut() {
-            self.generation += 1;
-            b.generation = self.generation;
-            b.last = None;
-            b.fetching = false;
-            b.buffer.clear();
-            if let Some(t) = b.deadline.take() {
-                cx.clear_timer(t);
-            }
-            if let Some(t) = b.retry.take() {
-                cx.clear_timer(t);
-            }
-        }
-    }
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, p: &mut Pending, item: &str) {
         match p {
             Pending::Markets(rows, _) => {
@@ -615,13 +569,33 @@ impl Venue for PhemexPerpetuals {
                     *invalid = true;
                 }
             }
-            Pending::Account(r) => self.account_item(cx, r, item),
+            Pending::Account(r) => {
+                if self.currency_read_delivery(cx, r).is_ok() {
+                    self.account_item(cx, &mut r.native, item);
+                }
+            }
             Pending::History(r) => self.history_item(cx, r, item),
+            Pending::PublicTrades(read) => read.item(cx, item),
             Pending::Income(r) => self.income_item(cx, r, item),
             _ => {}
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, r: Response<'_>) {
+        if let Pending::PublicTrades(read) = &p
+            && !read.valid_delivery(cx)
+        {
+            return;
+        }
+        let delivery = match &p {
+            Pending::Identity(read) => read.validate_delivery(cx),
+            Pending::Account(read) => self.currency_read_delivery(cx, read),
+            Pending::Orders(read) => self.orders_read_delivery(cx, read),
+            _ => Ok(()),
+        };
+        if let Err(error) = delivery {
+            self.on_http_failed(cx, p, error.read_venue_error());
+            return;
+        }
         if r.status == 429 {
             self.paused_until = self.paused_until.max(
                 cx.now
@@ -641,7 +615,7 @@ impl Venue for PhemexPerpetuals {
         {
             match p {
                 Pending::Trade(p) if e.error.is_none() => self.trade_response(cx, p, r),
-                Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
+                Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
                 p => self.fail(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg)),
             }
             return;
@@ -715,11 +689,25 @@ impl Venue for PhemexPerpetuals {
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
-            Pending::Account(p) => self.account_response(cx, p, r),
-            Pending::Orders(read) => self.orders_read_response(cx, read, r.body),
+            Pending::Account(p) => self.account_read_response(cx, p, r),
+            Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
             Pending::Trade(p) => self.trade_response(cx, p, r),
             Pending::History(p) => self.history_response(cx, p, r),
+            Pending::PublicTrades(read) => self.public_trades_response(cx, *read, r),
             Pending::Income(p) => self.income_response(cx, p, r),
+        }
+    }
+    fn on_signing_release(
+        &mut self,
+        target: safe_cex_engine::SigningTarget<'_, Pending>,
+        release: safe_cex_engine::SigningRelease,
+    ) {
+        if let safe_cex_engine::SigningTarget::Http {
+            request,
+            pending: Pending::Trade(trade),
+        } = target
+        {
+            self.trade_signing_release(request, trade, release);
         }
     }
     fn on_sign_error(
@@ -729,6 +717,9 @@ impl Venue for PhemexPerpetuals {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(command) => self.identity_failed(cx, command, error),
+            Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
+            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -742,6 +733,8 @@ impl Venue for PhemexPerpetuals {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(read) => self.identity_failed(cx, read, error),
+            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
@@ -769,18 +762,6 @@ impl Venue for PhemexPerpetuals {
         if self.startup_retry == Some(timer) {
             self.startup_retry = None;
             self.start(cx)
-        } else if self.public.supervisor.owns_timer(timer) {
-            match self.public.supervisor.on_timer(cx, timer) {
-                SocketTick::Reconnect => self.connect_public(cx),
-                SocketTick::TimedOut(_) => {
-                    if let Some(socket) = self.public.socket {
-                        cx.close(socket);
-                        self.on_close(cx, socket, 1006);
-                    }
-                }
-                SocketTick::Ping => self.send(cx, "server.ping", "[]".into()),
-                _ => {}
-            }
         } else {
             let timed = self
                 .books
@@ -828,7 +809,7 @@ impl Venue for PhemexPerpetuals {
                 self.generation += 1;
                 self.books
                     .insert(symbol.clone(), BookState::new(self.generation));
-                self.subscribe_book(cx, &symbol, true);
+                self.sync_public_interests(cx);
             }
             Command::UnsubscribeOrderBook { symbol } => {
                 if let Some(b) = self.books.get_mut(&symbol) {
@@ -845,10 +826,10 @@ impl Venue for PhemexPerpetuals {
                         cx.clear_timer(t);
                     }
                 }
-                self.subscribe_book(cx, &symbol, false);
+                self.sync_public_interests(cx);
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let Some(n) = resolution(interval) else {
+                let Some(_) = resolution(interval) else {
                     cx.notice(
                         Level::Error,
                         code::COMMAND_UNSUPPORTED,
@@ -865,15 +846,7 @@ impl Venue for PhemexPerpetuals {
                     return;
                 }
                 self.candles.insert(key, 1);
-                self.send(
-                    cx,
-                    "kline_p.subscribe",
-                    format!(
-                        "[{},{}]",
-                        serde_json::to_string(self.native_symbol(&symbol)).unwrap(),
-                        n
-                    ),
-                );
+                self.sync_public_interests(cx);
             }
             Command::UnsubscribeCandles { symbol, interval } => {
                 let key = (symbol.clone(), interval);
@@ -884,16 +857,8 @@ impl Venue for PhemexPerpetuals {
                     }
                 }
                 self.candles.remove(&key);
-                if let Some(n) = resolution(interval) {
-                    self.send(
-                        cx,
-                        "kline_p.unsubscribe",
-                        format!(
-                            "[{},{}]",
-                            serde_json::to_string(self.native_symbol(&symbol)).unwrap(),
-                            n
-                        ),
-                    );
+                if resolution(interval).is_some() {
+                    self.sync_public_interests(cx);
                 }
             }
             Command::FetchCandles {
@@ -960,22 +925,5 @@ impl Venue for PhemexPerpetuals {
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
-    }
-}
-
-#[cfg(test)]
-mod security_constructor {
-    use super::*;
-    #[test]
-    fn incomplete_credentials_are_retained_only_in_a_scrubbing_owner() {
-        for key in [None, Some(String::new())] {
-            let venue = PhemexPerpetuals::new(Options {
-                key,
-                secret: Some("private-secret".into()),
-                ..Options::default()
-            });
-            let _: &safe_cex_crypto::secrets::Sensitive<Options> = &venue.options;
-            assert!(venue.credentials.is_none());
-        }
     }
 }

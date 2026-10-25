@@ -22,8 +22,8 @@ fn setup() -> (Engine<Lighter>, SocketId, HttpRequest, TimerId) {
         ..Options::default()
     }));
     e.start(1_000.0);
-    let request = e
-        .drain_actions()
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)

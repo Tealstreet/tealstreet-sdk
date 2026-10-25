@@ -4880,8 +4880,10 @@ authority. The call shape and success value (`null`) are unchanged.
 Engine capacity refusal text: every engine request-context capacity refusal
 (execution-group joins above, Binance command entry, Hyperliquid candle reads
 and any other `Capacity` refusal) now reads `Engine request capacity reached`
-instead of `Too many requests in flight`; kind `internal` and outcome
-`notSent` are unchanged. The old text matched the `rate_limit` health
+instead of `Too many requests in flight`. Kind `internal` and each site's
+outcome are unchanged: a refusal keeps whatever outcome it already carried,
+for example none on a Read command-admission refusal (engine control
+`unissued_read_command_is_rejected_once_without_a_numeric_fallback`). The old text matched the `rate_limit` health
 pattern (`/too.*many.*request/i`), so NX showed a rate-limit toast and a false
 rate-limit health signal for a local engine bound. The new text matches no
 `errorPatterns.ts` category.
@@ -5514,6 +5516,19 @@ not establish complete history. Existing native row shapes and result shaping
 remain venue-specific. See [the history bridge contract](RUST_HISTORY_CONTEXT_BRIDGE.md)
 and [owned history](RUST_OWNED_HISTORY.md).
 
+
+## Managed order reads reconcile from their earliest leg
+
+A managed order read clears an uncertain-write fence only if its earliest
+released leg (page, settle coin or product) was released after the fence.
+A read that straddles a fence leaves it set until the next full read, which the
+engine already requests. Caller outcomes and frames are unchanged; an order row
+may stay one extra read cycle after an unknown write.
+
+Legacy `cx.request` order reads still carry the per-attempt overclaim: a paged
+legacy read can clear a fence on rows read before it. This stays true for each
+venue until that venue moves its order reads onto managed contexts.
+
 ### Lighter public order-book seed uses managed Background Read
 
 The independent `orderBookOrders?market_id={id}&limit=100` snapshot now waits for
@@ -5777,3 +5792,2519 @@ Request bodies are unchanged.
 | `fetchOptionExpiries` | Needs command admission; a full command table refuses it once with the shared `internal` capacity error; otherwise unchanged | None. |
 | Option ticker seeds at startup | Managed discovery reads with the same retry, pause and degradation rules | None. |
 
+## Exact background read delivery
+
+Adapters publishing a one-leg Background Read use
+`validate_background_read_http_delivery` synchronously in its matching managed
+HTTP callback, before retiring the Context or changing native/cache/Store state.
+Logical liveness alone does not prove that a different live Context belongs to
+that response. Command, Execution and Session owners cannot use this Background-only gate.
+
+Native response validity and publication freshness remain separate checks. A
+failure callback can have valid delivery identity without response data to
+publish. A refused gate publishes no replacement response and grants no command
+completion, retry or send authority. SDK/NX order-error handling and native result
+shapes are unchanged; adopting venue adapters retain their own caller contracts.
+## AsterDEX dispatch signing admission
+
+AsterDEX now signs only through the injected provider at dispatch
+([RUST_ASTER_SIGNER_ADMISSION.md](RUST_ASTER_SIGNER_ADMISSION.md), phases 2-3).
+Caller-visible changes:
+
+- **Setup carries the material.** `key`, `secret`, `auth.privateKey`,
+  `secondary_key` and `secondary_secret` reach the provider through the one-use
+  setup channel (raw WASM constructor argument 3, or native legacy setup). Generic
+  options and `exchange.options` keep only the public `auth.userAddress` /
+  `auth.signerAddress`. Native callers passing `asterdex.privateKey`,
+  `asterdex.readKey`, `asterdex.readSecret` or top-level key/secret beside opaque
+  `signing` refs are refused as invalid input.
+- **Setup resolves `apiVersion`.** TS and native setup resolve V1/V3 from the
+  material's shape and send it explicitly; the venue refuses a missing or
+  contradictory version instead of guessing. Keyless V3 callers should set
+  `extra.asterdexApiVersion`, since nothing inferred admits a keyless account.
+- **Encodings.** V3 wallet keys are trimmed hex, with an optional `0x`/`0X`;
+  V1 HMAC secrets stay byte-exact UTF-8. A whitespace-only key is absent.
+- **Read agent.** With an `auth.privateKey` wallet, the read agent presents its
+  own key and signs with the primary wallet's provider ref (one copy, one
+  revocation point), as before. Otherwise it signs with its own secret.
+- **Main-wallet hint.** The V1 "API Wallet keys require the Main Wallet Address"
+  refusal now happens at setup, with the same message.
+- **Read agent errors fail closed.** An empty read secret, or a V3 read secret
+  that is not hex, refuses setup instead of failing only the signed reads.
+- **`fetchAccount().userId`.** Without an `accountAlias`, V3 falls back to the
+  public signer address, as before. V1 previously fell back to the API key; it
+  now uses the trusted primary `localSigner.primary.stableId` (WEEX precedent)
+  and otherwise fails typed (`unsupported`). It is never the key and never
+  empty. claude-6mg5na confirmed tealstreet-next neither reads nor keys on the
+  Aster `getAccount` userId (DB, dedupe, cache, telemetry), so NX needs no
+  caller migration.
+
+
+## Managed subscription handoff before native reads
+
+OKX private reconnect account refreshes begin on a subsequent engine ingress
+following the handoff of their required subscription frames. The shared
+`set_socket_interests_then` API binds native Pending work to the current epoch
+and exact required interests. It waits for every paced batch and outstanding
+socket signature before arming an ordinary engine timer after final fencing.
+This establishes host handoff order; it promises neither peer acknowledgement
+nor a later JavaScript event-loop turn. Custom hosts must process the returned
+actions in order and deliver timer events through ordinary engine ingress.
+
+A committed removal or wire change cancels the dependent work. Unrelated
+additions preserve it behind the new revision; a refused replacement preserves
+still-needed work on the unchanged committed revision. Retirement, expiry,
+stale timers and duplicate delivery cannot issue its read. The callback has no
+borrowed HTTP delivery, command-entry, order-response or Plan activation token;
+reads retain their existing admission, signing, timeout and completion rules.
+
+The JS host removes inline-fired timer handles and ignores callbacks belonging
+to a cleared or superseded timer arm. Bitunix keeps its existing legacy socket
+boundary and its remove-before-master obligation.
+
+
+## WEEX ordinary trading: complete managed Plan
+
+The ordinary placement/cancel/amend/leverage/margin/mode pipeline now enters
+through genuine Preflight authority, admits its entire native serial sequence,
+and releases only through the existing primary dispatch recipe and shared
+Prepare/Bind/Claim path. Each native call retains 20s and one attempt; eight
+serial placement lots can complete over 152s inside their 160s Plan. No write
+retries or caller-side key selection were introduced. History/account/public
+callers and their temporary generic sender remain separate migrations.
+
+Accepted native IDs survive subsequent provider, refusal, transport, malformed
+ACK or expiry failures through the engine journal. Native code 40015 is a system
+error and remains Unknown, including when an old fixture's message says
+insufficient balance. Unlisted codes do not prove refusal. HTTP 408/5xx use the
+engine's typed Unknown reason, with native decoding/publication fenced. Two
+existing classification assertions were updated under overseer approval;
+payload fixtures are unchanged.
+
+CancelSymbolOrders still attempts its separate ordinary and algorithm families
+after an ordinary provider refusal or transport failure: exact failed-call
+settlement advances the Plan, and its journal retains the earlier NotSent or
+Unknown fact. It never retries either failed call. HTTP 408/5xx still terminate
+through the core before ordinary callbacks; no local continuation bypass exists.
+
+Late metadata contains bounded native client/cancel identities. Late replies
+remain nonpublishing and cannot produce a second terminal; native Store
+publication stays with authoritative active account/reconciliation reads.
+An immutable late reducer cannot also update WEEX native tombstone/freshness
+state, so freshness-aware late publication remains explicit follow-up debt.
+
+The inventory shrinks exactly 51 ->46 occurrences (42 -> 38 entries), with
+trading.rs 5 ->0: two numeric completions plus three conservative macro matches.
+No other venue inventory, shared checker, allowance or signer source changes.
+
+
+## Bitunix public REST Read authority
+
+Markets, tickers and FetchCandles use shared managed unsigned HTTP with a20s
+lifecycle bound covering preparation and queue time. Public route and exact
+production/testnet headers are preserved; WebSocket behavior stays legacy.
+Unclaimed, stale or expired replies publish no rows or successful completion;
+engine expiry may emit the original command's one typed Timeout failure.
+Candles retain their native interval/query/limit precedence, seconds timestamps,
+quote volume, permissive successful code coercions and row order without local
+truncation. Admission, preparation and timeout failures are typed; unsent work
+can carry NotSent. Shared read classification owns failed-response kinds/retry.
+Discovery keeps native rate floors (429 Retry-After15s versus business10005/6
+60s); auth/refused failures log a diagnostic, leave the seed unready and schedule
+no retry. Recovery requires fresh caller-owned initialization. Public auth
+failure spends no private auth budget after actual1923. No private P0#33 closure,
+signer readiness or managed socket claim. Exact inventory18->10; only8own sites.
+
+### WEEX synchronous local history Read terminals
+
+WEEX Futures keyless Fills, OrderHistory and Income retain exact `[]` before
+private input validation. Client-order lookup remains unsupported. Invalid
+family bounds and income/list budgets retain the existing messages, ordering
+and unclassified Read errors. These seven local terminals now require genuine
+engine command Read admission: shared capacity and invalid clock policy emit
+one correlated typed refusal without a financial outcome. Admitted terminals
+create no HTTP, signer, timer, Store mutation or history marker. Remote history,
+its credential selection and paging retain their existing paths and wire bytes.
+
+### WEEX FetchAccount initial Read authority
+
+WEEX account identity validation now requires genuine engine Read admission for
+both its local refusals and its signed accountConfig GET. Shared capacity or an
+invalid request clock produces one typed correlated Read failure without the
+old numeric CommandError fallback or a financial outcome. Admitted native
+refusals keep their validation order, exact messages, metadata and checked
+CommandError-before-CommandFailed delivery, including the existing missing
+stableId Unsupported/NotSent result. Valid reads keep the selected primary or
+secondary GET signer and exact native wire; the returned userId remains the
+trusted primary stableId. Account state, polling and reconciliation stay intact.
+
+
+## BingX synchronous history terminals acquire Read authority
+
+Keyless private history and credentialed Fills without a symbol still return
+exact []; keyless precedence, unsupported client lookup and invalid normalized
+range messages remain native. These four local exits now require genuine Read
+admission without a transport credential. Invalid entry clocks and full Context
+capacity emit one typed Read refusal (no financial outcome), with no provider,
+HTTP, timer or Store effect. A refused entry never emits a second numeric reply
+or retires an unrelated pending owner. Completed local command IDs remain reusable.
+Remote history selection, page geometry, signing, streaming and native finalizers
+are unchanged; this slice does not claim managed remote history adoption.
+
+## Backpack transitional dual custody (remove before master)
+
+The Backpack registry arm installs a provider copy of the configured API key
+and Ed25519 seed, and passes its identity to the venue for managed trading.
+Engine options still hold the raw key and seed, but only for the unadopted
+account-read and private-WS paths ([RUST_BACKPACK_SIGNER_ADMISSION.md](RUST_BACKPACK_SIGNER_ADMISSION.md),
+option B, approved by claude-ddi2il).
+
+- A malformed or non-32-byte base64 seed is now refused at construction, typed
+  invalid input ("Invalid Backpack base64 seed" or "Backpack Ed25519 seed must
+  be 32 bytes"). Such an account now gets no engine at all, public data
+  included. Previously it posted CONFIG_INVALID at account start and kept
+  streaming public data. This is deliberate (R3).
+- TS construction is unchanged: `dispatchSigning` is off for backpack.
+- External signers and injected refs are still refused for backpack.
+- This must be removed before master. It ends when account reads, private WS
+  auth and repair adopt the provider (codex-hcmq3f). The raw fields are then
+  dropped from venue options.
+
+## Backpack managed foreground write results
+
+Foreground place/cancel/amend/leverage uses shared Plan custody, send-time
+provider signing and one journal terminal. A failed explicit cancel no longer
+returns success; optional child failure returns a failure with all accepted IDs.
+A malformed or partially failed Pair retains correlated IDs as partial evidence;
+missing acknowledgement rows do not invent total or failed-index counts.
+Unlisted native errors and undocumented HTTP statuses cannot prove refusal.
+
+A delivered 408/5xx currently stops the batch as Unknown, preserves native
+code/message and prior IDs, and retires unsent legs: reconcile before resending.
+Restoring native independent optional-child continuation remains OPEN until the
+shared independent_calls policy is available and adopted. Each attempt now has
+an explicit 20-second managed bound; the root is derived from declared steps.
+
+Callers preserve partial IDs and reconcile uncertainty before retrying. A typed
+pre-send refusal restores only unchanged optimistic cancellation state. Late
+replies have bounded correlation and no Store or new-terminal authority. Native
+cancel/leverage empty-object acknowledgements remain accepted; malformed JSON
+cannot prove a successful managed acknowledgement. Legacy internal repair keeps
+its original response behavior.
+
+The native out-of-band Ed25519 cancel proof uses a fixed independent signature
+and remote-only key sentinel, with no HTTP before Signed. SDK/browser signing,
+registry admission, account/startup/session presentation and internal repair
+signing remain OPEN. Raw legacy credentials alone do not admit a managed write;
+a trusted identity is required and missing admission fails before write I/O.
+
+Managed Backpack write admission and window selection use only the trusted
+identity and Options. The delegated cancel proof uses a venue with no raw key or
+secret. Account/startup remains a separate legacy scope. Automatic trigger repair
+still uses that legacy account signer; identity-only mode gates it before job
+creation/I/O and reports that managed account signing is pending. An owned RED
+pins the repair dispatch obligation for the next account/background adoption.
+
+## Backpack transitional SDK custody (owner ruling, 2026-10-24)
+
+Authorized admission preserves current account/private-WS behavior while trusted
+setup supplies a provider and opaque identity for managed foreground writes. Raw
+material remains only in the unadopted legacy account/WS scope, temporarily beside
+the provider copy. Managed writes have no raw/eager fallback. dispatchSigning
+remains off and TS setup is unchanged; SDK/browser remote readiness stays open.
+
+This is a remove-before-master obligation owned by codex-hcmq3f. Account/WS and
+legacy account-repair adoption must remove retained raw material, end dual custody
+and complete ref-only admission. The admission implementation is separate work
+owned by claude-m26ps4; this ruling alone claims no SDK availability or merge.
+
+## Binance identity local refusal custody
+
+Binance USD-M and portfolio-margin `fetchAccount` preflight refusals use genuine
+engine Read command admission before publishing a result. Missing, disabled or
+incomplete credentials retain their existing message and one correlated
+diagnostic followed by one terminal when admission succeeds. If the engine
+context registry is full, the engine instead emits one Internal failure,
+`Engine request capacity reached`, with no extra diagnostic or transport.
+These Read failures carry no mutation outcome.
+
+Local identity refusals release their Read ownership immediately, including
+repeated calls with the same command number. They do not issue HTTP/signatures
+or mutate account snapshots. Valid identity reads retain the selected signer,
+request bytes, routes and `userId` shape. Spot and COIN-M identity remain
+capability-refused before venue dispatch.
+
+
+## Hyperliquid whole-family managed socket lifecycle
+
+Hyperliquid perps, standalone spot and merged spot accounts use one managed
+socket for their public and private topics. Connect10s, idle45s, ping15s and
+native retry/JSON behavior remain unchanged. Duplicate opens and retired or
+idle-expired ingress cannot replay subscriptions or publish financial/market
+data, even when a watchdog callback arrives late. Shared/Disabled public-feed
+policy still permits native private traffic while suppressing direct public
+subscriptions and publication.
+
+For an actual private subscription obligation, the complete private-then-public
+frame batch is handed to the host before a subsequent ordinary timer ingress
+starts the native account/spot refresh. This moves refresh HTTP after the public
+frames compared with the earlier private/HTTP/public opening trace; it promises
+host handoff ordering, neither peer acknowledgement nor a later JavaScript turn.
+Custom hosts must dispatch returned actions in order and deliver timers through
+normal engine ingress. Mode resolution still synchronously clears its own timer.
+Shared subscription capacity refusal reconnects through the native backoff;
+mode-completion intent survives refusal and retirement until a fresh handoff
+transfers its spot refresh to the native read owner. Stale or duplicate wakeups
+cannot consume or repeat that work. Final book unsubscriptions retain native
+l2Book-before-bbo order and the five ordered spot depth variants.
+Refreshes with no private frames (not open, unresolved mode or no private user)
+retain their native behavior instead of waiting for nonexistent convergence.
+
+Book/candle refcounts, spot depth variants, account snapshot/revision guards,
+HTTP request and signer formats, history and cached lookup/candle results retain
+their native semantics. A stale handoff cannot start a refresh on a retired feed.
+Bitunix retains the separately tracked legacy boundary under Sam's decision.
+
+## Phemex unsigned public-trades request custody
+
+Phemex fetchPublicTrades uses a managed public Read when both constructed
+credential containers are absent. Its original 20 s command deadline includes
+route preparation and the existing rate-limit pause. A pause wake after that
+deadline fails typed Timeout without sending; it releases the native active
+history slot. Host setup and network failures retain their typed kind and
+venue metadata without credential-auth evidence. Initial Read admission has
+outcome None; pre-release route refusal retains the shared NotSent outcome,
+while released network failures retain outcome None.
+
+The one-response snapshot keeps the native URL, unsigned headers, tuple codec,
+occurrence-based duplicate identities, stable descending sort and output limit
+(default100, clamp1..200). More than1000 tuples or any malformed row rejects the
+whole page; no accepted prefix or incomplete marker is published. Direct and
+streamed responses validate exact delivery custody before staging, completion
+or the common429 pause update. Expired/duplicate input cannot finish a reused
+command or pause its replacement. Rare history does not mutate live account data.
+
+Credentialed public trades retain their existing signed route and wire contract,
+including public_data_only and secondary-only configurations. Private reads,
+identity, income, trading, signing and socket behavior remain on their current
+paths. Those consumers still require the inventoried shared legacy funnel.
+
+## Selected managed signed Read helper
+
+The engine offers one selected-identity Read composition for genuine command
+entry and Background reads. Selection, opaque identity, slot, egress and account
+evidence stay coupled across the original Context generation and any permitted
+physical retry; method does not choose credentials. Timeout, pacing and retry
+remain explicit native declarations. Entry rejection is already terminal; queue
+or retry refusal preserves its exact error and original pending/wrapper. Missing
+command credentials use terminal-only local Read admission, with optional native
+diagnostic before the sole typed failure and no I/O. Caller codecs still own
+publication, completion, native error tables and body interpretation.
+
+This additive engine seam does not migrate BingX/WEEX issuers in this PR; their
+original native capacity assertions remain RED on the separately held consumer
+branch. It introduces no new NX/Agent caller timeout or cancellation behavior.
+Pre-issued external Contexts, Plan/Slot admission, writes and WS remain outside
+this API. G2 owns the separate trusted subject/config-generation retirement gap.
+
+## OKX dispatch signer adoption (draft; CI evidence pending)
+
+This proposed family change covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`.
+Native HTTP and private/business WS stage canonical work through the shared
+engine signer. Trusted setup consumes primary/secondary credentials before
+venue construction; generic options carry opaque identities, not secrets or
+passphrases. Native ordinary private GET uses secondary when configured;
+ordered writes, client-ID lookup and both WS login channels use primary.
+The primary passphrase is required for private accounts. An absent secondary
+passphrase inherits the primary provider ref; explicit empty is rejected.
+
+The #1714/#1728 worker/bootstrap requirements apply: provision the provider in
+the engine-owning realm, including rotation/reload/disposal, rather than copying
+sanitized `exchange.options`. Public/private readiness must use construction
+metadata. No new persisted account-ID mapping is introduced. Live/demo/EEA roots
+and proxy/CORS requirements remain as documented in the OKX integration guide.
+Typed signer refusal before the first write is `notSent`; earlier accepted
+bracket effects retain the existing aggregate outcome. Provider refusal cannot
+mean lookup absence or an empty completed financial snapshot.
+
+The draft now consumes actual #1757 and #1763. Browser `signHttpRequest` and
+`signWsAuth` use the shared owned provider without constructing a TS OKX venue;
+only the standalone request serializer survives deletion of TS venue classes.
+Keyless `remoteSigner` is declared for all four aliases. Its existing external
+wire is unchanged: each alias keeps its own label, Base64 MACs and WS
+`extraData.timestamp` as integer seconds derived from prepared work. The
+primary-only external wire cannot select a secondary identity: a native read
+requiring that identity refuses before callback/I/O, never silently uses primary.
+Hosted capture itself signs with primary even when secondary is configured.
+
+Private `PayloadSigner` remains typed `unsupported` / `notSent` at setup,
+including when a local secret is also supplied. The TS OKX interceptor never
+invokes that callback, so this does not remove a working combination. RemoteSigner
+wins when both callbacks are supplied, with no local or payload fallback.
+Passphrase material is separately provisioned into trusted Present-only provider
+custody; neither generic options, the external wire nor callback receiver retains
+it. Browser/worker providers must be provisioned in their executing realm.
+
+Native and SDK controls are passing; actual-WASM hosted/native-login tests and
+full CI/replay proof are pending. This section describes the proposed contract,
+not a landed or live-capture claim. [Family plan](RUST_OKX_DISPATCH_SIGNER.md),
+[landed shared presentation](RUST_HOSTED_SIGNER_PRESENTATION.md).
+
+### OKX caller adoption: leverage, config read and trade entry (slice 1)
+
+This covers all four OKX aliases. [Plan](RUST_OKX_CALLER_ADOPTION.md).
+
+- **`fetchLeverage`** is admitted as one command Read before any refusal. It
+  then sends one managed signed GET using the read key when configured, else
+  the primary key. An unanswered read fails once with kind `timeout` at the
+  shared 20 s deadline. A late reply publishes no leverage and adds no second
+  terminal. More than 256 outstanding managed reads give one typed capacity
+  failure before any HTTP; an answered read frees capacity. Provider refusal
+  stays one `notSent` failure.
+- **The startup config read** is a Background managed Read with no retry. An
+  unanswered read ends at the shared 20 s deadline and enters OKX's existing
+  startup backoff, so it is re-sent one jittered backoff step later. It no
+  longer stays in flight forever. 50113 counting, documented key rejections
+  and the 30 s configured poll are unchanged.
+- **Refusals are unchanged.** `unknown market`, `OKX leverage requires
+  credentials`, `Only cross mode is supported`, `OKX account is not ready` and
+  planning `invalidInput` refusals keep their text, kind and outcome. The
+  trade refusals stay `notSent` through a terminal-only Mutation owner and
+  leave no order lock behind. A duplicate active command ID is refused by the
+  engine before OKX sees it, so OKX's own "command is already running" text is
+  gone.
+- Both reads now emit `ManagedHttp` preparation, as Binance, BingX and WEEX
+  already do. The demo `x-simulated-trading: 1` header comes from the
+  recipe's unsigned-header declaration. Writes, history, candles and socket
+  login are unchanged.
+
+### OKX caller adoption: fetchCandles (slice 2)
+
+This covers all four OKX aliases. [Plan](RUST_OKX_CALLER_CANDLES.md).
+
+- **Bounded by one deadline.** Candle reads stay public and unsigned, with
+  the same URLs, limits, history fallback and row shape. They are now managed
+  public reads. The recent page and the history fallback share one 20 s
+  budget per command, so the fallback gets only what is left of it.
+- **Soft-empty on any post-send failure.** A venue error, HTTP error, bad row,
+  transport failure or timeout still gives one error event and then an empty
+  `[]` result. An unanswered read ends with the error event `HTTP request
+  timed out`. A late reply after the result is ignored. If the history
+  fallback cannot be admitted (capacity), the soft result applies, because
+  the recent page was already sent. More than 256 outstanding managed reads
+  are refused with one typed capacity failure before any HTTP.
+- **Pre-send deadline is hard.** If the host never finishes route
+  preparation, nothing is sent and the deadline gives one typed failure
+  (`HTTP request timed out`, Timeout, NotSent) with no `[]` result.
+- **Refusals are unchanged.** Unknown market still answers `[]`. Invalid
+  bounds and unsupported bars keep their text, with no kind or outcome. Live
+  candle subscriptions are unchanged.
+
+## Public derivations through the signer (P4)
+
+The engine signer gains two non-secret operations, `PublicAddress` and
+`PublicKey` (`RUST_SIGNER_PREREQUISITES.md`, "Public derivations (P4)").
+No venue uses them yet; the Hyperliquid, TxFlow, GRVT and Polymarket
+conversions adopt them. Caller-visible changes:
+
+- **`IdentitySetupPolicy.signing_algorithm`.** A new optional field declares a
+  slot's signing ref an asymmetric key (`ed25519`, `es256`, `secp256k1Digest`
+  or `starkDigest`). Rust literal constructors must set it, or use
+  `..Default::default()`. The TS `IdentitySetupPolicy` type and
+  `construction-rules.json` gain the optional `signingAlgorithm` key. A MAC
+  algorithm is refused, and so is an aliased secondary that declares a
+  different algorithm from its primary.
+- **Only a declared ref answers.** A provider answers a public operation only
+  for a ref that setup policy declared for exactly that algorithm. An HMAC,
+  undeclared, credential or passphrase ref is refused, and an extra-role ref
+  answers only through its role's algorithm (P6b), so no secret is
+  fingerprinted. `LocalSigner::insert` drops a replaced ordinary ref's
+  declaration. A role ref keeps its role, which is its declaration.
+- **`Operation` gains two variants.** Exhaustive matches on
+  `safe_cex_engine::signing::Operation` outside this repo must add them.
+  Injected providers may refuse them (`InvalidRequest`/`Unsupported`); result
+  widths are exact (20-byte address, 32-byte Ed25519 key or Stark felt).
+- **`safe_cex_venues::fetch_public`.** Trusted setup asks a local provider
+  inline for public values: at most 4 public-only operations, validated first.
+  A host or remote provider gets `Unavailable` and nothing is scheduled. Every
+  answer is checked as a canonical curve value (Stark x, Ed25519 point), and a malformed one
+  is `InvalidResult`. Those accounts
+  supply the value as bound account metadata instead.
+- **`safe_cex_crypto::ethereum::signed_by`.** A shared pre-release check that
+  a low-s host/remote signature recovers to the bound actual signer. Families call
+  it before release; it never compares with expected venue config.
+
+## Explicit request egress (#1833) and Plan/preflight issuance
+
+#1833 captures explicit egress (`Primary`, `PublicCors`, `Direct`) when a
+context is issued through `issue_with_egress` / `Cx::http_context_with_egress`.
+Legs, replacements and retries inherit it. Plan and preflight contexts from
+#1873 are minted directly with `Context::new`, so they have no explicit-egress
+admission. Without one, they derive routing from the credential: no credential
+routes Public, the primary slot Primary, and the secondary slot Secondary.
+Callers must not treat #1873 together with #1833 as Plan-egress support, for
+example for WOO or TxFlow entry. The additive seam (explicit egress on
+Plan/preflight issuance) is owned by claude-m26ps4, plan first after #1833
+lands, with codex-uufub4 reviewing API fit.
+
+## Caller command wait in the engine (#1945)
+
+The WASM host now adds the effective caller wait to every reply command's
+native envelope as `timeoutMs`. The effective wait is the per-call
+`options.timeoutMs` if given, else the configured `rustCommandTimeoutMs`, and
+it is the same validated number that arms the host's own timer. No-reply
+controls send no field.
+
+- **Receipt stamp.** The engine stamps one absolute deadline per external
+  receipt. Native hosts and envelopes without the field get the SDK default of
+  120000 ms, stamped at receipt. Held and deferred commands keep the receipt
+  they arrived with.
+- **Refusals.** A present but invalid `timeoutMs` (null, non-integer, zero,
+  negative or over 2147483647) is refused at decode. A non-finite clock is
+  refused by `handle_command`, with a `JsError` and no dispatch.
+- **Venue behaviour.** Nothing changes until a venue adopts
+  `Cx::command_wait`.
+
+Two separate events, which callers must not conflate:
+
+- **Caller abandonment.** The host timer rejects the promise with
+  `COMMAND_TIMEOUT`. The engine keeps any in-flight transport, and a late
+  native reply is dropped by the host.
+- **Engine-root expiry.** An adopting venue uses the `Remaining` wait as its
+  original Read root and stops issuing work at that same absolute deadline. A
+  Fresh entry that is already expired ends through
+  `reject_expired_command`: one typed Timeout terminal with zero HTTP, timer or
+  Store effects, `NotSent` for a mutation and no outcome for a Read. After
+  admission, expiry ends through the existing Context or Plan authority and
+  never claims `NotSent`.
+
+Raising a caller's timeout lengthens an adopting venue's root but never
+renews it. Plan consumers are not capped by the caller wait until the
+separate receipt-cap seam (#1949) lands.
+
+## Opt-in Read Plans retain the caller receipt deadline
+
+`begin_preflight_with_command_wait` opts a Read command into the original caller
+receipt cap before JWT/preflight work. The eventual Plan ends no later than
+that absolute deadline, and still ends earlier when its declared native work
+has a shorter bound. Native page, retry, fallback and per-call geometry are
+unchanged. Later callbacks, stages and retries cannot renew the receipt cap.
+Existing native-only preflight/Plan callers keep their current lifetime.
+
+An absent host timeout receives the SDK default once at external receipt. A
+missing or failed receipt never manufactures another default: genuine Fresh
+admission uses one typed engine Read refusal with no financial outcome. Borrowed
+or spent custody emits nothing. An already-expired own receipt leaves Fresh
+custody for `reject_expired_command(Read)`, the sole initial Timeout emitter.
+Expiry at Plan admission leaves valid preflight failure authority and returns
+TimedOut; adapters use the canonical Read error projection when settling it.
+
+Host listener abandonment and engine Plan expiry remain distinct. Raising the
+configured/per-call wait can lengthen the caller cap, but cannot enlarge a
+shorter native declaration. No transport cancellation, original Read-root cast
+or accepted-prefix recovery permission follows from observing this cap.
+Mutation and execution-owned capped Plans are outside this first slice; native
+mutation/provider errors and their outcome projections remain unchanged.
+
+## BingX FetchAccount selected Read custody
+
+FetchAccount admits its original Read before native eligibility diagnostics or
+signed HTTP. Shared capacity/invalid-clock denial emits one typed failure without
+a native diagnostic or financial outcome. Eligible requests retain the selected
+opaque identity and original 20s/Never Context through managed preparation and
+release; Secondary serves reads only with an eligible Primary, and a saved
+invalid Secondary keeps its native refusal even in public-only configurations.
+The exact GET/query/header bytes and userId codec are preserved. Rare identity
+reads leave live account state unchanged. Network/Timeout metadata now survives
+with the native correlated diagnostic before the single terminal. No history,
+account-poll, trading or socket caller is migrated by this slice.
+
+
+## Shared two-run CPU certification
+
+Every registered replay suite uses the same CPU certification policy. A complete
+public first measurement with only CPU misses below 5% of its existing limits
+requests one separate physical runner. All three CPU objectives must pass the
+arithmetic mean of the two runner-relative normalized ratios. The policy never
+selects the better run or averages memory, correctness or size failures.
+A strict first pass and an existing declared diagnostic result keep their
+ordinary manifest verdict and request no second measurement. Original strict
+reports, diagnostic lists and raw outputs remain unchanged, including FAILs.
+
+The existing `Rust / replay gate (<suite>)` checks certify the decision after
+initial `Rust / replay measurement (<suite>)` jobs. The global planner, shared certifier and final
+checks run even after upstream failure. Each final check requires the successful
+same-run, same-checkout complete output of that shared certifier. The second-run matrix is skipped when
+there is no eligible miss; otherwise it contains exactly the selected suites.
+Consumers of check-rollup metadata must allow that conditional job to be
+skipped, while requiring every final replay check to succeed. Missing, failed,
+retried or ambiguous second evidence fails certification; there is no third
+measurement. A workflow retry cannot add another candidate to the same cohort.
+A separately requested fresh workflow owns independent evidence.
+
+Both measurements use the original sealed source, Node, dependencies, tape,
+compiled JS/WASM and initial loader cache. Runtime or canonical output drift
+fails certification. Private replay workloads and existing diagnostic handling
+keep their strict policy. Build arguments, CPU thresholds and fixtures retain
+their existing contracts. [Policy and controls](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md).
+
+An immutable artifact or completed-log download can recover one TypeError caused
+by UND_ERR_SOCKET. Immutable artifact downloads can also recover one empty HTTP
+200; both causes share exactly two retrieval attempts. Metadata/log empties,
+HTTP refusals, oversized responses and invalid evidence still fail closed.
+Only registered runtime archives use the existing 4 GiB ZIP response bound;
+metadata, logs and ordinary archives retain the 512 MiB response bound. Exact
+size, digest, producer, source, ZIP and restored-runtime checks remain required.
+This retrieval recovery adds no physical measurement and cannot repeat a failed
+second run.
+
+## Engine-owned expiry of caller-wait Read roots (#1945 follow-up)
+
+A venue that admits its original Read root with `Cx::admit_caller_read_root`
+gets a root bounded by the caller's exact receipt deadline. The engine ends
+that root itself at the deadline:
+
+- **Terminal.** The engine emits exactly one strict `CommandFailed` with
+  kind Timeout and no financial outcome.
+- **Nothing published.** Accepted history rows are not published, and no
+  INCOMPLETE marker or native finalizer runs, even when earlier pages were
+  accepted.
+- **Venue.** Outstanding requests are cancelled. Their continuations reach
+  `Venue::read_root_retired`, which runs with no `Cx` and only drops queued
+  work.
+- **Inert afterwards.** Late replies, binds and venue completions through the
+  expired root are inert.
+
+A page timeout while the root is still live keeps the venue's native
+accepted-only partial recovery.
+
+Missing receipts. A genuine command with no receipt of its own (an exhausted
+receipt sequence, a duplicate of a live legacy id, or an unstampable clock)
+is refused once:
+- a Read gets no outcome;
+- a Mutation gets `NotSent`.
+
+No default deadline is ever minted. Callers see a typed failure, not a
+120 s wait.
+
+Adopting venues must complete only through their root and must never use
+numeric `done` or `fail`. A numeric completion after the owner is removed is
+a separate gap that predates this change and is not closed here. Callers can
+distinguish the following:
+
+| Event | Meaning |
+| --- | --- |
+| Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
+| Engine Timeout terminal | The root expired. No further work is issued. |
+
+## Selected caller-wait roots and physical history pages
+
+Signed plain command reads can retain one selected identity, slot, route and
+account-evidence scope across physical pages. The original root captures the
+caller's exact receipt deadline. Each eligible page or native re-send gets a
+fresh Read/Never child capped by that root; a preceding page's shorter deadline
+does not bound the next page. Selection never changes midway through a query.
+
+Root expiry uses the shared strict Timeout terminal without accepted-row
+publication or an incomplete marker. A physical page timeout while the root is
+live retains the shared history caller's accepted-prefix recovery. Queued native
+state retires by exact owner through the shared expiry hook. Consumers complete
+only through their original root and keep their existing retry eligibility,
+paging, body validation and finalization policy. This helper changes no host
+wait, numeric completion contract or native venue issuer by itself.
+
+## TxFlow whole managed socket family
+
+TxFlow uses shared managed feeds for both api-ws and node ws. API is Public;
+node is Private unless public_data_only. Shared/Disabled public-feed policy
+suppresses public sockets/topics while retaining private node financial traffic.
+Both feeds retain receive-before-decode AnyText liveness, native JSON/ping bytes,
+10s connect,30s idle,10s ping and1s-to16s retry bounds. Duplicate/retired/expired
+socket ingress is inert before native publication. Only node retirement clears
+published books and invalidates the account generation/settings/read owners.
+
+Subscriptions represent the final desired set, reconciled against frames already
+returned to the host, with150ms pacing. Transient subscribe/unsubscribe flips may
+coalesce before release. They do not create an unbounded FIFO or a4096-flip close;
+actual retained-capacity refusal remains bounded by the shared core. Unsubscribe
+after an already-returned subscribe still emits the native unsubscribe frame at
+the existing cadence. The final set converges after a burst of flips.
+
+Private opening/reconnect refresh follows the complete desired node batch and a
+subsequent shared released-interest timer ingress. This deliberately replaces
+native HTTP-before-paced-private-frames ordering; it is host-action handoff, not
+peer acknowledgement. The callback selects current native read/revision state.
+Refresh intent survives refusal/retirement and is consumed only by native read
+ownership. Startup and poll reads remain independent; startup consumption prevents
+a later wake from adding a refresh the native early-open path never admitted.
+Public-only mode has no private refresh. A missing private address still fails
+configuration before I/O; the defensive no-address callback remains a guarded
+native no-op. HTTP builders, PublicCors/static headers, financial reducers,
+history, signing and trading retain their existing contracts.
+
+
+### Replay protocol diagnostics at final capture
+
+Replay checkpoints capture comparison state without finalizing protocol
+coverage. Both TS and Rust replay receivers aggregate protocol errors once at
+the logical end of the replay, before correctness-mode memory collection. A
+checkpoint taken before an authentication acknowledgement or the first
+heartbeat therefore cannot permanently introduce an incomplete-lifecycle
+diagnostic into an otherwise complete final result.
+
+Actual event violations remain recorded and appear in the final report. Missing
+final authentication, heartbeat or required subscriptions still fail; an audit
+exception still aborts replay. This changes harness reporting, not native order,
+fill, transport or signing behavior. The tape and declared-failure policy retain
+their existing meaning; a clean intermediate capture does not certify private
+parity.
+
+## Hyperliquid perps history caller-root custody
+
+Perps fills, orders, income, public trades and uncached REST client-ID lookup now
+use one Read root at the exact caller receipt deadline (configured/per-call
+rustCommandTimeoutMs; absent input is stamped120000ms at engine receipt). Each physical
+page gets a20s child at eligible dequeue in the native shared Account FIFO,
+capped by that unchanged root. Missing receipts refuse typed with no default,
+I/O or outcome. These unsigned JSON POSTs retain the same user/vault/application
+subject, Content-Type and transport-preparation obligation. Public Auth* failures
+retain typed metadata without AccountAuth evidence.
+
+At root expiry the engine emits one strict Timeout with no financial outcome:
+accepted rows, INCOMPLETE markers and native finalizers are discarded; late data
+and old queued continuations are inert. A failed page while the root remains
+live keeps native accepted-only recovery, or strict failure if no eligible rows
+were accepted. fetchHistoricalPositions / PositionHistory::FillsSymbol therefore
+reject at root expiry instead of folding a prefix. Lookup keeps native unknownOid
+and symbol-mismatch non-definitive results and untyped codec errors.
+
+Native geometry is unchanged:200 pages per fills/funding stage, up to400 for
+combined income, inclusive timestamp/ID progress, retention notices, sorting and
+limits. Streamed pages reserve120 weight then settle20+ceil(rows/20) in the shared
+1000/min budget (full fills120, full funding45); no whole-walk duration is promised.
+Queued children do not spend their20s before dequeue, but the caller root keeps
+running. Existing cached/invalid/anonymous local lookup and standalone spot
+completion behavior remain unchanged. Uncached public-only identity refusals now
+obey caller-root capacity before their native message; admitted local refusals
+immediately clear their root timer and publish exactly one terminal.
+
+## Bitget native dispatch signer checkpoint (draft; hosted prerequisite pending)
+
+This proposed change covers `bitget`, `bitgetusdc` and `bitgetinverse` native
+execution through the existing engine signer/provider. Production venue options
+contain only opaque primary/secondary identities. Trusted #1738 setup consumes
+material once: private primary passphrase required, missing secondary passphrase
+inherits the primary reference, and explicit empty rejects before startup.
+Ordinary private GETs (identity, metadata, resolve-amend and history included)
+select secondary when configured; degraded balance recovery retains its existing
+primary identity/egress exception. Writes and Classic/UTA private WS use primary.
+Public requests stay unsigned; product, inverse sizing and UTA admission remain.
+
+#1714/#1728 provider bootstrap requirements extend to these aliases: provision
+and rotate/dispose the provider in the engine-owning worker/host, rather than
+copying sanitized exchange options. Use construction/readiness metadata instead
+of `options.key`. No new persisted account-ID mapping is introduced. Missing
+passphrases now fail trusted setup synchronously rather than a later startup
+callback. Native provider refusal does not prove Classic account type or native
+auth rejection. Strict identity/history reads cannot report successful absence;
+a wholly unsent write remains notSent, while existing accepted/resent/rollback
+financial evidence is preserved.
+
+Hosted and keyless admission now builds on the landed shared presentation
+extension; see the next subsection. Passphrase custody stays with the trusted
+provider; no SDK receiver secret, new required external wire field or
+venue-local crypto fallback is authorized.
+[Family plan and proof gates](RUST_BITGET_DISPATCH_SIGNER.md).
+
+### Bitget hosted and keyless remote signing (draft; actual-WASM CI pending)
+
+Browser `signHttpRequest`/`signWsAuth` for `bitget`, `bitgetusdc` and
+`bitgetinverse` use the shared owned provider without constructing a TS Bitget
+venue. Hosted HTTP formatting lives in the standalone `bitget/bitget.signing.ts`
+codec, which the TS interceptor also uses, so it survives deletion of the TS
+venue classes. Hosted capture signs with primary custody even when a secondary
+is configured; without a complete primary the request returns unsigned, as the
+legacy interceptor did. MACs are Base64; the provider presents
+`ACCESS-PASSPHRASE` and the codec sets `ACCESS-KEY`, `ACCESS-SIGN`,
+`ACCESS-TIMESTAMP`, `ACCESS-PASSPHRASE` over the request's broker headers.
+
+Keyless `remoteSigner` is declared for all three aliases on the existing
+external wire: WS login requests keep the hard-coded `exchangeName: 'bitget'`
+label, `outputFormat: 'base64'` and integer-seconds `extraData.timestamp`
+derived from prepared work; signed HTTP preimages keep the alias label. Native
+login JSON keeps its string timestamp. The primary-only wire refuses work
+needing the secondary identity before callback/I/O, never silently using
+primary. Private `PayloadSigner` stays typed `unsupported`/`notSent`: the TS
+Bitget interceptor never invokes it. RemoteSigner wins with no local or payload
+fallback.
+
+The WS-seconds codec is now construction-declared and shared with OKX:
+`wire.extraData: "secondsTimestamp"` requires `wire.secondsSuffix`
+(`{method, path}`; OKX `GET` + `/users/self/verify`, Bitget `GET` +
+`/user/verify`). Native login work is three typed byte parts (seconds, method,
+path) from the engine `seconds_suffix_payload` helper; the remote bridge decodes
+it only against its own family's declaration. OKX keeps its exact concatenation,
+MAC, receipt and external wire. Per-alias actual-WASM hosted and native-login
+tests run in CI only; no live capture is claimed.
+
+## OKX history caller-root custody
+
+All four OKX aliases admit history, income, public trades and client-ID lookup
+through a Read root at the exact caller receipt deadline. The absent host wait
+is stamped120000ms at engine receipt; configured/per-call waits keep their raw
+absolute deadline, and a missing receipt gets one typed Read refusal with no
+outcome or fallback. Native local[]/lookup validation still follows admission.
+
+Each physical page has a20s/Never child minted at its actual native send/dequeue
+boundary, capped by that root. Native100ms orders/income pacing, immediate fills
+archive fallback and EEA product transitions stay unchanged. Ordinary signed
+reads retain Secondary else Primary, client-ID lookup Primary, and public trades
+stay unsigned. Demo headers, exact paths/query bytes and dispatch recipes are
+unchanged. Hosts must perform managed route preparation and final release;
+managed Primary intent uses the host's default primary egress (physical routeNone).
+
+Whole-root expiry is strict: one Timeout with no financial outcome, rows,
+INCOMPLETE marker or soft[]; parked continuations and late DATA cannot resume or
+finish a reused command. Ordinary released page transport/HTTP/parse failure or
+a child-only timeout while the root is live still emits the native command_error
+then soft[] for queries, discarding every prior page. Lookup rejects instead of
+claiming absence. Provider/preparation refusals before release are strict typed NotSent failures.
+Synchronous child/submission refusals are also strict, with the shared Read
+projection (outcome None). Native
+lookup codec errors retain their untyped kind. Serialization errors finalized
+through ReadCompletion use the shared Internal classification.
+
+fetchHistoricalFills, fetchHistoricalOrders, fetchIncomeHistory and its range
+variant, fetchPublicTrades and findOrderByClientOrderId use this bound. Native
+PAGE100, orders cap50, income cap200 per product, EEA SWAP/FUTURES composition,
+decimal ID cursors, sorting, dedup, fee/PnL decomposition and contract conversion
+are unchanged. Plain page-cap/stall results retain their own incomplete notice;
+EEA composite cap/stall still rejects. Only successful native51603 is definitive
+lookup absence. FetchClosedPositions/okxJournal remains its separate unchanged
+source. Discovery still uses the retained legacy list/sign funnel.
+
+## Crypto.com candle and local-history read ownership
+
+fetchCandles uses unsigned Public managed HTTP with one physical attempt and a
+20-second engine deadline spanning preparation and response. Custom transports
+must drive prepare, bind and the final engine claim before sending; this candle
+path supplies no legacy-request fallback. Legacy unsigned
+HTTP relied on the host timeout after dispatch; preparation now consumes the
+same immutable command bound. Expiry/transport failures preserve typed Timeout/
+Network with public-read NotSent. Initial invalid-time/capacity refusals retain
+typed InvalidInput/Internal and no outcome. Native URL/timeframe mapping, raw
+bounds and candle timestamps/order, ignored limit and numeric-string parsing
+remain unchanged. Native HTTP/envelope/row/missing-list errors retain full string
+error fields and auth-health isolation; no public401/403/40101 auth retry is added.
+Undecodable text remains the native stream-list string at200 and HTTP string at500.
+
+Only five synchronous history terminals borrow shared entry and finalize a
+Context. Finite native errors/[] and validation order stay exact; invalid engine
+time or owner-capacity exhaustion gives one typed engine refusal instead.
+fetchHistoricalFills/fetchHistoricalOrders, fetchIncomeHistory/fetchIncomeHistoryRange,
+fetchPublicTrades and findOrderByClientOrderId consumers retain all successful
+native history signing/pagination/coverage paths. Explicitly bounded income
+with caller limit0 still dispatches native HTTP. This is not managed network
+history or signer adoption.
+
+### Crypto.com current shared failure contract
+
+Managed delivered text without the expected list at HTTP200 retains the native
+message and now carries the shared engine Internal kind, with the established
+public-read NotSent outcome. HTTP500 retains its native HTTP-error string.
+This follows the existing typed undecodable-response seam; the adapter does not
+demote the kind to mimic legacy string-only callbacks. The20s Context lifetime
+is explicitly a new admission-through-preparation/response whole-command bound,
+distinct from the old host's physical HTTP timeout fallback. Raw candle t/order
+and malformed numeric-string-to-zero coercion remain unchanged.
+
+### Bitget caller adoption: candles, identity, account reads and trade entry (slice 1)
+
+This covers `bitget`, `bitgetusdc` and `bitgetinverse`.
+[Plan](RUST_BITGET_CALLER_ADOPTION.md).
+
+- **`fetchCandles`** is admitted as one command Read before the interval
+  check. It sends one unsigned managed GET with only `X-CHANNEL-API-CODE:
+  Tealstreet`, prepared with the Public routing intent. The URL, limits and
+  rows are unchanged. Unsupported intervals and post-send failures keep their
+  text with kind and outcome absent and no diagnostic.
+- **`fetchAccount`** is admitted as one command Read. Public-only and invalid
+  read-key refusals happen before any HTTP with the same text and diagnostic.
+  It sends one managed signed GET with the read key when configured, else the
+  primary key. Failure texts and the equal diagnostic are unchanged.
+- An unanswered candle or identity read fails once with kind `timeout` at the
+  shared 20 s deadline; a late reply adds nothing. More than 256 outstanding
+  managed reads, Background account reads included, give one typed capacity
+  failure before any HTTP.
+- **Account reads** (settings probe, positions, balance and order pages) are
+  Background managed Reads with no retry. The degraded balance read keeps the
+  primary key and prepares with the Primary routing intent. An unanswered
+  probe ends at 20 s and takes the existing transport route into Classic
+  detection, unless UTA is confirmed. A probe that was never released
+  (signing or host preparation did not finish) backs off instead and is not
+  Classic evidence. An unanswered balance, position or order
+  read ends at 20 s and the next poll reads again. It no longer latches the
+  poll forever. Classic/UTA routes, backoff, 40009 and rate-limit pauses are
+  unchanged.
+- **Trade entry refusals** keep their text, no kind and `notSent` through a
+  terminal-only Mutation owner, with no lock or queued job left behind.
+- History, writes, discovery and the private socket are unchanged.
+
+### OKX account-cycle reads under Background Context
+
+This covers `okx`, `okxeu`, `okxdemo` and `okxeudemo`. [Plan](RUST_OKX_ACCOUNT_CYCLE.md).
+
+- The balance (`account-position-risk`), positions (each product) and open-order
+  pages (`orders-pending` and `orders-algo-pending`, each product, kind and cursor)
+  are now one managed Background read per page. Each page signs with the read key
+  when configured, otherwise the primary key.
+- An unanswered page ends at a 20 s deadline. The account cycle then reads again
+  on its native retry instead of staying stuck. A long order walk is never cut
+  short, because every page has its own 20 s.
+- URLs, the demo header, row decoding, the balance and positions join, order
+  paging, product order and rate-limit backoff are unchanged.
+
+### OKX discovery under Background Context
+
+The instruments catalogue and ticker seed walks (SWAP then FUTURES) are now one
+managed Background read per product: 20 s, no retry. Public reads stay unsigned
+and keep the demo header. The EEA account catalogue is signed with the read key
+when one is configured, otherwise the primary key. An unanswered read ends at
+20 s and startup discovery retries on its native backoff. URLs, row decoding,
+partial-catalogue rules, the seeded ticker count and the 429 pause are unchanged.
+
+## Lighter synchronous history Read custody
+
+The seven native local history replies (unsupported client ID/income category,
+invalid bounds/native index/market, empty keyless history and unavailable private
+identity) retain native precedence, JSON and messages. They now borrow genuine
+shared Read command admission before publishing, so invalid clocks, full owner
+capacity and reused ownership produce one engine refusal without a financial
+outcome. Both Lighter and Robinhood, on mainnet/testnet, keep the same contract.
+Remote history requests, pagination, authentication and byte-level query/codec
+behavior are unchanged; this slice issues no remote-fallthrough Context.
+
+## GRVT synchronous history Read custody
+
+Seven native local history refusals retain their original validation order and
+error messages: unsupported income, missing session, unknown market, invalid
+bounds, range/empty order ID, client-ID syntax and missing subaccount. Publication
+now requires a genuine shared Read root. Clock/capacity rejection produces one
+typed terminal without a financial outcome. Revoked entry and live duplicate IDs
+preserve the existing owner without a second terminal. Successful local admission
+keeps the original untyped native error. Both networks preserve the same behavior.
+Remote history queries, session setup, headers, paging, completion and codecs
+remain unchanged. This slice issues no Context on remote fallthrough.
+
+## KuCoin synchronous command refusal admission
+
+Eight local futures/Spot refusal sites now acquire their genuine shared command
+owner before publishing the native error. Capacity or invalid-entry refusal can
+therefore supersede that error; duplicates cannot replace or complete another
+owner. Read admission failures carry no write outcome, while Mutation admission
+failures are NotSent. Free-capacity native error text, kind, outcome and validation
+order remain unchanged, including Unsupported/NotSent on Spot's unsupported reads.
+
+No local refusal sends HTTP or uses the signing provider. Spot placement building
+still consumes native UUID entropy before some credential/build errors; supplied
+IDs and later batch errors keep their original order. Valid private/public wire
+paths stay legacy, and KCS steady public events gain no admission work. Successful
+keyless fixed settings remain held for the shared local-setting success seam.
+
+## Bitrue initial local trading refusal admission
+
+Three synchronous trading refusals now acquire their genuine shared Mutation
+owner before returning the existing error. Shared entry refusal can supersede
+the native error, producing one NotSent terminal; duplicate callbacks retain the
+original owner. Free-capacity messages, kinds and credential/public-only ordering
+are unchanged. Refusal creates no HTTP, signing-provider work or Store effect.
+
+The queued trade_next error, native builder/entropy behavior, valid private wire
+and successful SetPositionMode(false) stay unchanged. This does not migrate the
+signer or admit keyless successful settings; that success awaits the shared seam.
+
+
+## Polymarket public reads and local completion (2026-10-24)
+
+Owner codex-hcmq3f; plan RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md. Public `/book`
+and `/prices-history` now use unsigned managed transport, requiring host
+Prepare/Bind/Claim. Their explicit new attempt bound is 20000 ms from selection,
+before preparation; command legs are additionally capped by the original caller
+receipt through landed #1976. Missing/expired receipts use shared typed refusal,
+without a new fallback cap. No retry or pacing is added. Background candle polls
+keep the native five-second schedule and require exact current delivery before
+staging or publishing. Released read failures keep typed kind without a money
+outcome; genuine preparation refusal retains its shared local NotSent fact.
+
+Local read results/refusals and unsupported STP/symbol-amend mutation refusals
+use genuine command entry and Context completion, preserving native JSON/text.
+Keyless mutation refusals now explicitly prove NotSent. Fixed-setting no-op
+SUCCESS is still legacy and remains inventoried pending #1989; no fake write
+fact, credential or Read cast is used. The exact prune is 15 fingerprints /
+20 occurrences. Discovery aggregates (G1), private account/import (P6b), private
+writes/admission/P8 and their legacy inventory remain open.
+
+## Kraken public discovery and local custody (2026-10-24)
+
+Owner codex-hcmq3f; RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md. Futures instruments and
+tickers plus Spot AssetPairs/Ticker now require managed Prepare/Bind/Claim, with
+exact current Background Read delivery before row staging, body decoding or Store
+publication. Spot keeps its existing 20000 ms timeout; Futures adds an explicit
+20000 ms admission-to-attempt-expiry bound, including time held in preparation.
+No retry is added inside an attempt. Existing native discovery backoff schedules
+fresh independent attempts after exact success/failure retirement, and failure
+clears the same attempt's busy state. Stale replies cannot publish or affect a
+new attempt. Background work emits no numeric command terminal or auth evidence.
+
+Selected local Read results/refusals and keyless Mutation refusals use genuine
+command entry and Context completion with native JSON/text/metadata. None or
+expired caller receipts use the cause-aware shared refusal. Fixed-setting
+SetPositionMode(false) SUCCESS stays legacy and inventoried pending #1989.
+Valid signed account/trading/history, separate Spot/Futures nonce domains,
+private sessions, paged Futures candle reads and existing Spot OHLC remain open
+or unchanged. This prune is 17 fingerprints / 19 occurrences; no new signing or
+whole-family custody claim is made.
+
+## GRVT replay protocol coverage at final capture
+
+GRVT replay reports evaluate private-stream coverage at the logical end of the
+lifecycle. An interim observation before authentication acknowledgement does not
+leave missing-stream diagnostics after the valid subscriptions complete. Genuine
+unsubscribed private data, wrong subaccount selectors and missing coverage on an
+active replacement generation remain final failures. Execution identity and
+order/caller-identity differences remain strict account diagnostics.
+
+### Crypto.com replay protocol declaration accuracy
+
+Crypto.com's current private replay no longer declares missing subscription
+errors introduced by observing the audit before the authentication ACK. TS
+requires its four private channels; Rust additionally requires `user.trade`.
+Invalid authentication, subscriptions sent before the ACK and unanswered final
+heartbeats still appear as protocol failures. The remaining execution, hedge
+mode and caller-identity differences retain strict FAIL; this reporting change
+establishes no native financial parity.
+
+### Binance Spot replay acknowledgement diagnostics
+
+Replay checkpoints do not finalize Binance Spot's acknowledgement coverage.
+A signed subscription can therefore be observed before its ACK without creating
+false final missing-subscription or missing-request errors after the actual
+lifecycle completes. Genuine signature, typed-ID correlation and pre-ACK event
+violations remain failures, as do incomplete live replacement generations and
+unanswered final requests. The remaining fill-price, time-in-force, client-ID
+and order-lifecycle differences retain strict FAIL; financial parity is not
+established by protocol reporting.
+
+## MEXC local write refusal custody
+
+Low-level write commands whose native step construction fails retain the same
+CommandError diagnostic followed by the same NotSent failure. Validation still
+precedes missing-key handling. A valid step result without credentials retains
+'MEXC trading needs an API key', AuthInvalid/NotSent, with no diagnostic. These
+two local branches now borrow genuine Mutation entry and settle its Context.
+Successful native queue/sign/async paths remain unchanged.
+
+Invalid clock or full owner capacity produces one canonical typed admission
+refusal (InvalidInput/Internal, NotSent) without the local diagnostic, I/O, timer,
+Store mutation or peer completion. Synchronous settlement releases its own
+capacity/order-lock custody; duplicate live IDs keep the existing shared
+diagnostic and owner. A local missing-key error carries no credential evidence,
+so it no longer increments auth_failures through the legacy untracked-command
+path. This consumes the existing shared custody rule, with no venue counter.
+SDK placeOrder(s), cancellation/amend and setting callers keep existing validation
+and dispatch choices; this entry describes low-level refusal behavior and adds
+no new SDK calls or successful write capability.
+
+## KuCoin Spot fixed-setting local success
+
+SetLeverage still ignores the requested value and returns `[]` after storing
+leverage/buy/sell 1 through the original Store::update_setting (including its
+unknown-symbol default insertion). SetMarginType and SetPositionMode remain
+successful `[]` no-ops, before credentials, including public-only/keyless setup.
+The shared LocalSetting seam now refuses expired/sub-ms waits or exhausted
+command-owner capacity before projection and success; there is no numeric
+fallback or duplicate terminal. Duplicate live ids retain their original owner
+and diagnostic. No transport, signer, timer, Context or journal is added.
+
+## Bitrue local one-way setting completion
+
+SetPositionMode(false) still returns `[]` and stores hedged=false before
+credentials, including public-only/keyless setup and missing or unknown symbols.
+The shared LocalSetting seam now refuses exhausted command-owner capacity and
+expired/sub-ms waits before that projection or success. It adds no Context,
+HTTP, signer, timer or journal. Duplicate live ids retain the original owner
+and diagnostic; SetPositionMode(true) retains its Unsupported/NotSent refusal.
+
+## WEEX account-cycle reads use Background authority
+
+WEEX's recurring balance, positions, normal/algo orders and account/symbol
+configuration reads now use the shared managed preparation and final claim
+with one Background Read Context per physical request. Credential selection,
+sorted query bytes, streamed row shapes, snapshot joins and native revision
+fences are preserved. A paused continuation admits its fresh 20-second Context
+only at eligible dequeue, with no transport retry or re-sign.
+
+Provider/preparation refusal retires the physical Context and follows the
+native failed-read path without auth evidence or deactivation. A physical
+Timeout or transport failure retains last-good snapshots and permits a later
+poll; native settings backoff still independently holds the configuration reads.
+Exact Background delivery is checked before row decode and publication, and
+stale cycle/seed deliveries have no snapshot or credential-auth side effects;
+429 still preserves the native global pause for other reads.
+No command completion, metadata group, history or trading policy is changed.
+The remaining legacy shared signing helper and STAGING entry stay for their
+other callers; this semantic caller conversion has zero lexical inventory delta.
+
+### Bybit cancel by symbol-qualified refs
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `cancelOrdersWithSymbols` on any Bybit variant | Typed `NotSent` `unsupported` before any request (was accepted and never finished) | Use `cancelOrders` with order ids. |
+
+## Flat-position realized PnL evidence
+
+Replay comparison includes flat-position realized PnL only when the producer
+reports a finite value. Native unavailable NaN and TS absent/null values produce
+no flat-PnL evidence row. Actual zero, losses and profits remain comparable,
+including the existing numeric-string conversion; losing or changing actual PnL
+still fails comparison. This corrects shared replay evidence without changing
+venue account state or the native frame's unavailable-value encoding.
+
+## Paradex public Read refusals and Lighter catalog custody
+
+Paradex candle requests keep unsupported-interval-before-market validation and
+native messages. Their two immediate refusals now require a genuine Read root.
+The existing managed public book read uses shared command entry, so clock/capacity
+rejection yields one typed failure with no financial outcome. Revoked entry/live
+duplicates preserve the existing owner without a second terminal. Remote candle
+klines/TradingView fallback, polling, book GET bytes and book schema stay native.
+
+Lighter/Robinhood public startup catalogs now await managed Prepare/Bind/Claim
+and validate their exact Background Read callback before decoding or publishing.
+Their20s budget includes host preparation/claim delay; a delayed custom transport
+can expire before outbound. Each native orderBookDetails/orderBooks attempt has
+its own budget. Native endpoint fallback and shared startup backoff are retained,
+with the old attempt retired before follow-up. No command result is introduced.
+All four deployments keep their headers/body, route, catalog codec and metadata.
+
+## WOO and Crypto.com joined order-snapshot freshness
+
+Rust WOO and Crypto.com retain the last accepted order rows when a regular/algo
+or regular/advanced REST census crosses an accepted native order mutation.
+The shared Store token rejects the entire joined publication before changing
+native algo classification, advanced-list membership or startup fill baselines.
+Accepted ACKs invalidate older reads even when their IDs have no stored copy;
+malformed/refused order responses and leverage/mode operations keep their
+existing acceptance and outcome rules. Successful members of a batch retain
+their fence if a later member fails. Bounded Crypto.com retries keep the original
+read's token and collected regular half, so retrying after an ACK cannot renew
+old authority.
+
+Per-ID WS version/timestamp/terminal fences remain in force: newer live rows
+survive while healthy snapshot peers progress, and snapshot publication does
+not invalidate sibling read tokens. A discarded WOO join waits its ordinary
+account cadence rather than publishing caches or issuing an immediate repair;
+Crypto.com releases its reconciliation cycle and schedules its ordinary timer.
+When capture for a new census is exhausted, no new order census starts; stored
+rows and readiness are preserved. Existing in-flight retries can finish but cannot
+publish exhausted authority. Positions, balances and normal polling continue. Public wire
+payloads, signing, commands/results, IDs and frame shapes keep their contracts.
+No wrapper, SDK, CLI, MCP or server caller needs a new parameter or outcome type.
+
+## BloFin local FetchLeverage Read refusals
+
+Unknown market still precedes margin/mode-not-loaded before credentials, with
+exact native messages and absent kind/outcome fields. Each of these two local
+refusals now acquires its genuine shared Read owner; capacity refusal supersedes
+the native error with one typed Read failure and no write Outcome. No numeric
+fallback or extra terminal occurs. Duplicate live ids preserve their diagnostic
+and original owner. No Store change, HTTP, provider, timer or private credential
+is introduced. Valid signed leverage queries retain their original issuance,
+path, request fields, revision checks, response handling and native retries.
+
+## Polymarket and Kraken fixed settings (2026-10-24)
+
+Polymarket SetLeverage/SetMarginType/SetPositionMode and Kraken Futures
+SetPositionMode(false) adopt actual #1989 done_local_setting. They remain
+keyless Store no-ops with exact `[]` and `null` results, respectively, and no
+I/O. Success is confined to genuine Setting entry and now honors its receipt;
+an invalid clock produces typed InvalidInput/NotSent instead of numeric
+success. No Context, credential, physical attempt or signer readiness is
+created. Kraken true-mode refusal is unchanged. Inventory shrinks by two
+occurrences. See RUST_FIXED_SETTING_ADOPTION.md for the native compatibility
+and NEW-CONTRACT refusal controls.
+
+## OKX reported closed-position caller-root custody
+
+FetchClosedPositions now owns the immutable original caller receipt deadline
+(default120000ms, or the supplied rustCommandTimeoutMs). Each signed page has a
+20s/Never child minted only at its actual native100ms dequeue, capped by that
+root. Keyless and unknown-symbol empty results require genuine Read admission;
+missing/invalid receipts or full capacity can therefore produce one typed Read
+refusal instead of bypassing custody. No local timeout default is fabricated.
+
+Root expiry strictly returns one typed Timeout with no rows or INCOMPLETE, and
+local child admission/submission refusal strictly rejects the root. Physical
+HTTP/transport/live-child-timeout and provider/preparation failure preserve the
+native policy: fail without accepted output, otherwise return only accepted
+rows with owned INCOMPLETE. Shared typed failure metadata is retained on strict
+failure; released Read timeouts have no money outcome. Exact-owner retirement
+prevents late data and native timers from affecting a reused command ID.
+
+Raw OKX rows, Secondary-else-Primary selection behind the primary-required gate,
+wire parameters, PAGE100/MAX100, cursor/cycle/cap semantics and mapper stay
+unchanged. SDK fetchClosedPnl/fetchReportedClosedPnl still catches and reports
+failure then returns[]; fetchHistoricalPositions/okxJournal with report:false
+still propagates it. Recovered results keep copyHistoryCompleteness. This
+retires the Closed funnel consumer with0 direct lexical inventory removals;
+account/discovery/writes retain their shared list/sign sites until conversion.
+
+## Retained command readiness
+
+With the engine's `http-plans` feature, native FIFO commands can park their own
+Preflight during genuine entry and activate it once after a predecessor physically
+retires. They keep their original command generation; waiting creates no request,
+timer or artificial deadline. Final native Plan admission establishes its bound.
+A predecessor's HTTP DATA cannot donate command-entry or response authority to
+the next command. Cleanup returns only an already-parked handle; actual activation
+runs after cleanup, callback exit and the execution sweep.
+
+A ready callback must finish, submit a bounded prerequisite read or admit its Plan.
+An unhandled callback or a selected read with no submitted HTTP fails once with
+Internal. ReadOnly has no write outcome; a truly unissued mutation is NotSent.
+NX consumes that one terminal and keeps any prior uncertain effects for ordinary
+reconciliation. Ready custody cannot submit or retire another command's work.
+Root expiry and preparation refusal wake the successor in the same engine event;
+no unrelated feed event is needed. No host wire or signer capability is added.
+
+While either retained-Preflight readiness or Plan readiness owns the callback,
+Session creation, derived legs, retirement and waiter changes refuse with State
+before reserving IDs or consuming timers/continuations. Session-ready/failed
+drains return empty; session_wait returns its pending unchanged. Read-only
+session_live and the active Plan's own APIs remain available. Ordinary Session,
+socket, timer and startup callbacks retain their existing Session authority.
+
+### Lighter Schnorr signer contract (Lighter P3 part 1)
+
+Plan: [RUST_LIGHTER_SCHNORR_RECIPE.md](RUST_LIGHTER_SCHNORR_RECIPE.md). This
+defines the reserved `Algorithm::SchnorrDigest` and adds its provider arm. The
+Lighter venue still signs eagerly until its admission PR.
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| `SchnorrDigest` result width goes from 64 to **80 bytes** (`s \|\| e`) | none; the variant was reserved and had no callers | reserved, 64-byte group | Lighter ECgFp5 Schnorr over Goldilocks Poseidon2. Payload is 32 entropy bytes then little-endian u64 words; a 40-byte LE scalar key | none |
+| Keys are refused, not reduced | none until Lighter admission | legacy `Signer` reduces a key at or above the group order (Go semantics) | the provider arm refuses zero or non-canonical keys with `InvalidRequest` | behaviour change at admission: an out-of-range key fails typed instead of signing |
+| Crypto `schnorr` feature | WASM family builds | n/a | only a family that signs through the provider enables it; without it `SchnorrDigest` refuses as `Unsupported` | none |
+| `host.d.mts` `'schnorrDigest'` (already in the union) | custom JS host signers | refuse | a host that implements it must use the payload's first 32 bytes as nonce entropy and never its own randomness | none until P8 |
+## L1 wallet role (P6b part 1)
+
+`ExtraKey::L1Wallet` (`l1Wallet`) is the Polymarket L1 wallet: the raw 32-byte
+secp256k1 scalar, declared by family policy (`ExtraKeyPolicy`). See
+RUST_SIGNER_REMOTE_WIRE_AND_IMPORT.md, "P6b part 1". No family declares it yet;
+the Polymarket conversion (#1882) adopts it. Caller-visible changes:
+
+- **Every role names one algorithm** (`ExtraKey::algorithm`): `zklinkSeed` is
+  `zkLinkContract`, `l1Wallet` is `secp256k1Digest`. A role ref signs and
+  answers public operations only through that algorithm. It is never
+  presented, interpolated as a credential, or used for a MAC. Exhaustive
+  matches on `ExtraKey` outside this repo must add the variant.
+- **Primary only.** A policy declaring `l1Wallet` for the secondary slot, or a
+  secondary identity carrying one, refuses setup.
+- **Address.** The wallet address comes only from `fetch_public` with
+  `PublicAddress` on `identity.extra[l1Wallet]`. A wallet-only primary
+  identity (no L2 key or secret yet) is valid pre-import setup.
+- **Types.** The TS `ExtraKeyPolicy.key` union and `host.d.mts`
+  `SigningIdentity.extra` gain `l1Wallet`.
+
+
+## Socket login and native snapshot completion
+
+`register_socket_feed_with_snapshot` declares a private authenticated feed whose
+configured authentication timeout runs from physical connect until the native
+snapshot is accepted. Login acceptance permits the subscription needed to obtain
+that snapshot; it does not remove or renew the snapshot bound. Account ping
+callbacks and queued private one-shot frames wait for accepted login; the login
+frame itself remains permitted. Private one-shots use the shared
+`send_after_socket_interests` custody rather than an unconditional opening send.
+Pongs retain their separate receive-liveness meaning. Existing `register_socket_feed` semantics stay
+the same.
+
+The venue prepares and validates its native snapshot once, then calls
+`complete_socket_snapshot()` before publishing affected Store state. The engine
+requires the exact current managed text callback, physical epoch and receipt
+time; callers supply no feed, socket, generation or clock. Duplicate, retired,
+wrong-scope and borrowed callbacks cannot complete the barrier. Capacity refusal
+retains the pending proof and deadline, so no snapshot commit is authorized by a
+failed completion. A caller-modified timestamp cannot discharge the barrier.
+
+The existing shared Supervisor owns expiry, timers and reconnect. Equality at
+the immutable deadline fences ingress before native decoding/publication, even
+if the host delivers its watchdog late. Hosts use the existing socket actions
+and ordinary timer ingress; no new host message or wire format is required.
+Snapshot completion grants no command, HTTP, signing or new send authority.
+
+
+## Phemex whole-family managed socket lifecycle
+
+Phemex public and private sockets use shared feed identity, admission, interest
+release, liveness and reconnect supervision. Public receive-before-decode liveness
+and native subscription/refcount/depth-seed behavior remain intact. Shared and
+Disabled public-feed policies suppress the public transport while allowing a
+configured private socket and its financial publication. Retired, duplicate,
+late-open or idle-expired ingress cannot decode or publish through either feed.
+
+Private login acceptance and accepted native orders snapshot are independent.
+The private15s connect,12.5s PongOnly idle,5s ping and1s-to16s backoff policy is
+shared. A20s snapshot deadline starts at physical connect and remains live after
+login/pongs until the existing validated orders snapshot completes it before
+Store publication. Positions/accounts-only and malformed snapshots do not
+complete that barrier. Accepted revision-conflicted orders snapshots still do,
+while preserving newer financial state as the native reducer requires.
+
+Opening emits only user.auth999. After accepted login, the shared interest batch
+emits aop_p.subscribe1202 before the retained server.ping1201. This deliberately
+replaces the earlier auth,ping,ACK,AOP order; individual native JSON/signature/
+expiry and RPC identities remain exact. Subsequent periodic pings require
+accepted login and do not grant snapshot authority. No venue-owned socket timer,
+epoch map, retry queue or financial predecoder is introduced. REST account polls,
+reconciliation, HTTP/candle/history callbacks, signing and trading reducers keep
+their existing owners. Bitunix retains its separately recorded legacy boundary.
+
+## Phemex native dispatch signer custody
+
+Phemex native REST and private user.auth signing use the shared provider at
+actual dispatch. Trusted SDK/native setup consumes both credential slots; generic
+venue options retain only opaque identities. Ordinary GET keeps Secondary else
+Primary selection; client lookup and active-order repair keep Primary. Exact
+query/body/header bytes, optional authentication on public reads, and rounded
+60s protocol expiry are preserved. Hosted/delegated signing remains disabled.
+Provider refusal before the first write retains its typed NotSent failure;
+a later refused leg keeps accepted native IDs and cannot report the whole job
+NotSent. Unknown-write repair waits for the maximum engine-observed uncapped raw
+signature expiry across released legs plus5000ms. Private socket order follows
+the approved shared accepted-login contract: auth999 -> accepted ACK -> AOP1202
+-> opening ping1201, including a parked provider. SDK callers must provision
+providers through trusted setup rather than copying generic exchange options.
+### Session-scoped private egress (#1897)
+
+Unsigned requests that carry a login or session token now take the primary
+account egress. Examples are the GRVT API-key login, the BreakoutProp login and
+the KuCoin keyless bullet. They never take the public/CORS route. Host callers
+see a `Prepare` with intent `primary` and no explicit route, as for a primary
+signed request.
+
+This needs no host or tealstreet-next change. A host without a primary egress
+fails preparation typed; it never falls back to public.
+
+**Why `SessionEgress` carries no explicit subject (owner ruling, 2026-10-23).**
+- **Grant.** The engine mints the egress only from a live session. The grant
+  is an opaque `PrivateEgress`, which only a primary `SessionAuth` credential
+  selection yields.
+- **Session.** A session leg cannot move to another session (`issue_session`),
+  and a child cannot swap its parent's egress (`issue_with_egress`).
+- **Engine.** Another engine's session handle or egress-bearing context fails
+  issuer validation.
+- **Slot.** It is Primary only, so a slot cannot be swapped.
+- **Retirement.** `validate_send` refuses a retired generation at issuance and
+  at every send step.
+
+Together these controls make the session generation the subject. Delivery,
+streams and write facts of attempts sent before retirement remain recordable.
+[Design and controls](RUST_BACKGROUND_SESSION.md).
+
+## MEXC unsigned discovery and subscription snapshot custody
+
+Markets, ticker discovery and subscription depth snapshots use unsigned managed
+Background Reads with an immutable 20-second bound per operation. Public route
+preparation and final release precede HTTP. At deadline equality, including before
+host timer ingress, payload rows and stream completion cannot load markets or
+tickers, mutate volume-unit metadata or replace a subscription book. Expired
+responses are discarded before headers reach the venue, so they supply no new
+Retry-After evidence. A still-live operation from an old subscription generation
+retains native 429 pause evidence without publishing stale book data.
+
+Failed preparation, submission, transport and timeout retire their own Context
+and retain native startup backoff or depth resync. The first depth resync remains
+exactly 500ms; discovery keeps its nominal1/2/4-second jittered backoff. The native
+private startup after markets, malformed catalogue recovery, book generation and
+version fences, contract-size scaling and buffer limits remain. Public reads
+carry no credential and publish neither command terminals nor account-auth
+evidence. Existing safe-cex startup/subscribed-order-book consumers require no
+new input; host dispatch uses the existing managed prepare/bind/claim protocol.
+
+
+### Hyperliquid spot candles share managed Read custody
+
+Standalone and merged spot FetchCandles now use the existing perps public Read
+Context: unsigned,20s from command admission, Never retry. Admission precedes
+native interval/market/range validation. Preparation and host claim time consume
+that original deadline; expired or unreleased replies cannot publish candles.
+Native POST/info body, @coin mapping, header order, rows and local error strings
+remain. Existing perps metadata is retained: an unreleased preparation failure or
+timeout carries NotSent; a released Read timeout has no financial outcome.
+No signer, Session, Plan or socket authority is introduced. Six real legacy
+terminal occurrences are removed (Hyperliquid37->31, lib9->3).
+
+## BingX history pages retain the original caller Read root
+
+Remote fills, orders, income and unsigned public trades now require managed
+Prepare/Bind/Claim. One original engine caller-wait root spans all native
+windows, RangeWalk chunks, 200 ms page delays and the single signature resend.
+Each physical child keeps the native 20 s bound, including preparation, capped
+by that root. The caller's configured wait is retained exactly; absence of a
+host override defaults at external receipt, while invalid/missing receipt
+provenance refuses through shared admission without a new venue timeout.
+
+Every native page error still rejects the whole query, even after accepted
+rows: no partial rows or INCOMPLETE marker. Engine root expiry also rejects
+strictly. Shared physical Network/Timeout and admission failures retain typed
+Read errors with no write outcome; unclassified native errors receive the
+bridge's Internal kind with unchanged text. Provider/preparation refusals keep
+their typed NotSent fields and create no account-auth evidence or deactivation.
+The SDK's listener timeout remains separate from engine cancellation/expiry.
+
+GET selection remains Secondary when configured, otherwise Primary; selection
+and opaque identity stay fixed through every page and resend. Native query/body
+bytes, filters, dedup, sorting, limits, page caps and strict truncation remain.
+The existing 100001/signature-verification refusal re-signs once per page using
+a fresh root-bound child, with no new transport retry. Rejected-attempt staged
+rows/errors are discarded before that resend; the old wrapper retained them,
+though normal signature-refusal envelopes have no rows. Exact delivery gates
+and generation cleanup make late responses inert, including after ID reuse.
+Local history replies, account cycles, metadata groups, trading and the shared
+legacy signer funnel remain with their existing owners.
+
+
+### Backpack managed command candle stream
+
+Supported `FetchCandles` uses genuine engine Read admission and managed unsigned HTTP. The exact X-Broker-Id header and native /api/v1/klines query survive preparation/bind/re-preparation; streaming starts only after final claim. One original twenty-second root owns the list, with zero automatic retries. Exact delivery validation runs before row parsing, malformed diagnostics and response/status handling, so expired or reused owners cannot publish rows or complete another caller.
+
+Bounds remain floor-seconds in startTime/endTime, while native candle response timestamps remain milliseconds. Limit is ignored and no local bound filtering is added. Server order, duplicate timestamps, accepted finite negative/zero values, empty-list success and whole-list failure after a malformed row are preserved, together with the native malformed-row diagnostic. Unsupported interval, startup, WS candles, subscribed books, private sessions and history retain their existing behavior.
+
+Initial Read admission rejection emits one typed engine failure without an outcome. Preparation refusal and parked expiry preserve the engine's local pre-release NotSent fact and typed/native metadata; this is an attempt fact, not proof about a whole command's money effects. Released transport/deadline/integrity failures retain their engine kind without a financial outcome; malformed streamed envelopes receive the shared typed Internal failure. Native row/non-2xx error messages retain their existing fields, with no partial successful list. The separate public depth-query NotSent compatibility contract stays in place. SDK worker/hosted error receivers continue to consume the existing structured fields; no upstream deployment is claimed.
+
+
+## Crypto.com immediate trading command custody
+
+Seven immediate trading refusals now require genuine credential-free Mutation
+admission before publishing the native NotSent error. Invalid clocks, missing
+receipts or full owner capacity instead receive the shared typed refusal once;
+duplicate live ownership publishes no replacement native terminal. No native
+warning or command_error is emitted for denied admission. Finite business
+messages, error kinds, validation/key precedence and unchanged Store are retained.
+Local missing-key refusal carries no remote credential-health evidence.
+
+The fixed SetPositionMode acknowledgement uses shared LocalSetting admission
+without a Store projection: both initial hedged values remain unchanged. Its
+warning is emitted after successful completion, rather than before completion;
+failed/revoked admission emits no warning. Callers receive the same [] payload
+for admitted success. No arguments, signed wire bytes or remote write flow change.
+Empty order/cancel jobs and the asynchronous legacy trade terminals remain for
+the later managed-write conversion. Exactly eight request inventory occurrences
+are removed (Crypto.com 21 to 13); credential-selection inventory is unchanged.
+
+## WEEX public order-book query Read custody
+
+`FetchOrderBook` retains the original caller receipt across the native shared
+rate pause and one unsigned managed HTTP call. It needs no credentials, market
+or subscription; native URL/limit, row order, aliases, cumulative base amounts
+and exact version output remain unchanged and never publish subscription depth.
+The physical call retains 20 s, capped by the original caller wait.
+
+A query parked behind a pause now ends at that receipt deadline instead of
+waiting without a venue whole-query bound. Root expiry rejects once with typed
+Timeout and no write outcome; an expired/revoked 429 cannot extend the shared
+pause, whereas live 429 classification and delay are preserved. A local host
+listener timeout alone still does not cancel the engine command. Native
+HTTP/codec errors retain their original fields, including explicit NotSent.
+Released Network failure, engine physical Timeout and engine integrity failure
+keep their actual typed Read cause and outcome None (legacy wrapped host or
+non-UTF8 delivery failures as Network/NotSent).
+Pre-release managed preparation refusals keep typed NotSent and cannot infer
+credential failure from this public route. Stale generations cannot complete,
+pause or otherwise affect a reused command ID or an unrelated live query.
+
+
+## Backpack fixed-setting refusals
+
+SetMarginType and SetPositionMode keep their native keyless Unsupported/NotSent
+refusals ("Backpack only supports cross margin" and "Backpack position mode is
+fixed") for either requested value. The genuine shared Mutation entry checks
+the caller's receipt, clock and capacity before reporting the native refusal.
+An invalid or unavailable receipt reports the shared typed refusal; an expired
+receipt times out without renewing its bound. Duplicate commands retain their
+existing owner's rights and eventual reply. No credential, signing, HTTP, socket,
+timer or Store update is created by these refusals, and the command ID is
+reusable after completion. No fixed-setting success or new venue capability is
+added.
+
+
+## BingX local candle refusals use command Read authority
+
+FetchCandles keeps unknown-market, unsupported-interval and invalid-range
+validation in that order, before credentials, with its exact native untyped
+error on an admissible entry. Only these three local branches acquire an
+immediate credential-free Read Context and finish it through fail_context;
+there is no physical request, signer, timer or auth evidence. Valid signed and
+keyless remote candle issuance and all selection sites are unchanged.
+
+Capacity now supersedes the selected local error with the canonical Read
+capacity refusal. A missing receipt from an invalid/nonadvancing clock rejects
+as Revoked: "Request context was revoked", InvalidInput, no outcome. An expired
+own receipt uses the existing Read Timeout rejection. No default receipt or
+numeric fallback is fabricated. Duplicate live IDs preserve their diagnostic
+and original owner, and local completion releases authority for immediate ID
+reuse. Native absent kind/outcome remain absent; these refusals do not use the
+ReadCompletion string-to-Internal projection. No TypeScript, host, CLI or AWS
+production caller signature changes are required.
+
+
+## Crypto.com public discovery Background custody
+
+Instrument and ticker discovery now use credential-free managed Background
+Reads with the existing 20 s physical bound starting before route preparation.
+Expired rows, including a live streamed prefix ending at the deadline, cannot
+publish markets/tickers, index metadata, warnings derived from failed DATA or
+startup side effects. Shared preparation/capacity/timeout failure returns to
+the existing jittered discovery backoff once; it supplies no command terminal
+or account-auth evidence. Native retry cadence and response/status policy stay
+unchanged, with no new arguments or private signing behavior.
+
+Accepted catalogue publication retires its HTTP Context before issuing the
+next ticker read, then private startup runs while tickers are pending. Ticker
+success publishes quotes before retiring and opening public subscriptions.
+Usable partial catalogues, refresh/index retention, malformed-exposure coverage,
+independent ticker recovery and cached quotes keep their native behavior. One
+legacy discovery sender is removed; key-selection sites remain unchanged.
+
+Public ticker preparation and private legacy HTTP use independent dispatch
+paths. Logical order remains ticker enqueue then private startup; if the public
+route is parked, private HTTP may leave before the ticker's physical release.
+The old eager path emitted the ticker HTTP first. Private startup remains
+independent of ticker readiness/success; no venue defer queue restores physical
+ordering. A raw-action parked-route control pins this consequence explicitly;
+the immediate-route fixture proves its own ordering only.
+
+
+### Orderly initial history refusals
+
+Only the initial unsupported client lookup, unsupported income kind and shared
+argument-validation refusals in history.rs now use genuine Read command entry
+and fail_context. Accepted history requests, paging, signing/selection, nonce,
+callbacks and queues retain their existing ownership. A finite valid entry
+preserves the exact native failure text and Read outcome None; an unstamped or
+expired genuine entry is rejected through the shared initial-entry helper.
+Capacity refusal produces one shared failure, with no numeric fallback or
+physical action. The local helper must never be called from a delayed funding
+callback, accepted page delivery or queued trading work. Inventory: Orderly
+28F/29O to 25F/26O, solely the three documented initial failure fingerprints.
+
+### BreakoutProp login transport (session core): OPEN obligations
+
+The DXtrade password login now runs as an engine session write on the primary
+private egress. Login 401/403 now reaches waiting commands as
+`AuthInvalid`/`AuthPermission` (NotSent) with `AUTH_REJECTED`. It no longer
+arrives as untyped text.
+
+**OPEN, required before any BreakoutProp signer-migrated or remote-ready
+claim:**
+- **Provider presentation:** the password is still serialized into the body
+  at dispatch by the venue (claude-19pt8s).
+- **Remote readiness.**
+
+This slice claims transport and session ownership only.
+[Plan](RUST_BACKGROUND_SESSION.md).
+
+### Kraken Futures managed candle pages
+
+FetchCandles keeps one genuine caller-wait Read root across its native ten-page
+walk. Every eligible page uses a fresh unsigned Read/Never physical child, capped
+at that exact original receipt deadline. Subscription pages use independent
+Background Reads; generation checks still guard both publication and in-flight
+cleanup, with native five-second polling and no logical20s poll-walk cap.
+
+The explicit20s admission-to-expiry page bound is NEW: the old chart packet had
+no request_timeout declaration. It includes route preparation and unclaimed Bind
+waiting, as well as transport. Root expiry is strict engine-owned Timeout with
+no prefix, rows or continuation. Local preparation refusal/timeout preserves
+shared typed fields including localNotSent; released Read failure retains the
+shared projection. No financial effect or new retry is inferred. Existing
+unsigned wire, codec, sorting/duplicate winner, paging budget and validation
+messages remain native. SDK host/outer wait contracts are unchanged.
+
+A walk needs two registry Context slots: root and current physical page. Initial
+root admission reserves only its own slot; if the first child cannot fit, one
+strict typed Capacity/localNotSent terminal retires the root without HTTP.
+
+
+## Backpack unsupported command candle intervals
+
+Unsupported FetchCandles intervals keep the exact native refusal message and
+absent error kind on a valid keyless Read entry. The shared receipt, clock and
+capacity checks run first; invalid clocks and unavailable capacity report their
+existing typed engine errors without a write outcome. Missing or expired
+receipts refuse without renewing the caller's bound. Duplicate IDs retain the
+prior owner's authority and eventual reply. Refusal creates no HTTP, managed
+preparation, signing, socket, timer or Store update. Supported candle intervals,
+query/stream behavior and unsupported WS subscription diagnostics are unchanged.
+
+
+## CPU runtime environment mismatch evidence
+
+Shared CPU runtime restoration reports every differing identity field, including
+nested Node component versions, with the sealed expected and runner actual
+values in deterministic dotted-field order. Identity rejection still precedes
+all restore writes. The existing image, architecture, Node and component
+bindings remain enforced; provisioner versions are outside that identity.
+
+
+## WEEX history pages retain the caller Read root (#2003)
+
+WEEX fills, normal/algo order history, public trades and income now retain the
+original caller receipt deadline across native windows, pauses and physical
+pages. Each physical call keeps 20 s and no retry; signed pages retain their
+selected identity. GET lists remain secondary-else-primary after the existing
+primary-presence gate; POST income remains primary-only.
+
+The engine now ends the query once with typed Read Timeout at root expiry,
+without rows or an INCOMPLETE marker. Before expiry, a failed page recovers only
+nonempty accepted output and its owned marker; an empty accepted prefix or a
+provider/preparation refusal rejects. The default caller wait is 120 s; callers
+requiring longer native walks must raise rustCommandTimeoutMs. A host listener
+timeout does not cancel transport or grant engine detach authority. NX remains
+on its existing TS path until Rust is selected; no executed NX adoption is
+claimed by this venue change.
+
+
+## Crypto.com unsigned PublicTrades caller-root ownership
+
+PublicTrades is an unsigned one-response Read with one immutable caller receipt
+root across native 10ms queue eligibility, route preparation and retries. Each
+eligible dequeue mints a fresh child capped at 20s and at that original root;
+late or reused-owner DATA cannot parse/stage/complete. Root expiry is strict
+Timeout with no prefix, INCOMPLETE marker or renewed work. Preparation/local
+submission refusal is strict; a released physical-child Timeout under a live
+root keeps the native retry path. Shared Context pacing additionally preserves
+the native 10ms physical send gap when independent preparations are delayed.
+
+Production/testnet URL, escaping, empty headers/body, default count25, wire
+count clamp150, caller truncation, duplicate row order and native financial
+fields remain unchanged. A failed streamed page is reset before retry; no
+unaccepted prefix is published. Missing-array streams keep native transport
+retry, whereas malformed rows in a valid array reject the whole page.
+
+Native retry counts remain exact: three released transport retries with 1000ms
+waits; the legacy 40101 hint caps at one retry, including code40001/message40101
+and transport-message40101 collisions. Native code/message fields are carried
+through the shared classifier. The minimum 40101 compatibility predicate uses
+the original error projection: decoded error fields for a valid envelope, raw
+body text for a missing-list envelope, and the transport message for a host
+failure. It is a known follow-up requiring a separate caller-policy ruling
+before removal. Strict route preparation keeps the shared pre-release NotSent
+attempt fact; released read failures and root expiry have no financial outcome.
+It grants no account-auth evidence or mutation rights. Public 40101 errors
+retain typed/native metadata without changing auth health. Private history,
+signing, account/trading reducers and credential selection are unchanged.
+
+## Breakout immediate local command custody
+
+Local candle validation, leverage results, unsupported commands, fixed-account
+setting refusals and initial trade-planning failures consume their genuine
+command entry through shared Read or keyless Mutation admission. Missing or
+expired receipts, invalid clocks and exhausted capacity use the shared typed
+refusal without renewing the caller's bound. No local result stages HTTP,
+signing or timers, and duplicate IDs retain the earlier owner's delivery.
+
+Native messages, JSON, error kinds and validation order stay intact. The local
+unsupported SetStpMode Mutation now reports NotSent, an explicit added outcome
+field; its native message and absent kind remain. Read failures carry no money
+outcome. Physical login, valid candle/trade scheduling, queues, credentials and
+financial reducers retain their existing behavior. These immediate results
+introduce no successful keyless Mutation or LocalSetting path.
+
+
+### Orderly unsupported order controls
+
+Only the first trading.rs field-presence rejection for PlaceOrders containing
+Bybit BBO or TickSize controls now consumes genuine Mutation entry and finishes
+through fail_context. Finite valid entry preserves the exact native Unsupported
+message and NotSent outcome with no Store/queue/IO effects; unstamped/expired
+entry uses shared rejection, and capacity failure has no numeric fallback.
+Retained PlaceOrders passed this predicate unchanged, and push_front only adds
+CancelSymbolOrders, so this branch cannot borrow a dequeued job's entry. Later
+account, queue-full, planning, supersession and job-terminal paths are outside
+this slice. Signing/selection/nonce and accepted write/reconciliation behavior
+remain unchanged. Inventory shrinks1F/1O: base28F29O to27F28O, or after the
+separate #2051 history landing,25F26O to24F25O.
+
+## Paradex config and initial local command custody
+
+Paradex's unsigned `/system/config` GET now waits for managed Prepare/Bind/Claim
+under a 20s Background Read; the bound includes preparation delay. Exact live
+Background delivery precedes config decode, credential installation, private
+socket opening and auth/account I/O. Failure/expiry retires that root and keeps
+the native 2s retry; late/duplicate/unreleased responses cannot initialize it.
+
+Initial unsupported and missing-account branches plus isolated-margin/hedged-mode
+refusals now use genuine command admission before their one native terminal.
+Native strings, validation order, Unsupported kind and existing NotSent metadata
+(including native Read refusals) remain. New clock/capacity admission failures
+are typed once by the engine, with Read outcome None or Mutation NotSent.
+Fixed cross-margin and one-way `[]` successes use LocalSetting entry and honor
+the original caller receipt, without credentials, I/O, Store changes or a write
+journal. Remote signing/JWT/trading/history behavior is untouched. Exact legacy
+inventory: config 1 plus initial terminals 6 removed; Paradex 48 -> 41.
+
+
+## Lighter unsigned FetchAccount identity
+
+FetchAccount now admits one caller-bound unsigned Read before selector validation.
+Its native index/address candidates retain their order and each has its own20s
+physical window capped by the original caller receipt. Shared capacity, clock,
+duplicate and expiry refusals precede native diagnostics. Released transport
+failure or physical timeout can advance to a different native candidate only
+while that exact original root remains live; preparation refusal cannot. Existing
+native status/row/error/referrer semantics remain unchanged. The single checked
+companion diagnostic and command terminal use that root. No new caller parameter,
+credential, Session, signer or private lifecycle activity is needed.
+
+
+## Hyperliquid local settings and schedule validation
+
+Standalone spot1x/cross and merged-spot leverage/margin no-ops still complete []
+without credentials or writes. One-way mode still projects hedged=false; shared
+LocalSetting admission now precedes that Store change and the single terminal.
+These Context-free successes consume only the local command owner transaction,
+not an HTTP Context or write journal. A full command-owner registry, invalid
+clock or caller receipt now gives one shared typed refusal before projection.
+
+Hedged mode, unsupported standalone spot leverage/margin, spot scheduleCancel and
+invalid schedule time retain native precedence, exact messages, kinds and NotSent.
+Each refusal first admits its genuine Mutation owner; shared admission rejection
+supersedes the native diagnostic with its typed NotSent terminal. Schedule time
+<now+5000 refuses; equality and None disarm still reach the unchanged signed path.
+No caller parameter, signing/selection change, valid write, retry or timer is added.
+
+## Command Read-Plan history authority (#2011)
+
+`PlanReadCompletion::from_plan` binds one freshly admitted command Read Plan
+with a retained command receipt cap before any Slot is selected or settled.
+Use `PlanHistoryRows::admit` in exact DATA custody, stage through its exclusive
+guard, then `accept_page` or `finish_with`; standalone public Plan terminals and
+Slot settlement refuse after binding. The guard exposes no Cx accessor.
+
+`admit_failure` requires the exact latest released Network/physical Timeout
+Attempt in its engine callback and a live original Plan. Recovery uses only
+nonempty accepted rows and discards the failed page; preparation/provider,
+logical expiry and integrity failures remain strict. `reject` uses the same
+prepared Plan seal and is inert during that Plan's engine expiry callback.
+No numeric completion, Context-root cast, external finalizer, owner renewal,
+Background/Execution Plan, or native consumer cutover is introduced.
+
+## HTTP pacing sets and signing eligibility
+
+A venue declares primitive floors through `http_pacing()` and optional immutable
+flat sets through `http_pacing_sets()`. `PacingSet { group, constraints }` gives a
+set its own declaration ID; member references name primitive IDs only. Sets share
+primitive release clocks and cannot nest, duplicate members or collide with
+primitive IDs. Engine construction validates and resolves bounded member indices.
+
+A Context's existing `Pacing { group, minimum_gap_ms }` selects one primitive or
+one set. Its outer minimum extends each member floor. For WOO, a set containing
+global100/algo500 with outer0 charges both on algo POST; ordinary writes select
+global100, PUT global200. Ordinary interleaving does not reset the algo clock.
+All bounds pass before one admission; only Released charges all members. Failed
+admission, stale/expired requests and waits consume none. Raw deadlines remain
+immutable through signing waits and route reprepare.
+
+Signed HTTP now retains a prepared resource without invoking its recipe/provider
+while any selected primitive is blocked. Its existing timer wakes at the earliest
+eligibility, route-expiry or physical-deadline boundary. Final Claim rechecks all
+bounds, including releases made by other requests after signing. Hosts continue
+to prepare, bind and Claim through the existing protocol; no wire change.
+Admission paths requiring no pacing must use `SendPacing::validate_zero`, which
+expands registered sets and checks every effective floor, including outer0 sets.
+G2b's owner composes its zero-pacing helper onto this resolver before IDs; this
+section does not claim that unlanded G2b adoption has occurred.
+
+### Kraken Futures unsigned PublicTrades cursor ownership
+
+PublicTrades admits one genuine caller-receipt Read root, retained by shared
+ReadCursorHistory through its native 50-page cursor walk. Every physical page
+uses a fresh Read/Never child from that original root and the existing unsigned
+wire. Exact root/child/Attempt DATA admission precedes codec/progress/staging;
+the physical child retires before a successor. Only the root completes.
+
+The 20s per-child admission-to-expiry bound is NEW (the old raw packet declared
+no timeout). It covers route/Prepare/Bind and transport, capped by the exact
+original caller receipt. It adds neither a logical walk timeout nor a retry.
+Typed preparation/queue failures are strict and retain shared fields/local
+NotSent even after accepted pages. Root expiry is strict engine-owned Timeout,
+with no rows or INCOMPLETE marker. Released Network/physical Timeout under a
+live root and native later HTTP503/malformed DATA preserve accepted-only recovery
+and the owned marker; failed-page staging never appears. First released failure
+retains its typed cause (Network/Timeout), plus the native message prefix.
+
+Unsigned native egress, sorted form, limits, exact IDs/millisecond timestamps,
+row economics, descending sort, deduplication and cursor/stall rules remain.
+No signing, private history, key selection, Spot or candle behavior changes.
+Root plus current child require two Context slots; a child Capacity refusal
+strictly retires the admitted root without I/O or a leaked reservation.
+
+### Receipt-bound stamp floor (dispatch signing)
+
+Plan: [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md). This is an additive engine API.
+No family's stamps change until a recipe opts in.
+
+| Change | tealstreet-next file:line | Old usage | New usage | Impact |
+| --- | --- | --- | --- | --- |
+| `StampFloor` (opaque), `SigningRelease::stamp_floor()` | none | n/a | minted only from a genuine released receipt stamp | none |
+| `DispatchContext::stamp_after(floor)` = `max(0, stamp_ms(), floor + 1)`, refusing past the safe-integer range | Rust venue recipes only | `stamp_ms()` | resend recipes keep stamps monotonic on fixed or backward clocks; `stamp_ms()` is unchanged | none |
+
+StampFloor's opt-in helper also refuses a non-finite current clock before
+clamping and any final stamp beyond the safe-integer range, even without a
+floor. This does not change stamp_ms or opt any venue into the helper. A reused
+floor is metadata only; each consumer must retain its real original owner and
+released-attempt association, and separately obtain genuine resend authority.
+
+## Bitrue dispatch signer and managed bracket Read
+
+Bitrue REST signing now consumes trusted opaque Identity refs through one atomic
+provider recipe. API key bytes, exact body/query bytes, six-header order and native
+recvWindow remain. Selected identity, slot, egress and evidence stay coupled across
+signature and transport reissues; each uses the exact previous release's StampFloor.
+Keyless catalogue remains unsigned on Primary; keyed public-only catalogue remains
+primary-signed. Hosted signing compatibility is not enabled. Provider refusal emits
+no partially signed request and cannot trigger a raw fallback or transport resend.
+
+FetchMaxLeverage captures the genuine caller wait once and derives a fresh 20s/Never
+physical leg per native eligible reissue. Near-20s retries keep the original root,
+selection and deadline; strict caller expiry publishes one Timeout without changing
+limits. Only the original root completes. HTTP500/408 signature errors no longer
+replay an uncertain write. Native one-signature/three-transport budgets remain
+independent. Catalogue/account/coalesced reads, sessions, history and trade-owned
+work retain explicit legacy ownership until their shared owner adoptions; signing
+does not provide Mutation journal/ResendGrant or Plan/history authority. The stable
+legacy request funnel remains a remove-before-master obligation. SDK/NX history
+outer-wait behavior is unchanged by this single command-read adoption.
+
+
+## Backpack initial local history refusals
+
+Backpack rejects unsupported client-order-ID lookup, non-funding income kinds,
+invalid history time bounds and unknown requested markets through the original
+command receipt and a keyless Read Context. Missing or expired receipts use the
+shared rejection causes; valid admission preserves each native message, absent
+kind and absent write outcome. The Read policy has a 20-second maximum, no
+pacing and Never retry. Refusals create no transport or paging work, and retain
+native validation precedence. Supported history requests use their existing
+selection, signing, paging and completion paths.
+
+
+## GRVT unsigned FetchCandles caller bounds
+
+FetchCandles retains the original caller receipt through one unsigned Read Plan,
+with initial plus five immediate transport attempts. The explicit 20 s attempt
+bound (including route, Prepare, Bind and physical transport) and derived 120 s
+logical ceiling are NEW caller contracts: native Candles set timeout_ms=None.
+The original caller deadline always wins; retries never renew it, and a late
+selected attempt has a shortened window or refuses below 1 ms remaining.
+Unclaimed DATA, expired callers and stale attempts cannot publish candle rows.
+
+Status, malformed data and preparation refusals stay strict. Only released
+transport failures or physical timeouts can select a declared Read retry. The
+sixth failure terminates with no seventh request; rows staged by a failed attempt
+are discarded. Preparation errors retain shared typed fields and NotSent. Local
+interval/market/bounds precedence, wire, sorting and native errors are unchanged.
+The public request selects no credentials and waits on no Session or signer.
+All non-Candles preparation failures retain the inherited engine callback chain.
+The second integrator of this slice and #1905 runs its login-specific control.
+
+
+## GRVT unsigned FetchOrderBook Read Plan
+
+Independent public BookQuery now admits the genuine caller Read before market
+lookup. At capacity, an unknown symbol refuses through shared admission where
+the native path previously returned an empty book without I/O. Otherwise unknown
+market keeps its exact empty result through done_preflight. No fake HTTP leg.
+Known-symbol work retains one caller receipt under a single six-attempt Read
+Plan; the new 20 s admission/route/Prepare/Bind/physical bound and derived 120 s
+ceiling replace native timeout_ms=None. Original caller deadline wins, and a
+late retry is shortened or refused below 1 ms without renewal.
+
+Only released Network or physical Timeout can select the next immediate attempt.
+HTTP 408/504 Timeout DATA, rate-limit DATA, malformed snapshots and integrity
+failures stay strict with no transport retry. Native status/codec refusals retain
+Read NotSent and all venue metadata; rate-limit hints stay clamped with no new
+deferral timer. Shared entry refusal is Read outcome none; preparation refusal
+retains typed NotSent. This command neither publishes nor repairs Store books or
+private account/session state. Limit remains ignored, d=50 and native wire remain.
+
+### TxFlow immediate local command custody
+
+Fifteen local occurrences now consume genuine command entry through shared Read
+ownership or keyless Mutation refusal: initial history/candle validation,
+filtered empty income, cached leverage, unsupported book/STP and pre-I/O write
+refusals. FetchStpMode is Read and SetStpMode is Mutation; both keep native
+Unsupported/NotSent metadata. None/Expired caller waits use cause-aware rejection
+without a numeric fallback. Native JSON, validation order, finite-clock messages
+and no-I/O behavior are preserved. FetchAccount remains the shared pre-venue
+capability refusal; its unreachable native arm stays held. Physical HTTP,
+pagination, signed writes, queues, account/socket state and financial reducers
+are outside this slice. Inventory decreases from25 to10; #2031's ticker CPU
+change lands first and must be preserved on actual integration before freeze.
+
+## BreakoutProp options refusal is engine-owned
+
+FetchOptionChain, FetchOptionExpiries and FetchAccountGreeks are refused by the
+engine before command entry, because BreakoutProp declares
+`capabilities.options = false`. The venue's own options arm was unreachable and
+is deleted. Callers see the same result as before: "Options are not enabled on
+this account", no kind, no outcome and no I/O, at any entry clock. Nothing
+changes for SDK or TS callers. See
+[RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md).
+
+## OKX history selected identity retention
+
+History captures the engine-selected opaque identity on its original caller
+Read root. Every signed page queues through ReadLeg with that retained selection;
+it no longer maps a Context slot back into current venue credential options.
+Closed positions consume the existing read_slots declaration with their native
+primary-required policy. Ordinary private history remains Secondary else Primary,
+primary client-order lookup remains Primary, and public trades remain unsigned.
+
+Local empty/refusal/cached results are decided without effects before genuine
+entry admission, preserving keyless precedence and the secondary-presence cache
+guard. They cannot be preempted by a missing-selection auto-refusal. Page100,
+native100ms dequeue, immutable caller deadline,20s children, exact delivery,
+strict root/provider failures, native physical-failure shaping and demo headers
+remain unchanged. No new runtime policy or key-selection path is introduced.
+The credential inventory removes closed1 and reduces history2 to1; the remaining
+history mention is the protected snapshot-presence gate. lib/account/discovery,
+signer/host/engine code and existing fixtures are unchanged.
+Local early answers use a credential-free root: malformed opaque credential
+references no longer override a bad-range, unknown-symbol, empty-fills or cached
+lookup result. Remote reads still require shared selection and credential admission.
+
+## Polymarket unsigned midpoint seed batches
+
+Each unsigned POST /midpoints batch now admits an existing Background Read and
+passes through host Prepare/Bind/Claim. The exact JSON body, Content-Type,
+hundred-token partition, subset/bookless success and native quote overlay are
+retained. Private startup still proceeds independently of midpoint completion.
+
+NEW policy: each batch has a 20-second admission-to-expiry bound, including
+stalled route preparation. Expired DATA cannot decode or publish. Exact typed
+failure cleanup can cancel that operation, advance the next native batch and
+back off the failed offset independently. A fresh retry has its own bound.
+Unissued admission/queue refusal instead backs off that offset without walking
+all later offsets synchronously while capacity is unavailable. A new catalogue
+retires any replaced batch Contexts, fencing their late replies and resources.
+
+Exact Context ownership prevents old replies or host preparation failures from
+clearing a newer retry. Native warning text, retry timing, incremental ticker
+publication and out-of-batch filtering remain. No credentials, signing, command
+terminal, mutation fact or key-selection path is added.
+
+
+## Backpack subscribed-book REST seeds
+
+Subscribed Backpack book snapshots use a keyless Background Read Context with
+a20-second admission-to-expiry bound, no pacing and Never transport retry.
+The native GET depth URL and X-Broker-Id1200 header pass through managed
+Prepare/Bind/Claim. Exact background DATA validation precedes status/body
+decoding and book publication. Each terminal retires its exact Context,
+including snapshots rejected by the native subscription generation fence.
+Native subscriber counts, subscription-before-HTTP order, buffered sequence
+bridging, prices/quantities and recovery timers retain their existing rules.
+Preparation/transport/deadline failures retire the Read and use the existing
+current-generation book recovery; retired generations cannot disturb peers.
+Startup/public-trade streaming, credentials and signed transport retain their
+existing paths.
+
+
+
+
+## WEEX public candle query Read custody
+
+FetchCandles keeps its native live/history endpoint selection, query ordering,
+raw symbol, limit clamps, empty unsigned headers, streamed variable-length row
+decoder, timestamp conversion, ascending sort and serialized output. It does not
+subscribe to candles or publish WS/cache state. Unsupported REST intervals keep
+their native message and absent kind/outcome fields through the genuine root
+before creating the Read completion. Native HTTP, malformed-row and missing-list messages remain,
+with one Warn REQUEST_FAILED for live request failures.
+
+Each query now retains its original configured caller receipt deadline across
+the native shared rate pause. Its unsigned 20-second Never child starts only at
+eligible dequeue and is capped by that deadline. Previously unbounded parked
+queries now reject once with typed Read Timeout at receipt expiry, with no rows
+or incomplete marker. Raising rustCommandTimeoutMs extends the root, not the
+physical call. Host listener abandonment remains distinct from engine retirement.
+
+Exact live root/leg/attempt validation precedes streamed decoding, the response
+reducer and 429 pause learning. Expired/revoked late 429s cannot extend the pause.
+Released transport/physical expiry keeps Network/Timeout and outcome None;
+stream integrity failures keep Internal and their native messages. Shared Read
+completion supplies Internal for previously untyped native HTTP/row
+errors; explicitly typed pre-send failures retain their fields and NotSent.
+Entry admission refusal precedes a native local reply. Stale generations and
+late timers cannot settle reused IDs or alter unrelated live queries. No signer
+or credential-auth evidence is introduced. Legacy TypeScript/AWS behavior stays
+on its existing path until the Rust implementation is selected.
+
+## ApeX managed trade plans (#1891)
+
+Trade commands retain their native successful result bytes, cancellation order,
+client-ID receipts, multipart leverage fields and racing-fill replacement rules.
+Their HTTP requests pass through trusted Prepare/Bind/Claim and provider signing
+at release. Callers using native Options must supply an opaque identity and
+register the same trusted identity with the engine; raw legacy Options alone no
+longer authorize managed writes. Startup/account/session conversion and SDK
+admission are separate obligations.
+
+Released 408/5xx, malformed successful ACKs and unlisted native codes produce
+explicit Unknown failures through the shared classifier/journal. Earlier accepted
+native effect/reconciliation IDs survive a later failure; these include confirmed
+cancellation targets and must not all be interpreted as newly placed orders.
+Only exact native 20016 refusal can earn one resend;
+text containing "sign" and bare statuses cannot. Capability refusal before a
+contract-bearing Amend prevents its cancel too. Local zkLink works through the
+provider; remote zkLink remains gated by P8 (#1926). Native async remote HMAC
+cancel and multipart-setting controls pin independent Node vectors, remote-only
+credential/MAC sentinels and exact timestamp/body/header bytes. SDK/browser wire
+proof and registry admission remain open; local capability fixtures prove neither.
+
+## ApeX Omni signer admission (#2008)
+
+ApeX now signs only through the provider at dispatch
+(`RUST_APEXOMNI_SIGNER_ADMISSION.md`). Caller-visible changes:
+
+- **`Options` holds no key material.** `key`, `secret`, `passphrase` and
+  `omni_key_seed` are gone; `identity` (opaque refs) is the only signing input.
+  Native callers either pass raw fields to the registry, whose trusted setup
+  installs the provider, or inject refs plus a provider. Raw fields beside refs,
+  and refs without a provider, refuse.
+- **The OmniKey seed is the primary's `zklinkSeed` role.** The construction row
+  declares `dispatchSigning` and `setupMapping: apexomni`. TS `LocalSignerSetup`
+  carries the seed as `extra.zklinkSeed`, and `withoutSigningCredentials` drops
+  `omniKeySeed` for every venue. A wrong-width seed refuses setup with the
+  legacy "Invalid OmniKey seed" message.
+- **No secondary.** ApeX has no read credentials, so a supplied secondary
+  refuses setup.
+- **Public symbols are unsigned**, even for private accounts.
+- **Keyless and remote-signer ApeX accounts stay on TS** (`runsOnRustEngine`)
+  until P8.
+- **`sign::request` and `sign::ws_login`** are legacy test oracles taking
+  `sign::LegacyCredentials`; the venue never calls them.
+
+
+### CPU producer step metadata convergence
+
+CPU artifact authentication now waits for every step in its exact completed,
+successful attempt1 producer to become terminal. The command shares at most
+twenty complete metadata inventory refreshes, thirty seconds apart, across all
+artifact bindings, including valid empty step lists. Exhaustion reports the
+run, physical job and pending steps or the explicit empty-inventory cap;
+HTTP refusals, changed identity and retry aliases fail closed. This is an API
+metadata wait, not a replay/measurement retry or a new timing sample. Exact
+upload/checkout windows, ZIP/digest checks, raw observations and final
+provenance validation remain enforced. No venue policy or legacy non-Rust
+production changes. Plan: RUST_CPU_PRODUCER_STEP_METADATA.md.
+
+
+
+
+
+
+## WEEX local leverage refusals use command Read authority
+
+FetchLeverage preserves unknown-market, active shared-pause, then missing-read-
+credentials precedence. Admissible local failures keep the exact native plain
+messages with absent kind/outcome/retry_after; the pause failure remains an
+immediate local refusal, without deferral or a RateLimited classification.
+
+These three branches now require a genuine receipt and credential-free initial
+Read Context, completed immediately through fail_context. Capacity supersedes
+the selected local message with canonical Read Capacity; an invalid/nonadvancing
+receipt clock gives Revoked / "Request context was revoked", InvalidInput and
+no outcome. An expired own receipt uses the sole Read Timeout helper. No new
+receipt default, numeric fallback, signer, transport, timer or auth evidence is
+created. Native absent error metadata is not normalized to Internal.
+
+Existing Read selection remains byte-identical, including Secondary-only use;
+the valid symbolConfig path, signatures, settings response/publication, metadata
+revision fences and managed-setup error branch are unchanged. No Store mutation
+occurs on a local refusal. Duplicate live ownership and immediate ID reuse keep
+the shared engine rules. #1747 metadata writes and all account/trading flows
+remain separate; TypeScript and legacy AWS production callers are unchanged.
+
+## GRVT fixed local settings
+
+Both margin requests and hedged mode retain their exact Unsupported/NotSent
+refusals before credential use. One-way still returns [] and sets Store
+hedged=false without a key or remote call. Shared admission, command-owner
+capacity, invalid clock and caller receipt now precede these native fixed
+results and the Store effect. Shared refusal produces one typed NotSent failure
+with no native fallback or projection; foreground-only capacity is Internal.
+One-way LocalSetting uses no HTTP Context or journal. The two local Mutation
+refusals use keyless20s/Never admission without any physical I/O. No new caller
+parameter, signer selection, remote retry or valid-write behavior is introduced.
+
+## GRVT initial FetchLeverage refusals
+
+Unknown market still precedes missing authenticated account. Both local Read
+failures keep the native text and absent kind, financial outcome, venue code and
+retry hint, including public-only and configured-but-unestablished accounts.
+Shared admission, capacity, clock, duplicate and caller receipt now precede the
+native diagnostic. Shared rejection owns one typed failure with no fallback or
+Store/private side effect: foreground-only capacity is Internal/Read outcome
+None, and invalid-clock admission is InvalidInput/None. Keyless20s/Never Read
+admission completes immediately; it adds no HTTP, Plan, retry or root renewal.
+The valid private request and account/session/signing/queue behavior are unchanged.
+
+
+## GRVT instrument catalog managed Background read
+
+Startup, native Backoff retries and300-second catalog refreshes each obtain a
+fresh unsigned Background Read Context and use managed Prepare/Bind/Claim.
+Native mainnet/testnet POST /lite/v1/all_instruments, body{}, Content-Type,
+r/result streaming, row retention/remapping, leverage rails and synchronous
+Store/metadata/socket/private-start continuation keep their native ordering.
+Every item and final DATA must validate the exact live delivery before mutation.
+Successful publication retires afterward; failure retires before native Backoff.
+
+NEW caller contract: a20-second admission-to-expiry bound covers route
+preparation, held Prepare/Bind and physical I/O. Native catalog timeout was
+unset. Shared context-capacity refusal precedes HTTP and uses the native startup
+failure/backoff path. Unclaimed or equality-expired DATA cannot publish or
+connect. Preparation/integrity/HTTP/physical-timeout failures use the existing
+startup Backoff, without an immediate transport retry or authentication refresh.
+Each later retry or refresh has a distinct root. Shared public-feed mode still
+bounds unanswered catalog HTTP and backs off failures; it only suppresses the
+public socket. The socket-supervision fixture services its REST refresh to keep
+that distinction observable; a separate unanswered-catalog-request control pins it.
+
+DELETION, not adoption: the options refusal arm was unreachable because
+capabilities.options=false rejects FetchOptionChain, FetchOptionExpiries and
+FetchAccountGreeks before command entry. Removing it keeps that exact engine
+refusal and zero venue entry; the existing unsupported arm covers exhaustiveness.
+One catalog sender plus one dead-arm deletion remove two lib inventory sites.
+Credentials, selection, signers, login, private queues and financial reducers
+retain their existing implementations.
+
+
+Backpack FetchAccount owns one genuine selected Read root and a single leg
+clipped to its original caller receipt and 20-second maximum. Exact managed DATA
+custody precedes native account-ID decoding and its one correlated terminal;
+identity reads do not publish live account state. Registry setup supplies the
+real optional secondary identity and one stored native configuration/seed
+validation result, including public-only error precedence. Secondary GET uses
+the primary native window; mutations retain Primary selection. Unadopted account
+and socket paths retain their documented dual credential custody.
+
+
+## TxFlow command candle snapshot custody
+
+FetchCandles retains its actual caller receipt and one unsigned managed Read
+for the native POST candleSnapshot. PublicCors intent and explicit route, JSON
+Content-Type then x-api-version, numeric asset/range body, streamed data and all
+OHLCV output remain unchanged. Initial local validation is separate from this
+physical slice, and subscribed candles keep their existing API socket behavior.
+
+The physical bound is now 20 seconds from admission, including stalled route
+preparation or Bind, capped by the original caller wait. This is a new bound;
+there is no retry or renewal. Exact current DATA authority precedes status,
+envelope, row decoding and command publication. Preparation and transport
+failures preserve their actual typed fields through the original root;
+precommit NotSent is not a released financial outcome. Late callbacks cannot
+retire a reused command generation. Native discovery, account/history and write
+senders remain; only three command candle terminals are removed (25 to 22 on
+this base, or 10 to 7 after the separate local-custody slice lands).
+
+## Independent Mutation Plan gateway failures
+
+PlanPolicy.independent_calls defaults to false at existing admission sites. A
+Mutation caller may opt in at admission for its native continue_on_error batch.
+An exact delivered unproven 408/5xx then reaches typed on_http_failed with the
+already-recorded Unknown fact and bounded evidence IDs; it never reaches DATA
+or grants a resend. The handler settles only an independent failed call through
+finish_plan_failed_call and advances its sibling. It declines settlement for a
+dependent follow-up, preserving the whole-Plan abort. A declining handler is
+auto-sealed once; Read admission with this flag is Invalid. Final completion
+still projects the one shared journal, including accepted IDs and uncertainty.
+
+BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
+The core declaration alone does not migrate either venue or remove legacy sites.
+
+## Parallel Mutation preparation barrier
+
+A caller explicitly declares each all-Mutation parallel step and implements the
+pure Unscheduled group-admission hook. The engine prepares routes and signatures
+in declaration order, then checks and commits the entire group before the host
+hands off any member. A precommit failure sends no member; the common journal
+projects NotSent only without prior released or inherited uncertain facts.
+Provider refusals are not venue auth evidence and do not create an uncertain
+order-lock fence. Resolved nonzero pacing floors refuse admission before IDs.
+
+Native and JS hosts bind/check all resources, claim once, and attempt sends in
+one turn before callbacks. After commit, a synchronous send failure or expiry is
+Unknown; remaining handoffs still run and accepted IDs remain in the projection.
+This provides no atomic execution guarantee at the venue. Independent reply
+handling requires the separate independent_calls declaration.
+
+Groups skip mutable on_http_release. A caller that stamps Pending there must
+move that state before admission or use committed on_signing_release; the pure
+hook cannot mutate Pending. Execution-owned groups, retries and fallback members
+are refused in this first slice. Later serial mixed Read/Mutation steps require
+G2. No venue is adopted and no legacy request site is removed by this seam alone.
+
+## AsterDEX synchronous Read admission
+
+Low-level Aster Query commands that finish locally (keyless private history,
+invalid history bounds, order windows wider than seven days, unsupported client
+ID lookup, missing fills symbol, unrepresentable inclusive end and V1 unscoped
+orders), cached FetchLeverage and unsupported FetchCandles intervals complete
+through a genuine command-owned Read Context. Native result/error strings,
+untyped local errors and keyless-before-validation precedence are preserved.
+PublicTrades remains exempt from the keyless private-history shortcut.
+
+An invalid engine clock or full request capacity produces one typed Read
+admission failure with no financial outcome, rather than the cached/empty result
+or local validation error. These local calls issue no HTTP or timers and change
+no Store data. A live duplicate command ID retains the shared diagnostic without
+completing its existing owner; a completed synchronous ID can be reused.
+
+SDK RustExchange callers keep their existing capability behavior: Aster's
+Settings leverage path can return cache/null without a low-level FetchLeverage,
+and clientOrderLookup=false uses the existing open-order fallback. This entry
+describes the low-level command terminals, not additional SDK dispatches.
+
+
+
+
+
+## WEEX leverage initial managed admission preserves shared Read causes
+
+After the existing unknown-market, shared-pause and credential-selection checks,
+FetchLeverage now admits its signed symbolConfig read through the initial
+SelectedRead command transaction. Registry capacity returns the canonical Read
+Capacity error with outcome None, rather than the venue lifecycle Internal/NotSent
+fallback. An unavailable or invalid receipt returns the shared cause; invalid or
+nonadvancing clocks give Revoked / "Request context was revoked", InvalidInput
+and no outcome. An expired own receipt uses the existing Read Timeout helper.
+Admission owns the failure terminal, without a numeric fallback or a new receipt.
+
+Read selection, the selected identity and passphrase, URL/query/signature, native
+settings revision and publication remain unchanged. The physical policy stays
+20 seconds, Never and no pacing, including when the outer host wait is shorter;
+this does not add a tracked caller-wait history root. Queue and provider refusals
+keep their existing typed fields. Duplicate ownership, original-peer completion
+and fresh ID reuse keep shared engine semantics. No auth evidence is added.
+
+## AsterDEX local trading refusal ownership
+
+Synchronous Aster job-construction, credential/auth-shape and acknowledged-routing
+capacity failures now admit the genuine command operation before diagnostics or
+cleanup. FetchStpMode is Read even for V1's unsupported-plan failure; all trading
+writes are Mutation. Valid entries preserve native CommandError then failure,
+message/kind and error precedence. Mutation remains NotSent; local STP Read
+failures now have outcome None instead of legacy NotSent. Credential-free local
+auth failures preserve fields without counting account auth-health evidence.
+
+Invalid clock or full actual owner capacity returns one shared typed refusal
+before any diagnostic, acknowledged cleanup, job insertion, timer, I/O or Store
+effect. Read admission has outcome None; Mutation admission is NotSent. Native
+CancelSymbolOrders planning uses an immutable projection, preserving Store-first
+then live-ack routing without duplicates. After successful local admission its
+native cleanup still runs, including before missing-key refusal. Failed admission
+leaves both earlier planning and placement-capacity cleanup untouched.
+
+Valid native remote jobs acquire no extra managed root and retain their queue,
+reservations, signed role, wire and completion behavior. Existing SDK STP, order,
+cancel and setting dispatch remains; no successful capability is added. The
+exact prune is3 fingerprints/3 occurrences, family43F/67O to40F/64O at this base;
+remaining remote trading/refusal/history/session consumers stay inventoried.
+
+## ApeX managed reads (#2066)
+
+Every ApeX non-trading read now passes managed host preparation
+([plan](RUST_APEXOMNI_READ_CONTEXT.md)). Symbols, the snapshot legs, balance and
+heal refreshes are Background Reads under the native snapshot generation;
+FetchAccount is a command Read; fills and the history-orders fallback are legs of
+the caller's original root, so expiry is a strict Timeout with no partial rows.
+The one-time signature resend and the three-retry transport budget are unchanged
+native counters authorised by `http_retry_context(ReadFailure)` or a fresh leg;
+only a typed Network failure spends a transport retry.
+**NEW bounds:** each read's 20 s timeout now runs from admission to expiry, so it
+covers host preparation, binding and signing as well as the HTTP exchange.
+Retries keep that deadline; each history page is a fresh 20 s leg clipped to the
+caller's original deadline.
+The ApeX request-provenance staging row is removed.
+
+
+## Phemex identity and recurring account read ownership
+
+FetchAccount uses one original caller Read root and one selected signed Read leg.
+The native account cycle uses independent USDT/USDC Background reads sharing its
+existing cycle origin; uncertain-order reconciliation uses an explicitly Primary
+Background read with its existing signed-write-expiry plus 5s eligibility fence.
+Each physical read now has a 20s admission bound, including parked preparation or
+provider work. Identity also retains the original caller deadline.
+
+Live DATA/stream/common-429 effects require exact shared delivery plus native
+cycle or symbol/read custody. Typed failures and expired-current handles instead
+retire exact ownership and run matching native cleanup/backoff once; they cannot
+clear newer work. Partial currency publication, native poll/retry, revision and
+uncertain-write semantics remain native. History/income, PublicTrades, socket
+login/snapshot behavior, request wire and credential-selection policy are retained.
+
+### Managed socket intermediate authentication progress
+
+AuthEvidence::Progress renews only a current Required-auth Authenticating feed's
+existing OPEN-origin auth window. It grants no Ready, Accepted, interests or
+HTTP authority. The exact admitted text then reaches the existing native message
+handler to retain its accepted challenge and request epoch-bound authentication
+signing. Existing auth evidence dispatch and default feeds remain unchanged.
+Both original and renewed equality fences run before native codec/publication
+or final signed send; independent CONNECT snapshot and payload bounds remain.
+The Supervisor allocates its prospective replacement watch before changing the
+old watch or origin, and existing fatal exhaustion prevents partial output.
+
+
+## TxFlow ticker seeds retain per-attempt Read custody
+
+Unsigned activeAssetCtx seeds now wait for managed Prepare/Bind/Claim with
+explicit PublicCors egress and unchanged POST body/header order. Each physical
+attempt has a new 20-second admission-to-expiry bound, including a stalled host;
+there is no aggregate seed-walk deadline. Expired or stale DATA cannot decode or
+publish a seed. Failure cleanup retires only its exact current Context before
+native keyed Backoff and the independent 25 ms successor cadence. Admission
+pressure takes that bounded failure path once; nonfinite clocks cannot create
+HTTP or recovery timers. Complete-seed publication, live overlays, financial
+projection/CPU row hints and private-startup eligibility are preserved. This
+removes only the count-one ticker sender; the shared account/history/metadata
+info sender remains outside this slice.
+
+
+## GRVT remaining local Unsupported command custody
+
+The reachable CancelOrdersWithSymbols, FetchMaxLeverage, FetchStpMode and
+SetStpMode generic refusals now take genuine keyless command admission before
+fail_context. Read and Mutation policies use20s, no pacing and Never; there is
+no HTTP, signer, key selection or queued work. Native Unsupported GRVT command
+text and absent kind/code/retry hint remain. Shared capacity, invalid clocks,
+caller receipt and duplicate ownership precede that native diagnostic. A shared
+rejection owns its one terminal, with no numeric fallback or second failure.
+
+Explicit approved outcome change: native CancelOrdersWithSymbols and SetStpMode
+refusals had no outcome. They now carry NotSent because nothing was released.
+This follows the established shared pre-release Read None / Mutation NotSent
+contract and the [Breakout immediate local command precedent](#breakout-immediate-local-command-custody),
+whose local unsupported SetStpMode also adds NotSent while preserving native
+text and absent kind. Read refusals retain outcome None. Original native-None
+evidence remains at216142; only that Mutation assertion was superseded at7e39
+after the overseer's ruling, before source. No shared projection override exists.
+
+DELETION, not adoption: the private-phase-pending match arm was unreachable;
+all nine variants return through earlier real dispatch. Its deletion retains
+exhaustiveness in the generic match without changing those earlier paths.
+Symbol-aware amendment remains an engine pre-entry refusal; identity, BookQuery,
+query/history and valid trading remain on their own paths. Two singleton lib
+removals comprise one reachable refusal adoption and one dead-arm deletion.
+The independent catalog slice and its two inventory removals are separate.
+
+
+### Coinbase immediate local command custody
+
+Ten initial-entry completion sites now use shared Read ownership or keyless
+Mutation refusal: portfolio lookup, cached/unavailable leverage, initial
+history validation, startup queue capacity and trading validation/refusals.
+Native messages, JSON, Unsupported/NotSent metadata, validation order and the
+256-entry warning remain intact. Invalid or expired caller entry is rejected
+before local completion through the cause-aware shared API. No physical I/O,
+signed/private custody, FIFO pacing or deferred callback is adopted. The three
+candle validation sites, Instruments discovery and Daily seed remain held for
+retained command ownership and coordinated native REST release. Coinbase's
+legacy inventory decreases from 34 to 24 occurrences.
+
+## Order-lock capacity refusal
+
+For venues with `guard_order_mutations`, entry holds at most 64 order-lock
+scopes (`RUST_ORDER_LOCK_CAPACITY.md`). An order command refused only by that
+cap (a new placement, amend or cancel) now fails before entry with "Order
+command capacity reached: 64 order commands are in flight; retry after one
+finishes", `kind: Internal` and `outcome: NotSent`, and nothing is sent.
+Before, it reported "Order amendment or cancellation is already in flight"
+with no outcome. Placements take a scope only where `guard_pending_placements`
+is set: AsterDEX, Bitget, Bitrue, BloFin, BreakoutProp, OKX and Phemex at this
+base. Native queues have no such cap, so the 65th concurrent order command is a
+disclosed difference. Genuine conflicts are unchanged: an amend or cancel
+behind an in-flight command on the same order, or a placement behind an
+in-flight cancel-all, still report "Order amendment or cancellation is already
+in flight" with no outcome, and the uncertain cancel-all refusal is unchanged.
+
+
+## Orderly unsigned startup seed custody
+
+Markets and Tickers now admit independent keyless Background Read contexts for
+`/v1/public/info` and `/v1/public/futures`. Each physical leg has a new 20-second
+admission bound covering Prepare, Bind and streamed response; there is no aggregate
+startup-chain bound, signing, pacing or managed retry. Native per-Seed Backoff
+remains the recovery owner. Exact DATA validation precedes decoding and global
+effects; matching failure cleanup retires its returned Context even at expiry.
+Markets and Tickers retain live DATA custody through native map/Store publication,
+then retire before native account startup/ticker admission or socket/funding hooks. Independently issued reads retain independent custody.
+Only the common unsigned seed sender is pruned; key selection and other funnels
+are unchanged.
+
+## Crypto.com private dispatch and Plan custody
+
+Private REST remains POST through Primary with no route or account-read tag,
+including configurations with a valid unused secondary. Native and JS trusted
+setup consume that secondary once under the separate declared ValidateOnly
+prerequisite. Registry construction preserves its existing invalid-secondary
+InvalidInput refusal, exact message and absent command outcome before entering
+the venue arm. A directly constructed venue instead retains its CONFIG_INVALID
+startup notice and identity validation precedence. The venue receives only an
+opaque Primary and bounded status.
+Hosted setup sends no unused secondary material. REST and WS auth share the
+native sorted Text/u64/Strings envelope, millisecond stamp without a counter,
+and exact receipt/outbound binding. WS retains its native one-second auth
+eligibility; shared signing order may hold it behind earlier parked HTTP work.
+
+Identity and private history use the original caller-wait Read root and fresh
+20s children at eligible dequeue. Exact root/child delivery precedes decoding
+and Store effects. Root expiry is strict, with no partial history or INCOMPLETE
+marker; live-root released failures retain native retry budgets and recovery.
+Preparation/provider and local submission refusals are strict. Background
+account stages retain their native counters, snapshot tokens and financial
+reducers; failure-only cleanup retires the exact returned Pending without
+granting DATA authority.
+
+Trading uses the genuine WriteAfterReads Preflight and serial Mutation Plan.
+Each final write reserves two physical attempts, so a batch of at most128 final
+writes can be admitted within the256-credit bound; larger declarations refuse
+atomically before progress or I/O. Leverage's prerequisite has its separate
+20s read attempts and only the native one40101 resend. The final Plan starts
+after that read; no caller-wait cap is claimed for WriteAfterReads. The final
+span is40000*N plus declared step waits, with20ms between settled jobs and an
+immediate proven40101 resend. Network,408,5xx and malformed replies never grant
+a write resend.
+
+After the last settled call the native20ms timer may seal the same live Plan,
+then release one parked FIFO owner through shared ready custody. There is no
+tail extension: root expiry at or before that timer wins, produces one failure
+and retires the old timer's authority. Both equality event orders and the live
+tail/FIFO positive are pinned. All-failed batches fail; partial and unknown
+outcomes retain the journal's accepted IDs. Malformed success ACKs now carry
+Internal/Unknown,5xx carries VenueUnavailable/Unknown, and an unlisted native
+error carries Unknown instead of an untyped outcome. The shared classifier
+owns these projections; native decoded code/message and rejection text remain.
+
+Fixture setup installs an opaque LocalSigner before startup. Host collectors
+drive actual Prepare/Bind/Claim; capacity controls deliberately retain raw
+Prepare tokens. The parked-WS provider control completes prior HTTP setup so
+it tests the WS provider boundary independently of the shared signing barrier.
+Existing financial assertions remain in place; eager-signing comparisons are
+replaced by independent literal envelopes, including the WS HMAC vector.
+
+Private read integrity failures retain the engine's typed cause. Identity and
+History fail strictly without retry or partial history; Account retires the
+exact active read and schedules one native poll, without an inline resend.
+Only genuine Network/physical Timeout callbacks spend native transport budgets.
+The separately documented native40101 response/list-error compatibility retains
+its minimal text check and shared counters; typed integrity failures never enter
+that compatibility path. Old contexts retire before successor reads are minted.
+
+The native build API refuses a caller-preset readCredentialsValid result as
+"Unexpected read credential validation result" (InvalidInput, no outcome).
+Trusted host setup may carry its computed false result, which retains the
+native secondary-credentials validation error before venue construction.
+
+Crypto.com actual6b composition declares independent Mutation calls only for
+native best-effort trading batches. A released failed row settles through its
+exact failure custody, then the next sibling becomes eligible after20ms; the
+failed call is never resent. Coupled jobs, including leverage, remain strict.
+This declaration does not grant DATA or erase failure evidence: all-failed jobs
+fail, partial jobs retain accepted IDs, and the original Plan root still wins
+at expiry before the native final20ms timer. Read Plans do not opt in.
+
+
+
+
+
+## Shared metadata/settings owner: WEEX and BingX
+
+BingX same-symbol metadata calls at the same eligible settings revision share
+one leverage read followed by one margin read, retaining each command's native
+result or typed failure. Later sequential calls remain fresh. Settings writes,
+changed eligibility and background settings proposals invalidate stale Store
+publication independently of native financial position fences. A read admitted
+during a pending write cannot become publishing merely because that write ends.
+
+WEEX background settings proposals use the shared Store observation and write
+fences, including last-valid duplicate configuration handling. Explicit WEEX
+leverage reads retain the incoming managed Context path and native
+`settings_revision` fence: each command issues its own symbol configuration
+read. They do not join the shared metadata query owner. Their native codec,
+credential selection, retry policy, typed completion and cache update order stay
+with that managed adapter.
+
+Store metadata tokens and background observations bind to the Store issuer;
+foreign, default or exhausted authority cannot publish. These settings fences
+provide no HTTP delivery, observer or command completion authority. BingX's
+joined commands now receive the shared Plan's uniform result or typed failure,
+once per surviving observer. Each observer can expire or detach independently;
+a live peer retains the physical work, while the last observer leaving revokes
+its unsent work and publication authority. Store contains no numeric command
+waiter list or terminal fan-out. Callers retain native fallback and error
+handling; no numeric fallback stands in for managed completion.
+See [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).
+
+### TxFlow unsigned account-setting polls
+
+Each activeAssetData setting poll retains one keyless Background Read Context
+through managed Prepare/Bind/Claim and exact current-generation DATA validation.
+Explicit Primary egress preserves account routing for the wallet/vault query;
+there is no fabricated credential, Session or PublicCors override. The new
+20,000 ms admission-to-expiry bound includes stalled preparation and binding,
+with Never retry at the physical layer and no aggregate account-poll deadline.
+Successful DATA publishes native setting/hedged state while its exact Context
+remains live, then retires custody before the native 100 ms successor. Failure
+and revision-stale current replies also retire before that successor; the
+60-second refresh and setting/hedge reducers retain native behavior. Admission pressure follows one bounded successor; nonfinite
+refusal creates no timer or HTTP. Old callbacks cannot clear replacement owners.
+
+## Paradex command candle Read ownership
+
+FetchCandles retains the original caller Read root across documented klines and
+its native once-only TradingView fallback. Wide intervals still start directly
+with TradingView. Each physical call gets a fresh Never child clipped to that
+root. **NEW policy:** its 20s admission-to-expiry bound includes Prepare, Bind,
+route waits and transport; it is not a 20s cap on the entire two-call walk.
+Exact root/child DATA validation precedes streamed rows, envelope and codec.
+A released first-call failure or physical timeout may fall back only while the
+original root lives; typed preparation/queue refusal is strict. Original root
+expiry owns one terminal and discards every staged prefix without fallback.
+Shared typed fields are retained, including local pre-release NotSent, while
+native string failures keep their absent optional metadata. Full capacity now
+refuses before HTTP; root plus one child need two slots. Subscription polls, discovery,
+account-start delegation, private history and signing keep their existing paths.
+
+
+### Polymarket unsigned Gamma catalogue pages
+
+Unsigned Gamma /markets/keyset pages use separate keyless Background Read
+Contexts with Never retry and an explicit 20,000 ms admission-to-expiry bound,
+including stalled host Prepare/Bind. This is a new physical lifetime bound on
+the previously unbounded raw sender; it imposes no aggregate cursor-walk deadline.
+Exact current-page DATA authority precedes row/envelope parsing, walk dedup and
+publication. Final rows and prediction metadata still publish atomically; an
+expired or failed page never publishes its prefix. The native whole-walk retry
+starts from the first page after its existing jittered Backoff and clears native
+walk state there. Physical contexts retire before any next page or failure retry.
+Unissued admission/queue pressure backs off the first page without recursive
+page admission. Private startup, midpoint progression, cursor geometry, quoted
+HTTP data and signing/key selection retain their native behavior. No command or
+financial outcome is created by this Background Read adoption.

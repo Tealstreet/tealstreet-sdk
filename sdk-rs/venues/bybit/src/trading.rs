@@ -14,6 +14,7 @@ use safe_cex_engine::model::{
     MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Outcome, Response, SocketId, TimerId, VenueError, num,
 };
@@ -429,6 +430,22 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        // Bybit cancels by order id only; refuse rather than leave it open.
+        if matches!(command, Command::CancelOrdersWithSymbols { .. }) {
+            let policy = Policy {
+                operation: Operation::Mutation,
+                credential: None,
+                timeout_ms: 1_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            };
+            if let Ok(root) = cx.admit_http_command(policy) {
+                let refusal = not_sent("Bybit has no symbol-qualified cancel; use cancelOrders")
+                    .kind(ErrorKind::Unsupported);
+                let _ = cx.fail_context(&root, refusal);
+            }
+            return;
+        }
         if self.ordinary_command(&command) {
             self.start_ordinary(cx, command);
             return;

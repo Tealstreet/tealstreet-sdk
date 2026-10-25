@@ -9,6 +9,16 @@ fn command(h: &mut Harness, c: Command) {
     h.event(Event::Command(c));
 }
 fn pace(h: &mut Harness) {
+    if h.actions
+        .iter()
+        .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        && !h
+            .actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 20.0))
+    {
+        return;
+    }
     let i = h
         .actions
         .iter()
@@ -429,8 +439,16 @@ fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let unknown = (None, Some(Outcome::Unknown));
     for (status, body, classified) in [
-        (200, "{}", unknown),
-        (503, "busy", unknown),
+        (
+            200,
+            "{}",
+            (Some(ErrorKind::Internal), Some(Outcome::Unknown)),
+        ),
+        (
+            503,
+            "busy",
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+        ),
         (
             400,
             "bad",
@@ -447,11 +465,7 @@ fn write_failures_are_classified_without_changing_their_text() {
             (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
         ),
         (200, r#"{"code":50001,"message":"internal"}"#, unknown),
-        (
-            200,
-            r#"{"code":43012,"message":"self trade"}"#,
-            (None, None),
-        ),
+        (200, r#"{"code":43012,"message":"self trade"}"#, unknown),
     ] {
         let mut h = Harness::new();
         h.load();

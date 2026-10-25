@@ -5,10 +5,11 @@ use safe_cex_engine::{
 };
 mod support;
 use safe_cex_venue_weex::WeexFutures;
+use support::PreparedActions;
 use support::setup::Options;
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
 fn drain(e: &mut Engine<WeexFutures>) -> Vec<Action> {
-    e.drain_actions().collect()
+    e.prepared_actions(1000.).collect()
 }
 fn http(actions: &[Action], path: &str) -> HttpRequest {
     actions

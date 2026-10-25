@@ -40,7 +40,9 @@ const fixture = (options: Partial<ExchangeOptions> = {}, initialLoaded: Partial<
     capabilities: () => engineCapabilities('apexomni'),
     start,
     command: (json) => {
-      const command = JSON.parse(json);
+      // The caller wait is engine receipt metadata (pinned by the host tests),
+      // not part of the native command these regressions compare.
+      const { timeoutMs: _wait, ...command } = JSON.parse(json);
       if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return noActions();
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result(command)) }]);
@@ -56,7 +58,7 @@ const fixture = (options: Partial<ExchangeOptions> = {}, initialLoaded: Partial<
     httpFailed: noActions,
     timer: noActions,
   };
-  const construct = vi.fn(function (_venue: string, _options: string) {
+  const construct = vi.fn(function (_venue: string, _options: string, _setup?: string) {
     return engine;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
@@ -90,19 +92,25 @@ describe('Rust ApeX Omni SDK boundary', () => {
   };
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
-  it('registers the venue and forwards the Omni seed with all API credentials to WASM', async () => {
+  it('registers the venue and carries the Omni seed and API credentials only in provider setup', async () => {
     expect(isRustVenue('apexomni')).toBe(true);
     const { exchange, construct } = setup({ testnet: true });
     await exchange.start();
     expect(construct).toHaveBeenCalledOnce();
-    const [venue, json] = construct.mock.calls[0];
+    const [venue, json, providerSetup] = construct.mock.calls[0];
     expect(venue).toBe('apexomni');
+    const options = JSON.parse(json);
+    for (const field of ['key', 'secret', 'passphrase', 'omniKeySeed']) expect(options).not.toHaveProperty(field);
+    expect(JSON.parse(providerSetup ?? 'null')).toMatchObject({
+      primary: {
+        key: 'api-key',
+        secret: 'api-secret',
+        passphrase: 'api-passphrase',
+        extra: { zklinkSeed: { value: '11'.repeat(65), encoding: 'hex' } },
+      },
+    });
     // The options blob is uniform across venues; these are the fields this venue reads.
-    expect(JSON.parse(json)).toMatchObject({
-      key: 'api-key',
-      secret: 'api-secret',
-      passphrase: 'api-passphrase',
-      omniKeySeed: '11'.repeat(65),
+    expect(options).toMatchObject({
       testnet: true,
       publicDataOnly: false,
       remoteSigning: false,

@@ -34,7 +34,7 @@ impl Rig {
     }
     fn drain(&mut self, now: f64) {
         for _ in 0..50 {
-            let actions: Vec<_> = self.engine.drain_actions().collect();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut self.engine, now);
             if actions.is_empty() {
                 return;
             }

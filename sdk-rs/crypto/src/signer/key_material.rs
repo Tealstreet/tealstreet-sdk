@@ -38,7 +38,24 @@ pub(super) fn decode(
             output.truncate(length);
             Ok(output)
         }
+        KeyEncoding::Base58 => {
+            // Base58 never decodes longer than its input; decode into a guarded buffer.
+            let mut output = Zeroizing::new(vec![0; input.len()]);
+            let length = bs58::decode(&*input)
+                .onto(&mut output[..])
+                .map_err(|_| SignError::InvalidRequest)?;
+            if length == 0 {
+                return Err(SignError::InvalidRequest);
+            }
+            output.truncate(length);
+            Ok(output)
+        }
         KeyEncoding::Hex => {
+            // Wallet keys are commonly pasted 0x-prefixed; the prefix is optional.
+            let input = match input.as_slice() {
+                [b'0', b'x' | b'X', body @ ..] => body,
+                body => body,
+            };
             if !input.len().is_multiple_of(2) {
                 return Err(SignError::InvalidRequest);
             }

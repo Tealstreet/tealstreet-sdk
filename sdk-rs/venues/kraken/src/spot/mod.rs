@@ -6,7 +6,9 @@ mod wire;
 use crate::{Options, sign};
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryEvidence, RetryPolicy};
+use safe_cex_engine::request_context::{
+    Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
+};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
     VenueError,
@@ -22,10 +24,10 @@ use wire::*;
 pub enum Pending {
     Private(account::Request),
     Markets {
-        retries: u8,
+        context: Context,
     },
     Tickers {
-        retries: u8,
+        context: Context,
     },
     Candles {
         context: Context,
@@ -120,11 +122,13 @@ impl KrakenSpot {
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Markets { .. } => {
+            Pending::Markets { context } => {
+                let _ = cx.finish_http_context(&context);
                 self.markets_in_flight = false;
                 self.discovery.failed(cx, false);
             }
-            Pending::Tickers { .. } => {
+            Pending::Tickers { context } => {
+                let _ = cx.finish_http_context(&context);
                 self.tickers_in_flight = false;
                 self.ticker_reseed = false;
                 self.discovery.failed(cx, true);
@@ -136,15 +140,16 @@ impl KrakenSpot {
         }
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
-    fn read(&self, cx: &mut Cx<'_, Pending>, path: &str, params: &str, pending: Pending) {
-        let id = cx.request(
+    fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, context: Context, pending: Pending) {
+        if let Err((pending, reason)) = cx.request_managed(
+            context,
             Method::Get,
-            format!("https://api.kraken.com/0/public/{path}{params}"),
-            vec![],
+            format!("https://api.kraken.com/0/public/{path}"),
             None,
             pending,
-        );
-        cx.request_timeout(id, 20_000);
+        ) {
+            self.public_failed(cx, pending, &reason.to_string());
+        }
     }
     fn candle_request(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending) {
         let Pending::Candles {
@@ -176,15 +181,42 @@ impl KrakenSpot {
     }
     fn markets(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.markets_in_flight {
+            let context = match cx.http_context(
+                Scope::Background,
+                crate::public_context::policy(Operation::Read),
+            ) {
+                Ok(context) => context,
+                Err(reason) => {
+                    self.discovery.failed(cx, false);
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
+                    return;
+                }
+            };
             self.markets_in_flight = true;
-            self.read(cx, "AssetPairs", "", Pending::Markets { retries: 0 });
+            self.read(
+                cx,
+                "AssetPairs",
+                context.clone(),
+                Pending::Markets { context },
+            );
         }
     }
     fn tickers(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.tickers_in_flight {
+            let context = match cx.http_context(
+                Scope::Background,
+                crate::public_context::policy(Operation::Read),
+            ) {
+                Ok(context) => context,
+                Err(reason) => {
+                    self.discovery.failed(cx, true);
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
+                    return;
+                }
+            };
             self.tickers_in_flight = true;
             self.live_tickers.begin();
-            self.read(cx, "Ticker", "", Pending::Tickers { retries: 0 });
+            self.read(cx, "Ticker", context.clone(), Pending::Tickers { context });
         }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -674,13 +706,20 @@ impl Venue for KrakenSpot {
             let _ = cx.fail_context(context, error.venue_error());
             return;
         }
+        if let Pending::Markets { context } | Pending::Tickers { context } = &pending
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         let r = result(response).and_then(|text| match pending.clone() {
             Pending::Private(_) => unreachable!(),
-            Pending::Markets { .. } => {
+            Pending::Markets { context } => {
+                let _ = cx.finish_http_context(&context);
                 self.markets_in_flight = false;
                 self.markets_response(cx, text)
             }
-            Pending::Tickers { .. } => {
+            Pending::Tickers { context } => {
+                let _ = cx.finish_http_context(&context);
                 self.tickers_in_flight = false;
                 self.ticker_reseed = false;
                 self.tickers_response(cx, text)
@@ -902,7 +941,7 @@ impl Venue for KrakenSpot {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval: tf,
                 from_ms,
@@ -938,7 +977,11 @@ impl Venue for KrakenSpot {
                         },
                     );
                 } else {
-                    cx.fail(command, tf.unsupported("Kraken Spot"))
+                    crate::public_context::local(
+                        cx,
+                        Operation::Read,
+                        Err(tf.unsupported("Kraken Spot").into()),
+                    )
                 }
             }
             _ => {}

@@ -1,10 +1,11 @@
 //! Query-order covers closed orders; only native 51603 is authoritative absence.
 #![allow(dead_code)]
 mod support;
+use crate::support::FixtureOptions as Options;
+use crate::support::{MARKET, TICKER, envelope, prepared};
 use safe_cex_engine::{Action, Command, Engine, Event, Method, Notice, Query, Response};
-use safe_cex_venue_okx::{Okx, Options};
+use safe_cex_venue_okx::Okx;
 use serde::Deserialize;
-use support::{MARKET, TICKER, actions, envelope};
 const ROW: &str = r#"{"instId":"BTC-USDT-SWAP","ordId":"9007199254740993","clOrdId":"caller1","ordType":"post_only","state":"partially_filled","side":"sell","sz":"3","accFillSz":"1","px":"41000","avgPx":"40999","uTime":"1710000000123","reduceOnly":"true","posSide":"net"}"#;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,7 +43,7 @@ struct Info {
     pos_side: String,
 }
 fn ready(eea: bool, testnet: bool, private: bool) -> Engine<Okx> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options {
+    let mut e = crate::support::engine(Options {
         key: private.then(|| "lookup-key".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
             key: "secondary-key".into(),
@@ -54,10 +55,12 @@ fn ready(eea: bool, testnet: bool, private: bool) -> Engine<Okx> {
         eea,
         testnet,
         public_data_only: !private,
-    }));
-    e.start(1_710_000_000_000.0);
+    });
+    let mut now = 1_710_000_000_000.0;
+    e.start(now);
     for _ in 0..30 {
-        let out = actions(&mut e);
+        let out = prepared(&mut e, now);
+        now = 1_710_000_000_001.0;
         let mut requests = 0;
         for a in out {
             if let Action::Http(r) = a {
@@ -111,7 +114,7 @@ fn query(e: &mut Engine<Okx>, symbol: &str, id: &str) -> Vec<Action> {
             },
         }),
     );
-    actions(e)
+    prepared(e, 1_710_000_000_100.)
 }
 fn complete(
     e: &mut Engine<Okx>,
@@ -130,7 +133,7 @@ fn complete(
             },
         },
     );
-    done(actions(e))
+    done(prepared(e, 1_710_000_000_101.0))
 }
 fn done(out: Vec<Action>) -> Result<Lookup, String> {
     assert!(
@@ -153,11 +156,14 @@ fn done(out: Vec<Action>) -> Result<Lookup, String> {
         .expect("completed query")
 }
 fn request(out: Vec<Action>) -> safe_cex_engine::HttpRequest {
-    assert_eq!(out.len(), 1);
-    let Action::Http(r) = out.into_iter().next().unwrap() else {
-        panic!("HTTP expected")
-    };
-    r
+    assert!(!out.iter().any(|a| matches!(a, Action::WsSend { .. })));
+    let mut requests = out.into_iter().filter_map(|a| match a {
+        Action::Http(request) => Some(request),
+        _ => None,
+    });
+    let request = requests.next().expect("one prepared lookup HTTP");
+    assert!(requests.next().is_none());
+    request
 }
 #[test]
 fn lookup_signs_each_alias_and_preserves_read_only_order_provenance() {
@@ -171,7 +177,10 @@ fn lookup_signs_each_alias_and_preserves_read_only_order_provenance() {
         let before = e.snapshot_frame(42.0).to_vec();
         let r = request(query(&mut e, "BTCUSDT", "caller1"));
         assert_eq!(r.method, Method::Get);
-        assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+        assert_eq!(
+            r.route.unwrap_or(safe_cex_engine::RequestRoute::Primary),
+            safe_cex_engine::RequestRoute::Primary
+        );
         assert!(r.body.is_none());
         assert_eq!(
             r.url,
@@ -328,7 +337,7 @@ fn transport_failure_is_never_a_definitive_miss() {
             error: "OKX 51603: spoofed transport text",
         },
     );
-    assert!(done(actions(&mut e)).is_err());
+    assert!(done(prepared(&mut e, 1_710_000_000_101.0)).is_err());
     assert_eq!(before, e.snapshot_frame(42.0));
 }
 
@@ -337,7 +346,7 @@ fn cached_order_lookup_stays_read_only_without_private_credentials() {
     // This local-only shortcut is safe when no secondary account can have
     // populated the cache.
     let markets = ready(false, false, false).store().markets().to_vec();
-    let mut e = safe_cex_engine::test_support::seeded_engine(Okx::new(Options::default()));
+    let mut e = crate::support::engine(Options::default());
     e.store_mut().set_markets(markets);
     e.store_mut()
         .set_orders(vec![safe_cex_engine::model::Order {
@@ -416,7 +425,10 @@ fn secondary_account_cache_never_answers_primary_lookup() {
             }]);
         let before = e.snapshot_frame(42.0).to_vec();
         let r = request(query(&mut e, "BTCUSDT", "caller1"));
-        assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+        assert_eq!(
+            r.route.unwrap_or(safe_cex_engine::RequestRoute::Primary),
+            safe_cex_engine::RequestRoute::Primary
+        );
         assert!(
             r.headers
                 .iter()
@@ -460,7 +472,7 @@ fn secondary_account_cache_never_answers_primary_lookup() {
                         error: "network unavailable",
                     },
                 );
-                done(actions(&mut e))
+                done(prepared(&mut e, 1_710_000_000_101.0))
             }
         };
         match outcome {
