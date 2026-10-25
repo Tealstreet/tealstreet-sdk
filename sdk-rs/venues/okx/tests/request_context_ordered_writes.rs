@@ -760,11 +760,6 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
         failed(&output, OWNER)[0].outcome,
         Some(safe_cex_engine::Outcome::Unknown)
     );
-    // Order reads issued after the loss; the reconcile read is one of them.
-    let mut after: Vec<_> = output
-        .into_iter()
-        .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders-pending")))
-        .collect();
     let cancel_all = |engine: &mut Engine<Okx>, command, now| {
         engine.handle(
             now,
@@ -776,20 +771,44 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
         let (output, _) = release(engine, now);
         failed(&output, command).first().map(|e| e.message.clone())
     };
+    // Answer the account reads issued after the loss, including the order
+    // snapshot's successive pages, until none remain.
+    let mut reads: Vec<_> = output
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get))
+        .collect();
     assert_eq!(
         cancel_all(&mut engine, 50, 7.).as_deref(),
         Some("Placement outcome is uncertain; reconcile before cancel-all")
     );
-    // The venue answers the engine's uncertain reconcile with a fresh order read.
     let (later, _) = release(&mut engine, 8.);
-    after.extend(
+    reads.extend(
         later
             .into_iter()
-            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders-pending"))),
+            .filter(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get)),
     );
-    let read = after.pop().expect("a fresh reconcile read");
-    reply(&mut engine, &read, &support::envelope(""), 9.);
-    let _ = release(&mut engine, 9.);
+    assert!(
+        reads
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders-pending"))),
+        "a fresh reconcile read"
+    );
+    let mut now = 9.;
+    while let Some(read) = reads.pop() {
+        let body = if matches!(&read, Action::Http(r) if r.url.contains("account-position-risk")) {
+            support::envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            support::envelope("")
+        };
+        reply(&mut engine, &read, &body, now);
+        let (next, _) = release(&mut engine, now);
+        reads.extend(
+            next.into_iter().filter(
+                |a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get),
+            ),
+        );
+        now += 0.01;
+    }
     assert_ne!(
         cancel_all(&mut engine, 51, 10.).as_deref(),
         Some("Placement outcome is uncertain; reconcile before cancel-all"),
