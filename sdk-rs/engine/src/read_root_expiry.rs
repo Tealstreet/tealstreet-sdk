@@ -155,7 +155,7 @@ impl<P> Cx<'_, P> {
         }
         let deadline = match self.io.command_receipt() {
             Ok((_, deadline)) => deadline,
-            Err(reason) => return self.with_command_entry(Operation::Read, |_, _| Err(reason)),
+            Err(reason) => return Err(self.reject_command_entry(Operation::Read, reason)),
         };
         if !self.now.is_finite() || deadline - self.now < 1. {
             return Err(CommandEntryError::Revoked);
@@ -165,7 +165,7 @@ impl<P> Cx<'_, P> {
         // its timer's identities, taken together.
         let checked = self.root_admission_checks(command, credential.as_ref(), pacing);
         if let Err(reason) = checked {
-            return self.with_command_entry(Operation::Read, |_, _| Err(reason));
+            return Err(self.reject_command_entry(Operation::Read, reason));
         }
         let policy = Policy {
             operation: Operation::Read,
@@ -248,9 +248,9 @@ impl<P> Cx<'_, P> {
         let Err(reason) = self.io.command_receipt() else {
             return Err(CommandEntryError::Revoked);
         };
-        match self.with_command_entry(operation, |_, _| Err::<(), _>(reason)) {
-            Err(CommandEntryError::Rejected(_)) => Ok(()),
-            other => other,
+        match self.reject_command_entry(operation, reason) {
+            CommandEntryError::Rejected(_) => Ok(()),
+            error => Err(error),
         }
     }
 }

@@ -34,11 +34,22 @@ pub(super) struct Continuation<P> {
 
 impl<P> Cx<'_, P> {
     fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
-        let mut driver = std::mem::take(&mut self.io.core.socket_driver);
+        let mut driver = self.take_socket_driver();
         let result = f(&mut driver, self);
-        self.io.core.socket_driver = driver;
+        self.restore_socket_driver(driver);
         result
     }
+    // Shared out of line: every driver closure would otherwise inline the
+    // driver's default construction and drop.
+    #[inline(never)]
+    fn take_socket_driver(&mut self) -> Driver {
+        std::mem::take(&mut self.io.core.socket_driver)
+    }
+    #[inline(never)]
+    fn restore_socket_driver(&mut self, driver: Driver) {
+        self.io.core.socket_driver = driver;
+    }
+    #[inline(never)]
     pub(super) fn socket_effects(&mut self, effects: Vec<Effect>) {
         if self
             .io
@@ -316,10 +327,12 @@ impl<P> Cx<'_, P> {
         if values.len() > MAX_INTERESTS || required_keys.len() > MAX_INTERESTS {
             return Err(SocketError::Capacity);
         }
-        let values_by_key: std::collections::BTreeMap<_, _> =
-            values.iter().map(|i| (i.key.as_ref(), i)).collect();
-        if values_by_key.len() != values.len() {
-            return Err(SocketError::InvalidInterest);
+        // Inserted one by one: `collect` would add its own sort and bulk build.
+        let mut values_by_key = std::collections::BTreeMap::new();
+        for value in &values {
+            if values_by_key.insert(value.key.as_ref(), value).is_some() {
+                return Err(SocketError::InvalidInterest);
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         let mut required = Vec::with_capacity(required_keys.len());
@@ -471,6 +484,20 @@ impl<V: Venue> Engine<V> {
         }
         self.process_pending_socket_work(now);
     }
+    /// One shared notice for a refused lifecycle step.
+    #[inline(never)]
+    fn socket_refused(&mut self, now: f64, what: &str, error: SocketError) {
+        Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        }
+        .notice(
+            Level::Error,
+            log_code::SUBSCRIPTION_REJECTED,
+            format!("Managed socket {what} refused: {error:?}"),
+        );
+    }
     #[inline(never)]
     fn process_pending_socket_work(&mut self, now: f64) {
         let mut processed = 0usize;
@@ -539,30 +566,12 @@ impl<V: Venue> Engine<V> {
                         },
                     );
                     if let Err(error) = result {
-                        let mut cx = Cx {
-                            now,
-                            store: &mut self.store,
-                            io: &mut self.io,
-                        };
-                        cx.notice(
-                            Level::Error,
-                            log_code::SUBSCRIPTION_REJECTED,
-                            format!("Managed socket invalidation refused: {error:?}"),
-                        );
+                        self.socket_refused(now, "invalidation", error);
                     }
                     if let Err(error) = self.socket_mutate(now, |d, cx| {
                         d.acknowledge_retirement(cx, retirement, result.is_ok(), retry)
                     }) {
-                        let mut cx = Cx {
-                            now,
-                            store: &mut self.store,
-                            io: &mut self.io,
-                        };
-                        cx.notice(
-                            Level::Error,
-                            log_code::SUBSCRIPTION_REJECTED,
-                            format!("Managed socket retirement refused: {error:?}"),
-                        );
+                        self.socket_refused(now, "retirement", error);
                     }
                     continue;
                 }
@@ -645,16 +654,7 @@ impl<V: Venue> Engine<V> {
         }
     }
     fn socket_failed_feed(&mut self, now: f64, feed: FeedId, error: SocketError) {
-        let mut cx = Cx {
-            now,
-            store: &mut self.store,
-            io: &mut self.io,
-        };
-        cx.notice(
-            Level::Error,
-            log_code::SUBSCRIPTION_REJECTED,
-            format!("Managed socket operation refused: {error:?}"),
-        );
+        self.socket_refused(now, "operation", error);
         let effects = self.socket_mutate(now, |d, cx| d.stop_feed(cx, feed).into_iter().collect());
         self.socket_enqueue(now, effects);
     }

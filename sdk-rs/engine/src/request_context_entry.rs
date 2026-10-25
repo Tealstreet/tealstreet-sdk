@@ -326,12 +326,9 @@ impl<P> Cx<'_, P> {
         if self.command_wait() != Some(CommandWait::Expired) {
             return Err(CommandEntryError::Revoked);
         }
-        match self.with_command_entry(operation, |_, _| {
-            Err::<(), _>(crate::request_context::Error::TimedOut)
-        }) {
-            Err(CommandEntryError::Rejected(_)) => Ok(()),
-            Err(error) => Err(error),
-            Ok(()) => unreachable!("expiry never admits"),
+        match self.reject_command_entry(operation, crate::request_context::Error::TimedOut) {
+            CommandEntryError::Rejected(_) => Ok(()),
+            error => Err(error),
         }
     }
 
@@ -347,12 +344,32 @@ impl<P> Cx<'_, P> {
     }
 
     /// One initial command transaction shared by Context and opaque Preflight
-    /// issuers. Only this callback loan can reject an unissued command.
+    /// issuers. Only this callback loan can reject an unissued command. The
+    /// generic shell only calls `issue`; both halves are shared, non-generic code.
     pub(in crate::engine) fn with_command_entry<T>(
         &mut self,
         operation: Operation,
         issue: impl FnOnce(&mut Self, CommandId) -> Result<T, crate::request_context::Error>,
     ) -> Result<T, CommandEntryError> {
+        let command = self.begin_command_transaction()?;
+        issue(self, command)
+            .map_err(|reason| self.reject_command_transaction(command, operation, reason))
+    }
+
+    /// Reject this genuine command entry without issuing anything.
+    pub(in crate::engine) fn reject_command_entry(
+        &mut self,
+        operation: Operation,
+        reason: crate::request_context::Error,
+    ) -> CommandEntryError {
+        match self.begin_command_transaction() {
+            Ok(command) => self.reject_command_transaction(command, operation, reason),
+            Err(error) => error,
+        }
+    }
+
+    #[inline(never)]
+    fn begin_command_transaction(&mut self) -> Result<CommandId, CommandEntryError> {
         let Some(entry) = &mut self.io.core.command_entry else {
             return Err(CommandEntryError::Revoked);
         };
@@ -376,37 +393,42 @@ impl<P> Cx<'_, P> {
         // Suspend the fresh loan before ordinary issuance reserves an ID. Only
         // this exact transaction may produce its success or unissued rejection.
         self.io.core.command_entry.as_mut().unwrap().state = State::Bound;
-        match issue(self, command) {
-            Ok(owner) => Ok(owner),
-            Err(reason) => {
-                // Typed issuance errors occur before owner insertion. Never
-                // erase a previous owner or leave opaque work runnable.
-                assert!(self.io.core.request_contexts.command_entry_unowned(command));
-                let entry = self
-                    .io
-                    .core
-                    .command_entry
-                    .as_mut()
-                    .expect("active command entry");
-                assert!(entry.command == command && entry.state == State::Bound);
-                entry.state = State::Rejected;
-                let error = if operation == Operation::Read {
-                    reason.read_venue_error()
-                } else {
-                    reason.venue_error()
-                };
-                #[cfg(feature = "order-locks")]
-                {
-                    self.io.core.order_locks.finish(command, true);
-                    self.io.core.active_commands.remove(&command);
-                }
-                self.io.finish_command_wait(command);
-                self.io
-                    .core
-                    .actions
-                    .push(Action::Notice(Notice::CommandFailed { command, error }));
-                Err(CommandEntryError::Rejected(reason))
-            }
+        Ok(command)
+    }
+
+    #[inline(never)]
+    fn reject_command_transaction(
+        &mut self,
+        command: CommandId,
+        operation: Operation,
+        reason: crate::request_context::Error,
+    ) -> CommandEntryError {
+        // Typed issuance errors occur before owner insertion. Never erase a
+        // previous owner or leave opaque work runnable.
+        assert!(self.io.core.request_contexts.command_entry_unowned(command));
+        let entry = self
+            .io
+            .core
+            .command_entry
+            .as_mut()
+            .expect("active command entry");
+        assert!(entry.command == command && entry.state == State::Bound);
+        entry.state = State::Rejected;
+        let error = if operation == Operation::Read {
+            reason.read_venue_error()
+        } else {
+            reason.venue_error()
+        };
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.core.order_locks.finish(command, true);
+            self.io.core.active_commands.remove(&command);
         }
+        self.io.finish_command_wait(command);
+        self.io
+            .core
+            .actions
+            .push(Action::Notice(Notice::CommandFailed { command, error }));
+        CommandEntryError::Rejected(reason)
     }
 }
