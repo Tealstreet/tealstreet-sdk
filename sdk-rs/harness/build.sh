@@ -56,6 +56,7 @@ family_args() {
   elif [[ $family == bitget ]]; then
     # Engine at s: steady CPU clears the 1.10x gate with margin; z measured 1.07-1.21x.
     build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level="s"')
+    build_args+=(--config 'profile.release.package.safe-cex-venue-bitget.opt-level="s"')
   elif [[ $family == kucoin ]]; then
     # Derivatives pass z; Spot and combined builds keep the crate's throughput profile.
     build_args+=(--config 'profile.release.package.safe-cex-venue-kucoin.opt-level="z"')
