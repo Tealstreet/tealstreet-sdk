@@ -2403,6 +2403,38 @@ that hot path. No authority policy, codec, venue-specific shortcut or legacy-sit
 exemption changes. Exact paired CI performance and family memory/size gates remain
 separate evidence from diagnostic profiles.
 
+
+## Ordinary Bybit Plan adoption
+
+Ordinary Bybit writes move from the legacy job pipeline to the shared Preflight
+and Plan core; Hyro and every option-symbol command stay on the legacy pipeline until
+their own adoption (D5, remove-before-master-merge). One const code table and a
+strict object-only acknowledgement codec record write facts before any Store or
+Demo publication; refusals that carry rows or IDs are unproven, and no text or
+transport loss authorizes a resend. The partial-stop protection-cancel leg
+needs `plan_protection_cancel_leg_context`, carried on the child until its own
+engine follow-up PR merges after #1857 and #1873. Legacy inventory: one
+`trading.rs` site pruned; the rest serves the Hyro/option pipeline.
+
+
+## Bybit candles and no-I/O answers (slice 1a)
+
+`FetchCandles` is a single command Read Context (`admit_http_command`, managed
+GET with `X-Referer`, streamed `result.list`, `validate_read_http_delivery`
+before every row and the terminal, `done_context`/`fail_context`). The cached
+`FetchBalanceInfo` answer and the disabled-product refusal are admitted before
+answering, with no HTTP, timer or Store activity. Exact prune: seven `lib.rs`
+occurrences (three candle refusals, two kline terminals, the balance `done`,
+the disabled-product `fail`); the shared `send` chokepoint is unchanged.
+
+## Bybit environment probe (slice 1b)
+
+The opposite-environment key probe is a Background signed Read Context with
+its native 2 s window on the managed lifecycle; the venue timer is retired and
+the probe attributes a key only under its own validated Context. Native
+confirmation, hints and the single terminal are unchanged. Exact prune: the
+probe's `lib.rs` `request` and one `sign_http`.
+
 ## Draft socket lifecycle architecture adoption
 
 The shared Supervisor alone did not own current epochs, auth acceptance,
@@ -3268,3 +3300,42 @@ with unchanged native text/kind. The provably dead private-phase arm is deleted;
 all earlier handlers and pre-entry refusals remain. Exactly two lib singleton
 hashes disappear; no catalog, account, trading, queue or signer adoption.
 All18 originals, library7 and trading42 pass; source reviews/CI remain separate.
+## Metadata/settings freshness core
+
+The engine/Store owner supplies BingX query coalescing, settings-write fences
+and background settings publication observations. WEEX retains its incoming
+managed Context leverage reader and native settings revision; only background
+settings proposals and Store write fences use this shared boundary. No WEEX
+query coalescing or joined managed adoption is claimed. Native financial fences
+remain separate. BingX Plan/observer production wiring still requires the
+reviewed planned-execution seam and independent-observer controls.
+[Implementation and limits](RUST_METADATA_FRESHNESS.md).
+
+## Paradex command candle custody
+
+One original caller Read root owns at most two native unsigned routes. Fresh
+20s/Never children use exact delivery guards before item/envelope parsing;
+released failures bind through managed dispatch and retained child ownership,
+then validate the original root before native fallback. Preparation refusals are
+strict. Native wire, financial codecs, limit behavior, row order and poll paths
+are retained. Two numeric terminal occurrences are removed (public 5->3,
+family 41->39); retained raw calls are subscription polling only.
+
+Architecture gate: No. The venue consumes shared root/child admission, delivery,
+retirement and typed failure APIs; it adds no issuer, local timer or authority map.
+The old saturated-candles raw-send expectation is explicitly superseded by shared
+Capacity; its literal native wire assertions remain after genuine recovery.
+
+## Paradex subscription candle polls
+
+Two unsigned poll senders consume existing Background Read Contexts, managed
+Prepare/Bind/Claim, exact Background delivery and retirement. No new engine API,
+issuer, authority map, local HTTP timer, signer or socket supervisor. The native
+subscription generation gates continuations; trade revision gates publication
+only. Context retirement precedes fallback or native next-poll scheduling,
+after synchronous successful publication. Nonfinite admission refuses scheduling.
+
+The overseer approved the new 20s bound, strict pre-release cleanup and stale
+continuation suppression; CALLERS discloses them. Original plan/native/API and
+30-control review are CLEAR at b34798899c2 and 13f6a5dc13a. Exact source review,
+paired family/combined size and qualifying CI remain separate gates.

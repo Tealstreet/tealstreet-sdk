@@ -191,7 +191,7 @@ jobs:
           import { createHash } from 'node:crypto';
           import { createRequire } from 'node:module';
           import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-          import { WASM_BUDGETS, wasmBudgetError } from './sdk-rs/harness/wasm-budget.mjs';
+          import { wasmBudgetBytes, wasmBudgetError } from './sdk-rs/harness/wasm-budget.mjs';
           const mode = process.env.MODE;
           const { WasmEngine } = createRequire(import.meta.url)('./sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm.js');
           for (const method of ['httpGroupPending', 'httpClaimGroup']) {
@@ -203,9 +203,9 @@ jobs:
             const path = `sdk-rs/hosts/wasm/pkg/${target}/safe_cex_wasm_bg.wasm`;
             const bytes = readFileSync(path);
             copyFileSync(path, `${out}/${target}.wasm`);
-            return { target, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), error: wasmBudgetError(bytes.length, 'venue') ?? null };
+            return { target, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), error: wasmBudgetError(bytes.length, 'venue', 'bybit') ?? null };
           });
-          const report = { revision: process.env.GITHUB_SHA, mode, budgetBytes: WASM_BUDGETS.venue, artifacts };
+          const report = { revision: process.env.GITHUB_SHA, mode, budgetBytes: wasmBudgetBytes('venue', 'bybit'), artifacts };
           writeFileSync(`${out}/report.json`, JSON.stringify(report, null, 2) + '\n');
           console.log(JSON.stringify(report, null, 2));
           JS
@@ -223,7 +223,7 @@ jobs:
             if (!enabled) throw new Error('comparison target missing');
             console.log(`${artifact.target}: off=${artifact.bytes}, on=${enabled.bytes}, delta=${enabled.bytes - artifact.bytes}`);
           }
-          if (off.artifacts.some(({ error }) => error)) throw new Error('ordinary Bybit exceeds its unchanged budget');
+          if (off.artifacts.some(({ error }) => error)) throw new Error('ordinary Bybit exceeds its venue budget');
           JS
       - name: Retain same-head capability measurements
         if: always()
@@ -605,6 +605,9 @@ jobs:
       - name: Breakout compiled account, startup and polling controls
         if: matrix.venue == 'breakoutprop'
         run: corepack yarn rust:test-breakoutprop-parity
+      - name: Backpack selected public-only history contracts
+        if: matrix.venue == 'backpack'
+        run: corepack yarn -s node --test sdk-rs/harness/backpack-history.integration.mjs
       - name: Aster V3 wallet auth, builder, STP and native query contracts
         if: matrix.venue == 'asterdex'
         run: |

@@ -1,6 +1,8 @@
 //! Payload shapes: https://exchange-developer.crypto.com/exchange/v1/
+mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
+use safe_cex_venue_cryptocom::Cryptocom;
+use support::fixture::Options;
 
 fn answer(engine: &mut Engine<Cryptocom>, body: &str) {
     let request = safe_cex_engine::test_support::prepared_actions(engine, 0.0)
@@ -33,10 +35,10 @@ fn answer_request(engine: &mut Engine<Cryptocom>, request: RequestId, body: &str
     engine.handle(0.0, Event::HttpEnd { request });
 }
 fn ready() -> (Engine<Cryptocom>, SocketId) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    let mut engine = support::fixture::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
     answer(
         &mut engine,
@@ -67,10 +69,10 @@ fn nested_chunked_lists_seed_markets_and_tickers() {
 #[test]
 fn automatic_seed_budget_ignores_early_books_and_counts_unique_channels() {
     for market_count in [200, 351] {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+        let mut engine = support::fixture::engine(Options {
             public_data_only: true,
             ..Default::default()
-        }));
+        });
         engine.start(0.0);
         for symbol in ["M000USD-PERP", "M001USD-PERP"] {
             engine.handle(
@@ -185,8 +187,7 @@ fn valuations_distinguish_current_funding_and_index_instruments() {
 }
 #[test]
 fn code_after_array_is_checked_before_committing() {
-    let mut engine =
-        safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options::default()));
+    let mut engine = support::fixture::engine(Options::default());
     engine.start(0.0);
     answer(
         &mut engine,
@@ -238,8 +239,7 @@ fn malformed_streamed_array_never_commits_empty() {
         r#"{"result":{"data":[,]},"code":0}"#,
         r#"{"result":{"data":[{},]},"code":0}"#,
     ] {
-        let mut engine =
-            safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options::default()));
+        let mut engine = support::fixture::engine(Options::default());
         engine.start(0.0);
         answer(&mut engine, body);
         assert!(!engine.store().loaded().markets);
@@ -248,10 +248,10 @@ fn malformed_streamed_array_never_commits_empty() {
 
 #[test]
 fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    let mut engine = support::fixture::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
     answer(
         &mut engine,
@@ -315,10 +315,10 @@ fn bad_instrument_and_ticker_rows_are_skipped_at_startup() {
 }
 #[test]
 fn startup_stops_when_no_instrument_or_ticker_row_maps() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    let mut engine = support::fixture::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
     answer(
         &mut engine,
@@ -332,10 +332,10 @@ fn startup_stops_when_no_instrument_or_ticker_row_maps() {
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { level: safe_cex_engine::Level::Error, message, .. })) if message.contains("instrument")
     )));
 
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    let mut engine = support::fixture::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
     answer(
         &mut engine,
@@ -449,10 +449,10 @@ fn instrument_summary_counts_duplicates_and_keeps_the_first_label() {
         (r#"{"inst_type":"PERPETUAL_SWAP","symbol":""}"#, ""),
         (r#"{"inst_type":"PERPETUAL_SWAP","symbol":"bad"}"#, "bad"),
     ] {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+        let mut engine = support::fixture::engine(Options {
             public_data_only: true,
             ..Default::default()
-        }));
+        });
         engine.start(0.0);
         let good = r#"{"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.0001","quote_decimals":1,"quantity_decimals":4,"max_leverage":"50"}"#;
         let duplicate = r#"{"inst_type":"PERPETUAL_SWAP","symbol":"duplicate"}"#;

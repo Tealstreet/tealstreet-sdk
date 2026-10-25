@@ -71,6 +71,7 @@ impl Venue for Issue {
         };
         cx.request_signed_managed(
             context,
+            None,
             self.request.method,
             self.route.clone().unwrap_or_else(|| {
                 format!("https://api.backpack.exchange{}{suffix}", self.request.path)
@@ -90,15 +91,24 @@ impl Venue for Issue {
 }
 
 fn provider() -> (Arc<LocalSigner>, Identity) {
-    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-        primary: Some(LocalIdentity {
-            key: Secret::new("provider-public-key".into()),
-            secret: Secret::new(STANDARD.encode([7u8; 32])),
-            secret_encoding: KeyEncoding::Base64,
-            ..Default::default()
-        }),
-        secondary: None,
-    })
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new("provider-public-key".into()),
+                secret: Secret::new(STANDARD.encode([7u8; 32])),
+                secret_encoding: KeyEncoding::Base64,
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        safe_cex_engine::signing::CredentialSetupPolicy {
+            primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
     .unwrap();
     (Arc::new(provider), identities.primary.unwrap())
 }

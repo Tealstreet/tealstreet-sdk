@@ -205,6 +205,7 @@ impl Kraken {
         self.skipping_markets.clear();
         match cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!("{}/derivatives/api/v3/instruments", self.host()),
             None,
@@ -235,6 +236,7 @@ impl Kraken {
         self.live_tickers.begin();
         match cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!("{}/derivatives/api/v3/tickers", self.host()),
             None,
@@ -498,7 +500,7 @@ impl Kraken {
             (page.to / 1000.0).floor()
         );
         *context = Some(leg.clone());
-        match cx.request_managed(leg, Method::Get, url, None, pending) {
+        match cx.request_managed(leg, None, Method::Get, url, None, pending) {
             Ok(request) => cx.stream_response(request, ArrayAt::Field("candles")),
             Err((pending, reason)) => self.candles_failed(cx, pending, reason.venue_error()),
         }
@@ -604,6 +606,11 @@ fn resolution(interval: Interval) -> Option<&'static str> {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
+    #[inline]
+    fn dispatch_nonce() -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }

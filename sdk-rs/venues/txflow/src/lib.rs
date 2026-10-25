@@ -247,6 +247,7 @@ impl TxFlow {
         self.ticker_contexts.insert(asset, context.clone());
         if let Err((Pending::Ticker { asset, context }, error)) = cx.request_managed_with_headers(
             context.clone(),
+            None,
             Method::Post,
             format!("{}/info", self.rest()),
             &[
@@ -743,6 +744,11 @@ impl Venue for TxFlow {
     }
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(request) = &pending
+            && !self.account_delivery_live(cx, request)
+        {
+            return;
+        }
         if let Pending::Ticker { asset, context } = &pending
             && (self.ticker_contexts.get(asset) != Some(context)
                 || cx.validate_background_read_http_delivery(context).is_err())

@@ -50,16 +50,12 @@ family_args() {
   if [[ $family == asterdex ]]; then
     # Restore pre-#1656 venue throughput only for this family, not combined/native.
     build_args+=(--config 'profile.release.package.safe-cex-venue-asterdex.opt-level=3')
-  elif [[ $family == bitget ]]; then
-    # Size defaults fit dispatch signing; the engine stays at speed for the CPU gate.
-    build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level=3')
   elif [[ $family == woo ]]; then
     # Keep WOO ticker decoding throughput within the fixed CPU and size gates.
     build_args+=(--config 'profile.release.package.safe-cex-venue-woo.opt-level=3')
-  elif [[ $family == paradex ]]; then
-    # Keep standalone Paradex within the fixed size gate; public replay also gates CPU and memory.
-    build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level="z"'
-      --config 'profile.release.package.safe-cex-engine.opt-level=2')
+  elif [[ $family == bitget ]]; then
+    # Engine at s: steady CPU clears the 1.10x gate with margin; z measured 1.07-1.21x.
+    build_args+=(--config 'profile.release.package.safe-cex-engine.opt-level="s"')
   elif [[ $family == kucoin ]]; then
     # Derivatives pass z; Spot and combined builds keep the crate's throughput profile.
     build_args+=(--config 'profile.release.package.safe-cex-venue-kucoin.opt-level="z"')

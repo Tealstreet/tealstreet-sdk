@@ -57,6 +57,8 @@ export interface EngineRoutingPlan {
   socketChannels: Array<{ contains: string; channel: 'public' | 'private' | 'business' }>;
   /** Public sockets whose native URL names a product with its own route. */
   publicWsRoutes?: Array<{ contains: string; route: EngineWsRoute }>;
+  /** Private sockets whose native URL has its own route (Bitget UTA). */
+  privateWsRoutes?: Array<{ contains: string; route: EngineWsRoute }>;
 }
 
 type Request = Parameters<Transport['request']>[0];
@@ -194,6 +196,19 @@ const publicWsRoutes = (
       ]
     : undefined;
 
+// The Rust Bitget venue opens classic v2 and UTA v3 private sockets on one
+// channel; UTA takes TS #8093's privateUta route by its native URL.
+const privateWsRoutes = (routing: ResolvedRouting): EngineRoutingPlan['privateWsRoutes'] =>
+  routing.wsPrivateUta
+    ? [
+        {
+          contains: '/v3/ws/private',
+          // The same venue pong is not route traffic on either private socket.
+          route: wsRoute({ ...routing.wsPrivateUta, ignoredMessages: routing.wsPrivate.ignoredMessages }),
+        },
+      ]
+    : undefined;
+
 const resolved = (exchange: ExchangeName, options: ExchangeOptions, provider: TransportProvider) => {
   const declared = provider.wsRouting(exchange, options);
   // Bitunix's TS sockets choose their declared fallback on this explicit option.
@@ -260,6 +275,7 @@ export const resolveEngineRoutingPlan = (
     ? resolveEngineRoutingPlan(exchange, secondaryReadOptions(options, provider), baseURL)
     : undefined;
   const productRoutes = publicWsRoutes(exchange, options, provider);
+  const privateRoutes = privateWsRoutes(routing);
   return {
     http: http(!options.publicDataOnly && options.key ? 'primary' : 'public'),
     ...(publicCorsProxy
@@ -291,6 +307,7 @@ export const resolveEngineRoutingPlan = (
     venueWsHeaders: venueHeaders(exchange, options),
     socketChannels,
     ...(productRoutes ? { publicWsRoutes: productRoutes } : {}),
+    ...(privateRoutes ? { privateWsRoutes: privateRoutes } : {}),
   };
 };
 
@@ -722,6 +739,7 @@ export const createEngineTransport = (
     business: wsRoute(routing.wsBusiness),
   };
   const productRoutes = publicWsRoutes(exchange, options, provider) ?? [];
+  const privateRoutes = privateWsRoutes(routing) ?? [];
   // Relay sockets read the proxy token on open; see `httpTransport`.
   const proxyTokenProvider = captureProxyTokenProvider();
   const requireSocketHeaders = (url: string) => {
@@ -833,9 +851,8 @@ export const createEngineTransport = (
     connect: (url, handlers) => {
       const channel =
         handlers.channel ?? socketChannels.find((rule) => url.includes(rule.contains))?.channel ?? 'public';
-      const declared =
-        (channel === 'public' ? productRoutes.find((rule) => url.includes(rule.contains))?.route : undefined) ??
-        routes[channel];
+      const scoped = channel === 'public' ? productRoutes : channel === 'private' ? privateRoutes : [];
+      const declared = scoped.find((rule) => url.includes(rule.contains))?.route ?? routes[channel];
       const bypass = declared.directUrls?.includes(url);
       const route: EngineWsRoute = bypass ? {} : declared;
       const key = `${channel}:${handlers.context?.feed ?? ''}:${url.split('?')[0]}`;
@@ -844,7 +861,22 @@ export const createEngineTransport = (
         fallback = new WsDirectFallback(2, route.initialSilentConnects);
         fallbacks.set(key, fallback);
       }
-      if (handlers.context?.recover && route.fallback) fallback?.preferFallback();
+      if (handlers.context?.rejectRoute) {
+        // The venue refused this egress: advance exactly one route (not recover's
+        // jump to the last), or report exhaustion after connect returns, never dialling.
+        if (!fallback?.rejectCurrent()) {
+          let live = true;
+          transport.setTimeout(() => {
+            if (live) handlers.onRouteExhausted?.();
+          }, 0);
+          return {
+            send: () => {},
+            close: () => {
+              live = false;
+            },
+          };
+        }
+      } else if (handlers.context?.recover && route.fallback) fallback?.preferFallback();
       const target = fallback?.resolveUrl(route.host ?? url, route.relay, route.fallback) ?? url;
       const connection = requireSocketHeaders(target);
       const upgrade = AxiosHeaders.from(handlers.headers ?? {});

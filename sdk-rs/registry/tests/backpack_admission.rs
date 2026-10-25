@@ -3,6 +3,9 @@
 //! and seed, so managed trading signs through the provider.
 #![cfg(feature = "backpack")]
 
+use safe_cex_engine::credential_selection::{
+    CredentialRole, CredentialUnavailable, PrimaryReason, SlotPolicy, Slots,
+};
 use safe_cex_engine::signing::{
     Algorithm, Identities, Operation, PayloadPart, Provider, SignRequest,
 };
@@ -93,6 +96,44 @@ fn registry_installs_the_provider_and_identity_from_the_configured_seed() {
     assert!(identities.secondary.is_none());
 }
 
+// RFC 8032 section 7.1, test 1: the seed's public key.
+const RFC_PUBLIC: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+
+/// Key typing: the seed is declared Ed25519, so it answers its own public key
+/// and never MACs. The valid-seed case above also guards the setup probe,
+/// which would mask a missing declaration as a width error.
+#[test]
+fn the_backpack_seed_is_declared_ed25519() {
+    let (identities, signer) = construct(json!({
+        "key": "public-api-key",
+        "secret": base64(&hex(RFC_SEED)),
+    }))
+    .unwrap();
+    let primary = identities.primary.unwrap();
+    let signer = signer.unwrap();
+    let request = |operation| SignRequest {
+        receipt: Default::default(),
+        context: Default::default(),
+        operations: vec![operation],
+    };
+    let public = signer
+        .sign_ready(&request(Operation::PublicKey {
+            algorithm: Algorithm::Ed25519,
+            key: primary.signing.clone(),
+        }))
+        .unwrap()
+        .map(|result| result.values.clone());
+    assert_eq!(public, Ok(vec![hex(RFC_PUBLIC)]));
+    let mac = signer
+        .sign_ready(&request(Operation::Sign {
+            algorithm: Algorithm::HmacSha256,
+            key: primary.signing,
+            payload: vec![PayloadPart::Bytes { bytes: vec![] }],
+        }))
+        .unwrap();
+    assert!(mac.is_err());
+}
+
 #[test]
 fn malformed_or_wrong_length_seeds_are_refused_at_setup() {
     for (secret, message) in [
@@ -169,15 +210,48 @@ fn secondary_only_identity_uses_a_real_provider_without_a_primary() {
 }
 
 #[test]
-fn public_only_secondary_config_installs_no_signing_authority() {
+fn public_only_secondary_config_installs_read_scoped_authority_only() {
     let (identities, signer) = construct(json!({
         "publicDataOnly": true,
         "readCredentials": {"key": "read-api-key", "secret": base64(&hex(RFC_SEED))},
     }))
     .unwrap();
     assert!(identities.primary.is_none());
-    assert!(identities.secondary.is_none());
-    assert!(signer.is_none());
+    assert_read_provider(identities.clone(), signer, false);
+    let slots = Slots::new(
+        identities.primary,
+        identities.secondary,
+        SlotPolicy::default(),
+    );
+    let (selected, _) = slots.select(CredentialRole::Read { scope: None }).unwrap();
+    assert_eq!(selected.slot(), safe_cex_engine::CredentialSlot::Secondary);
+    for role in [
+        CredentialRole::Mutation,
+        CredentialRole::SessionAuth,
+        CredentialRole::PrimaryRead {
+            reason: PrimaryReason::History,
+            scope: None,
+        },
+    ] {
+        assert_eq!(
+            slots.select(role).err(),
+            Some(CredentialUnavailable::Missing)
+        );
+    }
+}
+
+#[test]
+fn public_only_invalid_secondary_installs_no_signing_authority() {
+    for secret in ["not base64!".to_string(), base64(&[8; 31])] {
+        let (identities, signer) = construct(json!({
+            "publicDataOnly": true,
+            "readCredentials": {"key": "read-api-key", "secret": secret},
+        }))
+        .unwrap();
+        assert!(identities.primary.is_none());
+        assert!(identities.secondary.is_none());
+        assert!(signer.is_none());
+    }
 }
 
 #[test]
@@ -316,20 +390,32 @@ fn native_valid_base64_read_seeds_always_construct_and_sign_in_the_provider() {
     for byte in [0, 1, 7, 8, 127, 128, 255] {
         let secret = base64(&[byte; 32]);
         assert!(safe_cex_venue_backpack::sign::Credentials::new("read".into(), &secret).is_ok());
-        let (signer, identities) = LocalSigner::from_setup(LocalSetup {
-            primary: Some(LocalIdentity {
-                key: Secret::new("primary".into()),
-                secret: Secret::new(base64(&[7; 32])),
-                secret_encoding: KeyEncoding::Base64,
-                ..Default::default()
-            }),
-            secondary: Some(LocalIdentity {
-                key: Secret::new("read".into()),
-                secret: Secret::new(secret),
-                secret_encoding: KeyEncoding::Base64,
-                ..Default::default()
-            }),
-        })
+        let (signer, identities) = LocalSigner::from_setup_with_policy(
+            LocalSetup {
+                primary: Some(LocalIdentity {
+                    key: Secret::new("primary".into()),
+                    secret: Secret::new(base64(&[7; 32])),
+                    secret_encoding: KeyEncoding::Base64,
+                    ..Default::default()
+                }),
+                secondary: Some(LocalIdentity {
+                    key: Secret::new("read".into()),
+                    secret: Secret::new(secret),
+                    secret_encoding: KeyEncoding::Base64,
+                    ..Default::default()
+                }),
+            },
+            safe_cex_engine::signing::CredentialSetupPolicy {
+                primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                    signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+                    ..Default::default()
+                }),
+                secondary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                    signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+                    ..Default::default()
+                }),
+            },
+        )
         .expect("native-valid read seed must not refuse the primary setup");
         let read = identities.secondary.unwrap();
         let request = SignRequest {

@@ -940,12 +940,72 @@ describe('Bitget host routing keeps engine feeds and recovery independent', () =
     expect(raw.connect.mock.calls.every(([url]) => url === privateUrl)).toBe(true);
   });
 
-  it('UTA private sockets bypass v2 fallbacks even during recovery and repeated silence', () => {
+  it('UTA private sockets take the v3 privateUta route and never a v2 route', () => {
     const raw = makeRaw();
     const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
     for (let attempt = 0; attempt < 10; attempt++) routed.connect(utaUrl, withContext('account', true, 'private'));
-    expect(raw.connect.mock.calls.every(([url]) => url === utaUrl)).toBe(true);
-    expect(raw.connect.mock.calls.every(([, handler]) => Object.keys(handler.headers ?? {}).length === 0)).toBe(true);
+    const urls = raw.connect.mock.calls.map(([url]) => url);
+    expect(urls.some((url) => url.includes('/v2/'))).toBe(false);
+    expect(urls.every((url) => url.includes('/v3'))).toBe(true);
+  });
+
+  const rejecting = (recover = false) => ({
+    ...handlers('private'),
+    context: { feed: 'account', recover, rejectRoute: true },
+    onRouteExhausted: vi.fn(),
+  });
+
+  it('rejectRoute advances exactly one route, even with recover set', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options(), raw);
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    expect(raw.connect.mock.lastCall![0]).toBe(privateUrl);
+    routed.connect(privateUrl, rejecting(true));
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private');
+    expect(raw.connect).toHaveBeenCalledTimes(2);
+  });
+
+  it('an exhausted chain reports after connect returns, never dials, and the next connect stays on the last route', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options(), raw);
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    const handler = rejecting();
+    let dials = raw.connect.mock.calls.length;
+    for (let attempt = 0; attempt < 5 && raw.connect.mock.calls.length === dials + attempt; attempt++) {
+      routed.connect(privateUrl, handler);
+    }
+    dials = raw.connect.mock.calls.length;
+    const last = raw.connect.mock.lastCall![0];
+    const exhausted = rejecting();
+    routed.connect(privateUrl, exhausted);
+    expect(raw.connect).toHaveBeenCalledTimes(dials);
+    expect(exhausted.onRouteExhausted).not.toHaveBeenCalled();
+    raw.setTimeout.mock.lastCall![0]();
+    expect(exhausted.onRouteExhausted).toHaveBeenCalledOnce();
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    expect(raw.connect.mock.lastCall![0]).toBe(last);
+  });
+
+  it('a direct provider has no other egress, so a refusal exhausts at once', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ transport: directTransport }), raw);
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    const exhausted = rejecting();
+    routed.connect(privateUrl, exhausted);
+    expect(raw.connect).toHaveBeenCalledOnce();
+    expect(exhausted.onRouteExhausted).not.toHaveBeenCalled();
+    raw.setTimeout.mock.lastCall![0]();
+    expect(exhausted.onRouteExhausted).toHaveBeenCalledOnce();
+  });
+
+  it('closing an exhausted connect before its report suppresses the report', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ transport: directTransport }), raw);
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    const exhausted = rejecting();
+    routed.connect(privateUrl, exhausted).close();
+    raw.setTimeout.mock.lastCall![0]();
+    expect(exhausted.onRouteExhausted).not.toHaveBeenCalled();
   });
 
   it.each([

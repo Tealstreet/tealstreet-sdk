@@ -78,9 +78,10 @@ impl Venue for Probe {
                     },
                 )
                 .unwrap();
-            self.before_id = cx.io.next_id;
+            self.before_id = cx.io.core.next_id;
             self.result = Some(cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -267,6 +268,7 @@ fn public_headers_keep_duplicate_order_and_absent_or_empty_body_without_signing(
                     .unwrap();
                 cx.request_managed_with_headers(
                     context,
+                    None,
                     Method::Post,
                     "https://public.test/info".into(),
                     headers,
@@ -285,7 +287,7 @@ fn public_headers_keep_duplicate_order_and_absent_or_empty_body_without_signing(
                     .iter()
                     .any(|action| matches!(action, Action::Http(_) | Action::Sign { .. }))
             );
-            assert_eq!(engine.io.signing.next_id(), RequestId(1));
+            assert_eq!(engine.io.core.signing.next_id(), RequestId(1));
             assert_eq!(calls.load(Ordering::SeqCst), 0);
         }
     }
@@ -320,10 +322,11 @@ fn invalid_public_headers_return_original_pending_before_any_transport_allocatio
                 },
             )
             .unwrap();
-        let before = cx.io.next_id;
+        let before = cx.io.core.next_id;
         assert_eq!(
             cx.request_managed_with_headers(
                 context,
+                None,
                 Method::Post,
                 "https://public.test/info".into(),
                 headers,
@@ -332,10 +335,10 @@ fn invalid_public_headers_return_original_pending_before_any_transport_allocatio
             ),
             Err((41, Error::Invalid))
         );
-        assert_eq!(cx.io.next_id, before);
-        assert!(cx.io.pending.is_empty() && cx.io.managed_http.is_empty());
-        assert!(cx.io.actions.is_empty() && cx.io.timers.is_empty());
-        assert_eq!(cx.io.signing.next_id(), RequestId(1));
+        assert_eq!(cx.io.core.next_id, before);
+        assert!(cx.io.pending.is_empty() && cx.io.core.managed_http.is_empty());
+        assert!(cx.io.core.actions.is_empty() && cx.io.core.timers.is_empty());
+        assert_eq!(cx.io.core.signing.next_id(), RequestId(1));
     }
 }
 
@@ -369,14 +372,15 @@ fn public_header_entry_preserves_private_expired_and_capacity_refusals() {
             .unwrap();
         cx.now = now;
         if capacity {
-            cx.io.next_id = crate::resource_ids::ResourceIds::starting_at(
+            cx.io.core.next_id = crate::resource_ids::ResourceIds::starting_at(
                 crate::resource_ids::MAX_RESOURCE_ID - 1,
             );
         }
-        let before = cx.io.next_id;
+        let before = cx.io.core.next_id;
         assert_eq!(
             cx.request_managed_with_headers(
                 context,
+                None,
                 Method::Post,
                 "https://public.test/info".into(),
                 PUBLIC,
@@ -385,10 +389,10 @@ fn public_header_entry_preserves_private_expired_and_capacity_refusals() {
             ),
             Err((41, expected))
         );
-        assert_eq!(cx.io.next_id, before);
-        assert!(cx.io.pending.is_empty() && cx.io.managed_http.is_empty());
-        assert!(cx.io.actions.is_empty() && cx.io.timers.is_empty());
-        assert_eq!(cx.io.signing.next_id(), RequestId(1));
+        assert_eq!(cx.io.core.next_id, before);
+        assert!(cx.io.pending.is_empty() && cx.io.core.managed_http.is_empty());
+        assert!(cx.io.core.actions.is_empty() && cx.io.core.timers.is_empty());
+        assert_eq!(cx.io.core.signing.next_id(), RequestId(1));
     }
 }
 
@@ -428,11 +432,11 @@ fn invalid_last_header_returns_pending_without_allocating_or_publishing() {
     for headers in invalid {
         let (mut engine, actions, calls) = start(headers);
         assert_eq!(engine.venue().result, Some(Err((41, Error::Invalid))));
-        assert_eq!(engine.io.next_id, engine.venue().before_id);
-        assert!(engine.io.pending.is_empty() && engine.io.managed_http.is_empty());
-        assert!(engine.io.timers.is_empty() && actions.is_empty());
-        assert!(engine.io.signing.next_work().is_none());
-        assert_eq!(engine.io.signing.next_id(), RequestId(1));
+        assert_eq!(engine.io.core.next_id, engine.venue().before_id);
+        assert!(engine.io.pending.is_empty() && engine.io.core.managed_http.is_empty());
+        assert!(engine.io.core.timers.is_empty() && actions.is_empty());
+        assert!(engine.io.core.signing.next_work().is_none());
+        assert_eq!(engine.io.core.signing.next_id(), RequestId(1));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }
@@ -483,10 +487,11 @@ fn existing_context_and_credential_rejections_do_not_read_declaration() {
             )
             .unwrap();
         cx.now = if credential.is_some() { 2. } else { 0. };
-        let before = cx.io.next_id;
+        let before = cx.io.core.next_id;
         assert!(
             cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -498,7 +503,7 @@ fn existing_context_and_credential_rejections_do_not_read_declaration() {
             )
             .is_err()
         );
-        assert_eq!(cx.io.next_id, before);
+        assert_eq!(cx.io.core.next_id, before);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         cx.now = 0.;
     }
@@ -511,6 +516,7 @@ fn full_managed_capacity_does_not_read_or_allocate_for_the_refused_recipe() {
     // the extra request reaches managed admission, not context creation.
     let context = engine
         .io
+        .core
         .managed_http
         .values()
         .next()
@@ -518,7 +524,7 @@ fn full_managed_capacity_does_not_read_or_allocate_for_the_refused_recipe() {
         .lifecycle
         .context()
         .clone();
-    let before = engine.io.next_id;
+    let before = engine.io.core.next_id;
     {
         let mut cx = Cx {
             now: 0.,
@@ -528,6 +534,7 @@ fn full_managed_capacity_does_not_read_or_allocate_for_the_refused_recipe() {
         assert_eq!(
             cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -540,12 +547,12 @@ fn full_managed_capacity_does_not_read_or_allocate_for_the_refused_recipe() {
             Err((99, Error::Capacity))
         );
     }
-    assert_eq!(engine.io.next_id, before);
-    assert!(engine.io.actions.is_empty());
+    assert_eq!(engine.io.core.next_id, before);
+    assert!(engine.io.core.actions.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 256);
     assert_eq!(engine.io.pending.len(), 256);
-    assert_eq!(engine.io.managed_http.len(), 256);
-    assert_eq!(engine.io.signing.next_id(), RequestId(257));
+    assert_eq!(engine.io.core.managed_http.len(), 256);
+    assert_eq!(engine.io.core.signing.next_id(), RequestId(257));
     assert_eq!(
         actions
             .iter()
@@ -579,24 +586,25 @@ fn managed_admission_preflights_both_identity_namespaces_without_partial_reserva
         if exhaust_signing {
             engine
                 .io
+                .core
                 .signing
                 .set_test_ids(ResourceIds::starting_at(MAX_RESOURCE_ID + 1));
         } else {
             // Root allocation leaves only two IDs; admission needs all three.
-            engine.io.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID - 2);
+            engine.io.core.next_id = ResourceIds::starting_at(MAX_RESOURCE_ID - 2);
         }
         engine.start(0.);
         assert_eq!(engine.venue().result, Some(Err((41, Error::Capacity))));
-        assert_eq!(engine.io.next_id, engine.venue().before_id);
-        assert!(engine.io.pending.is_empty() && engine.io.managed_http.is_empty());
-        assert!(engine.io.timers.is_empty());
+        assert_eq!(engine.io.core.next_id, engine.venue().before_id);
+        assert!(engine.io.pending.is_empty() && engine.io.core.managed_http.is_empty());
+        assert!(engine.io.core.timers.is_empty());
         assert!(engine.drain_actions().next().is_none());
         assert!(
             !engine.failed(),
             "typed capacity refusal must not retire a healthy engine"
         );
         if !exhaust_signing {
-            assert_eq!(engine.io.signing.next_id(), RequestId(1));
+            assert_eq!(engine.io.core.signing.next_id(), RequestId(1));
         }
     }
 }
@@ -610,6 +618,7 @@ fn exhausted_signing_namespace_settles_stale_and_terminal_preparation_failures_o
         let (token, _) = prepared(&actions);
         engine
             .io
+            .core
             .signing
             .set_test_ids(ResourceIds::starting_at(MAX_RESOURCE_ID + 1));
         engine.http_preparation_failed(1., token, reason, VenueError::new("route failed"));
@@ -624,8 +633,8 @@ fn exhausted_signing_namespace_settles_stale_and_terminal_preparation_failures_o
             }
         );
         assert_eq!(failures[0].1.outcome, Some(crate::Outcome::NotSent));
-        assert!(engine.io.pending.is_empty() && engine.io.managed_http.is_empty());
-        assert!(engine.io.timers.is_empty() && engine.io.signing.next_work().is_none());
+        assert!(engine.io.pending.is_empty() && engine.io.core.managed_http.is_empty());
+        assert!(engine.io.core.timers.is_empty() && engine.io.core.signing.next_work().is_none());
         assert!(!engine.failed());
         assert!(!engine.drain_actions().any(|action| match action {
             Action::Sign { .. } | Action::Http(_) => true,
@@ -682,7 +691,7 @@ fn fatal_engine_cannot_claim_a_previously_bound_http_permit() {
             _ => None,
         })
         .unwrap();
-    engine.io.next_id = ResourceIds::with_ceiling(1);
+    engine.io.core.next_id = ResourceIds::with_ceiling(1);
     engine.io.next();
     assert!(catch_unwind(AssertUnwindSafe(|| engine.io.next())).is_err());
     assert!(!engine.http_preparation_pending(token));
@@ -727,7 +736,7 @@ fn fatal_engine_retires_live_preparation_and_outstanding_signing_queries() {
             );
             None
         };
-        engine.io.next_id = ResourceIds::with_ceiling(1);
+        engine.io.core.next_id = ResourceIds::with_ceiling(1);
         engine.io.next();
         assert!(catch_unwind(AssertUnwindSafe(|| engine.io.next())).is_err());
         assert!(!engine.http_preparation_pending(token));

@@ -450,3 +450,234 @@ The seeded CI feature-mode dictionary also names an explicit dispatch-nonce OFF
 control (`http-plans,order-locks,test-support`), alongside the existing seeds and
 the explicit nonce ON control. This runs ordinary selected reads and strict
 feature-off refusal without depending on family closure feature unification.
+
+
+### Combined bundle attribution and sharing
+
+The exact `94124690fa9` combined baseline measures 14,127,182 bytes; the
+same tip plus nonce core (`9d44163e682`) measures 14,188,376. Both Node and
+web binaries agree, using the unchanged combined profile and optimizer. The
+fixed budget is 14,155,776; nonce core adds 61,194 bytes and exceeds it by
+32,600. The paired receipt and named diagnostics remain outside Git.
+
+Twiggy's optimized named comparison finds 24,093 bytes of aggregate growth
+in final Claim paths and 9,559 in managed queue paths. These paths repeat for
+venue pending/engine types. Share only the nonce portions in concrete private
+helpers, marked out of line so combined LTO cannot duplicate them:
+
+- Capture and validate declared/expected authority in one non-generic helper,
+  taking the borrowed recipe, retained expected authority, installed identities,
+  captured release registration and exact Context. Preserve the single getter,
+  exact Arc check, installed identity/credential/intent checks and all refusal
+  precedence. Bind-once stays at its original point, before IDs.
+- Move the nonce-only Claim branch onto the concrete Managed type. A borrowed
+  pure-admission callback runs only before the floor lock. Keep ordinary Claim
+  unchanged; keep observation, floor-only stale classification and repair
+  accounting unchanged. The mutex still encloses only floor check, infallible
+  Lifecycle/pacing commit and floor maximum. No new callback runs under it.
+
+No public API, feature map, deadline, domain, parsing, wire, retry, credit or
+budget changes. Feature-off code stays unchanged. Obtain bounded consumer and
+engine custody review, then rerun original nonce/selected-read/native/JS controls,
+strict checks and exact combined measurement. Retain the real WASM recipe proof
+as a required gate for any adopted correction. Keep this work local with no
+push, retry or dispatch under the overseer's current instruction.
+
+
+The optimized accounting above groups named queue functions only. The engine
+review also identifies nonce checks inlined into request wrappers; those must
+be included when evaluating actual savings. The complete paired release-size
+measurement decides whether the extraction fits, rather than summed symbols.
+
+The ordinary/OFF preservation claim is relative to the reviewed nonce parent
+`9d44163e682`, which already includes exclusive release registration and the
+OFF declaration guards. It does not assert byte identity with pre-nonce tip.
+The nonce path retains admit before SigningRelease construction; the ordinary
+path retains its prior order. Missing/invented reservation pairs remain State,
+and Mutable registration remains Invalid for a declared nonce.
+
+If sharing cannot leave adequate combined headroom, keep the branch unpublished
+and pursue a separately reviewed immutable per-venue capability gate so ordinary
+venue instantiations cannot link nonce orchestration. A mutable per-call getter
+or a feature-only assumption is insufficient. Kraken support and fail-closed
+admission must stay coherent; the combined ceiling cannot move.
+
+Before landing, compose the then-actual rewrite tip and measure it independently
+from the exact-941 attribution above. Coordinate Bearer landing order with its
+owner and the auditor. The generation/Bearer fence must precede the nonce helper;
+whoever integrates second must retain the joint stale/supersession control and
+measure the combined artifact with both features. No joint-fit claim is made by
+this extraction alone.
+
+
+The first extraction (`8847d34b315`, original 85 controls passing) measures
+14,167,903 Node bytes: 20,473 saved, still 12,127 over. Before the per-venue
+fallback, extend the concrete Claim helper to share ordinary Claim orchestration
+as well. Its admission input is a private exclusive enum of borrowed Mutable
+and NonceUnscheduled callbacks, retaining their distinct signatures. Engine
+instantiations only construct the callback appropriate to their captured mode.
+
+The ordinary helper branch preserves SigningRelease construction before admit;
+the nonce branch preserves pure admit before SigningRelease construction. A
+Mutable callback still refuses declared nonce work. Neither callback escapes or
+runs under the nonce mutex. The missing/invented reservation matrix, WaitUntil,
+Released-only bookkeeping and floor-only stale flag stay unchanged. This moves
+ordinary source only when dispatch-nonce is enabled; the OFF body remains the
+reviewed ordinary implementation. Obtain bounded review before this extension,
+then use the same original controls and exact combined measurement. The static
+per-venue fallback and current-tip/Bearer composition gates remain mandatory if
+this sharing approach cannot fit. Keep all work local.
+
+
+The broader shared Claim helper (`ab10defecfb`, 88 controls passing) measures
+14,165,173 bytes, still 9,397 over. Before changing venue capabilities, test
+function-level outlining of the existing `queue_managed_admitted` boundary
+when dispatch-nonce is ON. Its complete body and caller ordering remain exact;
+only `cfg_attr(feature = "dispatch-nonce", inline(never))` is added. This keeps
+the generic queue body out of inlined request wrappers identified by Twiggy,
+without changing any OFF code, API, admission, ownership or bind-once order.
+Measure the same combined artifact and retain it only if the complete result
+helps. Obtain bounded source review and run the same queue/Claim controls.
+
+
+Queue outlining measures 14,164,573 bytes, saving 600 but remaining 8,797
+over. Retain its unchanged-body boundary and pursue the planned type-level
+capability fallback, without adding further inline hints.
+
+Add `Venue::DISPATCH_NONCE: bool = false`, an immutable associated constant.
+It is independent of Cargo feature unification and of the once-captured release
+registration. Engine construction permits nonce authority only when both this
+constant and the captured NonceUnscheduled mode agree. The queue uses that
+captured permission and keeps its existing pre-ID refusal and binding order.
+Existing ordinary and pure non-nonce venues remain supported with the default.
+
+With the feature ON, `claim_http` uses the concrete nonce-capable helper only
+for a venue whose constant is true; false uses the ordinary release path. A
+false-capability request with any declared claim or recorded reservation refuses
+State before ordinary Lifecycle admission, so no hidden authority can bypass
+the floor. True retains the exact reviewed pair matrix, floor and repair path.
+Generation and Bearer fences remain earlier than either branch. OFF code is
+unchanged. Tests and the real-WASM recipe fixture explicitly opt in; native
+Kraken adoption remains a separate consumer gate, with no funnel switched here.
+
+Controls must cover default-capability denial before IDs/provider/reservation,
+pure non-nonce work with the default, and explicit-capability nonce success.
+The capability adds no authority: trusted mint, installed identity, captured
+registration, reservation and final floor checks remain required. Obtain plan
+and source review, then measure the exact combined pair and rerun the existing
+ON/OFF/native/real-WASM controls. This is local only; budgets remain fixed.
+
+
+Engine owner review rejected the associated-constant spelling because it makes
+Venue non-dyn-compatible (stable Rust cannot put a Sized bound on that const).
+Use a defaulted `#[inline] fn dispatch_nonce(&self) -> bool { false }` instead.
+The engine captures its initial permission with the release registration. A
+later statically dispatched call is only an optimization selector: true cannot
+grant authority beyond that captured permission; false must refuse any retained
+claim or reservation before ordinary Lifecycle admission. Therefore a changing
+getter cannot release a nonce without its fence. Pin a true-at-construction,
+false-at-Claim control to prove that refusal, and false-at-construction denial
+before IDs. The method preserves dyn compatibility; the paired release build
+will decide whether its constant default removes enough code.
+
+
+The overseer's ruling fixes the method spelling to the object-safe static
+`fn dispatch_nonce() -> bool where Self: Sized { false }`, matching http_release.
+Kraken and KrakenSpot return true without changing any native funnel. Keep
+Io.nonce_unscheduled as the captured release-mode fact used by barrier refusal;
+store nonce permission separately. Ordinary Plans and the default-capability
+pure mode retain their existing behavior. The changing-static-getter control
+still proves that an optimization selector cannot bypass captured permission.
+
+
+The first static-capability diagnostic (`55d4c639fbd`, before the reviewed
+capture-ceiling correction) measures 14,158,328 bytes, still 2,552 over. It
+restores the ordinary Lifecycle body per V, undoing part of ordinary sharing.
+Preserve the capability gate while splitting the concrete helper into two
+private entries: the reviewed nonce-capable Claim, and a shared nonce-free
+ordinary Claim containing exactly the previously shared ordinary arm. Choose
+the private entry from the static selector plus captured permission, then use
+the same exclusive borrowed admission enum. A disabled capability with retained
+nonce state still refuses State before either Lifecycle or callback. Both
+entries remain out of line; no generic body, public API or compiler profile
+changes. The ordinary entry preserves SigningRelease-before-admit and full
+Admission, and the nonce entry preserves its existing order and mutex body.
+This addresses the engine review's duplicated-ordinary-path note and requires
+the same ordinary/nonce/capture/barrier controls and exact measurement.
+
+
+The shared ordinary entry has the same private function-pointer signature as
+the nonce entry, including an unused nonce-stale output. Its out-of-line
+attribute preserves the reviewed sharing; selection may leave one indirect
+call per Claim. The static default removes the capability branch, but this
+work makes no CPU improvement claim. Existing CPU certification remains a CI
+gate after the local size and correctness gates pass.
+
+
+The split-entry experiment (`6cb609d3f6e`) measures 14,166,597 bytes, worse
+than the first capability candidate by 8,269. Reject that measured regression
+with a forward commit, retaining the smaller per-V ordinary path plus the
+captured-permission conjunction and all added hardening controls. Re-measure
+this corrected candidate; do not carry the rejected function-pointer sharing.
+The landing branch is now independently over budget. Under the overseer's
+temporary rule, readiness requires a same-toolchain current-tip pair with own
+combined delta at most zero; fitting the earlier absolute ceiling is no longer
+enough. Keep the PR held with no push or dispatch pending that gate or a new
+overseer ruling.
+
+The landed size stack #2102 (`9b05c9ac452`) restores combined headroom, and
+the overseer lifts the temporary own-delta-at-most-zero rule. Retain the smaller
+capability path, its captured-permission conjunction and all hardening controls;
+the rejected split-entry experiment remains history only. The object-safe static
+selector and separate captured release-mode fact are the final API shape.
+
+The same-path, pinned-toolchain pair against bare `9b05c9ac452` measures
+13,837,708 bytes before this change and 13,870,956 after it: +33,248 bytes,
+284,820 below the unchanged combined ceiling. Paired standalone deltas are
+Bybit +522, Bitget/USDC +686, Aster +325 and Kraken/Spot +19,720 bytes; every
+family fits, and Node/Web artifacts match. The remaining non-adopter cost is
+disclosed for the previously requested follow-up rather than further trimming.
+
+The automatic composition preserves the incoming size stack. Its metadata
+release test fixture needs only the mechanical Mutable-registration cutover,
+with identical scheduler admission and assertions. Workspace all-target and
+WASM32 checks, all seven seeded strict feature modes, scoped native/JS controls,
+and the refreshed four-control real-WASM engine-plus-recipe proof pass. Existing
+ignored Plan tests remain unchanged. Native-family adoption remains separate.
+
+## Resumed composition and dyn compatibility
+
+The resumed branch plain-merges the landed S0, serial/condition Plan, Bearer,
+signing-latch and socket-route changes. Nonce registration and captured
+permission live in IoCore; pending-aware poll calls remain on Io. The Bearer
+revision fence remains ahead of nonce repair, and the shared seeded OFF mode
+keeps both serial-plan and nonce labels under one key. Nine Bearer repairs
+assert the exact cancelled preparation, a new preparation under the same Attempt,
+and no consumption of the eight nonce-repair credits.
+
+The landed socket-route associated const made Venue dyn-incompatible. The
+separate approved repair c7e2d98897a replaces it with the defaulted inline
+route_exhaustion method bounded by Self: Sized, with the same default false,
+Bitget/test true overrides and static caller. Both source owners cleared the
+repair; the dyn control and all existing route assertions remain intact.
+
+On the resumed production source, workspace all-targets and WASM32 checks,
+formatting, bans/ratchets and all eleven seeded strict feature modes pass.
+Scoped nonce/read/registration/pacing/Bearer controls pass 153 tests, with one
+hidden-state and one real native-host stale-Claim control, 43 JS controls,
+10 route/dyn engine controls and five Bitget egress controls. Existing ignored
+Plan tests remain unchanged. The refreshed engine-plus-actual-Kraken-recipe
+WASM proof passes four controls; u64::MAX remains codec/private-builder/MAC
+coverage only, with no reservation or native-family adoption claim.
+
+The refreshed same-path combined pair on bare c6a5c4bb0a4 and composed
+ae4f268d114 measures 13,907,484 and 13,940,762 bytes: +33,278 bytes,
+215,014 below the unchanged combined budget. Node and Web match.
+Standalone paired sizes are Bybit 1,396,154 to 1,396,721, Bitget/USDC
+1,360,487 to 1,361,298, Aster 1,322,746 to 1,323,070 and Kraken/Spot
+1,154,656 to 1,174,456 bytes; all fit. These family pairs were measured
+on 6d13105b9b4 and 6ed99281f86. The newer Backpack landing changes no
+production input, Cargo graph or build profile for those standalone families;
+only the combined pair required refreshing. The isolated proof harness and
+lock overlay remain outside this branch. This documentation freeze changes no
+measured source or build input and takes one fresh PR-triggered run.

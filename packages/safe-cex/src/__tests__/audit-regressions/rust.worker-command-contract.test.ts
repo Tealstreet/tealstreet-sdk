@@ -129,7 +129,7 @@ it('applies the configured deadline to the live SDK host while preserving caller
   const idle = () => '[]';
   const native: WasmEngineLike = {
     capabilities: () => engineCapabilities('bybit'),
-    start: idle, wsOpen: idle, wsMessage: idle, wsClose: idle,
+    start: idle, wsOpen: idle, wsMessage: idle, wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle, httpChunk: idle, httpEnd: idle, httpFailed: idle, timer: idle,
     command: (json) => { requests.push(JSON.parse(json)); return '[]'; },
     snapshotFrame: () => new Uint8Array(),

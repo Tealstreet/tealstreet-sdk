@@ -1,5 +1,5 @@
-//! Declared read-key policy (docs/plans/RUST_READ_KEY_POLICY.md). No venue
-//! declares a policy yet, so these drive the policy explicitly.
+//! Declared read-key policy (docs/plans/RUST_READ_KEY_POLICY.md). Crypto.com
+//! activates ValidateOnly; synthetic controls exercise the other policy paths.
 use super::construction::ReadCredentialsPolicy::{Install, PublicRead, ValidateOnly};
 use super::*;
 
@@ -236,8 +236,17 @@ fn the_bridge_record_carries_the_policy_only_when_declared() {
             "{declared}"
         );
     }
-    // Every compiled family is undeclared until its consumer activates a row.
-    for venue in ["cryptocom", "backpack", "krakenspot", "kraken", "weex"] {
+    assert_eq!(
+        construction::read_credentials_policy("cryptocom"),
+        ValidateOnly
+    );
+    let crypto = construction::bridge("cryptocom", &options("{}"));
+    assert_eq!(
+        serde_json::to_value(crypto).unwrap()["readCredentials"],
+        "validateOnly"
+    );
+    // Other consumers must pin their own activation explicitly.
+    for venue in ["krakenspot", "kraken", "weex"] {
         assert_eq!(
             construction::read_credentials_policy(venue),
             Install,
@@ -348,9 +357,22 @@ mod wiring {
     #[test]
     fn the_json_setup_refuses_a_read_identity_for_a_validate_only_family() {
         let setup = r#"{"primary":{"key":"k","secret":"s","passphrase":"p"},"secondary":{"key":"r","secret":"t"}}"#;
-        assert!(local_signer_from_json_for_mode("weex", setup.into(), false).is_ok());
+        let private: crate::EngineOptions =
+            serde_json::from_str(r#"{"publicDataOnly":false}"#).unwrap();
+        assert!(local_signer_from_json_for_mode("weex", setup.into(), &private).is_ok());
         let _declared = test_policy::declare("weex", ValidateOnly);
-        let Err(error) = local_signer_from_json_for_mode("weex", setup.into(), false) else {
+        let Err(error) = local_signer_from_json_for_mode("weex", setup.into(), &private) else {
+            panic!("a read identity was installed for a ValidateOnly family");
+        };
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    }
+
+    #[test]
+    fn the_no_options_json_setup_also_refuses_a_read_identity_for_a_validate_only_family() {
+        let setup = r#"{"primary":{"key":"k","secret":"s","passphrase":"p"},"secondary":{"key":"r","secret":"t"}}"#;
+        assert!(crate::local_signer_from_json_for("weex", setup.into()).is_ok());
+        let _declared = test_policy::declare("weex", ValidateOnly);
+        let Err(error) = crate::local_signer_from_json_for("weex", setup.into()) else {
             panic!("a read identity was installed for a ValidateOnly family");
         };
         assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
@@ -373,4 +395,18 @@ fn the_preflight_refuses_only_a_false_validate_only_result() {
     // Undeclared families and raw keys are left to build_with_signer.
     assert!(read_key_preflight("weex", &options(r#"{"readCredentialsValid":false}"#)).is_ok());
     assert!(read_key_preflight("weex", &options(r#"{"readCredentials":{"key":"read"}}"#)).is_ok());
+}
+
+#[test]
+fn backpack_history_declares_public_read_in_registry_and_bridge() {
+    assert_eq!(
+        construction::read_credentials_policy("backpack"),
+        PublicRead
+    );
+    let bridge = construction::bridge("backpack", &options("{}"));
+    assert_eq!(bridge.read_credentials, PublicRead);
+    assert_eq!(
+        serde_json::to_value(bridge).unwrap()["readCredentials"],
+        "publicRead"
+    );
 }

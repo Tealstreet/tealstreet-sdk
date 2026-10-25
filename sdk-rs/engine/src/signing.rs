@@ -230,6 +230,14 @@ impl Identity {
             .ok_or(SignError::InvalidRequest)
     }
 
+    /// Whether `key` is one of this slot's refs.
+    pub fn owns(&self, key: &KeyRef) -> bool {
+        self.credential == *key
+            || self.signing == *key
+            || self.passphrase.as_ref() == Some(key)
+            || self.extra.values().any(|extra| extra == key)
+    }
+
     pub fn validate(&self) -> Result<(), &'static str> {
         if !valid_key_ref(&self.credential)
             || !valid_key_ref(&self.signing)
@@ -255,6 +263,18 @@ pub fn valid_stable_id(id: &str) -> bool {
 }
 fn valid_key_ref(key: &KeyRef) -> bool {
     !key.0.is_empty() && key.0.len() <= 256
+}
+
+impl Identities {
+    /// A secondary read slot's failure must never stop primary trading: with
+    /// a secondary, only a request naming a primary ref is primary.
+    pub fn primary_owns(&self, work: &SignRequest) -> bool {
+        self.secondary.is_none()
+            || self
+                .primary
+                .as_ref()
+                .is_some_and(|primary| work.any_key_ref(&|key| primary.owns(key)))
+    }
 }
 
 /// Only opaque identities cross into registry/engine options.
@@ -478,6 +498,36 @@ impl SignRequest {
             .collect()
     }
 
+    /// Refs come only from an identity, so an invalid one means the installed
+    /// credentials lack that material: no retry of this request can sign.
+    pub fn has_invalid_key_ref(&self) -> bool {
+        self.any_key_ref(&|key| !valid_key_ref(key))
+    }
+    /// Whether any ref the operations name, including interpolated
+    /// credentials, passes `test`. A plain loop over `dyn`, so every caller
+    /// shares one body.
+    pub fn any_key_ref(&self, test: &dyn Fn(&KeyRef) -> bool) -> bool {
+        for op in &self.operations {
+            let (key, payload) = match op {
+                Operation::Present { key }
+                | Operation::PublicAddress { key }
+                | Operation::PublicKey { key, .. } => (Some(key), &[][..]),
+                Operation::Sign { key, payload, .. } => (Some(key), &payload[..]),
+                Operation::Sha256 { payload } => (None, &payload[..]),
+            };
+            if key.is_some_and(test) {
+                return true;
+            }
+            for part in payload {
+                if let PayloadPart::Credential { key } = part
+                    && test(key)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
     /// Shared structural bounds also apply to injected providers. Expanded secret
     /// input bounds are enforced privately by the provider before allocation.
     pub fn validate(&self) -> Result<(), SignError> {
@@ -611,13 +661,16 @@ pub enum SignError {
     InvalidRequest,
     InvalidResult,
     TimedOut,
+    /// The request names a ref the credentials do not have. No retry with the
+    /// same credentials can sign, so this alone ends signing for the account.
+    MissingKey,
 }
 impl SignError {
     pub fn venue_error(self) -> crate::VenueError {
         use crate::{ErrorKind, Outcome, VenueError};
         let kind = match self {
             Self::TimedOut => ErrorKind::Timeout,
-            Self::Refused | Self::InvalidRequest => ErrorKind::InvalidInput,
+            Self::Refused | Self::InvalidRequest | Self::MissingKey => ErrorKind::InvalidInput,
             Self::Unsupported => ErrorKind::Unsupported,
             _ => ErrorKind::Internal,
         };
@@ -635,6 +688,7 @@ impl std::fmt::Display for SignError {
             Self::InvalidRequest => "Invalid signing request",
             Self::InvalidResult => "Invalid signing result",
             Self::TimedOut => "Signing timed out before dispatch",
+            Self::MissingKey => "Signing key is not installed",
         })
     }
 }

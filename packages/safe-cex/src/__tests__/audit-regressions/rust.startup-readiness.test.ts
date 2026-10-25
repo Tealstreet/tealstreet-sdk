@@ -126,7 +126,7 @@ class ScriptedEngine implements WasmEngineLike {
     if (ScriptedEngine.snapshotFailure) throw new Error('Scripted snapshot unavailable');
     return nativeFrame(this.state, this.includeEth, this.malformedSection, false, { omit: this.omitSections, workingOrder: this.workingOrder });
   };
-  wsOpen = () => ''; wsMessage = () => ''; wsClose = () => '';
+  wsOpen = () => ''; wsMessage = () => ''; wsClose = () => ''; wsRouteExhausted = () => '';
   httpStart = () => ''; httpChunk = () => ''; httpEnd = () => ''; httpFailed = () => ''; timer = () => '';
 }
 const cleanups: Array<() => void> = [];

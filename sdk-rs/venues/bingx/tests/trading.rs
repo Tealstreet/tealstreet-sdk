@@ -591,9 +591,9 @@ fn side_leverage_updates_only_the_acknowledged_leg_and_oneway_uses_both() {
             side: Some(side),
         });
         assert!(h.body().contains(&format!("\"side\":\"{native}\"")));
-        assert!(h.engine.venue().trading.settings_pending());
+        assert!(h.engine.store().metadata_write_pending("BTCUSDT"));
         h.reply(r#"{"code":0,"data":{}}"#);
-        assert!(!h.engine.venue().trading.settings_pending());
+        assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
         assert!(h.requests.is_empty());
         let setting = h.engine.store().setting("BTCUSDT").unwrap();
         assert_eq!(

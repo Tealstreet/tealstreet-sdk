@@ -1103,14 +1103,18 @@ impl Coinbase {
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Option<Command> {
-        let Some(id) = command_id(&command) else {
+        if command_id(&command).is_none() {
             return Some(command);
-        };
+        }
         match &command {
             Command::SetLeverage { .. }
             | Command::SetMarginType { .. }
             | Command::SetPositionMode { .. } => {
-                cx.fail(id, not_sent("Coinbase does not support account leverage, margin or position-mode mutations").kind(ErrorKind::Unsupported));
+                crate::local_context::complete(
+                    cx,
+                    safe_cex_engine::request_context::Operation::Mutation,
+                    Err(not_sent("Coinbase does not support account leverage, margin or position-mode mutations").kind(ErrorKind::Unsupported)),
+                );
                 return None;
             }
             Command::FetchLeverage { symbol, .. } => {
@@ -1121,17 +1125,19 @@ impl Coinbase {
                         buy_leverage: f64,
                         sell_leverage: f64,
                     }
-                    cx.done(
-                        id,
-                        encode(&Leverage {
+                    crate::local_context::complete(
+                        cx,
+                        safe_cex_engine::request_context::Operation::Read,
+                        Ok(encode(&Leverage {
                             buy_leverage: setting.leverage,
                             sell_leverage: setting.leverage,
-                        }),
+                        })),
                     );
                 } else {
-                    cx.fail(
-                        id,
-                        VenueError::new("Coinbase market settings are unavailable"),
+                    crate::local_context::complete(
+                        cx,
+                        safe_cex_engine::request_context::Operation::Read,
+                        Err(VenueError::new("Coinbase market settings are unavailable")),
                     );
                 }
                 return None;
@@ -1144,12 +1150,20 @@ impl Coinbase {
             || !cx.store.loaded().markets
             || !cx.store.loaded().orders
         {
-            cx.fail(id, not_sent("Coinbase account is not ready for trading"));
+            crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Mutation,
+                Err(not_sent("Coinbase account is not ready for trading")),
+            );
             return None;
         }
         self.reconcile_reductions(cx);
         if self.trading.queue.len() + usize::from(self.trading.active.is_some()) >= MAX_JOBS {
-            cx.fail(id, not_sent("Coinbase trading queue is full"));
+            crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Mutation,
+                Err(not_sent("Coinbase trading queue is full")),
+            );
             return None;
         }
         match self.prepare_job(cx, command) {
@@ -1157,7 +1171,11 @@ impl Coinbase {
                 self.trading.queue.push_back(job);
                 self.trading_next(cx);
             }
-            Err(error) => cx.fail(id, not_sent(error)),
+            Err(error) => crate::local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Mutation,
+                Err(not_sent(error)),
+            ),
         }
         None
     }

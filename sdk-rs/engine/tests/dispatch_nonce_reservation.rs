@@ -37,6 +37,10 @@ struct Trace {
     stamp_floor: Option<safe_cex_engine::StampFloor>,
     releases: Vec<safe_cex_engine::SigningRelease>,
     command_root: Option<safe_cex_engine::request_context::Context>,
+    #[cfg(feature = "session-bearer")]
+    bearer_revision: Option<u64>,
+    #[cfg(feature = "session-bearer")]
+    bearer_session: Option<safe_cex_engine::request_context::Session>,
 }
 struct Recipe {
     owner: u8,
@@ -100,7 +104,9 @@ impl SignStep for Recipe {
         10_000.
     }
 }
-struct NonceProbe<const SUPPORTED: bool> {
+static NONCE_SELECTOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+struct NonceProbe<const SUPPORTED: bool, const CAPABILITY: u8 = 0> {
     subject: &'static str,
     count: u8,
     trace: Arc<Mutex<Trace>>,
@@ -108,7 +114,17 @@ struct NonceProbe<const SUPPORTED: bool> {
     pacing: Option<safe_cex_engine::request_context::Pacing>,
 }
 type Probe = NonceProbe<true>;
-impl<const SUPPORTED: bool> Venue for NonceProbe<SUPPORTED> {
+impl<const SUPPORTED: bool, const CAPABILITY: u8> Venue for NonceProbe<SUPPORTED, CAPABILITY> {
+    #[inline]
+    fn dispatch_nonce() -> bool {
+        match CAPABILITY {
+            0 => true,
+            1 => false,
+            2 => NONCE_SELECTOR.load(std::sync::atomic::Ordering::SeqCst),
+            _ => unreachable!(),
+        }
+    }
+
     type Pending = u8;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -142,7 +158,40 @@ impl<const SUPPORTED: bool> Venue for NonceProbe<SUPPORTED> {
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         self.pacing.as_slice()
     }
+    #[cfg(feature = "session-bearer")]
+    fn session_bearer(&self, _: u64) -> safe_cex_engine::request_context::SessionBearer {
+        use safe_cex_engine::request_context::{SecretHeaderValue, SessionBearer, SessionHeaders};
+        match self.trace.lock().unwrap().bearer_revision {
+            Some(revision) => SessionBearer::Ready {
+                headers: SessionHeaders::authorization(
+                    SecretHeaderValue::new(format!("Bearer revision-{revision}")).unwrap(),
+                ),
+                revision,
+            },
+            None => SessionBearer::NotReady,
+        }
+    }
+    #[cfg(feature = "session-bearer")]
+    fn session_bearer_revision(&self, _: u64) -> Option<u64> {
+        self.trace.lock().unwrap().bearer_revision
+    }
     fn start(&mut self, cx: &mut Cx<'_, u8>) {
+        #[cfg(feature = "session-bearer")]
+        let bearer = if self.trace.lock().unwrap().bearer_revision.is_some() {
+            let session = cx
+                .open_session(safe_cex_engine::request_context::SessionPolicy {
+                    credential: None,
+                    repeat_safe: true,
+                    private_egress: None,
+                })
+                .unwrap();
+            self.trace.lock().unwrap().bearer_session = Some(session.clone());
+            Some(session)
+        } else {
+            None
+        };
+        #[cfg(not(feature = "session-bearer"))]
+        let bearer = None;
         for owner in 0..self.count {
             let slots = Slots::new(
                 Some(Identity {
@@ -180,6 +229,7 @@ impl<const SUPPORTED: bool> Venue for NonceProbe<SUPPORTED> {
             };
             if let Err((_, error)) = cx.request_signed_managed(
                 context,
+                bearer.as_ref(),
                 Method::Post,
                 format!("https://nonce.test/{owner}"),
                 None,
@@ -241,6 +291,7 @@ impl<const SUPPORTED: bool> Venue for NonceProbe<SUPPORTED> {
         self.trace.lock().unwrap().command_root = Some(root.clone());
         cx.request_signed_managed(
             root,
+            None,
             Method::Post,
             "https://nonce.test/0".into(),
             None,
@@ -289,12 +340,13 @@ impl Bound {
 #[derive(Default)]
 struct Batch {
     routes: Vec<Route>,
+    canceled: Vec<Preparation>,
     work: Vec<Work>,
     bound: Vec<Bound>,
     failed: Vec<(u32, VenueError)>,
     done: Vec<u32>,
 }
-fn drain(engine: &mut Engine<Probe>) -> Batch {
+fn drain<const CAPABILITY: u8>(engine: &mut Engine<NonceProbe<true, CAPABILITY>>) -> Batch {
     let mut batch = Batch::default();
     for action in engine.drain_actions() {
         match action {
@@ -314,7 +366,7 @@ fn drain(engine: &mut Engine<Probe>) -> Batch {
                     permit,
                     request,
                 }),
-                HttpAction::Cancel { .. } => {}
+                HttpAction::Cancel { preparation, .. } => batch.canceled.push(preparation),
                 HttpAction::BindGroup { .. } => panic!("nonce fixture declares no barriers"),
             },
             Action::Sign { attempt, work, .. } => batch.work.push(Work { attempt, work }),
@@ -342,7 +394,34 @@ fn fixture_with_pacing(
     count: u8,
     pacing: Option<safe_cex_engine::request_context::Pacing>,
 ) -> (Engine<Probe>, Vec<Route>) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
+    fixture_with_capability::<0>(subject, count, pacing)
+}
+fn fixture_with_capability<const CAPABILITY: u8>(
+    subject: &'static str,
+    count: u8,
+    pacing: Option<safe_cex_engine::request_context::Pacing>,
+) -> (Engine<NonceProbe<true, CAPABILITY>>, Vec<Route>) {
+    let mut engine = unstarted_fixture::<CAPABILITY>(subject, count, pacing);
+    engine.start(START);
+    let mut batch = drain(&mut engine);
+    assert_eq!(
+        batch.routes.len(),
+        if CAPABILITY == 1 {
+            0
+        } else {
+            usize::from(count)
+        }
+    );
+    assert!(batch.work.is_empty() && batch.bound.is_empty());
+    batch.routes.sort_by_key(|r| r.owner);
+    (engine, batch.routes)
+}
+fn unstarted_fixture<const CAPABILITY: u8>(
+    subject: &'static str,
+    count: u8,
+    pacing: Option<safe_cex_engine::request_context::Pacing>,
+) -> Engine<NonceProbe<true, CAPABILITY>> {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(NonceProbe::<true, CAPABILITY> {
         subject,
         count,
         trace: Arc::default(),
@@ -361,14 +440,14 @@ fn fixture_with_pacing(
             secondary: None,
         })
         .unwrap();
-    engine.start(START);
-    let mut batch = drain(&mut engine);
-    assert_eq!(batch.routes.len(), usize::from(count));
-    assert!(batch.work.is_empty() && batch.bound.is_empty());
-    batch.routes.sort_by_key(|r| r.owner);
-    (engine, batch.routes)
+    engine
 }
-fn ready(engine: &mut Engine<Probe>, route: &Route, now: f64) -> Work {
+
+fn ready<const CAPABILITY: u8>(
+    engine: &mut Engine<NonceProbe<true, CAPABILITY>>,
+    route: &Route,
+    now: f64,
+) -> Work {
     engine.http_prepared(
         now,
         route.token,
@@ -386,7 +465,11 @@ fn ready(engine: &mut Engine<Probe>, route: &Route, now: f64) -> Work {
     );
     batch.work.remove(0)
 }
-fn reply(engine: &mut Engine<Probe>, work: Work, now: f64) -> Batch {
+fn reply<const CAPABILITY: u8>(
+    engine: &mut Engine<NonceProbe<true, CAPABILITY>>,
+    work: Work,
+    now: f64,
+) -> Batch {
     engine.handle(
         now,
         Event::Signed {
@@ -396,13 +479,21 @@ fn reply(engine: &mut Engine<Probe>, work: Work, now: f64) -> Batch {
     );
     drain(engine)
 }
-fn bind(engine: &mut Engine<Probe>, work: Work, now: f64) -> Bound {
+fn bind<const CAPABILITY: u8>(
+    engine: &mut Engine<NonceProbe<true, CAPABILITY>>,
+    work: Work,
+    now: f64,
+) -> Bound {
     let mut batch = reply(engine, work, now);
     assert!(batch.routes.is_empty() && batch.work.is_empty());
     assert_eq!(batch.bound.len(), 1);
     batch.bound.remove(0)
 }
-fn send(engine: &mut Engine<Probe>, packet: &Bound, now: f64) -> u64 {
+fn send<const CAPABILITY: u8>(
+    engine: &mut Engine<NonceProbe<true, CAPABILITY>>,
+    packet: &Bound,
+    now: f64,
+) -> u64 {
     assert!(
         packet
             .request
@@ -1014,4 +1105,136 @@ fn actual_stamp_floor_and_nonce_counter_remain_independent_at_dispatch() {
         "nonce release never creates a StampFloor"
     );
     assert_eq!(third.work.receipt.nonce, Some(1000002));
+}
+
+#[test]
+fn disabled_nonce_capability_refuses_before_preparation_or_provider_work() {
+    let (mut engine, routes) = fixture_with_capability::<1>("nonce-capability/disabled", 1, None);
+    assert!(routes.is_empty());
+    assert!(engine.venue().trace.lock().unwrap().prepared.is_empty());
+    assert!(engine.venue().trace.lock().unwrap().releases.is_empty());
+    assert_eq!(engine.venue().errors.len(), 1);
+    assert_eq!(
+        engine.venue().errors[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        engine.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert!(drain(&mut engine).work.is_empty());
+}
+#[test]
+fn a_changed_nonce_selector_refuses_before_release_without_advancing_the_floor() {
+    use std::sync::atomic::Ordering;
+    struct RestoreSelector;
+    impl Drop for RestoreSelector {
+        fn drop(&mut self) {
+            NONCE_SELECTOR.store(true, Ordering::SeqCst);
+        }
+    }
+    let _restore = RestoreSelector;
+    NONCE_SELECTOR.store(false, Ordering::SeqCst);
+    let mut initially_disabled =
+        unstarted_fixture::<2>("nonce-capability/capture-ceiling", 1, None);
+    NONCE_SELECTOR.store(true, Ordering::SeqCst);
+    initially_disabled.start(START);
+    let denied = drain(&mut initially_disabled);
+    assert!(denied.routes.is_empty() && denied.work.is_empty() && denied.bound.is_empty());
+    assert!(
+        initially_disabled
+            .venue()
+            .trace
+            .lock()
+            .unwrap()
+            .prepared
+            .is_empty()
+    );
+    assert_eq!(initially_disabled.venue().errors.len(), 1);
+    assert_eq!(
+        initially_disabled.venue().errors[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        initially_disabled.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    let subject = "nonce-capability/changed-selector";
+    let (mut earlier, routes) = fixture(subject, Allocation::PrepareProbe, 1);
+    let work = ready(&mut earlier, &routes[0], START);
+    let earlier_packet = bind(&mut earlier, work, START);
+    let (mut changed, routes) = fixture_with_capability::<2>(subject, 1, None);
+    let work = ready(&mut changed, &routes[0], START);
+    let later_packet = bind(&mut changed, work, START);
+    assert!(later_packet.nonce() > earlier_packet.nonce());
+    NONCE_SELECTOR.store(false, Ordering::SeqCst);
+    assert_eq!(
+        changed.claim_http(START, later_packet.permit),
+        Err(Error::State)
+    );
+    assert!(changed.venue().trace.lock().unwrap().releases.is_empty());
+    assert_eq!(changed.venue().errors.len(), 1);
+    assert_eq!(
+        changed.venue().errors[0].message,
+        "HTTP nonce capability is unavailable"
+    );
+    assert_eq!(
+        changed.venue().errors[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert_eq!(
+        send(&mut earlier, &earlier_packet, START),
+        earlier_packet.nonce()
+    );
+    NONCE_SELECTOR.store(true, Ordering::SeqCst);
+}
+
+#[cfg(feature = "session-bearer")]
+#[test]
+fn bearer_revision_repairs_preserve_nonce_repair_credits() {
+    const NONCE_REPAIR_BUDGET: u64 = 8;
+    let revisions = 2..=NONCE_REPAIR_BUDGET + 2;
+    assert!(revisions.clone().count() > NONCE_REPAIR_BUDGET as usize);
+    let mut engine = unstarted_fixture::<0>("nonce-bearer/revision-floor", 2, None);
+    engine.venue().trace.lock().unwrap().bearer_revision = Some(1);
+    engine.start(START);
+    let mut routes = drain(&mut engine).routes;
+    routes.sort_by_key(|route| route.owner);
+    let a = ready(&mut engine, &routes[0], 1_001.);
+    let a = bind(&mut engine, a, 1_002.);
+    let b = ready(&mut engine, &routes[1], 1_003.);
+    let b = bind(&mut engine, b, 1_004.);
+    assert!(b.nonce() > a.nonce());
+    assert_eq!(send(&mut engine, &b, 1_005.), b.nonce());
+    let mut stale = a;
+    let mut stale_preparation = routes[0].token;
+    for revision in revisions {
+        let now = 1_006. + (revision - 2) as f64 * 3.;
+        engine.venue().trace.lock().unwrap().bearer_revision = Some(revision);
+        assert_eq!(engine.claim_http(now, stale.permit), Err(Error::Stale));
+        assert_eq!(engine.venue().trace.lock().unwrap().releases.len(), 1);
+        let mut batch = drain(&mut engine);
+        assert!(batch.work.is_empty() && batch.bound.is_empty() && batch.failed.is_empty());
+        assert_eq!(batch.canceled, [stale_preparation]);
+        assert_eq!(batch.routes.len(), 1);
+        let route = batch.routes.remove(0);
+        assert_eq!(route.token.attempt(), stale.permit.attempt());
+        assert_ne!(route.token, stale_preparation);
+        stale_preparation = route.token;
+        let work = ready(&mut engine, &route, now + 1.);
+        stale = bind(&mut engine, work, now + 2.);
+        assert!(stale.nonce() > b.nonce());
+        assert!(
+            stale
+                .request
+                .headers
+                .iter()
+                .any(|(name, value)| *name == "Authorization"
+                    && value == &format!("Bearer revision-{revision}"))
+        );
+    }
+    let repaired_nonce = send(&mut engine, &stale, 1_033.);
+    assert!(repaired_nonce > b.nonce());
+    assert_eq!(engine.venue().trace.lock().unwrap().releases.len(), 2);
+    assert!(engine.venue().errors.is_empty());
 }

@@ -27,6 +27,7 @@ impl Probe {
         let context = cx.plan_leg_context(plan, &slot).unwrap();
         cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             "https://history.test/boundary".into(),
             None,
@@ -86,14 +87,14 @@ impl Venue for Probe {
         assert!(!self.accepted);
         if self.refuse_cleanup {
             let plan = self.plan.as_ref().unwrap();
-            let body = cx.io.request_contexts.plan_body(plan).unwrap();
+            let body = cx.io.core.request_contexts.plan_body(plan).unwrap();
             let index = body.schedule.ordinal(self.slot.as_ref().unwrap()).unwrap();
             let credit = body.entries[index].credit;
             let handoff = body.handoff.clone();
-            let actions = cx.io.actions.len();
-            let contexts = cx.io.request_contexts.contexts.len();
-            let managed = cx.io.managed_http.len();
-            let ids = cx.io.next_id;
+            let actions = cx.io.core.actions.len();
+            let contexts = cx.io.core.request_contexts.contexts.len();
+            let managed = cx.io.core.managed_http.len();
+            let ids = cx.io.core.next_id;
             // One real managed request makes this an impossible Vec reservation.
             let refused = cx.io.prepare_read_history_cleanup(
                 plan.owner(),
@@ -101,11 +102,11 @@ impl Venue for Probe {
                 usize::MAX - 4,
             );
             assert!(matches!(refused, Err(Error::Capacity)));
-            assert_eq!(cx.io.actions.len(), actions);
-            assert_eq!(cx.io.request_contexts.contexts.len(), contexts);
-            assert_eq!(cx.io.managed_http.len(), managed);
-            assert_eq!(cx.io.next_id, ids);
-            let body = cx.io.request_contexts.plan_body(plan).unwrap();
+            assert_eq!(cx.io.core.actions.len(), actions);
+            assert_eq!(cx.io.core.request_contexts.contexts.len(), contexts);
+            assert_eq!(cx.io.core.managed_http.len(), managed);
+            assert_eq!(cx.io.core.next_id, ids);
+            let body = cx.io.core.request_contexts.plan_body(plan).unwrap();
             assert!(body.entries[index].credit == credit);
             assert_eq!(body.handoff, handoff);
             assert!(
@@ -146,7 +147,7 @@ impl Venue for Probe {
                 },
             );
             assert!(
-                cx.io.http_history_failure.is_none(),
+                cx.io.core.http_history_failure.is_none(),
                 "nested failure cannot restore the outer proof"
             );
         }
@@ -244,7 +245,7 @@ fn strict(actions: &[Action], kind: crate::ErrorKind) {
 #[test]
 fn integrity_internal_failure_after_accepted_rows_has_no_transport_witness() {
     let (mut engine, packet) = accepted_prefix(false);
-    engine.io.http_failure_kind = crate::ErrorKind::Internal;
+    engine.io.core.http_failure_kind = crate::ErrorKind::Internal;
     let actions = failed(&mut engine, packet);
     assert!(!engine.venue().proof_before && !engine.venue().proof_after);
     strict(&actions, crate::ErrorKind::Internal);

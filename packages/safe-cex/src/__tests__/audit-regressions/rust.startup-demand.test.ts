@@ -71,7 +71,7 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
     start: idle,
     wsOpen: idle,
     wsMessage: idle,
-    wsClose: idle,
+    wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,

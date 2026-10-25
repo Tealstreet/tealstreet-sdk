@@ -48,7 +48,7 @@ fn seed() -> (Driver, SocketId) {
         &r,
         r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","visible":true,"quantityIncrement":"0.01","priceIncrement":"0.01","minQuantity":"0.01","imfFunction":{"base":"0.02"}},{"symbol":"SOL_USDC","marketType":"SPOT","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = actions(&mut e, 0.0);
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -340,7 +340,7 @@ mod lifecycle {
     }
     fn setup(reserve: usize) -> (Engine<Audit>, Rc<Evidence>) {
         let evidence = Rc::new(Evidence::default());
-        evidence.reserve.set(reserve);
+        evidence.reserve.set(0);
         let mut e = safe_cex_engine::test_support::seeded_engine(Audit {
             native: Backpack::new(Options {
                 public_data_only: true,
@@ -350,15 +350,15 @@ mod lifecycle {
             held: vec![],
         });
         e.start(0.);
-        let market = e
-            .drain_actions()
+        let market = safe_cex_engine::test_support::prepared_actions(&mut e, 0.0)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) if r.url.ends_with("/markets") => Some(r),
                 _ => None,
             })
             .unwrap();
         e.handle(0.,Event::HttpResponse{request:market.id,response:Response{status:200,headers:"",body:r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#}});
-        let initial: Vec<_> = e.drain_actions().collect();
+        let initial = safe_cex_engine::test_support::prepared_actions(&mut e, 0.0);
         let socket = initial
             .iter()
             .find_map(|a| match a {
@@ -387,6 +387,14 @@ mod lifecycle {
             }
         }
         e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        evidence.reserve.set(reserve);
+        e.handle(
+            0.0,
+            Event::TimerFired {
+                timer: evidence.timer.get().unwrap(),
+            },
+        );
         e.drain_actions().for_each(drop);
         (e, evidence)
     }

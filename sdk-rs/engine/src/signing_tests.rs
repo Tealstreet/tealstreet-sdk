@@ -35,6 +35,27 @@ impl crate::SignStep for Step {
         5000.
     }
 }
+/// `Step` with a chosen ref, so a test can name either credential slot.
+struct KeyStep(&'static str);
+impl crate::SignStep for KeyStep {
+    fn prepare(
+        &mut self,
+        action: &mut Action,
+        context: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        let mut work = Step.prepare(action, context)?;
+        if let Some(Operation::Sign { key, .. }) = work.operations.first_mut() {
+            *key = KeyRef(self.0.into());
+        }
+        Ok(work)
+    }
+    fn apply(&mut self, action: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        Step.apply(action, result)
+    }
+    fn freshness_ms(&self) -> f64 {
+        Step.freshness_ms()
+    }
+}
 #[derive(Default)]
 struct TestVenue {
     failed: usize,
@@ -43,6 +64,8 @@ struct TestVenue {
     repair_on_failure: bool,
     invalid_prepare: bool,
     repair_request: Option<RequestId>,
+    /// Sign the first request with this ref instead of `Step`'s.
+    key: Option<&'static str>,
 }
 impl Venue for TestVenue {
     type Pending = ();
@@ -58,6 +81,8 @@ impl Venue for TestVenue {
             request,
             if self.invalid_prepare {
                 Box::new(InvalidStep)
+            } else if let Some(key) = self.key {
+                Box::new(KeyStep(key))
             } else {
                 Box::new(Step)
             },
@@ -397,7 +422,7 @@ fn full_pending_queue_rejects_dependent_ws_message_instead_of_dropping_it() {
         cx.send_signed(SocketId(42), "auth".into(), Box::new(Step));
     }
     cx.send(SocketId(42), "dependent");
-    assert_eq!(engine.io.signing_admission.len(), 1);
+    assert_eq!(engine.io.core.signing_admission.len(), 1);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(
         a,
@@ -598,6 +623,24 @@ impl crate::SignStep for InvalidStep {
     }
     fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
         unreachable!("invalid preparation never completes")
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
+/// A recipe whose identity lacks the ref it needs (`signing_ref()` failing).
+struct MissingKeyStep;
+impl crate::SignStep for MissingKeyStep {
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        _: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        Err(SignError::MissingKey)
+    }
+    fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
+        unreachable!("a missing key never completes")
     }
     fn freshness_ms(&self) -> f64 {
         5000.
@@ -945,6 +988,7 @@ fn materialized_outbound_is_reprepared_after_same_raw_time_calibration() {
     assert!(
         engine
             .io
+            .core
             .actions
             .iter()
             .any(|a| matches!(a, Action::SignedOutbound { .. }))
@@ -2029,5 +2073,271 @@ fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
     assert_eq!(
         primary.apply_to_identities(&mut injected, false),
         Err(SignError::InvalidRequest)
+    );
+}
+
+/// The local signer, which reports every ref as missing.
+struct MissingKeyLocal;
+impl crate::signing::Signer for MissingKeyLocal {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign(&self, _: SignRequest) -> crate::signing::SignFuture {
+        Box::pin(std::future::ready(Err(SignError::MissingKey)))
+    }
+    fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        Some(Err(SignError::MissingKey))
+    }
+}
+
+fn latched(actions: impl Iterator<Item = Action>) -> bool {
+    actions.into_iter().any(|action| {
+        matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
+            if code == log_code::CONFIG_INVALID)
+    })
+}
+
+/// A secondary read slot's missing key fails that request only; the same
+/// refusal on a primary ref latches signing for the account.
+#[test]
+fn only_a_primary_ref_refusal_latches_while_a_secondary_exists() {
+    let identity = |credential: &str, signing: &str| crate::signing::Identity {
+        credential: KeyRef(credential.into()),
+        signing: KeyRef(signing.into()),
+        passphrase: None,
+        stable_id: None,
+        extra: Default::default(),
+    };
+    let refused = |key: &'static str| {
+        let mut engine = crate::test_support::seeded_engine(TestVenue {
+            key: Some(key),
+            ..Default::default()
+        });
+        engine
+            .set_identities(crate::signing::Identities {
+                primary: Some(identity("account/credential", "account/primary")),
+                secondary: Some(identity("account/read-credential", "account/read")),
+            })
+            .unwrap();
+        engine
+            .set_signer(Some(std::sync::Arc::new(MissingKeyLocal)))
+            .unwrap();
+        engine.start(1000.);
+        let latched = latched(engine.drain_actions().collect::<Vec<_>>().into_iter());
+        assert_eq!(
+            engine.venue.failed, 1,
+            "the request itself fails either way"
+        );
+        latched
+    };
+    assert!(
+        !refused("account/read"),
+        "a secondary refusal never latches"
+    );
+    assert!(refused("account/primary"), "a primary refusal latches");
+}
+
+/// No host reports `MissingKey`, but if one did asynchronously, only that
+/// request fails: nothing latches, and the next signed request still stages.
+#[test]
+fn an_asynchronous_missing_key_fails_its_request_without_latching() {
+    let mut engine = engine();
+    let (attempt, _) = staged(&mut engine);
+    engine.handle(
+        1001.,
+        Event::Signed {
+            attempt,
+            result: Err(SignError::MissingKey),
+        },
+    );
+    assert_eq!(engine.venue.failed, 1, "the request fails, NotSent");
+    assert!(!latched(
+        engine.drain_actions().collect::<Vec<_>>().into_iter()
+    ));
+    let mut cx = Cx {
+        now: 1002.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let request = cx.request(
+        Method::Post,
+        "https://venue.test/private".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(request, Box::new(Step));
+    cx.route_request(request, RequestRoute::Primary);
+    engine.prepare_dispatch(1002.);
+    assert!(
+        engine
+            .drain_actions()
+            .any(|action| matches!(action, Action::Sign { .. })),
+        "signing is not latched"
+    );
+}
+
+/// A socket login whose key is missing fails identically on every reconnect,
+/// so it latches and the private role is never reconnected. Any other
+/// preparation refusal stays a per-request failure.
+#[test]
+fn a_socket_login_missing_its_key_latches_and_blocks_its_role() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    let private =
+        || crate::SocketSpec::new("wss://venue.test/private").channel(SocketChannel::Private);
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let socket = cx.connect(private());
+    cx.send_signed(socket, "auth".into(), Box::new(MissingKeyStep));
+    engine.prepare_dispatch(1000.);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|action| {
+        matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
+            if *code == log_code::CONFIG_INVALID)
+    }));
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+    let mut cx = Cx {
+        now: 1001.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    assert_eq!(
+        cx.connect(private()),
+        SocketId(0),
+        "the role never reconnects"
+    );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+}
+
+/// A signed upgrade missing its key latches before the socket ever opens, and
+/// its role is still never reconnected.
+#[test]
+fn a_signed_connect_missing_its_key_blocks_its_role() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    let private =
+        || crate::SocketSpec::new("wss://venue.test/private").channel(SocketChannel::Private);
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.connect_signed(private(), Box::new(MissingKeyStep));
+    engine.prepare_dispatch(1000.);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|action| {
+        matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
+            if *code == log_code::CONFIG_INVALID)
+    }));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    let mut cx = Cx {
+        now: 1001.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    assert_eq!(cx.connect_signed(private(), Box::new(Step)), SocketId(0));
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. } | Action::Sign { .. }))
+    );
+}
+
+/// An invalid request shape fails that request only, on a socket login too.
+#[test]
+fn a_socket_login_with_an_invalid_shape_never_latches() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    let private =
+        || crate::SocketSpec::new("wss://venue.test/private").channel(SocketChannel::Private);
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let socket = cx.connect(private());
+    cx.send_signed(socket, "auth".into(), Box::new(InvalidStep));
+    engine.prepare_dispatch(1000.);
+    assert!(!engine.drain_actions().any(|action| {
+        matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
+            if code == log_code::CONFIG_INVALID)
+    }));
+    let mut cx = Cx {
+        now: 1001.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    assert_ne!(
+        cx.connect(private()),
+        SocketId(0),
+        "the role reconnects as before"
+    );
+}
+
+/// An unsigned frame held behind a socket's queued login is never refused by
+/// a latch that fired elsewhere; the socket stays open.
+#[test]
+fn a_latch_never_refuses_an_unsigned_frame_held_behind_a_login() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    let private =
+        || crate::SocketSpec::new("wss://venue.test/private").channel(SocketChannel::Private);
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    // Signing is serialized: the request is the head, the login waits.
+    let request = cx.request(
+        Method::Post,
+        "https://venue.test/private".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(request, Box::new(MissingKeyStep));
+    cx.route_request(request, RequestRoute::Primary);
+    let socket = cx.connect(private());
+    cx.send_signed(socket, "auth".into(), Box::new(Step));
+    engine.prepare_dispatch(1000.);
+    assert!(latched(
+        engine.drain_actions().collect::<Vec<_>>().into_iter()
+    ));
+    let mut cx = Cx {
+        now: 1002.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.send(socket, "subscribe");
+    engine.prepare_dispatch(1002.);
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if s == socket)),
+        "the held frame does not tear the socket down"
+    );
+}
+
+/// The latch notice is the text the engine formatted before it became static.
+#[test]
+fn the_missing_key_notice_is_the_formatted_text() {
+    assert_eq!(
+        MISSING_KEY_NOTICE,
+        format!(
+            "Signing cannot succeed with the installed credentials: {}",
+            SignError::MissingKey
+        )
     );
 }

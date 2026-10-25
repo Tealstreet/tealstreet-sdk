@@ -112,6 +112,7 @@ mod planned_execution {
             let leg = cx.plan_leg_context(&plan, &slot).unwrap();
             cx.request_signed_managed(
                 leg.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -170,15 +171,15 @@ mod planned_execution {
                 std::slice::from_ref(&step)
             };
             if self.invalid_steps {
-                let ids = cx.io.next_id;
-                let actions = cx.io.actions.len();
-                let contexts = cx.io.request_contexts.plan_context_storage();
+                let ids = cx.io.core.next_id;
+                let actions = cx.io.core.actions.len();
+                let contexts = cx.io.core.request_contexts.plan_context_storage();
                 self.refusals
                     .push(share(cx, &preflight, &[], self.read).unwrap_err());
-                assert_eq!(cx.io.next_id, ids, "refusal spends no identity");
-                assert_eq!(cx.io.actions.len(), actions);
-                assert_eq!(cx.io.request_contexts.plan_context_storage(), contexts);
-                assert_eq!(cx.io.request_contexts.execution_count(), 0);
+                assert_eq!(cx.io.core.next_id, ids, "refusal spends no identity");
+                assert_eq!(cx.io.core.actions.len(), actions);
+                assert_eq!(cx.io.core.request_contexts.plan_context_storage(), contexts);
+                assert_eq!(cx.io.core.request_contexts.execution_count(), 0);
                 cx.fail_preflight(&preflight, "refused admission").unwrap();
                 return;
             }
@@ -189,6 +190,7 @@ mod planned_execution {
             if self.read {
                 cx.request_managed(
                     leg.clone(),
+                    None,
                     Method::Get,
                     "https://venue.test/read".into(),
                     None,
@@ -198,6 +200,7 @@ mod planned_execution {
             } else {
                 cx.request_signed_managed(
                     leg.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/write".into(),
                     None,
@@ -247,6 +250,7 @@ mod planned_execution {
                 // A member's only physical work is the Plan's.
                 let sent = cx.request_signed_managed(
                     root.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/own-root".into(),
                     None,
@@ -288,6 +292,7 @@ mod planned_execution {
                         .unwrap();
                     cx.request_managed(
                         root.clone(),
+                        None,
                         Method::Get,
                         "https://venue.test/probe".into(),
                         None,
@@ -365,6 +370,7 @@ mod planned_execution {
                     if let Ok(leg) = resent {
                         cx.request_signed_managed(
                             leg.clone(),
+                            None,
                             Method::Post,
                             "https://venue.test/write".into(),
                             None,
@@ -631,11 +637,11 @@ mod planned_execution {
         let (e, token, _) = shared_write(&[FOLLOWER]);
         let request = token.attempt().request;
         assert!(matches!(
-            e.io.managed_http.get(&request).unwrap().lifecycle.context().owner(),
+            e.io.core.managed_http.get(&request).unwrap().lifecycle.context().owner(),
             crate::request_context::Owner::Execution { .. }
         ));
         assert!(
-            e.io.http_responses.contains(request),
+            e.io.core.http_responses.contains(request),
             "a physical execution write keeps its reconciliation record"
         );
     }
@@ -667,7 +673,7 @@ mod planned_execution {
             );
         }
         assert!(prepared(&actions).is_empty());
-        assert!(!e.io.request_contexts.is_observer(FOLLOWER));
+        assert!(!e.io.core.request_contexts.is_observer(FOLLOWER));
     }
 
     #[test]
@@ -1391,7 +1397,7 @@ mod planned_execution {
             });
             e.start(0.);
             command(&mut e, 0., FOUNDER);
-            let ids = e.io.next_id;
+            let ids = e.io.core.next_id;
             e.drain_actions().for_each(drop);
             detach_founder(&mut e, 1.);
             let actions = e.drain_actions().collect::<Vec<_>>();
@@ -1399,7 +1405,7 @@ mod planned_execution {
                 outcome(&actions, FOUNDER),
                 expected(inherited, crate::Outcome::NotSent)
             );
-            assert_eq!(e.io.next_id, ids, "the carry spends no identity");
+            assert_eq!(e.io.core.next_id, ids, "the carry spends no identity");
         }
     }
 

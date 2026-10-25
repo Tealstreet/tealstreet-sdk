@@ -55,7 +55,14 @@ pub fn start(
         raw_rows: 0,
         limit: size as usize,
     };
-    match cx.request_managed(root, Method::Get, url, None, Pending::PublicTrades(read)) {
+    match cx.request_managed(
+        root,
+        None,
+        Method::Get,
+        url,
+        None,
+        Pending::PublicTrades(read),
+    ) {
         Ok(id) => cx.stream_response(id, ArrayAt::Field("results")),
         Err((Pending::PublicTrades(read), error)) => failed(cx, read, error.venue_error()),
         Err(_) => {}
