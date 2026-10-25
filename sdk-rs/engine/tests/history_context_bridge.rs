@@ -91,6 +91,7 @@ impl Venue for Fixture {
         };
         cx.request_managed(
             leg,
+            None,
             Method::Get,
             "https://history.test/read".into(),
             None,

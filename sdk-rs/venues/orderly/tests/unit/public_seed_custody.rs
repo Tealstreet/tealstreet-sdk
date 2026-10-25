@@ -64,6 +64,7 @@ impl Venue for Probe {
                     assert!(
                         cx.request_managed(
                             context.clone(),
+                            None,
                             Method::Get,
                             format!("https://fixture.invalid/{n}"),
                             None,

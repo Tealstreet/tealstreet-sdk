@@ -55,9 +55,9 @@ mod preflight_calls {
     }
     fn queue(cx: &mut Cx<'_, Context>, context: Context, signed: bool) -> Result<RequestId, (Context, Error)> {
         if signed {
-            cx.request_signed_managed(context.clone(), Method::Get, "https://venue.test/read".into(), None, Box::new(LongRecipe), context)
+            cx.request_signed_managed(context.clone(), None, Method::Get, "https://venue.test/read".into(), None, Box::new(LongRecipe), context)
         } else {
-            cx.request_managed(context.clone(), Method::Get, "https://venue.test/read".into(), None, context)
+            cx.request_managed(context.clone(), None, Method::Get, "https://venue.test/read".into(), None, context)
         }
     }
     impl Calls {
@@ -66,9 +66,9 @@ mod preflight_calls {
             let owner = self.owner.as_ref().unwrap();
             assert!(cx.validate_preflight_delivery(owner, &context).is_err());
             assert!(cx.done_preflight(owner, "wrong".into()).is_err());
-            let before = cx.io.next_id;
+            let before = cx.io.core.next_id;
             assert!(cx.preflight_read_context(owner, policy(self.signed), terms(self.shared)).is_err());
-            assert_eq!(cx.io.next_id, before);
+            assert_eq!(cx.io.core.next_id, before);
             if self.retry_failure {
                 self.retry_failure = false;
                 let retry = cx.preflight_retry_context(owner, &context, RetryEvidence::ReadFailure).unwrap();
@@ -172,7 +172,7 @@ mod preflight_calls {
             let (token, packet) = prepared(&actions);
             assert_eq!(packet.timeout_ms, Some(20_000));
             assert!(actions.iter().any(|a| matches!(a, Action::SetTimer { at_ms: 20_000., .. })));
-            let managed = &e.io.managed_http[&token.attempt().request];
+            let managed = &e.io.core.managed_http[&token.attempt().request];
             assert_eq!(managed.lifecycle.deadline(), 20_000.);
             assert_eq!(managed.lifecycle.context().deadline(), 40_000.);
             if signed {
@@ -209,7 +209,7 @@ mod preflight_calls {
         let (mut e, _) = start(Calls::default());
         let context = e.venue.context.clone().unwrap();
         let owner = e.venue.owner.clone().unwrap();
-        let before = e.io.next_id;
+        let before = e.io.core.next_id;
         cx(&mut e, 1., |cx| {
             assert_eq!(queue(cx, context.clone(), false).unwrap_err().1, Error::Revoked);
             assert!(cx.http_leg_context(&context, policy(false)).is_err());
@@ -219,8 +219,8 @@ mod preflight_calls {
             assert!(cx.validate_http_context(&context).is_err());
             assert!(cx.done_preflight(&owner, "wrong".into()).is_err());
         });
-        assert_eq!(e.io.next_id, before);
-        assert_eq!(e.io.managed_http.len(), 1);
+        assert_eq!(e.io.core.next_id, before);
+        assert_eq!(e.io.core.managed_http.len(), 1);
         assert_eq!(e.venue.retired, 0);
     }
     #[test]
@@ -279,18 +279,18 @@ mod preflight_calls {
                 purpose: PreflightPurpose::ReadOnly, read_credential: p.credential.clone(), write_credential: None,
             })).unwrap();
             if !io_short {
-                e.io.signing.set_test_ids(crate::resource_ids::ResourceIds::with_ceiling(1));
+                e.io.core.signing.set_test_ids(crate::resource_ids::ResourceIds::with_ceiling(1));
             }
             if io_short {
                 // Advance to a real near-exhaustion range, retaining the
                 // existing generation rather than rewinding an issued ID.
-                e.io.next_id = crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID - 5);
+                e.io.core.next_id = crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID - 5);
             }
-            let before = e.io.next_id;
+            let before = e.io.core.next_id;
             assert_eq!(cx(&mut e, 0., |cx| cx.preflight_read_context(&owner, p.clone(), terms(false))), Err(Error::Capacity));
-            assert_eq!(e.io.next_id, before);
-            assert!(e.io.managed_http.is_empty());
-            assert!(e.io.actions.is_empty());
+            assert_eq!(e.io.core.next_id, before);
+            assert!(e.io.core.managed_http.is_empty());
+            assert!(e.io.core.actions.is_empty());
             // A one-attempt declaration fits the unchanged limiting namespace;
             // no allocator is reset after refusal.
             let one = CallTerms { attempts: 1, ..terms(false) };
@@ -299,7 +299,7 @@ mod preflight_calls {
             let (token, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
             let mut expected = before;
             assert_eq!(token.attempt().request.0, expected.reserve(1).unwrap().start + 1);
-            assert_eq!(e.io.managed_http[&token.attempt().request].signing_attempt, Some(RequestId(1)));
+            assert_eq!(e.io.core.managed_http[&token.attempt().request].signing_attempt, Some(RequestId(1)));
         }
     }
 
@@ -311,14 +311,14 @@ mod preflight_calls {
                 purpose: PreflightPurpose::ReadOnly, read_credential: None, write_credential: None,
             })).unwrap();
             cx(&mut e, 0., |cx| cx.preflight_read_context(&owner, policy(false), terms(false))).unwrap();
-            let before = e.io.next_id;
+            let before = e.io.core.next_id;
             cx(&mut e, now, |cx| {
                 assert!(cx.done_preflight(&owner, "wrong".into()).is_err());
                 assert!(cx.preflight_read_context(&owner, policy(false), terms(false)).is_err());
                 cx.fail_preflight(&owner, "cancelled before queue").unwrap();
             });
-            assert_eq!(e.io.next_id, before);
-            assert!(e.io.managed_http.is_empty());
+            assert_eq!(e.io.core.next_id, before);
+            assert!(e.io.core.managed_http.is_empty());
             assert_eq!(terminal(&e.drain_actions().collect::<Vec<_>>()), 1);
             assert_eq!(e.venue.retired, 1);
         }
@@ -330,7 +330,7 @@ mod preflight_calls {
             let (mut e, actions) = start(Calls::default());
             let (token, _) = prepared(&actions);
             release(&mut e, token, 0.);
-            let timer = e.io.managed_http[&token.attempt().request].timer;
+            let timer = e.io.core.managed_http[&token.attempt().request].timer;
             if at > 40_000. {
                 cx(&mut e, at, |cx| cx.http_context(Scope::Background, policy(false))).unwrap();
             }
@@ -354,15 +354,15 @@ mod preflight_calls {
         release(&mut e, first, 0.);
         e.handle(19_000., Event::HttpFailed { request: first.attempt().request, error: "network lost" });
         assert_eq!(terminal(&e.drain_actions().collect::<Vec<_>>()), 0);
-        assert!(e.io.managed_http.is_empty());
+        assert!(e.io.core.managed_http.is_empty());
         let owner = e.venue.owner.clone().unwrap();
-        let before = e.io.next_id;
+        let before = e.io.core.next_id;
         cx(&mut e, 50_000., |cx| {
             assert!(cx.done_preflight(&owner, "wrong".into()).is_err());
             assert!(cx.preflight_read_context(&owner, policy(false), terms(false)).is_err());
             cx.fail_preflight(&owner, "retry preparation cancelled").unwrap();
         });
-        assert_eq!(e.io.next_id, before);
+        assert_eq!(e.io.core.next_id, before);
         assert_eq!(terminal(&e.drain_actions().collect::<Vec<_>>()), 1);
         assert_eq!(e.venue.retired, 1);
     }
@@ -377,15 +377,15 @@ mod preflight_calls {
             read_credential: p.credential.clone(), write_credential: p.credential.clone(),
         })).unwrap();
         let context = cx(&mut e, 0., |cx| cx.preflight_read_context(&owner, p, terms(false))).unwrap();
-        let before = e.io.next_id;
+        let before = e.io.core.next_id;
         let refusal = cx(&mut e, 0., |cx| {
             if bad_headers {
-                cx.request_signed_managed(context.clone(), Method::Get, "https://venue.test/read".into(), None, Box::new(BadStaticHeaders), context)
+                cx.request_signed_managed(context.clone(), None, Method::Get, "https://venue.test/read".into(), None, Box::new(BadStaticHeaders), context)
             } else { queue(cx, context, false) }
         });
         assert_eq!(refusal.unwrap_err().1, Error::Invalid);
-        assert_eq!(e.io.next_id, before);
-        assert!(e.io.managed_http.is_empty());
+        assert_eq!(e.io.core.next_id, before);
+        assert!(e.io.core.managed_http.is_empty());
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(terminal(&actions), 1);
         assert!(actions.iter().all(|a| !matches!(a, Action::ManagedHttp(_) | Action::Sign { .. })));
@@ -405,25 +405,25 @@ mod preflight_calls {
         let (mut foreign, foreign_actions) = start(Calls::default());
         let (foreign_first, _) = prepared(&foreign_actions);
         release(&mut foreign, foreign_first, 0.);
-        let wrong = foreign.io.managed_http[&foreign_first.attempt().request].delivery();
-        let actual = e.io.managed_http[&first.attempt().request].delivery();
+        let wrong = foreign.io.core.managed_http[&foreign_first.attempt().request].delivery();
+        let actual = e.io.core.managed_http[&first.attempt().request].delivery();
         assert_eq!(wrong.context, actual.context); // Equal public metadata.
         assert_eq!(wrong.attempt, actual.attempt);
         assert_ne!(wrong, actual); // Private issuers remain distinct.
         e.handle(19_000., Event::HttpFailed { request: first.attempt().request, error: "network lost" });
         let context = e.venue.context.clone().unwrap();
         let owner = e.venue.owner.clone().unwrap();
-        let before = e.io.next_id;
-        e.io.http_delivery = Some(wrong.clone());
+        let before = e.io.core.next_id;
+        e.io.core.http_delivery = Some(wrong.clone());
         cx(&mut e, 19_001., |cx| {
             assert!(cx.validate_preflight_delivery(&owner, &context).is_err());
             assert!(cx.preflight_retry_context(&owner, &context, RetryEvidence::ReadFailure).is_err());
             assert_eq!(queue(cx, context, false).unwrap_err().1, Error::Revoked);
             assert!(cx.fail_preflight(&owner, "borrowed").is_err());
-            assert_eq!(cx.io.http_delivery.as_ref(), Some(&wrong));
+            assert_eq!(cx.io.core.http_delivery.as_ref(), Some(&wrong));
         });
-        e.io.http_delivery = None;
-        assert_eq!(e.io.next_id, before);
+        e.io.core.http_delivery = None;
+        assert_eq!(e.io.core.next_id, before);
         assert_eq!(terminal(&e.drain_actions().collect::<Vec<_>>()), 0);
         cx(&mut e, 50_000., |cx| cx.fail_preflight(&owner, "cancelled")).unwrap();
         assert_eq!(terminal(&e.drain_actions().collect::<Vec<_>>()), 1);
@@ -453,7 +453,7 @@ mod preflight_calls {
         for inherited in [false, true] {
             let mut e = crate::test_support::seeded_engine(Calls::default());
             let (_, context) = write_preflight(&mut e, inherited);
-            let refusal = cx(&mut e, 0., |cx| cx.request_signed_managed(context.clone(), Method::Get,
+            let refusal = cx(&mut e, 0., |cx| cx.request_signed_managed(context.clone(), None, Method::Get,
                 "https://venue.test/read".into(), None, Box::new(BadStaticHeaders), context));
             assert_eq!(refusal.unwrap_err().1, Error::Invalid);
             let actions = e.drain_actions().collect::<Vec<_>>();

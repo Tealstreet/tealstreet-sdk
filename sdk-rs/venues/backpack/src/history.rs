@@ -502,6 +502,7 @@ impl Backpack {
                 request.leg = Some(Leg::Public(context.clone()));
                 let queued = cx.request_managed_with_headers(
                     context,
+                    None,
                     Method::Get,
                     url,
                     &[("X-Broker-Id", "1200")],

@@ -1063,6 +1063,7 @@ impl ApexOmni {
         self.trading.waiting = true;
         if let Err((Pending::Trade(delivery), error)) = cx.request_signed_managed(
             delivery.context.clone(),
+            None,
             delivery.unsigned.method,
             url,
             None,

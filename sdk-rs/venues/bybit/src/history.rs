@@ -4,10 +4,11 @@
 use crate::account::{order_side, order_status, order_type};
 use crate::sign::Query;
 use crate::wire::*;
-use crate::{BybitLinear, Category, Pending, Rest, Then, venue_error};
-use safe_cex_engine::history::{Completion, CursorHistory};
+use crate::{BybitLinear, Category, Pending, Rest, Then};
+use safe_cex_engine::history::{CursorAdmission, CursorHistory, ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, Stall, WindowOrder};
+use safe_cex_engine::request_context::{Context, Owner};
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Query as Read, Response, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -123,7 +124,7 @@ impl RowKind {
         }
     }
 
-    fn owner(self, completion: Completion) -> CursorHistory<Row> {
+    fn owner(self, completion: ReadCompletion) -> ReadCursorHistory<Row> {
         let max_pages = if matches!(self, Self::Orders) {
             MAX_ORDER_PAGES_PER_WINDOW
         } else {
@@ -169,7 +170,7 @@ enum Rows {
 }
 
 impl Rows {
-    fn stage(self, owner: &mut CursorHistory<Row>) {
+    fn stage(self, owner: &mut CursorAdmission<'_, '_, Row, Pending>) {
         match self {
             Self::Fills(rows) => rows.into_iter().for_each(|row| owner.stage(Row::Fill(row))),
             Self::Orders(rows) => rows
@@ -240,7 +241,7 @@ struct Walk {
     cap: usize,
     category_rows_start: usize,
     kind: RowKind,
-    history: CursorHistory<Row>,
+    history: ReadCursorHistory<Row>,
     inverse: bool,
     categories: VecDeque<Category>,
     original_windows: VecDeque<(Option<f64>, Option<f64>)>,
@@ -254,7 +255,8 @@ impl Walk {
     }
 
     fn finish(self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
-        self.history
+        let _ = self
+            .history
             .finish_with(cx, result, |rows| self.kind.encode(rows, self.cap));
     }
 }
@@ -394,7 +396,18 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
 
 impl BybitLinear {
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
-        let completion = Completion::new(command);
+        // Every page is a leg of this caller root; its deadline bounds the walk.
+        let signed = !matches!(read, Read::PublicTrades { .. });
+        let Some(root) = self.caller_read_root(cx, signed) else {
+            return;
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(&root, error.venue_error());
+                return;
+            }
+        };
         let symbol = match &read {
             Read::Fills { symbol, .. }
             | Read::OrderHistory { symbol, .. }
@@ -404,7 +417,7 @@ impl BybitLinear {
             }
         };
         if symbol.is_some_and(|symbol| !self.category_enabled(self.category_for(symbol))) {
-            completion.finish(cx, Err("Bybit product is not enabled".into()));
+            let _ = cx.fail_context(&root, VenueError::new("Bybit product is not enabled"));
             return;
         }
         let categories = if symbol.is_none() {
@@ -418,22 +431,24 @@ impl BybitLinear {
                 Read::PublicTrades { .. } | Read::OrderByClientId { .. }
             )
         {
-            completion.finish(cx, Ok("[]".into()));
+            let _ = cx.done_context(&root, "[]".into());
             return;
         }
         if matches!(read, Read::Income { .. }) && (self.variant.is_spot() || self.variant.is_hyro())
         {
-            completion.finish(
-                cx,
-                Err("This Bybit variant does not support income history".into()),
+            let _ = cx.fail_context(
+                &root,
+                VenueError::new("This Bybit variant does not support income history"),
             );
             return;
         }
         let mut walk = match read {
             Read::OrderByClientId { .. } => {
-                completion.finish(
-                    cx,
-                    Err("Bybit client order lookup is not supported by the Rust engine".into()),
+                let _ = cx.fail_context(
+                    &root,
+                    VenueError::new(
+                        "Bybit client order lookup is not supported by the Rust engine",
+                    ),
                 );
                 return;
             }
@@ -613,7 +628,19 @@ impl BybitLinear {
         }
     }
 
-    fn request_page(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+    fn request_page(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        let Some(walk) = self.history.reads.get(&command) else {
+            return;
+        };
+        let leg = match self.page_leg(cx, walk.history.root(), walk.signed) {
+            Ok(leg) => leg,
+            Err(error) => {
+                if let Some(walk) = self.history.reads.remove(&command) {
+                    walk.finish(cx, Err(error));
+                }
+                return;
+            }
+        };
         let Some(walk) = self.history.reads.get(&command) else {
             return;
         };
@@ -627,36 +654,35 @@ impl BybitLinear {
             .opt_str("cursor", walk.history.cursor());
         let rest = Rest::get(walk.path, query);
         let rest = if walk.signed { rest.signed() } else { rest };
-        self.send(cx, rest, Then::History(Request { command }));
+        self.queue_read(cx, leg, rest, Then::History(Request { command }));
     }
 
-    pub(crate) fn on_history_sign_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        error: VenueError,
-    ) {
-        if let Some(walk) = self.history.reads.remove(&request.command) {
-            walk.finish(cx, Err(error));
-        }
+    /// The engine retired this command's caller root at its deadline.
+    pub(crate) fn retire_history(&mut self, owner: Owner) {
+        self.history
+            .reads
+            .retain(|_, walk| walk.history.root().owner() != owner);
     }
 
+    /// A page answer, delivered on `leg` (the page or its native re-read).
     pub(crate) fn on_history_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        response: Result<Response<'_>, &str>,
+        leg: &Context,
+        response: Response<'_>,
     ) {
         let command = request.command;
-        let body = match &response {
-            Ok(response) => match venue_error(response) {
-                None => Ok(response.body),
-                Some((_, message)) => Err(VenueError::new(message)),
-            },
-            Err(error) => Err(VenueError::new(*error).kind(ErrorKind::Network)),
-        };
         let Some(walk) = self.history.reads.get_mut(&command) else {
             return;
+        };
+        // A page of an earlier generation or a superseded attempt is ignored.
+        if walk.history.validate_delivery(cx, leg).is_err() {
+            return;
+        }
+        let body = match crate::read_refusal(&response, "") {
+            None => Ok(response.body),
+            Some(error) => Err(error),
         };
         // Decode the whole required list before staging any rows from this page.
         let parsed =
@@ -674,15 +700,22 @@ impl BybitLinear {
                 return;
             }
         };
-        rows.stage(&mut walk.history);
+        let Ok(mut admitted) = walk.history.admit(cx, leg) else {
+            return;
+        };
+        rows.stage(&mut admitted);
         let full = walk.full();
         let count = walk.history.staged_len();
-        match walk.history.advance(CursorPage {
+        let Ok(mut admitted) = walk.history.admit(cx, leg) else {
+            return;
+        };
+        let step = admitted.advance(CursorPage {
             next: cursor,
             rows: count,
             fresh: count,
             want_more: !full,
-        }) {
+        });
+        match step {
             CursorStep::More(_) => self.request_page(cx, command),
             CursorStep::Stalled(reason)
                 if !(matches!(walk.kind, RowKind::Orders)
@@ -690,7 +723,8 @@ impl BybitLinear {
                     && reason == Stall::PageBudget) =>
             {
                 // Endpoint-policy refusals must never become partial success.
-                self.history
+                let _ = self
+                    .history
                     .reads
                     .remove(&command)
                     .expect("present")
@@ -703,6 +737,18 @@ impl BybitLinear {
                     );
             }
             CursorStep::Done | CursorStep::Stalled(_) => self.next_window(cx, command),
+        }
+    }
+
+    /// A page that failed before any answer: typed by the engine or the signer.
+    pub(crate) fn on_history_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        if let Some(walk) = self.history.reads.remove(&request.command) {
+            walk.finish(cx, Err(error));
         }
     }
 }

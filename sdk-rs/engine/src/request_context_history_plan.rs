@@ -21,14 +21,15 @@ impl<P> Cx<'_, P> {
     pub(crate) fn read_history_expiry_is_current(&self, plan: &Plan) -> Result<bool, Error> {
         if self
             .io
+            .core
             .http_plan_expiring
             .as_ref()
             .is_some_and(|current| current.same_plan(plan))
         {
-            self.io.request_contexts.validate_plan_seal_origin(
+            self.io.core.request_contexts.validate_plan_seal_origin(
                 plan,
                 self.now,
-                self.io.http_delivery.as_ref(),
+                self.io.core.http_delivery.as_ref(),
             )?;
             return Ok(true);
         }
@@ -40,14 +41,18 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         context: &Context,
     ) -> Result<Attempt, Error> {
-        if self.io.http_owner_poison
-            || self.io.http_plan_poison
-            || self.io.http_plan_expiring.is_some()
+        if self.io.core.http_owner_poison
+            || self.io.core.http_plan_poison
+            || self.io.core.http_plan_expiring.is_some()
         {
             return Err(Error::Revoked);
         }
         self.validate_plan_delivery(plan, context)?;
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         if !body.history_bound
             || body.policy.operation != Operation::Read
             || body.receipt_cap.is_none()
@@ -56,7 +61,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         let index = body.schedule.ordinal(slot)?;
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         if !body.entries[index].call.as_ref().is_some_and(|call| {
             call.context.same_issuer(context) && call.context == *context && call.matches(delivery)
         }) {
@@ -82,13 +87,18 @@ impl<P> Cx<'_, P> {
         })
     }
     pub(crate) fn begin_read_history_commit(&mut self) {
-        assert!(!self.io.http_owner_poison && !self.io.http_plan_poison);
-        self.io.http_owner_poison = true;
+        assert!(!self.io.core.http_owner_poison && !self.io.core.http_plan_poison);
+        self.io.core.http_owner_poison = true;
     }
     fn settle_read_history_page(&mut self, plan: &Plan, slot: &Slot, context: &Context) {
-        self.io.request_contexts.contexts.remove(&context.leg());
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
         let body = self
             .io
+            .core
             .request_contexts
             .plan_body_mut(plan)
             .expect("prepared history Plan");
@@ -98,14 +108,14 @@ impl<P> Cx<'_, P> {
             .expect("prepared active history Slot");
         body.entries[index].call = None;
         body.entries[index].credit = Credit::Released;
-        body.handoff = self.io.http_delivery.clone();
+        body.handoff = self.io.core.http_delivery.clone();
         body.refresh_availability(self.now);
         self.rearm_plan(plan);
     }
     pub(crate) fn commit_read_history_page(&mut self, prepared: PreparedHistoryPage) {
         self.io.commit_read_history_cleanup(prepared.cleanup);
         self.settle_read_history_page(&prepared.plan, &prepared.slot, &prepared.context);
-        self.io.http_owner_poison = false;
+        self.io.core.http_owner_poison = false;
     }
     pub(crate) fn prepare_read_history_terminal(
         &mut self,
@@ -115,13 +125,17 @@ impl<P> Cx<'_, P> {
         error: Option<VenueError>,
         marker: Option<String>,
     ) -> Result<PreparedHistoryTerminal, Error> {
-        if self.io.http_owner_poison
-            || self.io.http_plan_poison
-            || self.io.http_plan_expiring.is_some()
+        if self.io.core.http_owner_poison
+            || self.io.core.http_plan_poison
+            || self.io.core.http_plan_expiring.is_some()
         {
             return Err(Error::Revoked);
         }
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         if !body.history_bound
             || !matches!(plan.owner(), Owner::Command { .. })
             || body.policy.operation != Operation::Read
@@ -145,6 +159,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         self.io
+            .core
             .request_contexts
             .retirements
             .try_reserve(1)
@@ -195,15 +210,15 @@ impl<P> Cx<'_, P> {
         }
         if let Some(marker) = prepared.marker {
             super::super::super::push_event(
-                &mut self.io.actions,
-                &mut self.io.health,
-                self.io.min_level,
+                &mut self.io.core.actions,
+                &mut self.io.core.health,
+                self.io.core.min_level,
                 marker,
             );
         }
         self.commit_plan_terminal(&prepared.plan, result, prepared.seal)
             .expect("prepared history terminal");
-        self.io.http_owner_poison = false;
+        self.io.core.http_owner_poison = false;
     }
 }
 

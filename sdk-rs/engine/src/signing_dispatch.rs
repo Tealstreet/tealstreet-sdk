@@ -88,6 +88,8 @@ pub(crate) struct Pending {
     pub receipt: SignReceipt,
     prepared_protocol_at: Option<f64>,
     header_policy: ResultHeaderPolicy,
+    /// Whether the prepared request names primary material (`primary_owns`).
+    primary: bool,
 }
 impl Pending {
     fn receipt_expired(&self, raw_now: f64) -> bool {
@@ -122,6 +124,11 @@ pub(crate) struct Dispatch {
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: crate::IdMap<RequestId, Pending>,
     next: crate::resource_ids::ResourceIds,
+    /// A preparation that named a missing credential ref, and whether that
+    /// was primary material; taken once.
+    credential_refused: Option<bool>,
+    /// A missing primary key latched signing: every later staging refuses.
+    refused: bool,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
@@ -134,6 +141,20 @@ impl Dispatch {
         self.pending.is_empty() && self.outbound.is_empty()
     }
 
+    /// Latch signing; false when it already was.
+    pub fn refuse(&mut self) -> bool {
+        !std::mem::replace(&mut self.refused, true)
+    }
+    pub fn refused(&self) -> bool {
+        self.refused
+    }
+    pub fn take_credential_refusal(&mut self) -> Option<bool> {
+        self.credential_refused.take()
+    }
+    /// Whether the attempt's prepared request names primary material.
+    pub fn prepared_primary(&self, id: RequestId) -> bool {
+        self.pending.get(&id).is_some_and(|p| p.primary)
+    }
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
     }
@@ -254,7 +275,8 @@ impl Dispatch {
     }
     pub fn hold(&mut self, outbound: Action) -> Result<(), SignError> {
         let id = self.next_id();
-        self.stage(id, outbound, Box::new(Plain), TimerId(0), 0.)?;
+        // A held frame is unsigned, so a signing latch never refuses it.
+        self.admit(id, outbound, Box::new(Plain), TimerId(0), 0.)?;
         if let Some(p) = self.pending.get_mut(&id) {
             p.deadline = f64::MAX;
             p.plain = true;
@@ -270,6 +292,19 @@ impl Dispatch {
         Some(pending.deadline)
     }
     pub fn stage(
+        &mut self,
+        id: RequestId,
+        outbound: Action,
+        step: Box<dyn SignStep>,
+        timer: TimerId,
+        now: f64,
+    ) -> Result<f64, SignError> {
+        if self.refused {
+            return Err(SignError::MissingKey);
+        }
+        self.admit(id, outbound, step, timer, now)
+    }
+    fn admit(
         &mut self,
         id: RequestId,
         outbound: Action,
@@ -314,6 +349,7 @@ impl Dispatch {
                 receipt: Default::default(),
                 prepared_protocol_at: None,
                 header_policy,
+                primary: true,
             },
         );
         Ok(deadline)
@@ -397,6 +433,7 @@ impl Dispatch {
         now: f64,
         context: &DispatchContext<'_>,
         clock_revision: u64,
+        identities: &crate::signing::Identities,
     ) -> Result<SignRequest, SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
         if !now.is_finite() || now >= p.deadline {
@@ -410,7 +447,18 @@ impl Dispatch {
             original.timeout_ms = current.timeout_ms;
         }
         p.outbound = p.unsigned.clone();
-        let work = p.step.prepare(&mut p.outbound, context)?;
+        let work = match p.step.prepare(&mut p.outbound, context) {
+            Ok(work) => work,
+            Err(error) => {
+                // A login refused before naming refs uses the primary.
+                if error == SignError::MissingKey {
+                    let login =
+                        matches!(p.outbound, Action::WsSend { .. } | Action::WsConnect { .. });
+                    self.credential_refused = Some(login || identities.secondary.is_none());
+                }
+                return Err(error);
+            }
+        };
         if !matches!(p.header_policy, ResultHeaderPolicy::Deny)
             && !matches!(p.outbound, Action::Http(_))
         {
@@ -426,7 +474,14 @@ impl Dispatch {
         {
             return Err(SignError::InvalidRequest);
         }
-        work.validate()?;
+        if let Err(error) = work.validate() {
+            if !work.has_invalid_key_ref() {
+                return Err(error);
+            }
+            self.credential_refused = Some(identities.primary_owns(&work));
+            return Err(SignError::MissingKey);
+        }
+        p.primary = identities.primary_owns(&work);
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
         if work
@@ -546,16 +601,12 @@ impl Dispatch {
 pub(crate) fn wipe(action: &mut Action) {
     use zeroize::Zeroize;
     match action {
-        Action::Http(http) => {
-            http.url.zeroize();
-            for (_, value) in &mut http.headers {
-                value.zeroize();
-            }
-            for (_, value) in &mut http.signer_headers {
-                value.zeroize();
-            }
-            if let Some(body) = &mut http.body {
-                body.zeroize();
+        Action::Http(http) => wipe_http(http),
+        // A Bind may carry the Session Bearer, the engine's one token copy.
+        #[cfg(feature = "session-bearer")]
+        Action::ManagedHttp(managed) => {
+            if let crate::request_context::HttpAction::Bind { request, .. } = &mut **managed {
+                wipe_http(request);
             }
         }
         Action::WsSend { text, .. } => text.zeroize(),
@@ -566,6 +617,19 @@ pub(crate) fn wipe(action: &mut Action) {
             }
         }
         _ => {}
+    }
+}
+fn wipe_http(http: &mut crate::HttpRequest) {
+    use zeroize::Zeroize;
+    http.url.zeroize();
+    for (_, value) in &mut http.headers {
+        value.zeroize();
+    }
+    for (_, value) in &mut http.signer_headers {
+        value.zeroize();
+    }
+    if let Some(body) = &mut http.body {
+        body.zeroize();
     }
 }
 struct Plain;
@@ -662,7 +726,13 @@ mod header_tests {
             )
             .unwrap();
         let work = dispatch
-            .prepare(RequestId(10), 1000., &DispatchContext::new(1000., None), 3)
+            .prepare(
+                RequestId(10),
+                1000.,
+                &DispatchContext::new(1000., None),
+                3,
+                &Default::default(),
+            )
             .unwrap();
         let mut result = SignResult::new(vec![vec![7; 32]], work.receipt);
         result.headers = vec![("x-mbx-apikey".into(), "callback".into())];

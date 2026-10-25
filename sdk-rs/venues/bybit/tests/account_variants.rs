@@ -911,3 +911,42 @@ fn capability_profile_linear_inverse_demo_keep_income_advertised() {
         assert!(h.engine.capabilities().income_history, "{variant:?}");
     }
 }
+
+/// fe7lgm (#1971): a read the engine refused to admit never reached Hyro, so
+/// local owner-cap pressure cannot spend the transient streak and tear down
+/// a healthy private session; only venue and transport transients count.
+#[test]
+fn hyro_local_admission_refusals_never_spend_the_transient_streak() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    let private = h.socket("/v5/private").unwrap();
+    hyro_snapshot(&mut h);
+    h.advance(1.0);
+    // Park caller candle reads (20 s windows) until admission refuses.
+    for command in 2_000..2_300 {
+        h.command(Command::FetchCandles {
+            command,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: Some(2),
+            from_ms: None,
+            to_ms: None,
+        });
+    }
+    h.requests.clear();
+    for tick in 0..4 {
+        h.advance(5000.0);
+        h.message(
+            "/v5/private",
+            r#"{"req_id":"","op":"pong","args":["1675418560633"],"conn_id":"cfcb4ocsvfriu23r3er0-1b"}"#,
+        );
+        assert!(
+            !h.has_request("/v5/order/realtime"),
+            "tick {tick}: the snapshot read was refused locally"
+        );
+        assert!(
+            !h.closed.contains(&private),
+            "tick {tick}: a local refusal tore down the stream"
+        );
+    }
+}

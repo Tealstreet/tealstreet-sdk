@@ -32,6 +32,8 @@ struct Body {
     initial_custody: bool,
     history_bound: bool,
     history_latest_release: Option<Attempt>,
+    #[cfg(feature = "serial-plans")]
+    serial: Option<Box<serial::Serial>>,
 }
 
 struct Entry {
@@ -382,6 +384,21 @@ impl<P> Cx<'_, P> {
         declaration: AdmissionDeclaration<'_, '_, '_>,
         physical: bool,
     ) -> Result<(Plan, Option<(u64, Context)>), Error> {
+        #[cfg(feature = "serial-plans")]
+        return self.admit_plan_root(preflight, declaration, physical, None);
+        #[cfg(not(feature = "serial-plans"))]
+        self.admit_plan_root(preflight, declaration, physical)
+    }
+
+    /// A serial Plan shares the whole declared admission transaction, with its
+    /// own unbounded root and streamed journal.
+    fn admit_plan_root(
+        &mut self,
+        preflight: &Preflight,
+        declaration: AdmissionDeclaration<'_, '_, '_>,
+        physical: bool,
+        #[cfg(feature = "serial-plans")] serial: Option<serial::Serial>,
+    ) -> Result<(Plan, Option<(u64, Context)>), Error> {
         let extra = if physical { 2 } else { 0 };
         let AdmissionDeclaration {
             steps,
@@ -403,7 +420,11 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Invalid);
         }
-        let receipt_cap = self.io.request_contexts.preflight_receipt_cap(preflight)?;
+        let receipt_cap = self
+            .io
+            .core
+            .request_contexts
+            .preflight_receipt_cap(preflight)?;
         if receipt_cap.is_some() && operation != Operation::Read {
             return Err(Error::Invalid);
         }
@@ -413,9 +434,17 @@ impl<P> Cx<'_, P> {
         let schedule = Schedule::from_steps(steps)?;
         let terminals = terminal_ordinals(steps, &policy, terminals)?;
         #[cfg(feature = "http-mutation-barriers")]
-        let barriers = mutation_group::normalize(steps, &policy, barriers, &self.io.http_pacing)?;
+        let barriers =
+            mutation_group::normalize(steps, &policy, barriers, &self.io.core.http_pacing)?;
         let bound = schedule.bound();
         let native_deadline = bound.deadline(self.now)?;
+        #[cfg(feature = "serial-plans")]
+        let deadline = if serial.is_some() {
+            serial::ROOT
+        } else {
+            receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap))
+        };
+        #[cfg(not(feature = "serial-plans"))]
         let deadline = receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap));
         Context::new(
             preflight.owner(),
@@ -457,6 +486,18 @@ impl<P> Cx<'_, P> {
             entries[index].eligible_at = Some(at);
             entries[index].notified = false;
         }
+        #[cfg(feature = "serial-plans")]
+        let writes = match &serial {
+            Some(serial) => Some(
+                CommandWrites::new_reserved(serial::JOURNAL_ATTEMPTS, count)?
+                    .streamed_with(serial.refusals_complete),
+            ),
+            None if operation == Operation::Mutation => {
+                Some(CommandWrites::new_reserved(attempts, count)?)
+            }
+            None => None,
+        };
+        #[cfg(not(feature = "serial-plans"))]
         let writes = if operation == Operation::Mutation {
             Some(CommandWrites::new_reserved(attempts, count)?)
         } else {
@@ -470,21 +511,24 @@ impl<P> Cx<'_, P> {
         }
         let mut body = Vec::new();
         body.try_reserve_exact(1).map_err(|_| Error::Capacity)?;
-        self.io.request_contexts.prune(self.now);
+        self.io.core.request_contexts.prune(self.now);
         let old_slot = old_read.as_ref().is_some_and(|context| {
             self.io
+                .core
                 .request_contexts
                 .contexts
                 .contains_key(&context.leg())
         }) as usize;
         let future = self
             .io
+            .core
             .request_contexts
             .reserved_contexts
             .checked_add(count)
             .ok_or(Error::Capacity)?;
         if self
             .io
+            .core
             .request_contexts
             .contexts
             .len()
@@ -496,20 +540,26 @@ impl<P> Cx<'_, P> {
             return Err(Error::Capacity);
         }
         self.io
+            .core
             .request_contexts
             .contexts
             .try_reserve(future + extra)
             .map_err(|_| Error::Capacity)?;
-        self.io.timers.try_reserve(1).map_err(|_| Error::Capacity)?;
         self.io
+            .core
+            .timers
+            .try_reserve(1)
+            .map_err(|_| Error::Capacity)?;
+        self.io
+            .core
             .request_contexts
             .plan_index
             .try_reserve(1)
             .map_err(|_| Error::Capacity)?;
         let io_count = 1 + count as u64 + 3 * attempts as u64 + extra as u64;
         let signed = policy.credential.is_some();
-        if !self.io.next_id.available(io_count)
-            || (signed && !self.io.signing.available_ids(attempts as u64))
+        if !self.io.core.next_id.available(io_count)
+            || (signed && !self.io.core.signing.available_ids(attempts as u64))
         {
             return Err(Error::Capacity);
         }
@@ -522,6 +572,7 @@ impl<P> Cx<'_, P> {
         let logical = take(&mut ids, count as u64);
         let mut signing = signed.then(|| {
             self.io
+                .core
                 .signing
                 .reserve_ids(attempts as u64)
                 .expect("preflighted whole signing plan")
@@ -557,7 +608,7 @@ impl<P> Cx<'_, P> {
             )
             .and_then(|root| root.with_retry(policy.retry))
             .expect("validated with the Plan root above");
-            root.bind_issuer(&self.io.request_contexts.issuer);
+            root.bind_issuer(&self.io.core.request_contexts.issuer);
             root
         });
         body.push(Body {
@@ -570,19 +621,26 @@ impl<P> Cx<'_, P> {
             #[cfg(feature = "http-mutation-barriers")]
             barriers,
             entries,
-            handoff: self.io.http_delivery.clone(),
-            initial_custody: self.io.http_delivery.is_none() && self.io.http_plan_ready.is_none(),
+            handoff: self.io.core.http_delivery.clone(),
+            initial_custody: self.io.core.http_delivery.is_none()
+                && self.io.core.http_plan_ready.is_none(),
             history_bound: false,
             history_latest_release: None,
+            #[cfg(feature = "serial-plans")]
+            serial: serial.map(Box::new),
         });
         if let Some(context) = old_read {
             self.io.retire_http_leg(&context);
-            self.io.request_contexts.contexts.remove(&context.leg());
+            self.io
+                .core
+                .request_contexts
+                .contexts
+                .remove(&context.leg());
         }
         let Owner::Command { id, generation } = preflight.owner() else {
             unreachable!()
         };
-        let registry = &mut self.io.request_contexts;
+        let registry = &mut self.io.core.request_contexts;
         let owner = registry.commands.get_mut(&id).expect("validated preflight");
         assert_eq!(owner.generation, generation);
         let execution = match (moved, founder_root) {
@@ -628,7 +686,7 @@ impl<P> Cx<'_, P> {
             }
         };
         registry.reserved_contexts = future;
-        self.io.timers.insert(timer, ());
+        self.io.core.timers.insert(timer, ());
         self.rearm_plan(&handle);
         Ok((handle, execution))
     }
@@ -636,7 +694,11 @@ impl<P> Cx<'_, P> {
     /// Structural availability only; issuing a slot requires its exact Plan,
     /// original eligibility and one-use reserved physical admission.
     pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         let mut slots = Vec::new();
         slots
             .try_reserve_exact(body.entries.len())
@@ -657,6 +719,9 @@ impl<P> Cx<'_, P> {
     /// Park an unissued, eligible Slot on a login Session before it consumes an
     /// attempt. `session_ready` issues its leg with a fresh window under the
     /// same Plan root and Slot; nothing is spent while parked.
+    /// Known gap: the parked unit keeps only `intent`, so a protection-cancel leg
+    /// resumes as a plain cancel. The first venue to combine a Plan session wait with
+    /// protection-cancel legs must carry that flag through the parked unit, RED first.
     pub fn plan_session_wait(
         &mut self,
         plan: &Plan,
@@ -666,11 +731,19 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> Result<(), (P, Error)> {
         let checked = (|| {
-            let generation = self.io.request_contexts.validate_session(session)?;
+            let generation = self.io.core.request_contexts.validate_session(session)?;
             if !matches!(plan.owner(), Owner::Command { .. }) {
                 return Err(Error::State);
             }
-            let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+            let body = self
+                .io
+                .core
+                .request_contexts
+                .validate_plan(plan, self.now)?;
+            #[cfg(feature = "serial-plans")]
+            if body.serial.is_some() {
+                return Err(Error::State);
+            }
             let index = body.schedule.ordinal(slot)?;
             let entry = &body.entries[index];
             if entry.parked
@@ -690,6 +763,7 @@ impl<P> Cx<'_, P> {
             self.io.session_waits.reserve_ended()?;
             let parked = self.io.session_waits.parked_units();
             self.io
+                .core
                 .session_resumed
                 .try_reserve(parked + 1)
                 .map_err(|_| Error::Capacity)?;
@@ -700,6 +774,7 @@ impl<P> Cx<'_, P> {
             Err(error) => return Err((pending, error)),
         };
         self.io
+            .core
             .request_contexts
             .plan_body_mut(plan)
             .expect("validated parked Plan")
@@ -724,7 +799,7 @@ impl<P> Cx<'_, P> {
         pending: P,
     ) -> Result<(), (P, Error)> {
         let checked = (|| {
-            let generation = self.io.request_contexts.validate_session(session)?;
+            let generation = self.io.core.request_contexts.validate_session(session)?;
             if !matches!(plan.owner(), Owner::Command { .. }) {
                 return Err(Error::State);
             }
@@ -735,8 +810,16 @@ impl<P> Cx<'_, P> {
                 return Err(Error::RetryForbidden);
             }
             context.retry(evidence, self.now)?;
-            let body = self.io.request_contexts.validate_plan(plan, self.now)?;
-            self.io.request_contexts.validate(context, self.now)?;
+            let body = self
+                .io
+                .core
+                .request_contexts
+                .validate_plan(plan, self.now)?;
+            #[cfg(feature = "serial-plans")]
+            if body.serial.is_some() {
+                return Err(Error::State);
+            }
+            self.io.core.request_contexts.validate(context, self.now)?;
             let index = body.schedule.ordinal(slot)?;
             let entry = &body.entries[index];
             let call = entry
@@ -746,7 +829,7 @@ impl<P> Cx<'_, P> {
                 .ok_or(Error::Revoked)?;
             // The failed delivery's own callback, or a re-park of an ended
             // retry from the Plan's ready custody.
-            let delivered = self.io.http_delivery.as_ref().is_some_and(|delivery| {
+            let delivered = self.io.core.http_delivery.as_ref().is_some_and(|delivery| {
                 call.matches(delivery) && matches!(call.stage, Stage::Active { .. })
             });
             let reparked =
@@ -764,6 +847,7 @@ impl<P> Cx<'_, P> {
             self.io.session_waits.reserve_ended()?;
             let parked = self.io.session_waits.parked_units();
             self.io
+                .core
                 .session_resumed
                 .try_reserve(parked + 1)
                 .map_err(|_| Error::Capacity)?;
@@ -776,6 +860,7 @@ impl<P> Cx<'_, P> {
         self.io.retire_http_leg(context);
         let entry = &mut self
             .io
+            .core
             .request_contexts
             .plan_body_mut(plan)
             .expect("validated parked Plan")
@@ -800,8 +885,12 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         context: &Context,
     ) -> Result<Context, Error> {
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
-        self.io.request_contexts.validate(context, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
         let index = body.schedule.ordinal(slot)?;
         let entry = &body.entries[index];
         let call = entry
@@ -816,8 +905,8 @@ impl<P> Cx<'_, P> {
             return Err(Error::RetryForbidden);
         }
         call.window.physical_deadline(self.now)?;
-        let predecessor = self.io.http_delivery.clone();
-        let body = self.io.request_contexts.plan_body_mut(plan)?;
+        let predecessor = self.io.core.http_delivery.clone();
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
         body.schedule
             .retry(slot)
             .expect("remaining declared credit");
@@ -841,7 +930,7 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
     ) -> Result<Context, Error> {
-        let leg = self.make_plan_leg_context(plan, slot, intent, true)?;
+        let leg = self.make_plan_leg_context(plan, slot, intent, false, true)?;
         self.note_session_resume(plan, &leg);
         Ok(leg)
     }
@@ -849,11 +938,12 @@ impl<P> Cx<'_, P> {
     /// A resume drained with no delivery is the resumed attempt's custody for
     /// the rest of this event only.
     fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {
-        if self.io.http_delivery.is_some() {
+        if self.io.core.http_delivery.is_some() {
             return;
         }
         let body = self
             .io
+            .core
             .request_contexts
             .plan_body(plan)
             .expect("resumed Plan");
@@ -865,11 +955,11 @@ impl<P> Cx<'_, P> {
             .admission
             .attempt
             .request;
-        self.io.session_resumed.push(request);
+        self.io.core.session_resumed.push(request);
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, None, false)
+        self.make_plan_leg_context(plan, slot, None, false, false)
     }
 
     /// Narrow a write leg using the common engine intent rules before its first
@@ -880,23 +970,42 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: crate::classify::Intent,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(intent), false)
+        self.make_plan_leg_context(plan, slot, Some(intent), false, false)
+    }
+
+    /// The Plan form of `http_write_protection_cancel_leg`: an amend's cancel
+    /// leg of a position-bound cancel-then-recreate, declared before the leg's
+    /// journal registration. Never declare it for any other replacement.
+    pub fn plan_protection_cancel_leg_context(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+    ) -> Result<Context, Error> {
+        self.make_plan_leg_context(
+            plan,
+            slot,
+            Some(crate::classify::Intent::Cancel),
+            true,
+            false,
+        )
     }
 
     /// Handoff, initial or ready custody over this Plan's next issue.
     fn plan_issue_custody(&self, plan: &Plan, body: &Body) -> bool {
         self.io
+            .core
             .http_delivery
             .as_ref()
             .is_some_and(|delivery| body.handoff.as_ref() == Some(delivery))
             || (body.initial_custody
-                && self.io.http_delivery.is_none()
-                && self.io.http_plan_ready.is_none()
+                && self.io.core.http_delivery.is_none()
+                && self.io.core.http_plan_ready.is_none()
                 // A ready founder's own physical Plan counts as the ready owner.
                 && self.validate_preflight_ready_owner(plan.owner()).is_ok())
-            || (self.io.http_delivery.is_none()
+            || (self.io.core.http_delivery.is_none()
                 && self
                     .io
+                    .core
                     .http_plan_ready
                     .as_ref()
                     .is_some_and(|ready| ready.same_plan(plan)))
@@ -909,9 +1018,14 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
+        protection_cancel: bool,
         resumed: bool,
     ) -> Result<Context, Error> {
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         let index = body.schedule.ordinal(slot)?;
         let entry = &body.entries[index];
         if entry.credit != Credit::Unissued
@@ -926,6 +1040,29 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         let window = entry.terms.window(self.now, plan.deadline())?;
+        #[cfg(feature = "serial-plans")]
+        let (operation, retry, credential) = body.serial.as_ref().map_or_else(
+            || {
+                (
+                    body.policy.operation,
+                    body.policy.retry,
+                    body.policy.credential.clone(),
+                )
+            },
+            |serial| serial.terms(&body.policy.credential),
+        );
+        #[cfg(feature = "serial-plans")]
+        let mut context = Context::new(
+            plan.owner(),
+            entry.logical,
+            operation,
+            credential,
+            self.now,
+            window.deadline(),
+            body.policy.pacing,
+        )?
+        .with_retry(retry)?;
+        #[cfg(not(feature = "serial-plans"))]
         let mut context = Context::new(
             plan.owner(),
             entry.logical,
@@ -936,7 +1073,7 @@ impl<P> Cx<'_, P> {
             body.policy.pacing,
         )?
         .with_retry(body.policy.retry)?;
-        context.bind_issuer(&self.io.request_contexts.issuer);
+        context.bind_issuer(&self.io.core.request_contexts.issuer);
         let call = Call::open(
             context.clone(),
             entry.terms,
@@ -944,15 +1081,18 @@ impl<P> Cx<'_, P> {
             entry.ids.clone(),
             entry.signing.clone(),
             self.now,
-            self.io.http_delivery.clone(),
+            self.io.core.http_delivery.clone(),
         )?;
         let owner = self
             .io
+            .core
             .request_contexts
             .owner_entry_mut(plan.owner())
             .unwrap();
         let narrowed = match intent {
-            Some(intent) if owner.prepare_leg_intent(&context, intent, false)? => Some(intent),
+            Some(intent) if owner.prepare_leg_intent(&context, intent, protection_cancel)? => {
+                Some(intent)
+            }
             _ => None,
         };
         // Journal enrollment precedes headers, recipe preparation and all queue
@@ -972,14 +1112,15 @@ impl<P> Cx<'_, P> {
             );
             owner.leg_intents.push((context.leg(), intent));
         }
-        let body = self.io.request_contexts.plan_body_mut(plan).unwrap();
+        let body = self.io.core.request_contexts.plan_body_mut(plan).unwrap();
         body.schedule.start(slot).expect("available plan slot");
         body.entries[index].notified = true;
         body.entries[index].parked = false;
         body.entries[index].credit = Credit::Issued;
         body.entries[index].call = Some(call);
-        self.io.request_contexts.reserved_contexts -= 1;
+        self.io.core.request_contexts.reserved_contexts -= 1;
         self.io
+            .core
             .request_contexts
             .contexts
             .insert(context.leg(), context.clone());
@@ -988,9 +1129,13 @@ impl<P> Cx<'_, P> {
 
     /// Exact released DATA authority before any native or Store mutation.
     pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
-        self.io.request_contexts.validate(context, self.now)?;
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         let call = body
             .entries
             .iter()
@@ -1004,6 +1149,7 @@ impl<P> Cx<'_, P> {
         }
         if !self
             .io
+            .core
             .managed_http
             .get(&delivery.attempt.request)
             .is_some_and(|managed| managed.released_delivery(delivery))
@@ -1018,7 +1164,11 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id, .. } = plan.owner() else {
             return Err(Error::Invalid);
         };
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         if body.policy.operation != Operation::Read || body.receipt_cap.is_none() {
             return Err(Error::Invalid);
         }
@@ -1030,37 +1180,44 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::State);
         }
-        if self.io.http_owner_poison
-            || self.io.http_plan_expiring.is_some()
+        if self.io.core.http_owner_poison
+            || self.io.core.http_plan_expiring.is_some()
             || self
                 .io
+                .core
                 .http_plan_ready
                 .as_ref()
                 .is_some_and(|ready| !ready.same_plan(plan))
         {
             return Err(Error::Revoked);
         }
-        if self.io.http_delivery.is_some() {
-            self.io.request_contexts.validate_plan_seal_origin(
+        if self.io.core.http_delivery.is_some() {
+            self.io.core.request_contexts.validate_plan_seal_origin(
                 plan,
                 self.now,
-                self.io.http_delivery.as_ref(),
+                self.io.core.http_delivery.as_ref(),
             )?;
         } else if !(self.io.entry_bound(id)
             || self
                 .io
+                .core
                 .http_preflight_ready
                 .as_ref()
                 .is_some_and(|ready| ready.owner() == plan.owner())
             || self
                 .io
+                .core
                 .http_plan_ready
                 .as_ref()
                 .is_some_and(|ready| ready.same_plan(plan)))
         {
             return Err(Error::Revoked);
         }
-        self.io.request_contexts.plan_body_mut(plan)?.history_bound = true;
+        self.io
+            .core
+            .request_contexts
+            .plan_body_mut(plan)?
+            .history_bound = true;
         Ok(plan.clone())
     }
 
@@ -1072,7 +1229,7 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         context: &Context,
     ) -> Result<(), Error> {
-        self.io.request_contexts.validate_unbound_plan(plan)?;
+        self.io.core.request_contexts.validate_unbound_plan(plan)?;
         self.finish_plan_call_inner(plan, slot, context)
     }
 
@@ -1083,7 +1240,7 @@ impl<P> Cx<'_, P> {
         context: &Context,
     ) -> Result<(), Error> {
         self.validate_plan_delivery(plan, context)?;
-        let body = self.io.request_contexts.plan_body(plan)?;
+        let body = self.io.core.request_contexts.plan_body(plan)?;
         let index = body.schedule.ordinal(slot)?;
         let call = body.entries[index]
             .call
@@ -1092,6 +1249,7 @@ impl<P> Cx<'_, P> {
             .ok_or(Error::Revoked)?;
         if context.operation() == Operation::Mutation {
             self.io
+                .core
                 .request_contexts
                 .owner_entry(plan.owner())
                 .unwrap()
@@ -1101,12 +1259,16 @@ impl<P> Cx<'_, P> {
                 .validate_housekeeping(call.admission.attempt.request)?;
         }
         self.io.retire_http_leg(context);
-        self.io.request_contexts.contexts.remove(&context.leg());
-        let body = self.io.request_contexts.plan_body_mut(plan)?;
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
         body.schedule.settle(slot)?;
         body.entries[index].call = None;
         body.entries[index].credit = Credit::Released;
-        body.handoff = self.io.http_delivery.clone();
+        body.handoff = self.io.core.http_delivery.clone();
         body.refresh_availability(self.now);
         self.rearm_plan(plan);
         Ok(())
@@ -1147,15 +1309,19 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         context: &Context,
     ) -> Result<Context, Error> {
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
-        self.io.request_contexts.validate(context, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
         let index = body.schedule.ordinal(slot)?;
         let call = body.entries[index]
             .call
             .as_ref()
             .filter(|call| call.context == *context)
             .ok_or(Error::Revoked)?;
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         if !call.matches(delivery) || !matches!(call.stage, Stage::Active { .. }) {
             return Err(Error::Revoked);
         }
@@ -1168,6 +1334,7 @@ impl<P> Cx<'_, P> {
         let predecessor = delivery.clone();
         if context.operation() == Operation::Mutation {
             self.io
+                .core
                 .request_contexts
                 .owner_entry_mut(plan.owner())
                 .unwrap()
@@ -1177,7 +1344,7 @@ impl<P> Cx<'_, P> {
                 .retry(previous, next)?;
         }
         self.io.retire_http_leg(context);
-        let body = self.io.request_contexts.plan_body_mut(plan)?;
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
         body.schedule
             .retry(slot)
             .expect("remaining declared credit");
@@ -1194,8 +1361,12 @@ impl<P> Cx<'_, P> {
     /// convert known-partial, refused or unresolved writes into terminal failure.
     pub fn done_plan(&mut self, plan: &Plan, result: String) -> Result<(), Error> {
         self.validate_preflight_ready_owner(plan.owner())?;
-        self.io.request_contexts.validate_unbound_plan(plan)?;
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate_unbound_plan(plan)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         if !body.schedule.is_complete() {
             return Err(Error::State);
         }
@@ -1213,8 +1384,12 @@ impl<P> Cx<'_, P> {
         context: &Context,
         result: String,
     ) -> Result<(), Error> {
-        self.io.request_contexts.validate_unbound_plan(plan)?;
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate_unbound_plan(plan)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         if body.policy.operation != Operation::Read {
             return Err(Error::Invalid);
         }
@@ -1242,13 +1417,14 @@ impl<P> Cx<'_, P> {
     pub fn fail_plan(&mut self, plan: &Plan, error: impl Into<VenueError>) -> Result<(), Error> {
         if self
             .io
+            .core
             .http_plan_expiring
             .as_ref()
             .is_some_and(|current| current.same_plan(plan))
         {
             return self.fail_plan_owned(plan, error.into());
         }
-        self.io.request_contexts.validate_unbound_plan(plan)?;
+        self.io.core.request_contexts.validate_unbound_plan(plan)?;
         self.fail_plan_owned(plan, error.into())
     }
 
@@ -1259,14 +1435,15 @@ impl<P> Cx<'_, P> {
     ) -> Result<(), Error> {
         if self
             .io
+            .core
             .http_plan_expiring
             .as_ref()
             .is_some_and(|current| current.same_plan(plan))
         {
-            self.io.request_contexts.validate_plan_seal_origin(
+            self.io.core.request_contexts.validate_plan_seal_origin(
                 plan,
                 self.now,
-                self.io.http_delivery.as_ref(),
+                self.io.core.http_delivery.as_ref(),
             )?;
             return Ok(());
         }
@@ -1297,10 +1474,10 @@ impl<P> Cx<'_, P> {
         if physical {
             self.sweep_executions();
         }
-        let mut prepared = self.io.request_contexts.prepare_plan_seal(
+        let mut prepared = self.io.core.request_contexts.prepare_plan_seal(
             plan,
             self.now,
-            self.io.http_delivery.as_ref(),
+            self.io.core.http_delivery.as_ref(),
             error,
         )?;
         if physical {
@@ -1313,7 +1490,7 @@ impl<P> Cx<'_, P> {
                 (None, Some(error)) => Err(error.clone()),
                 (None, None) => Ok(result.unwrap_or_default().to_owned()),
             };
-            let observers = self.io.request_contexts.planned_observer_count(plan);
+            let observers = self.io.core.request_contexts.planned_observer_count(plan);
             prepared
                 .fanout
                 .try_reserve_exact(observers)
@@ -1355,7 +1532,11 @@ impl<P> Cx<'_, P> {
         let fanout = std::mem::take(&mut prepared.fanout);
         let sealed = std::mem::take(&mut prepared.sealed);
         let retired = std::mem::take(&mut prepared.retired);
-        let (owner, seal) = self.io.request_contexts.commit_plan_seal(plan, prepared);
+        let (owner, seal) = self
+            .io
+            .core
+            .request_contexts
+            .commit_plan_seal(plan, prepared);
         let Owner::Command { id, .. } = owner else {
             // The physical owner has no command: its observers take the
             // terminals and storage prepared above, moved without allocation.
@@ -1369,13 +1550,17 @@ impl<P> Cx<'_, P> {
     fn rearm_plan(&mut self, plan: &Plan) {
         let body = self
             .io
+            .core
             .request_contexts
             .plan_body(plan)
             .expect("live plan timer");
         let timer = body.timer;
         let at_ms = body.next_wake();
-        self.io.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-        self.io.actions.push(Action::SetTimer { timer, at_ms });
+        self.io.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+        #[cfg(feature = "serial-plans")]
+        self.io.core.actions.push(serial::wake(timer, at_ms));
+        #[cfg(not(feature = "serial-plans"))]
+        self.io.core.actions.push(Action::SetTimer { timer, at_ms });
     }
 }
 
@@ -1394,6 +1579,20 @@ impl Body {
             }
         }
     }
+    #[cfg(feature = "condition-waits")]
+    fn next_wake(&self) -> f64 {
+        let wake = self
+            .entries
+            .iter()
+            .filter(|entry| entry.credit == Credit::Unissued && !entry.notified && !entry.parked)
+            .filter_map(|entry| entry.eligible_at)
+            .fold(self.handle.deadline(), f64::min);
+        self.serial
+            .as_ref()
+            .and_then(|serial| serial.condition_deadline())
+            .map_or(wake, |at| wake.min(at))
+    }
+    #[cfg(not(feature = "condition-waits"))]
     fn next_wake(&self) -> f64 {
         self.entries
             .iter()
@@ -1443,12 +1642,13 @@ impl<P> Cx<'_, P> {
     ) -> bool {
         let Some(plan) = self
             .io
+            .core
             .request_contexts
             .plan_from_context(&delivery.context)
         else {
             return false;
         };
-        let body = self.io.request_contexts.plan_body(&plan).unwrap();
+        let body = self.io.core.request_contexts.plan_body(&plan).unwrap();
         let Some(call) = body
             .entries
             .iter()
@@ -1480,19 +1680,24 @@ impl<P> Cx<'_, P> {
         if context.operation() != Operation::Mutation {
             return Err(Error::Invalid);
         }
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         let index = body.schedule.ordinal(slot)?;
         let call = body.entries[index]
             .call
             .as_ref()
             .filter(|call| call.context.same_issuer(context) && call.context == *context)
             .ok_or(Error::Revoked)?;
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: true }) {
             return Err(Error::Revoked);
         }
         if context.operation() == Operation::Mutation {
             self.io
+                .core
                 .request_contexts
                 .owner_entry(plan.owner())
                 .unwrap()
@@ -1503,6 +1708,7 @@ impl<P> Cx<'_, P> {
             #[cfg(feature = "http-mutation-barriers")]
             if body.barriers.iter().any(|range| range.contains(&index)) {
                 self.io
+                    .core
                     .request_contexts
                     .owner_entry(plan.owner())
                     .unwrap()
@@ -1513,12 +1719,16 @@ impl<P> Cx<'_, P> {
             }
         }
         self.io.retire_http_leg(context);
-        self.io.request_contexts.contexts.remove(&context.leg());
-        let body = self.io.request_contexts.plan_body_mut(plan)?;
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
         body.schedule.settle(slot)?;
         body.entries[index].call = None;
         body.entries[index].credit = Credit::Released;
-        body.handoff = self.io.http_delivery.clone();
+        body.handoff = self.io.core.http_delivery.clone();
         body.refresh_availability(self.now);
         self.rearm_plan(plan);
         Ok(())
@@ -1593,10 +1803,13 @@ impl ContextRegistry {
     }
 
     pub(in super::super) fn rearm_live_plan<P>(io: &mut super::super::Io<P>, plan: &Plan) {
-        if let Ok(body) = io.request_contexts.plan_body(plan) {
+        if let Ok(body) = io.core.request_contexts.plan_body(plan) {
             let (timer, at_ms) = (body.timer, body.next_wake());
-            io.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-            io.actions.push(Action::SetTimer { timer, at_ms });
+            io.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            #[cfg(feature = "serial-plans")]
+            io.core.actions.push(serial::wake(timer, at_ms));
+            #[cfg(not(feature = "serial-plans"))]
+            io.core.actions.push(Action::SetTimer { timer, at_ms });
         }
     }
 }
@@ -1634,6 +1847,10 @@ impl ContextRegistry {
                 })
             })
     }
+    #[cfg(all(test, feature = "serial-plans"))]
+    pub(in super::super) fn command_writes(&self, command: CommandId) -> Option<&CommandWrites> {
+        self.commands.get(&command)?.writes.as_ref()
+    }
     #[cfg(test)]
     pub(in super::super) fn plan_context_storage(&self) -> (usize, usize, usize) {
         (
@@ -1658,7 +1875,7 @@ impl<P> Cx<'_, P> {
         }
         self.validate_plan_delivery(plan, context)?;
         context.retry(RetryEvidence::DefinitiveRefusal, self.now)?;
-        let body = self.io.request_contexts.plan_body(plan)?;
+        let body = self.io.core.request_contexts.plan_body(plan)?;
         let index = body.schedule.ordinal(slot)?;
         let call = body.entries[index]
             .call
@@ -1675,6 +1892,7 @@ impl<P> Cx<'_, P> {
         }
         let previous = call.admission.attempt.request;
         self.io
+            .core
             .request_contexts
             .owner_entry_mut(plan.owner())
             .unwrap()
@@ -1683,14 +1901,18 @@ impl<P> Cx<'_, P> {
             .ok_or(Error::State)?
             .replace(previous, &children)?;
         self.io.retire_http_leg(context);
-        self.io.request_contexts.contexts.remove(&context.leg());
-        let body = self.io.request_contexts.plan_body_mut(plan)?;
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
         body.schedule
             .replace(slot)
             .expect("validated declared replacement");
         body.entries[index].call = None;
         body.entries[index].credit = Credit::Released;
-        body.handoff = self.io.http_delivery.clone();
+        body.handoff = self.io.core.http_delivery.clone();
         body.refresh_availability(self.now);
         self.rearm_plan(plan);
         Ok(())
@@ -1708,7 +1930,11 @@ impl<P> Cx<'_, P> {
         };
         if let Some(context) = old_read {
             self.io.retire_http_leg(&context);
-            self.io.request_contexts.contexts.remove(&context.leg());
+            self.io
+                .core
+                .request_contexts
+                .contexts
+                .remove(&context.leg());
         }
         self.finish_sealed_command(id, Some(result), Seal::Success)
     }
@@ -1772,13 +1998,17 @@ impl<P> Cx<'_, P> {
         context: &Context,
     ) -> Result<Attempt, Error> {
         self.validate_preflight_ready_owner(plan.owner())?;
-        if self.io.http_owner_poison
-            || self.io.http_plan_poison
-            || self.io.http_plan_expiring.is_some()
+        if self.io.core.http_owner_poison
+            || self.io.core.http_plan_poison
+            || self.io.core.http_plan_expiring.is_some()
         {
             return Err(Error::Revoked);
         }
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         if !body.history_bound
             || !matches!(plan.owner(), Owner::Command { .. })
             || body.policy.operation != Operation::Read
@@ -1787,7 +2017,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         let index = body.schedule.ordinal(slot)?;
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         let call = body.entries[index]
             .call
             .as_ref()
@@ -1800,7 +2030,7 @@ impl<P> Cx<'_, P> {
         if !matches!(call.stage, Stage::Active { failed: true })
             || call.released_failure.is_none()
             || body.history_latest_release != Some(delivery.attempt)
-            || self.io.http_history_failure != Some(delivery.attempt)
+            || self.io.core.http_history_failure != Some(delivery.attempt)
         {
             return Err(Error::Revoked);
         }
@@ -1810,6 +2040,14 @@ impl<P> Cx<'_, P> {
 
 #[path = "request_context_history_plan.rs"]
 mod history;
+
+#[cfg(feature = "serial-plans")]
+#[path = "request_context_serial_plan.rs"]
+mod serial;
+
+#[cfg(feature = "condition-waits")]
+#[path = "request_context_condition_wait.rs"]
+mod condition_wait;
 
 #[cfg(all(test, not(feature = "http-mutation-barriers")))]
 #[path = "request_context_group_disabled_tests.rs"]

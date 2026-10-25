@@ -178,6 +178,7 @@ impl Venue for SyntheticProbe {
             .unwrap();
         cx.request_signed_managed(
             context,
+            None,
             self.0,
             "https://venue.test/synthetic".into(),
             None,
