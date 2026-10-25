@@ -463,6 +463,35 @@ mod pressure {
             }
             self.native.start(cx);
         }
+        fn on_socket_event(
+            &mut self,
+            cx: &mut Cx<'_, Self::Pending>,
+            event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+            self.native.on_socket_event(cx, event)
+        }
+        fn on_socket_interests_released(
+            &mut self,
+            cx: &mut Cx<'_, Self::Pending>,
+            epoch: safe_cex_engine::socket_lifecycle::Epoch,
+            pending: Self::Pending,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+            self.native.on_socket_interests_released(cx, epoch, pending)
+        }
+        fn encode_socket_interests(
+            &self,
+            store: &safe_cex_engine::Store,
+            feed: safe_cex_engine::socket_lifecycle::FeedId,
+            subscribe: bool,
+            items: &[safe_cex_engine::socket_lifecycle::Interest],
+            emit: &mut dyn FnMut(
+                safe_cex_engine::socket_lifecycle::EncodedBatch,
+            )
+                -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+            self.native
+                .encode_socket_interests(store, feed, subscribe, items, emit)
+        }
         fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId) {
             self.native.on_open(cx, socket);
         }
