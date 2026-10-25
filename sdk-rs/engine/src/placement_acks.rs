@@ -202,18 +202,18 @@ impl PlacementAcks {
             .reduce(f64::max)
     }
 
-    /// Whether to hold `command` until its acknowledged ids are stored. A
+    /// Hold `command` until its acknowledged ids are stored, or hand it back. A
     /// command naming an id that an earlier held command names waits behind it,
     /// so writes to one order keep their arrival order.
     #[inline(never)]
     pub fn hold(
         &mut self,
         store: &Store,
-        command: &Command,
+        command: Command,
         receipt: Option<u64>,
         now: f64,
-    ) -> bool {
-        let behind = named_ids(command).iter().any(|id| {
+    ) -> Result<(), Command> {
+        let behind = named_ids(&command).iter().any(|id| {
             self.held.iter().any(|(held, ..)| {
                 named_ids(held)
                     .iter()
@@ -223,14 +223,13 @@ impl PlacementAcks {
         if !behind
             && (self.acked.is_empty()
                 || self
-                    .awaited_until(&Stored::of(store), command, now)
+                    .awaited_until(&Stored::of(store), &command, now)
                     .is_none())
         {
-            return false;
+            return Err(command);
         }
-        self.held
-            .push((command.clone(), now + ACK_WAIT_MS, receipt));
-        true
+        self.held.push((command, now + ACK_WAIT_MS, receipt));
+        Ok(())
     }
 
     fn prune(&mut self, stored: &Stored<'_>, now: f64) {

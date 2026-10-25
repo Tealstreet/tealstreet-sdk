@@ -37,6 +37,8 @@ pub struct Request {
     cycle: u64,
     kind: Kind,
     revision: u64,
+    settings_stamp: safe_cex_engine::metadata::Observation,
+    settings_revision: safe_cex_engine::metadata::Observation,
     page: u32,
     page_rows: usize,
     orders: Vec<Order>,
@@ -200,7 +202,8 @@ impl State {
     pub fn order_revision(&self) -> u64 {
         self.orders_revision
     }
-    /// Fences a settings read against writes and newer reads.
+    /// Settings writes also supersede position snapshots; keep this financial
+    /// fence separate from engine-owned settings publication authority.
     pub fn settings_revision(&self) -> u64 {
         self.settings_revision
     }
@@ -368,7 +371,7 @@ impl WeexFutures {
             }
             let revision = match kind {
                 Kind::Normal | Kind::Algo => self.account.orders_revision,
-                Kind::Config | Kind::Metadata => self.account.settings_revision,
+                Kind::Config | Kind::Metadata => 0,
                 _ => self.account.revision,
             };
             let request = Request {
@@ -376,6 +379,8 @@ impl WeexFutures {
                 cycle: self.account.cycle,
                 kind,
                 revision,
+                settings_stamp: cx.store.metadata_observation(),
+                settings_revision: cx.store.metadata_revision(),
                 page: if matches!(kind, Kind::Algo) { 1 } else { 0 },
                 page_rows: 0,
                 orders: vec![],
@@ -650,14 +655,27 @@ impl WeexFutures {
                 self.account.position_stage =
                     Some((request.revision, request.positions, request.skipped));
             }
-            Kind::Config if request.revision == self.account.settings_revision => {
-                for (symbol, config) in request.configs {
-                    cx.store
-                        .update_setting(&symbol, |setting| *setting = config.setting);
-                    self.account.configs.insert(symbol, config);
+            Kind::Config => {
+                // The native response selects the last valid row for a symbol.
+                // Consolidate before the one observed commit: a repeated stamp
+                // is deliberately ineligible after that commit.
+                let configs: HashMap<_, _> = request.configs.into_iter().collect();
+                for (symbol, config) in configs {
+                    if let Ok(setting) =
+                        safe_cex_engine::metadata::ObservedSetting::new(config.setting)
+                        && cx
+                            .store
+                            .observe_setting(&symbol, &request.settings_stamp, setting)
+                    {
+                        self.account.configs.insert(symbol, config);
+                    }
                 }
             }
-            Kind::Metadata if request.revision == self.account.settings_revision => {
+            Kind::Metadata
+                if cx
+                    .store
+                    .metadata_revision_current(&request.settings_revision) =>
+            {
                 let Ok(row) = serde_json::from_str::<AccountConfig>(response.body) else {
                     self.account_failed(cx, request, "malformed account configuration");
                     return;
@@ -1109,12 +1127,6 @@ impl Kind {
         }
     }
 }
-pub(crate) fn auth_scope(task: &Task) -> Option<safe_cex_engine::AccountReadScope> {
-    let Task::Account(r) = task else {
-        return None;
-    };
-    Some(r.kind.auth_scope())
-}
 impl WeexFutures {
     /// One endpoint's rejection holds back its scope siblings' acceptance.
     pub(crate) fn account_auth(
@@ -1223,6 +1235,8 @@ mod auth_envelopes {
                 cycle: venue.account.cycle,
                 kind,
                 revision: 0,
+                settings_stamp: Default::default(),
+                settings_revision: Default::default(),
                 page: 0,
                 page_rows: 0,
                 orders: vec![],

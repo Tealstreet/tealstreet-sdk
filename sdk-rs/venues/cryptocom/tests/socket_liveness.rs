@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::{Action, Event, PublicFeedPolicy, SocketId, TimerId};
-use safe_cex_venue_cryptocom::Options;
 use support::Harness;
+use support::fixture::Options;
 
 fn timer_at(actions: &[Action], at: f64) -> TimerId {
     actions

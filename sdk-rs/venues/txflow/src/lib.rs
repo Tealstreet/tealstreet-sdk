@@ -1,6 +1,8 @@
 //! TxFlow testnet perpetuals, using separate node and API-service feeds.
 mod account;
+mod candle_read;
 mod history;
+mod local_context;
 pub mod sign;
 mod socket_codec;
 mod trading;
@@ -11,11 +13,13 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{
+    Context as HttpContext, Egress, Operation, Policy, RetryPolicy, Scope,
+};
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{FeedId, SocketError};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
-    Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -64,9 +68,10 @@ pub enum Pending {
     },
     Ticker {
         asset: u32,
+        context: HttpContext,
     },
     Candles {
-        command: CommandId,
+        read: candle_read::Read,
         rows: Vec<Candle>,
         valid: bool,
     },
@@ -119,6 +124,7 @@ pub struct TxFlow {
     seed_tickers: Vec<Ticker>,
     ticker_seeded: std::collections::HashSet<u32>,
     ticker_timer: Option<TimerId>,
+    ticker_contexts: HashMap<u32, HttpContext>,
     discovery: safe_cex_engine::startup::Backoff<Option<u32>>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     catalogue_partial: bool,
@@ -143,6 +149,7 @@ impl TxFlow {
             seed_tickers: Vec::new(),
             ticker_seeded: Default::default(),
             ticker_timer: None,
+            ticker_contexts: Default::default(),
             discovery: Default::default(),
             live_tickers: Default::default(),
             catalogue_partial: false,
@@ -216,20 +223,64 @@ impl TxFlow {
             },
         );
     }
-    fn ticker_request(&self, cx: &mut Cx<'_, Pending>, asset: u32) {
-        let id = cx.request(
+    fn ticker_request(&mut self, cx: &mut Cx<'_, Pending>, asset: u32) {
+        if let Some(old) = self.ticker_contexts.remove(&asset) {
+            let _ = cx.finish_http_context(&old);
+        }
+        let context = match cx.http_context_with_egress(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+            Egress::PublicCors,
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.ticker_failed(cx, asset, &error.to_string());
+                return;
+            }
+        };
+        self.ticker_contexts.insert(asset, context.clone());
+        if let Err((Pending::Ticker { asset, context }, error)) = cx.request_managed_with_headers(
+            context.clone(),
             Method::Post,
             format!("{}/info", self.rest()),
-            vec![
-                ("Content-Type", "application/json".into()),
-                ("x-api-version", API_VERSION.into()),
+            &[
+                ("Content-Type", "application/json"),
+                ("x-api-version", API_VERSION),
             ],
             Some(format!(
                 "{{\"type\":\"activeAssetCtx\",\"coin\":\"{asset}\"}}"
             )),
-            Pending::Ticker { asset },
-        );
-        cx.route_request(id, safe_cex_engine::RequestRoute::PublicCors);
+            Pending::Ticker { asset, context },
+        ) && self.finish_ticker_context(cx, asset, &context)
+        {
+            self.ticker_failed(cx, asset, &error.to_string());
+        }
+    }
+    fn finish_ticker_context(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        asset: u32,
+        context: &HttpContext,
+    ) -> bool {
+        let current = self.ticker_contexts.get(&asset) == Some(context);
+        if current {
+            self.ticker_contexts.remove(&asset);
+        }
+        let _ = cx.finish_http_context(context);
+        current
+    }
+    fn ticker_failed(&mut self, cx: &mut Cx<'_, Pending>, asset: u32, error: &str) {
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        if cx.now.is_finite() {
+            self.discovery.failed(cx, Some(asset));
+            self.ticker_timer = Some(cx.set_timer(25.0));
+        }
     }
     fn next_ticker(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(asset) = self.ticker_queue.pop_front() {
@@ -541,11 +592,19 @@ impl TxFlow {
             return;
         };
         let Some(asset) = self.asset(cx, &symbol) else {
-            cx.fail(command, "Market not found");
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Market not found".into()),
+            );
             return;
         };
         if !supported(interval) {
-            cx.fail(command, interval.unsupported("TxFlow"));
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err(interval.unsupported("TxFlow").into()),
+            );
             return;
         }
         let end = to_ms.unwrap_or(cx.now);
@@ -559,7 +618,11 @@ impl TxFlow {
             || end > 9_007_199_254_740_991.0
             || from_ms.is_some_and(|t| t < 0.0)
         {
-            cx.fail(command, "Invalid candle time range");
+            local_context::complete(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err("Invalid candle time range".into()),
+            );
             return;
         }
         #[derive(Serialize)]
@@ -585,16 +648,9 @@ impl TxFlow {
             },
         })
         .unwrap();
-        self.info(
-            cx,
-            body,
-            ArrayAt::Field("data"),
-            Pending::Candles {
-                command,
-                rows: Vec::new(),
-                valid: true,
-            },
-        );
+        if let Some(read) = candle_read::Read::new(cx, command) {
+            read.queue(cx, body);
+        }
     }
 }
 impl Venue for TxFlow {
@@ -687,6 +743,23 @@ impl Venue for TxFlow {
     }
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(request) = &pending
+            && !self.account_delivery_live(cx, request)
+        {
+            return;
+        }
+        if let Pending::Ticker { asset, context } = &pending
+            && (self.ticker_contexts.get(asset) != Some(context)
+                || cx.validate_background_read_http_delivery(context).is_err())
+        {
+            self.finish_ticker_context(cx, *asset, context);
+            return;
+        }
+        if let Pending::Candles { read, .. } = &pending
+            && !read.validate(cx)
+        {
+            return;
+        }
         if !(200..300).contains(&response.status) {
             self.on_request_failed(cx, pending, &format!("TxFlow HTTP {}", response.status));
             return;
@@ -798,6 +871,9 @@ impl Venue for TxFlow {
                     );
                     return;
                 }
+                for (_, context) in self.ticker_contexts.drain() {
+                    let _ = cx.finish_http_context(&context);
+                }
                 self.assets = assets;
                 self.coins = coins;
                 self.instruments = instruments;
@@ -825,7 +901,7 @@ impl Venue for TxFlow {
                 self.live_tickers.begin();
                 self.next_ticker(cx);
             }
-            Pending::Ticker { asset } => {
+            Pending::Ticker { asset, context } => {
                 match serde_json::from_str::<Reply<TickerRow>>(response.body) {
                     Ok(reply)
                         if reply.success
@@ -855,28 +931,22 @@ impl Venue for TxFlow {
                     _ => {
                         self.on_request_failed(
                             cx,
-                            Pending::Ticker { asset },
+                            Pending::Ticker { asset, context },
                             "Invalid TxFlow ticker seed identity or envelope",
                         );
                         return;
                     }
                 };
+                self.finish_ticker_context(cx, asset, &context);
                 self.ticker_timer = Some(cx.set_timer(25.0));
             }
-            Pending::Candles {
-                command,
-                rows,
-                valid,
-            } => {
+            Pending::Candles { read, rows, valid } => {
                 let result: Result<String, String> = if valid && Header::valid(response.body) {
                     Ok(serde_json::to_string(&rows).unwrap())
                 } else {
                     Err("Invalid TxFlow candle response".into())
                 };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                }
+                read.finish(cx, result);
             }
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
@@ -893,13 +963,41 @@ impl Venue for TxFlow {
                     safe_cex_engine::startup::skipped_row(cx);
                 }
             },
-            Pending::Candles { rows, valid, .. } => match serde_json::from_str::<CandleRow>(item) {
-                Ok(row) => rows.push(row.candle()),
-                Err(_) => *valid = false,
-            },
+            Pending::Candles { read, rows, valid } => {
+                if !read.validate(cx) {
+                    return;
+                }
+                match serde_json::from_str::<CandleRow>(item) {
+                    Ok(row) => rows.push(row.candle()),
+                    Err(_) => *valid = false,
+                }
+            }
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::History(request) => self.history_item(cx, request, item),
             _ => {}
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Candles { read, .. } => read.failed(cx, error),
+            pending => self.on_sign_error(cx, pending, error),
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Candles { read, .. } => read.failed(cx, error),
+            pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -908,12 +1006,14 @@ impl Venue for TxFlow {
                 cx.notice(Level::Warn, code::REQUEST_FAILED, error);
                 self.discovery.failed(cx, None);
             }
-            Pending::Ticker { asset } => {
-                cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-                self.discovery.failed(cx, Some(asset));
-                self.ticker_timer = Some(cx.set_timer(25.0));
+            Pending::Ticker { asset, context } => {
+                if self.finish_ticker_context(cx, asset, &context) {
+                    self.ticker_failed(cx, asset, error);
+                }
             }
-            Pending::Candles { command, .. } => cx.fail(command, error),
+            Pending::Candles { read, .. } => {
+                read.failed(cx, safe_cex_engine::VenueError::new(error))
+            }
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),
@@ -973,3 +1073,7 @@ fn supported(interval: Interval) -> bool {
         M1 | M3 | M5 | M15 | M30 | H1 | H2 | H4 | H8 | H12 | D1
     )
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/ticker_seed_custody.rs"]
+mod ticker_seed_custody_tests;

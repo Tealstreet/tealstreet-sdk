@@ -8,6 +8,9 @@ pub(super) use call::State;
 #[path = "request_context_preflight_ready.rs"]
 mod ready;
 
+#[path = "request_context_preflight_session.rs"]
+mod session_wait;
+
 impl ContextRegistry {
     fn prepare_preflight(
         &mut self,
@@ -215,7 +218,7 @@ impl<P> Cx<'_, P> {
         }
         let cap = match self.io.command_receipt() {
             Ok(cap) => cap,
-            Err(reason) => return self.with_command_entry(Operation::Read, |_, _| Err(reason)),
+            Err(reason) => return Err(self.reject_command_entry(Operation::Read, reason)),
         };
         if !self.now.is_finite() || cap.1 - self.now < 1. {
             return Err(CommandEntryError::Revoked);
