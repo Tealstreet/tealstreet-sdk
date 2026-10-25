@@ -6,13 +6,12 @@ use safe_cex_engine::{Action, Command, Engine, Event};
 use safe_cex_venue_weex::{Options, WeexFutures as Venue};
 
 fn identity(slot: &str) -> Identity {
-    Identity {
-        credential: KeyRef(format!("ref:{slot}-credential")),
-        signing: KeyRef(format!("ref:{slot}-signing")),
-        passphrase: Some(KeyRef(format!("ref:{slot}-passphrase"))),
-        stable_id: Some("native-primary-account".into()),
-        extra: Default::default(),
-    }
+    Identity::new(
+        KeyRef(format!("ref:{slot}-credential")),
+        Some(KeyRef(format!("ref:{slot}-signing"))),
+    )
+    .with_passphrase(Some(KeyRef(format!("ref:{slot}-passphrase"))))
+    .with_stable_id(Some("native-primary-account".into()))
 }
 
 fn market() -> safe_cex_engine::model::Market {

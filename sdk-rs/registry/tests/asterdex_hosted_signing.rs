@@ -15,15 +15,15 @@ const QUERY_MAC: &str = "4c6d3d8130f58f899d84bf0f47f1277e0696ccf38256e0ab48ca3b3
 
 fn fixture() -> (LocalSigner, Identities) {
     let mut signer = LocalSigner::new();
-    let primary = Identity {
-        credential: KeyRef("owned/primary/presentation".into()),
-        signing: KeyRef("owned/primary/mac".into()),
-        passphrase: None,
-        stable_id: None,
-        extra: Default::default(),
-    };
+    let primary = Identity::new(
+        KeyRef("owned/primary/presentation".into()),
+        Some(KeyRef("owned/primary/mac".into())),
+    );
     signer.insert(primary.credential.clone(), b"hosted-aster-key".to_vec());
-    signer.insert(primary.signing.clone(), b"fixture-only-v1-secret".to_vec());
+    signer.insert(
+        primary.signing_ref().unwrap().clone(),
+        b"fixture-only-v1-secret".to_vec(),
+    );
     (
         signer,
         Identities {

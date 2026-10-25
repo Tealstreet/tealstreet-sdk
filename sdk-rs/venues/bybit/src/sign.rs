@@ -65,13 +65,13 @@ impl SignStep for Http {
         };
         let stamp = dispatch.stamp_ms();
         self.stamp = num::format(stamp);
-        Ok(crate::hosted_signing::http_work(
+        crate::hosted_signing::http_work(
             &self.credentials,
             self.payload.clone(),
             stamp,
             self.window.to_string(),
             context(&http.url, http.method.as_str()),
-        ))
+        )
     }
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
         let Action::Http(http) = outbound else {
@@ -128,7 +128,7 @@ impl SignStep for WsAuth {
             &self.credentials,
             format!("GET/realtime{}", self.expires),
             context(&self.origin, "WS"),
-        );
+        )?;
         // Native auth generates this expiry; hosted auth preserves caller bytes.
         work.receipt = SignReceipt {
             nonce: None,

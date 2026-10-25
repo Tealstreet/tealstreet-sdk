@@ -255,7 +255,7 @@ fn batch(h: &Harness, identity: &Identity, method: Method, canonical: &str, stam
     );
     assert!(
         matches!(&request.operations[1], Operation::Sign { algorithm:Algorithm::HmacSha256, key, .. }
-        if key == &identity.signing)
+        if key == identity.signing_ref().unwrap())
     );
 }
 
@@ -492,8 +492,10 @@ fn native_wire_matches_independent_hex_vectors_and_ordered_header_bytes() {
 #[test]
 fn recording_provider_independently_signs_the_expected_atomic_work() {
     let h = fixture(options());
+    let primary = h.identities.primary.as_ref().unwrap();
     let request = safe_cex_engine::signing::hmac_sha256_work(
-        h.identities.primary.as_ref().unwrap(),
+        &primary.credential,
+        primary.signing_ref().unwrap(),
         vec![PayloadPart::Bytes {
             bytes: b"1234GET/fapi/v1/contracts".to_vec(),
         }],

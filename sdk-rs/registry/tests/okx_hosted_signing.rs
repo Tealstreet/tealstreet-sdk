@@ -7,28 +7,31 @@ use safe_cex_venues::hosted_signing::{self, Input, OutputFormat};
 #[test]
 fn all_okx_aliases_capture_primary_http_and_ws_with_provider_owned_passphrase() {
     let mut provider = LocalSigner::new();
-    let identity = Identity {
-        credential: KeyRef("ref:owned-public".into()),
-        signing: KeyRef("ref:owned-primary".into()),
-        passphrase: Some(KeyRef("ref:owned-presentation".into())),
-        stable_id: None,
-        extra: Default::default(),
-    };
+    let identity = Identity::new(
+        KeyRef("ref:owned-public".into()),
+        Some(KeyRef("ref:owned-primary".into())),
+    )
+    .with_passphrase(Some(KeyRef("ref:owned-presentation".into())));
     provider.insert(identity.credential.clone(), b"test-key".to_vec());
-    provider.insert(identity.signing.clone(), b"test-secret".to_vec());
+    provider.insert(
+        identity.signing_ref().unwrap().clone(),
+        b"test-secret".to_vec(),
+    );
     provider.insert(
         identity.passphrase.clone().unwrap(),
         b"test-passphrase".to_vec(),
     );
     let ids = Identities {
         primary: Some(identity),
-        secondary: Some(Identity {
-            credential: KeyRef("ref:unavailable-secondary-public".into()),
-            signing: KeyRef("ref:unavailable-secondary".into()),
-            passphrase: Some(KeyRef("ref:unavailable-secondary-presentation".into())),
-            stable_id: None,
-            extra: Default::default(),
-        }),
+        secondary: Some(
+            Identity::new(
+                KeyRef("ref:unavailable-secondary-public".into()),
+                Some(KeyRef("ref:unavailable-secondary".into())),
+            )
+            .with_passphrase(Some(KeyRef(
+                "ref:unavailable-secondary-presentation".into(),
+            ))),
+        ),
     };
     for alias in ["okx", "okxeu", "okxdemo", "okxeudemo"] {
         let (work, kind) = hosted_signing::prepare(

@@ -5,13 +5,10 @@ use safe_cex_engine::{Action, Command, Engine, Event};
 use safe_cex_venue_bingx::{Bingx, Options};
 
 fn identity(slot: &str) -> Identity {
-    Identity {
-        extra: Default::default(),
-        credential: KeyRef(format!("ref:{slot}-credential")),
-        signing: KeyRef(format!("ref:{slot}-signing")),
-        passphrase: None,
-        stable_id: None,
-    }
+    Identity::new(
+        KeyRef(format!("ref:{slot}-credential")),
+        Some(KeyRef(format!("ref:{slot}-signing"))),
+    )
 }
 fn engine() -> Engine<Bingx> {
     safe_cex_engine::test_support::seeded_engine(Bingx::new(Options {

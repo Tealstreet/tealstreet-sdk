@@ -65,7 +65,12 @@ fn signatures(
             },
             Operation::Sign {
                 algorithm,
-                key: identity.signing.clone(),
+                // An absent ref still reaches the provider here, so both paths
+                // must refuse it identically.
+                key: identity
+                    .signing_opt()
+                    .cloned()
+                    .unwrap_or_else(|| safe_cex_engine::signing::KeyRef(String::new())),
                 payload: vec![PayloadPart::Bytes {
                     bytes: vec![0x5a; 32],
                 }],
@@ -150,7 +155,7 @@ fn native_setup_matches_the_ts_mapping_golden() {
             );
             let signs = golden["secret"].is_string() || golden["signingFromPrimary"] == true;
             assert_eq!(
-                !identity.signing.0.is_empty(),
+                identity.signing_opt().is_some_and(|key| !key.0.is_empty()),
                 signs,
                 "{name}: {slot} secret"
             );
@@ -263,7 +268,7 @@ fn wallet_address(
         receipt: Default::default(),
         context: Default::default(),
         operations: vec![Operation::PublicAddress {
-            key: identity.signing.clone(),
+            key: identity.signing_ref().unwrap().clone(),
         }],
     };
     provider.sign_ready(&request).unwrap().map(|result| {
@@ -280,7 +285,11 @@ fn assert_v3_declared(name: &str, aliased: bool) {
     let (provider, ids) = prepare_local_signer_for("asterdex", &mut options).unwrap();
     let (primary, secondary) = (ids.primary.unwrap(), ids.secondary.unwrap());
     // An aliased read agent shares the primary's one ref and declaration.
-    assert_eq!(secondary.signing == primary.signing, aliased, "{name}");
+    assert_eq!(
+        secondary.signing_ref().ok() == primary.signing_ref().ok(),
+        aliased,
+        "{name}"
+    );
     // Each slot's own wallet address, derived independently from the input:
     // `auth.privateKey` when present (the alias case), else the secret.
     let derived = |field: &Value| {
