@@ -8759,3 +8759,31 @@ unchanged. Fixture-only admission-clock supersession aligns six catalogue starts
 to their already-existing epoch response time, with all response/event clocks,
 payloads and financial assertions retained and truncated-stream0->1->2 unchanged.
 Standalone custody controls retain genuine delayed/equality expiry coverage.
+
+## WEEX Depth and both socket lifecycle custody (local qualification)
+
+Subscription Depth uses independent keyless Primary Background observations
+with a NEW20s physical bound, Never retry and no pacing. Pre-open/bootstrap,
+reconnect and gap observations remain independent of eligible topic handoff.
+Live accepted publication precedes exact retirement and response-driven native
+reconciliation. Both socket roles use engine epochs with unchanged signed
+primary upgrade bytes and no authentication ACK wait; native subscription and
+refresh work occurs once on Opened. No generic engine or signing cutover occurs.
+
+Fixture supersessions are explicit: seven account stream controls add genuine
+first Opened/prepared drain at their existing NOW before the six pending reads
+finish. Three public Depth controls (depth_ignores_old_frames_and_heals_gaps_with_buffered_diffs,
+old_snapshots_and_failures_cannot_replace_a_resubscribed_book, and
+malformed_depth_is_not_an_authoritative_deletion) align physical observations to
+bootstrap1773295700000 plus the same relative offsets, with replies at that
+actual clock. Payloads and original financial/wire assertions remain unchanged;
+other public adaptations only drive actual preparation at existing clocks.
+Two public interest fixtures (websocket_candles_allow_two_hours_but_rest_rejects_it
+and active_tickers_send_incremental_diffs_and_identical_updates_send_nothing)
+use genuine bootstrap observation0 before their unchanged0..3 events. The
+parameterized bootstrap preserves every wire literal and test assertion; default
+started() retains the original1773295700000 clock for all other callers. Other
+shared helpers and dedicated delayed/equality expiry controls remain intact.
+On refused required public invalidation, exact native Depth cleanup precedes
+failure propagation and public replacement is denied; sibling feeds/read owners
+remain independent. Expanded custody, quota and native qualification remain gates.

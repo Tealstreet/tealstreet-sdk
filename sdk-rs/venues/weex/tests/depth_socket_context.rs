@@ -719,3 +719,1119 @@ fn full_registry_refuses_depth_then_recovers_with_all_credits() {
     let _ = d.event(retry.1 + 1., control("fill"), true);
     let _ = d.event(retry.1 + 2., control("release"), true);
 }
+
+#[test]
+fn mixed_depth_and_tickers_keep_native_book_first_wire_order() {
+    let (mut d, socket) = public();
+    let out = d.subscribe(NOW + 1., B, false);
+    let id = out.depth_requests()[0].id;
+    let accepted = d.response(NOW + 2., id, 200, DEPTH);
+    assert!(accepted.sent().is_empty());
+    let opened = d.event(NOW + 3., Event::WsOpened { socket }, false);
+    assert_eq!(
+        opened.sent(),
+        [(
+            socket,
+            r#"{"method":"SUBSCRIBE","params":["ETHUSDT@depth200","BTCUSDT@ticker","ETHUSDT@ticker"],"id":1}"#
+        )]
+    );
+}
+
+struct RetirementPressure {
+    inner: Pressure,
+    foreign: Option<safe_cex_engine::socket_lifecycle::FeedId>,
+    public: Option<safe_cex_engine::socket_lifecycle::FeedId>,
+    foreign_socket: Option<SocketId>,
+    armed: bool,
+    interest_pressure: bool,
+}
+impl RetirementPressure {
+    fn fill_proposals(&self, cx: &mut Cx<'_, Pending>) {
+        for _ in 0..512 {
+            cx.set_socket_interests(self.foreign.unwrap(), Vec::new())
+                .expect("genuine pending proposal credit");
+        }
+    }
+}
+impl Venue for RetirementPressure {
+    type Pending = Pending;
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        self.inner.capabilities()
+    }
+    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.inner.start(cx);
+        use safe_cex_engine::socket_lifecycle::*;
+        self.foreign = Some(
+            cx.register_socket_feed(FeedPolicy {
+                role: SocketChannel::Private,
+                supervision: safe_cex_engine::socket::Config::default(),
+                auth: AuthMode::None,
+                recovery: AuthRecovery::Reconnect,
+                permanent_refusal_group: None,
+                traffic: TrafficPolicy::AnyText,
+                controls: ControlPolicy::Native,
+                invalidation: Invalidation::Required,
+                subscription_interval_ms: 0.,
+            })
+            .expect("genuine foreign feed registration"),
+        );
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Command::SetTickerSymbols { symbols } = &command {
+            match symbols.first().map(String::as_str) {
+                Some("fixture:interest-pressure") => {
+                    self.interest_pressure = true;
+                    return;
+                }
+                Some("fixture:interest-release") => {
+                    self.interest_pressure = false;
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if matches!(&command, Command::SetTickerSymbols { symbols } if symbols.first().is_some_and(|s| s == "fixture:retirement-pressure"))
+        {
+            self.armed = true;
+            return;
+        }
+        if self.interest_pressure {
+            self.fill_proposals(cx);
+        }
+        self.inner.on_command(cx, command);
+    }
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        use safe_cex_engine::socket_lifecycle::*;
+        let feed = match &event {
+            LifecycleEvent::Opened(epoch)
+            | LifecycleEvent::Retired { epoch, .. }
+            | LifecycleEvent::Ready { epoch, .. }
+            | LifecycleEvent::Ping(epoch) => Some(epoch.feed()),
+            LifecycleEvent::InterestsCommitted { feed, .. }
+            | LifecycleEvent::InterestsRefused { feed, .. } => Some(*feed),
+            _ => None,
+        };
+        if feed == self.foreign {
+            return Ok(());
+        }
+        if let LifecycleEvent::Opened(epoch) = event
+            && self.public.is_none()
+        {
+            self.public = Some(epoch.feed());
+            let foreign =
+                cx.connect_socket(self.foreign.unwrap(), "wss://fixture-foreign.invalid")?;
+            self.foreign_socket = Some(foreign.socket());
+        }
+        let pressure = matches!(&event, LifecycleEvent::Retired { epoch, .. } if Some(epoch.feed()) == self.public)
+            && self.armed;
+        if pressure {
+            self.fill_proposals(cx);
+        }
+        let result = self.inner.inner.on_socket_event(cx, event);
+        if pressure {
+            assert_eq!(
+                result,
+                Err(SocketError::Capacity),
+                "the original shared proposal cap is genuinely saturated"
+            );
+        }
+        result
+    }
+    fn encode_socket_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.inner
+            .inner
+            .encode_socket_interests(store, feed, subscribe, items, emit)
+    }
+    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        self.inner.on_open(cx, socket);
+    }
+    fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if Some(socket) == self.foreign_socket {
+            cx.send(socket, "fixture:foreign-positive");
+        } else {
+            self.inner.on_message(cx, socket, text);
+        }
+    }
+    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
+        self.inner.on_close(cx, socket, code);
+    }
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        self.inner.on_item(cx, pending, item);
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        self.inner.on_response(cx, pending, response);
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        self.inner.on_request_failed(cx, pending, error);
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.interest_pressure && cx.now.is_finite() {
+            self.fill_proposals(cx);
+        }
+        self.inner.on_timer(cx, timer);
+    }
+    fn book(&self, symbol: &str) -> Option<&Book> {
+        self.inner.book(symbol)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        self.inner.books()
+    }
+}
+
+#[test]
+fn refused_public_retirement_cleans_depth_before_refusing_reconnect() {
+    let e = support::setup::with_venue(options(true, true), |inner| RetirementPressure {
+        inner: Pressure {
+            inner,
+            peers: Vec::new(),
+        },
+        foreign: None,
+        public: None,
+        foreign_socket: None,
+        armed: false,
+        interest_pressure: false,
+    });
+    let mut d = Driver::new(e);
+    let boot = bootstrap(&mut d);
+    let public = boot.socket(SocketChannel::Public);
+    let private = boot.socket(SocketChannel::Private);
+    for request in &boot.requests {
+        let body = if request.url.contains("accountConfig") {
+            r#"{"dualSidePosition":false,"canTrade":true}"#
+        } else {
+            "[]"
+        };
+        let _ = d.response(NOW, request.id, 200, body);
+    }
+    let opened = d.event(NOW + 1., Event::WsOpened { socket: public }, false);
+    let foreign = opened.socket(SocketChannel::Private);
+    let foreign_connect = opened
+        .actions
+        .iter()
+        .position(|action| matches!(action, Action::WsConnect { socket, .. } if *socket == foreign))
+        .unwrap();
+    let foreign_timer = opened.actions[..foreign_connect]
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .expect("captured foreign connect watchdog");
+    let public_timers: Vec<_> = opened
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1. + 5_000. => Some(*timer),
+            _ => None,
+        })
+        .filter(|timer| *timer != foreign_timer && !opened.actions.iter().any(|action| matches!(action, Action::ClearTimer { timer: cleared } if cleared == timer)))
+        .collect();
+    assert_eq!(
+        public_timers.len(),
+        1,
+        "one captured public watchdog; the captured foreign connect watchdog is unrelated"
+    );
+    let _ = d.event(NOW + 2., Event::WsOpened { socket: foreign }, false);
+    let private_open = d.event(NOW + 3., Event::WsOpened { socket: private }, false);
+    for request in &private_open.requests {
+        let body = if request.url.contains("accountConfig") {
+            r#"{"dualSidePosition":false,"canTrade":true}"#
+        } else {
+            "[]"
+        };
+        let _ = d.response(NOW + 3., request.id, 200, body);
+    }
+    let held = prepared(&d.subscribe(NOW + 4., A, true));
+    let released = prepared(&d.subscribe(NOW + 5., B, true));
+    let wire = d.release(NOW + 6., &released);
+    let query = d.event(
+        NOW + 6.,
+        Event::Command(Command::FetchOrderBook {
+            command: 700,
+            symbol: A.into(),
+            limit: Some(25),
+        }),
+        false,
+    );
+    let query_request = query.depth_requests()[0].clone();
+    let _ = d.event(
+        NOW + 6.,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["fixture:retirement-pressure".into()],
+        }),
+        false,
+    );
+    let before = store(&d);
+    let closed = d.event(
+        NOW + 7.,
+        Event::WsClosed {
+            socket: public,
+            code: 1006,
+        },
+        true,
+    );
+    assert!(
+        !d.e.http_preparation_pending(held.token),
+        "refused invalidation still retires the held Depth credit"
+    );
+    let mut timer_seen = Vec::new();
+    let mut cancel_seen = Vec::new();
+    let mut closes = 0;
+    let mut refusals = 0;
+    for action in &closed.actions {
+        match action {
+            Action::ClearTimer { timer }
+                if public_timers.contains(timer)
+                    || [held.timer, released.timer].contains(timer) =>
+            {
+                assert!(!timer_seen.contains(timer));
+                timer_seen.push(*timer);
+            }
+            Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { preparation, signing: None } if [held.token, released.token].contains(preparation)) =>
+            {
+                let HttpAction::Cancel { preparation, .. } = a.as_ref() else {
+                    unreachable!()
+                };
+                assert!(!cancel_seen.contains(preparation));
+                cancel_seen.push(*preparation);
+            }
+            Action::WsClose { socket } if *socket == public => closes += 1,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::SUBSCRIPTION_REJECTED
+                    && event.message == "Managed socket invalidation refused: Capacity" =>
+            {
+                refusals += 1
+            }
+            _ => panic!("unowned retirement effect: {action:?}"),
+        }
+    }
+    assert!(timer_seen.contains(&held.timer) && timer_seen.contains(&released.timer));
+    assert!(public_timers.iter().all(|timer| timer_seen.contains(timer)));
+    assert_eq!(timer_seen.len(), public_timers.len() + 2);
+    assert_eq!(cancel_seen.len(), 2);
+    assert_eq!((closes, refusals), (1, 1));
+    assert_eq!(store(&d), before);
+    assert!(d.e.book(A).is_none() && d.e.book(B).is_none());
+    let refusal = closed.actions.iter().position(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message == "Managed socket invalidation refused: Capacity")).unwrap();
+    assert!(
+        closed
+            .actions
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| matches!(a, Action::ManagedHttp(_)))
+            .all(|(at, _)| at < refusal)
+    );
+    for (id, status, body) in [
+        (wire.id, 200, DEPTH),
+        (wire.id, 429, r#"{"bad":"old"}"#),
+        (held.request.id, 200, DEPTH),
+    ] {
+        assert!(d.response(NOW + 8., id, status, body).actions.is_empty());
+        assert_eq!(store(&d), before);
+        assert!(d.e.book(A).is_none() && d.e.book(B).is_none());
+    }
+    d.e.http_prepared(
+        NOW + 8.,
+        held.token,
+        Prepared {
+            id: held.request.id.0,
+            expires_at: None,
+        },
+    );
+    assert!(d.take(NOW + 8., false).actions.is_empty());
+    let completed = d.response(NOW + 8., query_request.id, 200, DEPTH);
+    assert!(completed.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 700, result }) if result == r#"{"bids":[{"price":99.0,"amount":2.0,"total":2.0}],"asks":[{"price":101.0,"amount":1.0,"total":1.0}],"lastUpdateId":"160"}"#)));
+    let pong = d.event(
+        NOW + 9.,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"type":"ping"}"#,
+        },
+        false,
+    );
+    assert_eq!(pong.sent(), [(private, r#"{"method":"PONG","id":2}"#)]);
+    let peer = d.event(
+        NOW + 9.,
+        Event::WsMessage {
+            socket: foreign,
+            text: "fixture:probe",
+        },
+        false,
+    );
+    assert_eq!(peer.sent(), [(foreign, "fixture:foreign-positive")]);
+    for name in ["fixture:fill", "fixture:release"] {
+        let out = d.event(
+            NOW + 10.,
+            Event::Command(Command::SetTickerSymbols {
+                symbols: vec![name.into()],
+            }),
+            true,
+        );
+        assert!(
+            out.actions.is_empty(),
+            "all256 Context credits remain reusable without public reconnect"
+        );
+    }
+    assert!(
+        d.event(
+            NOW + 10_000.,
+            Event::Command(Command::SetTickerSymbols {
+                symbols: vec![A.into()]
+            }),
+            false
+        )
+        .actions
+        .iter()
+        .all(|a| !matches!(
+            a,
+            Action::WsConnect {
+                channel: Some(SocketChannel::Public),
+                ..
+            }
+        ))
+    );
+}
+
+fn physical_depth_timeout(held: bool) {
+    let (mut d, _) = public();
+    let out = d.subscribe(NOW + 1., A, held);
+    let issued = out.prepares[0].clone();
+    assert_eq!(issued.deadline, NOW + 1. + LIMIT);
+    assert_eq!(out.depth_requests().len(), usize::from(!held));
+    let before = store(&d);
+    let expired = d.event(
+        issued.deadline,
+        Event::TimerFired {
+            timer: issued.timer,
+        },
+        true,
+    );
+    assert_eq!(store(&d), before);
+    let mut cleanup = Trace::default();
+    let mut retry = None;
+    let mut diagnostics = 0;
+    for action in &expired.actions {
+        match action {
+            Action::ClearTimer { .. } | Action::ManagedHttp(_) => {
+                cleanup.actions.push(action.clone())
+            }
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::REQUEST_FAILED
+                    && event.message == "WEEX: HTTP request timed out" =>
+            {
+                diagnostics += 1
+            }
+            Action::SetTimer { timer, at_ms }
+                if *at_ms >= issued.deadline + 750. && *at_ms <= issued.deadline + 1_250. =>
+            {
+                assert!(retry.replace((*timer, *at_ms)).is_none());
+            }
+            _ => panic!("unexpected physical-timeout effect: {action:?}"),
+        }
+    }
+    exact_cleanup(&cleanup, Some(&issued));
+    assert_eq!(diagnostics, 1);
+    assert!(
+        d.event(
+            issued.deadline,
+            Event::TimerFired {
+                timer: issued.timer
+            },
+            true
+        )
+        .actions
+        .is_empty()
+    );
+    d.e.http_prepared(
+        issued.deadline,
+        issued.token,
+        Prepared {
+            id: issued.request.id.0,
+            expires_at: None,
+        },
+    );
+    assert!(d.take(issued.deadline, true).actions.is_empty());
+    let (timer, at) =
+        retry.expect("one native finite backoff after retiring the expired observation");
+    let fresh = prepared(&d.event(at, Event::TimerFired { timer }, true));
+    assert_ne!(fresh.token, issued.token);
+    let sent = d.release(at, &fresh);
+    let _ = d.response(at, sent.id, 200, DEPTH);
+    assert_eq!(d.e.book(A).unwrap().bids(), [(99., 2.)]);
+}
+#[test]
+fn released_depth_physical_timeout_retires_then_recovers_once() {
+    physical_depth_timeout(false);
+}
+#[test]
+fn held_depth_physical_timeout_retires_then_recovers_once() {
+    physical_depth_timeout(true);
+}
+
+fn invalid_preparation_failure(now: f64) {
+    let (mut d, _) = public();
+    let current = prepared(&d.subscribe(NOW + 1., A, true));
+    let sibling = prepared(&d.subscribe(NOW + 2., B, true));
+    let before = store(&d);
+    d.e.http_preparation_failed(
+        now,
+        current.token,
+        safe_cex_engine::request_context::Error::Invalid,
+        safe_cex_engine::VenueError::new("invalid host observation")
+            .kind(safe_cex_engine::ErrorKind::Internal),
+    );
+    let failed = d.take(now, true);
+    exact_cleanup(&failed, Some(&current));
+    assert_eq!(store(&d), before);
+    assert!(!d.e.http_preparation_pending(current.token));
+    assert!(d.e.http_preparation_pending(sibling.token));
+    let sent = d.release(NOW + 3., &sibling);
+    let _ = d.response(NOW + 3., sent.id, 200, DEPTH);
+    assert_eq!(d.e.book(B).unwrap().bids(), [(99., 2.)]);
+    let _ = d.unsubscribe(NOW + 4., A);
+    let fresh = prepared(&d.subscribe(NOW + 5., A, true));
+    assert_ne!(fresh.token, current.token);
+    let sent = d.release(NOW + 5., &fresh);
+    let _ = d.response(NOW + 5., sent.id, 200, DEPTH);
+    assert_eq!(d.e.book(A).unwrap().bids(), [(99., 2.)]);
+}
+#[test]
+fn nan_depth_preparation_failure_only_retires_its_exact_observation() {
+    invalid_preparation_failure(f64::NAN);
+}
+#[test]
+fn infinity_depth_preparation_failure_only_retires_its_exact_observation() {
+    invalid_preparation_failure(f64::INFINITY);
+}
+#[test]
+fn negative_infinity_depth_preparation_failure_only_retires_its_exact_observation() {
+    invalid_preparation_failure(f64::NEG_INFINITY);
+}
+
+#[test]
+fn retained_last_is_a_real_intervening_snapshot_and_reconnect_preserves_native_order() {
+    let (mut d, socket) = public();
+    let _ = d.event(NOW, Event::WsOpened { socket }, false);
+    let initial = d.subscribe(NOW + 1., A, false).depth_requests()[0].clone();
+    let failed = d.event(
+        NOW + 2.,
+        Event::HttpFailed {
+            request: initial.id,
+            error: "native depth loss",
+        },
+        false,
+    );
+    let book_retry = failed
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("real native book retry");
+    let closed = d.event(NOW + 700., Event::WsClosed { socket, code: 1006 }, true);
+    let socket_retry = closed
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("real native socket retry");
+    assert!(book_retry.1 > NOW + 700. && book_retry.1 < socket_retry.1);
+    let intervening = prepared(&d.event(
+        book_retry.1,
+        Event::TimerFired {
+            timer: book_retry.0,
+        },
+        true,
+    ));
+    let sent = d.release(book_retry.1, &intervening);
+    let accepted = d.response(book_retry.1, sent.id, 200, DEPTH);
+    assert!(accepted.sent().is_empty());
+    assert_eq!(d.e.book(A).unwrap().bids(), [(99., 2.)]);
+    let reconnect = d.event(
+        socket_retry.1,
+        Event::TimerFired {
+            timer: socket_retry.0,
+        },
+        true,
+    );
+    let next_socket = reconnect.socket(SocketChannel::Public);
+    let next_snapshot = prepared(&reconnect);
+    let connect_at = reconnect
+        .actions
+        .iter()
+        .position(|a| matches!(a, Action::WsConnect { socket, .. } if *socket == next_socket))
+        .unwrap();
+    let prepare_at = reconnect.actions.iter().position(|a| matches!(a, Action::ManagedHttp(work) if matches!(work.as_ref(), HttpAction::Prepare { preparation, .. } if *preparation == next_snapshot.token))).unwrap();
+    assert!(
+        connect_at < prepare_at,
+        "native reconnect queues connect before its pre-open snapshot"
+    );
+    assert_eq!(
+        d.e.book(A).unwrap().bids(),
+        [(99., 2.)],
+        "connect adds no new clear-last gate"
+    );
+    let opened = d.event(
+        socket_retry.1 + 1.,
+        Event::WsOpened {
+            socket: next_socket,
+        },
+        true,
+    );
+    assert!(
+        opened
+            .sent()
+            .iter()
+            .any(|(_, text)| text.contains("BTCUSDT@depth200")),
+        "genuine intervening last remains topic-eligible before the replacement response"
+    );
+    assert!(d.e.http_preparation_pending(next_snapshot.token));
+    let sent = d.release(socket_retry.1 + 2., &next_snapshot);
+    let _ = d.response(
+        socket_retry.1 + 2.,
+        sent.id,
+        200,
+        r#"{"lastUpdateId":161,"bids":[["100","3"]],"asks":[]}"#,
+    );
+    assert_eq!(d.e.book(A).unwrap().bids(), [(100., 3.)]);
+}
+
+#[test]
+fn gap_heal_observes_depth_without_new_topic_handoff() {
+    let (mut d, socket) = public();
+    let _ = d.event(NOW + 1., Event::WsOpened { socket }, false);
+    let initial = d.subscribe(NOW + 2., A, false).depth_requests()[0].clone();
+    let _ = d.response(NOW + 3., initial.id, 200, DEPTH);
+    let gap = d.event(
+        NOW + 4.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"e":"depth","s":"BTCUSDT","U":162,"u":162,"b":[["99","0"]],"a":[]}"#,
+        },
+        true,
+    );
+    let healing = prepared(&gap);
+    assert!(gap.sent().is_empty());
+    assert!(
+        !gap.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. } | Action::WsClose { .. }))
+    );
+    let sent = d.release(NOW + 5., &healing);
+    let _ = d.response(
+        NOW + 5.,
+        sent.id,
+        200,
+        r#"{"lastUpdateId":161,"bids":[["99","2"]],"asks":[["101","1"]]}"#,
+    );
+    assert!(
+        d.e.book(A).unwrap().bids().is_empty(),
+        "the genuinely buffered gap delta joins the accepted snapshot"
+    );
+}
+
+#[test]
+fn malformed_public_text_keeps_native_any_text_liveness_and_ping_codec() {
+    let (mut d, socket) = public();
+    let opened = d.event(NOW + 1., Event::WsOpened { socket }, false);
+    let mut watchdog = opened
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5_001. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    let before = store(&d);
+    let malformed = d.event(NOW + 1_000., Event::WsMessage { socket, text: "{" }, false);
+    assert_eq!(store(&d), before);
+    assert!(malformed.actions.is_empty());
+    for tick in 1..=6 {
+        let at = NOW + 1. + f64::from(tick) * 5_000.;
+        let out = d.event(at, Event::TimerFired { timer: watchdog }, false);
+        assert!(
+            !out.actions
+                .iter()
+                .any(|action| matches!(action, Action::WsClose { .. } | Action::WsConnect { .. }))
+        );
+        assert_eq!(
+            out.sent(),
+            [(
+                socket,
+                format!(r#"{{"method":"PING","id":{}}}"#, tick + 1).as_str()
+            )]
+        );
+        let next = out
+            .actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .expect("actual next supervised watchdog");
+        if tick == 6 {
+            assert_eq!(
+                next.1,
+                NOW + 31_000.,
+                "malformed text moved the idle bound beyond the original deadline"
+            );
+        }
+        watchdog = next.0;
+    }
+    let pong = d.event(
+        NOW + 30_002.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"event":"ping"}"#,
+        },
+        false,
+    );
+    assert_eq!(pong.sent(), [(socket, r#"{"method":"PONG","id":8}"#)]);
+}
+
+#[test]
+fn upgrade_header_incapability_preserves_native_rest_only_notice_and_reads() {
+    let mut d = Driver::new(support::setup::engine(options(true, false)));
+    let boot = bootstrap(&mut d);
+    assert_eq!(boot.requests.len(), 6);
+    assert!(!boot.actions.iter().any(|a| matches!(
+        a,
+        Action::WsConnect {
+            channel: Some(SocketChannel::Private),
+            ..
+        }
+    )));
+    assert!(boot.actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code == safe_cex_engine::log::code::STREAM_UNAVAILABLE && event.message == "WEEX private WebSocket disabled: transport cannot attach upgrade headers; continuing REST safety loop")));
+    assert!(boot.requests.iter().all(|request| {
+        request
+            .headers
+            .iter()
+            .any(|(key, value)| *key == "ACCESS-SIGN" && !value.is_empty())
+    }));
+}
+
+#[test]
+fn paused_depth_has_no_context_until_the_actual_native_wake() {
+    let e = support::setup::with_venue(options(false, false), |inner| Pressure {
+        inner,
+        peers: Vec::new(),
+    });
+    let mut d = Driver::new(e);
+    let _ = bootstrap(&mut d);
+    let sent = d.subscribe(NOW + 1., A, false).depth_requests()[0].clone();
+    let _ = d.event(
+        NOW + 2.,
+        Event::HttpResponse {
+            request: sent.id,
+            response: Response {
+                status: 429,
+                headers: "retry-after: 2",
+                body: "native rate limit",
+            },
+        },
+        true,
+    );
+    let waiting = d.subscribe(NOW + 3., B, true);
+    assert!(waiting.prepares.is_empty() && waiting.requests.is_empty());
+    let wake = waiting
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 2_002. => Some(*timer),
+            _ => None,
+        })
+        .expect("actual native pause wake");
+    for name in ["fixture:fill", "fixture:release"] {
+        assert!(
+            d.event(
+                NOW + 4.,
+                Event::Command(Command::SetTickerSymbols {
+                    symbols: vec![name.into()]
+                }),
+                true
+            )
+            .actions
+            .is_empty(),
+            "all256 genuine credits prove the paused book holds no Context"
+        );
+    }
+    let eligible = prepared(&d.event(NOW + 2_002., Event::TimerFired { timer: wake }, true));
+    let sent = d.release(NOW + 2_002., &eligible);
+    let _ = d.response(NOW + 2_002., sent.id, 200, DEPTH);
+    assert_eq!(d.e.book(B).unwrap().bids(), [(99., 2.)]);
+}
+
+fn interest_pressure() -> (Driver<RetirementPressure>, SocketId, SocketId) {
+    let e = support::setup::with_venue(options(false, false), |inner| RetirementPressure {
+        inner: Pressure {
+            inner,
+            peers: Vec::new(),
+        },
+        foreign: None,
+        public: None,
+        foreign_socket: None,
+        armed: false,
+        interest_pressure: false,
+    });
+    let mut d = Driver::new(e);
+    let socket = bootstrap(&mut d).socket(SocketChannel::Public);
+    let foreign = d
+        .event(NOW, Event::WsOpened { socket }, false)
+        .socket(SocketChannel::Private);
+    let _ = d.event(NOW + 1., Event::WsOpened { socket: foreign }, false);
+    let _ = ticker_demand(&mut d, NOW + 2., vec!["fixture:interest-pressure"]);
+    (d, socket, foreign)
+}
+fn ticker_demand<V: Venue>(d: &mut Driver<V>, now: f64, symbols: Vec<&str>) -> Trace {
+    d.event(
+        now,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: symbols.into_iter().map(str::to_owned).collect(),
+        }),
+        false,
+    )
+}
+fn sole_timer(out: &Trace) -> (TimerId, f64) {
+    let timers: Vec<_> = out
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        timers.len(),
+        1,
+        "one actual observation timer: {:?}",
+        out.actions
+    );
+    timers[0]
+}
+#[test]
+fn interest_pressure_obeys_cooldown_three_observations_and_resolved_demand_recovery() {
+    let (mut d, socket, foreign) = interest_pressure();
+    let initial = ticker_demand(&mut d, NOW + 3., vec![A]);
+    assert!(initial.sent().is_empty());
+    let (mut timer, mut bound) = sole_timer(&initial);
+    assert_eq!(bound, NOW + 1_003.);
+    for _ in 0..8 {
+        assert!(
+            ticker_demand(&mut d, NOW + 3., vec![A]).actions.is_empty(),
+            "same-clock commits cannot bypass pending cooldown"
+        );
+    }
+    let early = d.event(NOW + 4., Event::TimerFired { timer }, false);
+    let (replacement, same_bound) = sole_timer(&early);
+    assert_ne!(replacement, timer);
+    assert_eq!(same_bound, bound);
+    assert!(early.sent().is_empty());
+    assert!(
+        d.event(NOW + 4., Event::TimerFired { timer }, false)
+            .actions
+            .is_empty()
+    );
+    timer = replacement;
+    for observation in 1..=3 {
+        let now = bound + if observation == 2 { 1. } else { 0. };
+        let observed = d.event(now, Event::TimerFired { timer }, false);
+        assert!(observed.sent().is_empty());
+        assert!(
+            d.event(now, Event::TimerFired { timer }, false)
+                .actions
+                .is_empty()
+        );
+        if observation < 3 {
+            let next = sole_timer(&observed);
+            assert_eq!(next.1, now + 1_000.);
+            timer = next.0;
+            bound = next.1;
+        } else {
+            assert!(
+                !observed
+                    .actions
+                    .iter()
+                    .any(|a| matches!(a, Action::SetTimer { .. }))
+            );
+        }
+    }
+    let now = bound + 1.;
+    let _ = ticker_demand(&mut d, now, vec!["fixture:interest-release"]);
+    assert!(
+        ticker_demand(&mut d, now, vec![A]).actions.is_empty(),
+        "pressure release does not renew the exhausted epoch budget"
+    );
+    assert!(
+        ticker_demand(&mut d, now, Vec::new()).actions.is_empty(),
+        "returning to the committed native demand resolves the observation"
+    );
+    let accepted = ticker_demand(&mut d, now + 1., vec![A]);
+    assert_eq!(
+        accepted.sent(),
+        [(
+            socket,
+            r#"{"method":"UNSUBSCRIBE","params":["ETHUSDT@ticker"],"id":2}"#
+        )]
+    );
+    let peer = d.event(
+        now + 2.,
+        Event::WsMessage {
+            socket: foreign,
+            text: "fixture:probe",
+        },
+        false,
+    );
+    assert_eq!(peer.sent(), [(foreign, "fixture:foreign-positive")]);
+}
+fn nonfinite_interest_observation(now: f64) {
+    let (mut d, socket, foreign) = interest_pressure();
+    let initial = ticker_demand(&mut d, NOW + 3., vec![A]);
+    let (timer, bound) = sole_timer(&initial);
+    let before = store(&d);
+    assert!(
+        d.event(now, Event::TimerFired { timer }, false)
+            .actions
+            .is_empty()
+    );
+    assert_eq!(store(&d), before);
+    let _ = ticker_demand(&mut d, NOW + 4., vec!["fixture:interest-release"]);
+    let resumed = ticker_demand(&mut d, NOW + 5., vec![A]);
+    assert!(
+        resumed.sent().is_empty(),
+        "a nonfinite timer cannot erase the retained not-before bound"
+    );
+    let (next, at) = sole_timer(&resumed);
+    assert_ne!(next, timer);
+    assert_eq!(at, bound);
+    assert!(
+        d.event(NOW + 5., Event::TimerFired { timer }, false)
+            .actions
+            .is_empty()
+    );
+    let accepted = d.event(bound, Event::TimerFired { timer: next }, false);
+    assert_eq!(
+        accepted.sent(),
+        [(
+            socket,
+            r#"{"method":"UNSUBSCRIBE","params":["ETHUSDT@ticker"],"id":2}"#
+        )]
+    );
+    let peer = d.event(
+        bound + 1.,
+        Event::WsMessage {
+            socket: foreign,
+            text: "fixture:probe",
+        },
+        false,
+    );
+    assert_eq!(peer.sent(), [(foreign, "fixture:foreign-positive")]);
+}
+#[test]
+fn nan_interest_observation_retains_cooldown_without_new_work() {
+    nonfinite_interest_observation(f64::NAN);
+}
+#[test]
+fn infinity_interest_observation_retains_cooldown_without_new_work() {
+    nonfinite_interest_observation(f64::INFINITY);
+}
+#[test]
+fn negative_infinity_interest_observation_retains_cooldown_without_new_work() {
+    nonfinite_interest_observation(f64::NEG_INFINITY);
+}
+
+#[test]
+fn hourly_quota_refusal_preserves_wire_ids_and_recovers_at_its_real_floor() {
+    let (mut d, socket) = public();
+    let _ = d.event(NOW, Event::WsOpened { socket }, false);
+    let first = ticker_demand(&mut d, NOW + 1., vec![A]);
+    assert_eq!(first.sent().len(), 1);
+    let mut current = A;
+    for step in 0..119 {
+        current = if current == A { B } else { A };
+        let accepted = ticker_demand(&mut d, NOW + 2. + f64::from(step), vec![current]);
+        assert_eq!(
+            accepted.sent().len(),
+            2,
+            "two genuine native subscription operations"
+        );
+        let last: serde_json::Value = serde_json::from_str(accepted.sent()[1].1).unwrap();
+        assert_eq!(last["id"], 4 + step * 2);
+    }
+    let desired = if current == A { B } else { A };
+    let refused = ticker_demand(&mut d, NOW + 121., vec![desired]);
+    assert!(refused.sent().is_empty());
+    assert!(refused.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.message == "WEEX subscription operation limit reached")));
+    let (timer, bound) = sole_timer(&refused);
+    assert_eq!(bound, NOW + 3_600_000.);
+    let early = d.event(NOW + 122., Event::TimerFired { timer }, false);
+    let (mut timer, at) = sole_timer(&early);
+    assert_eq!(at, bound);
+    assert!(early.sent().is_empty());
+    let before = store(&d);
+    for step in 1..180 {
+        let observed = d.event(
+            NOW + f64::from(step) * 20_000.,
+            Event::WsMessage { socket, text: "{" },
+            false,
+        );
+        assert!(observed.sent().is_empty());
+    }
+    assert_eq!(store(&d), before);
+    let first_floor = d.event(bound, Event::TimerFired { timer }, false);
+    assert!(
+        first_floor.sent().is_empty(),
+        "one freed operation cannot partially commit the two-operation replacement"
+    );
+    let (next, at) = sole_timer(&first_floor);
+    assert!(at > bound && at <= bound + 1_000.);
+    timer = next;
+    let recovered = d.event(at, Event::TimerFired { timer }, false);
+    assert_eq!(recovered.sent().len(), 2);
+    let messages: Vec<serde_json::Value> = recovered
+        .sent()
+        .iter()
+        .map(|(_, text)| serde_json::from_str(text).unwrap())
+        .collect();
+    assert_eq!(
+        messages[0],
+        serde_json::json!({"method":"UNSUBSCRIBE","params":[format!("{current}@ticker")],"id":241})
+    );
+    assert_eq!(
+        messages[1],
+        serde_json::json!({"method":"SUBSCRIBE","params":[format!("{desired}@ticker")],"id":242})
+    );
+    assert_eq!(store(&d), before);
+}
+
+fn frame_limit_fixture(bytes: usize) -> (Driver<WeexFutures>, SocketId, Vec<String>, String) {
+    let mut symbols: Vec<_> = (0..50)
+        .map(|i| format!("{i:02}{}", "\\".repeat(600)))
+        .collect();
+    let frame = |symbols: &[String]| {
+        let params: Vec<_> = symbols.iter().map(|s| format!("{s}@ticker")).collect();
+        format!(
+            r#"{{"method":"SUBSCRIBE","params":{},"id":3}}"#,
+            serde_json::to_string(&params).unwrap()
+        )
+    };
+    let extra = bytes
+        .checked_sub(frame(&symbols).len())
+        .expect("base frame is below the boundary");
+    for (i, symbol) in symbols.iter_mut().enumerate() {
+        symbol.extend(std::iter::repeat_n(
+            'x',
+            extra / 50 + usize::from(i < extra % 50),
+        ));
+        assert!(symbol.len() + "@ticker".len() <= 1_024);
+    }
+    let expected = frame(&symbols);
+    assert_eq!(expected.len(), bytes);
+    let rows: Vec<_> = [A.to_owned(), B.to_owned()].into_iter().chain(symbols.iter().cloned()).map(|symbol| serde_json::json!({"symbol":symbol,"baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":3})).collect();
+    let info = serde_json::json!({"symbols":rows}).to_string();
+    let mut d = Driver::new(support::setup::engine(options(false, false)));
+    d.e.start(NOW);
+    let initial = d.take(NOW, false);
+    let tickers = d.response(NOW, request(&initial, "exchangeInfo"), 200, &info);
+    let _ = d.response(NOW, request(&tickers, "24hr"), 200, DAILY);
+    let boot = d.response(NOW, request(&tickers, "bookTicker"), 200, TICKERS);
+    let socket = boot.socket(SocketChannel::Public);
+    let _ = ticker_demand(&mut d, NOW, vec![A]);
+    let opened = d.event(NOW, Event::WsOpened { socket }, false);
+    assert_eq!(
+        opened.sent(),
+        [(
+            socket,
+            r#"{"method":"SUBSCRIBE","params":["BTCUSDT@ticker"],"id":1}"#
+        )]
+    );
+    (d, socket, symbols, expected)
+}
+#[test]
+fn fifty_valid_interest_keys_accept_the_exact_native_frame_boundary() {
+    let (mut d, socket, symbols, expected) = frame_limit_fixture(65_536);
+    let accepted = ticker_demand(
+        &mut d,
+        NOW + 1.,
+        symbols.iter().map(String::as_str).collect(),
+    );
+    assert_eq!(
+        accepted.sent(),
+        [
+            (
+                socket,
+                r#"{"method":"UNSUBSCRIBE","params":["BTCUSDT@ticker"],"id":2}"#
+            ),
+            (socket, expected.as_str())
+        ]
+    );
+}
+#[test]
+fn oversized_encoded_frame_refuses_atomically_and_preserves_healthy_peer_and_ids() {
+    let (mut d, socket, symbols, _) = frame_limit_fixture(65_537);
+    let before = store(&d);
+    let refused = ticker_demand(
+        &mut d,
+        NOW + 1.,
+        symbols.iter().map(String::as_str).collect(),
+    );
+    assert!(
+        refused.sent().is_empty(),
+        "serialized frame capacity cannot partially unsubscribe the healthy peer"
+    );
+    let (timer, _) = sole_timer(&refused);
+    assert_eq!(store(&d), before);
+    let resolved = ticker_demand(&mut d, NOW + 2., vec![A]);
+    assert!(resolved.sent().is_empty());
+    assert!(
+        resolved
+            .actions
+            .iter()
+            .any(|action| matches!(action, Action::ClearTimer { timer: old } if *old == timer))
+    );
+    assert!(
+        d.event(NOW + 2., Event::TimerFired { timer }, false)
+            .actions
+            .is_empty()
+    );
+    let recovered = ticker_demand(&mut d, NOW + 3., vec![B]);
+    assert_eq!(
+        recovered.sent(),
+        [
+            (
+                socket,
+                r#"{"method":"UNSUBSCRIBE","params":["BTCUSDT@ticker"],"id":2}"#
+            ),
+            (
+                socket,
+                r#"{"method":"SUBSCRIBE","params":["ETHUSDT@ticker"],"id":3}"#
+            )
+        ]
+    );
+    let pong = d.event(
+        NOW + 4.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"event":"ping"}"#,
+        },
+        false,
+    );
+    assert_eq!(pong.sent(), [(socket, r#"{"method":"PONG","id":4}"#)]);
+    assert_eq!(store(&d), before);
+}

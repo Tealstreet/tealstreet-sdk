@@ -16,6 +16,7 @@ pub(crate) struct State {
     failed: bool,
     clock: Cell<f64>,
     staged: RefCell<Option<Encoding>>,
+    quota_not_before: Cell<Option<f64>>,
     desired: Vec<String>,
     committed: Vec<String>,
     pending: Option<(u64, Vec<String>)>,
@@ -23,7 +24,7 @@ pub(crate) struct State {
     observations: u8,
 }
 struct Observation {
-    timer: TimerId,
+    timer: Option<TimerId>,
     not_before: f64,
     epoch: Epoch,
 }
@@ -100,6 +101,18 @@ impl WeexFutures {
         if !now.is_finite() {
             return Err(SocketError::InvalidTime);
         }
+        let order = self
+            .sockets
+            .pending
+            .as_ref()
+            .map_or(&self.sockets.committed, |p| &p.1);
+        let mut ordered: Vec<_> = items.iter().collect();
+        ordered.sort_by_key(|item| {
+            order
+                .iter()
+                .position(|key| key == item.key.as_ref())
+                .unwrap_or(usize::MAX)
+        });
         let mut staged = self.sockets.staged.borrow_mut();
         let state = staged.get_or_insert_with(|| Encoding {
             next_id: self.public.next_id,
@@ -112,7 +125,15 @@ impl WeexFutures {
         {
             state.operations.pop_front();
         }
-        if state.operations.len() + items.len().div_ceil(50) > 240 {
+        let required = state.operations.len() + items.len().div_ceil(50);
+        if required > 240 {
+            let floor = state
+                .operations
+                .get(required - 241)
+                .map(|at| at + 3_600_000.);
+            self.sockets
+                .quota_not_before
+                .set(floor.filter(|at| at.is_finite() && *at > now));
             return Err(SocketError::Capacity);
         }
         let method = if subscribe {
@@ -120,7 +141,7 @@ impl WeexFutures {
         } else {
             "UNSUBSCRIBE"
         };
-        for lot in items.chunks(50) {
+        for lot in ordered.chunks(50) {
             let id = state.next_id;
             let next = id.checked_add(1).ok_or(SocketError::Capacity)?;
             let params: Vec<_> = lot.iter().map(|item| item.wire_args.as_ref()).collect();
@@ -146,13 +167,29 @@ impl WeexFutures {
     ) {
         self.sockets.clock.set(cx.now);
         self.sockets.desired = desired;
+        if self.sockets.pending.is_none() && self.sockets.desired == self.sockets.committed {
+            if let Some(retry) = self.sockets.retry.take()
+                && let Some(timer) = retry.timer
+            {
+                cx.clear_timer(timer);
+            }
+            self.sockets.observations = 0;
+            return;
+        }
         self.propose_public_interests(cx, false);
     }
     fn propose_public_interests(&mut self, cx: &mut Cx<'_, Pending>, observation: bool) {
-        if !cx.now.is_finite()
-            || !self.public.open
+        if !cx.now.is_finite() {
+            return;
+        }
+        if let Some(retry) = self.sockets.retry.as_mut() {
+            if retry.timer.is_none() && cx.socket_epoch(retry.epoch.feed()) == Some(retry.epoch) {
+                retry.timer = Some(cx.set_timer((retry.not_before - cx.now).max(0.)));
+            }
+            return;
+        }
+        if !self.public.open
             || self.sockets.pending.is_some()
-            || self.sockets.retry.is_some()
             || self.sockets.observations >= 3 && !observation
         {
             return;
@@ -165,6 +202,7 @@ impl WeexFutures {
         };
         let desired = self.sockets.desired.clone();
         self.sockets.staged.get_mut().take();
+        self.sockets.quota_not_before.set(None);
         match cx.set_socket_interests(
             feed,
             desired
@@ -184,12 +222,17 @@ impl WeexFutures {
         let Some(epoch) = self.sockets.public.and_then(|f| cx.socket_epoch(f)) else {
             return;
         };
-        let not_before = cx.now + 1_000.;
+        let not_before = (cx.now + 1_000.).max(
+            self.sockets
+                .quota_not_before
+                .get()
+                .unwrap_or(f64::NEG_INFINITY),
+        );
         if !not_before.is_finite() || not_before <= cx.now {
             return;
         }
         self.sockets.retry = Some(Observation {
-            timer: cx.set_timer(not_before - cx.now),
+            timer: Some(cx.set_timer(not_before - cx.now)),
             not_before,
             epoch,
         });
@@ -199,16 +242,21 @@ impl WeexFutures {
             .sockets
             .retry
             .as_ref()
-            .is_some_and(|r| r.timer == timer)
+            .is_some_and(|r| r.timer == Some(timer))
         {
             return false;
         }
         let mut retry = self.sockets.retry.take().expect("matched observation");
-        if !cx.now.is_finite() || cx.socket_epoch(retry.epoch.feed()) != Some(retry.epoch) {
+        if cx.socket_epoch(retry.epoch.feed()) != Some(retry.epoch) {
+            return true;
+        }
+        if !cx.now.is_finite() {
+            retry.timer = None;
+            self.sockets.retry = Some(retry);
             return true;
         }
         if cx.now < retry.not_before {
-            retry.timer = cx.set_timer(retry.not_before - cx.now);
+            retry.timer = Some(cx.set_timer(retry.not_before - cx.now));
             self.sockets.retry = Some(retry);
             return true;
         }
@@ -260,9 +308,12 @@ impl WeexFutures {
                 }
             }
             LifecycleEvent::Retired { epoch, .. } => {
+                self.on_close(cx, epoch.socket(), 1006);
                 if Some(epoch.feed()) == self.sockets.public {
-                    if let Some(retry) = self.sockets.retry.take() {
-                        cx.clear_timer(retry.timer);
+                    if let Some(retry) = self.sockets.retry.take()
+                        && let Some(timer) = retry.timer
+                    {
+                        cx.clear_timer(timer);
                     }
                     self.sockets.pending = None;
                     self.sockets.staged.get_mut().take();
@@ -271,7 +322,6 @@ impl WeexFutures {
                     // A reconnect must not replay depth made ineligible by native close.
                     cx.set_socket_interests(epoch.feed(), Vec::new())?;
                 }
-                self.on_close(cx, epoch.socket(), 1006);
             }
             LifecycleEvent::InterestsCommitted { feed, proposal }
                 if Some(feed) == self.sockets.public =>
@@ -286,8 +336,10 @@ impl WeexFutures {
                     self.commit_encoding();
                     self.sockets.committed = desired;
                     if self.sockets.committed == self.sockets.desired {
-                        if let Some(retry) = self.sockets.retry.take() {
-                            cx.clear_timer(retry.timer);
+                        if let Some(retry) = self.sockets.retry.take()
+                            && let Some(timer) = retry.timer
+                        {
+                            cx.clear_timer(timer);
                         }
                         self.sockets.observations = 0;
                     }
@@ -307,6 +359,13 @@ impl WeexFutures {
                     .is_some_and(|p| p.0 == proposal)
                 {
                     self.sockets.pending = None;
+                    if self.sockets.quota_not_before.get().is_some() {
+                        cx.notice(
+                            safe_cex_engine::Level::Warn,
+                            safe_cex_engine::log::code::SUBSCRIPTION_REJECTED,
+                            "WEEX subscription operation limit reached",
+                        );
+                    }
                     self.defer_interests(cx);
                 }
             }

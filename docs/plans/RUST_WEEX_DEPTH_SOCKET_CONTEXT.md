@@ -260,3 +260,66 @@ TimerFired/preparation-failure controls, reconnect/gap/retained-last calibration
 transactional interest capacity/quota/burst/not-before controls and complete
 source-stage action/resource proofs remain gates. This is a bounded first
 originals checkpoint, not full originals/source/readiness clearance.
+
+## Local source qualification and approved native fixture changes
+
+Actual #2153 landed as aa75847b5c9. The first source checkpoint74e5b6d1313
+passes the first19 controls; c37b55f1567 removes only the genuine Depth sender,
+two socket senders and WEEX's socket-family row. Remaining14F/20O conservative
+request references and all signing/credential rows remain unchanged. The
+first-source WEEX/combined pair is pinned to bare aa758 versus74e5, separately
+from subsequent source corrections and their current-tree measurement.
+
+hcmq3f clears the bounded first19 checkpoint and two exact fixture adaptations.
+Seven account stream tests add a local genuine first Opened at existing NOW,
+while the original six account reads remain pending. Their prepared opening
+actions must contain no new HTTP. Shared setup/reply helpers, every original
+payload, financial assertion and clock remain unchanged.
+
+Three public Depth fixtures supersede physical observation clocks only:
+`depth_ignores_old_frames_and_heals_gaps_with_buffered_diffs`,
+`old_snapshots_and_failures_cannot_replace_a_resubscribed_book`, and
+`malformed_depth_is_not_an_authoritative_deletion`. Bootstrap1773295700000 plus
+the same relative0..8 offsets replaces their inconsistent epoch-to-zero walk;
+replies use each actual current observation. All46 public assertion invocations
+and34 raw payload literals remain token-exact/in-order. Other changes drive
+real prepared actions at three already-correct Depth clocks and prepare the
+four original interest-only assertions at their unchanged event clocks. Shared
+response/response_at/request helpers remain byte-exact. Dedicated expiry controls
+continue to exercise delayed/equality denial instead of being retimed.
+
+Two further public fixtures use a genuine zero-time bootstrap:
+`websocket_candles_allow_two_hours_but_rest_rejects_it` and
+`active_tickers_send_incremental_diffs_and_identical_updates_send_nothing`.
+The approved `started_at(observation)` helper parameterizes only bootstrap
+observations; default `started()` still forwards1773295700000 exactly. Only
+these two callers select zero, before their unchanged0..3 commands. Their entire
+assertions, payloads and event clocks remain unchanged; every other bootstrap
+retains its original clock. This supersedes only these two admission clocks.
+
+Required invalidation is deliberately fail-closed on a refused public interest
+clear: native close first invalidates generations and retires every exact held
+or released Depth context, then a clearing failure denies public replacement.
+It grants no parallel recovery or raw fallback, and must preserve private,
+foreign and independent caller work. The saturated512-proposal resource control
+must pass before functional closure. Native mixed book-first topic order and
+hourly quota recovery require their own exact controls and source review; no
+full source or readiness claim follows from the first19 pass.
+
+The expanded local target executes38 controls, retaining the entire original19
+prefix. Corrected source passes all38 and all-target strict Clippy/formatting.
+An isolated c37 build reproduces both retirement-credit and mixed-wire-order
+assertion failures. Three additional nonfinite interest-timer controls reproduce
+the lost-cooldown failure before correction: invalid observation consumes only
+the timer identity, retaining its epoch/not-before bound until a finite event
+rearms it without spending an observation. Persistent512-proposal pressure,
+early/duplicate/equality/late wakes, three-observation exhaustion, resolved-demand
+recovery, real240/hour release floor, exact65536/65537-byte frames and unchanged
+wire IDs after atomic refusal all pass. No source change widens shared authority.
+
+First-source measurements on aa758 are WEEX1210270 ->1266673 (+56403), and
+combined14034260 ->14041661 (+7401), matching Node/Web with fixed budgets.
+These numbers do not certify the subsequent correction. The complete native
+qualification is428PASS/2FAIL/0ignored: two command-only trading fixtures have
+not initialized feeds through genuine Engine.start. Their narrow initialization
+preview requires reviewer disposition before application; source stays local.

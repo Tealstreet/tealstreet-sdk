@@ -248,6 +248,13 @@ fn complete_paging_required_before_order_commit() {
 fn websocket_terminal_orders_and_positions_reject_stale_reads_and_events() {
     let (mut e, actions) = started(true);
     let socket = private_socket(&actions);
+    e.handle(NOW, Event::WsOpened { socket });
+    let opening: Vec<_> = e.prepared_actions(NOW).collect();
+    assert!(
+        !opening
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
+    );
     e.handle(NOW,Event::WsMessage {socket,text:r#"{"e":"orders","d":[{"id":"702345678901234600","symbol":"BTCUSDT","orderSide":"BUY","type":"LIMIT","status":"CANCELED","size":"0.02","price":"69500","updatedTime":"1773295701000"}]}"#});
     complete(&mut e, &actions, NORMAL, "[]");
     assert_eq!(
@@ -270,6 +277,13 @@ fn websocket_terminal_orders_and_positions_reject_stale_reads_and_events() {
 fn fills_are_per_execution_and_duplicates_are_suppressed() {
     let (mut e, actions) = started(true);
     let socket = private_socket(&actions);
+    e.handle(NOW, Event::WsOpened { socket });
+    let opening: Vec<_> = e.prepared_actions(NOW).collect();
+    assert!(
+        !opening
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
+    );
     let fills = r#"{"e":"fill","d":[{"id":"1","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.1","fillValue":"100"},{"id":"2","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.2","fillValue":"220"}]}"#;
     e.handle(
         NOW,
@@ -366,6 +380,13 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
 fn settings_arriving_after_positions_supply_identical_rest_and_socket_fallbacks() {
     let (mut e, actions) = started(true);
     let socket = private_socket(&actions);
+    e.handle(NOW, Event::WsOpened { socket });
+    let opening: Vec<_> = e.prepared_actions(NOW).collect();
+    assert!(
+        !opening
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
+    );
     let sparse = r#"[{"symbol":"BTCUSDT","side":"SHORT","size":"1","openValue":"100","updatedTime":1773295700000}]"#;
     response(&mut e, request(&actions, "allPosition"), 200, sparse);
     assert!(!e.store().loaded().positions);
@@ -515,6 +536,13 @@ fn delayed_first_socket_event_cannot_close_newer_rest_position() {
 fn socket_opening_stop_has_the_same_kind_and_trigger_as_rest_algo() {
     let (mut e, actions) = started(true);
     let socket = private_socket(&actions);
+    e.handle(NOW, Event::WsOpened { socket });
+    let opening: Vec<_> = e.prepared_actions(NOW).collect();
+    assert!(
+        !opening
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
+    );
     e.handle(NOW,Event::WsMessage {socket,text:r#"{"e":"orders","d":[{"id":"812345678901234500","symbol":"BTCUSDT","orderSide":"BUY","type":"STOP","status":"UNTRIGGERED","size":"1","price":"68800","triggerPrice":"68900","updatedTime":"1773295700000"}]}"#});
     let order = e.store().order("812345678901234500").unwrap();
     assert_eq!(order.kind, safe_cex_engine::model::OrderType::Conditional);
@@ -529,6 +557,13 @@ fn socket_opening_stop_has_the_same_kind_and_trigger_as_rest_algo() {
 fn bounded_terminal_floor_rejects_inflight_replay_but_fresh_snapshot_admits_old_active_ids() {
     let (mut e, actions) = started(true);
     let socket = private_socket(&actions);
+    e.handle(NOW, Event::WsOpened { socket });
+    let opening: Vec<_> = e.prepared_actions(NOW).collect();
+    assert!(
+        !opening
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
+    );
     complete(&mut e, &actions, "[]", "[]");
     let stale_cycle = next_cycle(&mut e);
     for i in 1..=20_001 {
@@ -1115,6 +1150,13 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
 fn live_fill_financials_preserve_optional_zero_and_absolute_fee_without_changing_dedup() {
     let (mut e, actions) = started(true);
     let socket = private_socket(&actions);
+    e.handle(NOW, Event::WsOpened { socket });
+    let opening: Vec<_> = e.prepared_actions(NOW).collect();
+    assert!(
+        !opening
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
+    );
     let text = r#"{"e":"fill","d":[{"id":"f1","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.1","fillValue":"100"},{"id":"f2","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.1","fillValue":"100","fillFee":"-2","realizePnl":"0"},{"id":"f3","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.1","fillValue":"100","fillFee":0,"realizePnl":-3},{"id":"f4","orderId":"42","symbol":"BTCUSDT","orderSide":"BUY","fillSize":"0.1","fillValue":"100","fillFee":{},"realizePnl":"NaN"}]}"#;
     for _ in 0..2 {
         e.handle(NOW, Event::WsMessage { socket, text });
@@ -1504,6 +1546,13 @@ fn position_row_without_identity_keeps_stored_positions_while_valid_peers_commit
 fn plain_limit_order_events_carry_no_trigger_type() {
     let (mut e, actions) = started(true);
     let socket = private_socket(&actions);
+    e.handle(NOW, Event::WsOpened { socket });
+    let opening: Vec<_> = e.prepared_actions(NOW).collect();
+    assert!(
+        !opening
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
+    );
     complete(&mut e, &actions, "[]", "[]");
     // WEEX order events put CONTRACT_PRICE with triggerPrice 0 on plain limit rows.
     e.handle(NOW, Event::WsMessage { socket, text: r#"{"e":"orders","d":[{"id":"702345678901234601","symbol":"BTCUSDT","orderSide":"BUY","type":"LIMIT","status":"NEW","size":"0.02","price":"69500","triggerPrice":"0","triggerPriceType":"CONTRACT_PRICE","updatedTime":"1773295701000"}]}"# });
