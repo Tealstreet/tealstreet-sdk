@@ -116,6 +116,16 @@ scheduler callback or callback under the nonce lock. Native response ACK and
 execution-during-cancel suppression then gate a later Place under the same
 command/journal. No simultaneous cancel/place egress or no-op protection.
 
+Local API proposal: dispatch-nonce-gated HttpReleaseView borrows the exact
+Context, release (including Attempt) and current engine Store, with no mutation
+or send authority. A defaulted object-safe Venue::validate_nonce_http_release
+receives pending plus this view. Engine fills it only for a genuine retained
+nonce Claim, after owner/Session validity and before pure admission/floor commit.
+No cached Store snapshot or arbitrary host view is accepted. First declare the
+read-only API and compile a late-Store-change RED; wire Claim only after core
+review. Existing HttpRelease registration, ordinary/OFF paths and parallel
+barrier refusal stay unchanged. Source size gates still cover all four artifacts.
+
 The separate future parallel nonce-group seam stays out of this cut. It needs
 complete member/subject/evolving-floor validation before any commit. Existing
 http_group_claim::prepare_group_commit publishes insert_group records before
