@@ -64,6 +64,8 @@ fn an_egress_refusal_redials_at_once_with_reject_route_and_reports_no_error() {
         let mut h = pre_login();
         let before = private(&h).len();
         h.private_message(refusal);
+        let now = h.now;
+        run_until(&mut h, now);
         let sockets = private(&h);
         assert_eq!(
             sockets.len(),
@@ -83,6 +85,8 @@ fn an_egress_refusal_redials_at_once_with_reject_route_and_reports_no_error() {
 fn later_refusals_in_a_streak_wait_for_backoff_and_still_leave_the_route() {
     let mut h = pre_login();
     h.private_message(IP_BOUND);
+    let now = h.now;
+    run_until(&mut h, now);
     let socket = private(&h).last().unwrap().0;
     h.event(Event::WsOpened { socket });
     let before = private(&h).len();
@@ -116,6 +120,8 @@ fn later_refusals_in_a_streak_wait_for_backoff_and_still_leave_the_route() {
 fn route_exhaustion_reports_once_stops_reconnecting_and_startup_settles() {
     let mut h = pre_login();
     h.private_message(IP_BOUND);
+    let now = h.now;
+    run_until(&mut h, now);
     let socket = private(&h).last().unwrap().0;
     h.event(Event::WsRouteExhausted { socket });
     assert_eq!(count(&h, WHITELIST), 1);
@@ -148,6 +154,8 @@ fn exhaustion_for_a_stale_private_socket_is_inert() {
     let mut h = pre_login();
     let stale = private(&h).last().unwrap().0;
     h.private_message(IP_BOUND);
+    let now = h.now;
+    run_until(&mut h, now);
     h.event(Event::WsRouteExhausted { socket: stale });
     assert_eq!(count(&h, WHITELIST), 0);
     let socket = private(&h).last().unwrap().0;

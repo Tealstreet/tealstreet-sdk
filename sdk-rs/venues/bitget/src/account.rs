@@ -1062,11 +1062,15 @@ impl BitgetFutures {
         self.account.route_refused = Some((code, msg.to_owned()));
         self.account.route_refusals = self.account.route_refusals.saturating_add(1);
         self.account.reject_route = true;
+        let Some(socket) = self.sockets[3].socket.take() else {
+            return;
+        };
+        cx.close(socket);
+        self.sockets[3].open = false;
         if self.account.route_refusals == 1 {
-            self.connect(cx, 3);
-        } else if let Some(socket) = self.sockets[3].socket {
-            cx.close(socket);
-            self.disconnected(cx, 3);
+            self.account.supervisor.retry_now(cx);
+        } else {
+            self.account.supervisor.retry(cx);
         }
     }
 
