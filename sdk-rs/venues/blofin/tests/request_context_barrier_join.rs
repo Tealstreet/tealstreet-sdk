@@ -411,10 +411,12 @@ fn both_refused_reports_the_last_refusal_as_native_does() {
         answer(&mut h, second.0, 200, second.1);
         let error = failure(&h, 7);
         assert_eq!(error.outcome, Some(Outcome::Rejected));
-        assert!(
-            error.message.contains(last),
-            "{long_first}: {}",
-            error.message
+        // The native oracle: the last failing arrival's exact text. The journal
+        // selects the earliest logical leg; the divergence awaits a ruling.
+        assert_eq!(
+            error.message,
+            format!("BloFin setting rejected: {last}"),
+            "{long_first}"
         );
     }
 }
