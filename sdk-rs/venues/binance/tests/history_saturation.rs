@@ -112,3 +112,26 @@ fn a_saturated_order_page_keeps_its_rows_and_marks_the_result_incomplete() {
         assert_eq!(marked(&h, 3), saturated, "limit {limit}");
     }
 }
+
+#[test]
+fn a_zero_order_limit_never_marks_a_page_saturated() {
+    let mut h = harness();
+    h.event(Event::Command(Command::Query {
+        command: 4,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(0.0),
+            to_ms: Some(1_000.0),
+            limit: Some(0),
+        },
+    }));
+    let page = h.take("/allOrders");
+    assert!(
+        page.url.contains("limit=0"),
+        "the wire keeps the caller's limit: {}",
+        page.url
+    );
+    h.reply(page.id, 200, "", &format!("[{}]", order(1)));
+    assert_eq!(rows(&h, 4), 1);
+    assert!(!marked(&h, 4), "a zero limit proves no saturation");
+}

@@ -122,7 +122,7 @@ fn rows<'a, W: Deserialize<'a>, T>(
 /// One page per window cannot prove the rest of a window empty once the venue
 /// filled the page.
 fn saturated(native: usize, limit: u32, what: &str) -> Option<String> {
-    (native > 0 && native >= limit as usize).then(|| {
+    (limit > 0 && native >= limit as usize).then(|| {
         format!("Binance {what} history is INCOMPLETE: a page returned its full limit of {limit}; later rows in that range were not fetched.")
     })
 }
