@@ -117,8 +117,9 @@ seam. Two native timing/traffic requirements do not fit a blind policy mapping:
   envelope. Current TrafficPolicy offers AnyText, PongOnly and TextAfterFirstPong;
   none means that native predicate. AnyText would let malformed text extend the
   60-second bound, while treating all valid data as Pong would consume it before
-  the financial reducer. Request an engine-owned typed codec traffic decision,
-  or an explicit owner disposition, before source. No venue receive-clock copy.
+  the financial reducer. The managed-sockets owner identifies the existing
+  expression or smallest shared typed codec traffic change before source. No
+  venue receive-clock copy.
 - The 180-second initial-payload bound starts at OPEN and is independent of the
   15-second challenge/ACK auth bound. Existing register_socket_feed_with_snapshot
   uses CONNECT origin and the same auth_timeout_ms, so it cannot be substituted.
@@ -129,8 +130,8 @@ seam. Two native timing/traffic requirements do not fit a blind policy mapping:
 
 Also pin stable-reset anchoring: native Futures supervision becomes Ready at
 OPEN, while managed Required auth's authenticated transition resets Supervisor's
-since at final ACK. Preserve native OPEN-based 30-second stability/reset behavior; the managed-sockets
-owner identifies the existing expression or smallest shared change. Auth latency
+since at final ACK. Preserve native OPEN-based 30-second stability/reset
+behavior; the managed-sockets owner identifies the existing expression or smallest shared change. Auth latency
 must not extend that anchor.
 These are review/source gates, not approved new APIs. No generic implementation
 belongs in this docs checkpoint. Any required shared seam gets its own plan,
