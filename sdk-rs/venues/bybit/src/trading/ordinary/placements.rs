@@ -86,6 +86,11 @@ impl BybitLinear {
             .intents
             .get_mut(&key)
             .expect("inserted above");
+        // An earlier call's lot may be live or may have reached the venue: no
+        // seal of this one, a remint refusal included, is Rejected or NotSent.
+        if intent.placed() {
+            let _ = cx.inherit_preflight_uncertainty(&preflight);
+        }
         if let Err(message) = intent
             .lots
             .iter_mut()
@@ -93,10 +98,6 @@ impl BybitLinear {
         {
             let _ = cx.fail_preflight(&preflight, not_sent(message));
             return;
-        }
-        // An earlier call may have reached the venue: no seal of this one is NotSent.
-        if intent.maybe_sent() {
-            let _ = cx.inherit_preflight_uncertainty(&preflight);
         }
         let receipts = intent.receipts();
         if !receipts.is_empty() {

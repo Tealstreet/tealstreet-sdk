@@ -100,8 +100,11 @@ impl Lot {
 }
 
 impl Intent {
-    pub(crate) fn maybe_sent(&self) -> bool {
-        self.lots.iter().any(Lot::maybe_sent)
+    /// A lot is live on Hyro or may have reached it.
+    pub(crate) fn placed(&self) -> bool {
+        self.lots
+            .iter()
+            .any(|lot| lot.maybe_sent() || matches!(lot.state, LotState::Accepted(_)))
     }
 
     pub(crate) fn ids(&self) -> String {
@@ -332,11 +335,7 @@ impl BybitLinear {
         if !matches!(intent.phase, Phase::Idle) {
             return;
         }
-        let placed = intent
-            .lots
-            .iter()
-            .any(|lot| lot.maybe_sent() || matches!(lot.state, LotState::Accepted(_)));
-        if success || !placed {
+        if success || !intent.placed() {
             self.trading.hyro.intents.remove(key);
         }
     }
