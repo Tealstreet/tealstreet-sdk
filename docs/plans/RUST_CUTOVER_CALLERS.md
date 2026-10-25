@@ -7588,6 +7588,36 @@ waited with no deadline. A reply that arrives after its read expired publishes
 nothing and opens no sockets. Admission or queue refusals fail promptly into
 the same native backoff. The TS-visible startup results are unchanged.
 
+## Bitget private-WS egress route parity (TS #8093)
+
+The Rust Bitget venue now matches TS #8093 on private-socket egress, for
+`bitget`, `bitgetusdc` and `bitgetinverse`:
+
+- **Egress refusals.** A pre-login 40018 (IP-bound key) or 40024 (restricted
+  location) leaves the refused route. It logs "Bitget private WS login refused
+  this egress IP (…); trying the next route" as a warning, not an error. Only
+  the first refusal of a streak redials at once; later refusals follow the
+  native backoff.
+- **Exhaustion.** When the host has no route left, Bitget logs one
+  `auth.rejected` error, "Bitget private WS login rejected: <code> <msg> — the
+  API key's IP whitelist allows none of Tealstreet's WebSocket egress IPs", and
+  stops the private socket. It is never `StartupFailed` and never a
+  deactivation. Startup still settles because it is REST-gated, and account
+  polling stands in for the stream.
+- **UTA routing.** The UTA (v3) private socket takes TS's `privateUta` route
+  instead of connecting direct. `packages/safe-cex/src/transport/tealstreet/routing/routingTable.ts`
+  drops its UTA `directUrls` bypass in this same cutover. The engine routing
+  plan gains `privateWsRoutes`.
+
+Host contract (TS, WASM and native are identical): `SocketContext.rejectRoute`
+(omitted when false) asks the host to advance exactly one route candidate. It
+composes with `recover`, which still means the same thing, but `recover`'s
+jump to the last route does not apply on that connect. With no route left, the
+host dials nothing and reports `wsRouteExhausted` after `connect` returns, as
+that socket's only terminal: no open or close follows it. A custom host that
+ignores the flag stays bounded by the venue's backoff, but loses route
+parity.
+
 ### TxFlow immediate local command custody
 
 Fifteen local occurrences now consume genuine command entry through shared Read

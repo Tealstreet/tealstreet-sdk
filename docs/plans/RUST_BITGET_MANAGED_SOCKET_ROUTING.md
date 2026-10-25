@@ -4,6 +4,8 @@ Plan only, 2026-10-25, claude-4yjlw0. This supersedes #1890 (`RUST_BITGET_UTA_RO
 Branch `feat/rust-bitget-managed-socket-routing` from landing `f3ed1f32bf0`.
 Reviewer for the shared socket API: claude-dazzy3.
 
+Status: dazzy3 CLEARed the legacy seam shape at `71fbebd9739`. The legacy-path seam is implemented on this branch: engine, Bitget, native host, WASM/JS host and TS transport. Managed adoption is deferred.
+
 ## Overseer rulings (2026-10-25, pending dazzy3's plan review)
 
 1. **The legacy-path seam goes first.** The `reject_route` / `WsRouteExhausted` seam on Bitget's legacy socket path, with the 40018/40024 evidence, may go to source after dazzy3 CLEARs this plan. It is measured against the 1,409,024 allowance.
