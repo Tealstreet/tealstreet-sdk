@@ -53,10 +53,6 @@ family_args() {
   elif [[ $family == woo ]]; then
     # Keep WOO ticker decoding throughput within the fixed CPU and size gates.
     build_args+=(--config 'profile.release.package.safe-cex-venue-woo.opt-level=3')
-  elif [[ $family == paradex ]]; then
-    # Keep standalone Paradex within the fixed size gate; public replay also gates CPU and memory.
-    build_args+=(--config 'profile.release.package.safe-cex-wasm.opt-level="z"'
-      --config 'profile.release.package.safe-cex-engine.opt-level=2')
   elif [[ $family == kucoin ]]; then
     # Derivatives pass z; Spot and combined builds keep the crate's throughput profile.
     build_args+=(--config 'profile.release.package.safe-cex-venue-kucoin.opt-level="z"')
