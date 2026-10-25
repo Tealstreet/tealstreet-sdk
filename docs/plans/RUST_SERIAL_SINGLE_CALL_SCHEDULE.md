@@ -114,3 +114,8 @@ Clippy passes serial and declared rows; formatting and full bans/ratchets pass.
 The qualifying full Rust run 40200956576 and general run 40200956635 are green
 on `38788da3380`. Current-tip integration requires the auditor's composed-tree
 check before publishing/landing; no source edit is hidden behind this carry.
+
+The subsequent AsterDEX landing `aec49a904bc` merges automatically. It changes
+no engine, host, registry or Bitget/Bybit source input. The README correction
+preserves every incoming byte and appends only this row plus one separator;
+`git diff 34999f973f9 HEAD -- docs/plans/README.md` removes zero tip lines.
