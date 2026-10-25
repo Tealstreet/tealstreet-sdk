@@ -287,15 +287,9 @@ impl<P> Cx<'_, P> {
         self.finish_sealed_command(id, Some(result), seal)
     }
 
-    /// Record that an earlier attempt of this intent may have reached the venue.
-    /// Monotonic: every later failure of this command projects at least Unknown.
-    /// It grants no send, resend, renewal, import or success authority; the
-    /// resulting Unknown follows the existing Unknown reconciliation.
+    #[inline]
     pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
-        self.io
-            .core
-            .request_contexts
-            .inherit_preflight_uncertainty(preflight)
+        self.core().inherit_preflight_uncertainty(preflight)
     }
 
     /// Failure before any plan was admitted proves this command sent no write;
@@ -321,5 +315,18 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         };
         self.finish_sealed_command(id, None, seal)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// Record that an earlier attempt of this intent may have reached the venue.
+    /// Monotonic: every later failure of this command projects at least Unknown.
+    /// It grants no send, resend, renewal, import or success authority; the
+    /// resulting Unknown follows the existing Unknown reconciliation.
+    pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
+        self.io
+            .core
+            .request_contexts
+            .inherit_preflight_uncertainty(preflight)
     }
 }

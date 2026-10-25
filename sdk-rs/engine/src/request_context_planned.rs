@@ -765,8 +765,26 @@ impl<P> Cx<'_, P> {
         Ok((handle, execution))
     }
 
+    #[inline]
+    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
+        self.core_ref().plan_slots(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
+    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
+        self.core_ref().plan_slots(plan)
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
     /// Structural availability only; issuing a slot requires its exact Plan,
     /// original eligibility and one-use reserved physical admission.
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
         let body = self
             .io
@@ -1009,27 +1027,9 @@ impl<P> Cx<'_, P> {
         Ok(leg)
     }
 
-    /// A resume drained with no delivery is the resumed attempt's custody for
-    /// the rest of this event only.
+    #[inline]
     fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {
-        if self.io.core.http_delivery.is_some() {
-            return;
-        }
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .plan_body(plan)
-            .expect("resumed Plan");
-        let request = body
-            .entries
-            .iter()
-            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *leg))
-            .expect("resumed call")
-            .admission
-            .attempt
-            .request;
-        self.io.core.session_resumed.push(request);
+        self.core().note_session_resume(plan, leg)
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
@@ -1201,36 +1201,9 @@ impl<P> Cx<'_, P> {
         Ok(context)
     }
 
-    /// Exact released DATA authority before any native or Store mutation.
+    #[inline]
     pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .validate_plan(plan, self.now)?;
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        let call = body
-            .entries
-            .iter()
-            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *context))
-            .ok_or(Error::Revoked)?;
-        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
-            return Err(Error::Revoked);
-        }
-        if self.now >= call.admission.deadline {
-            return Err(Error::TimedOut);
-        }
-        if !self
-            .io
-            .core
-            .managed_http
-            .get(&delivery.attempt.request)
-            .is_some_and(|managed| managed.released_delivery(delivery))
-        {
-            return Err(Error::Revoked);
-        }
-        Ok(())
+        self.core_ref().validate_plan_delivery(plan, context)
     }
 
     pub(crate) fn bind_read_plan_history(&mut self, plan: &Plan) -> Result<Plan, Error> {
@@ -1377,58 +1350,14 @@ impl<P> Cx<'_, P> {
         self.select_plan_retry(plan, slot, context)
     }
 
+    #[inline]
     fn select_plan_retry(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<Context, Error> {
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .validate_plan(plan, self.now)?;
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let index = body.schedule.ordinal(slot)?;
-        let call = body.entries[index]
-            .call
-            .as_ref()
-            .filter(|call| call.context == *context)
-            .ok_or(Error::Revoked)?;
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { .. }) {
-            return Err(Error::Revoked);
-        }
-        if call.selected >= call.terms.attempts {
-            return Err(Error::RetryForbidden);
-        }
-        call.window.physical_deadline(self.now)?;
-        let next = RequestId(call.ids.start);
-        let previous = delivery.attempt.request;
-        let predecessor = delivery.clone();
-        if context.operation() == Operation::Mutation {
-            self.io
-                .core
-                .request_contexts
-                .owner_entry_mut(plan.owner())
-                .unwrap()
-                .writes
-                .as_mut()
-                .ok_or(Error::State)?
-                .retry(previous, next)?;
-        }
-        self.io.retire_http_leg(context);
-        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
-        body.schedule
-            .retry(slot)
-            .expect("remaining declared credit");
-        body.entries[index]
-            .call
-            .as_mut()
-            .unwrap()
-            .select(self.now, Some(predecessor))
-            .expect("validated retry");
-        Ok(context.clone())
+        self.core().select_plan_retry(plan, slot, context)
     }
 
     /// Only a structurally complete plan may request success. Journal facts
@@ -1626,6 +1555,111 @@ impl<P> Cx<'_, P> {
         Ok(prepared)
     }
 
+    #[inline]
+    fn commit_plan_terminal(
+        &mut self,
+        plan: &Plan,
+        result: Option<String>,
+        prepared: conditional::PreparedPlanSeal,
+    ) -> Result<(), Error> {
+        self.core().commit_plan_terminal(plan, result, prepared)
+    }
+
+    #[inline]
+    fn rearm_plan(&mut self, plan: &Plan) {
+        self.core().rearm_plan(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// A resume drained with no delivery is the resumed attempt's custody for
+    /// the rest of this event only.
+    fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {
+        if self.io.core.http_delivery.is_some() {
+            return;
+        }
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .plan_body(plan)
+            .expect("resumed Plan");
+        let request = body
+            .entries
+            .iter()
+            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *leg))
+            .expect("resumed call")
+            .admission
+            .attempt
+            .request;
+        self.io.core.session_resumed.push(request);
+    }
+
+    /// Exact released DATA authority before any native or Store mutation.
+    // Only some feature combinations call this.
+    #[cfg_attr(
+        all(feature = "http-plans", not(feature = "serial-plans")),
+        allow(dead_code)
+    )]
+    #[inline]
+    pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
+        self.core_ref().validate_plan_delivery(plan, context)
+    }
+
+    fn select_plan_retry(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Context, Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let index = body.schedule.ordinal(slot)?;
+        let call = body.entries[index]
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context)
+            .ok_or(Error::Revoked)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { .. }) {
+            return Err(Error::Revoked);
+        }
+        if call.selected >= call.terms.attempts {
+            return Err(Error::RetryForbidden);
+        }
+        call.window.physical_deadline(self.now)?;
+        let next = RequestId(call.ids.start);
+        let previous = delivery.attempt.request;
+        let predecessor = delivery.clone();
+        if context.operation() == Operation::Mutation {
+            self.io
+                .core
+                .request_contexts
+                .owner_entry_mut(plan.owner())
+                .unwrap()
+                .writes
+                .as_mut()
+                .ok_or(Error::State)?
+                .retry(previous, next)?;
+        }
+        self.io.retire_http_leg(context);
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
+        body.schedule
+            .retry(slot)
+            .expect("remaining declared credit");
+        body.entries[index]
+            .call
+            .as_mut()
+            .unwrap()
+            .select(self.now, Some(predecessor))
+            .expect("validated retry");
+        Ok(context.clone())
+    }
+
     // One Cx-level terminal funnel, including conditional completion. Shared
     // execution observer projection hooks attach here, never re-run a journal.
     fn commit_plan_terminal(
@@ -1666,6 +1700,39 @@ impl<P> Cx<'_, P> {
         self.io.core.actions.push(serial::wake(timer, at_ms));
         #[cfg(not(feature = "serial-plans"))]
         self.io.core.actions.push(Action::SetTimer { timer, at_ms });
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let call = body
+            .entries
+            .iter()
+            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *context))
+            .ok_or(Error::Revoked)?;
+        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
+            return Err(Error::Revoked);
+        }
+        if self.now >= call.admission.deadline {
+            return Err(Error::TimedOut);
+        }
+        if !self
+            .io
+            .core
+            .managed_http
+            .get(&delivery.attempt.request)
+            .is_some_and(|managed| managed.released_delivery(delivery))
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(())
     }
 }
 
