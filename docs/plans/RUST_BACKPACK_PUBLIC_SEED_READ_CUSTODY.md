@@ -128,3 +128,27 @@ size receipts and run ID. Landing requires auditor exact-tree GO and guard.
   payload, schedule a timer, or reissue. Native failed-mark fallback is permitted.
   Original 17-test source prefix is byte-exact; now 20 executed: 5 GREEN, 15
   assertion RED, zero ignored. Corrected source remains unapplied pending review.
+
+- Corrected source artifact 97ca1c59 received hcm bounded runtime/source/API
+  CLEAR: completing native publication remains live; retirement precedes
+  successor/backoff work, and nonfinite retry scheduling is suppressed while
+  preserving failed-mark fallback. Applied exact runtime and startup-only
+  fixture 613a23e3 after m26 confirmed no unpublished overlap. A new-control
+  suffix allows only the exact expired preparation Cancel (one), no dispatch
+  or fresh work; original17 remain byte-exact. Focused20 now all GREEN.
+- Native fixture qualification, source-stage lifecycle controls and first-source
+  combined/Backpack WASM measurement remain before freeze/push.
+
+- First-source qualification: full Backpack294 PASS/0 FAIL/1 pre-existing ignored;
+  appended lifecycle target24/24 PASS covers exact precommit failure, delayed
+  preparation, 300 independent failures/recoveries with stale response injection,
+  and interrupted streamed catalogue cleanup. Strict scoped all-target Clippy,
+  changed-file fmt and bans/ratchets PASS. All330 original fixture assertions
+  token-exact; hcm exact fixture bundle671feac1 CLEAR. One Clippy-only let-chain
+  correction in the new pressure test preserves its assertions and original17.
+- Composed actual Paradex landing d3c734e4547 before first source commit. Plan
+  index and CALLERS resolved incoming plus own suffix once; source and inventory
+  composition automatic, reviewed Backpack runtime/fixture bytes exact. Only
+  the public-seed request fingerprint is removed; every foreign map preserved.
+- Required first-source combined/Backpack measurement begins on this commit;
+  no generic engine source changed, so no new Bybit/Bitget qualification needed.

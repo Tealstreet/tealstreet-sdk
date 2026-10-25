@@ -48,7 +48,7 @@ fn seed() -> (Driver, SocketId) {
         &r,
         r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","visible":true,"quantityIncrement":"0.01","priceIncrement":"0.01","minQuantity":"0.01","imfFunction":{"base":"0.02"}},{"symbol":"SOL_USDC","marketType":"SPOT","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.0);
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -416,8 +416,8 @@ fn failed_seed_reads_retry_independently_without_reopening_the_early_socket() {
         &markets,
         r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
     );
-    let requests: Vec<_> = e
-        .drain_actions()
+    let requests: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, 0.0)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -490,7 +490,7 @@ fn malformed_market_ticker_and_mark_rows_are_skipped_without_blocking_startup() 
     let mut logs = vec![];
     let mut socket = None;
     let mut requests = vec![];
-    for a in e.drain_actions() {
+    for a in safe_cex_engine::test_support::prepared_actions(&mut e, 0.0) {
         match a {
             Action::Http(r) => requests.push(r),
             Action::WsConnect { socket: s, .. } => socket = Some(s),

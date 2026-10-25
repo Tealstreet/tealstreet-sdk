@@ -392,11 +392,21 @@ fn nonfinite_released_event(failed: bool) {
                 !all.iter().any(|a| matches!(a, Action::SetTimer { .. })),
                 "nonfinite callback cannot schedule recovery"
             );
-            assert!(
-                !all.iter()
-                    .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_))),
-                "nonfinite callback cannot reissue work"
-            );
+            let mut cancelled = 0;
+            for action in all {
+                match action {
+                    Action::Http(_) => panic!("nonfinite callback cannot dispatch HTTP"),
+                    Action::ManagedHttp(action) => match *action {
+                        HttpAction::Cancel { preparation, .. } => {
+                            assert_eq!(Some(preparation), packet.preparation);
+                            cancelled += 1;
+                        }
+                        _ => panic!("nonfinite callback cannot prepare, bind or reissue work"),
+                    },
+                    _ => {}
+                }
+            }
+            assert_eq!(cancelled, 1, "expiry cancels its exact prepared resource");
         }
     }
 }
@@ -576,23 +586,22 @@ mod pressure {
         );
         let mut requests = vec![];
         for action in all {
-            if let Action::ManagedHttp(action) = action {
-                if let HttpAction::Prepare {
+            if let Action::ManagedHttp(action) = action
+                && let HttpAction::Prepare {
                     preparation,
                     request,
                     ..
                 } = *action
-                {
-                    e.http_prepared(
-                        1.,
-                        preparation,
-                        Prepared {
-                            id: request.id.0,
-                            expires_at: None,
-                        },
-                    );
-                    requests.push(request);
-                }
+            {
+                e.http_prepared(
+                    1.,
+                    preparation,
+                    Prepared {
+                        id: request.id.0,
+                        expires_at: None,
+                    },
+                );
+                requests.push(request);
             }
         }
         let permits: Vec<_> = e
@@ -635,4 +644,145 @@ mod pressure {
         assert!(e.store().loaded().tickers);
         assert_eq!(e.store().ticker(SYMBOL).unwrap().mark, 140.);
     }
+}
+#[test]
+fn preparation_failure_keeps_native_mark_fallback_and_recovery() {
+    let (mut e, packet) = issued(Seed::Marks, false);
+    let preparation = packet
+        .preparation
+        .expect("managed original established by source");
+    e.http_preparation_failed(
+        1.,
+        preparation,
+        safe_cex_engine::request_context::Error::Capacity,
+        safe_cex_engine::VenueError::new("public route unavailable"),
+    );
+    assert_eq!(e.store().ticker(SYMBOL).unwrap().mark, 141.);
+    assert!(!e.http_preparation_pending(preparation));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(!actions.iter().any(
+        |a| matches!(a, Action::ManagedHttp(action) if matches!(**action, HttpAction::Bind { .. }))
+    ));
+    let (timer, due) = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (751. ..=1001.).contains(&at_ms) => {
+                Some((timer, at_ms))
+            }
+            _ => None,
+        })
+        .expect("native retry after preparation failure");
+    e.handle(due, Event::TimerFired { timer });
+    let next = take(&mut packets(&mut e), Seed::Marks);
+    assert_ne!(next.request.id, packet.request.id);
+    release(&mut e, &next, due);
+    response(&mut e, &next, due + 1., 200, MARKS);
+    assert_eq!(e.store().ticker(SYMBOL).unwrap().mark, 140.);
+}
+
+#[test]
+fn delayed_preparation_cannot_release_at_new_observation_deadline() {
+    for seed in [Seed::Markets, Seed::Daily, Seed::Marks] {
+        let (mut e, packet) = issued(seed, false);
+        let preparation = packet
+            .preparation
+            .expect("source-stage managed observation");
+        e.http_prepared(
+            20_000.,
+            preparation,
+            Prepared {
+                id: packet.request.id.0,
+                expires_at: None,
+            },
+        );
+        assert!(!e.http_preparation_pending(preparation));
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(**action, HttpAction::Bind { .. }))));
+        response(&mut e, &packet, 20_001., 200, seed.body());
+        assert_unpublished(&e, seed);
+    }
+}
+
+#[test]
+fn repeated_native_mark_recoveries_do_not_exhaust_context_capacity() {
+    let (mut e, mut packet) = issued(Seed::Marks, true);
+    let mut now = 1.;
+    for _ in 0..300 {
+        e.handle(
+            now,
+            Event::HttpFailed {
+                request: packet.request.id,
+                error: "temporary outage",
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let (timer, due) = actions
+            .into_iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if at_ms > now && at_ms <= now + 30_000. => {
+                    Some((timer, at_ms))
+                }
+                _ => None,
+            })
+            .expect("one native recovery timer per completed observation");
+        e.handle(due, Event::TimerFired { timer });
+        let next = take(&mut packets(&mut e), Seed::Marks);
+        assert_ne!(next.request.id, packet.request.id);
+        assert!(next.preparation.is_some());
+        release(&mut e, &next, due);
+        response(&mut e, &packet, due, 200, MARKS);
+        assert_eq!(e.store().ticker(SYMBOL).unwrap().mark, 141.);
+        packet = next;
+        now = due + 1.;
+    }
+    response(&mut e, &packet, now, 200, MARKS);
+    assert_eq!(e.store().ticker(SYMBOL).unwrap().mark, 140.);
+}
+
+#[test]
+fn failed_stream_discards_unaccepted_catalogue_and_retries_native_payload() {
+    let (mut e, packet) = issued(Seed::Markets, true);
+    e.handle(
+        1.,
+        Event::HttpStart {
+            request: packet.request.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    let chunk = format!("[{},", &MARKETS[1..MARKETS.len() - 1]);
+    e.handle(
+        2.,
+        Event::HttpChunk {
+            request: packet.request.id,
+            data: chunk.as_bytes(),
+        },
+    );
+    assert!(!e.store().loaded().markets);
+    e.handle(
+        3.,
+        Event::HttpFailed {
+            request: packet.request.id,
+            error: "cut stream",
+        },
+    );
+    assert!(!e.store().loaded().markets);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let (timer, due) = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (753. ..=1003.).contains(&at_ms) => {
+                Some((timer, at_ms))
+            }
+            _ => None,
+        })
+        .expect("native catalogue recovery");
+    e.handle(due, Event::TimerFired { timer });
+    let next = take(&mut packets(&mut e), Seed::Markets);
+    release(&mut e, &next, due);
+    response(&mut e, &next, due + 1., 200, MARKETS);
+    assert_eq!(e.store().markets().len(), 1);
+    assert_eq!(e.store().markets()[0].symbol, SYMBOL);
 }
