@@ -3,7 +3,6 @@
   "sourceRoots": {
     "apexomni": "venues/apexomni/src/",
     "asterdex": "venues/asterdex/src/",
-    "backpack": "venues/backpack/src/",
     "binance": "venues/binance/src/",
     "bingx": "venues/bingx/src/",
     "bitget": "venues/bitget/src/",
