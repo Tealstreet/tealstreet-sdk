@@ -1627,15 +1627,14 @@ async fn healthy_binary_frames_reset_the_silent_connection_streak() {
 
 #[tokio::test]
 async fn signed_request_urls_are_absent_from_connection_and_body_errors() {
-    let (listener, _origin) = listener().await;
-    let address = listener.local_addr().unwrap();
-    drop(listener);
+    // Port zero cannot name a listener; a dropped ephemeral port can be reused
+    // by another test while this asynchronous connection is being attempted.
     let transport = NetworkTransport::new();
     let (sender, mut events) = mpsc::unbounded_channel();
     transport.request(
         http_request(
             800,
-            format!("http://{address}/private?api_key=secret-key&signature=secret-signature"),
+            "http://127.0.0.1:0/private?api_key=secret-key&signature=secret-signature".into(),
         ),
         sender,
     );
@@ -1860,9 +1859,8 @@ async fn routed_signed_network_notices(
 
 #[tokio::test]
 async fn signed_connection_and_body_failures_cannot_leak_through_any_native_notice() {
-    let (refused, refused_origin) = listener().await;
-    drop(refused);
-    let connection_notices = signed_network_notices(&refused_origin).await;
+    // Keep the failed destination independent of parallel loopback listeners.
+    let connection_notices = signed_network_notices("http://127.0.0.1:0").await;
     assert!(!connection_notices.is_empty());
 
     let (listener, origin) = listener().await;
