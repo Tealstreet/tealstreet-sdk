@@ -46,7 +46,7 @@ The other four share the same helper and need seeded order state.
 ## Inventory and size
 
 `venues/lighter/src/trading.rs` goes 15 fingerprints / 17 occurrences to
-6 occurrences, shrink-only; no other path changes. Local fresh builds on
+7 / 7: the ten refusals, shrink-only; no other path changes. Local fresh builds on
 `ba6fb191239`: Lighter 1,031,246 to 1,031,343 (+97) against 1,343,488;
 combined 13,894,756 to 13,894,837 (+81) against 14,155,776. CI gives the
 authoritative numbers.
