@@ -42,7 +42,7 @@ spelling is fixed by required review before implementation. Schematically:
 sign-req.d = {
   id, type: op, v: 2, exchangeName, accountName,
   request: {
-    attemptId, deadlineMs, receipt: SignReceipt, slot: CredentialSlot,
+    attemptId, deadlineMs, receipt: SignReceipt, slot: CredentialSlot, role,
     binding: { account, network, stableSubject, expectedCredential, generation },
     descriptor: closed family descriptor
   }
@@ -61,7 +61,11 @@ sign-res.d = {
   canonical decimal u64 JSON STRING end to end, never Number. A nonce-less
   request cannot acquire one in transport. Results echo exactly the original
   receipt; omitted, changed, extra or malformed facts refuse.
-- slot is the typed CredentialSlot from the immutable engine Selection. No
+- slot and role are typed metadata from the immutable engine Selection; role
+  preserves the declared Read/PrimaryRead reason/Mutation/SessionAuth intent,
+  never authority inferred from HTTP method. Peer family rules double-check
+  role/path/method/slot agreement. Exact metadata export is reviewed with m26ps4
+  and uufub4 before source. No
   KeyRef, extra-role reference or caller-selected peer key crosses the channel.
   accountName routes only within the authenticated account binding; never
   broadcast to other accounts. Envelope claims alone confer no authority.
@@ -200,6 +204,24 @@ inside original windows, and retire_session on rotation/revocation retires old
 browser/server/WS generations. This envelope grants no HTTP send or Session
 readiness by itself. Mode 3 custody/KMS provisioning remains outside this SDK
 plan and waits for Sam's explicit infra go; no resources are created here.
+
+## Deferred native-only setup gate
+
+The same shared companion records #8169's native setup prerequisite without
+implementing mode 3: shared safe-cex-crypto owns Stark CSPRNG key generation
+(rejection-sample [1,n-1]) and public-key derivation using the same Stark code as
+the provider. Return Zeroizing<Vec<u8>> directly into a trusted native-only byte
+install by move, with StarkDigest declared and public account-address credential
+bytes; produce the same Required Identities. Existing insert(KeyRef, Vec<u8>)
+clears algorithm declarations and is not this trusted install. Exact APIs stay
+with m26ps4's credential-core review; none is claimed present.
+
+No scalar JS String/JSON, Debug/export or second Stark implementation on the
+server path; retire/remove drops refs and zeroizes their bytes. This gate does
+not pretend existing device-held LocalSetup never handles a JS string. Mode 2
+browser/worker custody and mode 3 service custody stay distinct. #8169's approved
+Pantheon/KMS/encrypted-store topology is external work, with no resources,
+provisioning or source enabled by this document; mode 3 still waits for Sam.
 
 ## Rolling safety, evidence and delivery
 
