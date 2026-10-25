@@ -38,7 +38,7 @@ it.each([true, false])('preserves the explicit Bitunix clock despite legacy host
     command: idle,
     wsOpen: (_socket, now) => { loginTimes.push(now); return '[]'; },
     wsMessage: idle,
-    wsClose: idle,
+    wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,

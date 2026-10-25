@@ -57,7 +57,7 @@ const fixture = (
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noActions,
     wsMessage: noActions,
-    wsClose: noActions,
+    wsClose: noActions, wsRouteExhausted: noActions,
     httpStart: noActions,
     httpChunk: noActions,
     httpEnd: noActions,

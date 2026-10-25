@@ -3,7 +3,6 @@ import type { RoutingTable } from './types';
 
 import { isTokyoEgress } from '@tealstreet/http-over-websocket/src/egressRegion';
 import { exchangeMetadata } from '../../../exchangeMetadata';
-import { BASE_WS_PRIVATE_UTA_URL } from '../../../exchanges/bitget/bitget.types';
 
 // THE declarative routing table. Every value here was previously hardcoded and
 // scattered (getPrivateProxy's regex, the HOW TOKYO_EGRESS list, ~18 per-exchange
@@ -115,9 +114,8 @@ const okxeuWs: WsGroup = {
 const bitgetWs: WsGroup = {
   // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
   public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic, initialSilentConnects: 1 },
-  // Master's TS proxy/relay routing. The Rust engine still opens both classic and
-  // UTA private sockets on this channel, so its host hints and UTA direct bypass stay
-  // until the Rust Bitget venue adopts privateUta.
+  // Master's TS proxy/relay routing. The Rust engine host routes its UTA socket
+  // (v3) through privateUta by URL, so no UTA direct bypass remains.
   private: {
     kind: 'proxyConditional',
     host: WS.bitgetPrivate,
@@ -126,7 +124,6 @@ const bitgetWs: WsGroup = {
     relayWhenTunnelled: true,
     initialSilentConnects: 1,
     ignoredMessages: ['pong'],
-    directUrls: [BASE_WS_PRIVATE_UTA_URL],
   },
   privateUta: {
     kind: 'proxyConditional',
