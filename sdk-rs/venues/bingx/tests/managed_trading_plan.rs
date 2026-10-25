@@ -815,3 +815,99 @@ fn native_ack_state_cannot_be_used_as_a_signature_refusal_or_absence_proof() {
     assert_eq!(failures(&actions).len(), 1);
     assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
 }
+
+fn api_key(request: &HttpRequest) -> &str {
+    request
+        .headers
+        .iter()
+        .find(|(name, _)| *name == "X-BX-APIKEY")
+        .map(|(_, key)| key.as_ref())
+        .expect("signed read")
+}
+fn cancel_all(engine: &mut Engine<Bingx>, command: u32, now: f64) -> Vec<Action> {
+    engine.handle(
+        now,
+        Event::Command(Command::CancelSymbolOrders {
+            command,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    collect(engine, now)
+}
+fn cancel_all_sent(actions: &[Action]) -> bool {
+    actions.iter().any(|a| {
+        matches!(a, Action::Http(r) if r.method == Method::Delete && r.url.contains("/trade/allOpenOrders"))
+    })
+}
+fn fenced(actions: &[Action], command: u32) -> bool {
+    actions.iter().any(|a| {
+        matches!(a, Action::Notice(Notice::CommandFailed { command: id, error })
+            if *id == command
+                && error.message == "Placement outcome is uncertain; reconcile before cancel-all")
+    })
+}
+/// The clearing snapshot is Primary-signed even with a read key configured, and
+/// cancel-all is refused until it commits.
+fn assert_fence_clears_only_on_the_primary_snapshot(
+    engine: &mut Engine<Bingx>,
+    actions: &[Action],
+) {
+    let reads = order_reads(actions);
+    assert_eq!(reads.len(), 1, "one fresh reconciliation snapshot");
+    assert_eq!(api_key(&reads[0]), "primary-key", "PostUnknownOrderRead");
+    let refused = cancel_all(engine, COMMAND + 1, START + 3.);
+    assert!(fenced(&refused, COMMAND + 1));
+    assert!(!cancel_all_sent(&refused));
+    respond(
+        engine,
+        &reads[0],
+        START + 4.,
+        200,
+        r#"{"code":0,"data":{"orders":[]}}"#,
+    );
+    let admitted = cancel_all(engine, COMMAND + 2, START + 5.);
+    assert!(!fenced(&admitted, COMMAND + 2));
+    assert!(
+        cancel_all_sent(&admitted),
+        "a clean snapshot clears the fence"
+    );
+}
+
+#[test]
+fn lost_create_fences_cancel_all_until_the_primary_signed_snapshot() {
+    let mut e = engine();
+    place(&mut e, 1);
+    let first = packet(&collect(&mut e, START));
+    e.handle(
+        START + 1.,
+        Event::HttpFailed {
+            request: first.id,
+            error: "transport lost",
+        },
+    );
+    let actions = collect(&mut e, START + 1.);
+    assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Unknown));
+    assert_fence_clears_only_on_the_primary_snapshot(&mut e, &actions);
+}
+
+#[test]
+fn absent_cancel_fences_cancel_all_until_the_primary_signed_snapshot() {
+    let mut e = engine();
+    e.store_mut().set_orders(vec![open_order("old")]);
+    e.handle(
+        START,
+        Event::Command(Command::CancelOrders {
+            command: COMMAND,
+            ids: vec!["old".into()],
+        }),
+    );
+    let r = cancel_packet(&collect(&mut e, START));
+    let actions = respond(
+        &mut e,
+        &r,
+        START + 1.,
+        200,
+        r#"{"code":80016,"msg":"order not exist"}"#,
+    );
+    assert_fence_clears_only_on_the_primary_snapshot(&mut e, &actions);
+}

@@ -146,6 +146,7 @@ struct Harness {
     requests: Vec<HttpRequest>,
     done: Vec<Result<String, String>>,
     failures: Vec<safe_cex_engine::VenueError>,
+    receipted: std::collections::HashSet<String>,
     now: f64,
 }
 impl Harness {
@@ -180,6 +181,7 @@ impl Harness {
             requests: Vec::new(),
             done: Vec::new(),
             failures: Vec::new(),
+            receipted: Default::default(),
             now: 1_000.,
         };
         h.collect();
@@ -207,12 +209,19 @@ impl Harness {
                         })
                         .into_iter()
                         .collect();
-                    assert_eq!(
-                        std::mem::take(&mut receipts),
-                        expected,
+                    // A signature resend repeats an identity already receipted.
+                    let resent = receipts.is_empty()
+                        && expected
+                            .iter()
+                            .all(|r| self.receipted.contains(&r.identity));
+                    self.receipted
+                        .extend(expected.iter().map(|r| r.identity.clone()));
+                    assert!(
+                        resent || receipts == expected,
                         "receipt must precede the exact outgoing native identity: {}",
                         r.url
                     );
+                    receipts.clear();
                     self.requests.push(r);
                 }
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(Ok(result)),
@@ -1587,4 +1596,115 @@ fn rejected_entry_cannot_run_native_freshness_effects_or_start_a_write() {
     assert!(h.requests.is_empty());
     assert_eq!(h.failures.len(), 1);
     assert!(h.failures[0].message.contains("capacity"));
+}
+
+fn split_order(amount: f64) -> PlaceOrderOpts {
+    serde_json::from_value(serde_json::json!({
+        "symbol": "BTCUSDT", "type": "market", "side": "buy", "amount": amount
+    }))
+    .unwrap()
+}
+
+#[test]
+fn native_maximum_split_streams_every_lot_and_returns_every_accepted_id() {
+    // 10,000 lots of the market's 10.0 maximum: native `split()`'s exact bound.
+    let mut h = Harness::new(None);
+    h.place(vec![split_order(100_000.)]);
+    for lot in 0..10_000 {
+        assert_eq!(
+            h.requests.len(),
+            1,
+            "lot {lot}: one native write at a time: {:?}",
+            h.failures
+        );
+        let body: serde_json::Value = serde_json::from_str(h.body()).unwrap();
+        assert_eq!(body["quantity"], 10.0, "lot {lot}");
+        assert!(
+            h.done.is_empty(),
+            "lot {lot}: the command is still streaming"
+        );
+        h.reply(&format!(r#"{{"code":0,"data":{{"orderId":"{lot}"}}}}"#));
+    }
+    assert!(h.requests.is_empty());
+    let ids: Vec<String> = serde_json::from_str(h.done[0].as_ref().unwrap()).unwrap();
+    assert_eq!(
+        ids,
+        (0..10_000).map(|id| id.to_string()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn mid_split_signature_resend_and_refusal_keep_every_accepted_id() {
+    use safe_cex_engine::ErrorKind;
+    let mut h = Harness::new(None);
+    h.place(vec![split_order(30.)]);
+    h.reply(r#"{"code":0,"data":{"orderId":"lot-0"}}"#);
+    let first = h.body().to_owned();
+    h.reply(r#"{"code":100001,"msg":"Signature verification failed"}"#);
+    let resent: serde_json::Value = serde_json::from_str(h.body()).unwrap();
+    let first: serde_json::Value = serde_json::from_str(&first).unwrap();
+    assert_eq!(resent["clientOrderId"], first["clientOrderId"]);
+    h.reply(r#"{"code":0,"data":{"orderId":"lot-1"}}"#);
+    h.reply(r#"{"code":101204,"msg":"Insufficient margin"}"#);
+    assert!(h.requests.is_empty());
+    let [error] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures);
+    };
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::Rejected), None)
+    );
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["lot-0", "lot-1"]
+    );
+}
+
+/// cancelReplace runs STOP_ON_FAILURE, so a refusal may follow the cancel: native
+/// leaves its outcome unset, and no refusal on this path grants a resend.
+fn assert_refused_replace_has_no_outcome(body: &str, kind: Option<safe_cex_engine::ErrorKind>) {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.),
+        amount: None,
+    });
+    h.reply(body);
+    assert!(
+        h.requests.is_empty(),
+        "{body}: no resend and no further call"
+    );
+    let [error] = h.failures.as_slice() else {
+        panic!("{body}: {:?}", h.failures);
+    };
+    assert_eq!((error.kind, error.outcome), (kind, None), "{body}");
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|p| p.order_ids.is_empty()),
+        "{body}: no accepted ID may be invented"
+    );
+    assert_eq!(
+        h.engine.store().order(&order().id).unwrap().status,
+        OrderStatus::Open,
+        "{body}: the original stays until a read proves otherwise"
+    );
+}
+
+#[test]
+fn refused_cancel_replace_has_no_outcome() {
+    assert_refused_replace_has_no_outcome(
+        r#"{"code":100400,"msg":"invalid parameter"}"#,
+        Some(safe_cex_engine::ErrorKind::InvalidInput),
+    );
+}
+
+#[test]
+fn signature_refused_cancel_replace_has_no_outcome_and_no_resend() {
+    assert_refused_replace_has_no_outcome(
+        r#"{"code":100001,"msg":"Signature verification failed"}"#,
+        Some(safe_cex_engine::ErrorKind::AuthInvalid),
+    );
 }
