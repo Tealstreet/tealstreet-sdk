@@ -8594,8 +8594,8 @@ split validation, with no resend on uncertainty.
 
 Integrity/Internal, provider and local refusal fail strictly with their typed
 cause; accepted income prefixes recover only for native eligible released
-Network/physical Timeout or valid native business-envelope recovery. A malformed
-stream cannot publish an INCOMPLETE prefix. Engine-sealed unproven writes retain
+Network/physical Timeout or valid native business-envelope recovery. A typed stream
+integrity failure cannot publish an INCOMPLETE prefix. Engine-sealed unproven writes retain
 one exact deferred native cleanup: Store/fence state precedes the next command's
 planning, recovery I/O follows its admission, and no second terminal is emitted.
 Raw signing expiry plus 5000ms, immediate panic cancel-all and native per-row

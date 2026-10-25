@@ -282,7 +282,27 @@ and reuse, physical timeout, and released 408/500 followed immediately by
 cancel-all. The last control pins no InvalidInput, one original Unknown terminal,
 no resend, restored Store rows and the exact signing-expiry reconciliation fence.
 Strict all-target Phemex Clippy (-D warnings) passes. The local request dump is
-exactly the four holdouts, with no signing/credential growth. Full bans currently
-reports only stale foreign Backpack inventory drift against the moved remote;
-actual-tip integration must clear it before freeze. Paired Phemex/combined bytes
-and exact reviewer receipts remain separate gates; no CI or READY is claimed.
+exactly the four holdouts, with no signing/credential growth. Full bans passes after plain-merging actual tip c6a5c4bb0a4; the stale foreign
+Backpack row is gone. Exact source review and full CI remain separate gates;
+no READY is claimed.
+
+## First-source size pair and composition gate
+
+Frozen a634e821894 -> 7f6c35a3086, Rust1.99.0/Binaryen132, unchanged shipped
+web/node profiles and jobs4:
+
+| Bundle | Before bytes | After bytes | Delta |
+| --- | ---: | ---: | ---: |
+| Phemex | 1,139,332 | 1,231,469 | +92,137 |
+| Combined | 13,908,332 | 13,959,753 | +51,421 |
+
+Both existing budgets pass. The overseer accepted both deltas; combined has
+196,023 bytes remaining at this pair. Raw combined is 31,545,802 -> 31,653,471.
+The PR records the top ten positive raw Twiggy symbol deltas, normalizing Rust
+crate-disambiguator hashes. Renamed/extracted venue functions are paired with
+the removed originals, so their full bodies are not claimed as new shipped
+cost. No cheap behavior-preserving 5KB cut was identified: the largest genuine
+new item is the shared Plan admission instantiation, whose ownership checks
+cannot be discarded. No generic engine optimization is folded into this venue
+cutover. Re-measure combined on the actual composed landing tree after Bitget
+slice3; this first-source pair does not waive that landing gate.
