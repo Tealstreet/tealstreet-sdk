@@ -8709,3 +8709,25 @@ host nonce controls require its explicit `dispatch-nonce` forwarding feature.
 ### Backpack account GET observations
 
 Info, Positions, Balance and Orders each select one genuine installed Read identity from native-ready primary plus GET secondary, then hold a Background Read with a NEW 20s per-observation bound, no pacing and RetryPolicy::Never. Positions/Orders retain Root streaming; Info/Balance remain nonstreamed. Native revision/token fences govern publication independently of physical custody. DATA precedes rows, diagnostics and Store publication; exact retirement precedes corrective Balance, accepted repairs and original Next. Local configuration/selection refusals stay silent. Finite Capacity/TimedOut admission, the reviewed transient precommit kinds and owned expiry coalesce the existing 10s account poll only when absent; later polling creates a distinct observation. No immediate retry/Next or timer at nonfinite clocks. Native released transport/status/parse presentation and continuation remain intact. GET signing preserves native fractional receive-window truncation to zero; every non-GET still rejects zero. Direct constructors must install the valid read identity/provider alongside valid saved read status; registry construction supplies that atomic tuple. Raw nonstream writes and private WebSocket signing remain outside this adoption.
+
+
+### Seeded serial Session resend (engine API; GRVT adoption still separate)
+
+With serial-plans and session-bearer, a serial call may reserve two attempts.
+serial_plan_session_resend selects the same call's one remaining attempt from
+its exact DATA custody: a Mutation needs its classifier-created RefusedResend
+grant, and a Read keeps generic RetryPolicy Never. The selected attempt is seeded
+with the refused packet's bound Session revision and parks until a newer bundle
+is ready. It spends no additional logical call or refresh attempt. Existing
+write resend and Session resend share that one second credit. Engine-proven
+released Read transport failures may immediately continue as a new Read call;
+codec/integrity and unreleased failures cannot use that immediate path.
+
+The default-false status_exempt_refusal hook is venue-declared. Only a complete
+Unproven-status delivery (408 or 5xx) may consult it; a trusted full-envelope
+refusal then reaches DATA and the ordinary classified grant. Other and malformed
+bodies preserve Unknown, reconciliation and the fence. GRVT's parsed-code-1000
+override remains a separate adoption, with no status-wide grant or raw fallback.
+A parked operation expires Timeout/NotSent, while the command still follows its
+journal: released refusal plus an unreleased resend is Unknown with a fence and
+reconciliation; earlier IDs remain. No existing journal projection is changed.

@@ -304,3 +304,29 @@ and actual invalid-UTF8 Read ingress staying strict. The last control was RED
 against the initial source: a released integrity failure could otherwise use
 immediate continuation. Immediate retries require engine-recorded Network or
 physical-timeout provenance; existing delayed continuation behavior is preserved.
+
+
+### Local source checkpoint
+
+The implementation keeps the seed in the one live Serial call, as a Session
+generation and refused bound revision; it adds no owner map or secret cache.
+All selection, slot, delivery, binding, grant and window checks precede retry
+selection. The new managed attempt inherits the floor; an explicit foreign
+Session binding refuses before issue, and a serial continuation clears the seed.
+Read attempts=2 keep RetryPolicy Never and are admitted only for serial Session
+calls. Immediate Read continuation consumes only engine-recorded released
+Network/physical-timeout provenance. Generic retry and immediate write resend
+retain their existing gates and share the same declared second credit.
+
+The status hook runs only for complete ordinary Unproven deliveries, before
+unproven evidence. A request-id-scoped internal marker lets classify_write skip
+the status rule only for that callback; it is restored on exit. Public classifier
+APIs remain strict. NativeCodec and late deliveries never consult the hook.
+The implementation, seed storage and marker are non-default feature code; GRVT
+adoption and credential-only seams are unchanged.
+
+Local execution: 31 new controls pass (25 originals including the reviewed
+journal suffix correction, plus six source controls); the serial_ filter passes
+77 tests. Scoped clippy with warnings denied passes. Composed workspace checks,
+other feature modes, local bans, paired size measures, source review and final
+CI remain freeze gates, not results claimed by this local checkpoint.

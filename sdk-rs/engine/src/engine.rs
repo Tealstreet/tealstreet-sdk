@@ -1543,6 +1543,8 @@ struct IoCore {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    http_status_exempt: Option<RequestId>,
     // Reconcile reads the engine owes the venue, one per uncertain seal: the
     // symbols (`None` = all) and the earliest time to ask.
     #[cfg(feature = "order-locks")]
@@ -1677,6 +1679,8 @@ impl Default for IoCore {
             http_history_failure: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            http_status_exempt: None,
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             command_entry: None,

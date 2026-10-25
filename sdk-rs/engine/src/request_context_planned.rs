@@ -467,7 +467,14 @@ impl<P> Cx<'_, P> {
         .with_retry(policy.retry)?;
         let count = bound.logical_calls();
         let attempts = bound.physical_attempts();
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let session_read = serial
+            .as_ref()
+            .is_some_and(serial::Serial::allows_session_read_resend);
+        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+        let session_read = false;
         if policy.retry == crate::request_context::RetryPolicy::Never
+            && !session_read
             && schedule.declarations().any(|terms| terms.attempts > 1)
         {
             return Err(Error::Invalid);
@@ -2012,7 +2019,14 @@ impl ContextRegistry {
         let Ok(body) = self.plan_body_mut(&plan) else {
             return false;
         };
-        if !body.history_bound || body.history_latest_release != Some(delivery.attempt) {
+        let history = body.history_bound;
+        #[cfg(feature = "serial-plans")]
+        let serial = body.serial.is_some();
+        #[cfg(not(feature = "serial-plans"))]
+        let serial = false;
+        if (!history && !serial)
+            || (history && body.history_latest_release != Some(delivery.attempt))
+        {
             return false;
         }
         let Some(call) = body
@@ -2026,7 +2040,7 @@ impl ContextRegistry {
             return false;
         }
         call.released_failure = Some(origin);
-        true
+        history
     }
 }
 
