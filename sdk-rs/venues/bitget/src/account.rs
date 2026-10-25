@@ -99,6 +99,14 @@ pub struct Account {
     pub detected: bool,
     pub authenticated: bool,
     pub needs_recovery: bool,
+    /// Egress refusals (40018/40024) in the current private-login streak.
+    route_refusals: u8,
+    /// The last refusal's native code and text, reported once on exhaustion.
+    route_refused: Option<(String, String)>,
+    /// The next private connect asks the host to leave the refused route.
+    pub reject_route: bool,
+    /// Every route was refused: the private socket stops, as TS #8093.
+    pub route_exhausted: bool,
     poll: Option<TimerId>,
     /// Backs off the settings probe that gates private startup; transient failures never end it.
     probe: safe_cex_engine::startup::Backoff<()>,
@@ -1039,6 +1047,65 @@ impl BitgetFutures {
         }
     }
 
+    /// A login refused for this egress (40018 IP-bound key, 40024 restricted
+    /// location): leave the route. Only a streak's first refusal skips backoff,
+    /// so a host that ignores `reject_route` never redials hot.
+    fn refuse_route(&mut self, cx: &mut Cx<'_, Pending>, code: f64, msg: &str) {
+        let code = safe_cex_engine::num::format(code);
+        cx.notice(
+            Level::Warn,
+            code::AUTH_REJECTED,
+            format!(
+                "Bitget private WS login refused this egress IP ({code}); trying the next route"
+            ),
+        );
+        self.account.route_refused = Some((code, msg.to_owned()));
+        self.account.route_refusals = self.account.route_refusals.saturating_add(1);
+        self.account.reject_route = true;
+        let Some(socket) = self.sockets[3].socket.take() else {
+            return;
+        };
+        cx.close(socket);
+        self.sockets[3].open = false;
+        if self.account.route_refusals == 1 {
+            self.account.supervisor.retry_now(cx);
+        } else {
+            self.account.supervisor.retry(cx);
+        }
+    }
+
+    /// The host refused every route: report once and stop the private socket.
+    /// Startup is REST-gated, so it still settles; REST polling stands in.
+    pub(crate) fn private_route_exhausted(&mut self, cx: &mut Cx<'_, Pending>) {
+        if std::mem::replace(&mut self.account.route_exhausted, true) {
+            return;
+        }
+        self.account.supervisor.cancel(cx);
+        self.account.authenticated = false;
+        self.account.reject_route = false;
+        self.account.degraded = true;
+        self.sockets[3].open = false;
+        self.sockets[3].socket = None;
+        let detail = self
+            .account
+            .route_refused
+            .take()
+            .map_or_else(String::new, |(code, msg)| {
+                [code, msg]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            });
+        cx.notice(
+            Level::Error,
+            code::AUTH_REJECTED,
+            format!(
+                "Bitget private WS login rejected: {detail} — the API key's IP whitelist allows none of Tealstreet's WebSocket egress IPs"
+            ),
+        );
+    }
+
     pub(crate) fn promote_uta(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
         if self.account.uta || self.options.testnet || self.inverse() {
             return false;
@@ -1507,9 +1574,16 @@ impl BitgetFutures {
                     return;
                 }
                 self.account.authenticated = true;
+                self.account.route_refusals = 0;
+                self.account.route_refused = None;
                 self.account.supervisor.authenticated(cx);
                 self.private_subscribe(cx);
             } else {
+                if !self.account.authenticated
+                    && let Some(code) = code.filter(|code| [40018.0, 40024.0].contains(code))
+                {
+                    return self.refuse_route(cx, code, &header.msg);
+                }
                 if !self.account.authenticated
                     && !self.startup_ready(cx)
                     && let Some(code) = socket_key_rejection(text)

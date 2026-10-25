@@ -1929,7 +1929,7 @@ impl CommandWrites {
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.
     pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
-        let (error, budget) = self.failure_projection(fallback)?;
+        let (error, budget) = self.failure_projection(fallback, None)?;
         self.evidence = budget;
         self.sealed = true;
         Ok(error)
@@ -1939,12 +1939,14 @@ impl CommandWrites {
     /// evidence. This grants no completion, retry or observer authority. The
     /// execution owner supplies presentation-only observer termination errors.
     pub fn project_failure(&self, fallback: VenueError) -> Result<VenueError, Error> {
-        self.failure_projection(fallback).map(|(error, _)| error)
+        self.failure_projection(fallback, None)
+            .map(|(error, _)| error)
     }
 
     fn failure_projection(
         &self,
         fallback: VenueError,
+        note: Option<&str>,
     ) -> Result<(VenueError, evidence::EvidenceBudget), Error> {
         if self.sealed {
             return Err(Error::State);
@@ -2100,6 +2102,12 @@ impl CommandWrites {
         {
             error.message = format!("{} [truncated: {dropped} more refusals]", error.message);
         }
+        #[cfg(feature = "http-plans")]
+        if let Some(note) = note {
+            projected_budget.note(&mut error.message, note);
+        }
+        #[cfg(not(feature = "http-plans"))]
+        let _ = note;
         Ok((error, projected_budget))
     }
 
@@ -2107,6 +2115,7 @@ impl CommandWrites {
     pub(crate) fn prepare_seal(
         &self,
         error: Option<VenueError>,
+        note: Option<&str>,
     ) -> Result<PreparedWriteSeal, Error> {
         if error.is_none() && self.validate_success().is_ok() {
             return Ok(PreparedWriteSeal {
@@ -2114,10 +2123,12 @@ impl CommandWrites {
                 evidence: self.evidence,
             });
         }
-        let (error, evidence) =
-            self.failure_projection(error.unwrap_or_else(|| {
+        let (error, evidence) = self.failure_projection(
+            error.unwrap_or_else(|| {
                 VenueError::new("Command writes are not all confirmed accepted")
-            }))?;
+            }),
+            note,
+        )?;
         Ok(PreparedWriteSeal {
             failure: Some(error),
             evidence,
@@ -2340,6 +2351,12 @@ impl CommandWrites {
             .expect("streamed serial journal")
             .settled += 1;
     }
+}
+
+/// A venue note on a Plan failure that has no write journal to project it.
+#[cfg(feature = "http-plans")]
+pub(crate) fn note_unprojected(error: &mut VenueError, note: &str) {
+    evidence::note_unprojected(error, note);
 }
 
 fn effects_free(error: &VenueError) -> bool {

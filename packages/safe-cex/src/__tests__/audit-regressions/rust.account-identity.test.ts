@@ -128,7 +128,7 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
       ),
     wsOpen: idle,
     wsMessage: idle,
-    wsClose: idle,
+    wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,
