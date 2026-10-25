@@ -275,7 +275,8 @@ impl Dispatch {
     }
     pub fn hold(&mut self, outbound: Action) -> Result<(), SignError> {
         let id = self.next_id();
-        self.stage(id, outbound, Box::new(Plain), TimerId(0), 0.)?;
+        // A held frame is unsigned, so a signing latch never refuses it.
+        self.admit(id, outbound, Box::new(Plain), TimerId(0), 0.)?;
         if let Some(p) = self.pending.get_mut(&id) {
             p.deadline = f64::MAX;
             p.plain = true;
@@ -301,6 +302,16 @@ impl Dispatch {
         if self.refused {
             return Err(SignError::MissingKey);
         }
+        self.admit(id, outbound, step, timer, now)
+    }
+    fn admit(
+        &mut self,
+        id: RequestId,
+        outbound: Action,
+        step: Box<dyn SignStep>,
+        timer: TimerId,
+        now: f64,
+    ) -> Result<f64, SignError> {
         if self.pending.len() + self.outbound.len() >= 256 || !now.is_finite() {
             return Err(SignError::Unavailable);
         }

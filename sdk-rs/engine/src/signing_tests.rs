@@ -2220,3 +2220,55 @@ fn a_socket_login_with_an_invalid_shape_never_latches() {
         "the role reconnects as before"
     );
 }
+
+/// An unsigned frame held behind a socket's queued login is never refused by
+/// a latch that fired elsewhere; the socket stays open.
+#[test]
+fn a_latch_never_refuses_an_unsigned_frame_held_behind_a_login() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    let private =
+        || crate::SocketSpec::new("wss://venue.test/private").channel(SocketChannel::Private);
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    // Signing is serialized: the request is the head, the login waits.
+    let request = cx.request(
+        Method::Post,
+        "https://venue.test/private".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(request, Box::new(Step));
+    cx.route_request(request, RequestRoute::Primary);
+    let socket = cx.connect(private());
+    cx.send_signed(socket, "auth".into(), Box::new(Step));
+    engine.prepare_dispatch(1000.);
+    let (attempt, _) = staged(&mut engine);
+    engine.handle(
+        1001.,
+        Event::Signed {
+            attempt,
+            result: Err(SignError::MissingKey),
+        },
+    );
+    assert!(engine.drain_actions().any(|action| {
+        matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
+            if code == log_code::CONFIG_INVALID)
+    }));
+    let mut cx = Cx {
+        now: 1002.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.send(socket, "subscribe");
+    engine.prepare_dispatch(1002.);
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if s == socket)),
+        "the held frame does not tear the socket down"
+    );
+}
