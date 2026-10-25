@@ -132,9 +132,9 @@ assertions remain byte-exact; any unavoidable fixture carry is reviewed separate
 | --- | --- | --- |
 | Private mode not detected | park100ms and re-check native account state | native10s detection deadline; original caller receipt still wins |
 | Successful cursor/page or next window | accept page, retire leg, park100ms | same root, cursor/window and accepted rows retained |
-| Native response error, missing list/invalid row/cursor or genuine Network/physical Timeout | discard only provisional page, retire leg, park250/500/750ms | three retries then strict `Bitget history incomplete: ...`; no prefix-success or INCOMPLETE marker |
+| Native response error, malformed/non-UTF8 streamed envelope, missing list/invalid row/cursor or genuine Network/physical Timeout | discard only provisional page, retire leg, park250/500/750ms | three retries then strict `Bitget history incomplete: ...`; no prefix-success or INCOMPLETE marker |
 | Native body code40085, including HTTP408/5xx | native promote_uta, clear provisional page and reset detection deadline to now+10s, park100ms | preserve accepted earlier pages/windows/cursor; original root never resets |
-| Provider/signing/credential/preparation refusal, malformed stream or typed Internal/integrity failure | retain original typed cause and strictly reject root | no transport retry, no page-success or invented recovery |
+| Provider/signing/credential/preparation refusal or typed Internal from on_http_failed | retain original typed cause and strictly reject root | no transport retry, no page-success or invented recovery |
 | Repeated nonempty cursor or global1000-page cap | native strict error text | no successful prefix terminal |
 | Original root equality/expiry, whether in flight or parked | shared engine expiry seals once before venue DATA | matching continuation cleanup only; no timer-created replacement root |
 
@@ -169,12 +169,12 @@ Record the executed RED/GREEN count on this unchanged source before production.
 An unclaimed test intentionally withholds Claim; its bytes must never complete.
 
 The source-stage controls are additive after the frozen original full blob. The
-34-test funnel target now passes, including14 added controls for exact endpoint
+34-test funnel target passed at initial source e59c812b073, including14 added controls for exact endpoint
 Primary/Secondary/Public Prepare intents, queue and genuine provider refusal,
 held preparation through expiry, fresh signing stamp on Network retry, both root
 equality event orders,40085 detection reset without receipt renewal,408 without
-40085 at250/500/750ms, typed malformed/UTF-8 refusal with no retry or prefix
-success, stale pages,1000-page/repeated-cursor strict exhaustion, and retirement
+40085 at250/500/750ms, typed provider/integrity refusal with no retry or prefix
+success (malformed-stream classification corrected below), stale pages,1000-page/repeated-cursor strict exhaustion, and retirement
 under actual256-entry registry pressure. Existing native history14/14 and
 fee-asset2/2 pass unchanged, covering exact financial and window wire assertions.
 The only changes to two newly added controls after their first execution were
@@ -262,3 +262,34 @@ its exact header oracles are unchanged. The history provider-refusal control
 uses the real synchronous managed provider and pins the exact typed refusal and
 absence of native retry timers. Its orphaned legacy Sign helpers were removed.
 All other existing financial, trading, account and socket assertions are intact.
+
+## Malformed-stream review correction
+
+Dazzy3 M1 chooses native compatibility: on_stream_malformed forwards to the
+existing on_request_failed History arm, which validates exact delivery before
+spending native250/500/750ms retries. Malformed or non-UTF8 streamed envelopes
+therefore keep the native response budget, including accepted-page rollback.
+A typed Internal from on_http_failed remains strict; the real non-streamed
+HTTP500 invalid-UTF8 body pins that separate engine cause. No classification
+uses message text. Stale response failures retire only their own leg. An
+unexpected leg-retirement or rows-admission refusal attempts the original
+root's typed failure instead of silently abandoning a live query; an already
+retired root grants no additional terminal. Correction execution is pending.
+
+The initial e59c812b073 family measurement is1,479,255 bytes: +11,221 versus
+b0ee baseline1,468,034,2,707 above the current1,476,548 cap. This is an initial
+local result, not a qualifying CI family record or a corrected-source claim.
+The PR is held pending corrected-source measurement and a size disposition.
+Initial combined measurement remains in progress. Family sizes come from CI;
+a local combined measurement on the actual composed current tip is required
+before READY, independently of the wasm-families CI job.
+
+Overseer size ruling: proceed with a Bitget family cap equal to the qualifying
+CI family bytes rounded up to the next KiB, never above1,482,752 (1448KiB).
+Above that hard ceiling, stop and report. Native malformed-stream response
+retry compatibility is accepted. One short size pass found that the40085 probe
+and native envelope validation can reuse one identical Envelope<IgnoredAny>
+parse, preserving the original parse/venue errors and precedence. That small
+helper reuse is included in the correction; no separate saving is claimed.
+The raw first-source twiggy receipt is retained in scratch; query_request is
+already out of line, so no speculative inlining changes are introduced.

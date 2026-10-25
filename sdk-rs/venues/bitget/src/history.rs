@@ -815,21 +815,20 @@ impl BitgetFutures {
         if !r.delivered(cx) {
             return;
         }
-        if serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
-            .ok()
-            .is_some_and(|e| e.code.0 == Some(40085.0))
-            && self.promote_uta(cx)
-        {
+        let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body);
+        if envelope.as_ref().is_ok_and(|e| e.code.0 == Some(40085.0)) && self.promote_uta(cx) {
             r.page.clear();
             r.page_count = 0;
             r.invalid = false;
             r.detect_deadline = cx.now + 10_000.0;
-            if r.retire_leg(cx) {
-                self.history.waiting.push((cx.set_timer(100.0), r));
+            if let Err(error) = r.retire_leg(cx) {
+                self.query_strict_failed(cx, r, error.read_venue_error());
+                return;
             }
+            self.history.waiting.push((cx.set_timer(100.0), r));
             return;
         }
-        let valid = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
+        let valid = envelope
             .map_err(|e| e.to_string())
             .and_then(Envelope::checked);
         if response.status != 200 || valid.is_err() || r.invalid {
@@ -860,19 +859,23 @@ impl BitgetFutures {
         };
         let cursor = cursor.filter(|_| r.page_count > 0);
         r.page_count = 0;
-        {
+        let admitted = (|| {
             let leg = r.leg.as_ref().expect("validated physical page");
-            let Ok(mut page) = r.rows.admit(cx, leg) else {
-                return;
-            };
+            let mut page = r.rows.admit(cx, leg)?;
             for row in r.page.drain(..) {
                 if r.seen.insert(row.identity()) {
                     page.stage(row);
                 }
             }
             page.accept_page();
+            Ok::<_, safe_cex_engine::request_context::Error>(())
+        })();
+        if let Err(error) = admitted {
+            self.query_strict_failed(cx, r, error.read_venue_error());
+            return;
         }
-        if !r.retire_leg(cx) {
+        if let Err(error) = r.retire_leg(cx) {
+            self.query_strict_failed(cx, r, error.read_venue_error());
             return;
         }
         r.retries = 0;
@@ -909,7 +912,8 @@ impl BitgetFutures {
         });
     }
     pub(crate) fn query_failed(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
-        if !r.retire_leg(cx) {
+        if let Err(error) = r.retire_leg(cx) {
+            self.query_strict_failed(cx, r, error.read_venue_error());
             return;
         }
         if r.retries >= 3 {
@@ -934,9 +938,8 @@ impl BitgetFutures {
         mut r: Request,
         error: VenueError,
     ) {
-        if r.retire_leg(cx) {
-            let _ = r.rows.reject(cx, error);
-        }
+        let _ = r.retire_leg(cx);
+        let _ = r.rows.reject(cx, error);
     }
 
     pub(crate) fn query_http_failed(
@@ -982,10 +985,13 @@ impl Request {
             .as_ref()
             .is_some_and(|leg| self.rows.validate_delivery(cx, leg).is_ok())
     }
-    fn retire_leg(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+    pub(crate) fn retire_leg(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
         self.leg
             .take()
-            .is_none_or(|leg| cx.finish_http_context(&leg).is_ok())
+            .map_or(Ok(()), |leg| cx.finish_http_context(&leg))
     }
 }
 

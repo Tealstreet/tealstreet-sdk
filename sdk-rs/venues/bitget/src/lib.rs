@@ -965,12 +965,6 @@ impl Venue for BitgetFutures {
         if discovery_context(&pending).is_some() {
             let error = safe_cex_engine::startup::public_response_error(status, None, None);
             self.discovery_failed(cx, &pending, error);
-        } else if let Pending::History(request) = pending {
-            self.query_strict_failed(
-                cx,
-                *request,
-                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Internal),
-            );
         } else {
             self.on_request_failed(cx, pending, error);
         }
@@ -1056,9 +1050,11 @@ impl Venue for BitgetFutures {
             return;
         }
         match pending {
-            Pending::History(request) => {
+            Pending::History(mut request) => {
                 if request.delivered(cx) {
                     self.query_failed(cx, *request, error);
+                } else {
+                    let _ = request.retire_leg(cx);
                 }
             }
             Pending::Trade(request) => {

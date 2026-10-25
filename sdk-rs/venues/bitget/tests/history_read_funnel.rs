@@ -766,23 +766,20 @@ fn typed_integrity_failure_never_retries_or_returns_an_accepted_prefix() {
     let bad = h.take("/order/fills");
     h.event(safe_cex_engine::Event::HttpStart {
         request: bad.id,
-        status: 200,
+        status: 500,
         headers: "",
     });
-    // A complete list with a non-UTF8 envelope reaches the typed integrity path.
+    // Non-success bodies bypass the list splitter and report a typed engine failure.
     h.event(safe_cex_engine::Event::HttpChunk {
         request: bad.id,
-        data: b"{\"code\":\"00000\",\"data\":{\"fillList\":[],\"endId\":\"\"},\"bad\":\"\xff\"}",
+        data: &[0xff],
     });
     h.event(safe_cex_engine::Event::HttpEnd { request: bad.id });
     let result = terminals(&h);
     assert_eq!(result.len(), 1);
     let error = result[0].as_ref().unwrap_err();
     assert_eq!(error.kind, Some(ErrorKind::Internal));
-    assert_eq!(
-        error.message,
-        "response did not contain the expected list: {\"code\":\"00000\",\"data\":{\"fillList\":[],\"endId\":\"\"},\"bad\":\"�\"}"
-    );
+    assert_eq!(error.message, "response body is not UTF-8");
     let until = h.now + 2_000.;
     fire_new(&mut h, &before, until);
     assert_eq!(fills_requests(&h), 0);
@@ -1009,6 +1006,16 @@ fn stale_old_page_cannot_mutate_the_current_page_or_retry_state() {
     let second = h.take("/order/fills");
     for _ in 0..3 {
         h.reply(first.id, 500, r#"{"code":"40085"}"#);
+        h.event(safe_cex_engine::Event::HttpStart {
+            request: first.id,
+            status: 200,
+            headers: "",
+        });
+        h.event(safe_cex_engine::Event::HttpChunk {
+            request: first.id,
+            data: &[0xff],
+        });
+        h.event(safe_cex_engine::Event::HttpEnd { request: first.id });
     }
     assert!(terminals(&h).is_empty());
     h.reply(second.id, 200, &page("", "fresh"));
@@ -1221,34 +1228,48 @@ fn expiry_under_registry_pressure_retires_only_the_matching_parked_query() {
 }
 
 #[test]
-fn a_non_utf8_body_without_a_list_is_also_strict_integrity_failure() {
-    let mut h = Harness::classic();
-    let before = armed(&h);
-    query_with_wait(&mut h, fills(), 60_000);
-    let bad = h.take("/order/fills");
-    h.event(safe_cex_engine::Event::HttpStart {
-        request: bad.id,
-        status: 200,
-        headers: "",
-    });
-    h.event(safe_cex_engine::Event::HttpChunk {
-        request: bad.id,
-        data: &[0xff],
-    });
-    h.event(safe_cex_engine::Event::HttpEnd { request: bad.id });
-    let result = terminals(&h);
-    assert_eq!(result.len(), 1);
-    let error = result[0].as_ref().unwrap_err();
-    assert_eq!(error.kind, Some(ErrorKind::Internal));
-    assert!(
-        error
-            .message
-            .starts_with("response did not contain the expected list:")
-    );
-    let until = h.now + 2_000.;
-    fire_new(&mut h, &before, until);
-    assert_eq!(fills_requests(&h), 0);
-    assert_eq!(terminals(&h).len(), 1);
+fn native_malformed_streams_retry_the_same_page_and_preserve_accepted_rows() {
+    for body in [
+        &[0xff][..],
+        &b"{\"code\":\"00000\",\"data\":{\"fillList\":["[..],
+        &b"{\"code\":\"00000\",\"data\":{\"fillList\":[],\"endId\":\"\"},\"bad\":\"\xff\"}"[..],
+    ] {
+        let mut h = Harness::classic();
+        let before = armed(&h);
+        query_with_wait(&mut h, fills(), 60_000);
+        h.respond("/order/fills", 200, &page("next", "accepted"));
+        h.timer_after(100.);
+        for delay in [250., 500., 750.] {
+            let bad = h.take("/order/fills");
+            assert!(bad.url.contains("idLessThan=next"));
+            let failed_at = h.now;
+            h.event(safe_cex_engine::Event::HttpStart {
+                request: bad.id,
+                status: 200,
+                headers: "",
+            });
+            h.event(safe_cex_engine::Event::HttpChunk {
+                request: bad.id,
+                data: body,
+            });
+            h.event(safe_cex_engine::Event::HttpEnd { request: bad.id });
+            assert!(
+                terminals(&h).is_empty(),
+                "native malformed response remains retryable"
+            );
+            fire_new(&mut h, &before, failed_at + delay - 1.);
+            assert_eq!(fills_requests(&h), 0);
+            fire_new(&mut h, &before, failed_at + delay);
+            assert_eq!(fills_requests(&h), 1);
+        }
+        h.respond("/order/fills", 200, &page("", "recovered"));
+        let result = terminals(&h);
+        assert_eq!(result.len(), 1);
+        let rows: Value = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 2);
+        assert_eq!(rows[0]["id"], "accepted");
+        assert_eq!(rows[1]["id"], "recovered");
+    }
 }
 
 #[test]

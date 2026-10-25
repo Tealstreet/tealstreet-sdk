@@ -8838,3 +8838,9 @@ cause and consume no transport retry. Native response compatibility, including
 and strict incomplete failure remain; no prefix success or INCOMPLETE marker is
 introduced. Expiry removes only this owner’s parked work. The unrelated account
 completion remains the one Bitget legacy request site.
+
+Bitget malformed/non-UTF8 streamed envelopes keep native250/500/750ms response
+retries after exact delivery validation. They are distinct from typed Internal
+engine failures delivered through on_http_failed, which remain strict (including
+a non-streamed response body the engine cannot decode). No retry is authorized
+by error-message text.
