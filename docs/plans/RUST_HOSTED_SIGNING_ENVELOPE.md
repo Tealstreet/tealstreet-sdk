@@ -142,10 +142,12 @@ sign-res.d = {
   Bind the cached decision to the account and descriptor; a changed descriptor
   under that authority refuses too. This grants no peer nonce reservation or
   counter. Real repair has a fresh task and receipt, as specified above.
-  Bound concurrent work and replay state per authenticated account, with a
-  sanitized full-map refusal before callback; pin the existing limit or a
-  separately reviewed numeric limit before source, without cross-account
-  starvation or eviction that permits a replay before its deadline.
+- Declared follow-up (security F3; not a plan-landing blocker): bound concurrent
+  work and replay state per authenticated account, with sanitized full-map
+  refusal before callback. Pin the existing limit or a separately reviewed
+  numeric limit in that follow-up, preventing cross-account starvation and
+  eviction that permits replay before the original deadline. No unbounded map
+  is authorized in the interim.
 - Callback headers cannot replace authentication. First Kraken/Stark descriptors
   need no callback header authority; existing HmacSha256 presentation policies
   remain unchanged. Error text never includes preimages, refs, keys or results.
@@ -216,9 +218,10 @@ spelling preserved and no prefix/wildcard grant:
 | Futures | PUT | /derivatives/api/v3/leveragepreferences |
 | Spot | POST | /0/private/Balance; /0/private/OpenOrders; /0/private/GetWebSocketsToken; /0/private/AddOrder; /0/private/AmendOrder; /0/private/CancelOrder |
 
-Every other method/path refuses before callback. In particular no Spot Withdraw,
-WithdrawCancel or WalletTransfer, nor any Futures transfer/withdrawal endpoint,
-is authorized. No /secondary-test fixture path is a production grant. The
+Every other method/path refuses before callback. In particular Spot
+/0/private/Withdraw, /0/private/WithdrawCancel and /0/private/WalletTransfer,
+and all Futures transfer and withdrawal endpoints are explicitly excluded.
+No /secondary-test fixture path is a production grant. The
 secretless origin cannot verify a peer MAC; this closed peer check must prevent
 an origin from obtaining signatures for arbitrary Kraken account operations.
 
@@ -246,10 +249,29 @@ stays device-held under the main authority. No batch claim beyond the current
 explicit delegated limitation. GRVT is secp256k1/EIP-712; Lighter is ECgFp5:
 neither is enabled or treated as Stark by this plan.
 
+The same closed allowlist rule applies to Stark: only the rows below authorize
+a signature; every other op/method/path or type refuses before callback, even
+with otherwise valid fields. This is not a /v1/ prefix grant.
+
+| Descriptor variant | Method | Exact native target and constraint |
+| --- | --- | --- |
+| paradex.auth | POST | Signed Request path is exactly /v1/auth, empty body. Native HTTP target is /v1/auth/{subkey}, with subkey derived from the provider-confirmed bound public subkey, never an arbitrary path argument. |
+| paradex.order create | POST | /v1/orders, or /v1/orders/batch only for the single-order native representation already allowed under delegated signing; no multi-order batch capability. |
+| paradex.order modify | PUT | /v1/orders/{encoded_order_id}, the one encoded component derived from the same typed modify id in the signed preimage and native body. |
+
+The trusted network selects the existing native host. No arbitrary host, route,
+query, schema or body can expand these rows. Onboarding, subkey registration,
+withdrawal, transfer, wallet/account/permission changes, cancel-by-signature and
+unknown operations remain excluded even under a valid-looking auth/order tag.
+The signed /v1/auth path and native subkey-suffixed HTTP target are distinct
+native facts, not interchangeable inputs. Pin positive targets and rejected
+method/path/type substitutions in originals before source.
+
 The descriptor carries the exact named domain/schema revision and typed fields,
 not arbitrary type definitions, a digest or free-form JSON. Peer binds account,
 chain/network, expected public subkey, slot and generation to its own account.
-Auth freezes POST, /v1/auth, empty body, timestamp seconds and expiration seconds.
+Auth freezes POST, signed /v1/auth, its bound native subkey target, empty body,
+timestamp seconds and expiration seconds.
 Order freezes native market, BUY/SELL, order type, decimal size/price strings,
 signature timestamp milliseconds and modify order id where applicable. Reject
 unknown market/side/type, malformed decimal/felt and field/unit substitution.
@@ -324,6 +346,10 @@ travel only in bounded SignResult/native payload; JWT only at native auth/WS.
 
 Originals precede source and retain existing hosted HmacSha256 wire controls:
 
+The closed family allowlists (security F1) and duplicate-refusal rule (F2) are
+mandatory before this plan lands, per the overseer. Their RED controls below
+must execute before source; F3 remains the explicitly declared follow-up above.
+
 1. Closed schema/version/op/capability/slot/subject/network/generation failures
    invoke no signing callback and do not enter the server fatal-error streak.
    Cross-account routing, slot fallback, unknown op disguised as http/ws-auth,
@@ -332,6 +358,9 @@ Originals precede source and retain existing hosted HmacSha256 wire controls:
    post-encode send refusal, including UTF-8 byte length rather than JS length.
    Every excluded Kraken withdrawal/transfer/wallet path under an otherwise
    valid descriptor refuses before callback, alongside exact allowlist positives.
+   Paradex auth/create/modify positives and every excluded operation, changed
+   method/path, auth subkey substitution and multi-order batch also pin the
+   same no-callback refusal; a valid tag never bypasses the closed rules.
 2. Complete receipt presence/equality, exact nonce/descriptor/header/form,
    malformed u64 and 32/64-byte graph/result controls; literal vectors plus
    independent Node/Python HMAC and independent Stark verification.
