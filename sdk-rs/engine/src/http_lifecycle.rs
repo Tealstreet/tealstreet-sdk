@@ -623,6 +623,12 @@ impl<P> Cx<'_, P> {
                 generation => generation,
             },
         };
+        #[cfg(feature = "serial-plans")]
+        if let Some((seeded, _)) = registry.serial_session_seed(context)
+            && generation != Some(seeded)
+        {
+            return Err(Error::Revoked);
+        }
         if let Some(generation) = generation {
             self.io.core.request_contexts.reserve_leg_bearer()?;
             self.io.reserve_bearer_bound(generation)?;
@@ -864,6 +870,19 @@ impl<P> Cx<'_, P> {
         };
         #[cfg(not(feature = "session-bearer"))]
         let intent = context.routing_intent();
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let floor = self
+            .io
+            .core
+            .request_contexts
+            .serial_session_seed(&context)
+            .map(|(_, floor)| floor);
+        let managed_bearer = bearer.and_then(Bearer::new);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let managed_bearer = managed_bearer.map(|mut bearer| {
+            bearer.floor = floor;
+            bearer
+        });
         let lifecycle = Lifecycle::with_deadline(
             context,
             Attempt {
@@ -885,7 +904,7 @@ impl<P> Cx<'_, P> {
                 signing_attempt,
                 recipe: None,
                 intent,
-                bearer: bearer.and_then(Bearer::new),
+                bearer: managed_bearer,
                 #[cfg(feature = "http-mutation-barriers")]
                 group,
                 waiting_route: None,
@@ -935,6 +954,33 @@ impl<P> Io<P> {
                 && managed.lifecycle.accepts_response()
                 && managed.validate(&self.core.request_contexts, now).is_ok()
         })
+    }
+
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(super) fn serial_session_revision(
+        &self,
+        delivery: &request_context_registry::Delivery,
+    ) -> Result<(u64, u64), Error> {
+        let managed = self
+            .core
+            .managed_http
+            .get(&delivery.attempt.request)
+            .ok_or(Error::Revoked)?;
+        if !managed.released_delivery(delivery) {
+            return Err(Error::Revoked);
+        }
+        let bearer = managed.bearer.ok_or(Error::Invalid)?;
+        if !self
+            .core
+            .request_contexts
+            .session_generation_live(bearer.generation)
+        {
+            return Err(Error::Revoked);
+        }
+        Ok((
+            bearer.generation,
+            bearer.bound_revision().ok_or(Error::State)?,
+        ))
     }
 
     #[inline]
@@ -1688,12 +1734,16 @@ impl<V: Venue> Engine<V> {
             self.io.core.http_delivery = previous;
         }
         self.io.core.request_contexts.exit_delivery(&delivery);
+        #[cfg(feature = "repair-mutations")]
+        self.repair_delivered(&delivery, now);
         self.finish_event_scope(now);
         self.sweep_executions(now);
         self.flush_preflight_readiness(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }
+        #[cfg(feature = "repair-mutations")]
+        self.flush_repair_notices(now);
     }
 
     /// Fail the attempts a Session retire fenced, each through the common
@@ -2036,6 +2086,13 @@ impl<V: Venue> Engine<V> {
                                 self.io.core.order_locks.note_command_write(id);
                             }
                         }
+                        #[cfg(feature = "repair-mutations")]
+                        Owner::Repair { generation } => super::repair_core::repair_released(
+                            &self.io.core.repairs,
+                            &mut self.io.core.order_locks,
+                            generation,
+                            managed.lifecycle.context(),
+                        ),
                         _ => {}
                     }
                 }
@@ -2430,7 +2487,12 @@ impl<V: Venue> Engine<V> {
                 self.io.core.http_history_failure = None;
             }
             let previous = self.io.core.http_delivery.replace(delivery.clone());
-            if let Some(error) = proof.error() {
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            let exempt = proof.error().is_some()
+                && self.venue.status_exempt_refusal(&pending.value, response);
+            #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+            let exempt = false;
+            if let Some(error) = proof.error().filter(|_| !exempt) {
                 let venue = &self.venue;
                 let recorded = self.io.core.request_contexts.unproven_result(
                     &delivery,
@@ -2488,6 +2550,13 @@ impl<V: Venue> Engine<V> {
                 );
                 self.io.core.http_write_reply =
                     Some((response.status, response.headers.to_owned()));
+                #[cfg(feature = "repair-mutations")]
+                let previous_data = self.begin_repair_data(Some(request));
+                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+                let previous_exempt = std::mem::replace(
+                    &mut self.io.core.http_status_exempt,
+                    exempt.then_some(request),
+                );
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -2497,10 +2566,18 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
+                #[cfg(feature = "repair-mutations")]
+                self.end_repair_data(previous_data);
                 self.io.core.http_write_reply = None;
+                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+                {
+                    self.io.core.http_status_exempt = previous_exempt;
+                }
             }
             self.io.core.http_delivery = previous;
             self.io.core.request_contexts.exit_delivery(&delivery);
+            #[cfg(feature = "repair-mutations")]
+            self.repair_delivered(&delivery, now);
             self.io.discard_managed(request);
         }
         drop(record);
@@ -2651,10 +2728,14 @@ mod tests {
     include!("request_context_plan_independence_tests.rs");
     #[cfg(feature = "serial-plans")]
     include!("request_context_serial_plan_tests.rs");
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    include!("request_context_serial_session_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
     #[cfg(feature = "sign-meta")]
     include!("sign_meta_tests.rs");
+    #[cfg(feature = "repair-mutations")]
+    include!("repair_tests.rs");
 
     /// Bearer bundle attach and Bind-admission units (`session-bearer` only).
     #[cfg(feature = "session-bearer")]

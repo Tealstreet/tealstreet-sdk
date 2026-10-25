@@ -38,24 +38,26 @@ fn request(actions: Vec<Action>, path: &str) -> RequestId {
 }
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
 fn started() -> (Engine<WeexFutures>, SocketId) {
+    started_at(1_773_295_700_000.0)
+}
+fn started_at(observation: f64) -> (Engine<WeexFutures>, SocketId) {
     let mut e = engine();
-    e.start(1_773_295_700_000.0);
-    let id = request(
-        e.prepared_actions(1_773_295_700_000.0).collect(),
-        "exchangeInfo",
-    );
-    response(&mut e, id, INFO);
-    let actions: Vec<_> = e.prepared_actions(1_773_295_700_000.0).collect();
+    e.start(observation);
+    let id = request(e.prepared_actions(observation).collect(), "exchangeInfo");
+    response_at(&mut e, id, observation, INFO);
+    let actions: Vec<_> = e.prepared_actions(observation).collect();
     let daily = request(actions.clone(), "24hr");
     let book = request(actions, "bookTicker");
-    response(
+    response_at(
         &mut e,
         daily,
+        observation,
         r#"[{"symbol":"BTCUSDT","lastPrice":"102623.90","priceChangePercent":"-1.96","volume":"176145.66489","quoteVolume":"18115688543.1"}]"#,
     );
-    response(
+    response_at(
         &mut e,
         book,
+        observation,
         r#"[{"symbol":"BTCUSDT","bidPrice":"102623.8","askPrice":"102623.9"}]"#,
     );
     let socket = e
@@ -65,7 +67,7 @@ fn started() -> (Engine<WeexFutures>, SocketId) {
             _ => None,
         })
         .unwrap();
-    e.handle(1_773_295_700_000.0, Event::WsOpened { socket });
+    e.handle(observation, Event::WsOpened { socket });
     e.drain_actions().for_each(drop);
     (e, socket)
 }
@@ -94,20 +96,22 @@ fn documented_public_payloads_and_ping() {
 #[test]
 fn depth_ignores_old_frames_and_heals_gaps_with_buffered_diffs() {
     let (mut e, socket) = started();
+    let observation = 1_773_295_700_000.0;
     e.handle(
-        0.0,
+        observation + 0.0,
         Event::Command(Command::SubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let id = request(e.drain_actions().collect(), "/depth");
-    response(
+    let id = request(e.prepared_actions(observation + 0.0).collect(), "/depth");
+    response_at(
         &mut e,
         id,
+        observation + 0.0,
         r#"{"lastUpdateId":160,"bids":[["103435.9","2"]],"asks":[["103436.1","1.215"]]}"#,
     );
     e.handle(
-        1.0,
+        observation + 1.0,
         Event::WsMessage {
             socket,
             text: r#"{"e":"depth","s":"BTCUSDT","U":161,"u":161,"b":[["103435.9","2.1"]],"a":[]}"#,
@@ -115,26 +119,27 @@ fn depth_ignores_old_frames_and_heals_gaps_with_buffered_diffs() {
     );
     assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(103435.9, 2.1)]);
     e.handle(
-        2.0,
+        observation + 2.0,
         Event::WsMessage {
             socket,
             text: r#"{"e":"depth","s":"BTCUSDT","U":160,"u":160,"b":[["103435.9","9"]],"a":[]}"#,
         },
     );
     assert_eq!(e.book("BTCUSDT").unwrap().bids()[0].1, 2.1);
-    e.drain_actions().for_each(drop);
+    e.prepared_actions(observation + 2.0).for_each(drop);
     e.handle(
-        3.0,
+        observation + 3.0,
         Event::WsMessage {
             socket,
             text: r#"{"e":"depth","s":"BTCUSDT","U":163,"u":163,"b":[["103435.9","0"]],"a":[]}"#,
         },
     );
     assert!(e.book("BTCUSDT").is_none());
-    let id = request(e.drain_actions().collect(), "/depth");
-    response(
+    let id = request(e.prepared_actions(observation + 3.0).collect(), "/depth");
+    response_at(
         &mut e,
         id,
+        observation + 3.0,
         r#"{"lastUpdateId":162,"bids":[["103435.9","2.1"]],"asks":[["103436.1","1.215"]]}"#,
     );
     assert!(e.book("BTCUSDT").unwrap().bids().is_empty());
@@ -164,7 +169,7 @@ fn truncated_stream_does_not_load_markets() {
 }
 #[test]
 fn websocket_candles_allow_two_hours_but_rest_rejects_it() {
-    let (mut e, socket) = started();
+    let (mut e, socket) = started_at(0.0);
     e.handle(
         0.0,
         Event::Command(Command::SubscribeCandles {
@@ -172,6 +177,7 @@ fn websocket_candles_allow_two_hours_but_rest_rejects_it() {
             interval: safe_cex_engine::model::Interval::H2,
         }),
     );
+    e.prepare_dispatch(0.0);
     assert!(
         e.drain_actions().any(
             |a| matches!(a, Action::WsSend { text, .. } if text.contains("kline_2h_LAST_PRICE"))
@@ -235,55 +241,59 @@ fn silent_socket_is_closed_and_scheduled_for_reconnect() {
 #[test]
 fn old_snapshots_and_failures_cannot_replace_a_resubscribed_book() {
     let (mut e, _) = started();
+    let observation = 1_773_295_700_000.0;
     let subscribe = || {
         Event::Command(Command::SubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         })
     };
-    e.handle(1.0, subscribe());
-    let old = request(e.drain_actions().collect(), "/depth");
+    e.handle(observation + 1.0, subscribe());
+    let old = request(e.prepared_actions(observation + 1.0).collect(), "/depth");
     e.handle(
-        2.0,
+        observation + 2.0,
         Event::Command(Command::UnsubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
-    e.handle(3.0, subscribe());
-    let new = request(e.drain_actions().collect(), "/depth");
-    response(
+    e.handle(observation + 3.0, subscribe());
+    let new = request(e.prepared_actions(observation + 3.0).collect(), "/depth");
+    response_at(
         &mut e,
         new,
+        observation + 3.0,
         r#"{"lastUpdateId":200,"bids":[["100","2"]],"asks":[]}"#,
     );
-    response(
+    response_at(
         &mut e,
         old,
+        observation + 3.0,
         r#"{"lastUpdateId":100,"bids":[["100","1"]],"asks":[]}"#,
     );
     assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(100.0, 2.0)]);
     e.handle(
-        4.0,
+        observation + 4.0,
         Event::Command(Command::UnsubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
-    e.handle(5.0, subscribe());
-    let old = request(e.drain_actions().collect(), "/depth");
+    e.handle(observation + 5.0, subscribe());
+    let old = request(e.prepared_actions(observation + 5.0).collect(), "/depth");
     e.handle(
-        6.0,
+        observation + 6.0,
         Event::Command(Command::UnsubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
-    e.handle(7.0, subscribe());
-    let new = request(e.drain_actions().collect(), "/depth");
-    response(
+    e.handle(observation + 7.0, subscribe());
+    let new = request(e.prepared_actions(observation + 7.0).collect(), "/depth");
+    response_at(
         &mut e,
         new,
+        observation + 7.0,
         r#"{"lastUpdateId":300,"bids":[["100","3"]],"asks":[]}"#,
     );
     e.handle(
-        8.0,
+        observation + 8.0,
         Event::HttpFailed {
             request: old,
             error: "late reset",
@@ -294,20 +304,22 @@ fn old_snapshots_and_failures_cannot_replace_a_resubscribed_book() {
 #[test]
 fn malformed_depth_is_not_an_authoritative_deletion() {
     let (mut e, socket) = started();
+    let observation = 1_773_295_700_000.0;
     e.handle(
-        0.0,
+        observation + 0.0,
         Event::Command(Command::SubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let id = request(e.drain_actions().collect(), "/depth");
-    response(
+    let id = request(e.prepared_actions(observation + 0.0).collect(), "/depth");
+    response_at(
         &mut e,
         id,
+        observation + 0.0,
         r#"{"lastUpdateId":160,"bids":[["100","2"]],"asks":[]}"#,
     );
     e.handle(
-        1.0,
+        observation + 1.0,
         Event::WsMessage {
             socket,
             text: r#"{"e":"depth","s":"BTCUSDT","U":161,"u":161,"b":[["100","oops"]],"a":[]}"#,
@@ -375,13 +387,14 @@ fn requested_candles_decode_variable_length_rows_and_sort_by_open_time() {
 
 #[test]
 fn active_tickers_send_incremental_diffs_and_identical_updates_send_nothing() {
-    let (mut e, _) = started();
+    let (mut e, _) = started_at(0.0);
     e.handle(
         1.0,
         Event::Command(Command::SetTickerSymbols {
             symbols: vec!["ETHUSDT".into()],
         }),
     );
+    e.prepare_dispatch(1.0);
     assert!(e.drain_actions().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("UNSUBSCRIBE") && text.contains("BTCUSDT@ticker"))));
     e.handle(
         2.0,
@@ -389,6 +402,7 @@ fn active_tickers_send_incremental_diffs_and_identical_updates_send_nothing() {
             symbols: vec!["BTCUSDT".into()],
         }),
     );
+    e.prepare_dispatch(2.0);
     assert!(e.drain_actions().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("SUBSCRIBE") && text.contains("BTCUSDT@ticker"))));
     e.handle(
         3.0,
@@ -396,6 +410,7 @@ fn active_tickers_send_incremental_diffs_and_identical_updates_send_nothing() {
             symbols: vec!["BTCUSDT".into()],
         }),
     );
+    e.prepare_dispatch(3.0);
     assert!(
         !e.drain_actions()
             .any(|a| matches!(a, Action::WsSend { .. }))
@@ -412,7 +427,7 @@ fn public_candle_reads_wait_for_the_shared_ip_ban() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let depth = request(e.drain_actions().collect(), "/depth");
+    let depth = request(e.prepared_actions(now + 10.).collect(), "/depth");
     e.handle(
         now + 11.,
         Event::HttpResponse {
@@ -569,7 +584,7 @@ fn rest_book_queries_leave_live_depth_generation_and_ticker_account_state_unchan
             symbol: "BTCUSDT".into(),
         }),
     );
-    let id = request(e.drain_actions().collect(), "/depth");
+    let id = request(e.prepared_actions(at + 1.0).collect(), "/depth");
     response_at(
         &mut e,
         id,
@@ -692,7 +707,7 @@ fn rest_book_queries_leave_live_depth_generation_and_ticker_account_state_unchan
             symbol: "BTCUSDT".into(),
         }),
     );
-    let seed = request(e.drain_actions().collect(), "/depth");
+    let seed = request(e.prepared_actions(at + 9.0).collect(), "/depth");
     response_at(
         &mut e,
         query,
