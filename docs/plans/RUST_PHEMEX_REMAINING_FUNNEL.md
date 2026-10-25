@@ -2,7 +2,8 @@
 
 Owner: codex-ih35js. Engine reviewer: claude-fe7lgm or claude-dazzy3.
 Original source base: 7ada358c4460ec1e0965f776f5494c628efb3cbd.
-Status: plan plus executed originals; production is unchanged. Scope excludes
+Status: supported-path source implemented locally after original-control review.
+Source review, paired size measurement and full CI remain gates. Scope excludes
 commandless late repair under the overseer ruling.
 
 ## Scope and preservation
@@ -81,8 +82,9 @@ admission; do not mutate them for an unadmitted command.
 
 Use admit_serial_plan with SerialCall{Mutation, timeout_ms:20000, attempts:1}
 and SerialPolicy{Primary credential, pacing:None, refusals_complete:false}.
-No root wall-clock or added step limit. Phemex's 1000-lot cap is per input order;
-keep multi-input jobs and sequential cancel/replacement/bracket ordering.
+No root wall-clock or added step limit. Preserve native per-input safe-split
+checks and total 1000-order job validation, including multi-input jobs and
+sequential cancel/replacement/bracket ordering.
 Empty keyed jobs use done_empty_plan, no dummy call. Issue the available slot
 through plan_leg_context and request_signed_managed with the unchanged recipe.
 
@@ -234,3 +236,53 @@ precedence, 1000 split calls with ordered IDs, depth buffering and mixed cancel
 Unknown/row restoration. The separately executed unchanged native late-repair
 control passes. Target source contains no fake managed constructor or numeric
 fallback. Strict test-target Clippy (-D warnings) and scoped formatting pass.
+
+## First source checkpoint
+
+The supported paths now use the reviewed SelectedRead roots/legs and serial
+Mutation Plan. The request manifest drops 28 occurrences to the four named
+repair holdouts above, with no new sender. Public optional-key selection uses
+its own policy over the same trusted identities; private account/read selection
+and the unsigned PublicTrades sender remain as landed. No generic engine,
+provider recipe or host source changes are included.
+
+Released 408/5xx responses are sealed Unknown by the engine without venue DATA.
+The exact owner-retirement hook therefore retains only the live native write
+for deferred settlement. Before the next Cx callback processes its input, the
+venue restores native optimistic rows and records the raw signing-expiry plus
+5000ms reconciliation state. On command entry, Store restoration and state
+recording precede planning, while account-refresh/reconcile I/O follows genuine
+command admission: allocating recovery IDs before begin_preflight would revoke
+its fresh entry. The existing account helper is split into state recording and
+its unchanged scheduling wrapper. Retirement creates no terminal, retry or
+response authority. Successful/failed native reducers remove their jobs before
+retirement, so settlement cannot repeat. Empty cancel-all still warns and
+records its late-cancel obligation before done_empty_plan, after the genuine
+credential-checked Preflight, with no dummy call.
+
+The 20s child bound now includes route preparation, provider work and signing
+queue time. History/income retain the original caller receipt; serial writes
+have no whole-job timer or step-count cap. Strict typed integrity/provider/local
+failures cannot recover accepted income prefixes; released Network/physical
+Timeout recovery and native valid-envelope accepted-prefix recovery remain.
+Original history transport fixtures now supply Network explicitly, rather than
+using a generic Internal error to represent a connection loss.
+
+Native fixture changes drive real Prepare/Bind/Claim transitions. The immutable
+selection is asserted at Prepare.intent; the released Primary packet has no
+route override. Timer fixtures select the still-live native timer after managed
+HTTP timer cancellation. Existing wire, numerical, order-status, reconciliation
+and terminal assertions remain; trading.rs tests are byte-exact to the base.
+Probe wrappers forward the landed release/reconciliation/retirement hooks.
+
+Scoped execution: all 313 Phemex tests pass, zero ignored, including all 65
+unchanged trading tests. The dedicated target now has 27 passing controls:
+its 22 originals plus strict integrity/prefix rollback, caller-root equality
+and reuse, physical timeout, and released 408/500 followed immediately by
+cancel-all. The last control pins no InvalidInput, one original Unknown terminal,
+no resend, restored Store rows and the exact signing-expiry reconciliation fence.
+Strict all-target Phemex Clippy (-D warnings) passes. The local request dump is
+exactly the four holdouts, with no signing/credential growth. Full bans currently
+reports only stale foreign Backpack inventory drift against the moved remote;
+actual-tip integration must clear it before freeze. Paired Phemex/combined bytes
+and exact reviewer receipts remain separate gates; no CI or READY is claimed.

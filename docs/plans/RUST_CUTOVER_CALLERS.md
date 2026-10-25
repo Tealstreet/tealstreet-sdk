@@ -8564,3 +8564,30 @@ The remaining conservative discovery macro witness is retained. The old stale
 response fixture's no-action count is explicitly superseded by exactly one
 ClearTimer for the retired managed HTTP deadline; no native publication,
 fallback, recovery, notice or poll timer is permitted in that suffix.
+
+
+### Phemex supported remaining funnel
+
+History, income, optional-key public discovery/depth/candles and command writes
+use managed selection and completion ownership. Private selection remains
+Secondary then Primary; lookup and writes stay Primary. Public optional-key
+selection preserves Secondary-only configurations. The 20s child deadline now
+covers preparation/provider/queue time, while Read roots keep the original caller
+receipt. Serial writes preserve native unbounded duration and finite native
+split validation, with no resend on uncertainty.
+
+Integrity/Internal, provider and local refusal fail strictly with their typed
+cause; accepted income prefixes recover only for native eligible released
+Network/physical Timeout or valid native business-envelope recovery. A malformed
+stream cannot publish an INCOMPLETE prefix. Engine-sealed unproven writes retain
+one exact deferred native cleanup: Store/fence state precedes the next command's
+planning, recovery I/O follows its admission, and no second terminal is emitted.
+Raw signing expiry plus 5000ms, immediate panic cancel-all and native per-row
+restoration are retained.
+
+Four unchanged legacy fingerprints remain exclusively for commandless late
+repair: lib.rs fc8a5b682da0, 34b6cbe60cec, 6cf35cca0977 and trading.rs
+e6f9b79a027f. Their removal requires the separate constrained known-order
+cancel-repair core plan, owned by codex-ih35js and reviewed by claude-fe7lgm,
+with a second real venue consumer before approval. No Background Mutation,
+Session-auth substitute, fabricated command or new legacy sender is permitted.

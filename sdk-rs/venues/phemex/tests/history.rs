@@ -365,7 +365,7 @@ fn history_waits_for_the_shared_rate_limit_deadline() {
     let timer = output
         .into_iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } => {
+            Action::SetTimer { timer, at_ms } if at_ms == now + 2_000. => {
                 assert_eq!(at_ms, now + 2_000.0);
                 Some(timer)
             }
@@ -790,7 +790,7 @@ fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
             .iter()
             .any(|(k, v)| k.eq_ignore_ascii_case("x-phemex-access-token") && v == "primary-key")
     );
-    assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+    assert_eq!(r.route, None);
     respond(&mut e, &a, "[]", false);
     assert_eq!(
         result(&mut e).unwrap(),
@@ -981,8 +981,12 @@ mod owned_income {
                     .expect("first failure rejects");
                 assert_eq!(
                     error.kind,
-                    Some(ErrorKind::Internal),
-                    "callback combines transport and decode failures"
+                    Some(if failure == 0 {
+                        ErrorKind::Network
+                    } else {
+                        ErrorKind::Internal
+                    }),
+                    "typed transport and native response failures stay distinct"
                 );
             }
         }
@@ -1048,7 +1052,7 @@ mod owned_income {
                 .any(|action| matches!(action, Action::Notice(Notice::CommandDone { .. })))
         );
         assert!(output.iter().any(|action| matches!(action,
-            Action::Notice(Notice::CommandFailed { command: 10, error }) if error.kind == Some(ErrorKind::Internal)
+            Action::Notice(Notice::CommandFailed { command: 10, error }) if error.kind == Some(ErrorKind::Network)
         )), "no eligible output was accepted; failure must stay typed");
     }
 
@@ -1074,7 +1078,7 @@ mod owned_income {
         let output = actions(&mut e);
         assert!(markers(&output).is_empty(), "owner 42 has no accepted rows");
         assert!(output.iter().any(|action| matches!(action,
-            Action::Notice(Notice::CommandFailed { command: 42, error }) if error.kind == Some(ErrorKind::Internal)
+            Action::Notice(Notice::CommandFailed { command: 42, error }) if error.kind == Some(ErrorKind::Network)
         )));
         assert!(
             !output
@@ -1217,7 +1221,7 @@ mod owned_bounded {
                 assert_eq!(errors.len(), 1, "exactly one failure: {output:?}");
                 assert_eq!(
                     errors[0].kind,
-                    Some(if axis == 2 && failure == 0 {
+                    Some(if failure == 0 {
                         ErrorKind::Network
                     } else {
                         ErrorKind::Internal
@@ -1298,10 +1302,10 @@ mod owned_bounded {
             );
             let output = actions(&mut e);
             no_result_or_gap(&output);
-            let kind = if axis == 2 {
+            let kind = if axis <= 2 {
                 ErrorKind::Network
             } else {
-                ErrorKind::Internal
+                unreachable!()
             };
             assert!(output.iter().any(|a| matches!(a,
                 Action::Notice(Notice::CommandFailed { command: 10, error })
@@ -1359,12 +1363,21 @@ mod owned_bounded {
             let distinct = FILL.replace("5c3d96e1-8874-53b6-b6e5-9dcc4d28b4ab", "second");
             respond(&mut e, &first, &format!("[{FILL},{distinct}]"), streamed);
             let output = actions(&mut e);
+            let terminals: Vec<_> = output
+                .iter()
+                .filter(|action| {
+                    matches!(
+                        action,
+                        Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+                    )
+                })
+                .collect();
             let [
                 Action::Notice(Notice::CommandDone {
                     command: 10,
                     result,
                 }),
-            ] = output.as_slice()
+            ] = terminals.as_slice()
             else {
                 panic!("one successful owner: {output:?}");
             };
@@ -1383,7 +1396,17 @@ mod owned_bounded {
             );
             let output = actions(&mut e);
             no_result_or_gap(&output);
-            let [Action::Notice(Notice::CommandFailed { command: 42, error })] = output.as_slice()
+            let terminals: Vec<_> = output
+                .iter()
+                .filter(|action| {
+                    matches!(
+                        action,
+                        Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+                    )
+                })
+                .collect();
+            let [Action::Notice(Notice::CommandFailed { command: 42, error })] =
+                terminals.as_slice()
             else {
                 panic!("one failed peer: {output:?}");
             };
@@ -1398,7 +1421,16 @@ mod owned_bounded {
         respond(&mut e, &page, "[{}]", true);
         let output = actions(&mut e);
         no_result_or_gap(&output);
-        let [Action::Notice(Notice::CommandFailed { command: 10, error })] = output.as_slice()
+        let terminals: Vec<_> = output
+            .iter()
+            .filter(|action| {
+                matches!(
+                    action,
+                    Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+                )
+            })
+            .collect();
+        let [Action::Notice(Notice::CommandFailed { command: 10, error })] = terminals.as_slice()
         else {
             panic!("legacy lookup rejection: {output:?}");
         };

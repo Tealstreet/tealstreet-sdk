@@ -534,6 +534,9 @@ fn native_signed_history_uses_secondary_but_lookup_stays_primary() {
     ] {
         let mut e = seeded(true, true);
         let a = ask(&mut e, NOW, id, q);
+        if id == 32 {
+            assert!(a.iter().any(|a| matches!(a,Action::ManagedHttp(action) if matches!(action.as_ref(),HttpAction::Prepare { intent:safe_cex_engine::request_context::RoutingIntent::Primary,.. }))));
+        }
         let a = release(&mut e, NOW, a);
         let r = wire(&a, path);
         assert_eq!(
@@ -545,7 +548,7 @@ fn native_signed_history_uses_secondary_but_lookup_stays_primary() {
             key
         );
         if id == 32 {
-            assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
+            assert_eq!(r.route, None);
         }
     }
 }
@@ -816,4 +819,261 @@ fn native_mixed_cancel_rows_stop_unknown_and_restore_only_refused_rows() {
         OrderStatus::Open
     );
     assert!(!requests(&a).iter().any(|r| r.method != Method::Get));
+}
+
+fn corrupt_body(e: &mut TestEngine, now: f64, request: &HttpRequest) -> Vec<Action> {
+    let mut out = at(
+        e,
+        now,
+        Event::HttpStart {
+            request: request.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    out.extend(at(
+        e,
+        now,
+        Event::HttpChunk {
+            request: request.id,
+            data: &[0xff],
+        },
+    ));
+    out.extend(at(
+        e,
+        now,
+        Event::HttpEnd {
+            request: request.id,
+        },
+    ));
+    out
+}
+#[test]
+fn managed_private_integrity_failures_keep_the_typed_cause_without_retry() {
+    for q in [fills(), income()] {
+        let mut e = seeded(true, true);
+        let a = ask(&mut e, NOW, 801, q);
+        let path=if a.iter().any(|a| matches!(a,Action::ManagedHttp(action) if matches!(action.as_ref(),HttpAction::Prepare {request,..} if request.url.contains("tradeAccountDetail")))) {"tradeAccountDetail"} else {"g-futures/trades"};
+        let a = release(&mut e, NOW, a);
+        let output = corrupt_body(&mut e, NOW + 1., &wire(&a, path));
+        let result = terminal(&output, 801);
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].as_ref().unwrap_err().kind,
+            Some(ErrorKind::Internal)
+        );
+        assert!(
+            !output
+                .iter()
+                .any(|action| matches!(action, Action::Http(_)) || matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(),HttpAction::Prepare {..} | HttpAction::Bind {..} | HttpAction::BindGroup {..})))
+        );
+    }
+}
+#[test]
+fn income_network_recovers_only_the_accepted_prefix_and_integrity_discards_it() {
+    for integrity in [false, true] {
+        let mut e = seeded(true, true);
+        let a = ask(&mut e, NOW, 802, income());
+        let a = release(&mut e, NOW, a);
+        let row = r#"[{"typeDesc":"REALIZED_PNL","amountRv":"1","balanceRv":"101","createTime":500,"currency":"USDT"}]"#;
+        let mut a = reply(&mut e, NOW + 1., &wire(&a, "tradeAccountDetail"), 200, row);
+        let mut pages = 0;
+        let second = loop {
+            a = release(&mut e, NOW + 1., a);
+            let current = wire(&a, "tradeAccountDetail");
+            if current.url.contains("currency=USDC") {
+                break current;
+            }
+            pages += 1;
+            assert!(pages <= 4, "native USDT coverage must finish before USDC");
+            a = reply(&mut e, NOW + 1., &current, 200, "[]");
+        };
+        let output = if integrity {
+            corrupt_body(&mut e, NOW + 2., &second)
+        } else {
+            at(
+                &mut e,
+                NOW + 2.,
+                Event::HttpFailed {
+                    request: second.id,
+                    error: "physical transport loss",
+                },
+            )
+        };
+        let result = terminal(&output, 802);
+        assert_eq!(result.len(), 1);
+        if integrity {
+            assert_eq!(
+                result[0].as_ref().unwrap_err().kind,
+                Some(ErrorKind::Internal)
+            );
+        } else {
+            let rows: Value = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
+            assert_eq!(rows.as_array().unwrap().len(), 1);
+            assert_eq!(rows[0]["income"], 1.);
+        }
+        assert!(
+            !output
+                .iter()
+                .any(|a| matches!(a, Action::Http(_)) || matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(),HttpAction::Prepare {..} | HttpAction::Bind {..} | HttpAction::BindGroup {..})))
+        );
+    }
+}
+#[test]
+fn original_root_equality_is_strict_in_both_event_orders_and_reuse_keeps_peers() {
+    for query in [fills(), income()] {
+        for response_first in [false, true] {
+            let mut e = seeded(true, true);
+            e.handle_command(
+                NOW,
+                Command::Query {
+                    command: 803,
+                    query: query.clone(),
+                },
+                Some(5),
+            )
+            .unwrap();
+            let a = e.drain_actions().collect();
+            let a = release(&mut e, NOW, a);
+            let old = requests(&a).into_iter().next().unwrap();
+            let timer = a
+                .iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5. => Some(*timer),
+                    _ => None,
+                })
+                .unwrap();
+            let mut output = if response_first {
+                reply(&mut e, NOW + 5., &old, 200, "[]")
+            } else {
+                at(&mut e, NOW + 5., Event::TimerFired { timer })
+            };
+            if response_first {
+                output.extend(at(&mut e, NOW + 5., Event::TimerFired { timer }));
+            } else {
+                output.extend(reply(&mut e, NOW + 5., &old, 200, "[]"));
+            }
+            assert_eq!(terminal(&output, 803).len(), 1);
+            assert_eq!(
+                terminal(&output, 803)[0].as_ref().unwrap_err().kind,
+                Some(ErrorKind::Timeout)
+            );
+            let peer = ask(&mut e, NOW + 6., 804, query.clone());
+            let peer = release(&mut e, NOW + 6., peer);
+            let peer = requests(&peer).into_iter().next().unwrap();
+            let reused = ask(&mut e, NOW + 6., 803, query.clone());
+            let reused = release(&mut e, NOW + 6., reused);
+            let reused = requests(&reused).into_iter().next().unwrap();
+            assert!(
+                reply(&mut e, NOW + 7., &old, 200, "[]")
+                    .iter()
+                    .all(|a| !matches!(
+                        a,
+                        Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+                    ))
+            );
+            let peer_id = peer.id;
+            for request in [peer, reused] {
+                let next = reply(&mut e, NOW + 8., &request, 200, "[]");
+                if request.url.contains("tradeAccountDetail") {
+                    let next = release(&mut e, NOW + 8., next);
+                    let second = wire(&next, "currency=USDC");
+                    let end = reply(&mut e, NOW + 9., &second, 200, "[]");
+                    assert_eq!(
+                        terminal(&end, if request.id == peer_id { 804 } else { 803 }).len(),
+                        1
+                    );
+                } else {
+                    assert_eq!(
+                        terminal(&next, if request.id == peer_id { 804 } else { 803 }).len(),
+                        1
+                    );
+                }
+            }
+        }
+    }
+}
+#[test]
+fn physical_read_timeout_seals_once_while_the_original_root_is_live() {
+    for query in [fills(), income()] {
+        let mut e = seeded(true, true);
+        let a = ask(&mut e, NOW, 805, query);
+        let a = release(&mut e, NOW, a);
+        let timer = a
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+                _ => None,
+            })
+            .next_back()
+            .unwrap();
+        let request = requests(&a).into_iter().next().unwrap();
+        let output = at(&mut e, NOW + 20_000., Event::TimerFired { timer });
+        let result = terminal(&output, 805);
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].as_ref().unwrap_err().kind,
+            Some(ErrorKind::Timeout)
+        );
+        assert!(terminal(&reply(&mut e, NOW + 20_001., &request, 200, "[]"), 805).is_empty());
+    }
+}
+
+#[test]
+fn released_unproven_write_cleanup_precedes_immediate_cancel_all() {
+    for status in [408, 500] {
+        let (mut e, _) = started();
+        e.store_mut().upsert_order(cached_order("old-live"));
+        let actions = at(&mut e, NOW + 10., Event::Command(placement(850)));
+        let actions = release(&mut e, NOW + 10., actions);
+        let create = wire(&actions, "g-orders/create");
+        let failure = reply(
+            &mut e,
+            NOW + 11.,
+            &create,
+            status,
+            r#"{"code":11001,"msg":"insufficient balance","data":null}"#,
+        );
+        let results = terminal(&failure, 850);
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        let next = at(
+            &mut e,
+            NOW + 12.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 851,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        assert!(!next.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandFailed {error,..}) if error.kind==Some(ErrorKind::InvalidInput))));
+        assert!(
+            e.store()
+                .orders()
+                .iter()
+                .all(|order| order.status != OrderStatus::Creating)
+        );
+        let next = release(&mut e, NOW + 12., next);
+        let cancel = wire(&next, "/g-orders");
+        assert_eq!(cancel.method, Method::Delete);
+        assert_eq!(value(&cancel, "orderID"), "old-live");
+        let expiry = value_header(&create, "x-phemex-request-expiry")
+            .parse::<f64>()
+            .unwrap()
+            * 1000.;
+        assert!(
+            next.iter()
+                .any(|action| matches!(action, Action::SetTimer{at_ms,..} if *at_ms==expiry+5000.))
+        );
+        assert!(next.iter().any(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.message.contains("caller-a"))));
+        assert!(terminal(&next, 850).is_empty());
+        assert!(
+            requests(&next)
+                .iter()
+                .all(|request| !request.url.contains("g-orders/create"))
+        );
+    }
 }
