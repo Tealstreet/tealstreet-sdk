@@ -1,5 +1,112 @@
 use super::*;
 
+#[cfg(feature = "serial-plans")]
+#[test]
+fn single_call_matches_declared_schedule_bounds_and_transitions() {
+    for timeout_ms in [0, 1, u32::MAX] {
+        for attempts in [0, 1, 2, 255, 256, 257, u16::MAX] {
+            for wait_ms in [0, 250, u32::MAX] {
+                for retry_window in [RetryWindow::Shared, RetryWindow::FreshAttempt] {
+                    let terms = CallTerms {
+                        wait_ms,
+                        timeout_ms,
+                        attempts,
+                        retry_window,
+                    };
+                    let calls = [CallBound {
+                        timeout_ms,
+                        attempts,
+                        retry_window,
+                        after_refusal: &[],
+                    }];
+                    let steps = [StepBound {
+                        wait_ms,
+                        calls: &calls,
+                    }];
+                    match (
+                        Schedule::from_single_call(terms),
+                        Schedule::from_steps(&steps),
+                    ) {
+                        (Err(single), Err(declared)) => assert_eq!(single, declared),
+                        (Ok(mut single), Ok(mut declared)) => {
+                            assert_eq!(single.bound(), declared.bound());
+                            assert_eq!(single.calls.len(), declared.calls.len());
+                            assert_eq!(single.sequences.len(), declared.sequences.len());
+                            assert_eq!(single.sequences[0].steps, declared.sequences[0].steps);
+                            assert_eq!(single.sequences[0].parent, declared.sequences[0].parent);
+                            assert_eq!(single.sequences[0].cursor, declared.sequences[0].cursor);
+                            assert_eq!(single.calls[0].sequence, declared.calls[0].sequence);
+                            assert_eq!(single.calls[0].fallback, declared.calls[0].fallback);
+                            assert!(single.calls[0].state == declared.calls[0].state);
+                            let a = single.available().next().unwrap();
+                            let b = declared.available().next().unwrap();
+                            assert_eq!(single.terms(&a), declared.terms(&b));
+                            assert_eq!(single.start(&b), Err(Error::Revoked));
+                            assert_eq!(declared.start(&a), Err(Error::Revoked));
+                            assert_eq!(single.start(&a), declared.start(&b));
+                            for _ in 1..attempts {
+                                assert_eq!(single.retry(&a), declared.retry(&b));
+                            }
+                            assert_eq!(single.retry(&a), Err(Error::Capacity));
+                            assert_eq!(declared.retry(&b), Err(Error::Capacity));
+                            assert_eq!(single.settle(&a), declared.settle(&b));
+                            assert!(single.is_complete() && declared.is_complete());
+                            accounting(&single, usize::from(attempts), 0, 0);
+                            accounting(&declared, usize::from(attempts), 0, 0);
+                            assert_eq!(single.available().count(), 0);
+                            assert_eq!(single.settle(&a), declared.settle(&b));
+                        }
+                        _ => panic!(
+                            "single-call constructor disagrees with the declared oracle: {terms:?}"
+                        ),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "serial-plans")]
+#[test]
+fn single_call_releases_unused_retry_credit_and_cancels_like_declared() {
+    let terms = CallTerms {
+        wait_ms: 250,
+        timeout_ms: 20_000,
+        attempts: 2,
+        retry_window: RetryWindow::FreshAttempt,
+    };
+    for cancel in [false, true] {
+        let calls = [CallBound {
+            timeout_ms: terms.timeout_ms,
+            attempts: terms.attempts,
+            retry_window: terms.retry_window,
+            after_refusal: &[],
+        }];
+        let mut single = Schedule::from_single_call(terms).unwrap();
+        let mut declared = Schedule::from_steps(&[StepBound {
+            wait_ms: terms.wait_ms,
+            calls: &calls,
+        }])
+        .unwrap();
+        let a = single.available().next().unwrap();
+        let b = declared.available().next().unwrap();
+        single.start(&a).unwrap();
+        declared.start(&b).unwrap();
+        if cancel {
+            single.cancel();
+            declared.cancel();
+        } else {
+            single.settle(&a).unwrap();
+            declared.settle(&b).unwrap();
+        }
+        assert_eq!(single.is_complete(), declared.is_complete());
+        assert_eq!(single.start(&a), declared.start(&b));
+        assert_eq!(single.retry(&a), declared.retry(&b));
+        accounting(&single, 1, 0, 1);
+        accounting(&declared, 1, 0, 1);
+    }
+}
+
 fn call(attempts: u16) -> CallBound<'static> {
     CallBound {
         timeout_ms: 20_000,
