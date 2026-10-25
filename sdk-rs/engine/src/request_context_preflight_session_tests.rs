@@ -79,7 +79,7 @@ impl Reads {
     fn live(&self, cx: &Cx<'_, u32>) -> bool {
         self.preflight
             .as_ref()
-            .is_some_and(|handle| cx.io.request_contexts.preflight_state(handle).is_ok())
+            .is_some_and(|handle| cx.io.core.request_contexts.preflight_state(handle).is_ok())
     }
     fn entry_refusals(&mut self, cx: &mut Cx<'_, u32>, handle: &Preflight, live: &Session) {
         let stale = self.stale.clone().unwrap();
@@ -97,12 +97,20 @@ impl Reads {
             (live, read_policy(), mismatched),
         ];
         for (session, policy, terms) in attempts {
-            let before = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
+            let before = (
+                cx.io.core.next_id,
+                cx.io.core.timers.len(),
+                cx.io.core.actions.len(),
+            );
             let error = cx
                 .preflight_session_wait(handle, policy, terms, session, 9)
                 .map_err(|(_, error)| error)
                 .unwrap_err();
-            let after = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
+            let after = (
+                cx.io.core.next_id,
+                cx.io.core.timers.len(),
+                cx.io.core.actions.len(),
+            );
             self.entry_refusals.push((error, before == after));
         }
     }
@@ -184,6 +192,7 @@ impl Venue for Reads {
     ) {
         let own = cx
             .io
+            .core
             .http_preflight_ready
             .as_ref()
             .is_some_and(|ready| ready.owner() == handle.owner());
@@ -474,7 +483,8 @@ fn a_parked_preflight_read_expires_at_the_receipt_cap() {
     );
     let handle = e.venue.preflight.clone().unwrap();
     let cap =
-        e.io.request_contexts
+        e.io.core
+            .request_contexts
             .preflight_receipt_cap(&handle)
             .unwrap()
             .expect("caller receipt cap")
@@ -622,10 +632,10 @@ fn preflight_session_wait_refusals_spend_nothing() {
     assert_eq!(e.venue.park_result, Some(Ok(())));
     let handle = e.venue.preflight.clone().unwrap();
     let mut cx = cx(&mut e, 1.);
-    let before = (cx.io.next_id, cx.io.timers.len());
+    let before = (cx.io.core.next_id, cx.io.core.timers.len());
     let outside = cx.preflight_session_wait(&handle, read_policy(), terms(), &session, 5);
     assert_eq!(outside.map_err(|(_, error)| error), Err(Error::Revoked));
-    assert_eq!((cx.io.next_id, cx.io.timers.len()), before);
+    assert_eq!((cx.io.core.next_id, cx.io.core.timers.len()), before);
 }
 
 /// N7 with #1896: parking inside the Preflight's own ready callback is
@@ -664,7 +674,8 @@ fn a_resumed_capped_read_cannot_release_after_the_receipt_cap() {
     );
     let handle = e.venue.preflight.clone().unwrap();
     let cap =
-        e.io.request_contexts
+        e.io.core
+            .request_contexts
             .preflight_receipt_cap(&handle)
             .unwrap()
             .unwrap()
