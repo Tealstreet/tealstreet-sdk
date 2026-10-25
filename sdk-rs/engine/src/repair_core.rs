@@ -22,6 +22,9 @@ const UNAVAILABLE: &str = "repair.unavailable";
 
 #[derive(Default)]
 pub(super) struct Repairs {
+    /// Every handle carries this engine's issuer; a foreign handle never
+    /// matches, whatever its number.
+    issuer: std::sync::Arc<()>,
     next: u64,
     grants: Vec<Grant>,
     roots: Vec<Root>,
@@ -82,7 +85,13 @@ impl Repairs {
         self.next += 1;
         self.next
     }
+    fn ours(&self, issuer: &std::sync::Arc<()>) -> bool {
+        std::sync::Arc::ptr_eq(&self.issuer, issuer)
+    }
     fn grant(&self, entitlement: &Entitlement) -> Option<usize> {
+        if !self.ours(&entitlement.issuer) {
+            return None;
+        }
         self.grants.iter().position(|g| g.id == entitlement.id)
     }
     fn root_live(&self, id: u64) -> bool {
@@ -99,6 +108,22 @@ impl Repairs {
     }
 }
 
+/// A released repair leg: only the Place leg marks its placing scope sent.
+pub(super) fn repair_released(
+    repairs: &Repairs,
+    locks: &mut crate::order_locks::OrderLocks,
+    generation: u64,
+    context: &Context,
+) {
+    if repairs
+        .roots
+        .iter()
+        .any(|root| root.id == generation && root.place.as_ref() == Some(context))
+    {
+        locks.note_repair_write(generation);
+    }
+}
+
 fn unavailable(reason: RepairRefusal) -> String {
     match reason {
         RepairRefusal::Capacity => {
@@ -106,6 +131,17 @@ fn unavailable(reason: RepairRefusal) -> String {
         }
         reason => format!("Automatic repair authority unavailable: {reason:?}"),
     }
+}
+
+/// Whether the Store publishes `binding.order_id` on `binding.symbol` as this
+/// subject's order. The only refinement from a subject to a native order.
+fn bound(store: &Store, held: &Held, binding: &Binding<'_>) -> bool {
+    store.order(binding.order_id).is_some_and(|order| {
+        order.id == binding.order_id
+            && order.symbol == binding.symbol
+            && (order.id == held.subject.key
+                || order.client_order_id.as_deref() == Some(held.subject.key.as_str()))
+    })
 }
 
 /// Whether a Store order is the subject's: by native ID, client ID or the
@@ -144,6 +180,9 @@ impl<P> Cx<'_, P> {
     fn current_receipt(&self, receipt: &SnapshotReceipt) -> Option<&Receipt> {
         let delivery = self.io.core.http_delivery.as_ref()?;
         let data = self.io.core.repairs.data?;
+        if !self.io.core.repairs.ours(&receipt.issuer) {
+            return None;
+        }
         self.io
             .core
             .repairs
@@ -246,7 +285,10 @@ impl<P> Cx<'_, P> {
                 })
                 .collect(),
         });
-        Ok(Entitlement { id })
+        Ok(Entitlement {
+            issuer: self.io.core.repairs.issuer.clone(),
+            id,
+        })
     }
 
     /// Commit an accepted whole Orders snapshot inside the exact live
@@ -281,7 +323,10 @@ impl<P> Cx<'_, P> {
             orders_revision,
             began,
         });
-        Some(SnapshotReceipt { id })
+        Some(SnapshotReceipt {
+            issuer: self.io.core.repairs.issuer.clone(),
+            id,
+        })
     }
 
     /// Mint cancel-then-place authority for one order that this delivery's
@@ -347,7 +392,10 @@ impl<P> Cx<'_, P> {
                 order_id: None,
             }],
         });
-        Ok(Entitlement { id })
+        Ok(Entitlement {
+            issuer: self.io.core.repairs.issuer.clone(),
+            id,
+        })
     }
 
     /// Issue one leg of `root`; refusal leaves nothing allocated or held.
@@ -357,6 +405,10 @@ impl<P> Cx<'_, P> {
         primary: &Credential,
         intent: Intent,
     ) -> Result<Context, RepairRefusal> {
+        // Refuse before reserving an ID, so a full registry spends nothing.
+        if !self.io.core.request_contexts.repair_leg_capacity() {
+            return Err(RepairRefusal::Capacity);
+        }
         let identity = self.io.reserve_ids(1).ok_or(RepairRefusal::Capacity)?.start;
         self.io
             .core
@@ -420,6 +472,9 @@ impl<P> Cx<'_, P> {
             if spend.contains(&(grant, index)) {
                 return Err(RepairRefusal::Invalid);
             }
+            if !bound(self.store, &held.subjects[index], binding) {
+                return Err(RepairRefusal::StoreMissing);
+            }
             primary = Some(&held.primary);
             spend.push((grant, index));
         }
@@ -463,6 +518,9 @@ impl<P> Cx<'_, P> {
         }
         if held.snapshot_symbol.as_deref() != Some(binding.symbol) {
             return Err(RepairRefusal::Incompatible);
+        }
+        if !bound(self.store, &held.subjects[index], &binding) {
+            return Err(RepairRefusal::StoreMissing);
         }
         let primary = held.primary.clone();
         if !self.installed_primary(&primary) {
@@ -521,12 +579,21 @@ impl<P> Cx<'_, P> {
             cancel: cancel.clone(),
             place: None,
         });
-        Ok((RepairRoot { id }, cancel))
+        Ok((
+            RepairRoot {
+                issuer: self.io.core.repairs.issuer.clone(),
+                id,
+            },
+            cancel,
+        ))
     }
 
     /// The single placement leg after an engine-recorded accepted cancel.
     pub fn repair_successor(&mut self, root: &RepairRoot) -> Result<Context, RepairRefusal> {
         let repairs = &self.io.core.repairs;
+        if !repairs.ours(&root.issuer) {
+            return Err(RepairRefusal::Invalid);
+        }
         let held = repairs
             .roots
             .iter()
@@ -552,6 +619,12 @@ impl<P> Cx<'_, P> {
             .find(|g| g.id == grant)
             .map(|g| g.primary.clone())
             .ok_or(RepairRefusal::Invalid)?;
+        // The predecessor's slot is retired before the successor is issued.
+        let cancel = held.cancel.clone();
+        if self.io.core.request_contexts.repair_leg_live(&cancel) {
+            self.io.retire_http_leg(&cancel);
+            self.io.core.request_contexts.remove_repair_leg(&cancel);
+        }
         let place = self.issue_leg(root.id, &primary, Intent::Place)?;
         let held = self
             .io
@@ -631,16 +704,45 @@ impl<P> Cx<'_, P> {
 }
 
 impl<P> Io<P> {
-    fn repair_effect(&self, root: u64, leg: &Context) -> Effect {
+    /// One subject's effect from its leg's latest attempt (`None`: the whole
+    /// leg). A native ACK proves only the orders it names.
+    fn subject_effect(&self, root: u64, leg: &Context, order_id: Option<&str>) -> Effect {
+        let named = |ids: &[String]| order_id.is_some_and(|id| ids.iter().any(|named| named == id));
+        let partial = |error: &VenueError| -> Vec<String> {
+            error
+                .partial
+                .as_ref()
+                .map_or_else(Vec::new, |partial| partial.order_ids.clone())
+        };
         match self
             .core
             .request_contexts
             .repair_leg_outcome(root, leg.leg())
         {
-            Some((_, Some(WriteResult::Accepted { .. }))) => Effect::Accepted,
-            Some((_, Some(WriteResult::Rejected(_) | WriteResult::KnownPartial(_)))) => {
-                Effect::Rejected
+            Some((_, Some(WriteResult::Accepted { order_ids }))) => {
+                if order_ids.is_empty() || order_id.is_none() || named(order_ids) {
+                    Effect::Accepted
+                } else {
+                    Effect::Unknown
+                }
             }
+            Some((_, Some(WriteResult::KnownPartial(error)))) => {
+                if named(&partial(error)) {
+                    Effect::Accepted
+                } else {
+                    Effect::Rejected
+                }
+            }
+            Some((released, Some(WriteResult::PartialUnknown(error)))) => {
+                if named(&partial(error)) {
+                    Effect::Accepted
+                } else if released {
+                    Effect::Unknown
+                } else {
+                    Effect::NotSent
+                }
+            }
+            Some((_, Some(WriteResult::Rejected(_)))) => Effect::Rejected,
             Some((true, _)) => Effect::Unknown,
             Some((false, _)) | None => Effect::NotSent,
         }
@@ -654,37 +756,21 @@ impl<P> Io<P> {
             return;
         };
         let root = repairs.roots.swap_remove(index);
-        let cancel = self.repair_effect(generation, &root.cancel);
         let place = root
             .place
             .as_ref()
-            .map(|leg| self.repair_effect(generation, leg));
-        let acknowledged: Option<Vec<String>> = match self
-            .core
-            .request_contexts
-            .repair_leg_outcome(generation, root.cancel.leg())
-        {
-            Some((_, Some(WriteResult::Accepted { order_ids }))) if !order_ids.is_empty() => {
-                Some(order_ids.clone())
-            }
-            _ => None,
-        };
+            .map(|leg| self.subject_effect(generation, leg, None));
         let mut facts = Vec::with_capacity(root.members.len());
         for &(grant, index) in &root.members {
             let Some(grant) = self.core.repairs.grants.iter().find(|g| g.id == grant) else {
                 continue;
             };
             let held = &grant.subjects[index];
-            // An ACK naming orders proves only the orders it names.
-            let cancel = match (&acknowledged, &held.order_id) {
-                (Some(ids), Some(id)) if !ids.contains(id) => Effect::Unknown,
-                _ => cancel,
-            };
             facts.push(SubjectFact {
                 key: held.subject.key.clone(),
                 order_id: held.order_id.clone(),
                 origin: grant.origin,
-                cancel,
+                cancel: self.subject_effect(generation, &root.cancel, held.order_id.as_deref()),
                 place,
             });
         }
@@ -700,10 +786,14 @@ impl<P> Io<P> {
             self.queue_reconcile(Some(vec![root.symbol]), now);
         }
         self.core.request_contexts.close_repair(generation);
+        let root = RepairRoot {
+            issuer: self.core.repairs.issuer.clone(),
+            id: generation,
+        };
         self.core
             .repairs
             .notices
-            .push(Pending::Settled(RepairRoot { id: generation }, facts));
+            .push(Pending::Settled(root, facts));
     }
 }
 

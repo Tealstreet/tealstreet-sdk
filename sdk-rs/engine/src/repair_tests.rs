@@ -170,6 +170,7 @@ mod repair {
         mark_old_cancelled: bool,
         successors: Vec<Result<(), RepairRefusal>>,
         successor_slot: Option<crate::CredentialSlot>,
+        forced_result: Option<WriteResult>,
         failures: usize,
         reconciles: Vec<Option<Vec<String>>>,
     }
@@ -220,6 +221,15 @@ mod repair {
             .unwrap();
         }
         fn admit(&mut self, cx: &mut Cx<'_, Context>, group: &[Member]) {
+            // Discovery: the native orders are published before admission.
+            for (_, key, order_id, symbol, side) in group {
+                let mut published = order(order_id, symbol);
+                published.client_order_id = Some((*key).to_owned());
+                if *side == "sell" {
+                    published.side = OrderSide::Sell;
+                }
+                cx.store.upsert_order(published);
+            }
             let before = Self::mark(cx);
             let subjects: Vec<Subject> = group.iter().map(|m| subject(m.1)).collect();
             let members: Vec<_> = group
@@ -411,7 +421,7 @@ mod repair {
             let ids = serde_json::from_str::<Ack>(response.body)
                 .map(|ack| ack.ids)
                 .unwrap_or_default();
-            cx.http_write_result(&context, WriteResult::Accepted { order_ids: ids })
+            cx.http_write_result(&context, self.forced_result.clone().unwrap_or(WriteResult::Accepted { order_ids: ids }))
                 .unwrap();
             cx.finish_http_context(&context).unwrap();
             let Some((root, _)) = self
@@ -1078,5 +1088,178 @@ mod repair {
         }
         assert_eq!(e.venue.mints.last(), Some(&Err(RepairRefusal::Capacity)));
         assert_eq!(warns(&last, "Automatic repair authority unavailable: capacity exhausted"), 1);
+    }
+
+    #[test]
+    fn reviewer_foreign_entitlement_cannot_spend_local_grant() {
+        let a = minted(&["foreign"]);
+        let mut b = minted(&["local"]);
+        assert_eq!(subjects(&mut b, 0), vec![subject("local")]);
+        let mut cx = Cx { now: 2., store: &mut b.store, io: &mut b.io };
+        let before = Repairer::mark(&cx);
+        let result = cx.admit_repair_cancel(&[(&a.venue.entitlements[0], &subject("local"),
+            Binding { order_id: "local", symbol: "BTCUSD", side: "buy" })]);
+        assert!(result.is_err(), "a real foreign handle spent the other engine's same-numbered grant");
+        assert_eq!(Repairer::mark(&cx), before);
+    }
+    #[test]
+    fn reviewer_command_subject_cannot_bind_unrelated_order() {
+        let mut e = minted(&["client-a"]);
+        let mut owned = order("native-a", "BTCUSD"); owned.client_order_id = Some("client-a".into());
+        e.store.upsert_order(owned);
+        e.store.upsert_order(order("unrelated", "ETHUSD"));
+        let mut cx = Cx { now: 2., store: &mut e.store, io: &mut e.io };
+        let result = cx.admit_repair_cancel(&[(&e.venue.entitlements[0], &subject("client-a"),
+            Binding { order_id: "unrelated", symbol: "ETHUSD", side: "sell" })]);
+        assert!(result.is_err(), "a client-id entitlement authorized an unrelated native order and symbol");
+    }
+    #[test]
+    fn reviewer_matching_client_to_native_binding_works() {
+        let mut e = minted(&["client-a"]);
+        let mut owned = order("native-a", "BTCUSD"); owned.client_order_id = Some("client-a".into());
+        e.store.upsert_order(owned);
+        let mut cx = Cx { now: 2., store: &mut e.store, io: &mut e.io };
+        assert!(cx.admit_repair_cancel(&[(&e.venue.entitlements[0], &subject("client-a"),
+            Binding { order_id: "native-a", symbol: "BTCUSD", side: "buy" })]).is_ok());
+    }
+
+    #[test]
+    fn reviewer_partial_ack_retains_accepted_subject() {
+        let mut e = minted(&["c1", "c2"]);
+        e.venue.groups = vec![vec![(0,"c1","c1","BTCUSD","buy"),(0,"c2","c2","BTCUSD","buy")]];
+        e.venue.forced_result = Some(WriteResult::KnownPartial(VenueError::new("c2 refused").partial_ids(&["c1".into()])));
+        let token = preps(&fire(&mut e, 2.))[0];
+        release(&mut e, token, 2.);
+        reply(&mut e, token, 3., 200, r#"{"ids":["c1"]}"#);
+        assert_eq!(e.venue.notices.len(),1);
+        assert!(e.venue.notices[0].contains("cancel: Accepted"), "accepted c1 lost: {:?}", e.venue.notices);
+    }
+    #[test]
+    fn reviewer_preclaim_refusal_settles_root() {
+        let (mut e, token) = one_root(&["c1"]);
+        e.http_preparation_failed(2.5, token, crate::request_context::Error::Invalid,
+            VenueError::new("provider refused").kind(crate::ErrorKind::Internal));
+        // A normal event also drains pending notices; this must not need a new command.
+        fire(&mut e, 3.);
+        assert_eq!(e.venue.failures,1,"real preparation failure reaches venue");
+        assert_eq!(e.venue.notices.len(),1,"unreleased root must retire and notify exactly once");
+        assert!(e.venue.notices[0].contains("cancel: NotSent"));
+    }
+    #[test]
+    fn reviewer_full_context_refusal_spends_no_resource_id() {
+        let mut e = minted(&["c1"]);
+        // Bound to its published order, so capacity is the only refusal.
+        e.store.upsert_order(order("c1", "BTCUSD"));
+        let mut cx = Cx { now: 2., store: &mut e.store, io: &mut e.io };
+        let mut peers = Vec::new();
+        for _ in 0..256 {
+            peers.push(cx.http_context(Scope::Background, Policy { operation: Operation::Read,
+                credential:None, timeout_ms:20_000, pacing:None, retry:RetryPolicy::Never }).unwrap());
+        }
+        let before = Repairer::mark(&cx);
+        let result = cx.admit_repair_cancel(&[(&e.venue.entitlements[0], &subject("c1"),
+            Binding { order_id:"c1", symbol:"BTCUSD", side:"buy" })]);
+        assert_eq!(result.err(),Some(RepairRefusal::Capacity));
+        assert_eq!(cx.repair_subjects(&e.venue.entitlements[0]),vec![subject("c1")]);
+        assert_eq!(Repairer::mark(&cx),before,"refused admission consumed a resource id");
+        assert_eq!(peers.len(),256);
+    }
+    #[test]
+    fn reviewer_snapshot_subject_cannot_cancel_other_order() {
+        let (mut e, _) = snapshot(Repairer::default());
+        assert_eq!(e.venue.snapshot_mints,vec![Ok(())]);
+        e.store.upsert_order(order("unrelated", "BTCUSD"));
+        let mut cx = Cx { now: 2., store: &mut e.store, io: &mut e.io };
+        assert!(cx.admit_repair_replace(&e.venue.entitlements[0],&subject("old-1"),
+            Binding { order_id:"unrelated", symbol:"BTCUSD", side:"buy" }).is_err(),
+            "snapshot old-1 authorized cancel of unrelated native order");
+    }
+
+    #[test]
+    fn a_partial_unknown_ack_keeps_its_accepted_subject_and_reconciles_the_rest() {
+        let mut e = minted(&["c1", "c2"]);
+        e.venue.groups = vec![vec![
+            (0, "c1", "c1", "BTCUSD", "buy"),
+            (0, "c2", "c2", "BTCUSD", "buy"),
+        ]];
+        e.venue.forced_result = Some(WriteResult::PartialUnknown(
+            VenueError::new("c2 unproven").partial_ids(&["c1".into()]),
+        ));
+        let token = preps(&fire(&mut e, 2.))[0];
+        release(&mut e, token, 2.);
+        reply(&mut e, token, 3., 200, r#"{"ids":["c1"]}"#);
+        let notice = &e.venue.notices[0];
+        assert!(notice.contains(r#"key: "c1", order_id: Some("c1"), origin: Command(7), cancel: Accepted"#), "{notice}");
+        assert!(notice.contains(r#"key: "c2", order_id: Some("c2"), origin: Command(7), cancel: Unknown"#), "{notice}");
+        let btc = Some(vec!["BTCUSD".to_owned()]);
+        assert!(
+            e.io.core.reconcile_due.iter().any(|(symbols, _)| *symbols == btc)
+                || e.venue.reconciles.contains(&btc)
+        );
+    }
+    #[test]
+    fn a_placement_refused_before_release_never_marks_the_scope_sent() {
+        let (mut e, _) = snapshot(Repairer {
+            replace: true,
+            ..Default::default()
+        });
+        let cancel = preps(&fire(&mut e, 2.))[0];
+        release(&mut e, cancel, 2.);
+        let actions = reply(&mut e, cancel, 3., 200, r#"{"code":0,"ids":["old-1"]}"#);
+        assert_eq!(e.venue.successors, vec![Ok(()), Err(RepairRefusal::Spent)]);
+        let place = preps(&actions)[0];
+        e.http_preparation_failed(
+            3.5,
+            place,
+            crate::request_context::Error::Invalid,
+            VenueError::new("provider refused").kind(crate::ErrorKind::Internal),
+        );
+        assert!(!e.io.core.order_locks.uncertain("BTCUSD"), "no sent placement exists");
+        assert!(
+            e.venue.notices.iter().any(|n| n.contains("cancel: Accepted") && n.contains("place: Some(NotSent)")),
+            "{:?}",
+            e.venue.notices
+        );
+    }
+    #[test]
+    fn a_foreign_root_cannot_open_a_successor() {
+        let (a, _) = snapshot(Repairer {
+            replace: true,
+            ..Default::default()
+        });
+        let (mut a, b) = (a, snapshot(Repairer {
+            replace: true,
+            ..Default::default()
+        }).0);
+        fire(&mut a, 2.);
+        let mut b = b;
+        fire(&mut b, 2.);
+        assert_eq!(a.venue.admits, vec![Ok(())]);
+        assert_eq!(b.venue.admits, vec![Ok(())]);
+        assert_ne!(a.venue.roots[0].0, b.venue.roots[0].0, "same number, different issuer");
+        let foreign = a.venue.roots[0].0.clone();
+        let mut cx = Cx {
+            now: 2.5,
+            store: &mut b.store,
+            io: &mut b.io,
+        };
+        let before = Repairer::mark(&cx);
+        assert_eq!(cx.repair_successor(&foreign), Err(RepairRefusal::Invalid));
+        assert_eq!(Repairer::mark(&cx), before);
+    }
+    #[test]
+    fn a_foreign_snapshot_receipt_cannot_mint() {
+        let (mut a, _) = snapshot(Repairer {
+            snap: Snap::ForeignReceipt,
+            ..Default::default()
+        });
+        let (mut b, _) = snapshot(Repairer {
+            snap: Snap::ForeignReceipt,
+            ..Default::default()
+        });
+        // B's later read mints with A's same-numbered receipt.
+        b.venue.first_receipt = a.venue.first_receipt.take();
+        second_read(&mut b);
+        assert_eq!(b.venue.snapshot_mints, vec![Ok(()), Err(RepairRefusal::NotData)]);
     }
 }

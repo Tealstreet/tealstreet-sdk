@@ -1670,12 +1670,16 @@ impl<V: Venue> Engine<V> {
             self.io.core.http_delivery = previous;
         }
         self.io.core.request_contexts.exit_delivery(&delivery);
+        #[cfg(feature = "repair-mutations")]
+        self.repair_delivered(&delivery, now);
         self.finish_event_scope(now);
         self.sweep_executions(now);
         self.flush_preflight_readiness(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }
+        #[cfg(feature = "repair-mutations")]
+        self.flush_repair_notices(now);
     }
 
     /// Fail the attempts a Session retire fenced, each through the common
@@ -2019,9 +2023,12 @@ impl<V: Venue> Engine<V> {
                             }
                         }
                         #[cfg(feature = "repair-mutations")]
-                        Owner::Repair { generation } => {
-                            self.io.core.order_locks.note_repair_write(generation)
-                        }
+                        Owner::Repair { generation } => super::repair_core::repair_released(
+                            &self.io.core.repairs,
+                            &mut self.io.core.order_locks,
+                            generation,
+                            managed.lifecycle.context(),
+                        ),
                         _ => {}
                     }
                 }

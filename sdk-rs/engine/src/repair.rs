@@ -5,17 +5,32 @@
 //! The engine-side custody lives in `engine/repair_core.rs`.
 use crate::{CommandId, RequestId};
 
-/// Spendable repair authority. Opaque; only the issuing engine validates it.
-#[derive(Debug, PartialEq, Eq)]
+/// Spendable repair authority. Opaque; only the issuing engine accepts it.
+#[derive(Debug)]
 pub struct Entitlement {
+    pub(crate) issuer: std::sync::Arc<()>,
     pub(crate) id: u64,
 }
 
 /// One admitted physical workflow spending one or more subjects.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct RepairRoot {
+    pub(crate) issuer: std::sync::Arc<()>,
     pub(crate) id: u64,
 }
+
+/// Handles compare by issuing engine and identity, never by number alone.
+macro_rules! issued_eq {
+    ($($handle:ty),*) => {$(
+        impl PartialEq for $handle {
+            fn eq(&self, other: &Self) -> bool {
+                self.id == other.id && std::sync::Arc::ptr_eq(&self.issuer, &other.issuer)
+            }
+        }
+        impl Eq for $handle {}
+    )*};
+}
+issued_eq!(Entitlement, RepairRoot, SnapshotReceipt);
 
 /// What an entitlement may act on: a native client or order ID and the
 /// adapter's discovery generation for it.
@@ -25,7 +40,11 @@ pub struct Subject {
     pub generation: u64,
 }
 
-/// The validated native order a subject resolves to at root admission.
+/// The native order a subject resolves to at root admission. Core checks
+/// that the Store publishes `order_id` on `symbol` as the subject's order (by
+/// native or client ID). `side` is the adapter's native grouping key (position
+/// side); the Store carries no position side, so core only requires that
+/// members of one root agree on it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binding<'a> {
     pub order_id: &'a str,
@@ -69,8 +88,9 @@ pub enum RepairRefusal {
 
 /// An accepted whole Orders snapshot committed inside one exact live
 /// Background Read DATA delivery. Only `commit_repair_snapshot` issues it.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct SnapshotReceipt {
+    pub(crate) issuer: std::sync::Arc<()>,
     pub(crate) id: u64,
 }
 

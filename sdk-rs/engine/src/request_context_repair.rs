@@ -97,6 +97,11 @@ impl ContextRegistry {
             .leg_outcome(leg)
     }
 
+    /// Whether one more leg fits, checked before any ID is reserved.
+    pub(in crate::engine) fn repair_leg_capacity(&self) -> bool {
+        self.contexts.len() + self.reserved_context_count() < super::CAPACITY
+    }
+
     /// Whether this root leg is still an issued Context.
     pub(in crate::engine) fn repair_leg_live(&self, context: &Context) -> bool {
         self.contexts.get(&context.leg()) == Some(context)
