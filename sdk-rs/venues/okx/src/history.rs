@@ -45,6 +45,8 @@ pub struct Request {
     limit: usize,
     pages: usize,
     rows_seen: usize,
+    /// Rows committed before the page in flight; a failed page rolls back to it.
+    accepted: usize,
     count: usize,
     after: Option<String>,
     oldest: Option<String>,
@@ -341,6 +343,26 @@ impl Request {
             self.oldest = Some(value.into());
         }
     }
+    fn len(&self) -> usize {
+        match &self.rows {
+            Rows::Fills(rows) => rows.len(),
+            Rows::Orders(rows) => rows.len(),
+            Rows::Income(rows) => rows.len(),
+            Rows::Trades(rows) => rows.len(),
+        }
+    }
+    /// Drops the rows a failed page appended. A row it replaced shares its key
+    /// with an accepted one: the same venue row, re-delivered.
+    fn roll_back_page(&mut self) {
+        let accepted = self.accepted;
+        match &mut self.rows {
+            Rows::Fills(rows) => rows.truncate(accepted),
+            Rows::Orders(rows) => rows.truncate(accepted),
+            Rows::Income(rows) => rows.truncate(accepted),
+            Rows::Trades(rows) => rows.truncate(accepted),
+        }
+        self.indices.retain(|_, index| *index < accepted);
+    }
     fn put<T>(indices: &mut HashMap<String, usize>, rows: &mut Vec<T>, key: String, row: T) {
         if let Some(index) = indices.get(&key) {
             rows[*index] = row;
@@ -555,6 +577,7 @@ impl Okx {
                 rows,
                 pages: 0,
                 rows_seen: 0,
+                accepted: 0,
                 count: 0,
                 after: None,
                 oldest: None,
@@ -672,6 +695,7 @@ impl Okx {
             limit: 1,
             pages: 0,
             rows_seen: 0,
+            accepted: 0,
             count: 0,
             after: None,
             oldest: None,
@@ -832,6 +856,7 @@ impl Okx {
         r.count = 0;
         r.oldest = None;
         r.pages += 1;
+        r.accepted = r.len();
         let page_limit = match r.rows {
             Rows::Fills(_) | Rows::Trades(_) => r.limit,
             _ => PAGE,
@@ -1203,24 +1228,32 @@ impl Okx {
         self.history.delayed.push((timer, r));
     }
 
+    /// A failed page never claims absence. With accepted rows a query returns
+    /// them plus one incomplete marker; with none it rejects. Lookups and EEA
+    /// composite reads stay strict, as their caps and stalls are.
     pub(crate) fn history_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        r: Request,
+        mut r: Request,
         error: impl Into<safe_cex_engine::VenueError>,
     ) {
-        let error = error.into();
+        let mut error = error.into();
+        error.message = format!("OKX history: {}", error.message);
         if cx
-            .command_error_context(r.root(), format!("OKX history: {}", error.message))
+            .command_error_context(r.root(), error.message.clone())
             .is_err()
         {
             return;
         }
-        if r.is_lookup() {
+        r.roll_back_page();
+        let composite = self.options.eea && r.instrument.is_none();
+        if r.is_lookup() || composite || r.accepted == 0 {
             let _ = cx.fail_context(r.root(), error);
-        } else {
-            let _ = cx.done_context(r.root(), "[]".into());
+            return;
         }
+        r.completion
+            .incomplete(format!("history is INCOMPLETE: {}", error.message));
+        r.finish(cx);
     }
     pub(crate) fn history_sign_failed(
         cx: &mut Cx<'_, Pending>,
