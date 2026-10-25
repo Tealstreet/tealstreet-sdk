@@ -32,6 +32,7 @@ impl Venue for Feed {
     fn on_close(&mut self, _: &mut Cx<'_, ()>, socket: SocketId, code: u16) {
         self.closes.push((socket, code));
     }
+    const ROUTE_EXHAUSTION: bool = true;
     fn on_route_exhausted(&mut self, _: &mut Cx<'_, ()>, socket: SocketId) {
         self.exhausted.push(socket);
     }

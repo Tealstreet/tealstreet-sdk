@@ -3010,11 +3010,11 @@ pub trait Venue {
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, text: &str);
     fn on_close(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, code: u16);
-    /// Every route was refused, so the host dialled nothing. The default is
-    /// today's close handling; a venue opts in to report and stop.
-    fn on_route_exhausted(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId) {
-        self.on_close(cx, socket, ROUTE_EXHAUSTED_CLOSE);
-    }
+    /// Opts in to `on_route_exhausted`; every other venue sees today's close.
+    const ROUTE_EXHAUSTION: bool = false;
+    /// Every route was refused, so the host dialled nothing. Called only when
+    /// `ROUTE_EXHAUSTION` is set.
+    fn on_route_exhausted(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId) {}
     fn on_response(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -3973,24 +3973,26 @@ impl<V: Venue> Engine<V> {
                 #[cfg(not(feature = "managed-sockets"))]
                 self.venue.on_message(&mut cx, socket, text);
             }
-            Event::WsClosed { socket, code } => {
+            // One terminal body for both: exhaustion is a close unless the venue opts in.
+            Event::WsClosed { socket, .. } | Event::WsRouteExhausted { socket } => {
+                let (code, exhausted) = match event {
+                    Event::WsClosed { code, .. } => (code, false),
+                    _ => (ROUTE_EXHAUSTED_CLOSE, true),
+                };
                 for timer in cx.io.signing.close_socket(socket) {
                     if timer.0 != 0 {
                         cx.io.actions.push(Action::ClearTimer { timer });
                     }
                 }
                 cx.io.sockets.closed(socket, true);
-                cx.io.health.count(log_code::WS_CLOSED);
-                self.venue.on_close(&mut cx, socket, code)
-            }
-            Event::WsRouteExhausted { socket } => {
-                for timer in cx.io.signing.close_socket(socket) {
-                    if timer.0 != 0 {
-                        cx.io.actions.push(Action::ClearTimer { timer });
-                    }
+                if !exhausted {
+                    cx.io.health.count(log_code::WS_CLOSED);
                 }
-                cx.io.sockets.closed(socket, true);
-                self.venue.on_route_exhausted(&mut cx, socket)
+                if exhausted && V::ROUTE_EXHAUSTION {
+                    self.venue.on_route_exhausted(&mut cx, socket)
+                } else {
+                    self.venue.on_close(&mut cx, socket, code)
+                }
             }
             Event::HttpResponse { request, response } => {
                 self.http_start(now, request, response.status, response.headers);
