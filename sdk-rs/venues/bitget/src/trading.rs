@@ -10,7 +10,8 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     ConditionOwner, ConditionWait, Context, Credential, HttpOwnerRetirement, Operation, Plan,
-    Policy, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData, RetryPolicy,
+    Policy, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData, ResendGrant,
+    RetryPolicy,
 };
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -1963,7 +1964,20 @@ impl BitgetFutures {
         {
             restore_canceling(cx, &request.call);
             // A 5xx proves nothing: the call's fact is Unknown and reconciles.
-            let proven = read || self.record(cx, &request, &response);
+            let reply = serde_json::from_str::<Reply>(response.body).ok();
+            let message = reply.as_ref().map_or_else(String::new, |reply| {
+                format!(
+                    "Bitget {}: {} (HTTP {})",
+                    reply.code.get(),
+                    reply.msg,
+                    response.status
+                )
+            });
+            let native = native_code(reply.as_ref(), response.status);
+            let proven = read
+                || self
+                    .record_once(cx, &request, native, Answer::Coded, &message, &mut false)
+                    .0;
             if job.ids.is_empty() && proven {
                 job.calls.clear();
                 job.planned = false;
@@ -2062,10 +2076,8 @@ impl BitgetFutures {
         {
             let message = format!("Bitget 40009: sign signature error (HTTP {status})");
             let native = native_code(parsed.as_ref().ok(), status);
-            let grant = cx
-                .http_write_failure(&request.context, &CODES, native.as_ref(), message, None)
-                .ok()
-                .and_then(|(_, grant)| grant);
+            let (_, grant) =
+                self.record_once(cx, &request, native, Answer::Coded, &message, &mut false);
             let plan = job.plan.clone().expect("live Plan");
             if let Some(context) = grant.and_then(|grant| {
                 cx.plan_resend_context(&plan, &request.slot, &request.context, grant)
@@ -2443,7 +2455,8 @@ impl BitgetFutures {
         self.drive(cx, job, At::Data(&request.slot, &request.context));
     }
 
-    /// Records a write's journal fact exactly once; reads keep none.
+    /// Records a write's journal fact exactly once; reads keep none. Returns
+    /// whether a coded answer proves a refusal, and its resend grant.
     #[inline(never)]
     fn record_once(
         &self,
@@ -2453,16 +2466,15 @@ impl BitgetFutures {
         answer: Answer,
         message: &str,
         recorded: &mut bool,
-    ) {
+    ) -> (bool, Option<ResendGrant>) {
         if *recorded || request.call.read() {
-            return;
+            return (false, None);
         }
         *recorded = true;
         let context = &request.context;
-        let _ = match answer {
-            Answer::Accepted(order_ids) => cx
-                .http_write_fact(context, WriteFact::Accepted { order_ids }, None)
-                .map(drop),
+        let message = message.to_owned();
+        let fact = match answer {
+            Answer::Accepted(order_ids) => WriteFact::Accepted { order_ids },
             Answer::Batch {
                 expected,
                 accepted,
@@ -2478,52 +2490,25 @@ impl BitgetFutures {
                         message: failure.as_str(),
                     })
                 }));
-                cx.http_write_batch(context, &CODES, expected, &items, message, None)
-                    .map(drop)
+                let _ = cx.http_write_batch(context, &CODES, expected, &items, message, None);
+                return (false, None);
             }
-            Answer::Unproven => cx.http_write_unproven(context, message),
-            Answer::Coded => cx
-                .classify_write(context, &CODES, native.as_ref(), message)
-                .and_then(|fact| {
-                    cx.http_write_fact(
-                        context,
-                        WriteFact::Failed {
-                            fact,
-                            known_effects: false,
-                        },
-                        None,
-                    )
-                })
-                .map(drop),
-        };
-    }
-
-    /// The 40085 promotion's own write fact: true when it proves a refusal.
-    #[inline(never)]
-    fn record(&self, cx: &mut Cx<'_, Pending>, request: &Request, response: &Response<'_>) -> bool {
-        let reply = serde_json::from_str::<Reply>(response.body).ok();
-        let native = native_code(reply.as_ref(), response.status);
-        let message = reply.as_ref().map_or_else(String::new, |reply| {
-            format!(
-                "Bitget {}: {} (HTTP {})",
-                reply.code.get(),
-                reply.msg,
-                response.status
-            )
-        });
-        let Ok(fact) = cx.classify_write(&request.context, &CODES, native.as_ref(), message) else {
-            return false;
-        };
-        let proven = fact.verdict().is_refusal();
-        let _ = cx.http_write_fact(
-            &request.context,
-            WriteFact::Failed {
-                fact,
-                known_effects: false,
+            Answer::Unproven => {
+                let _ = cx.http_write_unproven(context, message);
+                return (false, None);
+            }
+            Answer::Coded => match cx.classify_write(context, &CODES, native.as_ref(), message) {
+                Ok(fact) => WriteFact::Failed {
+                    fact,
+                    known_effects: false,
+                },
+                Err(_) => return (false, None),
             },
-            None,
-        );
-        proven
+        };
+        let refusal =
+            matches!(&fact, WriteFact::Failed { fact, .. } if fact.verdict().is_refusal());
+        let grant = cx.http_write_fact(context, fact, None).ok().flatten();
+        (refusal, grant)
     }
 
     /// Native placement custody: each acknowledged ID keeps its own cancel call
@@ -3178,13 +3163,12 @@ fn with_rollback(original: Option<VenueError>, error: VenueError) -> VenueError 
     }
 }
 
-/// Order identities that let the engine reconcile a released write.
+/// Bounded correlation for a released write: its endpoint. Bitget has no late
+/// reconcile codec; the order snapshot reconciles.
 pub(crate) fn trade_reconciliation(
     request: &Request,
 ) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
-    let data = serde_json::to_string(&request.call.identities())
-        .map_err(|_| safe_cex_engine::request_context::Error::Invalid)?;
-    ReconciliationData::new(data)
+    ReconciliationData::new(request.path.clone())
 }
 
 impl Job {
