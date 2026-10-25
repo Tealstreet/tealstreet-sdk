@@ -4,6 +4,7 @@
     "privateEligible": [["canSign"]]
   },
   "venues": {
+    "backpack": {"bridge": {"readCredentials": "publicRead"}},
     "cryptocom": {"bridge": {"dispatchSigning": true, "readCredentials": "validateOnly"}},
     "bitrue": {"bridge": {"dispatchSigning": true}},
     "weex": {"bridge": {"dispatchSigning": true}, "signerSetup": {"primary": {"passphrase": "requiredForPrivate"}, "secondary": {"passphrase": "requiredWithPrimaryFallback"}}},

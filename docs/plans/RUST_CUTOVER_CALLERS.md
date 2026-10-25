@@ -8514,3 +8514,53 @@ venue that adopts the hook:
 - **Header order.** The bundle goes First, or immediately after a named header
   (`After`, falling back to First), as declared with the bundle. Collision and
   whole-packet count/byte limits refuse NotSent, wiping the inserted copies.
+
+
+## Backpack supported-history Read custody
+
+Fills/orders/funding select Read(scope=None) once through default Slots and
+retain that exact provider binding for every page. Public trades retain a real
+keyless caller root with static X-Broker-Id:1200 and native Public egress.
+All four routes use one ReadCursorHistory under the genuine caller receipt.
+Each physical page has a NEW 20,000ms cap, clipped to the original root, no
+pacing and Never retry; page boundaries never renew the caller wait. Exact
+root/leg DATA admission precedes streamed rows, status, diagnostics and final
+success. Accepted-prefix failure cleanup keeps native paging/economic facts,
+drops unaccepted page rows/IDs/skips and retires the exact leg before another.
+The Backpack publicRead row preserves saved-read-key private GET history in
+public_data_only through a read-only provider; no primary or hosted authority.
+
+History native error presentation: only a released Backpack history transport
+Network failure retains the native Internal kind; message/outcome/code remain
+unchanged. Preparation and physical Timeout retain their typed causes.
+
+## Paradex subscription candle poll custody
+
+Each native poll route now owns a fresh unsigned Background Read with Never
+retry. **NEW:** its 20s admission-to-expiry bound includes Prepare, Bind, route
+waits and transport; native packets had no explicit timeout. A released klines
+failure can still use the single TradingView fallback under an independent
+Background Context with its own fresh 20s bound and original captured
+bounds/revision. There is no 20s cap across both routes.
+Unreleased admission/queue/preparation refusal is strict for that cycle: no
+recursive fallback, one finite current-generation completion + 3s timer. New
+refusal warnings use REQUEST_FAILED and the typed engine error's message;
+preparation fields stay intact through the callback. Polls emit no command or
+money outcome and add no auth evidence. A nonfinite Event clock queues no HTTP,
+Prepare, Bind, poll timer or recovery action.
+
+**NEW:** stale subscription generations cannot decode, publish, warn, fall back,
+schedule or recover. An outstanding Context remains bounded and retires on its
+callback/expiry; final unsubscribe does not promise immediate HTTP cancellation.
+A trade revision change suppresses only candle publication: current-generation
+cleanup, completion + 3s polling and native strict-20s/inclusive-30s trade-channel
+recovery remain. Duplicate reference counts and overlapping native startup
+cycles gain no new coalescing. Row order, last-row/volume merge, both native
+wires and decoders, command candle ownership, socket behavior and outer
+public-response account.start delegation are preserved.
+
+Inventory removes exactly two raw poll senders: public 3 -> 1, family 39 -> 37.
+The remaining conservative discovery macro witness is retained. The old stale
+response fixture's no-action count is explicitly superseded by exactly one
+ClearTimer for the retired managed HTTP deadline; no native publication,
+fallback, recovery, notice or poll timer is permitted in that suffix.
