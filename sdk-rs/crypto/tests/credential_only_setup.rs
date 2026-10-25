@@ -78,3 +78,27 @@ fn k6_existing_setup_policies_serialize_unchanged() {
         );
     }
 }
+
+/// C5 (control): selection is generic over slot material, so a credential-only
+/// primary is chosen for Mutation and SessionAuth like any other primary.
+#[test]
+fn c5_credential_only_primary_selects_for_mutation_and_session_auth() {
+    use safe_cex_engine::CredentialSlot;
+    use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+    let (_, identities) = LocalSigner::from_json_with_policy_and_mode(
+        r#"{"primary":{"key":"api-key"}}"#.into(),
+        CredentialSetupPolicy::default(),
+        false,
+    )
+    .unwrap();
+    let slots = Slots::new(identities.primary, None, SlotPolicy::default());
+    for role in [CredentialRole::Mutation, CredentialRole::SessionAuth] {
+        let (selection, identity) = slots.select(role).unwrap();
+        assert_eq!(selection.slot(), CredentialSlot::Primary);
+        assert_eq!(identity.credential.0, "primary.credential");
+        assert_eq!(
+            selection.session_egress().is_some(),
+            role == CredentialRole::SessionAuth
+        );
+    }
+}
