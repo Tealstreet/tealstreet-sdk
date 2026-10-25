@@ -12275,9 +12275,6 @@
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -12311,6 +12308,17 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },
@@ -12581,9 +12589,6 @@
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -12617,6 +12622,17 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },
@@ -12652,10 +12668,12 @@
         },
         "attempts": [
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             },
             "context": {
               "feed": "private",
@@ -12663,31 +12681,39 @@
             }
           },
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             }
           },
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             }
           },
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             }
           },
           {
-            "url": "wss://ws.bitget.com/v3/ws/private",
+            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
             "relay": null,
             "headers": {
-              "X-Venue-Header": "keep"
+              "X-Venue-Header": "keep",
+              "Origin": "https://preview.tealstreet.io",
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             }
           }
         ]
@@ -12715,9 +12741,6 @@
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -12751,6 +12774,17 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },
@@ -12858,9 +12892,6 @@
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -12894,6 +12925,17 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },
@@ -12993,9 +13035,6 @@
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
-          ],
-          "directUrls": [
-            "wss://ws.bitget.com/v3/ws/private"
           ]
         },
         "business": {}
@@ -13029,6 +13068,17 @@
         {
           "contains": "listenKey=",
           "channel": "private"
+        }
+      ],
+      "privateWsRoutes": [
+        {
+          "contains": "/v3/ws/private",
+          "route": {
+            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "ignoredMessages": [
+              "pong"
+            ]
+          }
         }
       ]
     },
