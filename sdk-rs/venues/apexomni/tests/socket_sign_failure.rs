@@ -14,6 +14,7 @@ use support::*;
 #[derive(Default)]
 struct Seen {
     config_invalid: usize,
+    signed_sent: usize,
     startup_failed: usize,
     io: usize,
     private_connects: usize,
@@ -53,6 +54,13 @@ fn run(e: &mut TestEngine, replies: &[SignError], serve: bool, remote: bool) -> 
                 },
                 Action::Http(request) => {
                     seen.io += 1;
+                    if request
+                        .headers
+                        .iter()
+                        .any(|(name, _)| *name == "APEX-SIGNATURE")
+                    {
+                        seen.signed_sent += 1;
+                    }
                     sent.push(request.id);
                 }
                 Action::WsConnect {
@@ -190,8 +198,8 @@ fn transient_remote_failures_keep_retrying_and_never_fail_startup() {
     assert_eq!(seen.startup_failed, 0);
 }
 
-/// Signs REST with the fixture but refuses every socket login outright.
-struct NoSocketLogin(Arc<dyn Signer>);
+/// Signs REST with the fixture but refuses every socket login with `.1`.
+struct NoSocketLogin(Arc<dyn Signer>, SignError);
 impl Signer for NoSocketLogin {
     fn immediate(&self) -> bool {
         true
@@ -202,7 +210,7 @@ impl Signer for NoSocketLogin {
     }
     fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
         if request.context.method == "WS" {
-            Some(Err(SignError::Unsupported))
+            Some(Err(self.1))
         } else {
             self.0.sign_ready(request)
         }
@@ -212,21 +220,43 @@ impl Signer for NoSocketLogin {
     }
 }
 
-#[test]
-fn a_socket_login_that_cannot_sign_fails_once_and_never_reconnects() {
+fn refusing_socket_logins(error: SignError) -> TestEngine {
     let (provider, identities) = fixture_provider(&Material::default());
     let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         identity: identities.primary.clone(),
         ..Options::default()
     }));
     e.set_identities(identities).unwrap();
-    e.set_signer(Some(Arc::new(NoSocketLogin(provider))))
+    e.set_signer(Some(Arc::new(NoSocketLogin(provider, error))))
         .unwrap();
     e.start(0.0);
+    e
+}
+
+#[test]
+fn a_socket_login_that_cannot_sign_fails_once_and_never_reconnects() {
+    let mut e = refusing_socket_logins(SignError::InvalidRequest);
     let seen = run(&mut e, &[SignError::Unavailable], true, false);
     assert_eq!(
         seen.private_connects, 1,
         "the login is never retried by reconnecting"
     );
     assert_eq!(seen.config_invalid, 1, "one visible error");
+}
+
+/// An algorithm the provider lacks fails that request kind only: it never
+/// latches, and every other signed request keeps being sent.
+#[test]
+fn an_unsupported_login_fails_alone_and_signed_reads_keep_working() {
+    let mut e = refusing_socket_logins(SignError::Unsupported);
+    let seen = run(&mut e, &[SignError::Unavailable], true, false);
+    assert_eq!(seen.config_invalid, 0);
+    assert_eq!(seen.startup_failed, 0);
+    assert!(seen.private_connects > 1, "the login is retried as before");
+    assert!(
+        seen.signed_sent > seen.private_connects,
+        "signed reads continue: {} signed, {} connects",
+        seen.signed_sent,
+        seen.private_connects
+    );
 }

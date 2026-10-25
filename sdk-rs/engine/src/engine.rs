@@ -3646,7 +3646,7 @@ impl<V: Venue> Engine<V> {
         };
         if let Event::Signed { attempt, result } = event {
             if !self.io.signing.is_managed(attempt) || self.signing_pending(attempt) {
-                self.provider_refused(now, &result);
+                self.provider_refused(now, attempt, &result);
                 self.sign_completed(now, attempt, result);
             }
             if self.venue.cancel_needs_stored_order() {
@@ -4526,6 +4526,7 @@ impl<V: Venue> Engine<V> {
     fn provider_refused(
         &mut self,
         now: f64,
+        attempt: RequestId,
         result: &Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
         let local = self.io.signer.as_ref().is_some_and(|s| s.immediate());
@@ -4534,9 +4535,21 @@ impl<V: Venue> Engine<V> {
             .err()
             .copied()
             .filter(|e| e.permanent(local))
+            && self.primary_refs(self.io.signing.prepared_refs(attempt))
         {
             self.refuse_signing(now, error);
         }
+    }
+
+    /// A secondary read slot's failure must never stop primary trading, so
+    /// only a request naming a primary ref latches when a secondary exists.
+    fn primary_refs(&self, refs: &[crate::signing::KeyRef]) -> bool {
+        let identities = &self.io.identities;
+        identities.secondary.is_none()
+            || identities
+                .primary
+                .as_ref()
+                .is_some_and(|primary| refs.iter().any(|key| primary.owns(key)))
     }
 
     fn refuse_signing(&mut self, now: f64, error: crate::signing::SignError) {
@@ -5048,7 +5061,9 @@ impl<V: Venue> Engine<V> {
                             Ok(work) => work,
                             Err(error) => {
                                 let emitted = self.io.actions.len();
-                                if self.io.signing.take_credential_refusal() {
+                                if let Some(refs) = self.io.signing.take_credential_refusal()
+                                    && self.primary_refs(&refs)
+                                {
                                     self.refuse_signing(now, error);
                                 }
                                 self.sign_completed(now, attempt, Err(error));
@@ -5060,7 +5075,7 @@ impl<V: Venue> Engine<V> {
                             self.io.signer.as_ref().and_then(|s| s.sign_ready(&work))
                         {
                             let emitted = self.io.actions.len();
-                            self.provider_refused(now, &result);
+                            self.provider_refused(now, attempt, &result);
                             self.sign_completed(now, attempt, result);
                             // Inline local completion retains original mixed action order.
                             self.queue_dispatch_callback_actions(&mut queued, emitted);

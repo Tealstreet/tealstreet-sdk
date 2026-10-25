@@ -88,6 +88,7 @@ pub(crate) struct Pending {
     pub receipt: SignReceipt,
     prepared_protocol_at: Option<f64>,
     header_policy: ResultHeaderPolicy,
+    refs: Vec<crate::signing::KeyRef>,
 }
 impl Pending {
     fn receipt_expired(&self, raw_now: f64) -> bool {
@@ -122,8 +123,9 @@ pub(crate) struct Dispatch {
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: crate::IdMap<RequestId, Pending>,
     next: crate::resource_ids::ResourceIds,
-    /// Set when a preparation named an invalid credential ref; taken once.
-    credential_refused: bool,
+    /// The refs of a preparation that named an invalid credential ref, or of
+    /// a socket step that could not prepare at all (none known); taken once.
+    credential_refused: Option<Vec<crate::signing::KeyRef>>,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
@@ -136,8 +138,12 @@ impl Dispatch {
         self.pending.is_empty() && self.outbound.is_empty()
     }
 
-    pub fn take_credential_refusal(&mut self) -> bool {
-        std::mem::take(&mut self.credential_refused)
+    pub fn take_credential_refusal(&mut self) -> Option<Vec<crate::signing::KeyRef>> {
+        self.credential_refused.take()
+    }
+    /// The refs the attempt's prepared request names.
+    pub fn prepared_refs(&self, id: RequestId) -> &[crate::signing::KeyRef] {
+        self.pending.get(&id).map_or(&[], |p| &p.refs)
     }
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
@@ -319,6 +325,7 @@ impl Dispatch {
                 receipt: Default::default(),
                 prepared_protocol_at: None,
                 header_policy,
+                refs: Vec::new(),
             },
         );
         Ok(deadline)
@@ -415,7 +422,18 @@ impl Dispatch {
             original.timeout_ms = current.timeout_ms;
         }
         p.outbound = p.unsigned.clone();
-        let work = p.step.prepare(&mut p.outbound, context)?;
+        let work = match p.step.prepare(&mut p.outbound, context) {
+            Ok(work) => work,
+            Err(error) => {
+                // A login that cannot even prepare fails identically every time.
+                if error == SignError::InvalidRequest
+                    && matches!(p.outbound, Action::WsSend { .. } | Action::WsConnect { .. })
+                {
+                    self.credential_refused = Some(Vec::new());
+                }
+                return Err(error);
+            }
+        };
         if !matches!(p.header_policy, ResultHeaderPolicy::Deny)
             && !matches!(p.outbound, Action::Http(_))
         {
@@ -432,9 +450,12 @@ impl Dispatch {
             return Err(SignError::InvalidRequest);
         }
         if let Err(error) = work.validate() {
-            self.credential_refused = work.has_invalid_key_ref();
+            if work.has_invalid_key_ref() {
+                self.credential_refused = Some(work.key_refs().cloned().collect());
+            }
             return Err(error);
         }
+        p.refs = work.key_refs().cloned().collect();
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
         if work

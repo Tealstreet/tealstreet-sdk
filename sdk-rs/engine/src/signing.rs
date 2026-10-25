@@ -230,6 +230,14 @@ impl Identity {
             .ok_or(SignError::InvalidRequest)
     }
 
+    /// Whether `key` is one of this slot's refs.
+    pub fn owns(&self, key: &KeyRef) -> bool {
+        self.credential == *key
+            || self.signing == *key
+            || self.passphrase.as_ref() == Some(key)
+            || self.extra.values().any(|extra| extra == key)
+    }
+
     pub fn validate(&self) -> Result<(), &'static str> {
         if !valid_key_ref(&self.credential)
             || !valid_key_ref(&self.signing)
@@ -465,14 +473,23 @@ impl SignRequest {
     /// Refs come only from an identity, so an invalid one means the installed
     /// credentials lack that material: no retry of this request can sign.
     pub fn has_invalid_key_ref(&self) -> bool {
-        self.operations.iter().any(|op| match op {
-            Operation::Present { key }
-            | Operation::PublicAddress { key }
-            | Operation::PublicKey { key, .. } => !valid_key_ref(key),
-            Operation::Sign { key, payload, .. } => {
-                !valid_key_ref(key) || payload.iter().any(invalid_credential_part)
-            }
-            Operation::Sha256 { payload } => payload.iter().any(invalid_credential_part),
+        self.key_refs().any(|key| !valid_key_ref(key))
+    }
+    /// Every ref the operations name, including interpolated credentials.
+    pub fn key_refs(&self) -> impl Iterator<Item = &KeyRef> {
+        self.operations.iter().flat_map(|op| {
+            let (key, payload) = match op {
+                Operation::Present { key }
+                | Operation::PublicAddress { key }
+                | Operation::PublicKey { key, .. } => (Some(key), &[][..]),
+                Operation::Sign { key, payload, .. } => (Some(key), &payload[..]),
+                Operation::Sha256 { payload } => (None, &payload[..]),
+            };
+            key.into_iter()
+                .chain(payload.iter().filter_map(|part| match part {
+                    PayloadPart::Credential { key } => Some(key),
+                    _ => None,
+                }))
         })
     }
     /// Shared structural bounds also apply to injected providers. Expanded secret
@@ -536,10 +553,6 @@ impl SignRequest {
         }
         Ok(())
     }
-}
-
-fn invalid_credential_part(part: &PayloadPart) -> bool {
-    matches!(part, PayloadPart::Credential { key } if !valid_key_ref(key))
 }
 
 /// Algorithms with a public form; consumers exist only for these two.
@@ -618,9 +631,10 @@ impl SignError {
     /// provider's malformed result may be transient; a local one is not.
     pub fn permanent(self, local: bool) -> bool {
         match self {
-            Self::InvalidRequest | Self::Unsupported => true,
+            Self::InvalidRequest => true,
             Self::InvalidResult => local,
-            Self::Unavailable | Self::Refused | Self::TimedOut => false,
+            // An algorithm not compiled in fails one request kind, not the account.
+            Self::Unsupported | Self::Unavailable | Self::Refused | Self::TimedOut => false,
         }
     }
     pub fn venue_error(self) -> crate::VenueError {

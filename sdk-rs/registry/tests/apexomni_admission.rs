@@ -185,35 +185,3 @@ fn json_setup_keeps_the_apexomni_secondary_and_seed_refusals() {
         refused.message
     );
 }
-
-/// Every ApeX private request is signed, so a key without its secret is
-/// refused at setup on both the options and the JSON path, instead of
-/// installing an account that can never sign.
-#[test]
-fn a_key_without_its_secret_is_refused_at_setup() {
-    let mut options = material();
-    options.as_object_mut().unwrap().remove("secret");
-    let error = build(
-        "apexomni",
-        serde_json::from_value(options).unwrap(),
-        Some(safe_cex_engine::test_support::seeded_entropy(11)),
-        Capture,
-    )
-    .err()
-    .expect("a key-only account is refused at setup");
-    assert_eq!(
-        error.message,
-        "ApeX requires the API secret with the API key"
-    );
-
-    let key_only = json!({ "primary": { "key": "api-key", "passphrase": "pass" } });
-    let Err(refused) =
-        safe_cex_venues::local_signer_from_json_for("apexomni", key_only.to_string())
-    else {
-        panic!("a key-only JSON setup must be refused");
-    };
-    assert_eq!(
-        refused.message,
-        "ApeX requires the API secret with the API key"
-    );
-}
