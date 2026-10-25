@@ -3714,7 +3714,6 @@ impl<V: Venue> Engine<V> {
         };
         if let Event::Signed { attempt, result } = event {
             if !self.io.core.signing.is_managed(attempt) || self.signing_pending(attempt) {
-                self.provider_refused(attempt, &result);
                 self.sign_completed(now, attempt, result);
             }
             if self.venue.cancel_needs_stored_order() {
@@ -4601,16 +4600,18 @@ impl<V: Venue> Engine<V> {
         }
     }
 
-    /// A missing key on primary material latches signing (`SigningLatch`).
+    /// The local signer's missing key on primary material latches signing
+    /// (`SigningLatch`). An asynchronous result fails only its own request:
+    /// no host reports `MissingKey`, and none may stop the account if one did.
     fn provider_refused(
         &mut self,
-        attempt: RequestId,
+        work: &crate::signing::SignRequest,
         result: &Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
         if let Err(crate::signing::SignError::MissingKey) = result {
             let startup = self.startup_watch_at.is_some();
             let io = &mut self.io;
-            let primary = io.core.signing.prepared_primary(attempt);
+            let primary = io.core.identities.primary_owns(work);
             SigningLatch::missing_key(
                 &mut io.core.signing,
                 primary,
@@ -5150,7 +5151,7 @@ impl<V: Venue> Engine<V> {
                             .and_then(|s| s.sign_ready(&work))
                         {
                             let emitted = self.io.core.actions.len();
-                            self.provider_refused(attempt, &result);
+                            self.provider_refused(&work, &result);
                             self.sign_completed(now, attempt, result);
                             // Inline local completion retains original mixed action order.
                             self.queue_dispatch_callback_actions(&mut queued, emitted);
@@ -5578,6 +5579,10 @@ fn apply_signature(
 /// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
 pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
 
+/// The latch notice, `SignError::MissingKey`'s text after a fixed prefix.
+const MISSING_KEY_NOTICE: &str =
+    "Signing cannot succeed with the installed credentials: Signing key is not installed";
+
 /// Credential-level signing refusal. Non-generic, so the combined build holds
 /// one copy rather than one per venue engine.
 #[derive(Default)]
@@ -5631,7 +5636,7 @@ impl SigningLatch {
             LogEvent {
                 level: Level::Error,
                 code: log_code::CONFIG_INVALID,
-                message: format!("Signing cannot succeed with the installed credentials: {error}"),
+                message: MISSING_KEY_NOTICE.into(),
                 fields: Vec::new(),
             },
         );

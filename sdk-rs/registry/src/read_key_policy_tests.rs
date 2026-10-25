@@ -245,7 +245,7 @@ fn the_bridge_record_carries_the_policy_only_when_declared() {
         "validateOnly"
     );
     // Other consumers must pin their own activation explicitly.
-    for venue in ["backpack", "krakenspot", "kraken", "weex"] {
+    for venue in ["krakenspot", "kraken", "weex"] {
         assert_eq!(
             construction::read_credentials_policy(venue),
             Install,
@@ -381,4 +381,18 @@ fn the_preflight_refuses_only_a_false_validate_only_result() {
     // Undeclared families and raw keys are left to build_with_signer.
     assert!(read_key_preflight("weex", &options(r#"{"readCredentialsValid":false}"#)).is_ok());
     assert!(read_key_preflight("weex", &options(r#"{"readCredentials":{"key":"read"}}"#)).is_ok());
+}
+
+#[test]
+fn backpack_history_declares_public_read_in_registry_and_bridge() {
+    assert_eq!(
+        construction::read_credentials_policy("backpack"),
+        PublicRead
+    );
+    let bridge = construction::bridge("backpack", &options("{}"));
+    assert_eq!(bridge.read_credentials, PublicRead);
+    assert_eq!(
+        serde_json::to_value(bridge).unwrap()["readCredentials"],
+        "publicRead"
+    );
 }

@@ -1,6 +1,6 @@
 //! Backpack's public-only read-key-only provider seam
-//! (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md). The `backpack` row is not
-//! declared yet, so these declare PublicRead through the test-only seam.
+//! (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md). Policy overrides keep
+//! the undeclared and PublicRead contracts independent of venue adoption.
 use super::construction::ReadCredentialsPolicy::PublicRead;
 use super::construction::test_policy;
 use super::*;
@@ -147,6 +147,8 @@ fn public_only_with_an_invalid_read_key_installs_nothing_and_keeps_the_typed_sta
 /// Control: undeclared, public-only installs nothing, exactly as today.
 #[test]
 fn undeclared_public_only_is_unchanged() {
+    let _undeclared =
+        test_policy::declare("backpack", construction::ReadCredentialsPolicy::Install);
     assert_eq!(
         construction::read_credentials_policy("backpack"),
         construction::ReadCredentialsPolicy::Install
