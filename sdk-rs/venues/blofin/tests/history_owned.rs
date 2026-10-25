@@ -3,7 +3,7 @@ use safe_cex_engine::{Action, Command, ErrorKind, Event, Level, Notice, Query, R
 use support::*;
 fn query(h: &mut Harness, command: u32, query: Query) {
     h.ws("pong");
-    h.e.handle(1.0, Event::Command(Command::Query { command, query }));
+    h.handle(1.0, Event::Command(Command::Query { command, query }));
     h.collect_at(1.0);
 }
 fn income() -> Query {
@@ -110,7 +110,7 @@ fn fail(h: &mut Harness, request: safe_cex_engine::HttpRequest, kind: u8) {
     match kind {
         0 => h.respond(request, r#"{"code":"152401","msg":"denied","data":[]}"#),
         1 => {
-            h.e.handle(
+            h.handle(
                 1.0,
                 Event::HttpResponse {
                     request: request.id,
@@ -124,7 +124,7 @@ fn fail(h: &mut Harness, request: safe_cex_engine::HttpRequest, kind: u8) {
             h.collect();
         }
         2 => {
-            h.e.handle(
+            h.handle(
                 1.0,
                 Event::HttpFailed {
                     request: request.id,
@@ -190,7 +190,8 @@ fn general_history_first_failures_are_typed_and_never_accept_streamed_prefixes()
             query(&mut h, 7, q);
             let r = h.take(path);
             fail(&mut h, r, kind);
-            if operation == 3 && kind == 2 {
+            // Managed reads keep a transport loss typed as Network, public or private.
+            if kind == 2 {
                 let error = outcome(&h, 7)
                     .expect("command settled")
                     .expect_err("must reject");
