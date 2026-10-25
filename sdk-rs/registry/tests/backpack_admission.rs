@@ -3,6 +3,9 @@
 //! and seed, so managed trading signs through the provider.
 #![cfg(feature = "backpack")]
 
+use safe_cex_engine::credential_selection::{
+    CredentialRole, CredentialUnavailable, PrimaryReason, SlotPolicy, Slots,
+};
 use safe_cex_engine::signing::{
     Algorithm, Identities, Operation, PayloadPart, Provider, SignRequest,
 };
@@ -169,15 +172,48 @@ fn secondary_only_identity_uses_a_real_provider_without_a_primary() {
 }
 
 #[test]
-fn public_only_secondary_config_installs_no_signing_authority() {
+fn public_only_secondary_config_installs_read_scoped_authority_only() {
     let (identities, signer) = construct(json!({
         "publicDataOnly": true,
         "readCredentials": {"key": "read-api-key", "secret": base64(&hex(RFC_SEED))},
     }))
     .unwrap();
     assert!(identities.primary.is_none());
-    assert!(identities.secondary.is_none());
-    assert!(signer.is_none());
+    assert_read_provider(identities.clone(), signer, false);
+    let slots = Slots::new(
+        identities.primary,
+        identities.secondary,
+        SlotPolicy::default(),
+    );
+    let (selected, _) = slots.select(CredentialRole::Read { scope: None }).unwrap();
+    assert_eq!(selected.slot(), safe_cex_engine::CredentialSlot::Secondary);
+    for role in [
+        CredentialRole::Mutation,
+        CredentialRole::SessionAuth,
+        CredentialRole::PrimaryRead {
+            reason: PrimaryReason::History,
+            scope: None,
+        },
+    ] {
+        assert_eq!(
+            slots.select(role).err(),
+            Some(CredentialUnavailable::Missing)
+        );
+    }
+}
+
+#[test]
+fn public_only_invalid_secondary_installs_no_signing_authority() {
+    for secret in ["not base64!".to_string(), base64(&[8; 31])] {
+        let (identities, signer) = construct(json!({
+            "publicDataOnly": true,
+            "readCredentials": {"key": "read-api-key", "secret": secret},
+        }))
+        .unwrap();
+        assert!(identities.primary.is_none());
+        assert!(identities.secondary.is_none());
+        assert!(signer.is_none());
+    }
 }
 
 #[test]
