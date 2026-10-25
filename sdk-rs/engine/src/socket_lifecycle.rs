@@ -928,7 +928,8 @@ impl Lifecycle {
             .ok_or(SocketError::Capacity)?;
         // Reuse immutable rows only when both key and native arguments match.
         // Changed arguments keep a distinct released row until unsubscribe.
-        // Collected, then sorted once into the map (BTreeMap insert semantics).
+        // Collected, then sorted once into the map; has_duplicate refused any
+        // repeated key above, so the sort's order among equal keys is moot.
         let mut entries = Vec::new();
         match interests {
             InterestInput::Proposed(rows) => {
@@ -950,7 +951,7 @@ impl Lifecycle {
                 }
             }
         }
-        let desired = Map::from_entries(entries);
+        let desired = Map::from_unique(entries);
         let mut forced = Set::default();
         for key in repair {
             forced.insert(key.as_str());
@@ -1147,18 +1148,38 @@ mod sorted {
         pub(super) fn clear(&mut self) {
             self.0.clear();
         }
-        /// As inserting each entry into a `BTreeMap` in order: one stable sort,
-        /// then for a repeated key its first key value and its last value.
-        pub(super) fn from_entries(mut entries: Vec<(K, V)>) -> Self {
-            entries.sort_by(|a, b| a.0.cmp(&b.0));
-            let mut map: Vec<(K, V)> = Vec::with_capacity(entries.len());
-            for (key, value) in entries {
-                match map.last_mut() {
-                    Some(last) if last.0 == key => last.1 = value,
-                    _ => map.push((key, value)),
+        /// From entries whose keys are already known to be distinct. A small
+        /// heapsort instead of a std sort: ~4K less code per element type.
+        pub(super) fn from_unique(mut entries: Vec<(K, V)>) -> Self {
+            heapsort_by_key(&mut entries);
+            debug_assert!(entries.windows(2).all(|p| p[0].0 < p[1].0));
+            Self(entries)
+        }
+    }
+
+    fn heapsort_by_key<K: Ord, V>(v: &mut [(K, V)]) {
+        fn sift<K: Ord, V>(v: &mut [(K, V)], mut root: usize) {
+            loop {
+                let mut child = 2 * root + 1;
+                if child >= v.len() {
+                    return;
                 }
+                if child + 1 < v.len() && v[child].0 < v[child + 1].0 {
+                    child += 1;
+                }
+                if v[root].0 >= v[child].0 {
+                    return;
+                }
+                v.swap(root, child);
+                root = child;
             }
-            Self(map)
+        }
+        for root in (0..v.len() / 2).rev() {
+            sift(v, root);
+        }
+        for end in (1..v.len()).rev() {
+            v.swap(0, end);
+            sift(&mut v[..end], 0);
         }
     }
 
@@ -1279,23 +1300,35 @@ mod sorted {
         }
 
         #[test]
-        fn from_entries_matches_inserting_into_a_btreemap_in_order() {
-            for seed in 1..40u64 {
-                let entries: Vec<(Arc<str>, u32)> =
-                    ops(seed, 200).map(|(_, k, v)| (k.into(), v)).collect();
-                let mut tree = BTreeMap::new();
-                let mut first_keys: BTreeMap<Arc<str>, Arc<str>> = BTreeMap::new();
-                for (k, v) in &entries {
-                    tree.insert(k.clone(), *v);
-                    first_keys.entry(k.clone()).or_insert_with(|| k.clone());
-                }
-                let ours = Map::from_entries(entries);
+        fn from_unique_matches_a_btreemap_for_distinct_keys() {
+            let check = |entries: Vec<(Arc<str>, u32)>, label: &str| {
+                let tree: BTreeMap<_, _> = entries.iter().cloned().collect();
+                let keys: Vec<_> = entries.iter().map(|(k, _)| k.clone()).collect();
+                let ours = Map::from_unique(entries);
                 let a: Vec<_> = ours.iter().map(|(k, v)| (k.clone(), *v)).collect();
-                let b: Vec<_> = tree.into_iter().collect();
-                assert_eq!(a, b, "seed {seed}");
+                assert_eq!(a, tree.into_iter().collect::<Vec<_>>(), "{label}");
                 for (k, _) in ours.iter() {
-                    assert!(Arc::ptr_eq(k, &first_keys[k]), "first key kept");
+                    assert!(
+                        keys.iter().any(|key| Arc::ptr_eq(k, key)),
+                        "{label}: key moved"
+                    );
                 }
+            };
+            for seed in 1..40u64 {
+                let mut seen = BTreeSet::new();
+                let entries: Vec<(Arc<str>, u32)> = ops(seed, 200)
+                    .filter(|(_, k, _)| seen.insert(k.clone()))
+                    .map(|(_, k, v)| (k.into(), v))
+                    .collect();
+                check(entries, &format!("seed {seed}"));
+            }
+            for len in [0usize, 1, 2, 3, 8192] {
+                let ascending: Vec<(Arc<str>, u32)> = (0..len as u32)
+                    .map(|i| (format!("k{i:05}").into(), i))
+                    .collect();
+                let descending = ascending.iter().rev().cloned().collect();
+                check(ascending, &format!("ascending {len}"));
+                check(descending, &format!("descending {len}"));
             }
         }
 
