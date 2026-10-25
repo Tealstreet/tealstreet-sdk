@@ -18,7 +18,8 @@ fn work(
         .clone()
         .ok_or(SignError::InvalidRequest)?;
     let mut work = hmac_sha256_work(
-        identity,
+        &identity.credential,
+        identity.signing_ref()?,
         payload,
         context,
         SignReceipt {
