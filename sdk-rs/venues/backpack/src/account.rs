@@ -2,7 +2,7 @@
 //! the request began. Executions are independent from order-state updates.
 use crate::sign::{Credentials, Params};
 use crate::wire::*;
-use crate::{Backpack, Connection, Pending, REST, WS};
+use crate::{Backpack, Connection, Pending, REST};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
@@ -14,7 +14,6 @@ use safe_cex_engine::request_context::{Error, RetryPolicy};
 use safe_cex_engine::selected_read::{
     AdmittedRead, BackgroundReadError, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
 };
-use safe_cex_engine::socket::Tick;
 use safe_cex_engine::{Cx, Fill, Method, OrderSnapshotToken, Response, SocketId, TimerId};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -540,9 +539,7 @@ impl Backpack {
             Next::Balance => self.balance_read(cx, true, Next::Orders),
             Next::Orders => self.orders_read(cx, Next::Finish),
             Next::Finish => {
-                if self.account.socket.socket.is_none()
-                    && !self.account.socket.supervisor.is_waiting()
-                {
+                if !self.account.socket.started {
                     self.private_connect(cx);
                 }
                 if let Some(t) = self.account.tick.take() {
@@ -934,7 +931,6 @@ impl Backpack {
         );
         self.account.socket.open = true;
         self.account.socket.ping_at = cx.now;
-        self.account.socket.supervisor.opened(cx);
         cx.send(socket, "{\"method\":\"PING\"}");
         if cx.store.loaded().orders {
             self.orders_read(cx, Next::None);
@@ -947,14 +943,12 @@ impl Backpack {
         cx: &mut Cx<'_, Pending>,
         text: &str,
     ) -> Result<(), String> {
-        self.account.socket.supervisor.received(cx.now);
         let envelope: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
         if let Some(error) = envelope.error {
             if error.code == 4002 {
                 return Ok(());
             }
             if let Some(socket) = self.account.socket.socket {
-                cx.close(socket);
                 self.private_close(cx, socket);
             }
             return Err(format!(
@@ -1122,39 +1116,24 @@ impl Backpack {
             self.account.fill_timer = None;
             self.fill_refresh(cx);
         } else {
-            match self.account.socket.supervisor.on_timer(cx, timer) {
-                Tick::Unhandled => return false,
-                Tick::Reconnect => self.private_connect(cx),
-                Tick::Ping => {
-                    if let Some(socket) = self.account.socket.socket {
-                        self.account.socket.ping_at = cx.now;
-                        cx.send(socket, "{\"method\":\"PING\"}");
-                    }
-                }
-                Tick::TimedOut(_) => {
-                    if let Some(socket) = self.account.socket.socket {
-                        cx.close(socket);
-                        self.private_close(cx, socket);
-                    }
-                }
-                Tick::Handled => {}
-            }
+            return false;
         }
         true
     }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.socket.supervisor.connecting(cx);
-        self.account.socket.socket = Some(cx.connect(
-            safe_cex_engine::SocketSpec::new(WS).channel(safe_cex_engine::SocketChannel::Private),
-        ));
+        if let Err(error) = self.connect_feed(cx, true) {
+            Self::socket_notice(cx, error);
+        }
     }
     pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account.socket.socket != Some(socket) {
-            return;
+        if self.account.socket.socket == Some(socket)
+            && let Some(feed) = self.account.socket.feed
+        {
+            cx.retire_socket(
+                feed,
+                safe_cex_engine::socket_lifecycle::RetireReason::Closed,
+            );
         }
-        self.account.socket.socket = None;
-        self.account.socket.open = false;
-        self.account.socket.supervisor.retry(cx);
     }
 }
 
