@@ -120,13 +120,18 @@ fn started_config(
         .unwrap();
     }
     e.start(NOW);
-    let a: Vec<_> = e.drain_actions().collect();
+    let a = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     response(&mut e, NOW, request(&a, "products").id, 200, PRODUCTS);
     let mut a: Vec<_> = if release {
         safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
     } else {
         e.drain_actions().collect()
     };
+    if !release {
+        let index=a.iter().position(|action| matches!(action,Action::ManagedHttp(action) if matches!(action.as_ref(),HttpAction::Prepare {request,..} if request.url.contains("24hr/all")))).unwrap();
+        let public = a.remove(index);
+        a.extend(self::release(&mut e, NOW, vec![public]));
+    }
     if release {
         response(&mut e, NOW, request(&a, "24hr/all").id, 200, DAILY);
         a.extend(e.drain_actions());
@@ -267,7 +272,7 @@ fn uncertain_config(
             orders: vec![opts("uncertain")],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 1_000.);
     let create = request(&actions, "/g-orders/create");
     e.handle(
         NOW + 1500.,

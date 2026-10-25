@@ -3,13 +3,10 @@ use safe_cex_venue_bybit::Options;
 #[test]
 fn credential_options_contain_only_opaque_refs_and_debug_redacts_them() {
     let options = Options {
-        credentials: Some(Identity {
-            credential: KeyRef("audit-opaque-reference".into()),
-            signing: KeyRef("audit-signing-reference".into()),
-            passphrase: None,
-            stable_id: None,
-            extra: Default::default(),
-        }),
+        credentials: Some(Identity::new(
+            KeyRef("audit-opaque-reference".into()),
+            Some(KeyRef("audit-signing-reference".into())),
+        )),
         ..Options::default()
     };
     assert!(!format!("{options:?}").contains("audit-opaque-reference"));

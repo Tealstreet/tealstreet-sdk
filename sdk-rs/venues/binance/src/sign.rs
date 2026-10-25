@@ -19,9 +19,10 @@ pub mod hosted_signing {
         exact_encoded_query: String,
         stamp_ms: f64,
         context: Context,
-    ) -> SignRequest {
-        hmac_sha256_work(
-            identity,
+    ) -> Result<SignRequest, SignError> {
+        Ok(hmac_sha256_work(
+            &identity.credential,
+            identity.signing_ref()?,
             vec![bytes(exact_encoded_query.into_bytes())],
             context,
             SignReceipt {
@@ -29,16 +30,21 @@ pub mod hosted_signing {
                 stamp_ms: Some(stamp_ms),
                 expiry_ms: None,
             },
-        )
+        ))
     }
 
-    pub fn ws_work(identity: &Identity, exact_preimage: String, context: Context) -> SignRequest {
-        hmac_sha256_work(
-            identity,
+    pub fn ws_work(
+        identity: &Identity,
+        exact_preimage: String,
+        context: Context,
+    ) -> Result<SignRequest, SignError> {
+        Ok(hmac_sha256_work(
+            &identity.credential,
+            identity.signing_ref()?,
             vec![bytes(exact_preimage.into_bytes())],
             context,
             SignReceipt::default(),
-        )
+        ))
     }
 
     #[cfg(test)]
@@ -48,13 +54,10 @@ pub mod hosted_signing {
         use safe_cex_engine::signing::{Algorithm, KeyRef};
 
         fn identity() -> Identity {
-            Identity {
-                credential: KeyRef("primary.credential".into()),
-                signing: KeyRef("primary.signing".into()),
-                passphrase: None,
-                stable_id: None,
-                extra: Default::default(),
-            }
+            Identity::new(
+                KeyRef("primary.credential".into()),
+                Some(KeyRef("primary.signing".into())),
+            )
         }
 
         fn mac(work: &SignRequest) -> String {
@@ -77,7 +80,7 @@ pub mod hosted_signing {
                 path: "/fapi/v1/order".into(),
             };
             let query = "symbol=BTCUSDT&timestamp=1709209849123&recvWindow=5000&note=a%2Bb%20%C3%A9&value=first&value=second";
-            let work = http_work(&id, query.into(), 1_709_209_849_123., context.clone());
+            let work = http_work(&id, query.into(), 1_709_209_849_123., context.clone()).unwrap();
             assert_eq!(work.context, context);
             assert_eq!(
                 work.receipt,
@@ -90,10 +93,12 @@ pub mod hosted_signing {
             assert_eq!(
                 work.operations,
                 vec![
-                    Operation::Present { key: id.credential },
+                    Operation::Present {
+                        key: id.credential.clone(),
+                    },
                     Operation::Sign {
                         algorithm: Algorithm::HmacSha256,
-                        key: id.signing,
+                        key: id.signing_ref().unwrap().clone(),
                         payload: vec![PayloadPart::Bytes {
                             bytes: query.as_bytes().to_vec()
                         }],
@@ -107,6 +112,7 @@ pub mod hosted_signing {
             );
             assert!(
                 http_work(&identity(), String::new(), 1_000.5, Context::default())
+                    .unwrap()
                     .validate()
                     .is_err()
             );
@@ -119,15 +125,18 @@ pub mod hosted_signing {
                 &id,
                 "apiKey=primary-key%2B%25%C3%A9&timestamp=1709209849123".into(),
                 Context::default(),
-            );
+            )
+            .unwrap();
             assert_eq!(work.receipt, SignReceipt::default());
             assert_eq!(
                 work.operations,
                 vec![
-                    Operation::Present { key: id.credential },
+                    Operation::Present {
+                        key: id.credential.clone(),
+                    },
                     Operation::Sign {
                         algorithm: Algorithm::HmacSha256,
-                        key: id.signing,
+                        key: id.signing_ref().unwrap().clone(),
                         payload: vec![PayloadPart::Bytes {
                             bytes: b"apiKey=primary-key%2B%25%C3%A9&timestamp=1709209849123"
                                 .to_vec()
@@ -228,12 +237,7 @@ impl SignStep for Http {
                 .into_string();
             http.url.push('?');
             http.url.push_str(&query);
-            return Ok(hosted_signing::http_work(
-                &self.credentials,
-                query,
-                now,
-                context,
-            ));
+            return hosted_signing::http_work(&self.credentials, query, now, context);
         }
         Ok(SignRequest {
             receipt: SignReceipt::default(),
@@ -288,7 +292,8 @@ impl SignStep for SpotSubscribe {
         let now = context.stamp_ms();
         self.timestamp = now;
         Ok(hmac_sha256_work(
-            &self.credentials,
+            &self.credentials.credential,
+            self.credentials.signing_ref()?,
             vec![
                 bytes(b"apiKey=".to_vec()),
                 PayloadPart::Credential {

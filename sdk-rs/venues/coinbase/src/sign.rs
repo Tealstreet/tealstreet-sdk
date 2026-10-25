@@ -312,7 +312,7 @@ fn prepare_jwt(
                     JwtAlgorithm::Es256 => Algorithm::Es256,
                     JwtAlgorithm::EdDsa => Algorithm::Ed25519,
                 },
-                key: identity.signing.clone(),
+                key: identity.signing_ref()?.clone(),
                 payload: vec![PayloadPart::Bytes {
                     bytes: input.clone().into_bytes(),
                 }],

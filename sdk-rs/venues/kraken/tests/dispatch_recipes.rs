@@ -507,8 +507,8 @@ fn same_key_different_secrets_share_subject_but_each_mac_uses_its_selected_secre
     });
     // Each slot keeps its own signing ref despite the trusted shared subject.
     assert_ne!(
-        ids.primary.as_ref().unwrap().signing,
-        ids.secondary.as_ref().unwrap().signing
+        ids.primary.as_ref().unwrap().signing_ref().unwrap(),
+        ids.secondary.as_ref().unwrap().signing_ref().unwrap()
     );
     let first = run(p.clone(), ids.clone(), false, "", false);
     let (second, errors) = run_case(
@@ -929,7 +929,7 @@ fn retained_read_and_leg_build_real_recipes_without_reselection_after_slots_chan
             assert_eq!(work.len(), 1);
             assert_eq!(work[0].receipt.nonce, Some(1700000000000000));
             assert!(
-                matches!(&work[0].operations[2],safe_cex_engine::signing::Operation::Sign {key,..} if key==&expected_identity.signing)
+                matches!(&work[0].operations[2],safe_cex_engine::signing::Operation::Sign {key,..} if key==expected_identity.signing_ref().unwrap())
             );
             drop(work);
             let request = packets[0].id;

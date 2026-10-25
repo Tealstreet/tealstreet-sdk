@@ -1,12 +1,16 @@
 //! Bounded rare reads; documented g-futures history uses textual enums, unlike
 //! the numeric execution endpoint whose side enum remains unverified.
 use crate::{Pending, PhemexPerpetuals};
-use safe_cex_engine::history::{Completion, HistoryRows};
+use safe_cex_engine::credential_selection::PrimaryReason;
+use safe_cex_engine::history::{ReadCompletion, ReadHistoryRows};
 use safe_cex_engine::model::{OrderStatus, OrderType};
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation, Owner, Policy, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
+};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError, json::ArrayAt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 const MAX_ROWS: u32 = 200;
 
@@ -14,6 +18,7 @@ const MAX_ROWS: u32 = 200;
 pub struct State {
     pub(super) active: HashSet<CommandId>,
     pub(super) deferred: Vec<(TimerId, Deferred)>,
+    owners: HashMap<CommandId, Owner>,
 }
 
 pub(super) enum Deferred {
@@ -22,7 +27,8 @@ pub(super) enum Deferred {
 }
 
 pub struct Request {
-    command: CommandId,
+    root: ReadRoot,
+    leg: Option<ReadLeg>,
     symbol: String,
     native_symbol: String,
     from: Option<f64>,
@@ -37,15 +43,36 @@ pub struct Request {
 }
 
 impl Request {
+    pub(crate) fn validate_delivery(
+        &self,
+        cx: &Cx<'_, Pending>,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        self.root.validate_delivery(
+            cx,
+            self.leg
+                .as_ref()
+                .ok_or(safe_cex_engine::request_context::Error::Revoked)?,
+        )
+    }
+    fn is_public_trade(&self) -> bool {
+        matches!(self.rows, Rows::Trades(_))
+    }
     pub(crate) fn is_lookup(&self) -> bool {
         self.client_id.is_some()
     }
 }
 
+enum Kind {
+    Fills,
+    Orders,
+    Trades,
+    Lookup,
+}
+
 enum Rows {
-    Fills(Box<HistoryRows<Execution>>),
-    Orders(Box<HistoryRows<HistoricalOrder>>),
-    Trades(Box<HistoryRows<Trade>>),
+    Fills(Box<ReadHistoryRows<Execution>>),
+    Orders(Box<ReadHistoryRows<HistoricalOrder>>),
+    Trades(Box<ReadHistoryRows<Trade>>),
     Lookup(Vec<safe_cex_engine::model::Order>),
 }
 
@@ -53,20 +80,24 @@ fn encode_rows<T: Serialize>(rows: &[T]) -> Result<String, VenueError> {
     serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
 }
 
-fn owned_rows<T: Serialize>(command: CommandId) -> Box<HistoryRows<T>> {
-    Box::new(HistoryRows::new(Completion::new(command), encode_rows))
+fn owned_rows<T: Serialize>(completion: ReadCompletion) -> Box<ReadHistoryRows<T>> {
+    Box::new(ReadHistoryRows::new(completion, encode_rows))
 }
 
 fn finish_rows<T: Serialize, P>(
-    mut owner: HistoryRows<T>,
+    mut owner: ReadHistoryRows<T>,
     cx: &mut Cx<'_, P>,
+    leg: &Context,
     limit: usize,
     time: impl Fn(&T) -> f64,
 ) {
     // These endpoints have exactly one response. No rows are admitted before
     // its complete HTTP/envelope/row verdict, so a failure can never be partial.
-    owner.accept_page();
-    owner.finish_with(cx, Ok(()), |mut rows| {
+    let Ok(mut page) = owner.admit(cx, leg) else {
+        return;
+    };
+    page.accept_page();
+    let _ = owner.finish_with(cx, Ok(()), |mut rows| {
         rows.sort_by(|a, b| time(b).total_cmp(&time(a)));
         rows.truncate(limit);
         encode_rows(&rows)
@@ -239,7 +270,7 @@ impl PhemexPerpetuals {
             return;
         }
         let mut client_id = None;
-        let (symbol, from, to, limit, order_id, rows) = match query {
+        let (symbol, from, to, limit, order_id, kind) = match query {
             Query::OrderByClientId {
                 symbol,
                 client_order_id,
@@ -253,14 +284,7 @@ impl PhemexPerpetuals {
                     return;
                 }
                 client_id = Some(client_order_id);
-                (
-                    Some(symbol),
-                    None,
-                    None,
-                    Some(1),
-                    None,
-                    Rows::Lookup(Vec::new()),
-                )
+                (Some(symbol), None, None, Some(1), None, Kind::Lookup)
             }
             Query::Fills {
                 symbol,
@@ -268,39 +292,20 @@ impl PhemexPerpetuals {
                 from_ms,
                 to_ms,
                 limit,
-            } => (
-                symbol,
-                from_ms,
-                to_ms,
-                limit,
-                order_id,
-                Rows::Fills(owned_rows(command)),
-            ),
+            } => (symbol, from_ms, to_ms, limit, order_id, Kind::Fills),
             Query::OrderHistory {
                 symbol,
                 from_ms,
                 to_ms,
                 limit,
-            } => (
-                symbol,
-                from_ms,
-                to_ms,
-                limit,
-                None,
-                Rows::Orders(owned_rows(command)),
-            ),
-            Query::PublicTrades { symbol, limit } => (
-                Some(symbol),
-                None,
-                None,
-                limit,
-                None,
-                Rows::Trades(owned_rows(command)),
-            ),
+            } => (symbol, from_ms, to_ms, limit, None, Kind::Orders),
+            Query::PublicTrades { symbol, limit } => {
+                (Some(symbol), None, None, limit, None, Kind::Trades)
+            }
             Query::Income { .. } => unreachable!(),
         };
         if (self.options.public_data_only || self.credentials.is_none())
-            && !matches!(rows, Rows::Trades(_))
+            && !matches!(kind, Kind::Trades)
         {
             Self::finish_local_history(cx, Err("Phemex private history requires credentials"));
             return;
@@ -325,10 +330,48 @@ impl PhemexPerpetuals {
             Self::finish_local_history(cx, Err("Unsupported Phemex native history symbol"));
             return;
         }
+        let role = if matches!(kind, Kind::Lookup) {
+            ReadRole::Primary {
+                reason: PrimaryReason::ClientOrderLookup,
+                scope: None,
+            }
+        } else {
+            ReadRole::Read { scope: None }
+        };
+        let slots = if matches!(kind, Kind::Trades) {
+            &self.public_read_slots
+        } else {
+            &self.read_slots
+        };
+        let Ok(root) = SelectedRead::command_root(
+            cx,
+            SelectedRead::select(slots, role),
+            LocalRefusal {
+                diagnostic: None,
+                error: VenueError::new("Phemex private history requires credentials"),
+            },
+        ) else {
+            return;
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.context().clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(root.context(), error.read_venue_error());
+                return;
+            }
+        };
+        let rows = match kind {
+            Kind::Fills => Rows::Fills(owned_rows(completion)),
+            Kind::Orders => Rows::Orders(owned_rows(completion)),
+            Kind::Trades => Rows::Trades(owned_rows(completion)),
+            Kind::Lookup => Rows::Lookup(Vec::new()),
+        };
+        self.history.owners.insert(command, root.context().owner());
         self.history.active.insert(command);
         let limit = limit.unwrap_or(100).clamp(1, MAX_ROWS) as usize;
         let request = Request {
-            command,
+            root,
+            leg: None,
             symbol,
             native_symbol,
             from,
@@ -344,7 +387,13 @@ impl PhemexPerpetuals {
         self.history_send(cx, request);
     }
 
-    fn history_send(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+    fn history_send(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
+        if cx
+            .validate_read_root_context(request.root.context())
+            .is_err()
+        {
+            return;
+        }
         if cx.now < self.paused_until {
             let timer = cx.set_timer(self.paused_until - cx.now);
             self.history
@@ -358,14 +407,15 @@ impl PhemexPerpetuals {
             Rows::Orders(_) => ("/api-data/g-futures/orders", ArrayAt::Root),
             Rows::Trades(_) => ("/md/v2/trade", ArrayAt::Path(&["result", "trades_p"])),
         };
-        let mut query = format!("symbol={}", request.native_symbol);
+        let native_symbol = &request.native_symbol;
+        let mut query = format!("symbol={native_symbol}");
         let from = request.from;
         let to = request.to;
         let limit = request.limit;
         if let Some(client_id) = &request.client_id {
             query.push_str("&clOrdID=");
             query.push_str(&crate::trading::encode(client_id));
-        } else if !matches!(request.rows, Rows::Trades(_)) {
+        } else if !request.is_public_trade() {
             if let Some(from) = from {
                 query.push_str(&format!("&start={from:.0}"));
             }
@@ -374,30 +424,61 @@ impl PhemexPerpetuals {
             }
             query.push_str(&format!("&offset=0&limit={limit}"));
         }
-        self.request(
+        let leg = match request.root.leg(
             cx,
-            Method::Get,
-            path,
-            &query,
-            None,
-            Pending::History(request),
-            Some(at),
-        );
+            ReadLegPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+            },
+        ) {
+            Ok(leg) => leg,
+            Err(error) => {
+                self.history_failed(cx, request, error.read_venue_error());
+                return;
+            }
+        };
+        let testnet = self.options.testnet;
+        let url = format!("{}{path}?{query}", self.rest());
+        if let Err((Pending::History(request), error)) = leg.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url,
+                body: None,
+                stream: Some(at),
+            },
+            |identity| {
+                Box::new(crate::dispatch_signing::Http::new(
+                    identity.clone(),
+                    testnet,
+                    Method::Get,
+                    path.into(),
+                    query,
+                    None,
+                ))
+            },
+            |leg| {
+                request.leg = Some(leg);
+                Pending::History(request)
+            },
+        ) {
+            self.history_failed(cx, request, error.read_venue_error());
+        }
     }
 
     pub(crate) fn history_item(
         &mut self,
-        _cx: &mut Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) {
-        if request.invalid {
+        if request.invalid || request.validate_delivery(cx).is_err() {
             return;
         }
         request.count += 1;
         // The public trade endpoint has no requested size. Bound its documented
         // recent snapshot too; refuse oversized pages instead of retaining them.
-        let cap = if matches!(request.rows, Rows::Trades(_)) {
+        let cap = if request.is_public_trade() {
             1_000
         } else {
             MAX_ROWS as usize
@@ -406,7 +487,7 @@ impl PhemexPerpetuals {
             request.invalid = true;
             return;
         }
-        if decode(request, item).is_none() {
+        if decode(cx, request, item).is_none() {
             request.invalid = true;
         }
     }
@@ -417,16 +498,19 @@ impl PhemexPerpetuals {
         mut request: Request,
         response: Response<'_>,
     ) {
+        if request.validate_delivery(cx).is_err() {
+            return;
+        }
         if !(200..300).contains(&response.status) {
             self.history_failed(
                 cx,
                 request,
-                &format!("Phemex history HTTP {}", response.status),
+                format!("Phemex history HTTP {}", response.status),
             );
             return;
         }
         // Direct/native hosts can deliver the full body instead of chunks.
-        let parsed = if matches!(request.rows, Rows::Trades(_)) {
+        let parsed = if request.is_public_trade() {
             #[derive(Deserialize)]
             struct Envelope<'a> {
                 #[serde(borrow)]
@@ -455,7 +539,6 @@ impl PhemexPerpetuals {
             })
             .is_ok()
         };
-        self.history.active.remove(&request.command);
         if !parsed || request.invalid {
             self.history_failed(
                 cx,
@@ -464,6 +547,7 @@ impl PhemexPerpetuals {
             );
             return;
         }
+        self.retire_history(request.root.context().owner());
         match request.rows {
             Rows::Lookup(rows) => {
                 #[derive(Serialize)]
@@ -480,13 +564,35 @@ impl PhemexPerpetuals {
                     definitive: rows.is_empty().then_some(true),
                 });
                 match result.map_err(|error| error.to_string()) {
-                    Ok(data) => cx.done(request.command, data),
-                    Err(error) => cx.fail(request.command, error),
+                    Ok(data) => {
+                        let _ = cx.done_context(request.root.context(), data);
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_context(request.root.context(), error);
+                    }
                 };
             }
-            Rows::Fills(owner) => finish_rows(*owner, cx, request.limit, |row| row.timestamp),
-            Rows::Orders(owner) => finish_rows(*owner, cx, request.limit, |row| row.created_time),
-            Rows::Trades(owner) => finish_rows(*owner, cx, request.limit, |row| row.timestamp),
+            Rows::Fills(owner) => finish_rows(
+                *owner,
+                cx,
+                request.leg.as_ref().unwrap().context(),
+                request.limit,
+                |row| row.timestamp,
+            ),
+            Rows::Orders(owner) => finish_rows(
+                *owner,
+                cx,
+                request.leg.as_ref().unwrap().context(),
+                request.limit,
+                |row| row.created_time,
+            ),
+            Rows::Trades(owner) => finish_rows(
+                *owner,
+                cx,
+                request.leg.as_ref().unwrap().context(),
+                request.limit,
+                |row| row.timestamp,
+            ),
         }
     }
 
@@ -494,14 +600,39 @@ impl PhemexPerpetuals {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        error: impl Into<VenueError>,
     ) {
-        self.history.active.remove(&request.command);
-        match request.rows {
-            Rows::Lookup(_) => cx.fail(request.command, error),
-            Rows::Fills(owner) => owner.finish(cx, Err(VenueError::new(error))),
-            Rows::Orders(owner) => owner.finish(cx, Err(VenueError::new(error))),
-            Rows::Trades(owner) => owner.finish(cx, Err(VenueError::new(error))),
+        let mut error = error.into();
+        if !request.is_lookup() && error.kind.is_none() {
+            error.kind = Some(safe_cex_engine::ErrorKind::Internal);
+        }
+        if let Some(leg) = request.leg {
+            let _ = cx.finish_http_context(leg.context());
+        }
+        if cx
+            .validate_read_root_context(request.root.context())
+            .is_ok()
+        {
+            self.retire_history(request.root.context().owner());
+            let _ = cx.fail_context(request.root.context(), error);
+        }
+    }
+    pub(crate) fn retire_history(&mut self, owner: Owner) {
+        self.history
+            .deferred
+            .retain(|(_, deferred)| match deferred {
+                Deferred::Signed(read) => read.root.context().owner() != owner,
+                Deferred::PublicTrades(_) => true,
+            });
+        let commands: Vec<_> = self
+            .history
+            .owners
+            .iter()
+            .filter_map(|(id, current)| (*current == owner).then_some(*id))
+            .collect();
+        for id in commands {
+            self.history.owners.remove(&id);
+            self.history.active.remove(&id);
         }
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -522,7 +653,7 @@ impl PhemexPerpetuals {
     }
 }
 
-fn decode(request: &mut Request, text: &str) -> Option<()> {
+fn decode(cx: &Cx<'_, Pending>, request: &mut Request, text: &str) -> Option<()> {
     match request.rows {
         Rows::Lookup(_) => {
             let row: crate::account_wire::OrderRow<'_> = serde_json::from_str(text).ok()?;
@@ -568,17 +699,19 @@ fn decode(request: &mut Request, text: &str) -> Option<()> {
                 return Some(());
             }
             if let Rows::Fills(rows) = &mut request.rows {
-                rows.stage(Execution {
-                    id: row.id.into(),
-                    timestamp: (row.transact_time_ns / 1_000_000_000) as f64,
-                    symbol: request.symbol.clone(),
-                    order_id: row.order_id.into(),
-                    price,
-                    qty,
-                    side,
-                    commission: fee.abs(),
-                    commission_asset: row.currency.into(),
-                });
+                rows.admit(cx, request.leg.as_ref()?.context())
+                    .ok()?
+                    .stage(Execution {
+                        id: row.id.into(),
+                        timestamp: (row.transact_time_ns / 1_000_000_000) as f64,
+                        symbol: request.symbol.clone(),
+                        order_id: row.order_id.into(),
+                        price,
+                        qty,
+                        side,
+                        commission: fee.abs(),
+                        commission_asset: row.currency.into(),
+                    });
             }
         }
         Rows::Orders(_) => {
@@ -651,25 +784,29 @@ fn decode(request: &mut Request, text: &str) -> Option<()> {
                 return Some(());
             }
             if let Rows::Orders(rows) = &mut request.rows {
-                rows.stage(HistoricalOrder {
-                    id: row.order_id.into(),
-                    symbol: request.symbol.clone(),
-                    side,
-                    kind,
-                    status,
-                    price: if trigger > 0.0 { trigger } else { price },
-                    amount,
-                    filled,
-                    reduce_only: row.reduce_only || row.close_on_trigger,
-                    created_time: timestamp,
-                    updated_time: milliseconds(row.transact_time_ns),
-                });
+                rows.admit(cx, request.leg.as_ref()?.context())
+                    .ok()?
+                    .stage(HistoricalOrder {
+                        id: row.order_id.into(),
+                        symbol: request.symbol.clone(),
+                        side,
+                        kind,
+                        status,
+                        price: if trigger > 0.0 { trigger } else { price },
+                        amount,
+                        filled,
+                        reduce_only: row.reduce_only || row.close_on_trigger,
+                        created_time: timestamp,
+                        updated_time: milliseconds(row.transact_time_ns),
+                    });
             }
         }
         Rows::Trades(_) => {
             let row = decode_public_trade(text, &request.symbol, request.count - 1)?;
             if let Rows::Trades(rows) = &mut request.rows {
-                rows.stage(row);
+                rows.admit(cx, request.leg.as_ref()?.context())
+                    .ok()?
+                    .stage(row);
             }
         }
     }
