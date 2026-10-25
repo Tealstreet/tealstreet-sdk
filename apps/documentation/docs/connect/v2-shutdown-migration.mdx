@@ -144,8 +144,9 @@ exchange account.
 Add the full new Tealstreet IP list anywhere your exchange asks for the
 Tealstreet Network, TS Network, or Tealstreet IP whitelist.
 
-All new Tealstreet routing for this migration uses the same Tokyo list. There
-are no separate Singapore, proxy, or exchange-specific IP blocks to add.
+Going forward, Tealstreet Network routing uses one region instead of split
+Japan and Singapore routing. Add the single Tokyo list below; there are no
+separate Singapore, proxy, or exchange-specific IP blocks to add.
 
 #### New Tealstreet IPs, Vultr Tokyo fleet
 
@@ -162,7 +163,17 @@ are no separate Singapore, proxy, or exchange-specific IP blocks to add.
 #### Old Tealstreet IPs, AWS fleet
 
 These are the old AWS IPs that Tealstreet is retiring. Your exchange may show
-some or all of these on existing API keys:
+some or all of these Japan and Singapore IPs on existing API keys.
+
+##### Old Japan region IPs
+
+- `18.178.14.27`
+- `35.75.147.201`
+- `35.78.132.227`
+- `54.238.24.246`
+- `54.65.38.58`
+
+##### Old Singapore region IPs
 
 - `13.215.143.179`
 - `54.169.98.78`
@@ -171,7 +182,6 @@ some or all of these on existing API keys:
 - `13.251.151.220`
 - `54.179.219.84`
 - `18.139.81.245`
-- `54.255.57.166`
 
 When Tealstreet shows both old and new blocks in the API key form, copy the new
 Tealstreet IP list for your exchange. Keep the old list in place until the
