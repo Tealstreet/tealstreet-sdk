@@ -126,3 +126,12 @@ describe('hosted setup refusal metadata and callback custody', () => {
     });
   }
 });
+
+describe('hosted top-level passphrase custody', () => {
+  it.each(families)('%s refuses a passphrase before options retention', (name) => {
+    let error: unknown;
+    try { construct(name, { key: '', hostedMode: true, passphrase: 'private-material-sentinel' }); }
+    catch (caught) { error = caught; }
+    expect(error).toMatchObject({ kind: 'invalidInput', outcome: 'notSent' });
+  });
+});
