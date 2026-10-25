@@ -109,3 +109,10 @@ size receipts and run ID. Landing requires auditor exact-tree GO and guard.
 ## Checkpoints
 
 - Plan only; runtime, inventories and fixtures unchanged.
+
+- Originals on unchanged runtime: 17 executed, 5 native GREEN and 12 assertion
+  RED, zero ignored. Three each: managed Prepare, held DATA, NEW 20s equality,
+  late malformed diagnostics. Marks boundary permits native last-price fallback;
+  it forbids adoption of the failed observation. Working controls cover three-route
+  wire/financial mapping, empty marks, mark failure/recovery, duplicate success,
+  and empty catalogue/daily recovery. Receipt is external, no runtime proof yet.
