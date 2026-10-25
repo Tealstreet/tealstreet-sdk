@@ -2,7 +2,7 @@
 
 ## Scope and baseline
 
-Plan before originals and production. Base: actual #2101 landing
+Plan preceded originals and production. Original base: actual #2101 landing
 3614cd119b606c1da9b7f2ad8cb3bc52e86ba970. Owner: codex-mxb4mq;
 bounded native/API/source reviewer: codex-hcmq3f; landing auditor: claude-8x5tm1.
 Overseer approved Markets, daily tickers and MarkPrices; approximately 200–300
@@ -152,3 +152,15 @@ size receipts and run ID. Landing requires auditor exact-tree GO and guard.
   the public-seed request fingerprint is removed; every foreign map preserved.
 - Required first-source combined/Backpack measurement begins on this commit;
   no generic engine source changed, so no new Bybit/Bitget qualification needed.
+
+- First source commit2831fb4fea1 measured with Rust1.99.0, wasm-bindgen0.2.129
+  and wasm-opt132, jobs4/Binaryen4: optimized web/node identical. Combined
+  13,905,385 bytes (250,391 headroom); Backpack1,090,033 (253,455 headroom).
+  Fresh bare d3c pair is still running for exact deltas, before READY.
+- Actual optimized family WASM: direct managed three-route startup preserves
+  headers/financial fields and held-preparation equality blocks late catalogue;
+  existing real-WASM public-only private history2/2 also passes. Temporary
+  execution evidence is external. Runtime/fixture/native/first-source map carry
+  CLEAR at2831; frozen follow-up changes only this plan and its index status.
+- One intended frozen push and qualifying PR-triggered Rust run follow; no
+  READY claim until full green, paired measurements and auditor verification.
