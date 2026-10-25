@@ -24,7 +24,7 @@ pub struct LocalSetup {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalIdentity {
     /// Omitted or `null` is Absent; `""` is Empty (D3).
-    #[serde(default, deserialize_with = "Secret::nullable")]
+    #[serde(default = "Secret::absent", deserialize_with = "Secret::nullable")]
     pub key: Secret,
     /// Never absent: omitted is a present empty secret; `null` is refused.
     #[serde(default = "Secret::empty")]
@@ -48,7 +48,7 @@ impl Default for LocalIdentity {
     /// except the key, whose presence is the D3 fact.
     fn default() -> Self {
         Self {
-            key: Secret::default(),
+            key: Secret::absent(),
             secret: Secret::empty(),
             passphrase: None,
             stable_id: None,
@@ -93,10 +93,13 @@ impl<'de> serde::Deserialize<'de> for LocalExtras {
         deserializer.deserialize_map(Visitor)
     }
 }
-/// Setup material; the default is absent, which reads as empty bytes.
-#[derive(Default)]
+/// Setup material. Only this module can build the absent form (a key's
+/// presence fact); absent reads as empty bytes.
 pub struct Secret(Option<Zeroizing<String>>);
 impl Secret {
+    fn absent() -> Self {
+        Self(None)
+    }
     pub fn new(value: String) -> Self {
         Self(Some(Zeroizing::new(value)))
     }
