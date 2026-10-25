@@ -230,11 +230,15 @@ impl Okx {
     }
 
     pub(crate) fn closed_response(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
-        // A page the exclusive cursor did not bound (rows not older than it)
-        // cannot advance: repeating the cursor stops it as incomplete.
+        // A page the exclusive cursor did not bound (rows not older than it),
+        // full or short, cannot advance: repeating the cursor stops it as incomplete.
         let cursor = request.history.cursor().and_then(|c| c.parse::<i64>().ok());
+        let unbounded = request
+            .oldest
+            .zip(cursor)
+            .is_some_and(|(oldest, cursor)| oldest >= cursor);
         let next = request.oldest.map(|oldest| match cursor {
-            Some(cursor) if oldest >= cursor => cursor.to_string(),
+            Some(cursor) if unbounded => cursor.to_string(),
             _ => (oldest + 1).to_string(),
         });
         let Some(leg) = &request.leg else { return };
@@ -246,7 +250,7 @@ impl Okx {
                 next,
                 rows: request.count,
                 fresh: request.fresh,
-                want_more: request.count >= PAGE,
+                want_more: request.count >= PAGE || unbounded,
             })
         };
         if let Some(leg) = request.leg.take() {

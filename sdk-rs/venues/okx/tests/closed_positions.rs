@@ -307,6 +307,24 @@ fn rows_not_older_than_the_cursor_stop_at_once_as_incomplete() {
     );
 }
 
+#[test]
+fn a_short_page_not_older_than_the_cursor_is_incomplete_too() {
+    let mut e = trading_engine();
+    fetch(&mut e, None, None, Some(1_710_000_000_000.0));
+    let first = request(&mut e);
+    let rows: Vec<_> = (0..3).map(|i| row(i, 1_710_000_000_000)).collect();
+    reply(&mut e, &first, &page(&rows), NOW);
+    let out = actions(&mut e);
+    assert!(matches!(done(&out), Some(Ok(_))));
+    assert!(!out.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    assert!(
+        out.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+        )),
+        "rows outside the exclusive bound are never a complete result"
+    );
+}
+
 fn next_request(e: &mut Engine<Okx>, at: f64) -> Action {
     let timer = actions(e)
         .into_iter()
