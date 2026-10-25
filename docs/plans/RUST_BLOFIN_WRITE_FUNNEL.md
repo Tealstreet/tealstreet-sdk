@@ -168,16 +168,46 @@ successful terminal.
 
 ## W2 shape (barrier join)
 
-- **Plan.** Hedged isolated leverage (long then short) is one declared Plan:
+W2 restores native parallel release for hedged isolated leverage, replacing
+W1's serial interim. Every other job keeps W1's serial Plan unchanged.
+
+- **Job split at start.** `start_job` plans as in W1. A job whose planned
+  steps are exactly the two hedged leverage legs (`job.join`) admits a declared
+  Plan instead of a serial one:
   `admit_plan_with_barriers(preflight, [StepBound{wait_ms: 0, calls: [long,
-short]}], PlanPolicy{Mutation, Primary, ..}, [MutationBarrierBound{step: 0}])`,
-  with `prepare_group_http_release` returning Unscheduled.
-- **Barrier behaviour.** Both legs prepare and sign in declaration order. If
-  either preparation fails, there is zero HTTP and the whole command is NotSent
-  (today: either header fails, neither is sent).
-- **Independence.** `independent_calls` stays off. The join is one setting,
-  and a released 408 or 5xx on either leg seals the Plan Unknown.
-- **Commit.** Applied only when both legs succeed.
+short]}], PlanPolicy{independent_calls: false, Mutation, Primary, pacing: None,
+retry: Never}, [MutationBarrierBound{step: 0}])`. Each call is
+  `CallBound{timeout_ms: 20_000, attempts: 1, retry_window: FreshAttempt,
+after_refusal: []}`.
+- **Issue.** From entry custody, take the Plan's two slots in declaration order
+  (long, then short), make one `plan_leg_context` each and queue both with
+  `request_signed_managed`. The engine prepares and signs both before releasing
+  either. Store effects are unchanged: a setting has none before commit.
+- **Pure release hook.** BloFin implements `prepare_group_http_release`,
+  returning `Unscheduled` for its two set-leverage legs and refusing anything
+  else. It touches no state. Its single-request `http_release` stays the default.
+- **Barrier behaviour.** If either leg's preparation, signing or deadline fails
+  before the barrier opens, there is zero HTTP and the command is NotSent,
+  including a refusal on short after long prepared. That's native's "either
+  header fails, neither is sent".
+- **Join.** Each leg's answer records exactly one fact through W1's
+  `write_answer` Setting arm, then `finish_plan_call`. The venue counts settled
+  legs and keeps the first error. When both have settled: if there's no error,
+  `done_plan` and commit; otherwise `fail_plan` with the first error, no commit,
+  and native's join-failure `refresh_account`. A released 408 or 5xx on either
+  leg is Unknown by the journal. One 503 plus one Accepted is Unknown with
+  long's effect kept and no commit. A refusal of one leg after the other was
+  Accepted projects to outcome None, as native's `succeeded` edit did.
+- **Retirement.** Unchanged from W1: the engine-sealed join moves to
+  `retired`, restores, reconciles and refreshes the account.
+- **Feature closure.** BloFin's venue crate links `http-mutation-barriers`, and
+  the BloFin WASM and native features forward the host barrier support
+  (`hosts/wasm`'s `blofin` feature and the native host's barrier feature). The
+  combined bundle therefore links barriers too. A host without group support
+  refuses the group before binding, with no individual fallback; the JS
+  helper already refuses missing group exports.
+- **Removed in W2.** W1's serial interim for the join, and its CALLERS interim
+  note, replaced by a restoration note.
 
 ## Size gate
 
@@ -237,12 +267,29 @@ W1 (each fails on the base):
   preflight-ready wake against the current hedged/isolated state, so a flip
   while queued never issues a stale one- or two-leg plan.
 
-W2:
+W2 (each fails on W1's serial interim):
 
+- both legs are prepared before either is released, and both are in flight
+  before either answers;
 - either leg's preparation failure gives zero HTTP and NotSent, including a
-  refusal on the second leg after the first leg prepared;
-- both succeed and commit;
-- one 503 plus one Accepted gives Unknown with the ID kept and no commit.
+  refusal on the second leg after the first leg prepared (an injected signing
+  refusal for short);
+- both succeed and commit once;
+- one 503 plus one Accepted gives Unknown with long's effect kept and no commit;
+- one documented refusal plus one Accepted gives outcome None, no commit and the
+  account refresh;
+- both refused gives Rejected;
+- a host without group support binds nothing and sends nothing (the
+  isolated native proof, both host modes).
+- W1's serial-interim tests (`the_hedged_join_sends_short_only_after_long_is_accepted`,
+  the long-503 and long-refusal "short never prepared" REDs, and the
+  `trading.rs` interim fixture) are restored to native parallel assertions. That
+  is the documented interim ending, not a weakened assertion.
+
+W2 size: BloFin is the first shipping adopter of `http-mutation-barriers`, so
+the family and combined deltas are measured on the composed tip. Bybit's
+diagnostic barrier-on build was about +20K, and the post-S1 +30K combined bar
+still applies.
 
 Existing trading fixtures keep their assertions; only how they drive the engine
 changes, as in #2143.
