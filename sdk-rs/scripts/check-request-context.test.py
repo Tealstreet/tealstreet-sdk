@@ -571,14 +571,14 @@ class DataMacroModuleProvenance(unittest.TestCase):
 
     def inventory(self, root_source='mod wire; mod account;', target='pub struct Request;',
                   consumer_prefix='use crate::wire::*;', extras=None, consumer='account.rs',
-                  body='matches!(request.kind, Kind::Normal);'):
+                  body='matches!(request.kind, Kind::Normal);', consumer_suffix=''):
         with tempfile.TemporaryDirectory() as directory:
             repo = pathlib.Path(directory)
             sdk = repo / 'sdk-rs'
             venue = sdk / 'venues/reference/src'
             venue.mkdir(parents=True)
             files = {'lib.rs': root_source, 'wire.rs': target,
-                     consumer: consumer_prefix + DataMacroProvenance.source(body)}
+                     consumer: consumer_prefix + DataMacroProvenance.source(body) + consumer_suffix}
             files.update(extras or {})
             for name, source in files.items():
                 path = venue / name
@@ -700,6 +700,19 @@ class DataMacroModuleProvenance(unittest.TestCase):
                 expected = {'venues/reference/src/account.rs': dict(ban.fingerprints(raw))}
                 self.assertEqual(self.inventory(consumer_prefix=prefix + 'use crate::wire::*;', body=body),
                                  expected)
+
+
+    def test_inline_ancestor_generator_cannot_install_a_textual_macro(self):
+        for prefix in ['install!();', 'use external::install as format; format!();']:
+            source = prefix + 'mod child {' + DataMacroProvenance.source(
+                'matches!(request.kind, Kind::Normal);') + '}'
+            with self.subTest(prefix=prefix, boundary='source'):
+                self.assertTrue(ban.context_fingerprints(source)[0])
+            with self.subTest(prefix=prefix, boundary='tracked'):
+                self.assertTrue(self.inventory(consumer_prefix=prefix + 'mod child {',
+                                               consumer_suffix='}'))
+        ordinary = 'use external::install as format; mod child {'
+        self.assertEqual(self.inventory(consumer_prefix=ordinary, consumer_suffix='}'), {})
 
 
 if __name__ == '__main__':
