@@ -55,7 +55,9 @@ const fixture = (options: Partial<ExchangeOptions> = {}) => {
     capabilities: () => engineCapabilities('hyperliquid'),
     start: noActions,
     command: (json) => {
-      const command = JSON.parse(json);
+      // The caller wait is engine receipt metadata (pinned by the host tests),
+      // not part of the native command these regressions compare.
+      const { timeoutMs: _wait, ...command } = JSON.parse(json);
       if (command.op === 'setTickerSymbols' || command.op === 'setPollScale') return noActions();
       commands.push(command);
       return JSON.stringify([{ op: 'done', command: command.command, result: JSON.stringify(result(command)) }]);

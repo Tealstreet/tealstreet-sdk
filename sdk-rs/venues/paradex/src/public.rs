@@ -6,7 +6,7 @@ use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Prec
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, VenueError,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -34,8 +34,65 @@ pub enum Request {
     },
 }
 pub enum CandleTarget {
-    Command(CommandId),
+    Command(Box<CommandRead>),
     Poll { generation: u64, revision: u64 },
+}
+pub struct CommandRead {
+    root: Context,
+    child: Option<Context>,
+}
+impl CommandRead {
+    fn retire_child(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(child) = self.child.take() {
+            let _ = cx.finish_http_context(&child);
+        }
+    }
+    fn failed(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        self.retire_child(cx);
+        let _ = cx.fail_context(&self.root, error);
+    }
+}
+impl Request {
+    pub(crate) fn is_command_candle(&self) -> bool {
+        matches!(
+            self,
+            Self::Candles {
+                target: CandleTarget::Command(_),
+                ..
+            }
+        )
+    }
+    pub(crate) fn command_candle_delivery(&self, cx: &Cx<'_, Pending>) -> bool {
+        let Self::Candles {
+            target: CandleTarget::Command(read),
+            ..
+        } = self
+        else {
+            return false;
+        };
+        read.child
+            .as_ref()
+            .is_some_and(|child| cx.validate_read_http_delivery(&read.root, child).is_ok())
+    }
+    pub(crate) fn retire_command_candle(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Self::Candles {
+            target: CandleTarget::Command(read),
+            ..
+        } = self
+        {
+            read.retire_child(cx);
+        }
+    }
+    pub(crate) fn reject_command_candle(self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        let Self::Candles {
+            target: CandleTarget::Command(mut read),
+            ..
+        } = self
+        else {
+            unreachable!("only the command candle owner takes this refusal");
+        };
+        read.failed(cx, error);
+    }
 }
 #[derive(Default)]
 pub(crate) struct Public {
@@ -644,6 +701,9 @@ impl Paradex {
         request: &mut Request,
         item: &str,
     ) {
+        if request.is_command_candle() && !request.command_candle_delivery(cx) {
+            return;
+        }
         match request {
             Request::ManagedSeed(context, seed) => {
                 if cx.validate_http_context(context).is_ok() {
@@ -781,9 +841,13 @@ impl Paradex {
     pub(crate) fn public_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        request: Request,
+        mut request: Request,
         response: Response<'_>,
     ) {
+        if request.is_command_candle() && !request.command_candle_delivery(cx) {
+            request.retire_command_candle(cx);
+            return;
+        }
         let request = match request {
             Request::ManagedSeed(context, seed) => {
                 // Engine dispatch fences this exact managed attempt. Check its
@@ -929,6 +993,12 @@ impl Paradex {
         error: &str,
     ) {
         match request {
+            request @ Request::Candles {
+                target: CandleTarget::Command(_),
+                ..
+            } => {
+                self.command_candles_failed(cx, request, error.into());
+            }
             Request::ManagedSeed(context, seed) => {
                 // Expired handles may still retire; a failure never publishes.
                 let _ = cx.finish_http_context(&context);
@@ -954,24 +1024,87 @@ impl Paradex {
                 interval,
                 ..
             } => {
-                if let CandleTarget::Command(command) = target {
-                    cx.fail(command, error);
-                } else {
-                    cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
-                    self.finish_candles(cx, target, &symbol, interval, vec![]);
-                }
+                cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
+                self.finish_candles(cx, target, &symbol, interval, vec![]);
             }
+        }
+    }
+    pub(crate) fn command_candles_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        let Request::Candles {
+            target: CandleTarget::Command(mut read),
+            symbol,
+            interval,
+            from,
+            to,
+            legacy,
+            rows,
+            ..
+        } = request
+        else {
+            unreachable!("managed candle failure retains its command owner");
+        };
+        // A released failure is bound by engine dispatch and this exact child's
+        // retained Pending; physical timeout cannot supply a DATA grant.
+        let live = cx.validate_read_root_context(&read.root).is_ok();
+        read.retire_child(cx);
+        drop(rows);
+        if !live {
+            return;
+        }
+        if legacy {
+            let _ = cx.fail_context(&read.root, error);
+        } else {
+            self.fetch_candles(
+                cx,
+                CandleTarget::Command(read),
+                symbol,
+                interval,
+                (from, to),
+                true,
+            );
         }
     }
     fn fetch_candles(
         &self,
         cx: &mut Cx<'_, Pending>,
-        target: CandleTarget,
+        mut target: CandleTarget,
         symbol: String,
         interval: Interval,
         bounds: (Option<f64>, Option<f64>),
         legacy: bool,
     ) {
+        let context = if let CandleTarget::Command(read) = &mut target {
+            if cx.validate_read_root_context(&read.root).is_err() {
+                read.retire_child(cx);
+                return;
+            }
+            match cx.http_leg_context(
+                &read.root,
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            ) {
+                Ok(child) => {
+                    read.child = Some(child.clone());
+                    Some(child)
+                }
+                Err(reason) => {
+                    read.failed(cx, reason.venue_error());
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let (from, to) = bounds;
         let legacy = legacy || !documented(interval);
         let resolution = resolution(interval).unwrap();
@@ -1010,7 +1143,25 @@ impl Paradex {
             rows: vec![],
             invalid: false,
         });
-        if legacy {
+        if let Some(context) = context {
+            match cx.request_managed(
+                context,
+                Method::Get,
+                format!("{}{path}", self.rest()),
+                None,
+                request,
+            ) {
+                Ok(id) => {
+                    if !legacy {
+                        cx.stream_response(id, ArrayAt::Field("results"));
+                    }
+                }
+                Err((Pending::Public(request), reason)) => {
+                    request.reject_command_candle(cx, reason.venue_error())
+                }
+                Err(_) => unreachable!("command candle queue preserves its continuation"),
+            }
+        } else if legacy {
             cx.request(
                 Method::Get,
                 format!("{}{path}", self.rest()),
@@ -1037,8 +1188,10 @@ impl Paradex {
         rows: Vec<Candle>,
     ) {
         match target {
-            CandleTarget::Command(command) => {
-                cx.done(command, serde_json::to_string(&rows).unwrap())
+            CandleTarget::Command(mut read) => {
+                let result = serde_json::to_string(&rows).unwrap();
+                read.retire_child(cx);
+                let _ = cx.done_context(&read.root, result);
             }
             CandleTarget::Poll {
                 generation,
@@ -1258,7 +1411,7 @@ impl Paradex {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval,
                 from_ms,
@@ -1266,13 +1419,41 @@ impl Paradex {
                 ..
             } => {
                 if interval_ms(interval).is_none() {
-                    cx.fail(command, interval.unsupported("Paradex"));
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return None;
+                    };
+                    let _ = cx.fail_context(&context, interval.unsupported("Paradex"));
                 } else if cx.store.market(&symbol).is_none() {
-                    cx.fail(command, "Unknown Paradex candle market");
+                    let Ok(context) = cx.admit_http_command(Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    }) else {
+                        return None;
+                    };
+                    let _ = cx.fail_context(&context, "Unknown Paradex candle market");
                 } else {
+                    let root = match cx.admit_caller_read_root(None, None) {
+                        Ok(root) => root,
+                        Err(safe_cex_engine::request_context::CommandEntryError::Rejected(_)) => {
+                            return None;
+                        }
+                        Err(safe_cex_engine::request_context::CommandEntryError::Revoked) => {
+                            let _ = cx.reject_expired_command(Operation::Read);
+                            return None;
+                        }
+                    };
                     self.fetch_candles(
                         cx,
-                        CandleTarget::Command(command),
+                        CandleTarget::Command(Box::new(CommandRead { root, child: None })),
                         symbol,
                         interval,
                         (from_ms, to_ms),

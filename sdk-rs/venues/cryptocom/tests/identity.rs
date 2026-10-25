@@ -1,11 +1,10 @@
 //! Actual signed identity queries are isolated from financial reconciliation.
+mod support;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, ReadCredentials, Response,
 };
-use safe_cex_venue_cryptocom::{
-    Cryptocom, Options,
-    sign::{Credentials, Params},
-};
+use safe_cex_venue_cryptocom::Cryptocom;
+use support::fixture::Options;
 const NOW: f64 = 1_700_000_000_000.;
 fn options() -> Options {
     Options {
@@ -15,7 +14,7 @@ fn options() -> Options {
     }
 }
 fn engine(options: Options) -> Engine<Cryptocom> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
+    let mut e = support::fixture::engine(options);
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 123.,
         free: 100.,
@@ -26,7 +25,7 @@ fn engine(options: Options) -> Engine<Cryptocom> {
 }
 fn ask(e: &mut Engine<Cryptocom>) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
 }
 fn take(actions: Vec<Action>) -> HttpRequest {
     let mut requests = actions.into_iter().filter_map(|a| {
@@ -48,8 +47,17 @@ fn take(actions: Vec<Action>) -> HttpRequest {
     r
 }
 fn respond(e: &mut Engine<Cryptocom>, r: &HttpRequest, status: u16, body: &str) -> Vec<Action> {
+    respond_at(e, NOW, r, status, body)
+}
+fn respond_at(
+    e: &mut Engine<Cryptocom>,
+    now: f64,
+    r: &HttpRequest,
+    status: u16,
+    body: &str,
+) -> Vec<Action> {
     e.handle(
-        NOW,
+        now,
         Event::HttpResponse {
             request: r.id,
             response: Response {
@@ -59,7 +67,7 @@ fn respond(e: &mut Engine<Cryptocom>, r: &HttpRequest, status: u16, body: &str) 
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(e, now)
 }
 
 fn result(actions: Vec<Action>, command_id: u32, rejected: bool) -> Result<String, String> {
@@ -107,11 +115,7 @@ fn identity_primary_signed_post_retains_exact_uuid_with_secondary_configured() {
     let mut e = engine(opts);
     let before = e.account_snapshot_frame(NOW).to_vec();
     let r = take(ask(&mut e));
-    let expected = Credentials {
-        key: "primary-key".into(),
-        secret: "primary-secret".into(),
-    }
-    .envelope("private/get-accounts", &Params::default(), NOW, false);
+    let expected = r#"{"id":1700000000000,"method":"private/get-accounts","api_key":"primary-key","params":{},"sig":"a69045d3689998a494d25861de1154e06c4d2338ef0fb355451fd0af114f5014","nonce":1700000000000}"#.to_owned();
     assert_eq!(r.body.as_deref(), Some(expected.as_str()));
     let body = r#"{"code":0,"result":{"this_account":{"uuid":9007199254740993}}}"#;
     assert_eq!(
@@ -166,16 +170,16 @@ fn identity_signature_expiry_resigns_once_with_new_clock_then_succeeds() {
             },
         },
     );
-    let retry = take(e.drain_actions().collect());
-    let expected = Credentials {
-        key: "primary-key".into(),
-        secret: "primary-secret".into(),
-    }
-    .envelope("private/get-accounts", &Params::default(), NOW + 1., false);
+    let retry = take(safe_cex_engine::test_support::prepared_actions(
+        &mut e,
+        NOW + 1.,
+    ));
+    let expected=r#"{"id":1700000000001,"method":"private/get-accounts","api_key":"primary-key","params":{},"sig":"ef38ffbd574eb2864d5974329163c8a63a8a6c7b0a29e10c7ceb82f6f8544fbb","nonce":1700000000001}"#.to_owned();
     assert_eq!(retry.body.as_deref(), Some(expected.as_str()));
     result(
-        respond(
+        respond_at(
             &mut e,
+            NOW + 1.,
             &retry,
             200,
             r#"{"code":0,"result":{"this_account":{"uuid":"ok"}}}"#,
@@ -205,7 +209,7 @@ fn identity_transport_retry_budget_and_other_errors_settle_once() {
                 error: "connection lost",
             },
         );
-        let actions = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
         if attempt < 3 {
             r = take(actions);
         } else {

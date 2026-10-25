@@ -9,7 +9,11 @@ fn jittered(actual: f64, nominal: f64) -> bool {
 
 type Driver = Engine<Backpack>;
 fn http(e: &mut Driver, needle: &str) -> HttpRequest {
-    e.drain_actions()
+    http_at(e, needle, 0.)
+}
+fn http_at(e: &mut Driver, needle: &str, now: f64) -> HttpRequest {
+    safe_cex_engine::test_support::prepared_actions(e, now)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.contains(needle) => Some(r),
             _ => None,
@@ -17,8 +21,11 @@ fn http(e: &mut Driver, needle: &str) -> HttpRequest {
         .expect(needle)
 }
 fn reply(e: &mut Driver, r: &HttpRequest, body: &str) {
+    reply_at(e, r, 0., body);
+}
+fn reply_at(e: &mut Driver, r: &HttpRequest, now: f64, body: &str) {
     e.handle(
-        0.0,
+        now,
         Event::HttpResponse {
             request: r.id,
             response: Response {
@@ -188,7 +195,13 @@ fn candle_seconds_and_empty_stream_candles() {
             to_ms: None,
         }),
     );
-    let r = http(&mut e, "klines");
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("klines") => Some(request),
+            _ => None,
+        })
+        .expect("klines");
     assert!(r.url.contains("startTime=1732182900"));
     reply(
         &mut e,
@@ -211,20 +224,18 @@ fn candle_seconds_and_empty_stream_candles() {
     assert!(e.take_frame(1.0).is_none());
 }
 
-fn retry(e: &mut Driver) -> HttpRequest {
-    let timer = e
+fn retry(e: &mut Driver) -> (HttpRequest, f64) {
+    let (timer, at_ms) = e
         .drain_actions()
-        .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(timer)
-            } else {
-                None
-            }
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
         })
         .unwrap();
-    e.handle(1001.0, Event::TimerFired { timer });
-    http(e, "depth")
+    e.handle(at_ms, Event::TimerFired { timer });
+    (http_at(e, "depth", at_ms), at_ms)
 }
+
 #[test]
 fn gap_evidence_survives_repeated_stale_snapshots_and_failure_is_local() {
     let (mut e, socket) = seed();
@@ -242,8 +253,8 @@ fn gap_evidence_survives_repeated_stale_snapshots_and_failure_is_local() {
     e.drain_actions().for_each(drop);
     delta(&mut e, socket, 20, 21);
     for _ in 0..3 {
-        let r = retry(&mut e);
-        reply(&mut e, &r, SNAP);
+        let (r, now) = retry(&mut e);
+        reply_at(&mut e, &r, now, SNAP);
     }
     assert!(e.venue().book("SOL_USDC_PERP").unwrap().is_empty());
     assert!(!e.venue().book("BTC_USDC_PERP").unwrap().is_empty());
@@ -274,12 +285,12 @@ fn successful_resnapshot_resets_recovery_streak() {
     e.drain_actions().for_each(drop);
     for i in 1..=5 {
         delta(&mut e, socket, 10 * i + 10, 10 * i + 11);
-        let r = retry(&mut e);
+        let (r, now) = retry(&mut e);
         let snapshot = SNAP.replace(
             "\"lastUpdateId\":10",
             &format!("\"lastUpdateId\":{}", 10 * i + 10),
         );
-        reply(&mut e, &r, &snapshot);
+        reply_at(&mut e, &r, now, &snapshot);
         assert!(
             e.venue()
                 .book("SOL_USDC_PERP")

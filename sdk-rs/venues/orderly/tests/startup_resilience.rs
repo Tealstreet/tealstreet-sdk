@@ -1,4 +1,5 @@
 //! Scripted discovery regressions; no network or account credentials.
+use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{Action, Engine, Event, Response};
 use safe_cex_venue_orderly::{Options, Orderly};
 
@@ -16,15 +17,15 @@ fn public_engine() -> Engine<Orderly> {
 #[test]
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     let mut engine = public_engine();
+    let mut now = 0.0;
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = prepared_actions(&mut engine, now)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/public/info") => Some(request),
             _ => None,
         })
         .expect("catalogue request");
-    let mut now = 0.0;
     for delay in [1000.0, 2000.0, 4000.0] {
         engine.handle(
             now,
@@ -33,7 +34,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
                 error: "scripted network failure",
             },
         );
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = prepared_actions(&mut engine, now);
         assert!(
             !actions
                 .iter()
@@ -49,8 +50,8 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
             .expect("shared exponential retry timer");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = prepared_actions(&mut engine, now)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) if request.url.contains("/public/info") => Some(request),
                 _ => None,
@@ -70,7 +71,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     );
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
-    assert!(engine.drain_actions().any(|action| matches!(action,
+    assert!(prepared_actions(&mut engine, now).into_iter().any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
@@ -83,8 +84,8 @@ fn authenticated_discovery_starts_private_reads_before_tickers() {
         ..Default::default()
     }));
     engine.start(0.0);
-    let info = engine
-        .drain_actions()
+    let info = prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -101,8 +102,8 @@ fn authenticated_discovery_starts_private_reads_before_tickers() {
             },
         },
     );
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.ends_with("/public/info") => Some(r),
             _ => None,
@@ -122,8 +123,8 @@ fn authenticated_discovery_starts_private_reads_before_tickers() {
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
     assert!(
-        engine
-            .drain_actions()
+        prepared_actions(&mut engine, 0.0)
+            .into_iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("/client/margin_modes")))
     );
 }
@@ -132,8 +133,8 @@ fn authenticated_discovery_starts_private_reads_before_tickers() {
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -150,8 +151,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
             },
         },
     );
-    let ticker = engine
-        .drain_actions()
+    let ticker = prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -168,8 +169,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
             },
         },
     );
-    let timer = engine
-        .drain_actions()
+    let timer = prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
@@ -177,8 +178,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
         .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine
-        .drain_actions()
+    let retry = prepared_actions(&mut engine, 1000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url == ticker.url => Some(r),
             _ => None,
@@ -196,8 +197,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
         for cached in [false, true] {
             let mut engine = public_engine();
             engine.start(0.0);
-            let catalogue = engine
-                .drain_actions()
+            let catalogue = prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) => Some(request),
                     _ => None,
@@ -214,8 +215,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
                     },
                 },
             );
-            let ticker = engine
-                .drain_actions()
+            let ticker = prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url.contains("/public/futures") => {
                         Some(request)
@@ -248,16 +249,16 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
             );
             assert_eq!(engine.store().tickers(), before);
             assert_eq!(engine.store().loaded().tickers, cached);
-            let timer = engine
-                .drain_actions()
+            let timer = prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
                     _ => None,
                 })
                 .expect("unusable successful HTTP body must back off");
             engine.handle(1000.0, Event::TimerFired { timer });
-            let retry = engine
-                .drain_actions()
+            let retry = prepared_actions(&mut engine, 1000.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url == ticker.url => Some(request),
                     _ => None,

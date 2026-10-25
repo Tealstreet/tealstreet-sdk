@@ -14,7 +14,6 @@
     "coinbase": "venues/coinbase/src/",
     "cryptocom": "venues/cryptocom/src/",
     "grvt": "venues/grvt/src/",
-    "hyperliquid": "venues/hyperliquid/src/",
     "kraken": "venues/kraken/src/",
     "kucoin": "venues/kucoin/src/",
     "kucoinspot": "venues/kucoin/src/spot/",
@@ -22,9 +21,7 @@
     "mexc": "venues/mexc/src/",
     "orderly": "venues/orderly/src/",
     "paradex": "venues/paradex/src/",
-    "phemex": "venues/phemex/src/",
     "polymarket": "venues/polymarket/src/",
-    "txflow": "venues/txflow/src/",
     "weex": "venues/weex/src/",
     "woo": "venues/woo/src/"
   }

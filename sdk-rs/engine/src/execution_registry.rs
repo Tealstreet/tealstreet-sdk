@@ -7,10 +7,10 @@ use crate::execution_group::{Execution, Groups, Joined, Member, Observer, Root, 
 pub(super) struct Executions {
     groups: Groups,
     /// Execution root identity (its `Owner::Execution` generation) to group.
-    roots: HashMap<u64, Execution>,
-    observers: HashMap<CommandId, Observer>,
+    roots: crate::IdMap<u64, Execution>,
+    observers: std::collections::HashMap<CommandId, Observer>,
     /// Background read Context rooting each background execution.
-    backgrounds: HashMap<u64, Context>,
+    backgrounds: crate::IdMap<u64, Context>,
 }
 
 fn root_identity(context: &Context) -> Option<u64> {
@@ -96,20 +96,28 @@ impl ContextRegistry {
 
     /// Exclusive whole-command composition: an entry-owned root with no other
     /// issued handle, attempt, delivery or journal.
-    fn observer_member(&self, root: &Context, key: &str, now: f64) -> Result<Member, Error> {
+    fn observer_member(
+        &self,
+        root: &Context,
+        key: &str,
+        now: f64,
+        planned: bool,
+    ) -> Result<Member, Error> {
         self.validate(root, now)?;
         let Owner::Command { id, generation } = root.owner() else {
             return Err(Error::Invalid);
         };
         let owner = self.commands.get(&id).ok_or(Error::Revoked)?;
-        if !matches!(&owner.phase, CommandPhase::Context { root: issued, entry_owned: true } if issued == root)
+        if !matches!(&owner.phase, CommandPhase::Context { root: issued, entry_owned: true, .. } if issued == root)
         {
             return Err(Error::Revoked);
         }
         if owner.pending != 0
             || owner.deliveries != 0
+            || owner.waits != 0
             || owner.writes.is_some()
-            || owner.mutation_declared
+            // A Plan seal projects the founder's journal; the member has none.
+            || (owner.mutation_declared && !planned)
             || self
                 .contexts
                 .values()
@@ -282,7 +290,7 @@ impl ContextRegistry {
         if policy.operation != Operation::Read || policy.timeout_ms == 0 || !now.is_finite() {
             return Err(Error::Invalid);
         }
-        let member = self.observer_member(founder, key, now)?;
+        let member = self.observer_member(founder, key, now, false)?;
         // Validate the root before committing any group state.
         let deadline = founder.deadline().min(now + f64::from(policy.timeout_ms));
         let root = self.execution_root(identity, &policy, deadline, now)?;
@@ -312,12 +320,28 @@ impl ContextRegistry {
     ) -> Result<Joined, Error> {
         self.validate(execution_root, now)?;
         let execution = self.execution_of(execution_root).ok_or(Error::Revoked)?;
-        let member = self.observer_member(root, key, now)?;
+        let planned = self.executions.groups.planned(execution);
+        let member = self.observer_member(root, key, now, planned)?;
         let command = member.command;
         let (observer, joined) = self.executions.groups.join(execution, member, now)?;
         self.executions.observers.insert(command, observer);
         self.observe_execution_credential(command, execution_root);
         Ok(joined)
+    }
+
+    /// Identity progress for every live observer, retained for late joiners.
+    pub(in crate::engine) fn execution_progress(
+        &mut self,
+        execution_root: &Context,
+        receipts: Vec<crate::OrderIdentityReceipt>,
+    ) -> Result<Vec<(CommandId, u64, Vec<crate::OrderIdentityReceipt>)>, Error> {
+        if !execution_root.issued_by(&self.issuer)
+            || self.contexts.get(&execution_root.leg()) != Some(execution_root)
+        {
+            return Err(Error::Revoked);
+        }
+        let execution = self.execution_of(execution_root).ok_or(Error::Revoked)?;
+        self.executions.groups.progress(execution, receipts)
     }
 
     /// An observer seals through the shared execution: a signed execution's
@@ -350,6 +374,40 @@ impl ContextRegistry {
         }
     }
 
+    /// A planned observer leaving before the Plan seal is told what the shared
+    /// journal knows now, without sealing or charging it: its accepted IDs,
+    /// and Unknown while a peer remains (more declared work may still send).
+    #[cfg(feature = "http-plans")]
+    fn project_early(&self, sealed: &mut Sealed) {
+        let (Some(execution), Err(error)) = (sealed.early, &mut sealed.result) else {
+            return;
+        };
+        let Some(writes) = self
+            .executions
+            .roots
+            .iter()
+            .find(|(_, root)| **root == execution)
+            .and_then(|(identity, _)| self.physical.get(identity))
+            .and_then(|owner| owner.writes.as_ref())
+        else {
+            return;
+        };
+        if let Ok(projected) = writes.project_failure(error.clone()) {
+            // The observer keeps its own reason; the journal supplies the
+            // write outcome and known IDs. A live peer keeps declared work
+            // open, so no current answer can rule out a later effect.
+            error.outcome = if self.executions.groups.may_publish(execution) {
+                Some(crate::Outcome::Unknown)
+            } else {
+                projected.outcome
+            };
+            error.partial = projected.partial;
+        }
+    }
+
+    #[cfg(not(feature = "http-plans"))]
+    fn project_early(&self, _: &mut Sealed) {}
+
     pub(in crate::engine) fn detach_observer(
         &mut self,
         root: &Context,
@@ -367,7 +425,16 @@ impl ContextRegistry {
             return Err(Error::Revoked);
         }
         let observer = *self.executions.observers.get(&id).ok_or(Error::Revoked)?;
-        self.executions.groups.detach(observer, error)
+        let mut sealed = self.executions.groups.detach(observer, error)?;
+        self.project_early(&mut sealed);
+        Ok(sealed)
+    }
+
+    /// Whether `context` is a Plan-backed execution root: its only physical
+    /// work is the Plan's and only the Plan seal completes it.
+    pub(in crate::engine) fn planned_execution_root(&self, context: &Context) -> bool {
+        self.execution_of(context)
+            .is_some_and(|execution| self.executions.groups.planned(execution))
     }
 
     pub(in crate::engine) fn seal_execution(
@@ -381,6 +448,9 @@ impl ContextRegistry {
             return Err(Error::Revoked);
         }
         let execution = self.execution_of(execution_root).ok_or(Error::Revoked)?;
+        if self.executions.groups.planned(execution) {
+            return Err(Error::Invalid);
+        }
         self.executions.groups.complete(execution, project)
     }
 
@@ -390,6 +460,9 @@ impl ContextRegistry {
         // depend on root bookkeeping.
         for execution in self.executions.groups.executions() {
             sealed.extend(self.executions.groups.expire(execution, now));
+        }
+        for seal in &mut sealed {
+            self.project_early(seal);
         }
         self.prune_roots();
         sealed
@@ -405,6 +478,204 @@ impl ContextRegistry {
             .get(&sealed.command)
             .filter(|owner| owner.generation == sealed.generation)
             .and_then(|owner| owner.context_root().cloned())
+    }
+
+    /// Check and reserve everything the planned execution adds beyond the
+    /// Plan itself (group membership, root and physical-owner storage, one
+    /// more retirement) so the commit after Plan admission cannot fail.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn prepare_planned_execution(
+        &mut self,
+        founder: CommandId,
+        key: &str,
+    ) -> Result<(), Error> {
+        self.executions.groups.admissible(founder, key)?;
+        self.executions
+            .roots
+            .try_reserve(1)
+            .map_err(|_| Error::Capacity)?;
+        self.physical.try_reserve(1).map_err(|_| Error::Capacity)?;
+        let retained = self
+            .commands
+            .values()
+            .chain(self.physical.values())
+            .filter(|owner| owner.retained())
+            .count()
+            + 2;
+        self.retirements
+            .try_reserve_exact(retained.saturating_sub(self.retirements.len()))
+            .map_err(|_| Error::Capacity)
+    }
+
+    /// Commit the group whose physical owner is this admitted Plan; the
+    /// founder's observer root is its first member. Bound: the Plan root.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn begin_planned_execution(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        policy: &crate::request_context::PlanPolicy,
+        founder: &Context,
+        key: &str,
+        now: f64,
+    ) -> Result<Context, Error> {
+        let Owner::Execution {
+            generation: identity,
+        } = plan.owner()
+        else {
+            return Err(Error::Invalid);
+        };
+        let Owner::Command { id, generation } = founder.owner() else {
+            return Err(Error::Invalid);
+        };
+        let mut root = Context::new(
+            plan.owner(),
+            identity,
+            policy.operation,
+            policy.credential.clone(),
+            now,
+            plan.deadline(),
+            policy.pacing,
+        )?;
+        let member = Member {
+            command: id,
+            generation,
+            operation: founder.operation(),
+            deadline: founder.deadline(),
+            key: key.to_owned(),
+        };
+        let (execution, observer) = self.executions.groups.begin(
+            Root::Planned {
+                deadline: plan.deadline(),
+                founder: member,
+            },
+            policy.operation,
+            Window::UntilTerminal,
+            1,
+            now,
+        )?;
+        root.bind_issuer(&self.issuer);
+        self.contexts.insert(identity, root.clone());
+        self.executions.roots.insert(identity, execution);
+        self.executions
+            .observers
+            .insert(id, observer.expect("founder observer"));
+        Ok(root)
+    }
+
+    /// Whether `owner` is the live physical Plan that exactly `founder`
+    /// (command and generation) founded; never another execution's member.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn founded_by(&self, owner: Owner, founder: Owner) -> bool {
+        let (
+            Owner::Execution {
+                generation: identity,
+            },
+            Owner::Command { id, generation },
+        ) = (owner, founder)
+        else {
+            return false;
+        };
+        self.physical_owner(owner)
+            && self
+                .executions
+                .roots
+                .get(&identity)
+                .is_some_and(|execution| {
+                    self.executions.groups.planned(*execution)
+                        && self.executions.groups.member(id) == Some((*execution, generation))
+                })
+    }
+
+    /// The commands observing a physical Plan owner's execution.
+    #[cfg(all(feature = "http-plans", feature = "order-locks"))]
+    pub(in crate::engine) fn physical_observers(&self, owner: Owner) -> Vec<CommandId> {
+        let Owner::Execution {
+            generation: identity,
+        } = owner
+        else {
+            return Vec::new();
+        };
+        self.executions
+            .roots
+            .get(&identity)
+            .map_or_else(Vec::new, |execution| {
+                self.executions.groups.observer_commands(*execution)
+            })
+    }
+
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn has_planned_executions(&self) -> bool {
+        !self.physical.is_empty()
+    }
+
+    /// Seal a physical owner's execution once with the Plan's projection.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn seal_planned_execution(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        fanout: &mut [(Result<String, VenueError>, Vec<String>)],
+        sealed: &mut Vec<Sealed>,
+    ) {
+        let Owner::Execution {
+            generation: identity,
+        } = plan.owner()
+        else {
+            return;
+        };
+        self.contexts.remove(&identity);
+        let Some(execution) = self.executions.roots.get(&identity).copied() else {
+            return;
+        };
+        let mut prepared = fanout.iter_mut();
+        let _ = self.executions.groups.complete_into(
+            execution,
+            |_| {
+                let (terminal, _) = prepared
+                    .next()
+                    .expect("one prepared terminal per surviving observer");
+                std::mem::replace(terminal, Ok(String::new()))
+            },
+            sealed,
+        );
+    }
+
+    /// Surviving observers of a physical Plan's execution, for preparation.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn planned_observer_count(
+        &self,
+        plan: &crate::request_context::Plan,
+    ) -> usize {
+        let Owner::Execution {
+            generation: identity,
+        } = plan.owner()
+        else {
+            return 0;
+        };
+        self.executions.roots.get(&identity).map_or(0, |execution| {
+            self.executions.groups.observer_count(*execution)
+        })
+    }
+
+    /// A live physical Plan whose execution has no observer left; the engine
+    /// fails it outside any delivery so nothing more is sent or published.
+    #[cfg(feature = "http-plans")]
+    pub(in crate::engine) fn orphaned_plan(&self) -> Option<crate::request_context::Plan> {
+        self.physical.iter().find_map(|(identity, owner)| {
+            let orphan = self
+                .executions
+                .roots
+                .get(identity)
+                .is_none_or(|execution| !self.executions.groups.may_publish(*execution));
+            match &owner.phase {
+                CommandPhase::Planned(state) if orphan => Some(state.handle()),
+                _ => None,
+            }
+        })
+    }
+
+    #[cfg(all(test, feature = "http-plans"))]
+    pub(in crate::engine) fn execution_count(&self) -> usize {
+        self.executions.roots.len()
     }
 
     pub(super) fn forget_observer(&mut self, command: CommandId) {

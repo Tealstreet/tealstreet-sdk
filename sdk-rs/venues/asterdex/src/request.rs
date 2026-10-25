@@ -36,6 +36,8 @@ pub struct SignedRequest {
     version: Version,
     public: bool,
     role: CredentialRole,
+    /// Engine authority of a dispatched listenKey session write.
+    context: Option<safe_cex_engine::request_context::Context>,
 }
 
 #[derive(Clone, Copy)]
@@ -76,14 +78,18 @@ struct ErrorBody {
 }
 
 impl SignedRequest {
+    /// Reads, and listenKey writes: their repeat-safe session makes each
+    /// retry a new operation.
     fn is_read(&self) -> bool {
-        self.method == Method::Get
-            || self
-                .path
-                .split('?')
-                .next()
-                .unwrap_or(&self.path)
-                .ends_with("/listenKey")
+        self.method == Method::Get || self.listen_key()
+    }
+
+    fn listen_key(&self) -> bool {
+        matches!(
+            self.pending,
+            Pending::Account(crate::account::Request::ListenKey { .. })
+                | Pending::Account(crate::account::Request::Keepalive { .. })
+        )
     }
 
     fn reset(&mut self) {
@@ -153,6 +159,7 @@ impl AsterDex {
             version: self.version,
             public: true,
             role: CredentialRole::Read { scope: None },
+            context: None,
         });
         self.dispatch_signed(cx, request);
     }
@@ -180,6 +187,7 @@ impl AsterDex {
             version: self.version,
             public: false,
             role,
+            context: None,
         });
         let stale = self
             .requests
@@ -232,6 +240,15 @@ impl AsterDex {
         // The recipe writes the signed query and API-key header at dispatch.
         let path = &request.path;
         let url = format!("{}{path}", self.urls.rest);
+        if request.listen_key() {
+            // The reducer ignores a closed stream's create or keepalive, and
+            // sending it would rotate the current stream's session.
+            if !self.listen_key_current(&request.pending) {
+                return false;
+            }
+            let credential = selection.credential(slot.identity.credential.clone());
+            return self.listen_key_session_write(cx, request, url, credential, recipe);
+        }
         let headers = Vec::new();
         let method = request.method;
         let stream = request.stream;
@@ -241,6 +258,62 @@ impl AsterDex {
         };
         selection.sign(cx, id, Box::new(recipe));
         true
+    }
+
+    /// One session operation per physical listenKey create or keepalive.
+    fn listen_key_session_write(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Box<SignedRequest>,
+        url: String,
+        credential: safe_cex_engine::request_context::Credential,
+        recipe: Recipe,
+    ) -> bool {
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+        let create = request.method == Method::Post;
+        let context = self
+            .listen_key_session(cx, create, &credential)
+            .and_then(|session| {
+                cx.session_context(
+                    &session,
+                    Policy {
+                        operation: Operation::Mutation,
+                        credential: Some(credential),
+                        timeout_ms: LISTEN_KEY_TIMEOUT_MS,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .ok()
+            });
+        let Some(context) = context else {
+            self.on_request_failed(cx, request.pending, "listenKey session is unavailable");
+            return false;
+        };
+        let method = request.method;
+        request.context = Some(context.clone());
+        match cx.request_signed_managed(
+            context,
+            method,
+            url,
+            None,
+            Box::new(recipe),
+            Pending::Signed(request),
+        ) {
+            Ok(_) => true,
+            Err((pending, _)) => {
+                let mut pending = pending;
+                if let Pending::Signed(request) = &mut pending
+                    && let Some(context) = request.context.take()
+                {
+                    let _ = cx.finish_http_context(&context);
+                }
+                if let Pending::Signed(request) = pending {
+                    self.on_request_failed(cx, request.pending, "listenKey session is unavailable");
+                }
+                false
+            }
+        }
     }
 
     pub(crate) fn on_signed_item(
@@ -258,6 +331,20 @@ impl AsterDex {
         mut request: Box<SignedRequest>,
         response: Result<Response<'_>, &str>,
     ) {
+        if let Some(context) = request.context.take() {
+            let accepted = response.as_ref().is_ok_and(|response| {
+                (200..300).contains(&response.status) && !negative_code(response.body)
+            });
+            if accepted {
+                let _ = cx.http_write_fact(
+                    &context,
+                    safe_cex_engine::classify::WriteFact::Accepted { order_ids: vec![] },
+                    None,
+                );
+            }
+            // Repeat-safe: an unproven write does not block the next operation.
+            let _ = cx.finish_http_context(&context);
+        }
         let discovery = request.public
             && matches!(
                 &request.pending,
@@ -451,6 +538,16 @@ impl AsterDex {
     }
 }
 
+/// Same raw bound as the host default the unmanaged listenKey relied on.
+const LISTEN_KEY_TIMEOUT_MS: u32 = 20_000;
+
+fn negative_code(body: &str) -> bool {
+    serde_json::from_str::<ErrorBody>(body)
+        .ok()
+        .and_then(|error| error.code.and_then(|code| code.value()))
+        .is_some_and(|code| code < 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,22 +678,9 @@ mod tests {
     impl Harness {
         fn new(method: Method, v3: bool) -> Self {
             let options = if v3 {
-                Options {
-                    key: Some("0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0".into()),
-                    secret: Some(
-                        "4fd0a42218f3eae43a6ce26d22544e986139a01e5b34a62db53757ffca81bae1".into(),
-                    ),
-                    application_id: Some("0x63DD5aCC6b1aa0f563956C0e534DD30B6dcF7C4e".into()),
-                    ..Options::default()
-                }
+                Options::v3_wallet()
             } else {
-                Options {
-                    key: Some("primary-key".into()),
-                    secret: Some("primary-secret".into()),
-                    read_key: Some("read-key".into()),
-                    read_secret: Some("read-secret".into()),
-                    ..Options::default()
-                }
+                Options::v1_with_read_agent()
             };
             let (inner, signer) = options.build();
             let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
@@ -780,16 +864,13 @@ mod tests {
     }
 
     #[test]
-    fn read_policy_includes_listen_key_but_not_order_deletion() {
-        let request = |method, path: &str| SignedRequest {
+    fn read_policy_includes_listen_key_sessions_but_not_order_writes() {
+        use crate::account::Request;
+        let signed = |method, path: &str, pending| SignedRequest {
             method,
             path: path.into(),
             query: Query::new(),
-            pending: Pending::Klines {
-                command: 7,
-                rows: Vec::new(),
-                invalid: None,
-            },
+            pending,
             stream: None,
             network_retries: 0,
             timestamp_retried: false,
@@ -797,12 +878,21 @@ mod tests {
             version: Version::V1,
             public: false,
             role: CredentialRole::Mutation,
+            context: None,
         };
-        for method in [Method::Post, Method::Put, Method::Delete] {
-            assert!(request(method, "/fapi/v3/listenKey").is_read());
-        }
-        assert!(!request(Method::Delete, "/fapi/v3/order").is_read());
-        assert!(!request(Method::Post, "/fapi/v3/order").is_read());
+        let klines = || Pending::Klines {
+            command: 7,
+            rows: Vec::new(),
+            invalid: None,
+        };
+        let create = Pending::Account(Request::ListenKey { epoch: 0 });
+        let keepalive = Pending::Account(Request::Keepalive { epoch: 0 });
+        assert!(signed(Method::Post, "/fapi/v3/listenKey", create).is_read());
+        assert!(signed(Method::Put, "/fapi/v3/listenKey", keepalive).is_read());
+        // The listenKey path alone grants nothing; the session write does.
+        assert!(!signed(Method::Post, "/fapi/v3/listenKey", klines()).is_read());
+        assert!(!signed(Method::Delete, "/fapi/v3/order", klines()).is_read());
+        assert!(!signed(Method::Post, "/fapi/v3/order", klines()).is_read());
     }
 
     #[test]

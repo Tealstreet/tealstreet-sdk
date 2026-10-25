@@ -1074,3 +1074,106 @@ fn an_unknown_cancel_leg_makes_the_batch_unknown_with_its_kind() {
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
 }
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for session/signer and Plan seams"]
+fn p0_write_accepted_id_survives_later_refusal() {
+    p0_write_partial(false);
+}
+
+#[test]
+#[ignore = "original RED: P0 write adoption waits for session/signer and Plan seams"]
+fn p0_write_accepted_id_survives_later_transport_loss() {
+    p0_write_partial(true);
+}
+
+fn p0_write_partial(transport: bool) {
+    let mut rig = private();
+    place(&mut rig, 751, vec![limit(), limit()]);
+    let first = rig.next_request();
+    assert_eq!(first.method, Method::Post);
+    rig.reply(
+        &first,
+        200,
+        r#"{"orderId":46073148,"updateOrderId":46073149}"#,
+    );
+    let second = rig.next_request();
+    assert_eq!(second.method, Method::Post);
+    if transport {
+        rig.failure(&second);
+    } else {
+        rig.reply(&second, 409, r#"{"errorCode":33}"#);
+    }
+    assert_eq!(done_count(&rig, 751), 1);
+    let [error] = rig.failures.as_slice() else {
+        panic!("one failed terminal: {:?}", rig.failures);
+    };
+    if transport {
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    }
+    assert!(!matches!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Rejected | safe_cex_engine::Outcome::NotSent)
+    ));
+    assert_eq!(
+        error
+            .partial
+            .as_ref()
+            .map(|partial| partial.order_ids.as_slice()),
+        Some(["46073148".to_owned()].as_slice())
+    );
+    assert!(
+        !rig.requests
+            .iter()
+            .any(|request| request.method == Method::Post && request.url.contains("/orders"))
+    );
+}
+
+#[test]
+fn p0_write_login_401_preserves_auth_invalid_for_waiter() {
+    p0_write_login(401, safe_cex_engine::ErrorKind::AuthInvalid);
+}
+
+#[test]
+fn p0_write_login_403_preserves_auth_permission_for_waiter() {
+    p0_write_login(403, safe_cex_engine::ErrorKind::AuthPermission);
+}
+
+fn p0_write_login(status: u16, kind: safe_cex_engine::ErrorKind) {
+    let mut rig = Rig::defaults();
+    rig.command(Command::FetchCandles {
+        command: 752,
+        symbol: "ETHUSD".into(),
+        interval: Interval::H1,
+        from_ms: None,
+        to_ms: None,
+        limit: None,
+    });
+    let login = rig.next_request();
+    assert!(login.url.ends_with("/login"));
+    rig.reply(
+        &login,
+        status,
+        r#"{"message":"example-password secret-token"}"#,
+    );
+    assert_eq!(done_count(&rig, 752), 1);
+    let [error] = rig.failures.as_slice() else {
+        panic!("one failed waiter: {:?}", rig.failures);
+    };
+    assert_eq!(error.kind, Some(kind));
+    assert!(
+        rig.notices
+            .iter()
+            .any(|notice| matches!(notice, Notice::Event(event)
+        if event.code == safe_cex_engine::log::code::AUTH_REJECTED))
+    );
+    assert!(
+        rig.notices
+            .iter()
+            .any(|notice| matches!(notice, Notice::Deactivate))
+    );
+    assert!(rig.requests.is_empty());
+    let notices = format!("{:?}", rig.notices);
+    assert!(!notices.contains("example-password"));
+    assert!(!notices.contains("secret-token"));
+}

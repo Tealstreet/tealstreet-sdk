@@ -56,7 +56,11 @@ fn secondary_get_signatures_keep_every_mutation_and_websocket_login_primary() {
                             .str("symbol", "BTCUSDT")
                             .str("marginCoin", "USDT"),
                         (method != Method::Get).then(|| r#"{"amount":"1"}"#.into()),
-                        Pending::Candles { command: 1 },
+                        Pending::SymbolSettings {
+                            symbol: "BTCUSDT".into(),
+                            write_revision: 0,
+                            serial: 0,
+                        },
                     );
                 }
                 v.login(cx, SocketId(777));
@@ -125,14 +129,31 @@ fn every_account_axis_settings_and_history_get_uses_read_identity() {
     let venue = ProbeVenue::new(
         BitunixFutures::new(options()),
         |v: &mut BitunixFutures, cx: &mut Cx<'_, Pending>| {
-            let mut seed = Pending::Markets {
-                rows: vec![],
-                invalid: false,
-            };
-            v.on_item(cx, &mut seed, r#"{"symbol":"BTCUSDT","base":"BTC","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"}"#);
-            if let Pending::Markets { rows, .. } = seed {
-                cx.store.set_markets(rows);
-            }
+            cx.store.set_markets(vec![Market {
+                id: "BTC/USDT".into(),
+                symbol: "BTCUSDT".into(),
+                base: "BTC".into(),
+                quote: "USDT".into(),
+                active: true,
+                precision: Precision {
+                    amount: 0.001,
+                    price: 0.1,
+                },
+                limits: Limits {
+                    amount: MinMax { min: 0., max: 100. },
+                    leverage: MinMax { min: 1., max: 100. },
+                    price: None,
+                },
+                pretty_symbol: None,
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: None,
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            }]);
             assert!(cx.store.market("BTCUSDT").is_some());
             for axis in [
                 account::Axis::Balance,
@@ -173,7 +194,16 @@ fn every_account_axis_settings_and_history_get_uses_read_identity() {
 fn public_discovery_remains_unsigned_with_secondary_credentials() {
     let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(options()));
     e.start(NOW);
-    let requests = http_requests(&mut e);
+    let requests = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
     assert_eq!(requests.len(), 1);
     assert!(requests[0].url.ends_with("/trading_pairs"));
     assert!(

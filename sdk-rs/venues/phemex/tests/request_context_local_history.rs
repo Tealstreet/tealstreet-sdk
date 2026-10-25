@@ -1,10 +1,12 @@
 //! Local history results still borrow genuine, bounded command-entry custody.
+mod support;
 use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Error, HttpAction, Preparation};
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Notice, Query, VenueError,
 };
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+use safe_cex_venue_phemex::PhemexPerpetuals;
+use support::Options;
 
 type TestEngine = Engine<PhemexPerpetuals>;
 const NOW: f64 = 1_710_000_000_000.;
@@ -16,11 +18,11 @@ const INCOME_CAPACITY: &str = "Too many active Phemex income queries";
 const LOOKUP: &str = r#"{"found":false,"definitive":false}"#;
 
 fn engine(private: bool) -> TestEngine {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::engine(Options {
         key: private.then(|| "fixture-identity".into()),
         secret: private.then(|| "fixture-material".into()),
         ..Options::default()
-    }));
+    });
     e.store_mut().set_markets(
         [SYMBOL, UNSAFE]
             .into_iter()
@@ -376,7 +378,7 @@ fn repeated_local_admission_does_not_accumulate_owners_or_block_native_paths() {
     assert!(e.http_preparation_pending(peer));
 }
 #[test]
-fn valid_signed_and_public_native_dispatch_keep_original_route_and_continuations() {
+fn valid_signed_legacy_and_managed_public_dispatch_keep_native_wire() {
     for (private, read, path) in [
         (
             true,
@@ -391,7 +393,26 @@ fn valid_signed_and_public_native_dispatch_keep_original_route_and_continuations
         (false, public(SYMBOL), "/md/v2/trade?symbol=BTCUSDT"),
     ] {
         let mut e = engine(private);
-        let request = dispatch(&mut e, 606, read);
+        let request = if private {
+            dispatch(&mut e, 606, read)
+        } else {
+            e.handle(
+                NOW,
+                Event::Command(Command::Query {
+                    command: 606,
+                    query: read,
+                }),
+            );
+            let output = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+            assert!(terminal(&output, 606).is_empty());
+            output
+                .into_iter()
+                .find_map(|action| match action {
+                    Action::Http(request) => Some(request),
+                    _ => None,
+                })
+                .expect("managed public read releases through the shared fixture")
+        };
         assert!(request.url.ends_with(path), "{}", request.url);
         assert_eq!(
             request
