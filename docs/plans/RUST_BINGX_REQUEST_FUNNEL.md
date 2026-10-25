@@ -1,6 +1,6 @@
 # BingX trading and request funnel
 
-Plan only, 2026-10-26. Owner: claude-4yjlw0. Overseer: claude-ddi2il. Reviewers: claude-dazzy3 or claude-fe7lgm. Landing: claude-8x5tm1, with an exact-tree GO.
+Plan CLEAR (fe7lgm, `d14e5bd034c`, with pins P1 to P3 folded), 2026-10-26. Owner: claude-4yjlw0. Overseer: claude-ddi2il. Reviewers: claude-dazzy3 or claude-fe7lgm. Landing: claude-8x5tm1, with an exact-tree GO.
 
 Base: `feat/rust-rewrite` `8fcedfbbdfc`. Branch: `feat/rust-bingx-request-funnel`. This supersedes #1954, `feat/rust-bingx-managed-trading`.
 
@@ -50,7 +50,12 @@ Covered: PlaceOrders (split lots and protection legs), AmendOrder (quantity amen
   - Attempts are 2 because 100001 is the one `RefusedResend` (#1954's ruling), resent through `plan_resend_context`.
   - Each next call comes from the previous call's exact DATA (`continue_serial_plan`). No step count is declared, so a large native split is never capped.
 - **Settings writes keep native custody.** `metadata_write_started` before the call, and `metadata_write_finished` on every terminal path.
-- **cancelReplace refusal keeps outcome None** (ruling 2). A whole-code refusal of `/trade/cancelReplace` records a `Failed { known_effects: true }` fact (KnownPartial), because STOP_ON_FAILURE may already have cancelled the original. The terminal outcome projects as None. A RED pins it: a refused cancelReplace is outcome None, never Rejected, and no further call follows.
+- **cancelReplace refusal keeps outcome None** (ruling 2). A whole-code refusal of `/trade/cancelReplace` is classified with `classify_write`, then recorded through `http_write_fact` as `WriteFact::Failed { fact, known_effects: true }`, because STOP_ON_FAILURE may already have cancelled the original. The engine journals that as `WriteResult::KnownPartial`.
+  - The terminal projects outcome None and keeps the IDs.
+  - It is not an Unknown seal, so there is no fence and no reconcile from it.
+  - It is not a RefusedResend, so it gets no resend grant, even for 100001 on this path.
+  - No further call follows.
+  - A RED pins the full projection (fe7lgm P2).
 - **The trigger cancel-then-replace stops natively.** When the cancel is answered 80016, which records `Satisfied(Cancel)` and so as `Accepted{[]}`, the engine would permit continuing. The venue stops before `continue_serial_plan`, keeping #1954's "an absent old order never authorizes replacement" rule. A RED asserts that no replacement is prepared.
 
 ## Independent cancel batches stay on complete Plans
@@ -72,7 +77,7 @@ At this base BingX calls neither `orders_reconciled` nor `reconcile_uncertain`. 
 
 So, in this slice:
 
-- **`reconcile_uncertain`** issues BingX's fresh open-order snapshot under its own account authority.
+- **`reconcile_uncertain`** issues BingX's fresh open-order snapshot under its own account authority. The snapshot selects `CredentialRole::PrimaryRead { reason: PostUnknownOrderRead, scope }`, never the ordinary Read role, so a Secondary key's snapshot can never be the read that clears an unknown-write fence (fe7lgm P1).
 - **`orders_reconciled`** is called on a clean committed snapshot only. A read started before the uncertainty can't clear the fence, because the engine checks its token.
 
 A RED drives a lost create, then a symbol cancel-all that is refused as uncertain, then the reconcile snapshot (answering its successive pages), then cancel-all admitted again. A second RED does the same after an 80016 plain cancel.
@@ -95,10 +100,12 @@ Measured on `8fcedfbbdfc` with local wasm-opt; the BingX family figure is the fe
 Each must fail on the base. The adopted #1954 controls are GREEN after its merge.
 
 1. A PlaceOrders split of more than one lot is a streamed serial Plan: each next lot is prepared only after the previous lot's DATA.
+   - Also at BingX's real maximum native split (`split()` at the market's max quantity and step): the streamed journal, the progress receipts and every accepted ID carry the whole split.
+   - A mid-split 100001 resend, and a mid-split refusal, each keep the IDs already accepted (fe7lgm P3).
 2. A 100001 refusal resends once through `plan_resend_context`, with an unchanged clientOrderId. A second 100001 stops.
-3. A refused cancelReplace is outcome None with no further call.
+3. A refused cancelReplace is outcome None, with its IDs kept, no Unknown seal (so no fence or reconcile), no resend grant and no further call.
 4. A trigger replace after an 80016 cancel prepares no replacement.
-5. A lost create fences cancel-all until the reconcile snapshot clears it.
+5. A lost create fences cancel-all until the reconcile snapshot clears it. With a Secondary read key configured, the clearing snapshot is Primary-signed (PrimaryRead PostUnknownOrderRead), and a Secondary read cannot clear the fence.
 6. An 80016 plain cancel fences, and the reconcile snapshot clears it.
 7. Keyless klines are a managed unsigned command Read: one Prepare, then `done_context`/`fail_context`, never numeric `done`/`fail`.
 8. Keyless tickers and lists are managed Background reads with no credential.
