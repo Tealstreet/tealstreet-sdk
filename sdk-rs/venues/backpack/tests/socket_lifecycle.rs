@@ -698,17 +698,40 @@ fn command(h: &mut Harness, command: safe_cex_engine::Command) {
     h.event(Event::Command(command));
 }
 
-fn wake_current_interests(h: &mut Harness) -> Vec<TimerId> {
-    let timers: Vec<_> = h
-        .timers
+fn current_wakes(h: &Harness) -> Vec<TimerId> {
+    h.timers
         .iter()
         .filter(|(_, at)| *at == h.now)
         .map(|(timer, _)| *timer)
-        .collect();
+        .collect()
+}
+
+fn fire_timer(h: &mut Harness, timer: TimerId) {
+    h.timers.retain(|(id, _)| *id != timer);
+    h.event(Event::TimerFired { timer });
+}
+
+fn wake_current_interests(h: &mut Harness) -> Vec<TimerId> {
+    let timers = current_wakes(h);
     for timer in &timers {
-        h.event(Event::TimerFired { timer: *timer });
+        fire_timer(h, *timer);
     }
     timers
+}
+
+fn accept_depth_reads(h: &mut Harness, urls: &mut Vec<String>) {
+    for request in std::mem::take(&mut h.http) {
+        assert!(request.url.contains("/depth?"));
+        urls.push(request.url);
+        h.event(Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"lastUpdateId":1,"bids":[],"asks":[]}"#,
+            },
+        });
+    }
 }
 
 #[test]
@@ -728,16 +751,7 @@ fn two_book_handoff_keeps_survivor_when_sibling_is_removed_before_wake() {
         if reconnect {
             assert_eq!(wake_current_interests(&mut h).len(), 2);
             assert_eq!(h.http.len(), 2);
-            for request in std::mem::take(&mut h.http) {
-                h.event(Event::HttpResponse {
-                    request: request.id,
-                    response: Response {
-                        status: 200,
-                        headers: "",
-                        body: r#"{"lastUpdateId":1,"bids":[],"asks":[]}"#,
-                    },
-                });
-            }
+            accept_depth_reads(&mut h, &mut vec![]);
             h.now = 1001.;
             h.event(Event::WsClosed {
                 socket: old,
@@ -750,29 +764,29 @@ fn two_book_handoff_keeps_survivor_when_sibling_is_removed_before_wake() {
             h.http.is_empty(),
             "snapshot waits for genuine post-handoff ingress"
         );
-        let original_wakes: Vec<_> = h
-            .timers
-            .iter()
-            .filter(|(_, at)| *at == h.now)
-            .map(|(id, _)| *id)
-            .collect();
-        assert_eq!(original_wakes.len(), 2);
+        let old_wakes = current_wakes(&h);
+        assert_eq!(old_wakes.len(), 2);
         command(
             &mut h,
             Command::UnsubscribeOrderBook {
                 symbol: SYMBOL.into(),
             },
         );
-        for timer in &original_wakes {
-            h.event(Event::TimerFired { timer: *timer });
+        let current = current_wakes(&h);
+        assert_eq!(current.len(), 1);
+        assert!(
+            current.iter().all(|timer| !old_wakes.contains(timer)),
+            "successful replacement rebased surviving work"
+        );
+        for timer in &old_wakes {
+            fire_timer(&mut h, *timer);
         }
+        assert!(h.http.is_empty(), "all old wakes are inert");
+        fire_timer(&mut h, current[0]);
         assert_eq!(h.http.len(), 1);
         assert!(h.http[0].url.ends_with("symbol=B"));
+        accept_depth_reads(&mut h, &mut vec![]);
         h.clear_observations();
-        for timer in &original_wakes {
-            h.event(Event::TimerFired { timer: *timer });
-        }
-        assert!(h.http.is_empty(), "old wakes are inert");
         command(
             &mut h,
             Command::SubscribeOrderBook {
@@ -780,25 +794,16 @@ fn two_book_handoff_keeps_survivor_when_sibling_is_removed_before_wake() {
             },
         );
         assert!(h.http.is_empty());
-        let new: Vec<_> = h
-            .timers
-            .iter()
-            .filter(|(_, at)| *at == h.now)
-            .map(|(id, _)| *id)
-            .filter(|id| !original_wakes.contains(id))
-            .collect();
-        assert_eq!(new.len(), 1);
-        h.event(Event::TimerFired { timer: new[0] });
+        assert_eq!(wake_current_interests(&mut h).len(), 1);
         assert_eq!(h.http.len(), 1);
         assert!(h.http[0].url.ends_with(&format!("symbol={SYMBOL}")));
     }
 }
 
-#[test]
-fn pending_handoff_credit_refusal_rolls_back_addition_and_retry_has_no_phantom_refcount() {
+fn pending_books(count: usize) -> Harness {
     use safe_cex_engine::Command;
     let mut h = Harness::new(PublicFeedPolicy::Direct);
-    for n in 0..512 {
+    for n in 0..count {
         command(
             &mut h,
             Command::SubscribeOrderBook {
@@ -806,19 +811,22 @@ fn pending_handoff_credit_refusal_rolls_back_addition_and_retry_has_no_phantom_r
             },
         );
     }
-    let public = h.open(SocketChannel::Public);
+    h.open(SocketChannel::Public);
     assert!(h.http.is_empty());
-    let wakes: Vec<_> = h
-        .timers
-        .iter()
-        .filter(|(_, at)| *at == h.now)
-        .map(|(id, _)| *id)
-        .collect();
     assert_eq!(
-        wakes.len(),
+        current_wakes(&h).len(),
         512,
-        "actual engine-issued pending handoff credits"
+        "real engine pending handoff capacity"
     );
+    h
+}
+
+#[test]
+fn pending_handoff_credit_refusal_rolls_back_addition_and_retry_has_no_phantom_refcount() {
+    use safe_cex_engine::Command;
+    let mut h = pending_books(512);
+    let public = h.socket(SocketChannel::Public);
+    let old = current_wakes(&h);
     h.clear_observations();
     command(
         &mut h,
@@ -828,12 +836,25 @@ fn pending_handoff_credit_refusal_rolls_back_addition_and_retry_has_no_phantom_r
     );
     assert_eq!(h.notices, 1);
     assert!(h.sent.is_empty() && h.http.is_empty() && h.closed.is_empty());
-    h.event(Event::TimerFired { timer: wakes[0] });
+    h.clear_observations();
+    command(
+        &mut h,
+        Command::UnsubscribeOrderBook {
+            symbol: "B0".into(),
+        },
+    );
+    assert_eq!(
+        h.notices, 1,
+        "last removal rolls back under the same real proposal pressure"
+    );
+    assert!(h.sent.is_empty() && h.http.is_empty() && h.closed.is_empty());
+    fire_timer(&mut h, old[0]);
     assert_eq!(
         h.http.len(),
         1,
         "existing peer still receives its exact snapshot"
     );
+    accept_depth_reads(&mut h, &mut vec![]);
     h.clear_observations();
     command(
         &mut h,
@@ -843,18 +864,29 @@ fn pending_handoff_credit_refusal_rolls_back_addition_and_retry_has_no_phantom_r
     );
     assert_eq!(h.sent.len(), 1);
     assert!(h.sent[0].1.contains("depth.NEW"));
+    let current = current_wakes(&h);
+    assert_eq!(
+        current.len(),
+        512,
+        "remaining peers plus NEW get current rebased wakes"
+    );
+    assert!(current.iter().all(|id| !old.contains(id)));
+    for timer in &old {
+        fire_timer(&mut h, *timer);
+    }
     assert!(h.http.is_empty());
-    let new: Vec<_> = h
-        .timers
-        .iter()
-        .filter(|(_, at)| *at == h.now)
-        .map(|(id, _)| *id)
-        .filter(|id| !wakes.contains(id))
-        .collect();
-    assert_eq!(new.len(), 1);
-    h.event(Event::TimerFired { timer: new[0] });
-    assert_eq!(h.http.len(), 1);
-    assert!(h.http[0].url.ends_with("symbol=NEW"));
+    let mut urls = vec![];
+    for timer in current {
+        fire_timer(&mut h, timer);
+        accept_depth_reads(&mut h, &mut urls);
+    }
+    assert_eq!(urls.len(), 512);
+    assert_eq!(
+        urls.iter()
+            .filter(|url| url.ends_with("symbol=NEW"))
+            .count(),
+        1
+    );
     h.clear_observations();
     command(
         &mut h,
@@ -869,31 +901,60 @@ fn pending_handoff_credit_refusal_rolls_back_addition_and_retry_has_no_phantom_r
             r#"{"method":"UNSUBSCRIBE","params":["depth.NEW"]}"#.into()
         )]
     );
+    h.clear_observations();
+    command(
+        &mut h,
+        Command::UnsubscribeOrderBook {
+            symbol: "B0".into(),
+        },
+    );
+    assert_eq!(
+        h.sent,
+        [(
+            public,
+            r#"{"method":"UNSUBSCRIBE","params":["depth.B0"]}"#.into()
+        )]
+    );
     h.message(public, TICKER);
     assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
     assert!(h.closed.is_empty());
 }
 
 #[test]
-fn real_synchronous_byte_and_async_frame_refusal_preserve_peers_and_rollback_demand() {
+fn real_synchronous_byte_and_invalid_key_refusal_preserve_peers_and_rollback_demand() {
     use safe_cex_engine::Command;
-    for len in [4 * 1024 * 1024, 65_536] {
+    for (len, reason) in [(4 * 1024 * 1024, "Capacity"), (65_536, "InvalidInterest")] {
         let mut h = Harness::new(PublicFeedPolicy::Direct);
         let public = h.open(SocketChannel::Public);
         h.clear_observations();
         let oversized = "X".repeat(len);
-        command(
-            &mut h,
-            Command::SubscribeOrderBook {
+        h.engine.handle(
+            h.now,
+            Event::Command(Command::SubscribeOrderBook {
                 symbol: oversized.clone(),
-            },
+            }),
         );
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+        let notices: Vec<_> = actions
+            .iter()
+            .filter_map(|a| {
+                if let Action::Notice(safe_cex_engine::Notice::Event(n)) = a {
+                    Some(n)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(notices.len(), 1);
         assert_eq!(
-            h.notices, 1,
-            "real proposal-byte or encoded-frame capacity refusal"
+            notices[0].code,
+            safe_cex_engine::log::code::SUBSCRIPTION_REJECTED
         );
-        assert!(h.sent.is_empty() && h.http.is_empty() && h.closed.is_empty());
-        h.clear_observations();
+        assert!(notices[0].message.contains(reason));
+        assert!(actions.iter().all(|a| matches!(
+            a,
+            Action::Notice(_) | Action::ClearTimer { .. } | Action::SetTimer { .. }
+        )));
         command(&mut h, Command::UnsubscribeOrderBook { symbol: oversized });
         assert!(
             h.sent.is_empty() && h.http.is_empty() && h.notices == 0,
@@ -906,14 +967,288 @@ fn real_synchronous_byte_and_async_frame_refusal_preserve_peers_and_rollback_dem
             },
         );
         assert_eq!(h.sent.len(), 1);
-        assert!(h.sent[0].1.contains(&format!("depth.{SYMBOL}")));
         assert_eq!(wake_current_interests(&mut h).len(), 1);
         assert_eq!(h.http.len(), 1);
         h.message(public, TICKER);
         assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
-        assert!(
-            h.closed.is_empty(),
-            "encoder refusal did not stop healthy public feed"
+        assert!(h.closed.is_empty());
+    }
+}
+
+fn long_candle_symbols(count: usize) -> Vec<String> {
+    (0..count)
+        .map(|n| format!("C{n:03}{}", "X".repeat(990)))
+        .collect()
+}
+
+#[test]
+fn valid_key_batch_frame_capacity_refuses_only_last_addition_then_recovers_after_release() {
+    use safe_cex_engine::{Command, model::Interval};
+    let mut h = Harness::new(PublicFeedPolicy::Direct);
+    let public = h.open(SocketChannel::Public);
+    h.clear_observations();
+    let symbols = long_candle_symbols(80);
+    let count = (1..=symbols.len())
+        .find(|count| {
+            let params: Vec<_> = symbols[..*count]
+                .iter()
+                .map(|s| format!("kline.1m.{s}"))
+                .collect();
+            serde_json::to_string(&serde_json::json!({"method":"SUBSCRIBE","params":params}))
+                .unwrap()
+                .len()
+                > 65_536
+        })
+        .unwrap();
+    let symbols = &symbols[..count];
+    for symbol in symbols {
+        assert!(format!("kline.1m.{symbol}").len() < 1024);
+        h.engine.handle(
+            h.now,
+            Event::Command(Command::SubscribeCandles {
+                symbol: symbol.clone(),
+                interval: Interval::M1,
+            }),
         );
     }
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+    let notices: Vec<_> = actions
+        .iter()
+        .filter_map(|a| {
+            if let Action::Notice(safe_cex_engine::Notice::Event(n)) = a {
+                Some(n)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].message.contains("Capacity"));
+    let sent: Vec<_> = actions
+        .iter()
+        .filter_map(|a| {
+            if let Action::WsSend { socket, text } = a {
+                assert_eq!(*socket, public);
+                Some(text)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        sent.len(),
+        1,
+        "prior peer frame remains atomically releasable"
+    );
+    let params = serde_json::from_str::<serde_json::Value>(sent[0]).unwrap()["params"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(params.len(), count - 1);
+    for symbol in &symbols[..count - 1] {
+        assert!(params.iter().any(|p| p == &format!("kline.1m.{symbol}")));
+    }
+    assert!(
+        actions
+            .iter()
+            .all(|a| !matches!(a, Action::WsClose { .. } | Action::Http(_)))
+    );
+    command(
+        &mut h,
+        Command::SubscribeCandles {
+            symbol: symbols.last().unwrap().clone(),
+            interval: Interval::M1,
+        },
+    );
+    assert_eq!(
+        h.sent.len(),
+        1,
+        "fresh real request succeeds after peer frame release"
+    );
+    h.clear_observations();
+    command(
+        &mut h,
+        Command::UnsubscribeCandles {
+            symbol: symbols.last().unwrap().clone(),
+            interval: Interval::M1,
+        },
+    );
+    assert_eq!(h.sent.len(), 1, "one successful add needs only one remove");
+    assert!(h.sent[0].1.contains("UNSUBSCRIBE"));
+    h.message(public, TICKER);
+    assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
+    assert!(h.closed.is_empty());
+}
+
+#[test]
+fn persistent_handoff_pressure_observes_cooldown_and_three_retry_exhaustion() {
+    let mut h = pending_books(513);
+    assert_eq!(
+        h.notices, 1,
+        "same-clock commit callbacks did not retry the first Capacity"
+    );
+    for n in 1..=3 {
+        let timers: Vec<_> = h
+            .timers
+            .iter()
+            .filter(|(_, at)| *at == 1000. + f64::from(n) * 1000.)
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(timers.len(), 1);
+        h.now = 1000. + f64::from(n) * 1000.;
+        fire_timer(&mut h, timers[0]);
+        assert!(h.http.is_empty());
+        assert_eq!(
+            h.notices,
+            1 + n as usize + usize::from(n == 3),
+            "one attempt per genuine observation, then one exhaustion Warn"
+        );
+    }
+    let future: Vec<_> = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at > 4000. && *at < 6000.)
+        .collect();
+    assert!(future.is_empty(), "no fourth recovery timer");
+    let current: Vec<_> = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at == 1000.)
+        .map(|(timer, _)| *timer)
+        .collect();
+    assert_eq!(current.len(), 512);
+    fire_timer(&mut h, current[0]);
+    accept_depth_reads(&mut h, &mut vec![]);
+    h.clear_observations();
+    command(
+        &mut h,
+        safe_cex_engine::Command::SubscribeCandles {
+            symbol: SYMBOL.into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        },
+    );
+    assert_eq!(
+        h.sent.len(),
+        1,
+        "genuine peer proposal commits with the released credit"
+    );
+    assert!(
+        h.http.is_empty() && h.notices == 0,
+        "same-clock commit cannot restart exhausted snapshot recovery"
+    );
+    h.clear_observations();
+    let public = h.socket(SocketChannel::Public);
+    h.message(public, TICKER);
+    assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
+    assert!(
+        h.http.is_empty() && h.notices == 0,
+        "ordinary current ingress cannot restart exhausted recovery"
+    );
+}
+
+#[test]
+fn all_nonfinite_interest_retry_timer_deliveries_create_no_work_or_timers() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = pending_books(513);
+        let retry = h.timers.iter().find(|(_, at)| *at == 2000.).unwrap().0;
+        let before = store_frame(&h);
+        h.engine.handle(now, Event::TimerFired { timer: retry });
+        h.engine.prepare_dispatch(now);
+        let actions: Vec<_> = h.engine.drain_actions().collect();
+        assert_eq!(store_frame(&h), before);
+        assert!(
+            actions.iter().all(|action| match action {
+                Action::ClearTimer { timer } => h.timers.iter().any(|(id, _)| id == timer),
+                Action::WsClose { socket } => h.connects.iter().any(|(_, id)| id == socket),
+                _ => false,
+            }),
+            "only exact issued cleanup, no proposal/HTTP/auth/frames/timers"
+        );
+    }
+}
+
+#[test]
+fn inherited_engine_ready_replay_capacity_stops_only_its_feed_without_venue_retry() {
+    use safe_cex_engine::{Command, model::Interval};
+    let mut h = Harness::new(PublicFeedPolicy::Direct);
+    let public = h.open(SocketChannel::Public);
+    let private = h.open(SocketChannel::Private);
+    for symbol in long_candle_symbols(80) {
+        command(
+            &mut h,
+            Command::SubscribeCandles {
+                symbol,
+                interval: Interval::M1,
+            },
+        );
+    }
+    h.now = 1001.;
+    h.event(Event::WsClosed {
+        socket: public,
+        code: 1006,
+    });
+    h.advance(2000.);
+    let new = h.socket(SocketChannel::Public);
+    assert_ne!(new, public);
+    h.clear_observations();
+    h.open(SocketChannel::Public);
+    assert!(
+        h.closed.contains(&new),
+        "inherited Ready replay Capacity remains fail-closed"
+    );
+    assert!(!h.closed.contains(&private));
+    assert!(
+        h.sent.is_empty(),
+        "no partial replay or opening PING handoff"
+    );
+    assert_eq!(
+        h.connects
+            .iter()
+            .filter(|(channel, _)| *channel == SocketChannel::Public)
+            .count(),
+        2
+    );
+    h.message(private, ORDER);
+    assert!(h.engine.store().order("unexpected").is_some());
+}
+
+#[test]
+fn removing_the_only_unarmed_demand_cancels_its_obsolete_recovery_timer() {
+    use safe_cex_engine::Command;
+    let mut h = pending_books(513);
+    let retry = h.timers.iter().find(|(_, at)| *at == 2000.).unwrap().0;
+    let mut urls = vec![];
+    for timer in current_wakes(&h) {
+        fire_timer(&mut h, timer);
+        accept_depth_reads(&mut h, &mut urls);
+    }
+    assert_eq!(urls.len(), 512);
+    let missing: Vec<_> = (0..513)
+        .map(|n| format!("B{n}"))
+        .filter(|symbol| {
+            !urls
+                .iter()
+                .any(|url| url.ends_with(&format!("symbol={symbol}")))
+        })
+        .collect();
+    assert_eq!(missing.len(), 1);
+    h.clear_observations();
+    command(
+        &mut h,
+        Command::UnsubscribeOrderBook {
+            symbol: missing[0].clone(),
+        },
+    );
+    assert!(
+        !h.timers.iter().any(|(timer, _)| *timer == retry),
+        "resolved demand cancels its exact genuine timer"
+    );
+    assert_eq!(h.sent.len(), 1);
+    h.clear_observations();
+    h.now = 2000.;
+    fire_timer(&mut h, retry);
+    assert!(
+        h.sent.is_empty() && h.http.is_empty() && h.notices == 0,
+        "obsolete wake cannot mint new work"
+    );
 }

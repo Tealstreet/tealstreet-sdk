@@ -241,3 +241,27 @@ handoff-credit refusal/release without phantom refcounts, and real proposal-byte
 versus encoded-frame capacity refusal. Their deeper source-only suffixes remain
 gated on legacy; no capacity/recovery execution proof is inferred from the RED.
 Corrected immutable runtime7d43d006 remains UNAPPLIED pending hcm review.
+
+The recovery preview42102c4f is UNAPPLIED. It gates all automatic paths on the
+exact current public epoch, finite time, no pending cooldown and no exhaustion.
+Only a real finite timer delivery spends one of three1s recovery observations;
+commits do not reset the budget. Resolved demand cancels its exact timer, and
+retirement clears it. Refused new additions/removals retain transactional rollback;
+per-book genuine handoffs remain independent. Native book-recovery timer work
+also requests that real handoff before the unchanged snapshot primitive.
+
+Control corrections follow hcm's API finding: surviving desired interests receive
+new wake IDs, so controls capture current wake/cleanup traces and keep every old
+wake inert. A65536-byte symbol tests InvalidInterest, not encoder capacity. A
+separate bounded-key batch grows past65536 encoded bytes, preserving earlier peer
+release and proving recovery after that release. Persistent real513-book pressure,
+same-clock commits, three-observation cap, all nonfinite timer deliveries and
+obsolete-timer cancellation are separate controls. Engine Ready's own replay Err
+remains inherited fail-closed; only venue proposal refusals get rollback/recovery.
+No generic engine change or blanket replay recovery is promised.
+
+On unchanged runtime target35 compiles and executes12workingGREEN/23assertionRED,
+0ignored. One source-stage Notice enum access was fixed before this receipt; that
+compile failure is excluded from original evidence. The original19 entire prefix
+and the eight earlier source-stage controls are retained. Exact source/control
+review, GREEN suffix execution, fixture preservation and paired sizes remain gates.
