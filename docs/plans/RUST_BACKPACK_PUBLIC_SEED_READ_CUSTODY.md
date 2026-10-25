@@ -116,3 +116,15 @@ size receipts and run ID. Landing requires auditor exact-tree GO and guard.
   it forbids adoption of the failed observation. Working controls cover three-route
   wire/financial mapping, empty marks, mark failure/recovery, duplicate success,
   and empty catalogue/daily recovery. Receipt is external, no runtime proof yet.
+
+- hcmq3f CLEARed plan/originals at 6ced, including distinct native Backoff
+  observations and exact startup-only fixture patch 613a23e3. Initial source
+  patch 96b22d91 was NOT CLEAR: completing credit outlived successor admission,
+  and nonfinite released failure clocks could schedule nonfinite retry timers.
+- Added three original assertion controls on unchanged runtime: 254 engine-issued
+  peer Contexts leave catalogue credit to be retired before both derived
+  preparations; probe credits after each terminal must be 0/1/2. Genuine issued
+  and released responses/failures at NaN and either Infinity must not publish
+  payload, schedule a timer, or reissue. Native failed-mark fallback is permitted.
+  Original 17-test source prefix is byte-exact; now 20 executed: 5 GREEN, 15
+  assertion RED, zero ignored. Corrected source remains unapplied pending review.
