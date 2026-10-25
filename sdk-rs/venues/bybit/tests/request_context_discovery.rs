@@ -184,6 +184,8 @@ fn a_reply_past_its_deadline_before_the_timer_still_retries() {
         let mut h = Harness::started(public(Variant::Linear, ""));
         h.respond("status=PreLaunch", 200, PRELAUNCH);
         let read = h.take("/v5/market/instruments-info");
+        // The final assert must see a new discovery request, not a queued one.
+        assert!(!h.has_request("/v5/market/instruments-info"));
         h.now += 20_001.;
         h.reply(read.id, 200, body);
         assert!(h.engine.store().markets().is_empty(), "no rows published");
