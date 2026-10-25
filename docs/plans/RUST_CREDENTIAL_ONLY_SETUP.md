@@ -4,7 +4,7 @@ Status: PLAN, revision 3, CLEAR (kuhwxi, at `8d5914ee117`). It folds in kuhwxi's
 X1, X2), fe7lgm's review (points 1-5) and ddi2il's ruling on G1 and G3. No source before CLEAR.
 Owner: shared credential core (m26ps4). First consumer: GRVT, whose recipe is
 zs5e83's (plan `c13acb15e56` on `feat/rust-grvt-write-funnel-plan`). This plan
-does not edit that recipe; G2, G4 and G5 stay open for zs5e83.
+does not edit that recipe; G2, G4, G5 and G6 stay open for zs5e83.
 
 ## Problem
 
@@ -182,7 +182,8 @@ construction, and Required is unchanged.**
   (#2109) on every path, beside a secondary too (C4l): one `config.invalid`
   notice, `StartupFailed` during startup, a socket role that never
   reconnects, and every later signed staging refused, including steps that
-  only present the key without a signature.
+  only present the key without a signature. For an Optional family that
+  scope is open (G6).
 - Capability admission (`Cx::can_sign`) refuses an absent signing ref as
   `MissingKey`; a missing extra ref stays `InvalidRequest` in any need order.
   An admission refusal does not latch; the venue returns it.
@@ -259,7 +260,7 @@ terminal.
    the signing policy, the external boundary and the bans rule. C1, C4-C8
    (with C4l) and K1-K6 go GREEN.
 3. D3 + D5: the `Option<Secret>` key, `KeyPresence` and `SetupFacts`. C2, C3
-   and C9 go GREEN. **This phase does not start until G3 is answered** with
+   and C9 go GREEN. **This phase does not start until G3 and G6 are answered** with
    zs5e83. If the answer reopens D3, D3 is revised first.
 4. Docs: a `RUST_CUTOVER_CALLERS.md` row saying external providers may omit
    `signing` only for Optional families, and the `RUST_SIGNER.md` identity
@@ -279,12 +280,8 @@ per-venue fix of a cross-cutting concern?"
 - **G2: placement admission.** Refuse placement typed in GRVT's command
   admission, using `signing_ref()` and the declared Secp256k1Digest
   capability, before queue effects. kuhwxi's view: the D4 `NotSent` floor is
-  safe, but GRVT should refuse earlier. Blocking on GRVT's adoption PR (the
-  first Optional family), with kuhwxi: today one signed attempt on a credential-only primary latches
-  all later signed staging, key-only presentation steps and startup
-  included (D4). Either admission refuses first so nothing reaches the
-  latch, or the latch skips `signing_ref()` absence for an Optional primary,
-  or it narrows to work that carries a signing operation.
+  safe, but GRVT should refuse earlier. Whether admission alone keeps work
+  from the latch is part of G6.
 - **G3: Empty login (gates phase 3).** Under `KeyPresence::Empty` the slot is
   `{credential: "", signing: None}`, and it fails both validators. Which
   Selection and `session_egress` does the `api_key ""` login use? One option
@@ -295,3 +292,13 @@ per-venue fix of a cross-cutting concern?"
   eligibility reads Blank. Confirm the native diagnostic and I/O precedence.
 - **G5: legacy callbacks.** Do any GRVT remote, payload or delegated shapes
   need credential-only support? D2 refuses them by default.
+- **G6: latch scope for an Optional family (gates phase 3 and GRVT
+  adoption).** Today one signed attempt on a credential-only primary latches
+  all later signed staging (D4), including key-only presentation and session
+  steps, second-slot reads and startup. For an Optional family an absent key
+  is a valid state, which contradicts the per-operation check D4 is named
+  for. Options:
+  admission refuses first so nothing reaches the latch (G2); the latch skips
+  `signing_ref()` absence for an Optional primary; or the latch narrows to
+  work that carries a signing operation. No decision yet; settled with
+  zs5e83 and kuhwxi when the GRVT recipe resumes.
