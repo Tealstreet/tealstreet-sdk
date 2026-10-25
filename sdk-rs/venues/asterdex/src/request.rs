@@ -21,6 +21,33 @@ const CLOCK_TIMEOUT_MS: u32 = 5_000;
 const CLOCK_ADMISSION_RETRY_MS: f64 = 1_000.0;
 const READ_TIMEOUT_MS: u32 = 20_000;
 
+/// A command read's root, carried by its native continuation.
+fn root_of(pending: &Pending) -> Option<Context> {
+    match pending {
+        Pending::DepthRead { context } | Pending::Klines { context, .. } => Some(context.clone()),
+        Pending::Account(crate::account::Request::Info { root }) => Some(root.clone()),
+        Pending::History(history) => Some(history.root().clone()),
+        _ => None,
+    }
+}
+
+/// The caller's original Read root for a command that reads remotely.
+pub(crate) fn command_read_root(cx: &mut Cx<'_, Pending>) -> Option<Context> {
+    match cx.command_wait() {
+        Some(safe_cex_engine::CommandWait::Remaining(_)) => {
+            cx.admit_caller_read_root(None, None).ok()
+        }
+        Some(safe_cex_engine::CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Read);
+            None
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Read);
+            None
+        }
+    }
+}
+
 /// Unsigned public reads: the engine owns the bound and retry eligibility.
 pub(crate) fn public_read_policy() -> Policy {
     Policy {
@@ -58,8 +85,11 @@ pub struct SignedRequest {
     role: CredentialRole,
     /// Engine authority of a dispatched listenKey session write.
     context: Option<Context>,
-    /// Engine custody of a managed public read: the command's own Context, or
-    /// a Background one retired before its native callback.
+    /// A command read's root, carried by its native continuation.
+    root: Option<Context>,
+    /// The physical read Context: the root itself for a one-request public
+    /// command, a leg under it, or a Background one. Retired before the
+    /// native callback unless it is the root.
     read: Option<Context>,
 }
 
@@ -128,21 +158,40 @@ impl SignedRequest {
             )
     }
 
-    fn command_read(&self) -> bool {
-        matches!(
-            self.pending,
-            Pending::DepthRead { .. } | Pending::Klines { .. }
-        )
+    /// Signed reads the engine releases; writes, STP and listenKey keep the
+    /// native path until their slice.
+    fn managed_signed(&self) -> bool {
+        !self.public
+            && self.method == Method::Get
+            && !self.listen_key()
+            && !matches!(self.pending, Pending::Trade(_))
     }
 
-    /// Retire a Background read before its native callback; a command read
+    /// Retire a leg or Background read before its native callback; a root
     /// settles through its own terminal.
     fn settle(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(context) = self.read.take()
-            && !self.command_read()
+            && self.root.as_ref() != Some(&context)
         {
             let _ = cx.finish_http_context(&context);
         }
+    }
+
+    /// Engine permission for one more attempt under the original bound. A leg
+    /// retires and the next dispatch mints a fresh one under the root.
+    fn resend_permit(&mut self, cx: &mut Cx<'_, Pending>) -> Result<(), VenueError> {
+        let Some(read) = self.read.take() else {
+            return Ok(());
+        };
+        if self.root.is_some() && self.root.as_ref() != Some(&read) {
+            let _ = cx.finish_http_context(&read);
+            return Ok(());
+        }
+        let granted = cx.http_retry_context(&read, RetryEvidence::ReadFailure);
+        self.read = Some(granted.as_ref().map_or(read, Clone::clone));
+        granted
+            .map(|_| ())
+            .map_err(|error| error.read_venue_error())
     }
 
     fn retryable_status(&self, status: u16) -> bool {
@@ -196,21 +245,11 @@ impl AsterDex {
         pending: Pending,
         stream: Option<ArrayAt>,
     ) {
-        // History reads keep the native public path until their own slice.
-        let read = match &pending {
-            Pending::DepthRead { context } | Pending::Klines { context, .. } => {
-                Some(Ok(context.clone()))
-            }
-            Pending::History(_) => None,
-            _ => Some(cx.http_context(Scope::Background, public_read_policy())),
-        };
-        let read = match read.transpose() {
-            Ok(read) => read,
-            Err(error) => {
-                self.on_read_failed(cx, pending, error.read_venue_error());
-                return;
-            }
-        };
+        let root = root_of(&pending);
+        // A one-request public command reads under its own root.
+        let read = root
+            .clone()
+            .filter(|_| matches!(pending, Pending::DepthRead { .. } | Pending::Klines { .. }));
         let request = Box::new(SignedRequest {
             method: Method::Get,
             path: path.into(),
@@ -224,6 +263,7 @@ impl AsterDex {
             public: true,
             role: CredentialRole::Read { scope: None },
             context: None,
+            root,
             read,
         });
         self.dispatch_signed(cx, request);
@@ -240,6 +280,7 @@ impl AsterDex {
         pending: Pending,
         stream: Option<ArrayAt>,
     ) -> bool {
+        let root = root_of(&pending);
         let request = Box::new(SignedRequest {
             method,
             path: path.into(),
@@ -253,6 +294,7 @@ impl AsterDex {
             public: false,
             role,
             context: None,
+            root,
             read: None,
         });
         let stale = self
@@ -268,37 +310,14 @@ impl AsterDex {
         }
     }
 
-    fn dispatch_signed(&mut self, cx: &mut Cx<'_, Pending>, request: Box<SignedRequest>) -> bool {
-        if let Some(read) = request.read.clone() {
-            let path = &request.path;
-            let url = format!("{}{path}", self.urls.rest);
-            let stream = request.stream;
-            match cx.request_managed(read, None, Method::Get, url, None, Pending::Signed(request)) {
-                Ok(id) => {
-                    if let Some(at) = stream {
-                        cx.stream_response(id, at);
-                    }
-                }
-                Err((Pending::Signed(mut unsent), error)) => {
-                    unsent.settle(cx);
-                    let error = error.read_venue_error();
-                    self.on_read_failed(cx, unsent.pending, error);
-                }
-                Err(_) => unreachable!("a refused read returns its own continuation"),
-            }
-            return true;
-        }
+    fn dispatch_signed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Box<SignedRequest>,
+    ) -> bool {
         if request.public {
             let url = format!("{}{}", self.urls.rest, request.path);
-            match request.stream {
-                Some(at) => {
-                    cx.request_streamed(Method::Get, url, Vec::new(), at, Pending::Signed(request));
-                }
-                None => {
-                    cx.request(Method::Get, url, Vec::new(), None, Pending::Signed(request));
-                }
-            }
-            return true;
+            return self.release_read(cx, request, url, public_read_policy(), None);
         }
         let Ok((selection, slot)) = self.credentials.select(request.role) else {
             self.on_request_failed(cx, request.pending, "Missing required Aster credentials");
@@ -318,6 +337,7 @@ impl AsterDex {
         let recipe = match recipe {
             Ok(recipe) => recipe,
             Err(error) => {
+                request.settle(cx);
                 self.on_request_failed(cx, request.pending, &error);
                 return false;
             }
@@ -325,6 +345,13 @@ impl AsterDex {
         // The recipe writes the signed query and API-key header at dispatch.
         let path = &request.path;
         let url = format!("{}{path}", self.urls.rest);
+        if request.managed_signed() {
+            let policy = Policy {
+                credential: Some(selection.credential(slot.identity.credential.clone())),
+                ..public_read_policy()
+            };
+            return self.release_read(cx, request, url, policy, Some(Box::new(recipe)));
+        }
         if request.listen_key() {
             // The reducer ignores a closed stream's create or keepalive, and
             // sending it would rotate the current stream's session.
@@ -343,6 +370,60 @@ impl AsterDex {
         };
         selection.sign(cx, id, Box::new(recipe));
         true
+    }
+
+    /// Release one read attempt under its Context: a granted resend keeps
+    /// its Context, a command read mints a leg under its root, and anything
+    /// else is a Background read. Signing, when present, happens at release.
+    fn release_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut unsent: Box<SignedRequest>,
+        url: String,
+        policy: Policy,
+        recipe: Option<Box<dyn safe_cex_engine::SignStep>>,
+    ) -> bool {
+        let read = match (unsent.read.clone(), &unsent.root) {
+            (Some(read), _) => Ok(read),
+            (None, Some(root)) => cx.http_leg_context(root, policy),
+            (None, None) => cx.http_context(Scope::Background, policy),
+        };
+        let read = match read {
+            Ok(read) => read,
+            Err(error) => {
+                self.on_read_failed(cx, unsent.pending, error.read_venue_error());
+                return false;
+            }
+        };
+        unsent.read = Some(read.clone());
+        let method = unsent.method;
+        let stream = unsent.stream;
+        let queued = match recipe {
+            Some(recipe) => cx.request_signed_managed(
+                read,
+                None,
+                method,
+                url,
+                None,
+                recipe,
+                Pending::Signed(unsent),
+            ),
+            None => cx.request_managed(read, None, method, url, None, Pending::Signed(unsent)),
+        };
+        match queued {
+            Ok(id) => {
+                if let Some(at) = stream {
+                    cx.stream_response(id, at);
+                }
+                true
+            }
+            Err((Pending::Signed(mut unsent), error)) => {
+                unsent.settle(cx);
+                self.on_read_failed(cx, unsent.pending, error.read_venue_error());
+                false
+            }
+            Err(_) => unreachable!("a refused read returns its own continuation"),
+        }
     }
 
     /// One session operation per physical listenKey create or keepalive.
@@ -432,10 +513,9 @@ impl AsterDex {
             let _ = cx.finish_http_context(&context);
         }
         if let (Some(read), Ok(_)) = (&request.read, &response) {
-            let delivered = if request.command_read() {
-                cx.validate_read_http_delivery(read, read)
-            } else {
-                cx.validate_background_read_http_delivery(read)
+            let delivered = match &request.root {
+                Some(root) => cx.validate_read_http_delivery(root, read),
+                None => cx.validate_background_read_http_delivery(read),
             };
             if let Err(error) = delivered {
                 request.settle(cx);
@@ -461,7 +541,9 @@ impl AsterDex {
             {
                 request.signature_retried = true;
                 request.reset();
-                self.dispatch_signed(cx, request);
+                if let Some(request) = self.granted(cx, request) {
+                    self.dispatch_signed(cx, request);
+                }
                 return;
             }
             if !request.public
@@ -471,8 +553,10 @@ impl AsterDex {
             {
                 request.timestamp_retried = true;
                 request.reset();
-                self.requests.awaiting_clock.push_back(request);
-                self.begin_clock(cx);
+                if let Some(request) = self.granted(cx, request) {
+                    self.requests.awaiting_clock.push_back(request);
+                    self.begin_clock(cx);
+                }
                 return;
             }
             if discovery
@@ -538,21 +622,27 @@ impl AsterDex {
         self.on_read_failed(cx, request.pending, error);
     }
 
-    /// The engine grants a managed read's resend under its original bound; the
-    /// native 1/2/3 s delay stays.
-    fn retry_read(&mut self, cx: &mut Cx<'_, Pending>, mut request: Box<SignedRequest>) {
-        if let Some(read) = request.read.take() {
-            match cx.http_retry_context(&read, RetryEvidence::ReadFailure) {
-                Ok(read) => request.read = Some(read),
-                Err(error) => {
-                    request.read = Some(read);
-                    request.settle(cx);
-                    self.on_read_failed(cx, request.pending, error.read_venue_error());
-                    return;
-                }
+    /// The native 1/2/3 s delay stays; the engine grants the resend.
+    fn retry_read(&mut self, cx: &mut Cx<'_, Pending>, request: Box<SignedRequest>) {
+        if let Some(request) = self.granted(cx, request) {
+            self.schedule_retry(cx, request);
+        }
+    }
+
+    /// A resend the engine refuses fails with its typed cause instead.
+    fn granted(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Box<SignedRequest>,
+    ) -> Option<Box<SignedRequest>> {
+        match request.resend_permit(cx) {
+            Ok(()) => Some(request),
+            Err(error) => {
+                request.settle(cx);
+                self.on_read_failed(cx, request.pending, error);
+                None
             }
         }
-        self.schedule_retry(cx, request);
     }
 
     pub(crate) fn on_signed_stream_error(
@@ -1042,7 +1132,9 @@ mod tests {
             };
             assert_eq!(request.headers, vec![("X-MBX-APIKEY", expected.into())]);
             assert!(request.body.is_none());
-            assert_eq!(request.timeout_ms, None);
+            // Reads carry their managed bound; writes keep the host default.
+            let bound = (method == Method::Get).then_some(READ_TIMEOUT_MS);
+            assert_eq!(request.timeout_ms, bound);
         }
     }
 
@@ -1062,6 +1154,7 @@ mod tests {
             public: false,
             role: CredentialRole::Mutation,
             context: None,
+            root: None,
             read: None,
         };
         let klines = || Pending::MarketBrackets {
