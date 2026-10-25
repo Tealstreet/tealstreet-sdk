@@ -117,3 +117,28 @@ With that leaf erased, the P-free set grows to about 235 of 269 methods. They
 move to a non-generic `CoreCx<'a> { now, store, io: &mut IoCore }` with
 `#[inline]` `Cx<P>` forwarders. The remaining generic code is the issue path,
 the venue-callback boundaries and the socket proposal and continuation queues.
+
+### S1 review pins (claude-fe7lgm)
+
+1. **Drop timing.** `discard(id)` drops at exactly today's point in each
+   caller. It is never deferred past a later venue callback, and never runs
+   while a venue callback holds the `Cx`, because `P` may run venue code on
+   drop (Rc/RefCell guards, nesting counters).
+2. **Survival paths use the typed boundary, never `discard`.** These are the
+   paths that keep a pending alive past removal:
+   - the two callers that return the pending;
+   - `session_waits` handing pendings back (`on_session_wait_expired`,
+     `on_plan_session_wait_ended`);
+   - a refused `queue_managed` returning `(P, Error)`;
+   - late-response reconciliation, where `capture_http_reconciliation` must
+     run before any discard of that id;
+   - a Plan seal retiring parked units and returning the pending once.
+3. **Ordering.** Delivery removes the pending and then calls the venue with it
+   by value, inside the generic boundary. `discard` on an id that is already
+   taken is a no-op, so nothing drops twice.
+4. **`'static`.** `as_any_mut` needs `P: 'static`. `Venue::Pending` has no such
+   bound today. No venue or fixture `Pending` type names a lifetime, but adding
+   the bound changes an existing public trait item, so the workspace
+   `--all-targets` check applies.
+5. **CPU.** One dyn call per discard, off the hot decode path. This goes in the
+   PR's CPU note.
