@@ -44,3 +44,28 @@ ignored tests. Serial-disabled controls pass 1,089 tests with the same 10
 existing ignored tests. Strict Clippy passes with serial/barriers enabled and
 with serial disabled; scoped formatting passes.
 The PR opens after slice 3 lands, with actual-tip integration and ratchet checks.
+
+
+## Actual slice-3 landing composition
+
+Plain-merge of actual `ae3f8b47cc1` into the reviewed independent cut gives
+source `3a04f7ce924`. Source merges automatically; only README keeps incoming
+rows plus this plan row once. The engine delta is byte-identical to the
+previously reviewed cut, and fe7lgm carried exact-patch CLEAR.
+
+| Family | Before on ae3 | After on the same composition | Delta |
+| --- | ---: | ---: | ---: |
+| Bitget | 1,475,547 | 1,475,379 | -168 |
+| Bybit | 1,397,889 | 1,397,793 | -96 |
+
+Rust 1.99.0, Binaryen 132, unchanged profiles and Web/Node agreement. Raw modules
+shrink by 581 and 112 bytes respectively. No allowance change and no sum with
+cut 1 until their union is measured.
+
+Fresh composed engine rows pass 1,230 serial/condition/barrier/nonce, 1,155
+declared/nonce, and 1,167 declared/barrier/nonce tests, retaining ten existing
+ignored tests each. Strict all-target Clippy passes all three rows; scoped
+formatting passes. The new report-control name originally contained the token
+for a forbidden JSON feature, despite testing unrelated report ordering. Only
+its name is corrected; its body and production source remain unchanged. The
+renamed control and formatting pass again, followed by full bans/ratchets.

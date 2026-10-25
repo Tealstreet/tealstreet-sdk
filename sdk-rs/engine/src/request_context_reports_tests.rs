@@ -183,7 +183,7 @@ fn accepted_facts_cannot_publish_rejection_reports_and_recovered_attempts_are_si
 
 #[cfg(feature = "serial-plans")]
 #[test]
-fn streamed_and_live_reports_preserve_order_silence_and_sealed_reads() {
+fn streamed_and_live_reports_keep_logical_order_retry_silence_and_sealed_reads() {
     let mut writes = CommandWrites::new(3).unwrap().streamed_with(true);
     writes.register(RequestId(1), 1).unwrap();
     writes.released(RequestId(1)).unwrap();
