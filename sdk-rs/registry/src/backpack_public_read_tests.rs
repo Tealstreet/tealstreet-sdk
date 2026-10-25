@@ -214,3 +214,25 @@ fn public_only_read_provider_grants_no_hosted_or_startup_authority() {
         "public-only startup produced signing work"
     );
 }
+
+#[test]
+fn valid_read_status_always_installs_the_real_secondary() {
+    let _declared = test_policy::declare("backpack", PublicRead);
+    for public in [false, true] {
+        for primary in [false, true] {
+            let setup = setup(public, primary, Some(READ_SEED));
+            assert!(matches!(setup.read_status, Some(Ok(()))));
+            assert!(setup.provider.is_some());
+            assert_eq!(setup.identities.primary.is_some(), !public && primary);
+            let read = setup
+                .identities
+                .secondary
+                .as_ref()
+                .expect("valid status installs read identity");
+            let expected =
+                safe_cex_crypto::ed25519::sign(b"instruction=fillHistoryQueryAll", &[9u8; 32])
+                    .unwrap();
+            assert_eq!(signature(&setup, &read.signing), expected.to_vec());
+        }
+    }
+}

@@ -32,7 +32,6 @@ fn probe(venue: Backpack) -> ProbeVenue<Backpack, impl FnMut(&mut Backpack, &mut
                     Default::default(),
                     None,
                     Pending::SigningProbe,
-                    false,
                 )
                 .unwrap();
         }
