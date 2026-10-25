@@ -226,8 +226,13 @@ after_refusal: []}`.
   overwrites `joined.error` on each failing leg, so it reports the LAST failing
   leg's text, kept Unknown if any leg was unproven. W2 keeps that rule (the
   last failing fact by arrival), per fe7lgm's "pin whichever native does".
-  hcmq3f's review wrote "first error"; that point is returned to hcmq3f. The
-  outcome and kind are the journal's projection, never the venue's.
+  fe7lgm confirms native-last. The outcome and kind are the journal's
+  projection, never the venue's, and the last leg's text never selects them
+  (fe7lgm pin 1). W1 showed that the recorded facts' messages drive the
+  projected terminal text, so the REDs pin the exact string the projection
+  emits for both-refused and for refusal plus Accepted, in both orders. If the
+  projection takes one fact's message whatever `fail_plan` carries, CALLERS
+  says so instead of claiming native-last parity (dazzy3).
 - **Outcome of one refusal plus one Accepted (fe7lgm P2).** This must be the
   journal's projection through `fail_plan`. The engine's `failure_projection`
   gives None when a leg was released, none is uncertain and not all were
@@ -327,6 +332,10 @@ W2 (each fails on W1's serial interim):
 - 503 ordering (hcmq3f P2): in both orders, after the first answer there is no
   terminal and no refresh and the sibling is still current; after the second,
   exactly one Unknown terminal, no commit and one refresh;
+- in the 503-first order, the sibling's later Accepted fact is recorded (its
+  effect is in the journal) and still gives no commit, which is what makes
+  wait-both observable (fe7lgm pin 2; the journal probe is chosen at source
+  time);
 - a duplicate response or a duplicate failure for a settled leg changes
   nothing, and root expiry retires the job once and the FIFO proceeds;
 - reported error: a short refusal before long's Accepted, and after it, gives
