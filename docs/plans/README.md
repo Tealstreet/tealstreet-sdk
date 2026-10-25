@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Managed socket core size | Plan only; structural cuts and ownership under review | Before changing socket capability reachability, Pending storage or Driver scheduling to reduce adoption size. | [RUST_MANAGED_SOCKET_CORE_SHRINK.md](RUST_MANAGED_SOCKET_CORE_SHRINK.md) |
 | Paradex command candle Read custody | Local source; scoped controls pass, source review pending | Before changing command candle fallback, caller deadlines or its two terminal inventory prunes. | [RUST_PARADEX_CANDLE_COMMAND_CONTEXT.md](RUST_PARADEX_CANDLE_COMMAND_CONTEXT.md) |
 | Request-context inventory precision | Implementation and rebaseline; review pending | Before changing `check-request-context.py`, its manifests, or what counts as a legacy `Cx` call. | [RUST_REQUEST_CONTEXT_PRECISION.md](RUST_REQUEST_CONTEXT_PRECISION.md) |
 | BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
