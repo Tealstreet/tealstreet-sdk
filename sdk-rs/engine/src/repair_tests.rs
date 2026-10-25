@@ -168,6 +168,8 @@ mod repair {
         successors: Vec<Result<(), RepairRefusal>>,
         successor_slot: Option<crate::CredentialSlot>,
         forced_result: Option<WriteResult>,
+        foreign_root: Option<RepairRoot>,
+        foreign_successor: Option<Result<(), RepairRefusal>>,
         failures: usize,
         reconciles: Vec<Option<Vec<String>>>,
     }
@@ -429,6 +431,11 @@ mod repair {
             else {
                 return;
             };
+            if let Some(foreign) = self.foreign_root.take() {
+                // Inside this engine's own accepted cancel DATA: only the
+                // issuer check can refuse a same-numbered foreign root.
+                self.foreign_successor = Some(cx.repair_successor(&foreign).map(drop));
+            }
             if self.replace && self.successors.is_empty() {
                 if self.mark_old_cancelled {
                     cx.store.set_order_status("old-1", OrderStatus::Canceled);
@@ -1089,15 +1096,27 @@ mod repair {
 
     #[test]
     fn reviewer_foreign_entitlement_cannot_spend_local_grant() {
-        let a = minted(&["foreign"]);
+        let a = minted(&["local"]);
         let mut b = minted(&["local"]);
-        assert_eq!(subjects(&mut b, 0), vec![subject("local")]);
-        let mut cx = Cx { now: 2., store: &mut b.store, io: &mut b.io };
+        // B publishes the bound order, so only the issuer check can refuse.
+        b.store.upsert_order(order("local", "BTCUSD"));
+        let binding = || Binding {
+            order_id: "local",
+            symbol: "BTCUSD",
+            side: "buy",
+        };
+        let mut cx = Cx {
+            now: 2.,
+            store: &mut b.store,
+            io: &mut b.io,
+        };
         let before = Repairer::mark(&cx);
-        let result = cx.admit_repair_cancel(&[(&a.venue.entitlements[0], &subject("local"),
-            Binding { order_id: "local", symbol: "BTCUSD", side: "buy" })]);
-        assert!(result.is_err(), "a real foreign handle spent the other engine's same-numbered grant");
+        let result =
+            cx.admit_repair_cancel(&[(&a.venue.entitlements[0], &subject("local"), binding())]);
+        assert_eq!(result.err(), Some(RepairRefusal::Invalid), "foreign same-numbered handle");
         assert_eq!(Repairer::mark(&cx), before);
+        let own = cx.admit_repair_cancel(&[(&b.venue.entitlements[0], &subject("local"), binding())]);
+        assert!(own.is_ok(), "the same binding under B's own handle");
     }
     #[test]
     fn reviewer_command_subject_cannot_bind_unrelated_order() {
@@ -1258,5 +1277,42 @@ mod repair {
         b.venue.first_receipt = a.venue.first_receipt.take();
         second_read(&mut b);
         assert_eq!(b.venue.snapshot_mints, vec![Ok(()), Err(RepairRefusal::NotData)]);
+    }
+
+    #[test]
+    fn a_foreign_root_cannot_open_a_successor_inside_an_accepted_cancel() {
+        let venue = || Repairer {
+            replace: true,
+            ..Default::default()
+        };
+        let (mut a, _) = snapshot(venue());
+        let (mut b, _) = snapshot(venue());
+        fire(&mut a, 2.);
+        let cancel = preps(&fire(&mut b, 2.))[0];
+        assert_eq!(a.venue.roots[0].0.id, b.venue.roots[0].0.id, "colliding numbers");
+        b.venue.foreign_root = Some(a.venue.roots[0].0.clone());
+        release(&mut b, cancel, 2.);
+        reply(&mut b, cancel, 3., 200, r#"{"code":0,"ids":["old-1"]}"#);
+        assert_eq!(b.venue.foreign_successor, Some(Err(RepairRefusal::Invalid)));
+        assert_eq!(b.venue.successors, vec![Ok(()), Err(RepairRefusal::Spent)]);
+    }
+    #[test]
+    fn a_foreign_receipt_cannot_mint_in_the_first_live_delivery() {
+        let (mut a, _) = snapshot(Repairer {
+            snap: Snap::ForeignReceipt,
+            ..Default::default()
+        });
+        let mut b = engine(Repairer {
+            snapshot: true,
+            snap: Snap::ForeignReceipt,
+            ..Default::default()
+        });
+        let token = preps(&drain(&mut b))[0];
+        // A's receipt carries the same number as the one B's commit issues.
+        b.venue.first_receipt = a.venue.first_receipt.take();
+        release(&mut b, token, 1.);
+        reply(&mut b, token, 1.5, 200, "[]");
+        assert_eq!(b.venue.commits, vec![true]);
+        assert_eq!(b.venue.snapshot_mints, vec![Err(RepairRefusal::NotData)]);
     }
 }
