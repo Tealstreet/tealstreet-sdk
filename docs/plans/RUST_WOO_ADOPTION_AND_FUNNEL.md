@@ -137,3 +137,44 @@ Do not represent this sequence as implementation approval for all 30 sites:
 The next executable request block and its exact fingerprints/expected size
 will be selected after the socket successor is qualified; this document is the
 plan-first funnel map, not a new transport architecture or protocol migration.
+
+
+## Current import and refusal disposition
+
+The old source is genuinely merged at `36b9d453ab5`, preserving #1930's history.
+`6b7adf4def0` then plain-merges actual `49a5b54f362`, including the landed repair
+core #2151. All WOO runtime blobs still equal reviewed `124ab3074fd`; no repair
+consumer is enabled here. Hcm cleared plan/API direction, historical carry and
+exact current socket-map union `de9a627a` for qualification, not source freeze.
+
+Current-source P2: the old adapter returns Err for asynchronous Capacity, which
+makes the core stop the feed permanently, unlike its synchronous Closed/backoff
+path. The overseer approved the narrow public-async correction and the explicit
+matrix below. The unapplied exact source artifact is SHA256
+`f91ab8be2191563119eaa2db514ed2f4c465f5f03ac9e1faa5063e987ac7fea9`.
+Application waits for valid-key pressure originals and hcm's exact review.
+
+| Managed outcome | Native behavior and approved presentation |
+| --- | --- |
+| Public synchronous proposal/continuation Capacity | Native has no managed queue limit; preserve the already-reviewed adapter's one shared Closed/native backoff, refs and due intent. |
+| Public asynchronous Capacity with current epoch | Same shared Closed/backoff as synchronous Capacity; no HTTP/auth retry grant, no permanent stop and no sibling retirement. If already retired, no second timer/admission. |
+| Permanent InvalidInterest/InvalidCoverage/NotPermitted | Native constructs/sends topics without the managed key/frame/coverage checks and keeps its supervisor. Managed stops only the defective feed; named divergence WOO_SOCKET_DEFECT_FAIL_CLOSED. |
+| Private admission/encoding failure | Native has no corresponding local typed admission/coverage error; managed keeps its existing affected-feed fail-closed behavior, public sibling independent. Named divergence WOO_SOCKET_PRIVATE_ADMISSION_FAIL_CLOSED. |
+| Initial Ready replay failure, including Capacity | Native open/auth directly loops through subscriptions without a bounded replay queue, then continues supervised; managed core stops the affected feed before venue Ready. Named divergence WOO_SOCKET_READY_REPLAY_FAIL_CLOSED, for now per ruling. |
+
+The fail-closed controls distinguish an actual malformed-key refusal from a
+fault-injected encoder Capacity at the inherited Ready boundary. The latter
+pins disposition and sibling survival, not an independently reached normal
+resource-capacity failure. The genuine valid-key frame-pressure original uses
+600 established candle/trade pairs and one atomic valid metadata replacement,
+then checks exact async Capacity and retained native recovery. A separate real
+512-continuation pressure control pins synchronous admission. All inputs stay
+within per-key and desired-count/byte limits before the intended queue limit.
+If any fail-closed row is demonstrated in normal operation rather than a
+permanent defect or the explicit inherited boundary control, return it to the
+overseer; do not silently classify it as harmless or add a generic seam.
+
+New additive first-open/reconnect A/B demand controls keep the entire old18
+managed-socket bodies unchanged, capture the actual cleanup/rearmed timers,
+prove all superseded wakes inert, and issue exactly the surviving ETH seed
+before independent BTC resubscription. No old financial fixture is changed.

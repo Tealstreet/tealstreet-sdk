@@ -670,3 +670,81 @@ fn expired_released_seed_wake_cannot_issue_http() {
         1
     );
 }
+
+#[test]
+fn first_open_and_reconnect_rebase_two_book_demand_before_unsubscribe_wakes() {
+    for reconnect in [false, true] {
+        let (mut engine, mut public) = support::started();
+        let mut markets = engine.store().markets().to_vec();
+        let mut second = markets[0].clone();
+        second.symbol = "ETHUSDT".into();
+        second.base = "ETH".into();
+        markets.push(second);
+        engine.store_mut().set_markets(markets);
+        engine.drain_actions().for_each(drop);
+        subscribe_book(&mut engine, 40., "BTCUSDT");
+        engine.drain_actions().for_each(drop);
+        subscribe_book(&mut engine, 40., "ETHUSDT");
+        let mut actions: Vec<_> = engine.drain_actions().collect();
+        let mut now = 40.;
+        if reconnect {
+            engine.handle(
+                41.,
+                Event::WsClosed {
+                    socket: public,
+                    code: 1006,
+                },
+            );
+            actions = engine.drain_actions().collect();
+            (public, now) = reconnect_book(&mut engine, 41., &actions);
+            actions = engine.drain_actions().collect();
+        }
+        let old: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == now => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        assert!(!old.is_empty(), "actual current grouped handoff is issued");
+        engine.handle(
+            now,
+            Event::Command(safe_cex_engine::Command::UnsubscribeOrderBook {
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let replaced: Vec<_> = engine.drain_actions().collect();
+        let current: Vec<_> = replaced
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == now => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            current.len(),
+            1,
+            "surviving ETH demand has its actual replacement wake"
+        );
+        assert!(current.iter().all(|timer| !old.contains(timer)));
+        for timer in old {
+            engine.handle(now, Event::TimerFired { timer });
+            assert!(
+                engine.drain_actions().next().is_none(),
+                "every superseded wake is inert"
+            );
+        }
+        engine.handle(now, Event::TimerFired { timer: current[0] });
+        let http = requests(&mut engine);
+        assert_eq!(http.len(), 1);
+        assert!(http[0].url.ends_with("/orderbook/PERP_ETH_USDT"));
+        subscribe_book(&mut engine, now, "BTCUSDT");
+        let additions: Vec<_> = engine.drain_actions().collect();
+        assert!(additions.iter().any(|action| matches!(action, Action::WsSend { socket, text } if *socket == public && text.contains("PERP_BTC_USDT@orderbookupdate"))));
+        let timer = seed_wake(&additions, now);
+        engine.handle(now, Event::TimerFired { timer });
+        let http = requests(&mut engine);
+        assert_eq!(http.len(), 1);
+        assert!(http[0].url.ends_with("/orderbook/PERP_BTC_USDT"));
+    }
+}

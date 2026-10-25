@@ -9007,3 +9007,25 @@ retirement and stale or expired wakes cannot issue a seed for newer work.
 Native one-second snapshot retry timing and request/reducer freshness stay with
 their existing owners. A synchronous shared admission-capacity refusal retires
 the matching public feed with shared backoff; due seeds survive its reconnect.
+
+
+### WOO socket refusal disposition during #1930 adoption
+
+The overseer approved public asynchronous Capacity using the same shared Closed
+and native backoff as synchronous Capacity, retaining desired refs/seed_due.
+There is no HTTP/auth retry grant or private-sibling retirement. Exact pressure
+originals and current-source review gate the correction in #2169.
+
+Three named divergences remain explicit under that ruling. Native WOO emits
+its topic frames directly and retains its Supervisor; it has no corresponding
+managed key/coverage/admission/replay-budget failure. Managed permanent encoder
+or invalid-interest defects stop only the affected feed
+(WOO_SOCKET_DEFECT_FAIL_CLOSED); private admission/encoding failure keeps the
+same affected-feed stop (WOO_SOCKET_PRIVATE_ADMISSION_FAIL_CLOSED); inherited
+initial-Ready replay failure stops that feed before venue Ready
+(WOO_SOCKET_READY_REPLAY_FAIL_CLOSED). socket_pressure.rs pins actual malformed
+key behavior, public and private inherited Ready encoder-failure disposition,
+and sibling liveness. The injected Ready Capacity is a boundary control, not
+proof of normal pressure reachability. Any normally reachable fail-closed row
+goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
+supervision constants are unchanged; no generic coexistence/recovery seam.
