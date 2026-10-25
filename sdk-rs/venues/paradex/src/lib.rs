@@ -184,6 +184,11 @@ impl Venue for Paradex {
             request.retire_command_candle(cx);
             return;
         }
+        if let Pending::Public(request) = &mut pending
+            && self.discard_stale_poll(cx, request)
+        {
+            return;
+        }
         let error = success(response)
             .err()
             .unwrap_or_else(|| format!("Malformed Paradex list (HTTP {})", response.status));
@@ -245,6 +250,10 @@ impl Venue for Paradex {
                 request.reject_command_candle(cx, error);
                 self.failures(cx);
             }
+            Pending::Public(request) if request.is_poll_candle() => {
+                self.reject_poll_candle(cx, request, error);
+                self.failures(cx);
+            }
             other => self.on_sign_error(cx, other, error),
         }
     }
@@ -258,6 +267,10 @@ impl Venue for Paradex {
             Pending::PublicTrades(read) => history::public_trades::failed(cx, read, error),
             Pending::Public(request) if request.is_command_candle() => {
                 self.command_candles_failed(cx, request, error);
+                self.failures(cx);
+            }
+            Pending::Public(request) if request.is_poll_candle() => {
+                self.poll_candles_failed(cx, request, error);
                 self.failures(cx);
             }
             other => self.on_request_failed(cx, other, &error.message),
