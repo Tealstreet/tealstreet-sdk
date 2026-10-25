@@ -48,6 +48,44 @@ class SocketLifecycleBan(unittest.TestCase):
         empty = {'temporaryFeature': 'managed-sockets', 'sourceRoots': {}}
         self.assertFalse(ban.check({}, {}, empty, old, [('parent', families)]))
 
+    def test_a_reviewed_argument_replacement_passes_once_and_nothing_else_does(self):
+        path = 'venues/example/src/lib.rs'
+        old = ban.lex.fingerprints('cx.connect(spec.feed(name, recover));')
+        new = ban.lex.fingerprints('cx.connect(spec);')
+        other = ban.lex.fingerprints('other.connect(url);')
+        (old_digest,), (new_digest,) = old, new
+        families = {'temporaryFeature': 'managed-sockets',
+                    'sourceRoots': {'example': 'venues/example/src/'}}
+        base = [('origin/base', {path: dict(old)})]
+        entry = {path: [{'old': old_digest, 'new': new_digest}]}
+        edited = {path: dict(new)}
+        self.assertFalse(ban.check(edited, edited, families, base, replacements=entry))
+        # Without the reviewed entry the edit is growth, exactly as today.
+        self.assertTrue(ban.check(edited, edited, families, base))
+        # An added site, or a count rise, still fails with the entry present.
+        added = {path: {new_digest: 1, **dict(other)}}
+        self.assertTrue(ban.check(added, added, families, base, replacements=entry))
+        rise = {path: {new_digest: 2}}
+        self.assertTrue(ban.check(rise, rise, families, base, replacements=entry))
+        # The old digest must exist at the base; a replacement cannot mint a site.
+        missing = [('origin/base', {path: dict(other)})]
+        self.assertTrue(ban.check(edited, edited, families, missing, replacements=entry))
+        # Single use: once the base carries the new digest, the entry is stale.
+        landed = [('origin/base', {path: dict(new)})]
+        self.assertTrue(ban.check(edited, edited, families, landed, replacements=entry))
+        self.assertFalse(ban.check(edited, edited, families, landed))
+
+    def test_replacement_entries_are_strictly_shaped(self):
+        digest = 'a' * 64
+        self.assertEqual(ban.replacement_manifest('{}'), {})
+        for text in ('[]', '{"venues/x/src/lib.rs": []}',
+                     '{"../x.rs": [{"old": "%s", "new": "%s"}]}' % (digest, 'b' * 64),
+                     '{"venues/x/src/lib.rs": [{"old": "%s", "new": "%s"}]}' % (digest, digest),
+                     '{"venues/x/src/lib.rs": [{"old": "%s"}]}' % digest,
+                     '{"venues/x/src/lib.rs": [{"old": "x", "new": "%s"}]}' % digest):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                ban.replacement_manifest(text)
+
     def test_family_growth_root_changes_and_missing_families_fail(self):
         path = 'venues/example/src/lib.rs'
         current = {path: dict(ban.lex.fingerprints('cx.connect(url);'))}
@@ -87,6 +125,7 @@ class SocketLifecycleBan(unittest.TestCase):
             (root / 'scripts').mkdir()
             (root / 'engine').mkdir()
             (root / ban.SITES).write_text('{}')
+            (root / ban.REPLACEMENTS).write_text('{}')
             (root / ban.FAMILIES).write_text(json.dumps({
                 'temporaryFeature': 'managed-sockets', 'sourceRoots': {}}))
             cargo = root / 'engine/Cargo.toml'
