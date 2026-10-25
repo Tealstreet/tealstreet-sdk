@@ -197,3 +197,44 @@ preparation, duplicate cleanup, and new timer actions. Baseline qualification is
 45 executed:34 intended assertion RED,11 GREEN,0 ignored. The original34 RED
 boundaries remain, including nine explicit missing-Prepare assertions. Production,
 prior fixtures, Cargo and inventories remain unchanged by these corrections.
+
+## First source checkpoint
+
+The corrected originals53c47 are full bounded ORIGINAL/native/control CLEAR.
+The implementation retains Context only in the three adopted task variants,
+checks exact Background HTTP delivery and ticker generation before DATA effects,
+and finishes each current read after publication and before native successors.
+Failure-only retirement precedes finite backoff/private startup; nonfinite and
+old-generation failure paths perform owned cleanup only. Depth's raw nonstream
+sender is unchanged. Removing DeferredGet.stream also removes the one unused
+initializer in depth_query.rs; its command/defer/replay logic is unchanged.
+
+The source-stage pressure controls require six actual signed private read
+Prepares after the exact seed Cancel at full256 occupancy, on either ticker's
+successful final response and on genuine finite Network/TimerFired failure.
+The initial pressure helper handed off Bind without its observed Prepare map;
+that fixture error was corrected before qualification. The timeout original's
+first equal-deadline timer could belong to Daily while testing BookTickers;
+it now selects the captured resource for the actual tested request and keeps
+all timeout/recovery assertions. All47 affected controls pass, including the
+previously gated nine preparation suffixes. The first compile also identified
+the dead deferred Depth stream initializer, removed with the field.
+
+Existing raw public collectors require real Prepare/Bind/Claim adaptation.
+Their successful seed fixture additionally issued at0 and responded at epoch
+1773295700000, beyond the new20s bound. This timing conflict is recorded before
+changing the clock; an exact seed-start alignment to the existing response clock
+is requested from the native reviewer. No assertion or response clock change is
+authorized by this note. First-source paired WEEX/combined measurements and
+complete native/fixture/source review remain gates before freeze.
+
+The full venue pass identified fixture setup assumptions in addition to the
+recorded public clock conflict: the account helper retained already retired seed
+timers ahead of the actual account deadline. It now returns the actual post-seed
+private-start actions rather than merging the earlier seed issuance trace into
+that result. Both original paging/deadline controls then pass unchanged. The
+secondary-key unit and startup collectors now use the real fixture dispatcher at
+their event clocks. No account reducer, deadline, key policy or assertion changed.
+The scoped custody/account/startup/unit pass is103 controls,0 failed/ignored.
+The local lexical scanner confirms exactly the planned streamed singleton
+removal with no new lexical site; complete provenance/bans still gate freeze.

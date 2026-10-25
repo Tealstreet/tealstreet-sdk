@@ -935,9 +935,15 @@ fn finite_physical_timeout_recovers_through_native_backoff_once() {
     for kind in 0..3 {
         let (mut e, r, initial) = started(kind);
         let issued = if kind == 0 { NOW } else { NOW + 1. };
-        let timer = initial.actions.iter().find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == issued + LIMIT => Some(*timer),
-            _ => None,
+        let timer = resource(&initial, r.id).and_then(|owned| {
+            initial.actions.iter().find_map(|a| match a {
+                Action::SetTimer { timer, at_ms }
+                    if *timer == owned.timer && *at_ms == issued + LIMIT =>
+                {
+                    Some(*timer)
+                }
+                _ => None,
+            })
         });
         assert!(timer.is_some(), "physical bound starts before host work");
         e.handle(
@@ -1265,3 +1271,160 @@ invalid_clock_tests!(
     negative_infinity_book_preparation,
     f64::NEG_INFINITY
 );
+
+fn private_pressure_engine(peers: usize) -> Driver {
+    support::setup::with_venue(
+        Options {
+            key: Some("seed-pressure-key".into()),
+            secret: Some("seed-pressure-secret".into()),
+            passphrase: Some("seed-pressure-passphrase".into()),
+            ..Options::default()
+        },
+        |inner| Probe {
+            inner,
+            peers: Vec::new(),
+            initial_peers: peers,
+            start_native: true,
+            failures: Default::default(),
+        },
+    )
+}
+fn private_seed_pair(peers: usize) -> (Driver, Output) {
+    let mut e = private_pressure_engine(peers);
+    e.start(NOW);
+    let initial = drain(&mut e, NOW);
+    let catalogue = request(&initial, 0);
+    respond(&mut e, &catalogue, NOW + 1., 200, INFO);
+    let pair = drain(&mut e, NOW + 1.);
+    assert_eq!(pair.requests.len(), 2);
+    (e, pair)
+}
+fn six_private_prepares_after_seed_cleanup(e: &mut Driver, now: f64, old: Resource, socket: bool) {
+    let actions: Vec<_> = e.drain_actions().collect();
+    let cancel = actions.iter().position(|a| matches!(a,
+        Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { preparation, .. } if *preparation == old.preparation)
+    )).expect("completing seed's exact physical cleanup");
+    let prepares: Vec<_> = actions
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| match a {
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Prepare { request, .. } => Some((i, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        prepares.len(),
+        6,
+        "all six private reads need retired seed credit"
+    );
+    assert!(
+        prepares.iter().all(|(i, r)| *i > cancel
+            && !r.url.ends_with("24hr")
+            && !r.url.ends_with("bookTicker"))
+    );
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::WsConnect { .. }))
+            .count(),
+        usize::from(socket)
+    );
+    e.prepare_dispatch(now);
+    let mut queue: VecDeque<_> = actions.into();
+    queue.extend(e.drain_actions());
+    let mut routes = std::collections::HashMap::new();
+    let mut released = 0;
+    while let Some(action) = queue.pop_front() {
+        if let Action::ManagedHttp(action) = action {
+            match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => {
+                    assert!(routes.insert(request.id, preparation).is_none());
+                    e.http_prepared(
+                        now,
+                        preparation,
+                        Prepared {
+                            id: request.id.0,
+                            expires_at: None,
+                        },
+                    );
+                }
+                HttpAction::Bind {
+                    preparation,
+                    permit,
+                    request,
+                } => {
+                    assert_eq!(routes.remove(&request.id), Some(preparation));
+                    assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
+                    released += 1;
+                }
+                HttpAction::Cancel { .. } => {}
+                HttpAction::BindGroup { .. } => panic!("private GETs have no mutation group"),
+            }
+        }
+        queue.extend(e.drain_actions());
+    }
+    assert!(routes.is_empty());
+    assert_eq!(released, 6);
+}
+#[test]
+fn each_final_seed_retires_before_six_private_reads_under_full_pressure() {
+    for final_kind in [1, 2] {
+        let (mut e, pair) = private_seed_pair(250);
+        let first = if final_kind == 1 { 2 } else { 1 };
+        respond(
+            &mut e,
+            &request(&pair, first),
+            NOW + 2.,
+            200,
+            if first == 1 { DAILY } else { BOOK },
+        );
+        drain(&mut e, NOW + 2.);
+        let final_request = request(&pair, final_kind);
+        let old = resource(&pair, final_request.id).unwrap();
+        respond(
+            &mut e,
+            &final_request,
+            NOW + 3.,
+            200,
+            if final_kind == 1 { DAILY } else { BOOK },
+        );
+        assert!(e.store().loaded().tickers);
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap().bid, 99.);
+        six_private_prepares_after_seed_cleanup(&mut e, NOW + 3., old, true);
+    }
+}
+#[test]
+fn finite_failed_or_timed_out_seed_retires_before_private_start_once() {
+    for timeout in [false, true] {
+        let (mut e, pair) = private_seed_pair(249);
+        let daily = request(&pair, 1);
+        let old = resource(&pair, daily.id).unwrap();
+        let now = if timeout { NOW + 1. + LIMIT } else { NOW + 2. };
+        let event = if timeout {
+            Event::TimerFired { timer: old.timer }
+        } else {
+            Event::HttpFailed {
+                request: daily.id,
+                error: "pressure failure",
+            }
+        };
+        e.handle(now, event);
+        assert!(!e.store().loaded().tickers);
+        six_private_prepares_after_seed_cleanup(&mut e, now, old, false);
+        e.handle(
+            now,
+            Event::HttpFailed {
+                request: daily.id,
+                error: "duplicate",
+            },
+        );
+        assert!(e.drain_actions().next().is_none());
+    }
+}

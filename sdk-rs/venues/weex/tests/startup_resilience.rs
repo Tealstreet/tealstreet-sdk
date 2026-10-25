@@ -21,7 +21,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     let mut engine = public_engine();
     engine.start(0.0);
     let mut request = engine
-        .drain_actions()
+        .prepared_actions(0.0)
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("exchangeInfo") => Some(request),
             _ => None,
@@ -36,7 +36,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
                 error: "scripted network failure",
             },
         );
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = engine.prepared_actions(now).collect::<Vec<_>>();
         assert!(
             !actions
                 .iter()
@@ -53,7 +53,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
         request = engine
-            .drain_actions()
+            .prepared_actions(now)
             .find_map(|action| match action {
                 Action::Http(request) if request.url.contains("exchangeInfo") => Some(request),
                 _ => None,
@@ -73,7 +73,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     );
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
-    assert!(engine.drain_actions().any(|action| matches!(action,
+    assert!(engine.prepared_actions(0.0).any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
@@ -149,7 +149,7 @@ fn blank_public_values_keep_ts_zero_and_fallback_semantics_in_either_response_or
         let mut engine = public_engine();
         engine.start(0.0);
         let catalogue = engine
-            .drain_actions()
+            .prepared_actions(0.0)
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -167,7 +167,7 @@ fn blank_public_values_keep_ts_zero_and_fallback_semantics_in_either_response_or
             },
         );
         let requests = engine
-            .drain_actions()
+            .prepared_actions(0.0)
             .filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -224,7 +224,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
     let catalogue = engine
-        .drain_actions()
+        .prepared_actions(0.0)
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -242,7 +242,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
         },
     );
     let ticker = engine
-        .drain_actions()
+        .prepared_actions(0.0)
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -260,7 +260,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
         },
     );
     let timer = engine
-        .drain_actions()
+        .prepared_actions(0.0)
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
@@ -269,7 +269,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
     let retry = engine
-        .drain_actions()
+        .prepared_actions(1000.0)
         .find_map(|a| match a {
             Action::Http(r) if r.url == ticker.url => Some(r),
             _ => None,
@@ -284,7 +284,7 @@ fn entirely_unusable_daily_and_book_sources_retry_without_replacing_prior_quotes
         let mut engine = public_engine();
         engine.start(0.0);
         let catalogue = engine
-            .drain_actions()
+            .prepared_actions(0.0)
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -302,7 +302,7 @@ fn entirely_unusable_daily_and_book_sources_retry_without_replacing_prior_quotes
             },
         );
         let reads = engine
-            .drain_actions()
+            .prepared_actions(0.0)
             .filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -336,7 +336,7 @@ fn entirely_unusable_daily_and_book_sources_retry_without_replacing_prior_quotes
         assert_eq!(engine.store().tickers(), before);
         assert_eq!(engine.store().loaded().tickers, cached);
         let timer = engine
-            .drain_actions()
+            .prepared_actions(0.0)
             .find_map(|a| match a {
                 Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
                 _ => None,
@@ -345,7 +345,7 @@ fn entirely_unusable_daily_and_book_sources_retry_without_replacing_prior_quotes
         engine.handle(1000.0, Event::TimerFired { timer });
         assert!(
             engine
-                .drain_actions()
+                .prepared_actions(1000.0)
                 .any(|a| matches!(a, Action::Http(r) if r.url.contains("24hr")))
         );
     }
