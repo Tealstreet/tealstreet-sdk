@@ -59,7 +59,7 @@ fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
     e.start(NOW);
     let actions: Vec<_> = e.prepared_actions(NOW).collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
-    let mut actions: Vec<_> = e.prepared_actions(NOW).collect();
+    let actions: Vec<_> = e.prepared_actions(NOW).collect();
     response(
         &mut e,
         request(&actions, "24hr"),
@@ -72,8 +72,7 @@ fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
         200,
         r#"[{"symbol":"BTCUSDT","bidPrice":"89999","askPrice":"90001"}]"#,
     );
-    actions.extend(e.prepared_actions(NOW));
-    actions.retain(|action| !matches!(action, Action::Http(r) if r.url.contains("24hr") || r.url.contains("bookTicker")));
+    let actions = e.prepared_actions(NOW).collect();
     (e, actions)
 }
 fn complete(e: &mut Engine<WeexFutures>, actions: &[Action], normal: &str, algo: &str) {

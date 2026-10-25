@@ -1403,6 +1403,15 @@ impl PhemexPerpetuals {
         lost: Option<&Order>,
         not_before: f64,
     ) {
+        self.note_uncertain_orders(symbols, lost, not_before);
+        self.orders_reconcile(cx);
+    }
+    pub(crate) fn note_uncertain_orders(
+        &mut self,
+        symbols: Vec<String>,
+        lost: Option<&Order>,
+        not_before: f64,
+    ) {
         for symbol in symbols {
             let entry = self.account.reconcile.entry(symbol.clone()).or_default();
             entry.generation += 1;
@@ -1416,7 +1425,6 @@ impl PhemexPerpetuals {
                 entry.lost.push((id, entry.generation));
             }
         }
-        self.orders_reconcile(cx);
     }
     /// A cancel-all on `symbol` was dispatched; a still-unknown placement may land later.
     pub(crate) fn orders_cancel_all(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {

@@ -202,32 +202,9 @@ impl<P> Io<P> {
         });
     }
 
-    /// The command's terminal ends its caller wait (exact receipt inside its
-    /// own entry; the live command's otherwise).
-    pub(super) fn finish_command_wait(&mut self, command: CommandId) {
-        let entry = self
-            .core
-            .command_entry
-            .as_ref()
-            .filter(|entry| entry.command == command)
-            .map(|entry| entry.receipt);
-        let carried = self
-            .core
-            .command_waits
-            .stamp(command)
-            .is_some_and(|(receipt, _)| self.carries(receipt));
-        self.core.command_waits.finish(command, entry, carried);
-    }
-
-    /// Whether a held cancellation, deferred cancel-all or released batch
-    /// still carries `receipt`.
+    #[inline]
     fn carries(&self, receipt: u64) -> bool {
-        #[cfg(feature = "order-locks")]
-        if self.core.order_locks.carries(receipt) {
-            return true;
-        }
-        self.core.placement_acks.carries(receipt)
-            || self.core.command_waits.batched.contains(&receipt)
+        self.core_ref().carries(receipt)
     }
 
     /// Stamp one external receipt; past capacity, first drop expired stamps
@@ -253,6 +230,41 @@ impl<P> Io<P> {
     pub(super) fn end_command_entry(&mut self) {
         self.core.command_entry = None;
     }
+    #[inline]
+    pub(super) fn opaque_entry_activity(&mut self) {
+        self.core_io().opaque_entry_activity()
+    }
+    // Only some feature combinations call this.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    #[inline]
+    pub(super) fn entry_bound(&self, command: CommandId) -> bool {
+        self.core_ref().entry_bound(command)
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
+    /// The command's terminal ends its caller wait (exact receipt inside its
+    /// own entry; the live command's otherwise).
+    pub(super) fn finish_command_wait(&mut self, command: CommandId) {
+        let entry = self
+            .core
+            .command_entry
+            .as_ref()
+            .filter(|entry| entry.command == command)
+            .map(|entry| entry.receipt);
+        let carried = self
+            .core
+            .command_waits
+            .stamp(command)
+            .is_some_and(|(receipt, _)| self.carries(receipt));
+        self.core.command_waits.finish(command, entry, carried);
+    }
+
+    #[inline]
+    fn carries(&self, receipt: u64) -> bool {
+        self.core_ref().carries(receipt)
+    }
+
     /// Existing resources are not a second ID allocator. Changing their state,
     /// or staging an outbound operation without a new ID, burns fresh custody.
     pub(super) fn opaque_entry_activity(&mut self) {
@@ -262,30 +274,57 @@ impl<P> Io<P> {
             entry.state = State::Legacy;
         }
     }
+
+    #[inline]
     pub(super) fn numeric_entry_completion_allowed(&self, command: CommandId) -> bool {
-        self.core.command_entry.as_ref().is_none_or(|entry| {
-            entry.command != command || matches!(entry.state, State::Fresh | State::Legacy)
-        })
+        self.core_ref().numeric_entry_completion_allowed(command)
     }
+
+    #[inline]
     pub(super) fn entry_context_allowed(&self, scope: Scope) -> bool {
-        self.core.command_entry.as_ref().is_none_or(|entry| {
-            scope != Scope::Command(entry.command)
-                || !matches!(entry.state, State::Rejected | State::Spent)
-        })
+        self.core_ref().entry_context_allowed(scope)
     }
-    /// Read-only: this exact command's genuine callback holds its issued root.
-    pub(super) fn entry_bound(&self, command: CommandId) -> bool {
-        self.core
-            .command_entry
-            .as_ref()
-            .is_some_and(|entry| entry.command == command && entry.state == State::Bound)
-    }
+
     pub(super) fn entry_completed(&mut self, command: CommandId) {
         if let Some(entry) = &mut self.core.command_entry
             && entry.command == command
         {
             entry.state = State::Spent;
         }
+    }
+}
+
+impl crate::engine::CoreIoRef<'_> {
+    /// Whether a held cancellation, deferred cancel-all or released batch
+    /// still carries `receipt`.
+    fn carries(&self, receipt: u64) -> bool {
+        #[cfg(feature = "order-locks")]
+        if self.core.order_locks.carries(receipt) {
+            return true;
+        }
+        self.core.placement_acks.carries(receipt)
+            || self.core.command_waits.batched.contains(&receipt)
+    }
+
+    pub(super) fn numeric_entry_completion_allowed(&self, command: CommandId) -> bool {
+        self.core.command_entry.as_ref().is_none_or(|entry| {
+            entry.command != command || matches!(entry.state, State::Fresh | State::Legacy)
+        })
+    }
+
+    pub(super) fn entry_context_allowed(&self, scope: Scope) -> bool {
+        self.core.command_entry.as_ref().is_none_or(|entry| {
+            scope != Scope::Command(entry.command)
+                || !matches!(entry.state, State::Rejected | State::Spent)
+        })
+    }
+
+    /// Read-only: this exact command's genuine callback holds its issued root.
+    pub(super) fn entry_bound(&self, command: CommandId) -> bool {
+        self.core
+            .command_entry
+            .as_ref()
+            .is_some_and(|entry| entry.command == command && entry.state == State::Bound)
     }
 }
 
@@ -379,6 +418,33 @@ impl<P> Cx<'_, P> {
             .map_err(|reason| self.reject_command_transaction(command, operation, reason))
     }
 
+    #[inline]
+    pub(in crate::engine) fn reject_command_entry(
+        &mut self,
+        operation: Operation,
+        reason: crate::request_context::Error,
+    ) -> CommandEntryError {
+        self.core().reject_command_entry(operation, reason)
+    }
+
+    #[inline]
+    fn begin_command_transaction(&mut self) -> Result<CommandId, CommandEntryError> {
+        self.core().begin_command_transaction()
+    }
+
+    #[inline]
+    fn reject_command_transaction(
+        &mut self,
+        command: CommandId,
+        operation: Operation,
+        reason: crate::request_context::Error,
+    ) -> CommandEntryError {
+        self.core()
+            .reject_command_transaction(command, operation, reason)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// Reject this genuine command entry without issuing anything.
     pub(in crate::engine) fn reject_command_entry(
         &mut self,

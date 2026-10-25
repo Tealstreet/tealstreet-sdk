@@ -104,6 +104,10 @@ impl<V: safe_cex_engine::Venue> PreparedEngine<V> {
         self.now = now;
         self.inner.handle(now, event);
     }
+    pub fn drain_raw_actions(&mut self) -> Vec<safe_cex_engine::Action> {
+        self.inner.prepare_dispatch(self.now);
+        self.inner.drain_actions().collect()
+    }
     pub fn drain_actions(&mut self) -> std::vec::IntoIter<safe_cex_engine::Action> {
         safe_cex_engine::test_support::prepared_actions(&mut self.inner, self.now).into_iter()
     }
