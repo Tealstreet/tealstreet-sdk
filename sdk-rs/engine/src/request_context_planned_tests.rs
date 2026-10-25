@@ -2053,6 +2053,7 @@ mod planned_calls {
         assert_eq!(noted.message, "order refused; protection rollback failed: provider refused");
         noted.message = plain.message.clone();
         assert_eq!(noted, plain, "kind, outcome, codes and IDs come from the journal");
+        assert_eq!(refused_plan(Some("")), plain, "an empty note adds nothing");
     }
     #[test]
     fn a_failure_note_extends_the_fallback_when_nothing_was_selected() {

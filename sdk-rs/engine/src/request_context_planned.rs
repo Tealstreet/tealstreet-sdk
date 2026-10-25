@@ -1316,16 +1316,7 @@ impl<P> Cx<'_, P> {
 
     /// Failure-only retirement; expired authority never creates fresh sends.
     pub fn fail_plan(&mut self, plan: &Plan, error: impl Into<VenueError>) -> Result<(), Error> {
-        if self
-            .io
-            .http_plan_expiring
-            .as_ref()
-            .is_some_and(|current| current.same_plan(plan))
-        {
-            return self.fail_plan_owned(plan, error.into());
-        }
-        self.io.request_contexts.validate_unbound_plan(plan)?;
-        self.fail_plan_owned(plan, error.into())
+        self.fail_plan_checked(plan, error.into(), None)
     }
 
     /// `fail_plan` whose `note` is appended to the projected terminal message.
@@ -1336,16 +1327,24 @@ impl<P> Cx<'_, P> {
         error: impl Into<VenueError>,
         note: &str,
     ) -> Result<(), Error> {
-        if self
+        self.fail_plan_checked(plan, error.into(), Some(note))
+    }
+
+    fn fail_plan_checked(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        note: Option<&str>,
+    ) -> Result<(), Error> {
+        if !self
             .io
             .http_plan_expiring
             .as_ref()
             .is_some_and(|current| current.same_plan(plan))
         {
-            return self.fail_plan_noted_owned(plan, error.into(), Some(note));
+            self.io.request_contexts.validate_unbound_plan(plan)?;
         }
-        self.io.request_contexts.validate_unbound_plan(plan)?;
-        self.fail_plan_noted_owned(plan, error.into(), Some(note))
+        self.fail_plan_noted_owned(plan, error, note)
     }
 
     pub(in crate::engine) fn fail_plan_owned(

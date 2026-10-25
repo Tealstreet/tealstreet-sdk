@@ -204,6 +204,9 @@ impl EvidenceBudget {
     /// Append a venue's terminal note within the same text budget.
     #[cfg(feature = "http-plans")]
     pub(super) fn note(&mut self, message: &mut String, note: &str) {
+        if note.is_empty() {
+            return;
+        }
         let note = self.text(note);
         *message = format!("{message}; {note}").into_boxed_str().into_string();
     }
@@ -257,7 +260,8 @@ impl EvidenceBudget {
         let prefix = utf8_prefix(source, remaining.min(TEXT_FIELD - TRUNCATED.len()));
         self.text_bytes += prefix.len();
         // Marker bytes have a separate fixed ceiling: three fields per bounded
-        // attempt plus one terminal fallback. No text is charged twice at seal.
+        // attempt, one terminal fallback and one terminal note. No text is
+        // charged twice at seal.
         format!("{prefix}{TRUNCATED}")
             .into_boxed_str()
             .into_string()
