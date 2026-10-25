@@ -14,8 +14,16 @@ use support::Options;
 const NOW: f64 = 1_700_000_000_000.0;
 const COMMAND: u32 = 1;
 
+thread_local! {
+    /// Each clock answer moves the venue clock 9 s forward, so a resend that
+    /// waited for the resync signs a different stamp than the first send.
+    static CLOCK: std::cell::Cell<u64> = const { std::cell::Cell::new(1_700_000_000_000) };
+}
+
 #[derive(Default)]
 struct Output {
+    /// Every released URL in release order, the clock's included.
+    released: Vec<String>,
     requests: Vec<HttpRequest>,
     actions: Vec<Action>,
     legacy: usize,
@@ -62,7 +70,12 @@ fn drain(engine: &mut Engine<AsterDex>, now: f64) -> Output {
                 continue;
             }
         };
+        output.released.push(request.url.clone());
         if request.url.ends_with("/time") {
+            let body = format!(
+                r#"{{"serverTime":{}}}"#,
+                CLOCK.with(|clock| clock.replace(clock.get() + 9_000))
+            );
             engine.handle(
                 now,
                 Event::HttpResponse {
@@ -70,7 +83,7 @@ fn drain(engine: &mut Engine<AsterDex>, now: f64) -> Output {
                     response: Response {
                         status: 200,
                         headers: "",
-                        body: r#"{"serverTime":1700000000000}"#,
+                        body: &body,
                     },
                 },
             );
@@ -129,6 +142,27 @@ fn write<'a>(output: &'a Output, method: Method, path: &str) -> &'a HttpRequest 
         .iter()
         .find(|r| r.method == method && r.url.split('?').next().unwrap().ends_with(path))
         .unwrap_or_else(|| panic!("missing {method:?} {path}: {:?}", output.requests))
+}
+
+fn query<'a>(url: &'a str, name: &str) -> Option<&'a str> {
+    url.split(['?', '&'])
+        .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
+}
+
+fn stamp(url: &str) -> Option<&str> {
+    query(url, "timestamp")
+}
+
+fn signature(url: &str) -> Option<&str> {
+    query(url, "signature")
+}
+
+fn header<'a>(request: &'a HttpRequest, name: &str) -> Option<&'a str> {
+    request
+        .headers
+        .iter()
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value.as_str())
 }
 
 fn terminal(output: &Output) -> Option<Result<String, safe_cex_engine::VenueError>> {
@@ -329,6 +363,15 @@ fn a_timestamp_rejection_resyncs_then_resends_each_write_method_once() {
         managed(&resent, 1);
         let second = write(&resent, method, path).clone();
         assert_ne!(second.id, first.id);
+        // The resync runs first; the resend signs its fresh stamp after it.
+        let clock = resent
+            .released
+            .iter()
+            .position(|url| url.ends_with("/time"));
+        let resend = resent.released.iter().position(|url| *url == second.url);
+        assert!(clock.is_some() && clock < resend, "{:?}", resent.released);
+        assert_ne!(stamp(&second.url), stamp(&first.url));
+        assert_ne!(signature(&second.url), signature(&first.url));
         let failed = answer(&mut e, &second, 400, TIMESTAMP);
         assert!(failed.requests.is_empty(), "only one resend");
         let error = terminal(&failed).expect("one terminal").unwrap_err();
@@ -404,4 +447,62 @@ fn an_error_kind_survives_to_the_write_terminal() {
     let error = terminal(&failed).expect("one terminal").unwrap_err();
     assert_eq!(error.outcome, Some(Outcome::Rejected), "{error:?}");
     assert_ne!(error.kind, Some(ErrorKind::Network));
+}
+
+/// With a read agent configured, every plan write carries the primary key and
+/// a signed read carries the agent's.
+#[test]
+fn plan_writes_sign_with_the_primary_while_reads_use_the_read_agent() {
+    for (command_of, method, path) in [
+        (place as fn() -> Command, Method::Post, "/order"),
+        (cancel as fn() -> Command, Method::Delete, "/order"),
+        (leverage as fn() -> Command, Method::Post, "/leverage"),
+    ] {
+        let mut e = support::engine(Options::v1_with_read_agent());
+        e.store_mut().set_markets(vec![market()]);
+        e.store_mut().set_orders(vec![open("777")]);
+        let sent = command(&mut e, command_of());
+        managed(&sent, 1);
+        let request = write(&sent, method, path);
+        assert_eq!(
+            header(request, "X-MBX-APIKEY"),
+            Some("primary-key"),
+            "{path}"
+        );
+    }
+    let mut e = support::engine(Options::v1_with_read_agent());
+    let sent = command(&mut e, Command::FetchAccount { command: COMMAND });
+    let read = write(&sent, Method::Get, "/account");
+    assert_eq!(header(read, "X-MBX-APIKEY"), Some("read-key"));
+}
+
+/// V3: the STP read signs as the read agent's signer; a plan write as the
+/// primary's.
+#[test]
+fn a_v3_stp_read_signs_as_the_read_agent_and_a_write_as_the_primary() {
+    let primary = "01".repeat(32);
+    let agent = "02".repeat(32);
+    let primary_address = safe_cex_crypto::ethereum::private_key_address(&primary).unwrap();
+    let agent_address = safe_cex_crypto::ethereum::private_key_address(&agent).unwrap();
+    let options = || Options {
+        api_version: Some(safe_cex_venue_asterdex::sign::Version::V3),
+        application_id: Some(primary_address.clone()),
+        key: Some(primary_address.clone()),
+        secret: Some(primary.clone()),
+        read_key: Some(agent_address.clone()),
+        read_secret: Some(agent.clone()),
+        ..Options::default()
+    };
+    let mut e = support::engine(options());
+    let sent = command(&mut e, Command::FetchStpMode { command: COMMAND });
+    let read = write(&sent, Method::Get, "/stpMode");
+    assert_eq!(query(&read.url, "signer"), Some(agent_address.as_str()));
+    let mut e = support::engine(options());
+    e.store_mut().set_markets(vec![market()]);
+    let sent = command(&mut e, leverage());
+    let setting = write(&sent, Method::Post, "/leverage");
+    assert_eq!(
+        query(&setting.url, "signer"),
+        Some(primary_address.as_str())
+    );
 }
