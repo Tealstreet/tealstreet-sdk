@@ -19,6 +19,20 @@ impl<V: Venue> Drop for SweepScope<'_, V> {
 }
 
 impl<P> Io<P> {
+    /// A tracked root's own timer; one that fires early re-arms the same
+    /// identity for the exact deadline (true: consumed here).
+    pub(super) fn read_root_timer(&mut self, timer: TimerId, now: f64) -> bool {
+        let Some(&(at_ms, ..)) = self.core.read_roots.iter().find(|(.., own)| *own == timer) else {
+            return false;
+        };
+        if now < at_ms {
+            self.core.actions.push(Action::SetTimer { timer, at_ms });
+        }
+        true
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
     /// Every terminal of a tracked owner leaves the index and clears its own
     /// timer; nothing here needs a fresh identity.
     pub(super) fn untrack_read_root(&mut self, command: CommandId) {
@@ -31,18 +45,6 @@ impl<P> Io<P> {
             let (.., timer) = self.core.read_roots.swap_remove(index);
             self.core.actions.push(Action::ClearTimer { timer });
         }
-    }
-
-    /// A tracked root's own timer; one that fires early re-arms the same
-    /// identity for the exact deadline (true: consumed here).
-    pub(super) fn read_root_timer(&mut self, timer: TimerId, now: f64) -> bool {
-        let Some(&(at_ms, ..)) = self.core.read_roots.iter().find(|(.., own)| *own == timer) else {
-            return false;
-        };
-        if now < at_ms {
-            self.core.actions.push(Action::SetTimer { timer, at_ms });
-        }
-        true
     }
 }
 

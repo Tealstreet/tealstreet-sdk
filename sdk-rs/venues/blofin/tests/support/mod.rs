@@ -10,6 +10,11 @@ pub struct Harness {
     pub failures: Vec<safe_cex_engine::VenueError>,
     pub private: SocketId,
     pub tick: TimerId,
+    /// The latest event time, so `collect` releases managed reads at it.
+    pub now: f64,
+    /// The construction time `respond` answers at, so managed contexts never
+    /// see the clock run backwards behind it.
+    pub start: f64,
 }
 impl Harness {
     pub fn new() -> Self {
@@ -84,6 +89,8 @@ impl Harness {
             failures: vec![],
             private: SocketId(0),
             tick: TimerId(0),
+            now,
+            start: now,
         };
         h.collect_at(now);
         let instrument_request = h.take("instruments");
@@ -108,11 +115,18 @@ impl Harness {
             .unwrap();
         h
     }
+    /// Handle an event at `now`; a later `collect` releases at that time.
+    #[allow(dead_code)]
+    pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        self.now = now;
+        self.e.handle(now, event);
+    }
     pub fn collect(&mut self) {
-        let actions = self.e.drain_actions().collect::<Vec<_>>();
-        self.collect_actions(actions);
+        let now = self.now;
+        self.collect_at(now);
     }
     pub fn collect_at(&mut self, now: f64) {
+        self.now = now;
         let actions = safe_cex_engine::test_support::prepared_actions(&mut self.e, now);
         self.collect_actions(actions);
     }
@@ -189,7 +203,8 @@ impl Harness {
         self.respond(r, body);
     }
     pub fn respond(&mut self, r: HttpRequest, body: &str) {
-        self.respond_at(r, body, 0.0);
+        let start = self.start;
+        self.respond_at(r, body, start);
     }
     pub fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
         self.e.handle(
@@ -234,6 +249,7 @@ impl Harness {
         }
     }
     pub fn ws(&mut self, text: &str) {
+        self.now = self.now.max(1.0);
         self.e.handle(
             1.0,
             Event::WsMessage {

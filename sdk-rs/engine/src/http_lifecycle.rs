@@ -875,7 +875,7 @@ impl<P> Cx<'_, P> {
         );
         #[cfg(feature = "session-bearer")]
         if let Some(generation) = bearer
-            && let Some(bound) = self.io.bearer_bound_mut(generation)
+            && let Some(bound) = self.io.core.bearer_bound_mut(generation)
         {
             bound.push(request);
         }
@@ -919,20 +919,9 @@ impl<P> Io<P> {
         })
     }
 
+    #[inline]
     pub(super) fn retire_http_leg(&mut self, context: &Context) {
-        let requests = self
-            .core
-            .managed_http
-            .iter()
-            .filter_map(|(request, managed)| {
-                (managed.lifecycle.context().leg() == context.leg()
-                    && managed.lifecycle.context().owner() == context.owner())
-                .then_some(*request)
-            })
-            .collect::<Vec<_>>();
-        for request in requests {
-            self.discard_managed(request);
-        }
+        self.core_io().retire_http_leg(context)
     }
 
     pub(super) fn managed_preparation(&self, request: RequestId) -> Option<Preparation> {
@@ -943,22 +932,6 @@ impl<P> Io<P> {
                 .lifecycle
                 .preparation(),
         )
-    }
-
-    pub(super) fn retire_http_command(&mut self, command: CommandId) {
-        #[cfg(feature = "http-plans")]
-        if let Some(timer) = self.core.request_contexts.plan_timer(command) {
-            self.core.timers.remove(&timer);
-            self.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-            self.core.actions.push(Action::ClearTimer { timer });
-        }
-        let requests = self.core.managed_http.iter().filter_map(|(request, managed)| {
-            matches!(managed.lifecycle.context().owner(), Owner::Command {id, ..} if id == command)
-                .then_some(*request)
-        }).collect::<Vec<_>>();
-        for request in requests {
-            self.discard_managed(request);
-        }
     }
 
     /// A sealed physical Plan owner: clear its timer and unsent work.
@@ -1000,17 +973,11 @@ impl<P> Io<P> {
     }
 
     #[cfg(feature = "http-plans")]
-    /// A sealed physical Plan owner: clear its timer and the requests listed
-    /// before the seal (one already settled since then is simply skipped).
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     pub(super) fn retire_physical_owner(&mut self, owner: Owner, requests: Vec<RequestId>) {
-        if let Some(timer) = self.core.request_contexts.physical_plan_timer(owner) {
-            self.core.timers.remove(&timer);
-            self.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-            self.core.actions.push(Action::ClearTimer { timer });
-        }
-        for request in requests {
-            self.discard_managed(request);
-        }
+        self.core_io().retire_physical_owner(owner, requests)
     }
 
     pub(super) fn retire_http_owner(&mut self, owner: Owner) {
@@ -1022,6 +989,120 @@ impl<P> Io<P> {
                 (managed.lifecycle.context().owner() == owner).then_some(*request)
             })
             .collect::<Vec<_>>();
+        for request in requests {
+            self.discard_managed(request);
+        }
+    }
+
+    #[cfg(feature = "session-bearer")]
+    #[inline]
+    pub(super) fn bearer_bound_len(&self, generation: u64) -> usize {
+        self.core_ref().bearer_bound_len(generation)
+    }
+
+    #[cfg(feature = "session-bearer")]
+    fn reserve_bearer_bound(&mut self, generation: u64) -> Result<(), Error> {
+        if self.core.bearer_bound_mut(generation).is_none() {
+            self.core
+                .bearer_bound
+                .try_reserve(1)
+                .map_err(|_| Error::Capacity)?;
+            self.core.bearer_bound.push((generation, Vec::new()));
+        }
+        self.core
+            .bearer_bound_mut(generation)
+            .expect("reserved above")
+            .try_reserve(1)
+            .map_err(|_| Error::Capacity)
+    }
+
+    #[cfg(feature = "session-bearer")]
+    #[inline]
+    fn drop_empty_bearer_bound(&mut self, generation: u64) {
+        self.core_io().drop_empty_bearer_bound(generation)
+    }
+
+    /// Queue every unreleased packet bound to a retired generation for a typed
+    /// failure after the current callback; released packets still deliver.
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn fence_bearer_generation(&mut self, generation: u64) {
+        let Some(index) = self
+            .core
+            .bearer_bound
+            .iter()
+            .position(|(bound, _)| *bound == generation)
+        else {
+            return;
+        };
+        for request in self.core.bearer_bound.swap_remove(index).1 {
+            if let Some(managed) = self.core.managed_http.get(&request)
+                && managed.lifecycle.release().is_none()
+            {
+                self.core
+                    .bearer_fenced
+                    .push(managed.lifecycle.preparation());
+            }
+        }
+    }
+
+    pub(super) fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
+        self.discard_managed_with_cancel(request, None)
+    }
+
+    fn discard_managed_with_cancel(
+        &mut self,
+        request: RequestId,
+        cancel: Option<Action>,
+    ) -> Option<PendingHttp<P>> {
+        if !self.core_io().discard_managed_state(request, cancel) {
+            return None;
+        }
+        self.pending.remove(&request)
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
+    pub(super) fn retire_http_leg(&mut self, context: &Context) {
+        let requests = self
+            .core
+            .managed_http
+            .iter()
+            .filter_map(|(request, managed)| {
+                (managed.lifecycle.context().leg() == context.leg()
+                    && managed.lifecycle.context().owner() == context.owner())
+                .then_some(*request)
+            })
+            .collect::<Vec<_>>();
+        for request in requests {
+            self.discard_managed(request);
+        }
+    }
+
+    pub(super) fn retire_http_command(&mut self, command: CommandId) {
+        #[cfg(feature = "http-plans")]
+        if let Some(timer) = self.core.request_contexts.plan_timer(command) {
+            self.core.timers.remove(&timer);
+            self.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            self.core.actions.push(Action::ClearTimer { timer });
+        }
+        let requests = self.core.managed_http.iter().filter_map(|(request, managed)| {
+            matches!(managed.lifecycle.context().owner(), Owner::Command {id, ..} if id == command)
+                .then_some(*request)
+        }).collect::<Vec<_>>();
+        for request in requests {
+            self.discard_managed(request);
+        }
+    }
+
+    #[cfg(feature = "http-plans")]
+    /// A sealed physical Plan owner: clear its timer and the requests listed
+    /// before the seal (one already settled since then is simply skipped).
+    pub(super) fn retire_physical_owner(&mut self, owner: Owner, requests: Vec<RequestId>) {
+        if let Some(timer) = self.core.request_contexts.physical_plan_timer(owner) {
+            self.core.timers.remove(&timer);
+            self.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            self.core.actions.push(Action::ClearTimer { timer });
+        }
         for request in requests {
             self.discard_managed(request);
         }
@@ -1051,36 +1132,11 @@ impl<P> Io<P> {
     }
 
     #[cfg(feature = "session-bearer")]
-    fn bearer_bound_mut(&mut self, generation: u64) -> Option<&mut Vec<RequestId>> {
-        self.core
-            .bearer_bound
-            .iter_mut()
-            .find(|(bound, _)| *bound == generation)
-            .map(|(_, requests)| requests)
-    }
-
-    #[cfg(feature = "session-bearer")]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "session-bearer", allow(dead_code))]
+    #[inline]
     pub(super) fn bearer_bound_len(&self, generation: u64) -> usize {
-        self.core
-            .bearer_bound
-            .iter()
-            .find(|(bound, _)| *bound == generation)
-            .map_or(0, |(_, requests)| requests.len())
-    }
-
-    #[cfg(feature = "session-bearer")]
-    fn reserve_bearer_bound(&mut self, generation: u64) -> Result<(), Error> {
-        if self.bearer_bound_mut(generation).is_none() {
-            self.core
-                .bearer_bound
-                .try_reserve(1)
-                .map_err(|_| Error::Capacity)?;
-            self.core.bearer_bound.push((generation, Vec::new()));
-        }
-        self.bearer_bound_mut(generation)
-            .expect("reserved above")
-            .try_reserve(1)
-            .map_err(|_| Error::Capacity)
+        self.core_ref().bearer_bound_len(generation)
     }
 
     #[cfg(feature = "session-bearer")]
@@ -1088,29 +1144,6 @@ impl<P> Io<P> {
         self.core
             .bearer_bound
             .retain(|(bound, requests)| *bound != generation || !requests.is_empty());
-    }
-
-    /// Queue every unreleased packet bound to a retired generation for a typed
-    /// failure after the current callback; released packets still deliver.
-    #[cfg(feature = "session-bearer")]
-    pub(super) fn fence_bearer_generation(&mut self, generation: u64) {
-        let Some(index) = self
-            .core
-            .bearer_bound
-            .iter()
-            .position(|(bound, _)| *bound == generation)
-        else {
-            return;
-        };
-        for request in self.core.bearer_bound.swap_remove(index).1 {
-            if let Some(managed) = self.core.managed_http.get(&request)
-                && managed.lifecycle.release().is_none()
-            {
-                self.core
-                    .bearer_fenced
-                    .push(managed.lifecycle.preparation());
-            }
-        }
     }
 
     fn take_managed_with_cancel(
@@ -1125,7 +1158,7 @@ impl<P> Io<P> {
             .retain(|(_, parked)| *parked != request);
         #[cfg(feature = "session-bearer")]
         if let Some(bearer) = managed.bearer
-            && let Some(bound) = self.bearer_bound_mut(bearer.generation())
+            && let Some(bound) = self.core.bearer_bound_mut(bearer.generation())
         {
             bound.retain(|id| *id != request);
             self.drop_empty_bearer_bound(bearer.generation());
@@ -1153,29 +1186,18 @@ impl<P> Io<P> {
         }));
         Some(managed)
     }
+}
 
-    pub(super) fn discard_managed(&mut self, request: RequestId) -> Option<PendingHttp<P>> {
-        self.discard_managed_with_cancel(request, None)
-    }
-
-    fn discard_managed_with_cancel(
-        &mut self,
-        request: RequestId,
-        cancel: Option<Action>,
-    ) -> Option<PendingHttp<P>> {
-        let managed = self.take_managed_with_cancel(request, cancel)?;
-        if managed.lifecycle.context().operation() == Operation::Mutation
-            && managed.lifecycle.release().is_some()
-        {
-            self.core.http_responses.retire(request);
-        } else {
-            self.core.http_responses.remove(request);
-        }
-        self.core.streams.remove(&request);
-        self.core.incoming.remove(&request);
-        #[cfg(feature = "order-locks")]
-        self.core.order_read_tokens.remove(&request);
-        self.pending.remove(&request)
+impl crate::engine::CoreIoRef<'_> {
+    #[cfg(feature = "session-bearer")]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "session-bearer", allow(dead_code))]
+    pub(super) fn bearer_bound_len(&self, generation: u64) -> usize {
+        self.core
+            .bearer_bound
+            .iter()
+            .find(|(bound, _)| *bound == generation)
+            .map_or(0, |(_, requests)| requests.len())
     }
 }
 
@@ -1190,6 +1212,38 @@ impl<V: Venue> Engine<V> {
         _: crate::request_context::GroupPermit,
     ) -> Result<crate::request_context::GroupClaim, Error> {
         Err(Error::Invalid)
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
+    pub(super) fn discard_managed(&mut self, request: RequestId) -> bool {
+        self.discard_managed_with_cancel(request, None)
+    }
+
+    fn discard_managed_with_cancel(&mut self, request: RequestId, cancel: Option<Action>) -> bool {
+        if !self.discard_managed_state(request, cancel) {
+            return false;
+        }
+        self.pending.discard(request)
+    }
+
+    /// Everything a discard removes except the pending itself.
+    fn discard_managed_state(&mut self, request: RequestId, cancel: Option<Action>) -> bool {
+        let Some(managed) = self.take_managed_with_cancel(request, cancel) else {
+            return false;
+        };
+        if managed.lifecycle.context().operation() == Operation::Mutation
+            && managed.lifecycle.release().is_some()
+        {
+            self.core.http_responses.retire(request);
+        } else {
+            self.core.http_responses.remove(request);
+        }
+        self.core.streams.remove(&request);
+        self.core.incoming.remove(&request);
+        #[cfg(feature = "order-locks")]
+        self.core.order_read_tokens.remove(&request);
+        true
     }
 }
 
@@ -2474,6 +2528,24 @@ pub(in crate::engine) struct PreparedReadCleanup {
 
 #[cfg(feature = "http-plans")]
 impl<P> Io<P> {
+    #[inline]
+    pub(super) fn prepare_read_history_cleanup(
+        &mut self,
+        owner: Owner,
+        leg: Option<u64>,
+        notices: usize,
+    ) -> Result<Vec<PreparedReadCleanup>, Error> {
+        self.core_io()
+            .prepare_read_history_cleanup(owner, leg, notices)
+    }
+    #[inline]
+    pub(super) fn commit_read_history_cleanup(&mut self, cleanup: Vec<PreparedReadCleanup>) {
+        self.core_io().commit_read_history_cleanup(cleanup)
+    }
+}
+
+#[cfg(feature = "http-plans")]
+impl crate::engine::CoreIo<'_> {
     pub(super) fn prepare_read_history_cleanup(
         &mut self,
         owner: Owner,
@@ -2519,6 +2591,7 @@ impl<P> Io<P> {
         }
         Ok(cleanup)
     }
+
     pub(super) fn commit_read_history_cleanup(&mut self, cleanup: Vec<PreparedReadCleanup>) {
         for item in cleanup {
             assert!(
@@ -2529,6 +2602,16 @@ impl<P> Io<P> {
             );
             self.discard_managed_with_cancel(item.request, Some(item.cancel));
         }
+    }
+}
+
+impl crate::engine::IoCore {
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn bearer_bound_mut(&mut self, generation: u64) -> Option<&mut Vec<RequestId>> {
+        self.bearer_bound
+            .iter_mut()
+            .find(|(bound, _)| *bound == generation)
+            .map(|(_, requests)| requests)
     }
 }
 

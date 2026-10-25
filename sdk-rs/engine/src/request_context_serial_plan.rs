@@ -208,6 +208,36 @@ impl<P> Cx<'_, P> {
             .map(drop)
     }
 
+    #[inline]
+    pub(super) fn continue_serial(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        next: SerialCall,
+        wake: Next,
+    ) -> Result<Slot, Error> {
+        self.core().continue_serial(plan, slot, context, next, wake)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "serial-plans", allow(dead_code))]
+    fn commit_serial_continuation(
+        &mut self,
+        plan: &Plan,
+        context: &Context,
+        leg: Option<u64>,
+        next: SerialCall,
+        schedule: Schedule,
+        wake: Next,
+    ) -> Result<Slot, Error> {
+        self.core()
+            .commit_serial_continuation(plan, context, leg, next, schedule, wake)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     // Every check precedes the first change: a refusal leaves the current call
     // settleable exactly as it was.
     #[inline(never)]

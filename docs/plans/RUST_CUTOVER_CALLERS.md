@@ -3507,6 +3507,27 @@ unconverted paged histories remain open; this follow-on does not close the full
 history fan-out or prove deployed NX behavior.
 
 
+### BloFin private reads: managed history, closed positions and account reads
+
+BloFin fills, order history, income and closed positions now page under the
+caller's Read root at its exact receipt. Each page is one 20 s managed leg,
+capped by the root and signed by the #2084 HMAC recipe (Secondary else Primary
+for GET). Account settings, positions/balance and open/trigger order reads are
+each one Background read.
+- **Root expiry.** The caller's wait bounds the whole walk: expiry is a strict
+  Timeout, with no rows and no marker.
+- **Page failures.** A later-page transport, HTTP, parse or 20 s timeout failure
+  keeps the accepted rows with one `history.incomplete`. A failure before any
+  accepted rows rejects typed.
+- **Typed kinds.** Private history transport loss now reports `Network` rather
+  than `Internal`, as public trades already did.
+- **Closed-position refusals.** A closed-positions leg admission or queue
+  refusal is now strict (rejected with no rows) even after accepted pages, as
+  general history already was. A closed-position signing failure stays a
+  recoverable page failure, and general history's signing refusal stays strict.
+- **Unchanged.** Query bytes, results, row mapping and account Store effects. No
+  new frame or result schema.
+
 ### Bitunix histories: shared cursor and accepted-page completion
 
 Bitunix fills, orders and income now use the existing engine CursorHistory owner.
@@ -8759,6 +8780,37 @@ unchanged. Fixture-only admission-clock supersession aligns six catalogue starts
 to their already-existing epoch response time, with all response/event clocks,
 payloads and financial assertions retained and truncated-stream0->1->2 unchanged.
 Standalone custody controls retain genuine delayed/equality expiry coverage.
+
+### Phemex supported remaining funnel
+
+History, income, optional-key public discovery/depth/candles and command writes
+use managed selection and completion ownership. Private selection remains
+Secondary then Primary; lookup and writes stay Primary. Public optional-key
+selection preserves Secondary-only configurations. The 20s child deadline now
+covers preparation/provider/queue time, while Read roots keep the original caller
+receipt. Serial writes preserve native unbounded duration and finite native
+split validation, with no resend on uncertainty.
+
+Income failures after accepted output preserve those rows and emit the native
+Warn-level INCOMPLETE marker before the successful partial result. This applies
+to integrity, signing/provider, local submission and transport failures alike;
+rows staged by the failed page never leak into the result. With no accepted
+output, the original typed failure is retained without rows or marker. Exact
+Read-root expiry/retirement still revokes later callbacks.
+Engine-sealed unproven writes retain
+one exact deferred native cleanup: Store/fence state precedes the next command's
+planning, recovery I/O follows its admission, and no second terminal is emitted.
+Raw signing expiry plus 5000ms, immediate panic cancel-all and native per-row
+restoration are retained.
+
+Four unchanged legacy fingerprints remain exclusively for commandless late
+repair: lib.rs fc8a5b682da0, 34b6cbe60cec, 6cf35cca0977 and trading.rs
+e6f9b79a027f. Their removal requires the shared repair Mutation core from the landed
+RUST_REPAIR_MUTATION_AUTHORITY.md plan (#2147), covering Phemex cancel-only and
+Backpack cancel-then-place. claude-fe7lgm owns engine implementation;
+codex-ih35js reviews and separately adopts Phemex after the actual core landing.
+No general Background Mutation, Session-auth substitute, fabricated command or
+new legacy sender is permitted.
 
 ### Backpack public and private sockets
 

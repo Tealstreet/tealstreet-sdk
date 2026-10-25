@@ -15,7 +15,8 @@ pub struct Background<T> {
 pub(crate) fn read_slots(
     primary: Option<Identity>,
     secondary: Option<Identity>,
-) -> (Option<Identity>, Slots<Identity>) {
+) -> (Option<Identity>, Slots<Identity>, Slots<Identity>) {
+    let public = Slots::new(primary.clone(), secondary.clone(), SlotPolicy::default());
     let slots = Slots::new(
         primary,
         secondary.clone(),
@@ -23,7 +24,7 @@ pub(crate) fn read_slots(
             secondary_requires_primary: true,
         },
     );
-    (secondary, slots)
+    (secondary, slots, public)
 }
 impl PhemexPerpetuals {
     pub(crate) fn selected_read(
