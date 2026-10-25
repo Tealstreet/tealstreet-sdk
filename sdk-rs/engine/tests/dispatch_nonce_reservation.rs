@@ -366,7 +366,7 @@ fn drain<const CAPABILITY: u8>(engine: &mut Engine<NonceProbe<true, CAPABILITY>>
                     permit,
                     request,
                 }),
-                HttpAction::Cancel { preparation, .. } => batch.canceled.push(preparation)
+                HttpAction::Cancel { preparation, .. } => batch.canceled.push(preparation),
                 HttpAction::BindGroup { .. } => panic!("nonce fixture declares no barriers"),
             },
             Action::Sign { attempt, work, .. } => batch.work.push(Work { attempt, work }),
