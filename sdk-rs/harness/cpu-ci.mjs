@@ -16,6 +16,9 @@ import { verifyGateSuite } from './verify-gates.mjs';
 import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
 import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint } from './cpu-runtime.mjs';
 import { loadGateLedger } from './verify-gates.mjs';
+import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
+import { selectBitgetPair } from './bitget-paired-ci.mjs';
+import { assessBitgetPairedSteady, pairedSteadyAssessment } from './bitget-paired-steady.mjs';
 
 import { CPU_REMEASURE_SUITES, requireCpuRemeasureSuite } from './cpu-rollout.mjs';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -28,10 +31,10 @@ const artifactRef = ({ meta }) => ({ artifactId: meta.id, name: meta.name, diges
 const fullCase = (report) => Object.fromEntries(['venue', 'tape', 'tapeSha256', 'books', 'private', 'correctnessRuns', 'runs'].map((key) => [key, report[key]]));
 const manifest = () => json(new URL('./known-gate-failures.json', import.meta.url));
 
-export function classifyInitialCase(evidence, declarations) {
-  const assessment = assessGateReport(evidence.report, declarations);
+export function classifyInitialCase(evidence, declarations, paired) {
+  const assessment = pairedSteadyAssessment(assessGateReport(evidence.report, declarations), evidence.report, paired, evidence.execution?.measuredCheckoutSha);
   if (!assessment.errors.length) return { decision: 'first', assessment };
-  const eligible = assessEligibility(evidence);
+  const eligible = assessEligibility(evidence, paired);
   insist(eligible.eligible, [...assessment.errors, ...eligible.errors].join('\n'));
   return { decision: 'second', assessment };
 }
@@ -218,6 +221,54 @@ export async function authenticatedBundle(context, runId, name, jobName, stepNam
   return result;
 }
 
+async function loadBitgetPaired(context) {
+  context.bitgetPaired ??= (async () => {
+    const bundle = await authenticatedBundle(context, context.runId, 'bitget-paired-steady',
+      'Rust / Bitget counterbalanced steady CPU', 'Retain counterbalanced Bitget steady evidence', context.checkoutSha);
+    const directory = resolve(context.env.RUNNER_TEMP, 'authenticated-bitget-paired');
+    artifactEntriesToDirectory(bundle.entries, directory);
+    const evidence = readBitgetPairedEvidence(resolve(directory, 'records'));
+    const authority = await selectBitgetPair({ reader: context.reader, runId: context.runId, root: context.root });
+    for (const [index, cohort] of evidence.cohorts.entries()) {
+      const key = sha256(`bitget-paired:${index + 1}`);
+      insist(cohort.before.measurementKey === key, 'paired cohort measurement key differs');
+      authenticateMeasurementWindow({ key, job: bundle.job, logBytes: bundle.logBytes,
+        execution: { runId: authority.runId, jobId: authority.jobId, runnerId: authority.runnerId,
+          attempt: 1, measuredCheckoutSha: context.checkoutSha,
+          startedAt: cohort.before.startedAt, completedAt: cohort.finishedAt } });
+      restorePairedRawOutputs(context.root, cohort.evidence);
+      revalidateRecordedEvidence(cohort.evidence, { root: context.root });
+    }
+    const result = assessBitgetPairedSteady({ authority, evidence, manifest: manifest() });
+    insist(result.valid && result.certificate.steadyAccepted, result.errors.join('\n') || 'paired steady regression');
+    return { certificate: result.certificate, bundle };
+  })();
+  return context.bitgetPaired;
+}
+
+export function restorePairedRawOutputs(root, evidence) {
+  const out = resolve(root, 'sdk-rs/harness/out'), entries = new Map();
+  for (const [index, slot] of evidence.raw.entries()) {
+    const target = resolve(root, evidence.report.artifacts[index].path), name = relative(out, target);
+    insist(name && name !== '..' && !name.startsWith(`..${sep}`) && !name.startsWith(sep), 'paired raw path escapes original output root');
+    insist(!entries.has(name), 'paired raw path collision');
+    entries.set(name, Buffer.from(slot.bytes));
+  }
+  rmSync(out, { recursive: true, force: true });
+  artifactEntriesToDirectory(entries, out);
+}
+
+export function pairedCertificateForRuntime(paired, state, entries) {
+  if (!paired || state.mode !== 'family') return undefined;
+  const recorded = jsonMember(entries, 'manifest.json');
+  for (const [name, digest] of Object.entries(paired.certificate.moduleHashes)) {
+    const path = `sdk-rs/hosts/wasm/pkg/node/${name}`;
+    const matches = recorded.entries.filter(entry => entry.path === path && entry.type === 'file');
+    insist(matches.length === 1 && matches[0].sha256 === digest, 'paired candidate differs from the original measured family module');
+  }
+  return paired.certificate;
+}
+
 async function prepareMeasurement(context, suite, destination, mode) {
   insist(context.env.GITHUB_RUN_ATTEMPT === '1', 'first measurement cannot reuse a retry cohort');
   requireCpuRemeasureSuite(suite);
@@ -291,6 +342,7 @@ async function secondMeasurement(context, suite, destination) {
   requireCpuRemeasureSuite(suite);
   insist(context.env.GITHUB_RUN_ATTEMPT === '1', 'no third measurement via a job retry');
   const { plan, bundle: planBundle } = await loadPlan(context), row = plan.suites.find((item) => item.suite === suite);
+  const pairedBundle = suite === 'bitget' ? await loadBitgetPaired(context) : undefined;
   insist(row, 'suite missing from authenticated plan');
   const selected = row.cases.filter((item) => item.decision === 'second');
   insist(selected.length > 0, 'unissued second runner');
@@ -304,6 +356,7 @@ async function secondMeasurement(context, suite, destination) {
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
   insist(tiny.job.id === firstBundle.job.id && capsule.job.id === firstBundle.job.id, 'first uploads have different physical producers');
+  const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
   for (const first of firsts) {
     await authenticateCase(context, first, firstBundle.job, suite);
     validateFirstBindings({ state, evidence: first, cohortEntries: tiny.entries });
@@ -322,7 +375,7 @@ async function secondMeasurement(context, suite, destination) {
   restoreOriginalOutputs(context, firstBundle.entries);
   for (const first of firsts) {
     revalidateRecordedEvidence(first, { root: context.root });
-    insist(assessEligibility(first).eligible, 'planned case no longer eligible');
+    insist(assessEligibility(first, paired).eligible, 'planned case no longer eligible');
   }
   clearSecondOutputs({ root: context.root, directory: destination });
   const { run, job } = await currentPhysical(context, `Rust / CPU remeasurement (${suite})`);
@@ -359,7 +412,7 @@ async function secondMeasurement(context, suite, destination) {
       report, reportBytes: reportBytes.toString('utf8'), reportSha256: sha256(reportBytes), raw, execution };
     console.log(formatMeasurementMarker('END', first.key, completedAt));
     revalidateRecordedEvidence(evidence, { root: context.root });
-    const decision = decideRemeasurement(first, evidence);
+    const decision = decideRemeasurement(first, evidence, paired);
     if (!decision.accepted) errors.push(...decision.errors.map((error) => `${first.key}: ${error}`));
     const claim = { ...first.claim, jobId: job.id, firstJobId: first.claim.firstJobId };
     claims.push(claim); results.push({ key: first.key, decision });
@@ -435,6 +488,7 @@ export function requireSecondState(dispositions, jobs) {
 
 async function gatherSuite(context, suite) {
   requireCpuRemeasureSuite(suite);
+  const pairedBundle = suite === 'bitget' ? await loadBitgetPaired(context) : undefined;
   const strict = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
   restoreOriginalOutputs(context, strict.entries);
@@ -444,6 +498,7 @@ async function gatherSuite(context, suite) {
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
   insist(tiny.job.id === strict.job.id, 'first uploads have different physical producers');
   const bundle = jsonMember(tiny.entries, 'cohort.json'), state = jsonMember(strict.entries, 'cpu-collection/state.json');
+  const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
   insist(bundle.suite === suite && Array.isArray(bundle.claims) && bundle.claims.length === publicCases(suite).length, 'incomplete first claims');
   const { readSourceTree } = await import('./cpu-collection.mjs');
   insist(readSourceTree(context.root).inputsSha256 === state.inputsSha256 && state.sourceHead === context.checkoutSha, 'first measured inputs differ from current source');
@@ -456,7 +511,7 @@ async function gatherSuite(context, suite) {
     validateRetainedCache({ entries: strict.entries, evidence: first, state });
     await authenticateCase(context, first, strict.job, suite);
     revalidateRecordedEvidence(first, { root: context.root });
-    row.cases.push({ key: first.key, case: claim.case, decision: classifyInitialCase(first, manifest()).decision });
+    row.cases.push({ key: first.key, case: claim.case, decision: classifyInitialCase(first, manifest(), paired).decision });
   }
   return row;
 }
@@ -488,6 +543,7 @@ export function requireAuthorityRefs(evidence, originals) {
 async function certifySuite(context, suite, destination) {
   requireCpuRemeasureSuite(suite);
   const { plan, bundle: planBundle } = await loadPlan(context), recomputed = await gatherSuite(context, suite);
+  const pairedBundle = suite === 'bitget' ? await loadBitgetPaired(context) : undefined;
   const row = plan.suites.find(value => value.suite === suite);
   insist(same(row, recomputed), 'authenticated plan differs from full current first-evidence revalidation');
   const { jobs: allJobs } = await evidenceInventory(context);
@@ -499,6 +555,7 @@ async function certifySuite(context, suite, destination) {
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
   const state = jsonMember(strict.entries, 'cpu-collection/state.json');
+  const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
   const second = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-second-${suite}`,
     `Rust / CPU remeasurement (${suite})`, 'Retain CPU remeasurement results', context.checkoutSha) : null;
   const capsule = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
@@ -516,7 +573,8 @@ async function certifySuite(context, suite, destination) {
     restoreOriginalOutputs(context, strict.entries);
     revalidateRecordedEvidence(first, { root: context.root });
     if (value.decision === 'first') {
-      insist(!assessGateReport(first.report, manifest()).errors.length, 'first result fails existing strict manifest policy');
+      insist(!pairedSteadyAssessment(assessGateReport(first.report, manifest()), first.report, paired, first.execution?.measuredCheckoutSha).errors.length,
+        'first result fails strict policy and authenticated steady supplement');
       cases.push({ key: value.key, case: value.case, decision: { accepted: true, rule: first.report.status === 'PASS' ? 'strict-first-pass' : 'strict-declared-diagnostic', receipt: null } });
     } else {
       const evidence = jsonMember(second.entries, `cpu-second/cases/${value.key}.json`);
@@ -526,13 +584,14 @@ async function certifySuite(context, suite, destination) {
       await authenticateCase(context, evidence, second.job, suite, 'second');
       restoreOriginalOutputs(context, second.entries);
       revalidateRecordedEvidence(evidence, { root: context.root });
-      const decision = decideRemeasurement(first, evidence);
+      const decision = decideRemeasurement(first, evidence, paired);
       insist(decision.accepted, decision.errors.join('\n'));
       cases.push({ key: value.key, case: value.case, decision });
     }
   }
   const certificate = { schema: 1, suite, runId: context.runId, checkoutSha: context.checkoutSha,
-    plan: artifactRef(planBundle), first: artifactRef(strict), runtime: capsule ? artifactRef(capsule) : null, second: second ? artifactRef(second) : null, cases };
+    plan: artifactRef(planBundle), first: artifactRef(strict), runtime: capsule ? artifactRef(capsule) : null, second: second ? artifactRef(second) : null, cases,
+    ...(paired ? { pairedSteady: { artifact: artifactRef(pairedBundle.bundle), certificate: paired } } : {}) };
   write(resolve(destination, 'certificate.json'), certificate);
   return certificate;
 }

@@ -16,7 +16,6 @@ const canonical = (value) => {
   check(value === null || ['string', 'boolean'].includes(typeof value) || typeof value === 'number' && Number.isFinite(value), 'non-JSON identity');
   return JSON.stringify(value);
 };
-const same = (left, right) => canonical(left) === canonical(right);
 const id = (value) => { check(integer(value), 'invalid API identity'); return String(value); };
 const safePath = (path) => typeof path === 'string' && path.length > 0 && !path.startsWith('/') && !/[\\\0]/.test(path) && path.split('/').every((part) => part && !['.', '..'].includes(part));
 
@@ -161,6 +160,8 @@ export function authenticateArtifactMetadata({ artifact, run, job, logBytes, ste
   let expectedArtifact, expectedStep;
   if (jobName === 'Rust / CPU remeasurement plan') {
     expectedArtifact = 'cpu-plan'; expectedStep = CPU_COHORT_STEPS.plan;
+  } else if (jobName === 'Rust / Bitget counterbalanced steady CPU') {
+    expectedArtifact = 'bitget-paired-steady'; expectedStep = 'Retain counterbalanced Bitget steady evidence';
   } else if (jobName === 'Rust / CPU certification audit') {
     throw new Error('CPU cohort: no all-suite audit in this rollout');
   } else {
@@ -200,7 +201,8 @@ export function formatMeasurementMarker(kind, key, at) {
 
 /** Bind a case's payload clock window to literal markers in its physical log. */
 export function authenticateMeasurementWindow({ execution, key, job, logBytes }) {
-  check(hash(key) && execution && job && /^Rust \/ (?:replay measurement|CPU remeasurement) \([a-z0-9-]+\)$/.test(job.name), 'invalid physical measurement job/key');
+  check(hash(key) && execution && job && (/^Rust \/ (?:replay measurement|CPU remeasurement) \([a-z0-9-]+\)$/.test(job.name) ||
+    job.name === 'Rust / Bitget counterbalanced steady CPU'), 'invalid physical measurement job/key');
   check(integer(job.id) && integer(job.run_id) && integer(job.runner_id) && job.run_attempt === 1 && job.status === 'completed' && job.conclusion === 'success' && execution.attempt === 1 && execution.runId === String(job.run_id) && execution.jobId === String(job.id) && execution.runnerId === String(job.runner_id), 'measurement execution identity differs from API job');
   const start = instant(execution.startedAt), end = instant(execution.completedAt);
   check(start < end && execution.measuredCheckoutSha === loggedCheckout(job, logBytes), 'measurement time/source differs from physical checkout');
@@ -317,6 +319,21 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
     getCommit: (commit) => { check(gitId(commit), 'invalid commit identity'); return get(`git/commits/${commit}`, false, true); },
     getTree: (tree) => { check(gitId(tree), 'invalid tree identity'); return get(`git/trees/${tree}?recursive=1`, false, true); },
     getBlob: (blob) => { check(gitId(blob), 'invalid blob identity'); return get(`git/blobs/${blob}`, false, true); },
+    getPull: (number) => get(`pulls/${id(number)}`),
+    listCommitPulls: async (commit) => {
+      check(gitId(commit), 'invalid commit identity');
+      const result = [], seen = new Set();
+      for (let page = 1; page <= 8; page++) {
+        const rows = await get(`commits/${commit}/pulls?per_page=100&page=${page}`);
+        check(Array.isArray(rows) && rows.length <= 100, 'invalid commit pull inventory');
+        for (const row of rows) {
+          check(integer(row.id) && !seen.has(row.id), 'duplicate commit pull identity');
+          seen.add(row.id); result.push(row);
+        }
+        if (rows.length < 100) return result;
+      }
+      throw new Error('CPU cohort: commit pull pagination hard limit');
+    },
     getLog: async (jobId) => {
       const raw = await get(`actions/jobs/${id(jobId)}/logs`, true, completedJobs.has(jobId), 'log');
       if (!logIndices.has(jobId)) logIndices.set(jobId, Math.max(0, snapshots.length - 1));

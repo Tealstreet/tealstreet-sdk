@@ -39,6 +39,7 @@ on:
 permissions:
   contents: read
   actions: read
+  pull-requests: read
 
 # Pushes to a branch finish their run (the newest push waits behind it), so
 # landing gets completed results during a merge rush; PR pushes cancel stale runs.
@@ -730,9 +731,65 @@ jobs:
           if-no-files-found: error
 
 
+  bitget-paired:
+    name: Rust / Bitget counterbalanced steady CPU
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: .
+    env:
+      CARGO_BUILD_JOBS: 4
+      WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
+      ESBUILD_WORKER_THREADS: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+          key: ${{ runner.os }}-cargo-bitget-paired-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-gate-
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
+      - uses: ./.github/actions/prefetch-cargo
+      - name: Install pinned Binaryen
+        run: bash sdk-rs/harness/install-binaryen.sh
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - name: Public counterbalanced Bitget steady CPU
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node sdk-rs/harness/bitget-paired-ci.mjs --out '${{ runner.temp }}/bitget-paired-steady'
+      - name: Retain counterbalanced Bitget steady evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bitget-paired-steady
+          path: ${{ runner.temp }}/bitget-paired-steady/
+          retention-days: 14
+          if-no-files-found: error
+
   cpu-plan:
     name: Rust / CPU remeasurement plan
-    needs: gate
+    needs: [gate, bitget-paired]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 32
@@ -801,7 +858,7 @@ jobs:
 
   cpu-certify:
     name: Rust / shared CPU certification
-    needs: [gate, cpu-plan, cpu-second]
+    needs: [gate, bitget-paired, cpu-plan, cpu-second]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 42

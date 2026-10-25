@@ -368,3 +368,19 @@ test('artifact callers cannot request metadata or arbitrary response kinds', asy
     await assert.rejects(async () => reader.getArtifactBytes(700, kind), /invalid artifact response kind/);
   assert.equal(calls, 0);
 });
+
+test('paired baseline PR reads are live, exact and completely paginated', async () => {
+  const calls = [], commit = git('paired head');
+  const reader = createGithubReader({ repository: 'org/repo', fetch: async url => {
+    calls.push(url);
+    if (url.includes('/pulls/20')) return jsonResponse({ number: 20, base: { sha: git(String(calls.length)) } });
+    return jsonResponse(url.endsWith('page=1') ? Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })) : [{ id: 101 }]);
+  } });
+  assert.notDeepEqual(await reader.getPull(20), await reader.getPull(20), 'base selection must not cache mutable PR state');
+  assert.equal((await reader.listCommitPulls(commit)).length, 101);
+  assert.equal(calls.filter(url => url.includes('/commits/')).length, 2);
+  await assert.rejects(async () => reader.getPull('../20'));
+  await assert.rejects(async () => reader.listCommitPulls('HEAD'));
+  const duplicate = createGithubReader({ repository: 'org/repo', fetch: async () => jsonResponse([{ id: 1 }, { id: 1 }]) });
+  await assert.rejects(duplicate.listCommitPulls(commit), /duplicate/);
+});
