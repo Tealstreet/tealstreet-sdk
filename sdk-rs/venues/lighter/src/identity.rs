@@ -190,6 +190,7 @@ impl Lighter {
         });
         if let Err((_pending, error)) = cx.request_managed(
             leg,
+            None,
             Method::Get,
             format!("{}/api/v1/{}", self.host(), candidate.path()),
             None,

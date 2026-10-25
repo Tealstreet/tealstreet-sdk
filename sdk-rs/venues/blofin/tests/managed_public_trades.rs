@@ -529,6 +529,7 @@ impl Venue for FullQueue {
                 assert!(
                     cx.request_managed(
                         context.clone(),
+                        None,
                         Method::Get,
                         "https://fixture.invalid/parked".into(),
                         None,

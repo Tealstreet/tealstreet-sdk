@@ -8,6 +8,8 @@ const ID_COUNT: usize = 4_096;
 const ID_BYTES: usize = 256 * 1024;
 const ID_FIELD: usize = 1_024;
 const TEXT_BYTES: usize = 64 * 1024;
+#[cfg(feature = "serial-plans")]
+pub(super) const RETAINED_TEXT_BYTES: usize = TEXT_BYTES;
 const TEXT_FIELD: usize = 4_096;
 const TRUNCATED: &str = "[truncated]";
 const ID_OVERFLOW: &str = " [truncated IDs: reconcile remaining identities through reads]";
@@ -182,6 +184,21 @@ impl EvidenceBudget {
         }
         self.error_text(&mut error);
         (self, error, overflow)
+    }
+
+    /// A settled serial attempt's identities move to the command's streamed
+    /// list, so they stop counting against the per-attempt identity budget.
+    #[cfg(feature = "serial-plans")]
+    pub(super) fn release_identities(&mut self, ids: &[String]) {
+        for id in ids {
+            self.ids = self
+                .ids
+                .checked_sub(1)
+                .expect("released identities were admitted");
+            self.id_bytes = (self.id_bytes)
+                .checked_sub(std::mem::size_of::<String>() + id.len())
+                .expect("released identity bytes were admitted");
+        }
     }
 
     fn admit_identity(&mut self, id: &str) -> bool {

@@ -982,12 +982,15 @@ fn already_gone_cancel_allows_replacement_but_replacement_failure_never_restores
                 h.result(91).unwrap().is_ok(),
                 matches!(outcome, "not-modified" | "accepted")
             );
-            if !profile.variant.is_hyro() {
-                // D2: the absent old leg is retired by the reconcile read, not
-                // by the answer; a replacement failure never restores it.
-                assert!(h.has_request("/v5/order/realtime"), "{profile:?}/{outcome}");
-                while h.has_request("/v5/order/realtime") {
-                    h.respond("/v5/order/realtime", 200, EMPTY);
+            // D2: the absent old leg is retired by the reconcile read, not by
+            // the answer; a replacement failure never restores it. Hyro's
+            // reconcile read is its full atomic snapshot.
+            assert!(h.has_request("/v5/order/realtime"), "{profile:?}/{outcome}");
+            while h.has_request("/v5/order/realtime") {
+                h.respond("/v5/order/realtime", 200, EMPTY);
+                if profile.variant.is_hyro() {
+                    h.respond("/v5/position/list", 200, EMPTY);
+                    h.respond("/v5/account/wallet-balance", 200, WALLET);
                 }
             }
             assert!(

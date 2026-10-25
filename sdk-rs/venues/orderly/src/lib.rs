@@ -178,7 +178,7 @@ impl Orderly {
         let context = Self::candle_context(&pending)
             .expect("candle continuation")
             .clone();
-        match cx.request_managed(context, Method::Get, url, None, pending) {
+        match cx.request_managed(context, None, Method::Get, url, None, pending) {
             Ok(request) => {
                 if streamed {
                     cx.stream_response(request, ArrayAt::Path(&["data", "rows"]));
@@ -316,6 +316,7 @@ impl Orderly {
         };
         match cx.request_managed(
             context,
+            None,
             Method::Get,
             format!("{}{path}", self.rest()),
             None,
