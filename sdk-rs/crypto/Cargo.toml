@@ -39,7 +39,7 @@ ed25519 = []
 es256 = []
 secp256k1 = []
 stark = []
-# No venue signs HMAC-SHA512 through LocalSigner; keep it out of family builds.
+# Kraken dispatch recipes require HMAC-SHA512; other families opt in explicitly.
 hmac-sha512 = []
 schnorr = []
 
