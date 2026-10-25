@@ -154,7 +154,7 @@ eligibility/window semantics, not a guessed timer.
 | --- | --- |
 | Actual-agent nonce authority | Current NonceClaim::mint and matches_identity use NonceKey::stable_id. HYPERLIQUID_AGENT legacy reserve uses ethereum_address, so selecting that domain with today's stable-id claim would split the sequence. Need an engine-issued, selected-identity-bound actual-agent subject attested by provider PublicAddress; preserve TxFlow/native sharing and release freshness without a caller-forged address. Assigned by the overseer to m26ps4 for design/source after phase3, reviewers9czdjh/uufub4; still OPEN until reviewed/landed. |
 | Installed minimum material | The only secret is the agent secp256k1 scalar, not an API key or GRVT Session token. Wallet, account/application_id and vault are public and may differ from agent. Perps trade checks only nonempty scalar; standalone spot additionally requires its configured wallet to match the scalar. Preserve scalar-only/perps and missing/empty/public-only precedence without inventing a credential key/ref. The overseer APPROVED trusted scalar-only setup and this native distinction. Exact shared installation/public-address resolution remains to be reviewed with m26ps4; do not force a new secret or stable_id input. |
-| Actual-release pacing | Native records queue-time 334 ms; the older TRADE architecture calls for release-time pacing. SerialPlan refuses nonzero policy pacing. Review a shared-compatible release gate and exact native timing controls with the Plan/pacing owner (fe7lgm/uufub4), including whether the stricter release anchor is a ruled change. No venue-local parallel pacing authority or pretending nonzero serial pacing is accepted. |
+| Actual-release pacing | RESOLVED-PENDING: the overseer ruled a new non-default serial-pacing engine feature, owned by claude-dazzy3, reviewed by uufub4. Preserve the 334 ms gap at actual release. Moving the native queue-time anchor to release is an approved behavior change, recorded in CALLERS at adoption. Today SerialPlan still refuses nonzero policy pacing; do not adopt until the reviewed feature lands. No venue-local parallel authority. |
 | Per-call 20 s | APPROVED new20s per-call bound, attempts1 and unbounded serial root (same ruling as Kraken). CALLERS disclosure remains required; preserve FIFO and no write replay. |
 | Classifier/late evidence | Correlate full native status arrays before projection; native mixed/partial and journal outcome differences disclosed. ScheduleCancel uses its control-specific codec and cannot inherit order-reconciliation proof. Existing engine APIs first; any absent fact/evidence shape returns to its owner. |
 
@@ -233,8 +233,10 @@ Actual-agent nonce authority is assigned to m26ps4 after phase3, reviewed by
 9czdjh/uufub4, and remains OPEN. Trusted scalar-only setup is approved, with
 public wallet/user/vault separate from secrets and the native spot pair check
 retained; actual setup API fit is still a source gate. NEW20s per-call, one
-attempt and an unbounded serial root are approved. Native334ms pacing must be
-preserved; fe7lgm/uufub4 are asked for serial-Plan release-pacing disposition.
-Any needed engine pacing feature returns to the overseer for an owner; no
-venue-local authority is authorized. Plan/native originals may proceed while
-nonce and pacing remain OPEN; neither is bypassed by a green native control.
+attempt and an unbounded serial root are approved. The overseer resolved pacing to a new
+serial-pacing engine feature owned by claude-dazzy3, reviewed by uufub4. Its
+334 ms actual-release anchor is a CALLERS-recorded behavior change from native
+queue-time pacing. This is RESOLVED-PENDING the reviewed feature, not a landed
+API. No venue-local authority is authorized. Plan/native originals may proceed
+while nonce and pacing source are unavailable; neither is bypassed by a green
+native control.
