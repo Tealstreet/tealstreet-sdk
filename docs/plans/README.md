@@ -462,4 +462,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Serial Session resend | Originals CLEAR; source review and paired size gates pending | Before a serial call's one authentication resend waits for a login round trip (GRVT code 1000). | [RUST_SERIAL_SESSION_RESEND.md](RUST_SERIAL_SESSION_RESEND.md) |
 
-| Bitget history Read funnel | [RUST_BITGET_HISTORY_READ_FUNNEL.md](RUST_BITGET_HISTORY_READ_FUNNEL.md) | codex-ih35js | Local source onb0ee;333 native tests pass; exact source review and paired Bitget/combined sizes precede PR. |
+| Bitget history Read funnel | [RUST_BITGET_HISTORY_READ_FUNNEL.md](RUST_BITGET_HISTORY_READ_FUNNEL.md) | codex-ih35js | Source CLEAR on7da/f895;333 native tests and strict gates pass; CI family rounding and current-tip local combined required before READY. |

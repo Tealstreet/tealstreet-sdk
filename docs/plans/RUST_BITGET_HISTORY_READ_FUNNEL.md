@@ -187,9 +187,9 @@ This is venue-only; no generic engine source change is authorized by this plan.
 Measure paired Bitget and combined on the SAME actual-tip-composed baseline and
 first source tree, retain raw/shipped modules, hashes, tool versions, exact heads,
 commands and logs, then delete each OWN target. Also measure BitgetUSDC if the
-family builder does not prove byte-identical selection. No measurement exists
-for this plan. Planning estimate is0..15KiB per Bitget family and combined,
-unmeasured; it is neither credited savings nor permission to raise an allowance.
+family builder does not prove byte-identical selection. The initial isolated pair and corrected composed measurements are recorded
+below; the planning estimate was0..15KiB per family and combined and did not
+permit an allowance increase.
 #2158's shrink remains separate. If actual Bitget exceeds its current allowance,
 report the exact pair for a budget decision before pushing. When 5c57jl's Bitget
 CPU non-regression gate lands, the PR must satisfy it on the composed tree.
@@ -293,3 +293,25 @@ parse, preserving the original parse/venue errors and precedence. That small
 helper reuse is included in the correction; no separate saving is claimed.
 The raw first-source twiggy receipt is retained in scratch; query_request is
 already out of line, so no speculative inlining changes are introduced.
+
+## Executed correction and qualifying size gates
+
+On corrected composed7da95fb05b0 (tree20fb96d8c86, basef895d0d7018), native333,
+strict all-target clippy, scoped rustfmt, full bans and all ratchets PASS. The
+malformed-stream regression run against immutable e59 runtime gave exactly
+1 assertion RED /33GREEN /0ignored; the correction passes all34 controls. Dazzy3
+source CLEAR covers8884d69f8b2 and its automatic non-doc composition into7da.
+
+Local corrected web/node bytes: Bitget1,479,059; combined13,916,610, leaving
+239,166 below14,155,776. Raw/shipped hashes and unchanged harness/tool versions
+are retained in the corrected scratch receipt; targets were deleted. This
+corrected row is an absolute composed measurement, not an isolated delta
+against the older b0ee baseline. No separate saving is attributed to parse reuse.
+
+The declared Bitget/USDC ceiling is1,479,680 (1445KiB), the local result rounded
+up; its5 boundary tests pass and all other budgets/profiles are unchanged.
+Before READY it must match the qualifying CI family record rounded to a KiB,
+never above1,482,752. CI is authoritative for family size. Since Backpack socket
+lifecycle landed asde1e2383410 during measurement, its plain merge needs a fresh
+local combined record before READY; the older7da combined number is not relabeled.
+No new Bitget source change is needed, and the PR head is intended to freeze.

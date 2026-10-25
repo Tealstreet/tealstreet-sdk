@@ -8,11 +8,10 @@ import { parseArgs } from 'node:util';
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
 // total package size; overseer 2026-10-21 raised it to 13.5 MiB for the Bitunix family.
 export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_155_776 });
-// Bitget allowance: 1,478,656 less 2,108 measured bytes from #2142/#2145;
-// overseer-approved shrink-only follow-up under Sam's no-TS-fallback directive.
+// Bitget history Read custody: 1445 KiB (overseer ceiling 1448 KiB).
 // Bybit: Sam approved 2026-10-25 (venue + 60 KiB) for the Plan-adoption stack, whose top measured
 // 1,398,660 on 9b05c9ac452; it can only go down.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_476_548, bitgetusdc: 1_476_548, bybit: 1_404_928 });
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_479_680, bitgetusdc: 1_479_680, bybit: 1_404_928 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
