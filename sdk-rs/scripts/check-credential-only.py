@@ -31,6 +31,7 @@ TEST_ATTR = re.compile(r'^[ \t]*#\[cfg\(test\)\][ \t]*\n', re.M)
 
 
 RAW_STRING = re.compile(r'r(#*)"')
+CHAR = re.compile(r"'(?:\\\\.|[^\\\\'\\n])'")
 TEST_MODULE = re.compile(r'(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*([;{])')
 
 
@@ -62,6 +63,10 @@ def module_end(text, start):
         c = text[j]
         if c == '"' or RAW_STRING.match(text, j):
             j = skip_literal(text, j)
+            continue
+        char = CHAR.match(text, j) if c == "'" else None
+        if char:
+            j = char.end()
             continue
         if c == '{':
             depth += 1

@@ -43,6 +43,11 @@ class CredentialOnlyBans(unittest.TestCase):
                 'fn f(i: &Identity) { i.signing_opt(); }\n')
         self.assertEqual(len(check.violations('venues/x/src/lib.rs', text)), 1)
 
+    def test_char_literals_do_not_unbalance_a_test_module(self):
+        text = ("#[cfg(test)]\nmod tests {\n    fn t(s: &str) -> bool { s.starts_with('{') }\n}\n"
+                "fn f<'a>(i: &'a Identity) { i.signing_opt(); }\n")
+        self.assertEqual(len(check.violations('venues/x/src/lib.rs', text)), 1)
+
 
 if __name__ == '__main__':
     unittest.main()
