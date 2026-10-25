@@ -480,7 +480,7 @@ class DataMacroProvenance(unittest.TestCase):
             with self.subTest(parameters=parameters):
                 self.assertTrue(self.prod(source))
 
-    def test_every_rebinding_anywhere_in_the_fn_refuses_precision(self):
+    def test_same_block_and_nonexempt_binders_remain_conservative(self):
         for binding in ['let request = other;', 'let mut request = other;',
                         'let (request, _) = other;', 'let Request { request, .. } = other;',
                         'for request in rows {}', 'if let Some(request) = other {}',
@@ -488,12 +488,52 @@ class DataMacroProvenance(unittest.TestCase):
                         'match other { Some(request) => {}, _ => {} }',
                         'match other { Row { request, .. } => {}, _ => {} }',
                         'each(|request| {});', 'each(|request: &Request| {});',
-                        'let alias = request;']:
+                        'let alias = request;', 'bind!(request);']:
             for before in [True, False]:
                 expression = 'matches!(request.kind, Kind::Normal);'
                 source = self.source(binding + expression if before else expression + binding)
                 with self.subTest(binding=binding, before=before):
                     self.assertTrue(self.prod(source))
+
+    def test_exact_five_macros_precede_later_nested_queue_error_binding(self):
+        macros = ('matches!(request.kind, Kind::Algo);'
+                  'matches!(request.kind, Kind::Normal | Kind::Algo);'
+                  'matches!(request.kind, Kind::Normal | Kind::Algo);'
+                  'format!("limit=100&page={}", request.page);'
+                  'matches!(request.kind, Kind::Metadata);')
+        tail = ('match result { Ok(_) => {}, Err(pending) => {'
+                'let Task::Account(request) = pending.task else { unreachable!() };'
+                'matches!(cx.request(1), Kind::Normal); } }')
+        raw = dict(ban.fingerprints('matches!(cx.request(1), Kind::Normal);'))
+        self.assertEqual(self.prod(self.source(macros + tail)), raw)
+        self.assertEqual(self.prod(self.source('matches!(request.kind, Kind::Normal);'
+                         'match result { Err(_) => { let request = other; }, _ => {} }')), {})
+
+    def test_narrow_exception_rejects_containment_ambiguity_and_second_binders(self):
+        expression = 'matches!(request.kind, Kind::Normal);'
+        for body in [
+                expression + 'let Task::Account(request) = pending.task else { unreachable!() };',
+                'match result { Err(_) => { let request = other;' + expression + ' }, _ => {} }',
+                'match result { Err(_) => { let request = other; }, _ => {} }' + expression,
+                expression + 'match result { Err(_) => { let request = other; }, _ => {} }'
+                + 'let request = second;',
+                expression + 'match result { Err(_) => { bind!(request); }, _ => {} }',
+                expression + 'match result { Err(_) => { each(|request| {}); }, _ => {} }',
+                expression + 'match result { Err(_) => { let make!(request) = other; }, _ => {} }',
+                'let Task::Account(request) = pending.task else {' + expression + ' return; };',
+                'fn nested() {}' + expression]:
+            with self.subTest(body=body):
+                self.assertTrue(self.prod(self.source(body)))
+
+    def test_match_guard_references_are_not_patterns_but_guard_binders_refuse(self):
+        expression = 'matches!(request.kind, Kind::Normal);'
+        self.assertEqual(self.prod(self.source(expression +
+                         'match other { Kind::One if request.page > 0 => {}, _ => {} }')), {})
+        for arm in ['Some(request) if request.page > 0 => {}',
+                    'Kind::One if each(|request| true) => {}',
+                    'Kind::One if let Some(request) = other => {}']:
+            with self.subTest(arm=arm):
+                self.assertTrue(self.prod(self.source(expression + 'match other { ' + arm + ', _ => {} }')))
 
     def test_visible_macro_shadows_and_import_aliases_are_conservative(self):
         for prefix in ['macro_rules! matches { ($x:expr,$p:pat) => { true } }',

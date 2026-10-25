@@ -45,9 +45,9 @@ conditions are proved:
 2. Every METHODS-spelled token must be an enclosing fn parameter with an explicit
    concrete non-Cx type, not generic/impl/dyn/inferred or a closure parameter.
    Its expression is only IDENT followed by .field segments, with no call,
-   index, turbofish or parenthesized receiver. ANY rebinding anywhere in that
-   function (let/for/match/if-let/while-let/closure parameter) refuses the proof;
-   no flow analysis or borrowing an outer parameter proof across ambiguity.
+   index, turbofish or parenthesized receiver. Every rebinding in that function
+   refuses proof except the closed later-nested-let exception below. No flow
+   analysis or borrowing an outer parameter proof across ambiguity.
 3. For format!, arguments after the literal contain only these references,
    literals and the tokens . , &; no parentheses or calls. For matches!, the
    scrutinee obeys rule2, and parentheses are allowed only in the pattern after
@@ -55,6 +55,29 @@ conditions are proved:
 4. Any actual counted direct/raw/generic/UFCS/indirect call retains its wrapper
    fingerprint, even beside a pure sibling. This never clears fn taint or raw
    call rows. Unknown forms retain the old accounting.
+
+### Closed later-nested-let exception
+
+Both reviewers supersede any broader binding-scope proposal with ONLY this:
+an ordinary fully parsed let/let-else may be ignored when its strict nested
+block opens AFTER the candidate macro closes and cannot contain the invocation.
+Prove balanced statement/block and module/closure/item boundaries, the actual
+pattern binder and every potentially overlapping binding. Same-block later
+bindings stay conservative, as do all for/match/if-let/while-let/closure binders,
+macro-generated bindings and unresolved patterns/scopes. No reachability or
+type inference. The implementation may support fewer structurally proved blocks.
+
+In send_account, all five data macros precede the strict nested queue-error arm
+with let Task::Account(request) = pending.task else { unreachable!() };. Pair this
+positive with raw calls/wrappers inside that arm, same-block-later, earlier or
+containing blocks, invocation inside the arm, a second overlapping binder,
+closure and ambiguous pattern negatives. Record every ignored binding's actual
+scope/token bounds in the removed-row ledger.
+
+For account_response, split each arm's pattern from its guard at a balanced
+top-level boundary. A guard-only request reference is not a binder; nested guard
+let/closure ambiguity remains conservative. Pair actual-pattern and guard-shadow
+negatives. This parser correction grants no blanket guard exemption.
 
 ### Closed single-hop private-import proof
 
