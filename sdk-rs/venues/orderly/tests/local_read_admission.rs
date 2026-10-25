@@ -22,6 +22,7 @@ struct Probe {
     peers: Vec<Context>,
     original: Option<Context>,
     hold_next: bool,
+    expire_next: bool,
 }
 impl Venue for Probe {
     type Pending = Pending;
@@ -87,6 +88,7 @@ impl Venue for Probe {
                     }
                 }
                 Some("hold") => self.hold_next = true,
+                Some("expire") => self.expire_next = true,
                 Some("finish") => {
                     let context = self.original.take().expect("original root is still held");
                     cx.done_context(&context, "\"original\"".into()).unwrap();
@@ -99,6 +101,18 @@ impl Venue for Probe {
             self.hold_next = false;
             self.original = Some(cx.admit_http_command(policy()).unwrap());
             return;
+        }
+        if std::mem::take(&mut self.expire_next) {
+            assert_eq!(
+                cx.command_wait(),
+                Some(safe_cex_engine::CommandWait::Remaining(5))
+            );
+            // Advance only the fixture clock; keep this same genuine entry receipt.
+            cx.now += 5.0;
+            assert_eq!(
+                cx.command_wait(),
+                Some(safe_cex_engine::CommandWait::Expired)
+            );
         }
         self.inner.on_command(cx, command);
     }
@@ -113,6 +127,7 @@ fn engine(case: u8) -> Engine<Probe> {
         peers: Vec::new(),
         original: None,
         hold_next: false,
+        expire_next: false,
     });
     if case < 4 {
         e.start(0.0);
@@ -317,4 +332,91 @@ fn retained_identity_owner_rejects_success_and_failure_duplicates() {
         assert_eq!(e.venue().peers.len(), 256);
         assert!(control(&mut e, "release").is_empty());
     }
+}
+
+fn expired_entry(case: u8) {
+    let mut e = engine(case);
+    assert!(control(&mut e, "expire").is_empty());
+    let before = format!(
+        "{:?}{:?}{:?}{:?}{:?}{:?}",
+        e.store().loaded(),
+        e.store().markets(),
+        e.store().tickers(),
+        e.store().orders(),
+        e.store().positions(),
+        e.store().balance()
+    );
+    let mut expired_command = command(case);
+    if case == 3
+        && let Command::FetchCandles { from_ms, .. } = &mut expired_command
+    {
+        // Keep the native empty-range branch future-dated after the clock advances to 105.
+        *from_ms = Some(106.0);
+    }
+    e.handle_command(100.0, expired_command, Some(5)).unwrap();
+    let out: Vec<_> = e.drain_actions().collect();
+    let mut expected_error = Error::TimedOut.venue_error();
+    expected_error.outcome = None;
+    assert!(
+        matches!(&out[..], [Action::Notice(Notice::CommandFailed { command: COMMAND, error })] if error == &expected_error),
+        "expired local completion must refuse once without admission or IO: {out:?}"
+    );
+    assert_eq!(
+        format!(
+            "{:?}{:?}{:?}{:?}{:?}{:?}",
+            e.store().loaded(),
+            e.store().markets(),
+            e.store().tickers(),
+            e.store().orders(),
+            e.store().positions(),
+            e.store().balance()
+        ),
+        before
+    );
+    let mut recovery = command(case);
+    if case == 3
+        && let Command::FetchCandles { from_ms, .. } = &mut recovery
+    {
+        *from_ms = Some(111.0);
+    }
+    e.handle_command(110.0, recovery, Some(5)).unwrap();
+    assert_local(&e.drain_actions().collect::<Vec<_>>(), expected(case));
+    for name in ["saturate", "release"] {
+        e.handle(
+            110.0,
+            Event::Command(Command::SetTickerSymbols {
+                symbols: vec![name.into()],
+            }),
+        );
+        assert!(e.drain_actions().next().is_none());
+        assert_eq!(
+            e.venue().peers.len(),
+            if name == "saturate" { 256 } else { 0 }
+        );
+    }
+    assert_eq!(
+        format!(
+            "{:?}{:?}{:?}{:?}{:?}{:?}",
+            e.store().loaded(),
+            e.store().markets(),
+            e.store().tickers(),
+            e.store().orders(),
+            e.store().positions(),
+            e.store().balance()
+        ),
+        before
+    );
+}
+
+#[test]
+fn expired_initial_local_failure_preserves_store_and_releases_every_credit() {
+    expired_entry(0);
+}
+#[test]
+fn expired_initial_empty_success_cannot_bypass_receipt_expiry() {
+    expired_entry(3);
+}
+#[test]
+fn expired_initial_identity_success_cannot_bypass_receipt_expiry() {
+    expired_entry(4);
 }

@@ -145,3 +145,35 @@ recovery suffixes remain source-stage gates, not new original proof.
 Renewed native/caller and shared custody review is required before production.
 The approved Bitget opt-s follow-up takes priority immediately after actual
 #2122 lands; this local checkpoint can be resumed without rewriting history.
+
+## Production source checkpoint
+
+After both bounded plan/original CLEARs at 1115420b89e, the six immediate
+branches use one local helper: full command-wait disposition, keyless Read
+admission, then done_context/fail_context with the native result/error. The
+sole runtime delta is lib.rs. Reversing the original reviewed helper preview
+reconstructs the incoming lib exactly; accepted candle transport and every
+callback remain unchanged. The inventory prunes only the six listed count-one
+keys, leaving 17F/18O.
+
+All 19 original test bodies and 57 original assertion invocations are token
+exact. The admission Probe gained an expiry-only setup branch and three source
+controls: one local failure, empty success and identity success. A genuine
+handle_command entry carries its original five-millisecond receipt; only the
+fixture clock advances from 100 to its exact deadline 105 before native entry
+forwarding. Recovery is a fresh entry at 110, followed by all-256 credit reuse.
+No issuer, owner or receipt is fabricated. The first new empty-range fixture
+used from=101, which ceased to be future after the clock advance; it was
+corrected to 106 (and 111 for recovery), retaining the exact no-I/O assertion.
+No original assertion changed and no baseline RED claim is made for these
+three added source controls.
+
+Source controls: 22 PASS, zero ignored. Full scoped native source run: 263 PASS,
+zero ignored; after the final new-fixture monotonic recovery adjustment, the
+22 affected controls and strict all-target Clippy/fmt pass again. Optimized
+Orderly web/node WASM is 956,909 bytes versus the same-source baseline 956,661:
++248 bytes, within 1,343,488. No local CPU gate ran. Original logs, source and
+assertion proofs and both size artifacts are outside Git under
+/tmp/codex-orderly-local-read-refresh. The first bans check sees a newer foreign
+Backpack inventory shrink on origin; merge actual tip before freeze and rerun.
+No source review, CI or landing clearance is implied by these owner results.
