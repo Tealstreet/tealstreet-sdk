@@ -6658,9 +6658,11 @@ managed Primary intent uses the host's default primary egress (physical routeNon
 Whole-root expiry is strict: one Timeout with no financial outcome, rows,
 INCOMPLETE marker or soft[]; parked continuations and late DATA cannot resume or
 finish a reused command. Ordinary released page transport/HTTP/parse failure or
-a child-only timeout while the root is live still emits the native command_error
-then soft[] for queries, discarding every prior page. Lookup rejects instead of
-claiming absence. Provider/preparation refusals before release are strict typed NotSent failures.
+a child-only timeout while the root is live emits the native command_error, then
+a query returns its accepted pages (rows of the failed page are dropped) with one
+command-owned INCOMPLETE marker; with no accepted rows it rejects with the typed
+failure instead of a soft[]. EEA composite reads stay strict failures, as their
+caps and stalls are. Lookup rejects instead of claiming absence. Provider/preparation refusals before release are strict typed NotSent failures.
 Synchronous child/submission refusals are also strict, with the shared Read
 projection (outcome None). Native
 lookup codec errors retain their untyped kind. Serialization errors finalized
