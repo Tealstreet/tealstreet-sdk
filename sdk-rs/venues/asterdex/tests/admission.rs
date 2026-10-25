@@ -223,7 +223,8 @@ fn account_user_id(options: Options, body: &str) -> Result<String, String> {
     engine.start(NOW);
     engine.handle(NOW, Event::Command(Command::FetchAccount { command: 1 }));
     let mut pending: Vec<_> = prepared_actions(&mut engine, NOW);
-    for _ in 0..32 {
+    // Managed reads add their deadline timer actions to the startup traffic.
+    for _ in 0..128 {
         let Some(action) = pending.pop() else { break };
         match action {
             Action::Notice(safe_cex_engine::Notice::CommandDone { command: 1, result }) => {
