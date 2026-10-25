@@ -1,7 +1,7 @@
 # Credential-only trusted setup
 
-Status: PLAN, revision 2. It folds in kuhwxi's review (B1-B5, M1-M2), fe7lgm's
-review (points 1-5) and ddi2il's ruling on G1 and G3. No source before CLEAR.
+Status: PLAN, revision 3. It folds in kuhwxi's reviews (B1-B5, M1-M2, then R1,
+X1, X2), fe7lgm's review (points 1-5) and ddi2il's ruling on G1 and G3. No source before CLEAR.
 Owner: shared credential core (m26ps4). First consumer: GRVT, whose recipe is
 zs5e83's (plan `c13acb15e56` on `feat/rust-grvt-write-funnel-plan`). This plan
 does not edit that recipe; G2, G4 and G5 stay open for zs5e83.
@@ -47,7 +47,9 @@ must not keep the raw key.
   ref**. The absence is explicit, private to the type, and reachable only
   through accessors.
 - **Declared acceptance:** whether a family accepts such a primary is declared
-  setup policy, enforced at registry and setup. It is never a venue filter.
+  setup policy, accepted only at registry construction. It is never a venue
+  filter. Required families keep today's terminals; refusing key-only for them
+  is left to the ApeX fix lane and later per-family PRs (ddi2il ruling).
 - **Key-presence fact:** trusted setup records one non-sensitive fact about the
   supplied primary key, `Absent | Empty | Blank | Nonblank`. The fact is
   computed before the key is consumed, and nothing keeps the key.
@@ -91,6 +93,10 @@ cutover.**
   `KeyRef(String::new())` and `KeyRef("".into())` / `KeyRef::from("")`, except
   the two validation-metadata sites (`signer.rs` passphrase and extra
   placeholders, about lines 319 and 324). Those never touch `signing`.
+- `signing_opt()` must be `pub` across crates, so the same bans rule rejects
+  any call to it outside `crypto/src/signer.rs`, `registry/src/construction.rs`
+  and tests (kuhwxi X2). Otherwise it becomes the escape hatch the private
+  field closes.
 - **`validate()` keeps its meaning:** it requires a valid `signing`, so
   validating families still drop the slot. `validate_credential()` accepts an
   absent `signing` but still checks the credential, passphrase, stable id and
@@ -107,26 +113,24 @@ cutover.**
   than a raw grep, which also matches `io.signing`, entropy and JS fields
   (M1). It is not a gate.
 
-**D2 (G1, decided): declared signing policy, enforced at setup.**
+**D2 (G1, decided): declared signing policy; Optional is accepted at registry
+construction, and Required is unchanged.**
 - **The field:** `IdentitySetupPolicy.signing: SigningPolicy`, either
   `Required` (the default) or `Optional`. Serde gives it a default and skips it
   when it equals `Required`. The TS construction-rules `IdentitySetupPolicy`
   gains `signing?: 'optional'` and emits it only when it is Optional. A
   round-trip test pins that every existing policy serializes byte-for-byte as
   before (M2).
-- **Required:** setup refuses a primary whose credential is present but
-  signing is absent. It fails `InvalidRequest` with the existing
-  `invalid("Invalid local signer setup")` terminal, before any provider
-  install.
-  - Exception: when today's family-specific builder already decides that
-    case, by never building a key-only `LocalIdentity` (Backpack's
-    `present(key) && present(secret)`, for example), that builder's gate runs
-    first and stays unchanged.
-  - Exception: when today's slot is incomplete and is merely filtered later,
-    K1, K4 and K5 pin the before and after terminal. Any change needs an
-    explicit ruling and is not silently collapsed.
-- **Optional:** setup installs the credential-only identity, and the venue
-  uses `validate_credential()`.
+- **Required is today's behaviour, byte for byte** (kuhwxi R1, option (a)).
+  Setup installs the slot exactly as now, with `signing: None` where it
+  writes `""` today. The slot fails `validate()`. A validating crate filters
+  it, and a non-validating crate receives it, as now. There is no new setup
+  refusal: a user who supplies only a key sees the same terminal in every
+  family (K1, K4, K5).
+- **Optional:** setup installs the same slot. Only an Optional family's
+  construction accepts it, through `validate_credential()`, which the registry
+  calls when it hands the slot to construction. Acceptance therefore comes
+  from declared policy, never from a venue filter (fe7 point 1).
 - **External boundary (B1):** remote, delegated and hosted `Identities` JSON
   that omits `signing`, or sends `null`, is refused at construction unless the
   family's primary policy is Optional. A Required family keeps today's
@@ -189,11 +193,11 @@ Shared-core REDs. Each fails on `ad0b74afdf8` for the stated reason.
 | C2 | An omitted key, `"key": null` and `"key": ""` give `Absent`, `Absent` and `Empty` | serde default collapses them |
 | C3 | Presence matrix: absent, `null`, `""`, `"  "`, `"\u{85}"` (NEL, trimmed), `"\u{feff}"` (BOM, kept), `" k "`, `"k"`. Run through native setup and the WASM JSON entry TS actually calls | no fact exists |
 | C4 | `signing_ref()` on `None` refuses an HTTP sign prepare. Custody: the signing reservation and the Context are released (`Serial::signs` and the planned-write reservation), the terminal is `InvalidRequest` + `NotSent`, a peer command on the same registry still prepares, and there is no Sign effect or HTTP | no accessor; an empty ref reaches the provider |
-| C4s | A socket SessionAuth login that signs, given `None`, refuses before connect or send, with the same custody | same |
+| C4s | A socket SessionAuth login that signs, given `None`, refuses before send, with the same custody, and does not reconnect: a second-connection count of 0 under the X1 fix lane's terminal sign-failure path | same; today `sign_failed` on WsSend closes the socket and the supervisor reconnects with backoff |
 | C4p | Serial Plan: an unsigned call settles, then a signing call with `None` fails that call `NotSent`. The projection keeps the settled call's facts, with no Rejected or NotSent overclaim | same |
 | C5 | Control on `Slots` alone: Mutation and SessionAuth over a credential-only primary choose Primary, and `session_egress` is granted | (control) |
 | C6 | Identity JSON: omitting `signing` gives `None` and serializing `None` omits the field. `"signing": ""` fails `validate()` and `validate_credential()` | the field is mandatory |
-| C7 | A Required family refuses a key-only local setup at registry construction, with no venue code involved; an Optional fixture family gets the identity | no policy |
+| C7 | A Required family's key-only setup gives today's pinned terminal, with no venue code change. Only an Optional fixture family receives a slot that `validate_credential()` accepts at construction | no policy |
 | C8 | A Required family's remote, delegated and hosted identities without `signing` are refused at construction with today's terminal | after D1 they would parse as `None` |
 | C9 | `SetupFacts` `Debug` and serde output contain only the variant name | no type |
 
@@ -211,10 +215,25 @@ Behaviour-neutral controls, green before and after:
 - **K4:** for apexomni, breakoutprop, grvt, hyperliquid, lighter, orderly,
   paradex and polymarket, pin the key-only and secret-only setup terminal:
   kind, outcome and message before and after. For each crate either pin it,
-  or show that the crate never consumes `Identity`.
+  or show that the crate never consumes `Identity`. For apexomni, pin the
+  terminal after the X1 fix lane (its admit refusal of an empty signing ref),
+  not today's reconnect loop. This control depends on that lane.
 - **K5:** `construction::resolve` gives the same `Resolved` for a `None` and a
   `Some("")` signing, for `Input::Secret` and `AsterLocalAuth`.
 - **K6:** the IdentitySetupPolicy round-trip from M2.
+
+## Dependency: ddi2il's socket sign-failure fix lane (X1, kuhwxi's)
+
+Today a socket login whose signing fails non-transiently goes through
+`engine.rs` `sign_failed` on WsSend. That closes the socket and calls
+`on_close`, so the venue supervisor reconnects with backoff indefinitely; ApeX
+reconnects about every 30 seconds. The fix lane:
+- makes such failures (Unavailable, or an invalid ref) an engine-level
+  terminal with a notice;
+- adds an ApeX admit check that refuses an empty signing ref.
+
+C4s and the apexomni K4 row assert the post-lane terminal, so phase 2 lands
+after that lane, or carries those two tests as dependent and records that.
 
 ## Phases
 
