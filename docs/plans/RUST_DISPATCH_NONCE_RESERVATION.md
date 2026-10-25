@@ -624,3 +624,23 @@ temporary rule, readiness requires a same-toolchain current-tip pair with own
 combined delta at most zero; fitting the earlier absolute ceiling is no longer
 enough. Keep the PR held with no push or dispatch pending that gate or a new
 overseer ruling.
+
+The landed size stack #2102 (`9b05c9ac452`) restores combined headroom, and
+the overseer lifts the temporary own-delta-at-most-zero rule. Retain the smaller
+capability path, its captured-permission conjunction and all hardening controls;
+the rejected split-entry experiment remains history only. The object-safe static
+selector and separate captured release-mode fact are the final API shape.
+
+The same-path, pinned-toolchain pair against bare `9b05c9ac452` measures
+13,837,708 bytes before this change and 13,870,956 after it: +33,248 bytes,
+284,820 below the unchanged combined ceiling. Paired standalone deltas are
+Bybit +522, Bitget/USDC +686, Aster +325 and Kraken/Spot +19,720 bytes; every
+family fits, and Node/Web artifacts match. The remaining non-adopter cost is
+disclosed for the previously requested follow-up rather than further trimming.
+
+The automatic composition preserves the incoming size stack. Its metadata
+release test fixture needs only the mechanical Mutable-registration cutover,
+with identical scheduler admission and assertions. Workspace all-target and
+WASM32 checks, all seven seeded strict feature modes, scoped native/JS controls,
+and the refreshed four-control real-WASM engine-plus-recipe proof pass. Existing
+ignored Plan tests remain unchanged. Native-family adoption remains separate.
