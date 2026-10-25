@@ -247,8 +247,8 @@ Credentials::auth uses timestamp=floor(nowMs/1000), expiration=timestamp+300s.
 Preserve that 300s relationship; it does not extend the <=5s signing window.
 Order timestamps are native milliseconds and remain frozen across any separately
 authorized same-command re-sign. No new automatic resend. Expired command or
-signed validity refuses; reconstruction applies only to future commands. Before
-security approved these peer time-policy pins: read peer wall time at the
+signed validity refuses; reconstruction applies only to future commands.
+Security approved these peer time-policy pins: read peer wall time at the
 signing moment and check the original effective deadline first; equality or
 later refuses. Auth expiration must equal timestamp + 300 seconds exactly;
 auth timestamp seconds must be within [peer_now - 30s, peer_now + 30s] inclusive.
