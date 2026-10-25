@@ -221,3 +221,15 @@ Scoped strict clippy for the new test target and rustfmt --check PASS. The
 original RED log is /tmp/codex-ih35js-bitget-history-originals.log; native controls
 and strict checks have separate logs. These are local execution receipts only,
 not a source/CI/READY claim.
+
+## Production authorization and strengthened originals
+
+Overseer authorized local production against tip b0ee0a9a4d5 while dazzy3
+reviews. Both dazzy3 and fe7lgm cleared plan/originals4207b99c1e9. Before source,
+the originals pin the literal unstamped Read refusal (InvalidInput,
+"Request context was revoked", no outcome), no Done/Failed or reissued page
+from unclaimed bytes, native empty public headers, combined credential-before-
+unsupported/range precedence and the whole-walk helper's one-page clock slack.
+The native HTTP408/500+40085 promotion remains exercised through real replies;
+source adds408 without40085 retry plus typed Internal/provider no-retry.
+The CPU rule for this PR is **q <= T**, not the historical absolute bound.

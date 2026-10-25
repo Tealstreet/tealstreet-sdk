@@ -226,6 +226,7 @@ fn caller_wait_bounds_the_whole_walk_across_valid_pages() {
     let start = h.now;
     query_with_wait(&mut h, fills(), 30_000);
     walk(&mut h, &before, 5_000.0, 20);
+    // walk advances before replying: slack is one page latency plus a timer tick.
     assert!(
         h.now <= start + 30_000.0 + 5_200.0,
         "walk kept paging to {} after the 30 s caller wait",
@@ -267,6 +268,8 @@ fn unstamped_receipt_fails_closed_without_a_default_root() {
     let error = terminals[0].as_ref().unwrap_err();
     // The initial Read entry refusal has no outcome; today the walk starts and
     // its signing times out NotSent at this clock instead.
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput), "{error:?}");
+    assert_eq!(error.message, "Request context was revoked");
     assert_eq!(error.outcome, None, "{error:?}");
 }
 
@@ -327,7 +330,7 @@ fn an_expired_root_leaves_an_unrelated_live_query_running() {
 // ---- Compatibility controls ----
 
 #[test]
-fn entry_refusals_keep_their_text_and_order() {
+fn entry_refusals_keep_their_native_text_and_credentials_precedence() {
     let mut public = Harness::public();
     query_with_wait(&mut public, fills(), 60_000);
     let terminals_public = terminals(&public);
@@ -335,6 +338,27 @@ fn entry_refusals_keep_their_text_and_order() {
         terminals_public[0].as_ref().unwrap_err().message,
         "Bitget credentials are required"
     );
+
+    for query in [
+        Query::OrderByClientId {
+            symbol: "BTCUSDT".into(),
+            client_order_id: "x".into(),
+        },
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: Some(10.),
+            to_ms: Some(5.),
+            limit: None,
+        },
+    ] {
+        let mut keyless = Harness::public();
+        query_with_wait(&mut keyless, query, 60_000);
+        assert_eq!(
+            terminals(&keyless)[0].as_ref().unwrap_err().message,
+            "Bitget credentials are required"
+        );
+    }
 
     for (query, text) in [
         (
@@ -420,13 +444,8 @@ fn public_trades_stay_unsigned_without_credentials() {
         60_000,
     );
     let request = h.take("/market/fills");
-    assert!(
-        !request
-            .headers
-            .iter()
-            .any(|(name, _)| *name == "ACCESS-KEY"),
-        "public trades were signed"
-    );
+    // Native public trades emits no headers, even when private keys are configured.
+    assert!(request.headers.is_empty(), "public trades acquired headers");
 }
 
 fn query_raw(h: &mut Harness, query: Query) -> Vec<Action> {
@@ -516,6 +535,7 @@ fn unsigned_public_trades_waits_for_route_preparation() {
 fn unclaimed_response_cannot_complete_history() {
     let mut h = Harness::classic();
     let actions = query_raw(&mut h, fills());
+    let fills_before = fills_requests(&h);
     let request = actions
         .iter()
         .find_map(|a| match a {
@@ -544,13 +564,29 @@ fn unclaimed_response_cannot_complete_history() {
     assert!(
         !actions.iter().any(|a| matches!(
             a,
-            Action::Notice(safe_cex_engine::Notice::CommandDone {
-                command: COMMAND,
-                ..
-            })
+            Action::Notice(
+                safe_cex_engine::Notice::CommandDone {
+                    command: COMMAND,
+                    ..
+                } | safe_cex_engine::Notice::CommandFailed {
+                    command: COMMAND,
+                    ..
+                }
+            )
         )),
-        "unclaimed bytes must not publish history completion"
+        "unclaimed bytes must not emit any history terminal"
     );
+    assert!(
+        !actions.iter().any(|a| match a {
+            Action::Http(r) => r.url.contains("/order/fills"),
+            Action::ManagedHttp(http) =>
+                matches!(http.as_ref(), HttpAction::Prepare { request, .. }
+            if request.url.contains("/order/fills")),
+            _ => false,
+        }),
+        "unclaimed bytes must not issue a replacement page"
+    );
+    assert_eq!(fills_requests(&h), fills_before);
 }
 
 #[test]
