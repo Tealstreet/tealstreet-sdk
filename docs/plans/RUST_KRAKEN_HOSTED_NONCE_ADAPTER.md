@@ -15,45 +15,52 @@ registry Input::Http has no nonce or request structure, its formatter expects
 32-byte MACs, and signHostedHttp has no Kraken codec. Reusing those paths as-is
 cannot certify a working Kraken adapter.
 
-Use a separately bounded signing-only request capture, not a second nonce
-allocator or a digest-only legacy WS fallback. Proposed shared-owner seam:
+## Shared API disposition (m26ps4)
 
-- The engine-side provider validates the entire owned Kraken operation graph,
-  receipt and bounded HTTP descriptor before any callback. Nonce comes ONLY from
-  the original receipt; presence/absence, complete receipt equality and descriptor/
-  header/form agreement are mandatory. Exact canonical decimal survives the remote
-  HTTP config as Futures Nonce header / Spot nonce form field. Selected opaque
-  refs stay local, bound to the configured account/slot, never peer-selected.
-  Bind exact credential presentation and the trusted stable subject too; a peer
-  must not silently substitute its primary identity for a selected Secondary.
-  Existing remote callbacks refuse Secondary and hosted captures select Primary:
-  explicit bound-slot transport/peer ownership is another shared API source gate.
-- The signing peer accepts method, exact canonical path/form, supplied nonce,
-  protocol stamp and clock revision in a closed capture input. It selects its
-  own installed identity, checks network/method/path/form and nonce agreement,
-  and builds the actual Kraken canonical work. Factor the existing pure recipe
-  builder once for this capture; do not copy HMAC/preimage logic into TS. The
-  capture returns SignRequest work only: it is not a SignStep and cannot queue
-  or mint a NonceClaim. Dispatch preparation remains the only reserver.
-- The shared provider supports the bounded SHA256/result-part/HmacSha512 graph
-  and raw 64-byte MAC result with canonical padded Base64 presentation. Preserve
-  the existing HmacSha256 families and their exact 32-byte validation. Family
-  codec metadata owns the graph/encoding; no arbitrary algorithm fallback.
-- A standalone HTTP codec assembles and validates the request with native byte
-  order: Futures sorted form/query, stripped signing path, APIKey/Authent/Nonce;
-  Spot exact insertion-order body with nonce LAST, API-Key/API-Sign. Preserve
-  transport-owned headers but deny authentication replacement by callbacks.
-  Never instantiate a TS venue, call its nonce-generating interceptor, upload
-  material, parse nonce through Number, or reserve on the peer.
-- The existing single-use hosted capture owns raw deadline, revision, receipt
-  equality, abort/dispose and duplicate/late results. Peer completion attests the
-  exact nonce and bytes; final engine Claim still enforces nonce release order.
-  Stale Claim repair forwards its NEW receipt and recomputes its NEW MAC.
+Direction CLEAR on c8b5513f108; source and API spelling remain gated on m26ps4's
+companion envelope plan. This is the first HMAC descriptor in ONE shared
+structured-preimage transport, also covering #8169's hosted Stark descriptors
+later. Do not ship a Kraken-only capture API or a bare-digest WS fallback.
 
-This is an API direction to review with m26ps4 and uufub4 before shared runtime
-changes: exact descriptor/receipt transport and pure capture boundary are not
-claimed to exist. Public capture cannot override a dispatch recipe's nonce.
-No construction-rules runtime enablement until the complete proof is CLEAR.
+- Envelope: version, attempt id, original absolute attempt deadline, COMPLETE
+  receipt (presence/absence significant), typed selected CredentialSlot, and a
+  closed family operation descriptor. First operations: kraken.futures.http and
+  kraken.spot.http; paradex.auth/paradex.order join through the companion plan.
+  Kraken carries method, canonical path/form, nonce, stamp and clock revision;
+  the peer recomputes the actual pure Kraken work. The deadline is never renewed
+  or extended by transport. Current test kind krakenHttp is provisional only.
+- Identity: the slot comes from the engine Selection, never an opaque KeyRef.
+  The peer resolves its OWN installed identity for exactly that slot, verifies
+  its bound account/network/trusted stable subject against the descriptor and
+  refuses a missing slot. No Primary fallback or caller-chosen peer reference.
+  Secondary remains read-only: no Mutation or SessionAuth; both engine and peer
+  enforce it. Today's remote-Secondary refusal/hosted-Primary-only restriction
+  can be lifted only through this typed slot field. On return the engine checks
+  exact Present credential equality against the original owned operation graph.
+- Nonce: canonical unsigned u64 DECIMAL JSON STRING in receipt and descriptor;
+  never JSON number, JS Number, exponent, sign, leading zero or over-u64 value.
+  The peer refuses descriptor/header/form/receipt disagreement before signing.
+  Original dispatcher receipt is the sole authority; the peer never reserves,
+  mints a claim, queues or mutates the retained recipe. Repair transports its NEW
+  complete receipt and obtains a NEW MAC. The factored builder is signing-only
+  work, never a SignStep or a dispatcher nonce override.
+- Graph: family codec metadata declares Present -> Sha256 -> Result-part ->
+  HmacSha512, exact 64-byte MAC and canonical padded Base64. Existing HmacSha256
+  families retain exact 32-byte validation; no generic algorithm fallback.
+  Validate the complete graph/descriptor/identity before callbacks. Standalone
+  HTTP formatting preserves Futures sorted form/query, stripped signing path,
+  APIKey/Authent/Nonce order and Spot insertion-order nonce-LAST body,
+  API-Key/API-Sign order. Authentication headers cannot be substituted. No TS
+  venue/interceptor, copied preimage/HMAC implementation or secret upload.
+- Custody: attempt-id matching and full receipt echo; duplicate/late results are
+  Stale under existing attempt custody. Cancel, timeout and dispose release once.
+  Preserve clock-revision and final engine Claim/released-floor/repair fences.
+
+Sequencing: D1 (#2132) READY first, then m26ps4's G3/G6 seams, then the companion
+envelope plan (including this HMAC descriptor). Until that plan lands, this lane
+stays at compiling REDs. No shared provider/capture runtime or construction-rule
+activation before the reviewed companion contract. Local/hosted users keep their
+working routes; #2126 remains HELD and NX mode 2 remains parked.
 
 ## Evidence order
 
@@ -65,7 +72,8 @@ No construction-rules runtime enablement until the complete proof is CLEAR.
    rounded-number, path/method/host mismatch, changed receipt/credential and
    callback-result-width controls. A refusal before family admission alone is
    not evidence that the future field validator ran.
-3. Implement only the reviewed shared capture/provider/standalone codec, with
+3. After the companion plan lands, implement only the reviewed shared envelope/
+   capture/provider/standalone codec, with
    feature flags and live bridge admission unchanged. Scoped native registry,
    JS host and TS tests; existing hosted family controls stay exact.
 4. Drive actual EngineHost plus actual Kraken-family WASM and real recipe in
@@ -80,8 +88,9 @@ No construction-rules runtime enablement until the complete proof is CLEAR.
    signing-task drain on success, cancellation, timeout and disposal.
 6. Receipt: exact heads, harness hash, Rust/bindgen/Binaryen versions, artifact
    SHA256s, commands/logs, literal vectors and independent Node recomputation.
-   Merge actual landing tip first; Kraken+combined sizes on composed tree and
-   Bybit+Bitget too for generic engine changes, fixed budgets/profiles. JOBS=4,
+   Merge actual landing tip first. Shared provider/codec changes are generic:
+   measure Kraken, Bybit, Bitget and combined on the composed tree, even while
+   bridge activation stays off. Keep fixed budgets/profiles. JOBS=4,
    one build at a time; delete own targets after each measurement/review build.
 
 Reviewers: uufub4 dispatch/nonce/capture fit; m26ps4 shared provider/setup and
