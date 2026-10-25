@@ -529,3 +529,14 @@ CreateOrder rather than the pre-D1 field shape compiled at this frozen parent.
 G3/G6 in #2149 is still the next shared gate. No newer engine input is silently
 merged into the published #2146 A3d30/B7aa diagnostic pair, and no compatibility
 shim or optional-signing emulation is added to this recipe checkpoint.
+
+
+Plain-merged 702afdffef3759bd0bab5502774ce55ba7ae1a18 locally after the
+explicit stale-base instruction. Runtime composition was automatic; README
+and CALLERS retain the entire incoming file plus the unchanged own suffix.
+CreateOrder now obtains its required ref through the landed signing_ref()
+accessor, the one mechanical adjustment to #2132's optional-ref representation.
+There is no signing_opt(), empty sentinel or G6 latch workaround. The provider
+recipe remains a signed-operation API; credential-only login selection and
+installed native cutover remain at the #2149 boundary. The 8c695 receipt is the
+pre-composition execution receipt; it is not a new composed-test claim.

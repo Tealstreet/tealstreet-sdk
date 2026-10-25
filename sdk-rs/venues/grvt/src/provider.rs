@@ -186,7 +186,7 @@ impl CreateOrder {
         let expected_address =
             sign::parse_address(&expected_signer).map_err(|_| SignError::InvalidRequest)?;
         Ok(Self {
-            signing: identity.signing.clone(),
+            signing: identity.signing_ref()?.clone(),
             expected_signer,
             expected_address,
             order,
