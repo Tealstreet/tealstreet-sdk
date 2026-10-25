@@ -559,6 +559,9 @@ impl<P> Cx<'_, P> {
             body,
         };
         let signing_attempt = if let Some(step) = step {
+            if self.io.signing_refused.is_some() {
+                return Err((pending, Error::Invalid));
+            }
             #[cfg(feature = "http-plans")]
             let attempt = admission
                 .and_then(|admission| admission.signing)

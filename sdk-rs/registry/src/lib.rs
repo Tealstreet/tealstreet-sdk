@@ -659,6 +659,10 @@ pub fn prepare_local_signer_for(
 #[cfg(feature = "apexomni")]
 const APEXOMNI_NO_SECONDARY: &str =
     "ApeX has no read credentials; a secondary key is not supported";
+/// Every ApeX private request is signed, so a key without its secret is
+/// refused at setup rather than retried as an unsignable account.
+#[cfg(feature = "apexomni")]
+const APEXOMNI_SECRET_REQUIRED: &str = "ApeX requires the API secret with the API key";
 /// The legacy start refusal, now at trusted setup before any order exists.
 #[cfg(feature = "apexomni")]
 const APEXOMNI_SEED_INVALID: &str = "Invalid OmniKey seed: expected 65-byte Ethereum signature";
@@ -716,6 +720,13 @@ fn apexomni_admit(
     use safe_cex_engine::signing::{Algorithm, ExtraKey, Operation, PayloadPart, SignRequest};
     if identities.secondary.is_some() {
         return Err(invalid(APEXOMNI_NO_SECONDARY));
+    }
+    if identities
+        .primary
+        .as_ref()
+        .is_some_and(|identity| identity.signing.0.is_empty())
+    {
+        return Err(invalid(APEXOMNI_SECRET_REQUIRED));
     }
     if let Some(role) = identities
         .primary

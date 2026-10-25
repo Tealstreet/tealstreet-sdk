@@ -26,7 +26,7 @@ fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
     };
     assert!(signer.sign_now(&request).is_ok());
     signer.remove(&identity.signing);
-    assert_eq!(signer.sign_now(&request), Err(SignError::Unavailable));
+    assert_eq!(signer.sign_now(&request), Err(SignError::InvalidRequest));
     signer.remove(&identity.credential);
     let request = SignRequest {
         receipt: Default::default(),
@@ -35,5 +35,5 @@ fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
             key: identity.credential,
         }],
     };
-    assert_eq!(signer.sign_now(&request), Err(SignError::Unavailable));
+    assert_eq!(signer.sign_now(&request), Err(SignError::InvalidRequest));
 }

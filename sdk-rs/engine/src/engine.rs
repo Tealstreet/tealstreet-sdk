@@ -1589,6 +1589,10 @@ struct Io<P> {
     host_algorithms: Option<Vec<crate::signing::Algorithm>>,
     dispatch_now: f64,
     signing_admission: Vec<(Action, crate::signing::SignError)>,
+    /// A provider's first permanent refusal; later signed actions fail with it.
+    signing_refused: Option<crate::signing::SignError>,
+    /// Socket roles whose signing was refused; they are never reconnected.
+    refused_roles: u8,
     streams: crate::IdMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: crate::IdMap<RequestId, Incoming>,
     timers: crate::IdMap<TimerId, ()>,
@@ -1696,6 +1700,8 @@ impl<P> Default for Io<P> {
             host_algorithms: None,
             dispatch_now: 0.,
             signing_admission: Vec::new(),
+            signing_refused: None,
+            refused_roles: 0,
             streams: Default::default(),
             incoming: Default::default(),
             timers: Default::default(),
@@ -1908,11 +1914,21 @@ impl<P> Cx<'_, P> {
         self.io.private_feed_policy
     }
 
+    /// `SocketId(0)` stands for a connect the engine suppressed.
+    fn inert_socket(&self, socket: SocketId) -> bool {
+        socket.0 == 0
+            && (self.io.public_feed_policy != PublicFeedPolicy::Direct
+                || self.io.refused_roles != 0)
+    }
+
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
         let spec = spec.into();
         if self.io.managed_socket_active()
             || spec.channel == Some(SocketChannel::Public)
                 && self.io.public_feed_policy != PublicFeedPolicy::Direct
+            || spec.channel.as_ref().is_some_and(|channel| {
+                self.io.refused_roles & (1 << SocketRoles::role(channel)) != 0
+            })
         {
             return SocketId(0);
         }
@@ -1974,7 +1990,7 @@ impl<P> Cx<'_, P> {
         if !self.managed_send_allowed(socket) {
             return;
         }
-        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
+        if self.inert_socket(socket) {
             return;
         }
         self.io.opaque_entry_activity();
@@ -2009,7 +2025,7 @@ impl<P> Cx<'_, P> {
     /// use this after revoking the epoch, before native invalidation; public
     /// close can then enter retirement without recursively invoking itself.
     fn close_socket_transport(&mut self, socket: SocketId) {
-        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
+        if self.inert_socket(socket) {
             return;
         }
         self.io.opaque_entry_activity();
@@ -2167,6 +2183,10 @@ impl<P> Cx<'_, P> {
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
         self.io.opaque_entry_activity();
         self.io.assert_action_safe(&outbound);
+        if let Some(error) = self.io.signing_refused {
+            self.io.signing_admission.push((outbound, error));
+            return;
+        }
         let attempt = self.io.signing.next_id();
         // Exhaustion is handled through the same asynchronous failure event.
         let timer = if self.io.signer.as_ref().is_some_and(|s| s.immediate()) {
@@ -3626,6 +3646,7 @@ impl<V: Venue> Engine<V> {
         };
         if let Event::Signed { attempt, result } = event {
             if !self.io.signing.is_managed(attempt) || self.signing_pending(attempt) {
+                self.provider_refused(now, &result);
                 self.sign_completed(now, attempt, result);
             }
             if self.venue.cancel_needs_stored_order() {
@@ -4499,6 +4520,44 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    /// A provider's permanent refusal, or an invalid credential ref, means these
+    /// credentials can never sign; other preparation errors stay per request.
+    /// It fails once, visibly, and later signed actions and reconnects stop.
+    fn provider_refused(
+        &mut self,
+        now: f64,
+        result: &Result<crate::signing::SignResult, crate::signing::SignError>,
+    ) {
+        let local = self.io.signer.as_ref().is_some_and(|s| s.immediate());
+        if let Some(error) = result
+            .as_ref()
+            .err()
+            .copied()
+            .filter(|e| e.permanent(local))
+        {
+            self.refuse_signing(now, error);
+        }
+    }
+
+    fn refuse_signing(&mut self, now: f64, error: crate::signing::SignError) {
+        if self.io.signing_refused.replace(error).is_some() {
+            return;
+        }
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        cx.notice(
+            Level::Error,
+            log_code::CONFIG_INVALID,
+            format!("Signing cannot succeed with the installed credentials: {error}"),
+        );
+        if self.startup_watch_at.is_some() {
+            cx.startup_failed(error.venue_error());
+        }
+    }
+
     fn sign_failed(&mut self, now: f64, outbound: Action, error: crate::signing::SignError) {
         let mut cx = Cx {
             now,
@@ -4516,6 +4575,19 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
+                let refused = cx.io.signing_refused.is_some();
+                if refused && let Some(role) = cx.io.sockets.role_of(socket) {
+                    cx.io.refused_roles |= 1 << role;
+                }
+                #[cfg(feature = "managed-sockets")]
+                if refused
+                    && cx.io.managed_socket_active()
+                    && let Some(epoch) = cx.io.socket_driver.state.socket_epoch(socket)
+                {
+                    cx.stop_socket_feed(epoch.feed());
+                    self.flush_http_owner_retirements();
+                    return;
+                }
                 if cx.io.managed_socket_active() {
                     cx.close(socket);
                 } else {
@@ -4976,6 +5048,9 @@ impl<V: Venue> Engine<V> {
                             Ok(work) => work,
                             Err(error) => {
                                 let emitted = self.io.actions.len();
+                                if self.io.signing.take_credential_refusal() {
+                                    self.refuse_signing(now, error);
+                                }
                                 self.sign_completed(now, attempt, Err(error));
                                 self.queue_dispatch_callback_actions(&mut queued, emitted);
                                 continue;
@@ -4985,6 +5060,7 @@ impl<V: Venue> Engine<V> {
                             self.io.signer.as_ref().and_then(|s| s.sign_ready(&work))
                         {
                             let emitted = self.io.actions.len();
+                            self.provider_refused(now, &result);
                             self.sign_completed(now, attempt, result);
                             // Inline local completion retains original mixed action order.
                             self.queue_dispatch_callback_actions(&mut queued, emitted);
@@ -5423,6 +5499,12 @@ impl SocketRoles {
             SocketChannel::Private => 1,
             SocketChannel::Business => 2,
         }
+    }
+
+    fn role_of(&self, socket: SocketId) -> Option<u8> {
+        self.live
+            .iter()
+            .find_map(|(id, role)| (*id == socket).then_some(*role))
     }
 
     fn connected(&mut self, socket: SocketId, channel: &SocketChannel, health: &mut Health) {

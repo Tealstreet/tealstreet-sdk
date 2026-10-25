@@ -462,6 +462,19 @@ impl SignRequest {
             .collect()
     }
 
+    /// Refs come only from an identity, so an invalid one means the installed
+    /// credentials lack that material: no retry of this request can sign.
+    pub fn has_invalid_key_ref(&self) -> bool {
+        self.operations.iter().any(|op| match op {
+            Operation::Present { key }
+            | Operation::PublicAddress { key }
+            | Operation::PublicKey { key, .. } => !valid_key_ref(key),
+            Operation::Sign { key, payload, .. } => {
+                !valid_key_ref(key) || payload.iter().any(invalid_credential_part)
+            }
+            Operation::Sha256 { payload } => payload.iter().any(invalid_credential_part),
+        })
+    }
     /// Shared structural bounds also apply to injected providers. Expanded secret
     /// input bounds are enforced privately by the provider before allocation.
     pub fn validate(&self) -> Result<(), SignError> {
@@ -523,6 +536,10 @@ impl SignRequest {
         }
         Ok(())
     }
+}
+
+fn invalid_credential_part(part: &PayloadPart) -> bool {
+    matches!(part, PayloadPart::Credential { key } if !valid_key_ref(key))
 }
 
 /// Algorithms with a public form; consumers exist only for these two.
@@ -597,6 +614,15 @@ pub enum SignError {
     TimedOut,
 }
 impl SignError {
+    /// Whether no retry of the same credentials can succeed. A remote
+    /// provider's malformed result may be transient; a local one is not.
+    pub fn permanent(self, local: bool) -> bool {
+        match self {
+            Self::InvalidRequest | Self::Unsupported => true,
+            Self::InvalidResult => local,
+            Self::Unavailable | Self::Refused | Self::TimedOut => false,
+        }
+    }
     pub fn venue_error(self) -> crate::VenueError {
         use crate::{ErrorKind, Outcome, VenueError};
         let kind = match self {

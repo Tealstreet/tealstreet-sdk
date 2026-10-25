@@ -122,6 +122,8 @@ pub(crate) struct Dispatch {
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: crate::IdMap<RequestId, Pending>,
     next: crate::resource_ids::ResourceIds,
+    /// Set when a preparation named an invalid credential ref; taken once.
+    credential_refused: bool,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
@@ -134,6 +136,9 @@ impl Dispatch {
         self.pending.is_empty() && self.outbound.is_empty()
     }
 
+    pub fn take_credential_refusal(&mut self) -> bool {
+        std::mem::take(&mut self.credential_refused)
+    }
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
     }
@@ -426,7 +431,10 @@ impl Dispatch {
         {
             return Err(SignError::InvalidRequest);
         }
-        work.validate()?;
+        if let Err(error) = work.validate() {
+            self.credential_refused = work.has_invalid_key_ref();
+            return Err(error);
+        }
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
         if work
