@@ -313,8 +313,8 @@ generation and refused bound revision; it adds no owner map or secret cache.
 All selection, slot, delivery, binding, grant and window checks precede retry
 selection. The new managed attempt inherits the floor; an explicit foreign
 Session binding refuses before issue, and a serial continuation clears the seed.
-Read attempts=2 keep RetryPolicy Never and are admitted only for serial Session
-calls. Immediate Read continuation consumes only engine-recorded released
+Read attempts=2 keep RetryPolicy Never; the opt-in build admits the declaration,
+and selecting the auth attempt additionally requires a managed Session binding. Immediate Read continuation consumes only engine-recorded released
 Network/physical-timeout provenance. Generic retry and immediate write resend
 retain their existing gates and share the same declared second credit.
 
@@ -356,3 +356,12 @@ not proof of a request's Session binding. An unbound Read2 may be admitted, but
 serial_plan_session_resend refuses Invalid without a managed bearer; the extra
 source control pins that refusal without spending. No synthetic Session is
 created by admission and no generic Read retry reaches attempt 2.
+
+
+Final local feature-mode receipt: 35 serial Session controls pass. The explicit
+combined CI mode passes all engine targets (1554 PASS; the 10 existing ignored
+reconciliation controls remain ignored), with strict all-targets clippy and
+full bans/ratchets passing. claude-fe7lgm carried SOURCE CLEAR to eb8cd17f53e;
+the runtime remains exact e96870dfbb7. Paired size measures and the new frozen
+head's PR CI remain READY gates. Size receipts are attached to the PR once
+complete, without another source/config push.
