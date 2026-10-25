@@ -143,7 +143,8 @@ Hosted Rust Paradex and Polymarket construction refuses private material with
 is `hostedMode` or `remoteSigner`, including public-only accounts. Paradex `key`
 is public only with a configured `payloadSigner`; otherwise a nonempty key
 refuses. Polymarket key/L2 secret/passphrase and either family's secret or
-starkPrivateKey refuse. This follows field contracts, never scalar parsing;
+starkPrivateKey refuse. This follows declarative construction-rules field
+contracts, never scalar parsing;
 local and payload-callback-only modes keep their existing behavior.
 
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
