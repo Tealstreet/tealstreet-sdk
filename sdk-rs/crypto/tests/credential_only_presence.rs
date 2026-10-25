@@ -135,3 +135,27 @@ fn c11j_flag_is_not_injectable_and_takes_part_in_equality() {
         Identity::new(KeyRef("c".into()), None)
     );
 }
+
+/// D3 pin (kuhwxi): moving presence into Secret must not start accepting
+/// `null` for secret material. A null secret refuses through both entries;
+/// a null passphrase stays "no passphrase", exactly as before D3.
+#[test]
+fn d3_null_secret_refuses_and_null_passphrase_is_none() {
+    let null_secret = r#"{"primary":{"key":"k","secret":null}}"#;
+    assert!(matches!(
+        LocalSigner::from_json_with_facts(null_secret.into(), optional(), false),
+        Err(SignError::InvalidRequest)
+    ));
+    assert!(matches!(
+        LocalSigner::from_json_with_policy_and_mode(
+            null_secret.into(),
+            CredentialSetupPolicy::default(),
+            false
+        ),
+        Err(SignError::InvalidRequest)
+    ));
+    let null_passphrase = r#"{"primary":{"key":"k","secret":"s","passphrase":null}}"#;
+    let (_, ids, _) =
+        LocalSigner::from_json_with_facts(null_passphrase.into(), optional(), false).unwrap();
+    assert_eq!(ids.primary.unwrap().passphrase, None);
+}

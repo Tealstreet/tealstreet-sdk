@@ -26,6 +26,9 @@ RULES = [
     ('validate_credential outside the declared signing policy',
      re.compile(r'\bvalidate_credential\('),
      {'engine/src/signing.rs'}),
+    ('Secret::default (absent material) outside trusted setup; use Secret::empty',
+     re.compile(r'\bSecret::default\('),
+     {'crypto/src/signer.rs'}),
 ]
 TEST_ATTR = re.compile(r'^[ \t]*#\[cfg\(test\)\][ \t]*\n', re.M)
 
