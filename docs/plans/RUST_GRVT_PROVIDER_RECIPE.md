@@ -572,3 +572,12 @@ from_setup_with_facts / SetupFacts::primary_login seam after that landing.
 The Empty-intent, Optional operation refusal, no-latch and prior-journal controls
 remain required. No GRVT production feature, queue, login or inventory cutover
 is enabled at this recipe checkpoint.
+
+The overseer separately authorized publishing these recipes before adoption.
+The unchanged bf61 write-funnel originals use the same non-default
+private-adoption-originals test gate as Kraken, while their thirteen custody
+assertions remain RED. Explicitly enable that feature to run the original
+target. Default CI exercises the recipe and existing native controls; it does
+not claim the original custody gaps are fixed. The publication composes actual
+tip de1e2383410 with docs-only incoming-plus-own resolution. CI family sizes
+and one local composed combined measurement are required before READY.
