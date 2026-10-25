@@ -40,14 +40,27 @@ single-venue build other than the adopters stay byte-identical.
 1. **Role carrier.** Under `sign-meta`, `Selection` keeps its exact
    `CredentialRole` (set in `Slots::select`; accessor `Selection::role()`).
    Selection is built only there, so no venue literal changes.
-2. **Managed admission captures it.**
+2. **Managed admission captures it, from exactly one source.**
    - `Managed` gains `role: Option<CredentialRole>`.
-   - It is set from the nonce claim's Selection on the existing claimed path.
-   - It is also set from a new entry
-     `Cx::request_selected_managed(context, selection, session, method, url, body, step, pending)`.
-     That entry refuses `Invalid` unless `selection.slot()` equals the
-     Context Credential's slot, then forwards to `request_signed_managed`.
-   - Plain `request_signed_managed` records `None`.
+   - **Nonce recipes:** the nonce claim's own Selection (from the existing
+     validated capture, `ClaimAuthority.selection`) is the only source, and it
+     is recorded automatically on plain `request_signed_managed` and the
+     claimed read path. `request_selected_managed` REFUSES a recipe that
+     declares a nonce claim (`Invalid`, before any ID, Bind, provider work or
+     reservation), so two role sources can never disagree (9czdjh).
+   - **Other recipes:** a new entry
+     `Cx::request_selected_managed(context, selection, session, method, url, body, step, pending)`
+     records `selection.role()`. Plain `request_signed_managed` records `None`
+     for them.
+   - **Consistency, on both paths** (m26ps4 F1). Admission refuses `Invalid`
+     with nothing queued unless:
+     - the selection slot equals the Context Credential's slot;
+     - Read and PrimaryRead go with an `Operation::Read` Context;
+     - Mutation goes with a Mutation Context;
+     - SessionAuth goes with an `Owner::Session` Context;
+     - a Session-owned Context takes only SessionAuth;
+     - a Secondary slot never goes with Mutation or SessionAuth.
+     On the nonce path the claim's role is checked the same way.
    - `Credential` and `Policy` are unchanged (venues build them as literals).
 3. **Accessor.** `Engine::sign_meta(task: RequestId) -> Option<SignMeta>`.
 
@@ -79,14 +92,24 @@ single-venue build other than the adopters stay byte-identical.
      across re-sign, never `now + timeout_ms`;
    - `slot`: the Context Credential's slot.
 
-   Non-managed and ownerless tasks are `None`, so they refuse v2 and keep v1.
+   Non-managed and ownerless tasks (`sign_http`, `send_signed`,
+   `connect_signed`) are `None`, so they refuse v2 and keep v1; they are never
+   relabelled SessionAuth. Canceled, expired, disposed, completed and
+   superseded tasks are `None`. The metadata is descriptive only: it grants no
+   send, callback or key-selection authority.
+
+   An Optional family's intentionally absent signing ref (m26ps4 phase 3, D6)
+   refuses `SigningNotConfigured` in Prepare, before any `Action::Sign`, so
+   `sign_meta` never sees such a task.
 4. **Hosts.**
    - WASM: an `AnyEngine::sign_meta` default `None`, forwarded by the blanket
      impl, and a `signMeta(attempt)` export in a `sign-meta` block. It returns
      a plain object or `undefined`.
-   - Native: the same method.
-   - Feature wiring: the wasm and native `kraken` and `paradex` features
-     enable `safe-cex-engine/sign-meta`.
+   - Native: the same method, behind an explicit native-host `sign-meta`
+     feature that enables `safe-cex-engine/sign-meta`. The native host has no
+     per-family switches, so it forwards no family rows.
+   - Feature wiring: the wasm `kraken` and `paradex` features enable
+     `safe-cex-engine/sign-meta`.
    - Size scope: single-venue Bybit and Bitget builds stay byte-identical. The
      combined build links the feature and reports its delta.
 5. **`binding.generation`.** This is not engine data. Identities and the signer
@@ -98,7 +121,8 @@ single-venue build other than the adopters stay byte-identical.
 
 ## Originals (before source)
 
-Each runs on real admission and Prepare, with `sign-meta`:
+Each runs on real admission and Prepare, with `sign-meta` (nonce cases also
+with `dispatch-nonce`):
 
 1. A managed Mutation via `request_selected_managed` gives `Some` with owner
    Managed{Attempt}, slot Primary, role Mutation, and deadline equal to the
@@ -113,13 +137,23 @@ Each runs on real admission and Prepare, with `sign-meta`:
    unknown, finished and released tasks are all `None`.
 6. A selection/Context slot mismatch on `request_selected_managed` is
    `Invalid` with nothing queued.
-7. `Action::Sign`'s JSON shape is unchanged (field set pinned).
-8. Feature off: the existing suites pass unchanged, and paired Bybit and
-   Bitget single-venue sizes are 0.
+7. `Action::Sign`'s shape is unchanged (field set pinned).
+8. Feature off: the existing suites pass unchanged.
+9. A nonce-declaring recipe through `request_selected_managed` is `Invalid`
+   before any ID, Bind, provider work or reservation, even when its role agrees.
+10. A nonce recipe on plain `request_signed_managed` reports the claim's role.
+    A nonce stale repair gives a new task with the same managed Attempt and the
+    same raw deadline and role, and the old task is `None`.
+11. Each role/Context mismatch (Read role on a Mutation Context, Mutation on a
+    Read Context, SessionAuth on a Command Context, Mutation on a Session
+    Context, Secondary with Mutation) is `Invalid` with nothing queued, on the
+    selected path and, where reachable, the nonce path.
+12. Canceled and expired tasks are `None`.
 
 ## Gates
 
 Engine tests with and without `sign-meta`; clippy `-D warnings`; fmt; bans
-and ratchets; paired Bybit, Bitget and combined sizes on the composed tip.
+and ratchets. Four-artifact paired sizes on the composed tip: Kraken, Bybit,
+Bitget and combined, each reported as measured (no assumed zero).
 Consumer adoption (Kraken managed signing, Paradex moving off `SignPayload`)
 and the v2 host channel are separate PRs.
