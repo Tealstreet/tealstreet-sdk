@@ -220,6 +220,7 @@ struct CancelAck {
     finalized: HashMap<String, OrderStatus>,
     fills: Vec<(String, f64)>,
     problem: Option<String>,
+    refusals: HashMap<String, NativeCode<'static>>,
 }
 fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
     let result: CancelResult =
@@ -232,15 +233,27 @@ fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
     let mut accepted = HashSet::new();
     let mut finalized = HashMap::new();
     let mut problem = None;
+    let mut refusals = HashMap::new();
     let mut fills = Vec::new();
     for row in rows {
         if !ids.contains(&row.order_id) || !seen.insert(row.order_id.clone()) {
             accepted.remove(&row.order_id);
             finalized.remove(&row.order_id);
+            refusals.remove(&row.order_id);
             problem = Some("Phemex cancel identity mismatch".to_string());
             continue;
         }
         if row.code != 0 || row.biz_error != 0 || row.exec_status.eq_ignore_ascii_case("Rejected") {
+            refusals.insert(
+                row.order_id.clone(),
+                if row.code != 0 {
+                    NativeCode::Int(row.code)
+                } else if row.biz_error != 0 {
+                    NativeCode::Int(row.biz_error)
+                } else {
+                    NativeCode::Text("Rejected")
+                },
+            );
             problem = Some(format!(
                 "Phemex cancel row rejected: {} {}",
                 row.code, row.biz_error
@@ -282,6 +295,7 @@ fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
         finalized,
         fills,
         problem,
+        refusals,
     })
 }
 

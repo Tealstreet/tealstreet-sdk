@@ -754,7 +754,7 @@ impl Venue for PhemexPerpetuals {
             && (e.error.is_some() || e.code.is_some_and(|n| n != 0))
         {
             match p {
-                Pending::Repair(p) => self.repair_response(cx, p, r),
+                Pending::Repair(_) => unreachable!("handled before native envelope"),
                 Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
                 p => {
                     self.fail_pending(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg))
@@ -844,7 +844,7 @@ impl Venue for PhemexPerpetuals {
             }
             Pending::Account(p) => self.account_read_response(cx, p, r),
             Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
-            Pending::Repair(p) => self.repair_response(cx, p, r),
+            Pending::Repair(_) => unreachable!("handled before native envelope"),
             Pending::PlannedTrade(_) => unreachable!("handled before native envelope"),
             Pending::History(p) => self.history_response(cx, p, r),
             Pending::PublicTrades(read) => self.public_trades_response(cx, *read, r),
