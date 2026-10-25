@@ -459,3 +459,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Shared hosted-signing envelope | Docs-only companion; required m26ps4 review | Before shared Kraken HMAC or Paradex Stark structured-preimage transport, provider/capture or capability changes. | [RUST_HOSTED_SIGNING_ENVELOPE.md](RUST_HOSTED_SIGNING_ENVELOPE.md) |
 
 | OKX ordered write ownership | Source GO (dazzy3); exact-head CI green | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |
+
+| Engine signing metadata | Plan; m26ps4 and 9czdjh review | Before exporting signing-task metadata or carrying a CredentialRole into managed admission. | [RUST_ENGINE_SIGN_META.md](RUST_ENGINE_SIGN_META.md) |
