@@ -689,6 +689,7 @@ impl History {
                 });
                 let queued = cx.request_managed_with_headers(
                     context,
+                    None,
                     Method::Get,
                     url,
                     crate::sign::unsigned_headers(Method::Get),

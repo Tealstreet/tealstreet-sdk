@@ -616,3 +616,38 @@ mod envelope_rate_limits {
         assert!(h.engine.store().market("SOLUSDT").is_some());
     }
 }
+
+/// Slice 2 RED: the shared-consumer refusal is a typed NotSent terminal under
+/// the command's own admitted authority.
+#[test]
+fn a_shared_consumer_refusal_is_typed_not_sent_under_command_authority() {
+    use safe_cex_engine::{Action, ErrorKind, Notice, Outcome, PublicFeedPolicy};
+    let mut engine = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_bybit::BybitLinear::new(safe_cex_venue_bybit::Options {
+            public_data_only: true,
+            ..Default::default()
+        }),
+    );
+    engine
+        .set_public_feed_policy(PublicFeedPolicy::Shared)
+        .unwrap();
+    engine.start(1000.);
+    engine.drain_actions().for_each(drop);
+    engine.handle(
+        1001.,
+        safe_cex_engine::Event::Command(Command::Venue {
+            command: 51,
+            action: VenueAction::RefreshMarkets,
+        }),
+    );
+    let failures: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { command: 51, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "one terminal");
+    assert_eq!(failures[0].kind, Some(ErrorKind::Unsupported));
+    assert_eq!(failures[0].outcome, Some(Outcome::NotSent));
+}

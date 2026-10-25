@@ -56,6 +56,7 @@ impl Probe {
         let context = cx.plan_leg_context(plan, &slot).unwrap();
         cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             "https://binding.test/page".into(),
             None,

@@ -2427,6 +2427,14 @@ answering, with no HTTP, timer or Store activity. Exact prune: seven `lib.rs`
 occurrences (three candle refusals, two kline terminals, the balance `done`,
 the disabled-product `fail`); the shared `send` chokepoint is unchanged.
 
+## Bybit environment probe (slice 1b)
+
+The opposite-environment key probe is a Background signed Read Context with
+its native 2 s window on the managed lifecycle; the venue timer is retired and
+the probe attributes a key only under its own validated Context. Native
+confirmation, hints and the single terminal are unchanged. Exact prune: the
+probe's `lib.rs` `request` and one `sign_http`.
+
 ## Draft socket lifecycle architecture adoption
 
 The shared Supervisor alone did not own current epochs, auth acceptance,

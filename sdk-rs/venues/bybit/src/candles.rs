@@ -89,9 +89,11 @@ impl BybitLinear {
                 context: context.clone(),
                 candles: Vec::new(),
             }),
+            read: None,
         };
         match cx.request_managed_with_headers(
             context.clone(),
+            None,
             Method::Get,
             url,
             &[("X-Referer", sign::BROKER_ID)],
