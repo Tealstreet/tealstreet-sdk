@@ -492,8 +492,10 @@ fn native_wire_matches_independent_hex_vectors_and_ordered_header_bytes() {
 #[test]
 fn recording_provider_independently_signs_the_expected_atomic_work() {
     let h = fixture(options());
+    let primary = h.identities.primary.as_ref().unwrap();
     let request = safe_cex_engine::signing::hmac_sha256_work(
-        h.identities.primary.as_ref().unwrap(),
+        &primary.credential,
+        primary.signing_ref().unwrap(),
         vec![PayloadPart::Bytes {
             bytes: b"1234GET/fapi/v1/contracts".to_vec(),
         }],
@@ -507,8 +509,7 @@ fn recording_provider_independently_signs_the_expected_atomic_work() {
             stamp_ms: Some(1234.),
             expiry_ms: None,
         },
-    )
-    .unwrap();
+    );
     let result = h.provider.sign_ready(&request).unwrap().unwrap();
     assert_eq!(result.values.len(), 2);
     assert_eq!(result.values[0], b"fixture-primary-key");

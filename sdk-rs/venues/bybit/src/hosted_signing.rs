@@ -21,8 +21,9 @@ pub fn http_work(
         .ok()
         .map(|window| window.get())
         .map(|window| stamp_ms + f64::from(window));
-    hmac_sha256_work(
-        identity,
+    Ok(hmac_sha256_work(
+        &identity.credential,
+        identity.signing_ref()?,
         vec![
             PayloadPart::Bytes {
                 bytes: num::format(stamp_ms).into_bytes(),
@@ -42,7 +43,7 @@ pub fn http_work(
             stamp_ms: Some(stamp_ms),
             expiry_ms,
         },
-    )
+    ))
 }
 
 /// Legacy WS replies carry only the MAC, so sign the original caller preimage
@@ -52,14 +53,15 @@ pub fn ws_work(
     exact_preimage: String,
     context: Context,
 ) -> Result<SignRequest, SignError> {
-    hmac_sha256_work(
-        identity,
+    Ok(hmac_sha256_work(
+        &identity.credential,
+        identity.signing_ref()?,
         vec![PayloadPart::Bytes {
             bytes: exact_preimage.into_bytes(),
         }],
         context,
         SignReceipt::default(),
-    )
+    ))
 }
 
 #[cfg(test)]

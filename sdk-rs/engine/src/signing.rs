@@ -260,6 +260,7 @@ pub struct Identity {
     pub extra: std::collections::BTreeMap<ExtraKey, KeyRef>,
 }
 impl Identity {
+    #[inline]
     pub fn new(credential: KeyRef, signing: Option<KeyRef>) -> Self {
         Self {
             credential,
@@ -270,16 +271,19 @@ impl Identity {
         }
     }
 
+    #[inline]
     pub fn with_passphrase(mut self, passphrase: Option<KeyRef>) -> Self {
         self.passphrase = passphrase;
         self
     }
 
+    #[inline]
     pub fn with_stable_id(mut self, stable_id: Option<String>) -> Self {
         self.stable_id = stable_id;
         self
     }
 
+    #[inline]
     pub fn with_extra(mut self, extra: std::collections::BTreeMap<ExtraKey, KeyRef>) -> Self {
         self.extra = extra;
         self
@@ -287,16 +291,19 @@ impl Identity {
 
     /// The signing ref an operation that signs must use; absent is refused
     /// before any provider work.
+    #[inline]
     pub fn signing_ref(&self) -> Result<&KeyRef, SignError> {
         self.signing.as_ref().ok_or(SignError::MissingKey)
     }
 
     /// Setup, construction resolution and the alias check only (bans-scoped).
+    #[inline]
     pub fn signing_opt(&self) -> Option<&KeyRef> {
         self.signing.as_ref()
     }
 
     /// Setup only (bans-scoped): the aliased secondary signs with the primary's ref.
+    #[inline]
     pub fn set_signing_ref(&mut self, signing: Option<KeyRef>) {
         self.signing = signing;
     }
@@ -316,18 +323,24 @@ impl Identity {
             || self.extra.values().any(|extra| extra == key)
     }
 
+    #[inline]
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.signing.is_none() {
-            return Err("Secondary read credentials require a nonempty key and secret");
-        }
-        self.validate_credential()
+        self.checked(true)
     }
 
     /// `validate` without the signing requirement: a credential-only slot of an
     /// Optional family. A present signing ref must still be valid.
+    #[inline]
     pub fn validate_credential(&self) -> Result<(), &'static str> {
+        self.checked(false)
+    }
+
+    fn checked(&self, signing_required: bool) -> Result<(), &'static str> {
         if !valid_key_ref(&self.credential)
-            || self.signing.as_ref().is_some_and(|key| !valid_key_ref(key))
+            || self
+                .signing
+                .as_ref()
+                .map_or(signing_required, |key| !valid_key_ref(key))
             || self
                 .passphrase
                 .as_ref()
@@ -500,27 +513,28 @@ pub struct SignRequest {
 
 /// One credential presentation and exact HMAC preimage. Native recipes and
 /// signing-only compatibility adapters use the same atomic primitive shape;
-/// only the trusted recipe chooses the identity and canonical payload parts.
+/// the trusted recipe passes both refs from one `Identity` (`signing_ref()?`).
 pub fn hmac_sha256_work(
-    identity: &Identity,
+    credential: &KeyRef,
+    signing: &KeyRef,
     payload: Vec<PayloadPart>,
     context: Context,
     receipt: SignReceipt,
-) -> Result<SignRequest, SignError> {
-    Ok(SignRequest {
+) -> SignRequest {
+    SignRequest {
         receipt,
         operations: vec![
             Operation::Present {
-                key: identity.credential.clone(),
+                key: credential.clone(),
             },
             Operation::Sign {
                 algorithm: Algorithm::HmacSha256,
-                key: identity.signing_ref()?.clone(),
+                key: signing.clone(),
                 payload,
             },
         ],
         context,
-    })
+    }
 }
 
 /// Login preimage `seconds + method + path` as three typed byte parts. The shape

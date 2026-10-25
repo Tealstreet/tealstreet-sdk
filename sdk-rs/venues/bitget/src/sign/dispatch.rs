@@ -18,14 +18,15 @@ fn work(
         .clone()
         .ok_or(SignError::InvalidRequest)?;
     let mut work = hmac_sha256_work(
-        identity,
+        &identity.credential,
+        identity.signing_ref()?,
         payload,
         context,
         SignReceipt {
             stamp_ms: Some(stamp_ms),
             expiry_ms: None,
         },
-    )?;
+    );
     work.operations.push(Operation::Present { key: passphrase });
     Ok(work)
 }

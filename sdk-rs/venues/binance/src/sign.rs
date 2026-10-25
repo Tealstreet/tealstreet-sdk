@@ -20,15 +20,16 @@ pub mod hosted_signing {
         stamp_ms: f64,
         context: Context,
     ) -> Result<SignRequest, SignError> {
-        hmac_sha256_work(
-            identity,
+        Ok(hmac_sha256_work(
+            &identity.credential,
+            identity.signing_ref()?,
             vec![bytes(exact_encoded_query.into_bytes())],
             context,
             SignReceipt {
                 stamp_ms: Some(stamp_ms),
                 expiry_ms: None,
             },
-        )
+        ))
     }
 
     pub fn ws_work(
@@ -36,12 +37,13 @@ pub mod hosted_signing {
         exact_preimage: String,
         context: Context,
     ) -> Result<SignRequest, SignError> {
-        hmac_sha256_work(
-            identity,
+        Ok(hmac_sha256_work(
+            &identity.credential,
+            identity.signing_ref()?,
             vec![bytes(exact_preimage.into_bytes())],
             context,
             SignReceipt::default(),
-        )
+        ))
     }
 
     #[cfg(test)]
@@ -287,8 +289,9 @@ impl SignStep for SpotSubscribe {
     ) -> Result<SignRequest, SignError> {
         let now = context.stamp_ms();
         self.timestamp = now;
-        hmac_sha256_work(
-            &self.credentials,
+        Ok(hmac_sha256_work(
+            &self.credentials.credential,
+            self.credentials.signing_ref()?,
             vec![
                 bytes(b"apiKey=".to_vec()),
                 PayloadPart::Credential {
@@ -309,7 +312,7 @@ impl SignStep for SpotSubscribe {
                 stamp_ms: Some(self.timestamp),
                 expiry_ms: None,
             },
-        )
+        ))
     }
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
         let Action::WsSend { text, .. } = outbound else {

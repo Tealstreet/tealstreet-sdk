@@ -104,7 +104,8 @@ impl SignStep for Envelope {
             .map(Params::signing_text)
             .unwrap_or_default();
         let work = hmac_sha256_work(
-            &self.credentials,
+            &self.credentials.credential,
+            self.credentials.signing_ref()?,
             vec![
                 PayloadPart::Bytes {
                     bytes: format!("{}{nonce}", self.method).into_bytes(),
@@ -121,7 +122,7 @@ impl SignStep for Envelope {
                 stamp_ms: Some(stamp),
                 expiry_ms: None,
             },
-        )?;
+        );
         work.validate()?;
         self.unsigned = Some(outbound.clone());
         self.prepared = Some(work.clone());

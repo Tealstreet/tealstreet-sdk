@@ -175,13 +175,14 @@ fn http_work(
     identity.validate().map_err(|_| SignError::InvalidRequest)?;
     receipt.validate()?;
     let mut work = safe_cex_engine::signing::hmac_sha256_work(
-        identity,
+        &identity.credential,
+        identity.signing_ref()?,
         vec![safe_cex_engine::signing::PayloadPart::Bytes {
             bytes: payload.into_bytes(),
         }],
         context,
         receipt,
-    )?;
+    );
     if policy.passphrase_header.is_some() {
         work.operations.push(Operation::Present {
             key: identity.passphrase.clone().ok_or(SignError::Unavailable)?,
@@ -276,13 +277,14 @@ pub fn prepare(
             }
             Ok((
                 safe_cex_engine::signing::hmac_sha256_work(
-                    identity,
+                    &identity.credential,
+                    identity.signing_ref()?,
                     vec![safe_cex_engine::signing::PayloadPart::Bytes {
                         bytes: to_sign.into_bytes(),
                     }],
                     context,
                     SignReceipt::default(),
-                )?,
+                ),
                 OutputKind::WsAuth(output_format),
             ))
         }

@@ -90,7 +90,8 @@ impl SignStep for Http {
             expiry_ms: None,
         };
         let work = hmac_sha256_work(
-            &self.identity,
+            &self.identity.credential,
+            self.identity.signing_ref()?,
             vec![PayloadPart::Bytes {
                 bytes: format!(
                     "{stamp:.0}{}{path}{}",
@@ -106,7 +107,7 @@ impl SignStep for Http {
                 path: path.into(),
             },
             receipt,
-        )?;
+        );
         self.receipt = Some(receipt);
         Ok(work)
     }

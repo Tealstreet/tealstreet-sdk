@@ -57,7 +57,8 @@ fn work(
     };
     receipt.validate()?;
     let mut request = hmac_sha256_work(
-        identity,
+        &identity.credential,
+        identity.signing_ref()?,
         parts
             .into_iter()
             .map(|part| PayloadPart::Bytes {
@@ -66,7 +67,7 @@ fn work(
             .collect(),
         context,
         receipt,
-    )?;
+    );
     request
         .operations
         .push(Operation::Present { key: passphrase });

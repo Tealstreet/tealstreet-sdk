@@ -48,15 +48,16 @@ impl SignStep for Recipe {
         _: &mut Action,
         cx: &DispatchContext<'_>,
     ) -> Result<SignRequest, SignError> {
-        hmac_sha256_work(
-            &self.identity,
+        Ok(hmac_sha256_work(
+            &self.identity.credential,
+            self.identity.signing_ref()?,
             Vec::new(),
             Default::default(),
             SignReceipt {
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: None,
             },
-        )
+        ))
     }
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
         let Action::Http(request) = outbound else {

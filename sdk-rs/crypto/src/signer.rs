@@ -137,27 +137,26 @@ impl DecodedIdentity {
         KeyRef(format!("{slot}.extra.{}", name.name()))
     }
     fn references(&self, slot: &str) -> Identity {
-        Identity::new(
+        let mut identity = Identity::new(
             KeyRef(if self.key.is_empty() {
                 String::new()
             } else {
                 format!("{slot}.credential")
             }),
             (!self.secret.is_empty()).then(|| KeyRef(format!("{slot}.signing"))),
-        )
-        .with_passphrase(
-            self.passphrase
-                .as_ref()
-                .map(|_| KeyRef(format!("{slot}.passphrase"))),
-        )
-        .with_stable_id(self.stable_id.clone())
-        .with_extra(
-            self.extra
-                .iter()
-                .filter(|(_, bytes)| !bytes.is_empty())
-                .map(|(name, _)| (*name, Self::extra_ref(slot, *name)))
-                .collect(),
-        )
+        );
+        identity.passphrase = self
+            .passphrase
+            .as_ref()
+            .map(|_| KeyRef(format!("{slot}.passphrase")));
+        identity.stable_id = self.stable_id.clone();
+        identity.extra = self
+            .extra
+            .iter()
+            .filter(|(_, bytes)| !bytes.is_empty())
+            .map(|(name, _)| (*name, Self::extra_ref(slot, *name)))
+            .collect();
+        identity
     }
     fn install(self, signer: &mut LocalSigner, slot: &str) {
         if !self.key.is_empty() {
