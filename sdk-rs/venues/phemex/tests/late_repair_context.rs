@@ -999,3 +999,164 @@ fn native_owed_order_seen_after_expiry_repairs_before_the_read_reply() {
         "the old read never duplicates the stream repair"
     );
 }
+
+#[test]
+fn refused_repair_admission_emits_one_manual_cancel_error() {
+    let mut h = boot("OneWay", true, false);
+    h.owe("owed-a", OrderSide::Buy);
+    let mut peers = Vec::new();
+    for command in 1000..=1127 {
+        let actions = h.raw_event(Event::Command(Command::FetchAccount { command }));
+        for action in &actions {
+            if let Action::ManagedHttp(action) = action
+                && let HttpAction::Prepare { preparation, .. } = action.as_ref()
+            {
+                peers.push(*preparation);
+            }
+        }
+        if command == 1127 {
+            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command:1127,error }) if error.message == "Engine request capacity reached")));
+        }
+    }
+    assert_eq!(peers.len(), 127);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let refused = h.stream(vec![row.clone()], true);
+    assert_eq!(
+        messages(&refused, Level::Error)
+            .iter()
+            .filter(|message| message.contains("could not cancel late-landing")
+                && message.contains("native-a"))
+            .count(),
+        1
+    );
+    assert_eq!(command_terminals(&refused), 0);
+    let peer = peers.remove(0);
+    h.e.http_preparation_failed(
+        h.now,
+        peer,
+        safe_cex_engine::request_context::Error::State,
+        safe_cex_engine::VenueError::new("release one real peer"),
+    );
+    h.e.drain_raw_actions();
+    assert!(!h.e.http_preparation_pending(peer));
+    let repeated = h.stream(vec![row], true);
+    assert!(
+        messages(&repeated, Level::Error)
+            .iter()
+            .all(|message| !message.contains("could not cancel late-landing"))
+    );
+    assert!(!repeated.iter().any(|action| matches!(action,Action::Http(_)) || matches!(action,Action::ManagedHttp(a) if matches!(a.as_ref(),HttpAction::Prepare{request,..} if request.method == Method::Delete))));
+    assert!(peers.iter().all(|peer| h.e.http_preparation_pending(*peer)));
+}
+
+#[test]
+fn no_owed_cancel_all_mints_nothing_and_spends_no_grant() {
+    let mut h = boot("OneWay", true, false);
+    for _ in 0..257 {
+        let (id, actions) = h.cancel_all();
+        assert_eq!(terminals(&actions, id), vec![Ok("[]".into())]);
+        assert!(messages(&actions, Level::Error).is_empty());
+        assert!(messages(&actions, Level::Warn).is_empty());
+        assert!(deletes(&actions).is_empty());
+    }
+    h.owe("owed-a", OrderSide::Buy);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let actions = h.stream(vec![row], false);
+    assert_eq!(
+        deletes(&actions).len(),
+        1,
+        "no empty grant exhausted the real later mint"
+    );
+}
+
+fn host_without_repair_primary(public_data_only: bool) {
+    let mut e = support::prepared_engine(Options {
+        public_data_only,
+        key: public_data_only.then(|| "fixture-primary".into()),
+        secret: public_data_only.then(|| "fixture-material".into()),
+        read_credentials: Some(safe_cex_engine::ReadCredentials {
+            key: "fixture-secondary".into(),
+            secret: "fixture-secondary-material".into(),
+            passphrase: None,
+        }),
+        ..Default::default()
+    });
+    e.start(1000.);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        1001.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 55,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.iter().any(|action| matches!(action,Action::Notice(Notice::CommandFailed {command:55,error}) if error.kind == Some(safe_cex_engine::ErrorKind::AuthInvalid))));
+    assert!(deletes(&actions).is_empty());
+    assert!(
+        messages(&actions, Level::Warn)
+            .iter()
+            .all(|message| !message.contains("repair"))
+    );
+}
+#[test]
+fn secondary_only_host_cannot_mint_or_send_late_repair() {
+    host_without_repair_primary(false);
+}
+#[test]
+fn public_only_host_cannot_mint_or_send_late_repair() {
+    host_without_repair_primary(true);
+}
+
+#[test]
+fn repair_provider_refusal_retires_once_without_resend() {
+    let mut h = boot("OneWay", true, false);
+    let (old, _) = h.owe("owed-a", OrderSide::Buy);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let held = h.stream(vec![row], true);
+    let preparation = held
+        .iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.method == Method::Delete => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("real repair preparation");
+    h.e.http_preparation_failed(
+        h.now,
+        preparation,
+        safe_cex_engine::request_context::Error::State,
+        safe_cex_engine::VenueError::new("typed provider refusal")
+            .kind(safe_cex_engine::ErrorKind::Internal),
+    );
+    let actions = h.e.drain_raw_actions();
+    assert_eq!(
+        messages(&actions, Level::Error)
+            .iter()
+            .filter(|message| message.contains("could not cancel late-landing")
+                && message.contains("typed provider refusal"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        h.e.store().order("native-a").unwrap().status,
+        OrderStatus::Open
+    );
+    assert!(terminals(&actions, old).is_empty());
+    let replay = release(&mut h.e, h.now, held);
+    assert!(deletes(&replay).is_empty());
+    assert!(
+        messages(&replay, Level::Error)
+            .iter()
+            .all(|message| !message.contains("could not cancel late-landing"))
+    );
+}

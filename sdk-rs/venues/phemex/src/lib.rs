@@ -23,7 +23,7 @@ use safe_cex_engine::request_context::Context;
 use safe_cex_engine::socket_lifecycle::{
     Control, EncodedBatch, FeedId, Interest, LifecycleEvent, SocketError,
 };
-use safe_cex_engine::{Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue};
+use safe_cex_engine::{Command, Cx, PublicFeedPolicy, Response, SocketId, TimerId, Venue};
 use std::collections::HashMap;
 use wire::*;
 #[derive(Clone, Debug, Default)]
@@ -56,7 +56,7 @@ pub enum Pending {
     },
     Account(read_owners::Background<account::Request>),
     Orders(read_owners::Background<account::OrdersRead>),
-    Trade(trading::Request),
+    Repair(trading::RepairRequest),
     PlannedTrade(trading::PlannedRequest),
     History(history::Request),
     Income(income::Request),
@@ -284,56 +284,6 @@ impl PhemexPerpetuals {
             "wss://ws.phemex.com"
         }
     }
-    #[allow(clippy::too_many_arguments)]
-    fn request(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        query: &str,
-        body: Option<String>,
-        pending: Pending,
-        stream: Option<ArrayAt>,
-    ) {
-        // A definitive lookup must query the account that placed the order.
-        let primary = matches!(&pending, Pending::History(request) if request.is_lookup());
-        let credentials = if matches!(method, Method::Get) && !primary {
-            self.read_credentials.as_ref().or(self.credentials.as_ref())
-        } else {
-            self.credentials.as_ref()
-        };
-        let recipe = credentials.map(|identity| {
-            dispatch_signing::Http::new(
-                identity.clone(),
-                self.options.testnet,
-                method,
-                path.into(),
-                query.into(),
-                body.clone(),
-            )
-        });
-        let headers = Vec::new();
-        let url = format!(
-            "{}{path}{}",
-            self.rest(),
-            if query.is_empty() {
-                String::new()
-            } else {
-                format!("?{query}")
-            }
-        );
-        let id = if let Some(at) = stream {
-            cx.request_streamed_body(method, url, headers, body, at, pending)
-        } else {
-            cx.request(method, url, headers, body, pending)
-        };
-        if let Some(recipe) = recipe {
-            cx.sign_http(id, Box::new(recipe));
-        }
-        if primary {
-            cx.route_request(id, safe_cex_engine::RequestRoute::Primary);
-        }
-    }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Err(error) = self.connect_managed_public(cx) {
             self.public_socket_error(cx, error);
@@ -430,7 +380,9 @@ impl PhemexPerpetuals {
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Account(r) => self.account_read_failed(cx, r, error),
             Pending::Orders(r) => self.orders_background_failed(cx, r, error),
-            Pending::Trade(r) => self.trade_failed(cx, r, error, trading::Outcome::Unknown),
+            Pending::Repair(r) => {
+                self.repair_failed(cx, r, safe_cex_engine::VenueError::new(error))
+            }
             Pending::PlannedTrade(read) => {
                 self.planned_trade_failed(cx, read, safe_cex_engine::VenueError::new(error))
             }
@@ -786,6 +738,10 @@ impl Venue for PhemexPerpetuals {
         {
             return;
         }
+        if let Pending::Repair(request) = p {
+            self.repair_response(cx, request, r);
+            return;
+        }
         if let Pending::PlannedTrade(read) = p {
             self.planned_trade_response(cx, read, r);
             return;
@@ -798,7 +754,7 @@ impl Venue for PhemexPerpetuals {
             && (e.error.is_some() || e.code.is_some_and(|n| n != 0))
         {
             match p {
-                Pending::Trade(p) if e.error.is_none() => self.trade_response(cx, p, r),
+                Pending::Repair(p) => self.repair_response(cx, p, r),
                 Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
                 p => {
                     self.fail_pending(cx, p, &format!("Phemex {} {}", e.code.unwrap_or(-1), e.msg))
@@ -888,7 +844,7 @@ impl Venue for PhemexPerpetuals {
             }
             Pending::Account(p) => self.account_read_response(cx, p, r),
             Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
-            Pending::Trade(p) => self.trade_response(cx, p, r),
+            Pending::Repair(p) => self.repair_response(cx, p, r),
             Pending::PlannedTrade(_) => unreachable!("handled before native envelope"),
             Pending::History(p) => self.history_response(cx, p, r),
             Pending::PublicTrades(read) => self.public_trades_response(cx, *read, r),
@@ -902,7 +858,7 @@ impl Venue for PhemexPerpetuals {
     ) {
         if let safe_cex_engine::SigningTarget::Http { request, pending } = target {
             match pending {
-                Pending::Trade(trade) => self.trade_signing_release(request, trade, release),
+                Pending::Repair(_) => {}
                 Pending::PlannedTrade(read) => {
                     self.trade_signing_release(request, &mut read.native, release)
                 }
@@ -922,7 +878,7 @@ impl Venue for PhemexPerpetuals {
             Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(root.context(), error);
             }
-            Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
+            Pending::Repair(request) => self.repair_failed(cx, request, error),
             Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Income(read) => self.income_failed(cx, read, error),
@@ -942,6 +898,7 @@ impl Venue for PhemexPerpetuals {
         self.settle_retired_trading(cx);
         match pending {
             Pending::Identity(read) => self.identity_failed(cx, read, error),
+            Pending::Repair(request) => self.repair_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Income(read) => self.income_failed(cx, read, error),
             Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
@@ -1009,6 +966,13 @@ impl Venue for PhemexPerpetuals {
             p => self.fail_pending(cx, p, error),
         }
     }
+    fn on_repair_notice(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        notice: safe_cex_engine::repair::RepairNotice<'_>,
+    ) {
+        self.late_repair_notice(cx, notice);
+    }
     fn on_http_owner_retired(
         &mut self,
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
@@ -1022,7 +986,7 @@ impl Venue for PhemexPerpetuals {
         safe_cex_engine::request_context::ReconciliationData,
         safe_cex_engine::request_context::Error,
     > {
-        if !matches!(pending, Pending::PlannedTrade(_)) {
+        if !matches!(pending, Pending::PlannedTrade(_) | Pending::Repair(_)) {
             return Err(safe_cex_engine::request_context::Error::Invalid);
         }
         // Native late HTTP replies have no reducer authority; account polling

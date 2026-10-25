@@ -8977,3 +8977,12 @@ WEEX1212633->1274315 (+61682) and combined13908680->13920684 (+12004),
 with unchanged fixed budgets and Node/Web parity. Combined is local evidence;
 frozen-head CI remains the family-size record. Remaining14F/20O request refs
 and all signing/credential inventory stay unchanged.
+
+
+### Phemex final four: late repair authority
+
+Late cancel-only requests spend engine repair subjects minted at the original admitted cancel-all entry. Primary signing, native symbol/side groups, chunks of ten, FIFO, immediate stream discovery, signing-expiry-plus-5000 read discovery, no resend, and original command terminals are retained. A refused admission emits the native manual-cancel diagnostic without publishing Canceling; a repeat observation does not retry it. The 20-second per-call bound now includes preparation, signing and queue time as well as native physical HTTP; no aggregate repair lifetime is added.
+
+Covered reconciliation reads publish one merged Orders snapshot before retiring covered subjects. Newer stream rows remain authoritative. Store orders_revision advances once per committed read, and changes.orders is set even for an unchanged snapshot; account.order_revision retains its native row bookkeeping. The commit is guarded by held relevant subjects and loaded.orders: early pre-snapshot reconciliation stays incremental and does not mark Orders loaded. Stale snapshot tokens use native incremental publication and supply no retirement proof.
+
+Source remains blocked on the separately owned core CancelOnly overlap rule: disjoint-ID repair/foreground cancels must coexist immediately, while overlapping IDs and all repair/Place-or-Amend conflicts remain fenced. Existing trading.rs native controls and the frozen 19 repair originals are retained verbatim. No consumer deferral, re-queue, numeric completion or raw HTTP fallback is introduced.

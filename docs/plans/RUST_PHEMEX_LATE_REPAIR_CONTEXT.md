@@ -1,6 +1,6 @@
 # Phemex late cancel repair: final four legacy request sites
 
-Status: plan/API/lifecycle CLEAR; corrected originals executed and awaiting fe7 re-review after F1-F4. Original runtime base is 49a5b54f362 (includes repair core 8f5f9a2f957); the native audit below remains pinned to 035948b564a. No runtime adoption, Cargo, manifest, budget or CI change is included. Reviewer: claude-fe7lgm (core/API and custody), with claude-dazzy3 as alternate. Bitget history PR #2170 stays on its separate branch.
+Status: plan/API/lifecycle and corrected originals CLEAR at 99f8941b1d3; consumer source in local implementation. Original runtime base is 49a5b54f362 (includes repair core 8f5f9a2f957); the native audit below remains pinned to 035948b564a. No runtime adoption, Cargo, manifest, budget or CI change is included. Reviewer: claude-fe7lgm (core/API and custody), with claude-dazzy3 as alternate. Bitget history PR #2170 stays on its separate branch.
 
 ## Scope and prerequisite
 
@@ -143,3 +143,13 @@ F2 coverage is explicit; none of the following is attributed to the initial 13 G
 F3 updates the Status and the README's four-cell row; no separating blank is inserted before the own row. F4 states the prepared request ID is the same identity used at Bind and asserts that equality after the held request is actually released. As before, assertions beyond an original RED stop remain unexecuted until source.
 
 Corrected execution keeps all four original RED stops: unmanaged HTTP before Prepare (line 455), missing 20-second preparation timer (line 523), unclaimed ACK publishing Canceled (line 484), and optimistic Canceling after proved capacity refusal (line 857). The any-age native control maintains its real private socket with pong frames while leaving the reconciliation Read unanswered; socket idle expiry is not used as repair evidence.
+
+Source-stage additive control: refused_repair_admission_emits_one_manual_cancel_error requires exactly one Error containing "could not cancel late-landing" and "native-a" on the refused observation, and none on the repeat after a genuine peer release. The 19 reviewed original assertion bodies remain unchanged.
+
+## Source freeze and separate core prerequisite
+
+The local consumer migrates all four request holdouts without editing generic engine code. Its 19 reviewed originals remain a byte-exact full-file prefix; five additive source-stage controls cover the manual admission-refusal diagnostic, no empty grants, Secondary-only/public-only refusal, and typed provider preparation failure. The shared fixture now registers the genuine LocalSigner-issued identities after its signer, as production trusted setup does. Re-execute the unchanged native runtime with only this fixture registration to retain the original 4 RED / 15 GREEN baseline.
+
+Blocked native contract: tests/trading.rs::open_order_read_started_before_a_later_failure_cannot_settle_it must keep its body byte-exact and send the late DELETE immediately while command 133's unrelated-ID CancelSymbolOrders call remains active. The current core refuses this CancelOnly repair on symbol overlap. Per fe7's ruling, a separate core PR adds cancel_only scope semantics: repair/foreground CancelOnly pairs conflict only on explicit order-ID intersection; every other scope pair retains existing overlap rules. No consumer deferral, re-queue, early terminal, lock bypass or engine edit is introduced. Landing waits for that core PR and this native control passing unchanged.
+
+Orphan helper removal also deletes one Phemex lib.rs read_credentials lexical reference; prune that single credential inventory count. Shared read Slots, every other credential site, and the signing/socket inventories remain unchanged.
