@@ -248,6 +248,15 @@ impl Harness {
             .into_iter()
             .find(|r| r.url.contains("/g-orders/activeList?"))
             .expect("genuine primary reconciliation read");
+        assert_eq!(
+            read.headers
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("x-phemex-access-token"))
+                .unwrap()
+                .1,
+            "fixture-primary",
+            "the reconciliation READ uses Primary"
+        );
         self.at(
             self.now + 1.,
             Event::HttpResponse {
@@ -468,6 +477,9 @@ fn unclaimed_repair_ack_cannot_publish_or_finish_a_root() {
     row["clOrdID"] = json!("owed-a");
     let held = h.stream(vec![row], true);
     let r = capture_delete(&held);
+    // This is the prepared request ID; Bind must retain it, so the stray
+    // reply targets the same identity that later becomes live.
+    let prepared_request = r.id;
     let a = h.raw_reply(&r, &accept("native-a"));
     assert_eq!(
         h.e.store().order("native-a").unwrap().status,
@@ -483,6 +495,10 @@ fn unclaimed_repair_ack_cannot_publish_or_finish_a_root() {
     assert!(terminals(&a, old).is_empty());
     let a = release(&mut h.e, h.now, held);
     let r = deletes(&a).remove(0);
+    assert_eq!(
+        r.id, prepared_request,
+        "Bind preserves the prepared request ID"
+    );
     let a = h.reply(&r, 200, &accept("native-a"));
     assert_eq!(
         h.e.store().order("native-a").unwrap().status,
@@ -789,28 +805,55 @@ fn repair_admission_refusal_has_no_optimistic_cancel_or_io_and_preserves_peers()
     let mut h = boot("OneWay", true, false);
     h.owe("owed-a", OrderSide::Buy);
     let mut peers = Vec::new();
+    let mut capacity_refused = false;
     for command in 1000..1256 {
         let actions = h.raw_event(Event::Command(Command::FetchAccount { command }));
         let before = peers.len();
-        for action in actions {
+        for action in &actions {
             if let Action::ManagedHttp(action) = action
-                && let HttpAction::Prepare { preparation, .. } = *action
+                && let HttpAction::Prepare { preparation, .. } = action.as_ref()
             {
-                peers.push(preparation);
+                peers.push(*preparation);
             }
         }
         if peers.len() == before {
+            assert_eq!(command, 1127);
+            // Two native account legs plus 127 real Read root/leg pairs fill 256.
+            assert_eq!(peers.len(), 127, "the registry is full, not coalesced");
+            let error = actions
+                .iter()
+                .find_map(|action| match action {
+                    Action::Notice(Notice::CommandFailed { command: id, error })
+                        if *id == command =>
+                    {
+                        Some(error)
+                    }
+                    _ => None,
+                })
+                .expect("the stopping command is explicitly refused for capacity");
+            assert_eq!(error.message, "Engine request capacity reached");
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+            assert_eq!(error.outcome, None);
+            assert_eq!(command_terminals(&actions), 1);
+            assert!(messages(&actions, Level::Warn).is_empty());
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_))),
+                "refusing command installs no preparation or physical I/O"
+            );
+            capacity_refused = true;
             break;
         }
     }
     assert!(
-        !peers.is_empty(),
-        "real account commands retain preparation custody"
+        capacity_refused,
+        "the loop must reach the exact capacity refusal"
     );
     assert!(peers.iter().all(|p| h.e.http_preparation_pending(*p)));
     let mut row = live_row("native-a");
     row["clOrdID"] = json!("owed-a");
-    let actions = h.stream(vec![row], true);
+    let actions = h.stream(vec![row.clone()], true);
     assert_eq!(
         h.e.store().order("native-a").unwrap().status,
         OrderStatus::Open,
@@ -826,5 +869,133 @@ fn repair_admission_refusal_has_no_optimistic_cancel_or_io_and_preserves_peers()
         command_terminals(&actions),
         0,
         "repair refuses without a caller terminal"
+    );
+    let freed = peers.remove(0);
+    h.e.http_preparation_failed(
+        h.now,
+        freed,
+        safe_cex_engine::request_context::Error::State,
+        safe_cex_engine::VenueError::new("capacity control releases one actual peer"),
+    );
+    h.e.drain_raw_actions();
+    assert!(!h.e.http_preparation_pending(freed));
+    let repeated = h.stream(vec![row], true);
+    assert_eq!(
+        h.e.store().order("native-a").unwrap().status,
+        OrderStatus::Open
+    );
+    assert!(!repeated.iter().any(|action| matches!(action, Action::Http(_)) || matches!(action, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare{request,..} if request.method==Method::Delete))), "repeat observation alone must not retry a refused repair, even with free capacity");
+    assert!(peers.iter().all(|p| h.e.http_preparation_pending(*p)));
+    assert_eq!(command_terminals(&repeated), 0);
+}
+
+#[test]
+fn native_pre_expiry_reconcile_timer_is_inert_then_the_read_signs_primary() {
+    let mut h = boot("OneWay", true, true);
+    let (_, create) = h.owe("owed-a", OrderSide::Buy);
+    let expiry = create
+        .headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("x-phemex-request-expiry"))
+        .unwrap()
+        .1
+        .parse::<u64>()
+        .unwrap() as f64
+        * 1000.;
+    let deadline = expiry + 5000.;
+    let timer = h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, when)| *when == deadline)
+        .unwrap()
+        .0;
+    let early = h.at(deadline - 1., Event::TimerFired { timer }, false);
+    assert!(
+        requests(&early)
+            .iter()
+            .all(|r| !r.url.contains("/g-orders/activeList?"))
+    );
+    assert!(deletes(&early).is_empty());
+    assert_eq!(command_terminals(&early), 0);
+    let later = h.discover(&create, &rows(vec![rest_row("native-a", "owed-a")]), false);
+    assert_eq!(
+        p(&deletes(&later)[0], "orderID").as_deref(),
+        Some("native-a")
+    );
+}
+
+#[test]
+fn native_owed_order_seen_after_expiry_repairs_before_the_read_reply() {
+    let mut h = boot("OneWay", true, false);
+    let (_, create) = h.owe("owed-a", OrderSide::Buy);
+    let expiry = create
+        .headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case("x-phemex-request-expiry"))
+        .unwrap()
+        .1
+        .parse::<u64>()
+        .unwrap() as f64
+        * 1000.;
+    let deadline = expiry + 5000.;
+    let timer = h
+        .timers
+        .iter()
+        .rev()
+        .find(|(_, when)| *when == deadline)
+        .unwrap()
+        .0;
+    // Keep the genuine private socket live while its reconciliation read is pending.
+    while h.now + 5000. < deadline {
+        let socket = h.socket;
+        let keepalive = h.at(
+            h.now + 5000.,
+            Event::WsMessage {
+                socket,
+                text: r#"{"result":"pong"}"#,
+            },
+            false,
+        );
+        assert!(
+            !keepalive
+                .iter()
+                .any(|action| matches!(action, Action::WsClose { .. }))
+        );
+    }
+    let read_actions = h.at(deadline, Event::TimerFired { timer }, false);
+    let read = requests(&read_actions)
+        .into_iter()
+        .find(|r| r.url.contains("/g-orders/activeList?"))
+        .expect("post-expiry read is genuinely in flight");
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let time = deadline + 5000.;
+    let stamp = (time * 1e6) as u64;
+    row["transactTimeNs"] = json!(stamp);
+    let text = json!({"type":"incremental", "timestamp":stamp, "orders_p":[row]}).to_string();
+    let socket = h.socket;
+    let actions = h.at(
+        time,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+        false,
+    );
+    assert_eq!(
+        deletes(&actions).len(),
+        1,
+        "stream proof does not wait for the pending read"
+    );
+    assert_eq!(
+        p(&deletes(&actions)[0], "orderID").as_deref(),
+        Some("native-a")
+    );
+    assert_eq!(command_terminals(&actions), 0);
+    let later = h.reply(&read, 200, &rows(vec![]));
+    assert!(
+        deletes(&later).is_empty(),
+        "the old read never duplicates the stream repair"
     );
 }

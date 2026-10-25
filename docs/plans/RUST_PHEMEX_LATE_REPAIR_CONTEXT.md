@@ -1,6 +1,6 @@
 # Phemex late cancel repair: final four legacy request sites
 
-Status: consumer PLAN ONLY, based on landing tip 035948b564a9338371be2b2aef4cad073e7302a9. No runtime, original-test, Cargo, manifest, budget or CI change is authorized by this artifact. Reviewer: claude-fe7lgm (core/API and custody), with claude-dazzy3 as alternate. The independent Bitget history PR #2170 remains frozen on its own branch.
+Status: plan/API/lifecycle CLEAR; corrected originals executed and awaiting fe7 re-review after F1-F4. Original runtime base is 49a5b54f362 (includes repair core 8f5f9a2f957); the native audit below remains pinned to 035948b564a. No runtime adoption, Cargo, manifest, budget or CI change is included. Reviewer: claude-fe7lgm (core/API and custody), with claude-dazzy3 as alternate. Bitget history PR #2170 stays on its separate branch.
 
 ## Scope and prerequisite
 
@@ -106,7 +106,7 @@ Sequence: plan/API review -> originals freeze and execution on unchanged native 
 Fe7 CARRY CLEAR on reviewed plan95146369771844bc67757a6035c7e167df60a03c3c93294e0476da6cf220b89d authorized originals. The original target is added on49a5b54f36232d1c926f4280141d92060db18e2b (actual repair core8f5f9a2f957 plus Hyperliquid originals). The Phemex runtime/Cargo and request inventory are unchanged from that base. No source adoption is claimed.
 
 Executed cargo test --locked -p safe-cex-venue-phemex --test late_repair_context:
-17 run, 4 intended ASSERTION RED, 13 GREEN, 0 ignored. No compile/helper failure.
+Corrected run: 19 tests, 4 intended ASSERTION RED, 15 GREEN, 0 ignored. The completed run has no compile/helper failure. The initial d545b3d7ff5 run was 17 tests: 4 RED and 13 GREEN.
 
 | Intended RED | Genuine observed assertion |
 | --- | --- |
@@ -115,8 +115,31 @@ Executed cargo test --locked -p safe-cex-venue-phemex --test late_repair_context
 | unclaimed_repair_ack_cannot_publish_or_finish_a_root | Native accepts the actual unclaimed request ID and changes Canceling to Canceled. |
 | repair_admission_refusal_has_no_optimistic_cancel_or_io_and_preserves_peers | Real account commands exhaust registry credits; native late dispatch still changes Open to Canceling. |
 
-The13 native GREENs pin empty/nonempty original cancel-all results, duplicate stream observations, cross-command same-side grouping, native10+1 bulk path, independent FIFO after Network loss, mixed ACK accepted/refused row effects, filled-order manual diagnostics, actual signing-expiry+5000 discovery with Primary, complete versus incomplete generation release, pre-snapshot reconciliation staying unloaded, and empty/one/many-row read preservation of loaded Store and stream rows. Clocks advance monotonically; fixture credentials are synthetic. Native and source release helpers use real LocalSigner plus host Prepare/Bind/Claim; no opaque owner/Context/entitlement/receipt is forged.
+The initial 13 native GREENs pin empty/nonempty original cancel-all results, duplicate stream observations, cross-command same-side grouping, native10+1 bulk path, independent FIFO after Network loss, mixed ACK accepted/refused row effects, filled-order manual diagnostics, actual signing-expiry+5000 discovery with Primary, complete versus incomplete generation release, pre-snapshot reconciliation staying unloaded, and empty/one/many-row read preservation of loaded Store and stream rows. Clocks advance monotonically; fixture credentials are synthetic. Native and source release helpers use real LocalSigner plus host Prepare/Bind/Claim; no opaque owner/Context/entitlement/receipt is forged.
 
 The suffix assertions after the four RED stops remain unexecuted until source. They are not additional original passes. Source-stage controls still to add: mint capacity result/journal isolation, typed provider/Internal refusal and physical timeout, stale completion/old-root peer isolation, exact other-symbol/pre-mint receipt retirement, revision-parity during concurrent stream updates, bound credit reuse, and direct native/JS parity. Core controls do not replace these venue integration gates.
 
-Source must make all17 originals GREEN without changing their assertion bodies. Additional source-stage controls are additive and separately reviewed. Original execution logs and hashes stay outside the repository; no test output or profile artifact is committed.
+Source must make all 19 corrected originals GREEN without changing their assertion bodies. Additional source-stage controls are additive and separately reviewed. Original execution logs and hashes stay outside the repository; no test output or profile artifact is committed.
+
+## F1-F4 originals correction ledger
+
+F1 saturation is pinned by command 1127 returning exactly "Engine request capacity reached", kind Internal, outcome None, one failure terminal and no Warn. The 127 held Read root/leg pairs plus two native account legs fill 256 Contexts; the refusing command produces no preparation or physical I/O and all peers remain live. Its post-admission-refusal suffix also requires Open (not Canceling), no DELETE and no later automatic DELETE from a repeated observation. The cause/count passed on the unchanged native base; the suffix is a source-stage guarantee after the original RED. The repeat observation runs after releasing a genuine peer so continued saturation cannot make it pass vacuously.
+
+F2 coverage is explicit; none of the following is attributed to the initial 13 GREENs. Both additive originals and the strengthened Primary Read checks pass in the corrected 15 GREENs:
+
+| Control row | Exact subcase | Stage |
+| --- | --- | --- |
+| Exact source identity | Secondary-only host cannot mint/send a repair write | Source-stage: secondary_only_host_cannot_mint_or_send_late_repair |
+| Exact source identity | Public-only host cannot mint/send a repair write | Source-stage: public_only_host_cannot_mint_or_send_late_repair |
+| Post-expiry discovery | Native timer at raw expiry+4999 sends no reconciliation read; expiry+5000 does | Executed additive native original: native_pre_expiry_reconcile_timer_is_inert_then_the_read_signs_primary |
+| Post-expiry discovery | Reconciliation READ itself signs with Primary, not merely its later DELETE | Executed by strengthened discover helper in the corrected run |
+| Post-expiry discovery | Parent/child row is never a late-repair subject | Source-stage: child_order_observation_cannot_spend_parent_repair_subject |
+| Post-expiry discovery | Newer-generation same-client row cannot spend or retire the prior subject | Source-stage: newer_same_client_generation_cannot_spend_prior_entitlement |
+| Any-age stream observation | A valid observation well after expiry+5000 while its Read reply is pending sends repair immediately | Executed additive native original: native_owed_order_seen_after_expiry_repairs_before_the_read_reply |
+| Both mint sites | No-owed cancel-all spends no entitlement/grant capacity | Source-stage: no_owed_cancel_all_mints_nothing_and_spends_no_grant |
+| Original command isolation | Expired and numerically reused command ID receives no repair terminal | Source-stage: expired_reused_command_id_is_isolated_from_late_repair |
+| Original command isolation | Foreground/repair scope conflict remains enforced | Source-stage: foreground_repair_conflict_preserves_both_owners |
+
+F3 updates the Status and the README's four-cell row; no separating blank is inserted before the own row. F4 states the prepared request ID is the same identity used at Bind and asserts that equality after the held request is actually released. As before, assertions beyond an original RED stop remain unexecuted until source.
+
+Corrected execution keeps all four original RED stops: unmanaged HTTP before Prepare (line 455), missing 20-second preparation timer (line 523), unclaimed ACK publishing Canceled (line 484), and optimistic Canceling after proved capacity refusal (line 857). The any-age native control maintains its real private socket with pong frames while leaving the reconciliation Read unanswered; socket idle expiry is not used as repair evidence.
