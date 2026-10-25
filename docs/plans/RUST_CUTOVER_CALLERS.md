@@ -3210,8 +3210,11 @@ longer becomes an empty complete result. Its 20-page budget resets per window,
 raw duplicate rows stay intact, and one owner retains earlier incompleteness
 across later windows. Adjacent repeated cursors and non-adjacent cycles now stop
 early with incomplete coverage. OKX keeps its initial upper-bound cursor, lower
-bound, 100 ms continuing-page delay and immediate unchanged-cursor exhaustion;
-non-adjacent cycles stop with incomplete coverage. Neither method's arguments
+bound and 100 ms continuing-page delay. Each next page asks `after = oldest + 1`
+(the bound is exclusive), so rows sharing the oldest millisecond across a page
+break are fetched again and the re-sent boundary rows are dropped by count. A
+page that cannot advance (a full page inside one millisecond, or rows not older
+than the cursor) and non-adjacent cycles stop with incomplete coverage. Neither method's arguments
 change. This slice covers closed-position reads only; both venues' general
 history reads and the broader query-marker fan-out remain unfinished. No NX
 migration, deployment or B11 closure is claimed.
