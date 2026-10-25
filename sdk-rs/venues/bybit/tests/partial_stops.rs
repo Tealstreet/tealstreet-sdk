@@ -140,6 +140,14 @@ fn ready(profile: Profile) -> Harness {
                 ),
             );
         }
+    } else {
+        // Managed private feeds accept no traffic before authentication.
+        let socket = h.socket("/v5/private").unwrap();
+        h.event(Event::WsOpened { socket });
+        h.message(
+            "/v5/private",
+            r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"cejreaspqfh3sjdnldmg-p"}"#,
+        );
     }
     while h.has_request("/v5/order/realtime") {
         h.respond("/v5/order/realtime", 200, EMPTY);

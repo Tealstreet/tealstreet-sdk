@@ -83,6 +83,17 @@ fn handshake(h: &mut Harness) {
     ack(h, "subscribe");
 }
 
+/// Opens and authenticates the private socket; managed private feeds accept
+/// no traffic before authentication.
+fn authenticate(h: &mut Harness) {
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"cejreaspqfh3sjdnldmg-p"}"#,
+    );
+}
+
 fn hyro_snapshot(h: &mut Harness) {
     h.respond("/v5/order/realtime", 200, EMPTY);
     h.respond("/v5/position/list", 200, POSITIONS);
@@ -557,6 +568,7 @@ fn execution_id_dedupes_batches_repeated_frames_and_reconnects() {
         Variant::Spot,
     ] {
         let mut h = startup(variant);
+        authenticate(&mut h);
         emitted_fills(&mut h);
         let category = if variant.is_inverse() {
             "inverse"
@@ -600,7 +612,7 @@ fn execution_id_dedupes_batches_repeated_frames_and_reconnects() {
         h.advance(2000.0);
         let new = h.socket("/v5/private").unwrap();
         assert_ne!(old, new);
-        h.event(Event::WsOpened { socket: new });
+        authenticate(&mut h);
         h.message("/v5/private", &packet);
         assert!(
             emitted_fills(&mut h).is_empty(),
@@ -617,6 +629,7 @@ fn execution_id_dedupes_batches_repeated_frames_and_reconnects() {
 #[test]
 fn malformed_execution_does_not_consume_identity_and_missing_ids_stay_distinct() {
     let mut h = startup(Variant::Linear);
+    authenticate(&mut h);
     emitted_fills(&mut h);
     let row = r#"{"topic":"execution","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"execution-order","execId":"corrected","side":"Buy","execQty":"2","execPrice":"50000","execType":"Trade"}]}"#;
     for (from, to) in [
@@ -647,6 +660,7 @@ fn malformed_execution_does_not_consume_identity_and_missing_ids_stay_distinct()
 #[test]
 fn deduplicated_execution_retains_native_order_identity_in_fill_frame() {
     let mut h = startup(Variant::Inverse);
+    authenticate(&mut h);
     emitted_fills(&mut h);
     let row = r#"{"topic":"execution.inverse","data":[{"category":"inverse","symbol":"BTCUSD","orderId":"native-order-id","orderLinkId":"client-link-id","execId":"execution-id","side":"Sell","execQty":"750","execPrice":"50000","execType":"Trade"}]}"#;
     h.message("/v5/private", row);
