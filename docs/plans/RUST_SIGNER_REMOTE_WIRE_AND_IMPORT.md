@@ -10,6 +10,18 @@ claude-ddi2il. Two shared signer seams from
 
 Sam decided both on 2026-10-23. This document is a plan; it changes no code.
 
+## Shared-envelope ownership update
+
+The overseer assigned the shared companion draft to codex-9czdjh, with m26ps4
+as required credential-core reviewer. [RUST_HOSTED_SIGNING_ENVELOPE.md](RUST_HOSTED_SIGNING_ENVELOPE.md)
+is the ONE canonical proposed contract for Kraken HMAC first and Paradex Stark
+second. Its structured descriptors, typed selected slot, complete receipt and
+original absolute deadline supersede the older P8 layout/timing sketches for
+those consumers; do not implement a second transport. Other family activation
+and P6b credential import remain separate gates. #2126 is HELD for live-account
+compatibility; the conditional refusal discussion below is historical, not
+permission to refuse existing hosted accounts before their working migration.
+
 ## P8: versioned sign operations on the existing channel
 
 ### Today

@@ -357,7 +357,7 @@ fn delegated_ed25519_uses_only_the_remote_answer_after_signed_event() {
     else {
         panic!("exact Ed25519 operation required");
     };
-    assert_eq!(key, &identity.signing);
+    assert_eq!(key, identity.signing_ref().unwrap());
     assert_eq!(payload, &[PayloadPart::Bytes {
         bytes: b"instruction=orderCancel&orderId=123&symbol=SOL_USDC_PERP&timestamp=1700000000123&window=60000".to_vec(),
     }]);
