@@ -218,3 +218,8 @@ OPEN origin. Explicit feature-mode OFF/ON rows include enabled strict Clippy.
 
 Source review, refreshed existing-adopter controls, feature-OFF pairs, scoped
 strict/fmt/bans and exact CI remain gates; no size or publication claim yet.
+
+55ao7t SOURCE CLEAR binds a1d81fc8e646. Initial-payload expiry uses the existing
+RetireReason::Timeout(Timeout::Auth), even after Ready; it is not AuthFailure
+evidence or a definitive auth refusal. The Kraken consumer plan records that
+distinction so no credential latch or write resend is inferred from retirement.
