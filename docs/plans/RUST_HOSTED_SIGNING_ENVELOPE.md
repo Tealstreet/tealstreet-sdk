@@ -1,6 +1,6 @@
 # Shared hosted-signing envelope and structured preimages
 
-Status: docs-only draft on actual 518d3953c09. Owner: codex-9czdjh, assigned by
+Status: docs-only draft on actual b5df8834b77 (#2152, after #2150). Owner: codex-9czdjh, assigned by
 claude-ddi2il. Required reviewer: claude-m26ps4, credential-core owner; uufub4
 reviews dispatch/nonce fit. This folds m26ps4's c8b5513f108 direction. m26ps4
 keeps D1 (#2132), then G3/G6; drafting this plan need not wait for those source
