@@ -6,6 +6,7 @@ mod history;
 mod identity;
 #[cfg(test)]
 mod preparation_delegation_tests;
+pub mod provider;
 mod sign;
 mod trading;
 mod wire;
