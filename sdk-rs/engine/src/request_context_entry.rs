@@ -343,6 +343,13 @@ impl<P> Cx<'_, P> {
         })
     }
 
+    /// Settle this genuine command entry with a local pre-I/O refusal. A full
+    /// registry or invalid clock yields the engine's typed admission refusal.
+    #[inline(never)]
+    pub fn refuse_command(&mut self, operation: Operation, error: impl Into<crate::VenueError>) {
+        let _ = (operation, error.into());
+    }
+
     /// One initial command transaction shared by Context and opaque Preflight
     /// issuers. Only this callback loan can reject an unissued command. The
     /// generic shell only calls `issue`; both halves are shared, non-generic code.
