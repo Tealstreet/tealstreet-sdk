@@ -53,7 +53,7 @@ pub enum Pending {
     BookQuery {
         context: Context,
     },
-    Account(account::Request),
+    Account(Box<account::Request>),
     Trade(trading::Request),
     History(Box<history::Request>),
     Markets {
@@ -1177,6 +1177,7 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Account(request) => self.account_http_failed(cx, request, error),
             Pending::History(request) => {
                 // Native history presents a released transport failure as Internal.
                 let error = if error.kind == Some(safe_cex_engine::ErrorKind::Network) {
@@ -1202,10 +1203,11 @@ impl Venue for Backpack {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         pending: Pending,
-        _reason: safe_cex_engine::request_context::Error,
+        reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Account(request) => self.account_precommit_failed(cx, request, reason, error),
             Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Candles { context, .. } => {
@@ -1224,6 +1226,12 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Account(request) => self.account_precommit_failed(
+                cx,
+                request,
+                safe_cex_engine::request_context::Error::Invalid,
+                error,
+            ),
             Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
