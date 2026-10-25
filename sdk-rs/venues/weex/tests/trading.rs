@@ -1350,6 +1350,8 @@ fn imported_trailing_market_order_cancels_through_the_algo_endpoint() {
 #[test]
 fn fill_only_socket_event_during_cancel_blocks_replacement_before_order_update() {
     let mut e = engine_with_private_ws(true);
+    e.start(1000.0);
+    e.prepared_actions(1000.0).for_each(drop);
     let socket=import_orders_with_socket(&mut e,json!([{"orderId":"1","symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"PARTIALLY_FILLED","origQty":"0.2","executedQty":"0.1","price":"59000","updateTime":1773295700000u64}]),json!([])).unwrap();
     e.handle(1002.0, Event::WsOpened { socket });
     e.drain_actions().for_each(drop);
@@ -1407,6 +1409,8 @@ fn imported_algo_children_with_unknown_trigger_source_cannot_authorize_amend() {
 #[test]
 fn fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliation() {
     let mut e = engine_with_private_ws(true);
+    e.start(1000.0);
+    e.prepared_actions(1000.0).for_each(drop);
     let socket=import_orders_with_socket(&mut e,json!([{"orderId":"1","symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"PARTIALLY_FILLED","origQty":"0.2","executedQty":"0.1","price":"59000","updateTime":1773295700000u64}]),json!([])).unwrap();
     e.handle(1002.0, Event::WsOpened { socket });
     let before_fill: Vec<_> = e
