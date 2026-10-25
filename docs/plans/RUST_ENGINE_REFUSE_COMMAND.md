@@ -25,7 +25,7 @@ let _ = cx.fail_context(&context, error);
 ```
 
 On `feat/rust-rewrite` at `b0008964fbb` (after #2114), this exact shape appears
-at **37 sites in 10 venues**, listed in the appendix. Bitget and OKX already
+at **37 sites in 9 venues**, listed in the appendix. Bitget and OKX already
 wrap a credentialed variant in their own `refuse_entry`.
 
 This is a cross-cutting concern done per venue. Each copy can drift, and every
