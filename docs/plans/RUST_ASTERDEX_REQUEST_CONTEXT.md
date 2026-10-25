@@ -330,14 +330,23 @@ engine seam is needed.
 - **Clock.** Each `/time` attempt is its own Background read context; attempts
   2-3 use `http_context_with_egress(.., Egress::PublicCors)`, replacing
   `route_request`. The 5 s per-attempt bound becomes the Context deadline.
-- **Clock gating.** `awaiting_clock` holds unsigned requests under their
-  command root; each read's own Context is admitted when the clock settles and
-  the request is released, so its deadline starts then.
+- **Clock gating.** The command root is admitted at ingress with its
+  deadline. `awaiting_clock` holds the unsigned request; its signed leg is
+  staged and prepared only after the clock settles, bounded by the root's
+  remaining time, because dispatch signing stamps from `protocol_now` at
+  prepare. The -1021 resend likewise re-prepares after its resync. The gate
+  stays venue-local while Aster is its only user; a second family makes it a
+  shared release gate.
 - **Trade jobs become managed Plans** (W). Each `Planned` step is a plan leg
   (`plan_leg_context_with_intent`); the job ends through
   `done_plan`/`fail_plan`. `continue_on_error` and `successes` keep their native
   meaning, and released 408/5xx stays Unknown through the shared classifier.
-  Writes never resend, as today.
+  Writes never resend on network or gateway failure, as today. They keep
+  today's two single resends: V1 -1022 once, and -1021 once after a clock
+  resync. Each resend re-prepares the same plan leg (attempt 2) with a fresh
+  timestamp and signature and frozen economic fields. -1021/-1022 are
+  venue-definitive pre-execution rejections, never Unknown. RED tests pin
+  both for POST, PUT and DELETE.
 - **Resends.** Network retries and retryable 429/5xx on reads use
   `AdmittedRead::retry(ReadFailure)` or a fresh leg, and the shared backoff
   replaces the venue's 1/2/3 s timer (`RequestState.retries` is deleted). V1
@@ -378,9 +387,9 @@ stops and reports; nothing is trimmed silently.
 
 Decisions (overseer, 2026-10-25):
 
-1. A signed read's Context is admitted only after the clock settles, so the
-   read gets its own full bound and clock attempts never consume it. The
-   command root is still admitted at ingress; the clock phase keeps its own
-   bounded attempts.
+1. The signed release is staged and prepared only after the clock settles, so
+   clock attempts never consume the read's bound and nothing signs while
+   awaiting the clock. The command root is admitted at ingress; the clock
+   phase keeps its own bounded attempts.
 2. Slice 3 waits for #2093 (`sign.rs`); slices 1 and 2 proceed now. Reviewer:
    claude-m26ps4.
