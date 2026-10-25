@@ -149,7 +149,7 @@ impl<P> Cx<'_, P> {
             .retirements
             .try_reserve(1)
             .map_err(|_| Error::Capacity)?;
-        let seal = self.prepare_plan_terminal(plan, error, None)?;
+        let seal = self.prepare_plan_terminal(plan, error, None, None)?;
         let cleanup = self
             .io
             .prepare_read_history_cleanup(plan.owner(), None, 4)?;

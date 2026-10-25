@@ -2068,6 +2068,17 @@ mod planned_calls {
         assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
     }
     #[test]
+    fn a_failure_note_extends_a_read_plan_failure_without_a_write_journal() {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, ..Default::default() });
+        start(&mut e, 0.);
+        let plan = e.venue.plan.clone().unwrap();
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        assert!(cx.io.request_contexts.command_writes(7).is_none(), "no write journal");
+        cx.fail_plan_noted(&plan, "read failed", "cache kept").unwrap();
+        let error = plan_failure(&e.drain_actions().collect::<Vec<_>>());
+        assert_eq!(error.message, "read failed; cache kept");
+    }
+    #[test]
     fn an_oversized_failure_note_is_truncated_without_touching_the_refusal() {
         let note = "n".repeat(10_000);
         let note: &'static str = Box::leak(note.into_boxed_str());
