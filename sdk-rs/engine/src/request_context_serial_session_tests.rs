@@ -817,4 +817,29 @@ mod serial_session {
         assert!(e.venue.selected.iter().all(Result::is_err));
         assert_eq!(failed(&actions).outcome, Some(crate::Outcome::Unknown));
     }
+    #[test]
+    fn late_attempt_one_delivery_cannot_select_again_or_spend_resources() {
+        let (mut e, _, first) = seeded(false, 200);
+        let next_id = e.io.core.next_id;
+        e.handle(
+            3.,
+            Event::HttpResponse {
+                request: first.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"code":1000}"#,
+                },
+            },
+        );
+        let actions = drain(&mut e);
+        assert_eq!(e.venue.data, 1, "retired attempt never re-enters the codec");
+        assert_eq!(e.venue.selected, vec![Ok(())]);
+        assert_eq!(e.io.core.next_id, next_id);
+        no_http(&actions);
+        e.venue.foreign_probe = true;
+        let actions = wake(&mut e, 1, 4.);
+        assert_eq!(e.venue.foreign_result, Some(Err(Error::Revoked)));
+        no_http(&actions);
+    }
 }
