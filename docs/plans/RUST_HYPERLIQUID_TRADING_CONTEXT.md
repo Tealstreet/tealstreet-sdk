@@ -160,6 +160,8 @@ eligibility/window semantics, not a guessed timer.
 
 Feature intent at adoption: serial-plans, condition-waits, dispatch-signing,
 dispatch-nonce, crypto/secp256k1, with existing order-locks/sockets retained.
+Add the reviewed serial-pacing opt-in once dazzy3's shared feature lands; its
+name here is the approved prerequisite, not an existing Cargo declaration.
 No session-bearer, Session or mutation-group feature is needed by this funnel.
 These are opt-ins, not assumed shipped headroom. No generic core source or
 feature flag is added by this plan/originals stage.
@@ -240,3 +242,35 @@ queue-time pacing. This is RESOLVED-PENDING the reviewed feature, not a landed
 API. No venue-local authority is authorized. Plan/native originals may proceed
 while nonce and pacing source are unavailable; neither is bypassed by a green
 native control.
+
+## Original execution checkpoint
+
+The new request_context_trading target executes the actual Venue and startup,
+account and managed-socket callbacks. Each independent fixture has a distinct
+real scalar/address, leaving native sharing controls unchanged. It uses genuine
+Command Read owners for capacity and raw ingress only for native wire/reply
+probes. No future provider result, nonce subject or owner is fabricated.
+
+On the unchanged b0ee native source, 26 controls execute: ten intended behavior
+assertion REDs and sixteen GREENs, zero ignored. Four capacity writes fail at
+no exchange before admission; empty-cancel capacity sees native [] instead of
+a shared refusal. NaN fails at native kind None versus InvalidInput. Unclaimed
+DATA reaches a native completion. The three Prepare probes fail at raw exchange
+before Prepare. All are real predicates, not compile/setup failures.
+
+The exact-peer retirement, native recovery and 255-survivor validation suffixes
+are gated behind each capacity RED. Preparation failure/duplicate and twenty-
+second expiry/late preparation suffixes are gated behind Prepare. Managed
+signed Bind/Claim positives require the actual installed provider fixture at
+source; no raw compatibility is permitted past the custody assertions. Plan,
+Preflight and condition-ready delegation must be added with their feature opt-
+ins during adoption, since those hooks are feature-gated today.
+
+The sixteen GREENs pin startup, zero-wait, duplicate ownership, native wire and
+no-OID status, five HTTP refusal classes, no transport resend, native FIFO334ms,
+full mixed bracket correlation, uncertain cancel stopping replacement,
+scheduleCancel control proof and builder reply/eight-second expiry. The separate
+unchanged native trading target passes32/32. Initial strict clippy found one
+redundant header-name conversion; it is removed. A composed rerun after the
+#2146 landing must finish before the originals review pin is sent. Full bans,
+ratchets, formatting and diff checks pass; no source or size claim is made.
