@@ -227,15 +227,18 @@ the signed operation.**
   returns a new `SignError::SigningNotConfigured`, with venue error
   `InvalidInput` / `NotSent` and its own static message. Every other absence
   stays `MissingKey`.
-- **Where the flag comes from (kuhwxi carry A):** the flag is never
-  transported. `Identities` cross realms as serialized opaque refs (registry
-  options to the engine, a worker or the hosted host), and `serde(skip)`
-  drops it on every hop. It is derived in the engine-owning realm from the
-  family's trusted `IdentitySetupPolicy` after deserialization: engine
-  construction re-applies the Optional policy to the installed primary just
-  before `set_identities`. A serialized identity that loses the flag is never
-  trusted to carry it. Without the re-application it would fail safe
-  (`MissingKey`, latched) but silently break GRVT's Optional absence.
+- **Where the flag comes from (kuhwxi carry A, ddi2il ruling option 2):**
+  the flag is never transported, and `serde(skip)` drops it on any hop.
+  Because C8 refuses injected identities without `signing` for every family,
+  a credential-only identity reaches an engine only through trusted local
+  setup in the engine-owning realm. The flag is derived there, by
+  `apply_to_identities` from the family's trusted `IdentitySetupPolicy`. It
+  is set only on an installed primary whose `signing` is `None`, and never
+  from anything in a payload. Phase 3 adds no external acceptance surface.
+  Accepting an Optional credential-only identity across a serialized hop,
+  and its round-trip RED, belongs to the hosted/injected GRVT step, and only
+  if that step proves it needs one (zs5e83's G5: the intended path is the
+  in-realm hosted `LocalSetup`).
 - **Injection (carry B):** JSON carrying the flag's field name cannot set
   it. `Identity` ignores it, and a pin fixes that behaviour so a later serde
   change can't open it.
@@ -285,7 +288,7 @@ Shared-core REDs. Each fails on `ad0b74afdf8` for the stated reason.
 | C11 | Optional absence: a test that deliberately bypasses G2 reaches absent-ref preparation and fails `SigningNotConfigured` (`InvalidInput` / `NotSent`). There is no `config.invalid`, `StartupFailed` or latch; a real login `Present` plus unsigned cancel and leverage still succeed afterwards, including during startup | today it latches through `MissingKey` (C4s/C4l path) |
 | C11p | Serial Plan: an unsigned call settles, then the absent-ref placement fails in preparation. The operation and command terminals are pinned, there is no account latch, and later unsigned work succeeds | same |
 | C11i | Optional family with an installed ref: a provider `MissingKey` on inline `sign_ready` still latches (#2119), and C4s/C4l stay unchanged for Required families | control: green before and after |
-| C11r | Serialization boundary (carry A): an Optional credential-only identity round-trips through the serialized options path into a constructed engine and still refuses `SigningNotConfigured` without a latch; the same JSON for a Required family still latches `MissingKey` | flag not derived in the engine realm |
+| C11r | Serialization boundary (carry A, option 2): (a) a serialized Optional credential-only identity is still refused at the options parse (C8, every family); (b) trusted local setup derives the flag only for an installed primary with `signing` `None` under Optional policy, giving `SigningNotConfigured`; the same setup under Required gives `MissingKey`; a serialized copy never carries the flag back | no flag or derivation |
 | C11j | Injection and equality (carries B, C): JSON naming the flag's field leaves it unset (pinned as ignored), and a flagged identity is not equal to an otherwise identical unflagged one | no flag |
 
 Behaviour-neutral controls, green before and after:
