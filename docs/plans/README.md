@@ -68,6 +68,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Binance history under shared Read authority | Plan only; no engine features; size measured, REDs next after review | Before converting Binance fills/orders/income/public-trades history or client-order lookup off the legacy request funnel. | [RUST_BINANCE_HISTORY_CONTEXT.md](RUST_BINANCE_HISTORY_CONTEXT.md) |
 | Bitget caller adoption (candles, identity, account reads, trade entry) | Slice 1 implemented; history waits on #1945 | Before converting Bitget candles, FetchAccount, account-cycle reads, trade entry refusals or history to shared Context authority. | [RUST_BITGET_CALLER_ADOPTION.md](RUST_BITGET_CALLER_ADOPTION.md) |
 | Bitget discovery under Background Context (slice 2) | Plan and original REDs | Before converting Bitget contracts/tickers discovery off the legacy `get`. | [RUST_BITGET_DISCOVERY_CONTEXT.md](RUST_BITGET_DISCOVERY_CONTEXT.md) |
+| Bitget managed sockets and private-WS route parity | Plan; legacy-path seam next after dazzy3 CLEAR, managed adoption deferred | Before converting Bitget sockets to the managed lifecycle, adding a route-rejection seam or handling 40018/40024 on the private socket. | [RUST_BITGET_MANAGED_SOCKET_ROUTING.md](RUST_BITGET_MANAGED_SOCKET_ROUTING.md) |
 | Bitget trading write job | Implemented on the streamed serial Plan; stacked on #2092/#2094, size via #2105/#2107 | Before converting the Bitget trading queue, `trade_fail`, `trade_timer` or the `send` body branch to shared Plan authority. | [RUST_BITGET_TRADING_CONTEXT.md](RUST_BITGET_TRADING_CONTEXT.md) |
 | Bybit signing | Active dispatch signer adoption | Before Bybit REST/probe/private WS authentication or credential setup changes. | [RUST_BYBIT_DISPATCH_SIGNER.md](RUST_BYBIT_DISPATCH_SIGNER.md) |
 | Integer protocol wire stamps | Active shared clock correction | Before formatting outbound timestamps or adopting dispatch signing recipes. | [RUST_PROTOCOL_WIRE_STAMP.md](RUST_PROTOCOL_WIRE_STAMP.md) |
@@ -433,4 +434,14 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Polymarket Gamma catalogue custody | Managed adoption; original and pressure controls pass, review/CI pending | Before adopting unsigned streamed catalogue pages; retain atomic cursor walk and native retry. | [RUST_POLYMARKET_CATALOGUE_CONTEXT.md](RUST_POLYMARKET_CATALOGUE_CONTEXT.md) |
 
+| Backpack supported-history Read custody | Source reviews CLEAR; full CI next | Before moving four history routes onto one caller-bound Read owner and activating publicRead. | [RUST_BACKPACK_HISTORY_READ_CUSTODY.md](RUST_BACKPACK_HISTORY_READ_CUSTODY.md) |
+
+| Paradex subscription candle poll custody | Source and local size gates CLEAR; qualifying CI pending | Before changing poll Background Read ownership, stale generations, native fallback or completion/recovery timers. | [RUST_PARADEX_CANDLE_POLL_CONTEXT.md](RUST_PARADEX_CANDLE_POLL_CONTEXT.md) |
+
+| Backpack public-seed Read custody | Source/scoped checks CLEAR; exact-head CI pending | Before managing Markets, tickers and MarkPrices startup/recovery observations. | [RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md](RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md) |
+
+| [Orderly local candle and identity completions](RUST_ORDERLY_LOCAL_READ_COMPLETIONS.md) | Managed source; 19 originals and 3 expiry controls pass, 23F/24O to 17F/18O; source review and CI pending. |
+
+| Dispatch nonce reservation and release ordering | Source/review/local gates CLEAR; refreshed exact-head CI pending | Before reserving a selected-key nonce in SignStep preparation or changing nonce receipt and release-floor custody. | [RUST_DISPATCH_NONCE_RESERVATION.md](RUST_DISPATCH_NONCE_RESERVATION.md) |
 | Serial single-call schedule construction | Local cut; paired measurements and exact-patch review pending | Before changing serial topology construction or declared-admission error precedence. | [RUST_SERIAL_SINGLE_CALL_SCHEDULE.md](RUST_SERIAL_SINGLE_CALL_SCHEDULE.md) |
+

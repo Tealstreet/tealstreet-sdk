@@ -45,7 +45,7 @@ fn key_only(public: bool) -> EngineOptions {
 fn injected<T: Visit>(public: bool, visitor: T) -> Result<T::Output, safe_cex_engine::VenueError> {
     let setup = json!({ "primary": { "key": "api-key", "passphrase": "pass" } });
     let (provider, identities) =
-        local_signer_from_json_for_mode("apexomni", setup.to_string(), public).unwrap();
+        local_signer_from_json_for_mode("apexomni", setup.to_string(), &key_only(public)).unwrap();
     let mut options: EngineOptions =
         serde_json::from_value(json!({ "publicDataOnly": public })).unwrap();
     options.signing = Some(identities);

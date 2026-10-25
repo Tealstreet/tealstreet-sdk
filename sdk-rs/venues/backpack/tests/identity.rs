@@ -17,10 +17,13 @@ fn engine_window(read: bool, public: bool, recv_window: Option<f64>) -> Engine<B
             secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
             ..Default::default()
         };
-        let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-            primary: Some(local("primary-key", 7u8)),
-            secondary: read.then(|| local("read-key", 8u8)),
-        })
+        let (provider, identities) = LocalSigner::from_setup_with_policy(
+            LocalSetup {
+                primary: Some(local("primary-key", 7u8)),
+                secondary: read.then(|| local("read-key", 8u8)),
+            },
+            ed25519_seeds(),
+        )
         .unwrap();
         (
             Some(std::sync::Arc::new(provider) as safe_cex_engine::signing::Provider),
@@ -45,8 +48,8 @@ fn engine_window(read: bool, public: bool, recv_window: Option<f64>) -> Engine<B
     e.set_identities(identities).unwrap();
     e.start(NOW);
     for _ in 0..12 {
-        let reads: Vec<_> = e
-            .drain_actions()
+        let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
             .filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -288,4 +291,16 @@ fn identity_secondary_read_inherits_the_primary_native_window() {
             .iter()
             .any(|(name, value)| *name == "X-API-Key" && value == "read-key")
     );
+}
+
+/// Backpack seeds are Ed25519 keys, declared as the provider builder does.
+fn ed25519_seeds() -> safe_cex_engine::signing::CredentialSetupPolicy {
+    let ed25519 = Some(safe_cex_engine::signing::IdentitySetupPolicy {
+        signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+        ..Default::default()
+    });
+    safe_cex_engine::signing::CredentialSetupPolicy {
+        primary: ed25519,
+        secondary: ed25519,
+    }
 }

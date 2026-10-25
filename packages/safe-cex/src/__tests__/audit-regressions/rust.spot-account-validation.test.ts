@@ -19,7 +19,7 @@ const setup = (reject = true) => {
       loaded: { markets: !reject, tickers: !reject, balance: !reject, orders: !reject, positions: !reject },
     })),
     snapshotFrame: () => new Uint8Array(),
-    wsOpen: empty, wsMessage: empty, wsClose: empty, httpStart: empty,
+    wsOpen: empty, wsMessage: empty, wsClose: empty, wsRouteExhausted: empty, httpStart: empty,
     httpChunk: empty, httpEnd: empty, httpFailed: empty, timer: empty,
   };
   const construct = vi.fn(function () { return engine; });

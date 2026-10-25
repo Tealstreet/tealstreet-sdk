@@ -341,7 +341,7 @@ pass (`CARGO_BUILD_JOBS=4`).
 - **Rulings.** The TS-visible changes are recorded in `RUST_CUTOVER_CALLERS.md`.
 - **Open.** `dispatch_signer` `rollback_provider_refusal_preserves_original_native_rejection_details` keeps the native expectation (outcome none). It waits on fe7lgm's #2092 fix: an accepted write with no IDs counts as an effect.
 
-## Size checkpoint (held for Sam's ruling)
+## Size checkpoint (before Sam's ruling)
 
 - **Exact CI number.** Bitget family at engine s with slice 3 (`52b5ad62067`) is **1,471,661** bytes (scratch run 40153785129). Bare engine s on `9b05c9ac452` is 1,339,263, so the delta is +132,398. The CI delta matches the local raw delta: the raw-to-optimized factor is about 1.0, not 0.88.
 - **Split** (local raw, function names excluded):
@@ -364,3 +364,44 @@ pass (`CARGO_BUILD_JOBS=4`).
   - Type erasure saves about 0-2K per family; it pays off in the combined bundle once a second family adopts.
   - About 2-8K of Bitget's engine share is recoverable without a redesign.
 
+## Allowance ruling and the composed size (2026-10-25)
+
+Sam's directive is that there is no TS fallback for now. Under it, the overseer ruled (2026-10-25) that slice 3 lands on Rust with the Bitget allowance raised to the measured size plus a small margin. Sam set the directive, not this number. The allowance is shrink-only, and codex-ih35js's engine cuts are meant to bring it back down.
+
+- **Allowance.** `WASM_VENUE_OVERRIDES` for `bitget` and `bitgetusdc` goes from 1,409,024 (venue + 64 KiB) to **1,478,656 (venue + 132 KiB)**. That is the composed Bitget size on the landing tip `c5d7c3595af` (1,475,547, after #1990, #2127 and #2093) plus 3,109, under the overseer's 1,480,000 cap. The opt-s PR that follows restores 1,409,024. The change is in `sdk-rs/harness/wasm-budget.mjs`, with its test.
+- **Recompose.** Commit `546f585f187` is composed on tip `76f1f7fc842`, using dazzy3's S0 recipe:
+  - Step 0 merged `60056af11b7` first.
+  - The whole-file `request_context_planned.rs` from this branch was taken, then `s0_rewrite.py` was run (idempotent).
+  - It includes #2110's head `36b0943b4ac` (`fail_plan_noted`).
+- **Paired size.** Measured locally with wasm-opt (`SAFE_CEX_WASM_OPT=required`), bare `76f1f7fc842` against composed `546f585f187`:
+
+| Bundle | Bare tip | Composed | Delta | Budget |
+| --- | ---: | ---: | ---: | ---: |
+| Bitget family | 1,358,862 | 1,472,027 | +113,165 | 1,474,560 |
+| BitgetUSDC family | 1,358,862 | 1,472,027 | +113,165 | 1,474,560 |
+| Bybit family | 1,396,174 | 1,396,213 | +39 | 1,404,928 |
+| Combined | 13,900,838 | 14,001,947 | +101,109 | 14,155,776 (153,829 left) |
+
+The family delta is smaller than the earlier +132,398 because S0 and the landed engine work since `9b05c9ac452` now carry part of the shared cost.
+
+### Final composition on #2110 (`e3d1d70a5d1`)
+
+#2110 landed first, and merging it made this branch's engine delta vanish. What remains is the Bitget venue, its tests, the budget, the plan docs and the request inventory. #2111 (`7ada358c446`), which landed earlier, added +2,503 to Bitget, so the allowance was re-set on this final tree.
+
+Paired sizes, local wasm-opt, bare `e3d1d70a5d1` against composed:
+
+| Bundle | Bare tip | Composed | Delta | Budget |
+| --- | ---: | ---: | ---: | ---: |
+| Bitget / BitgetUSDC family | 1,360,487 | 1,473,466 | +112,979 | 1,476,608 |
+| Bybit family | 1,396,154 | 1,396,154 | +0 | 1,404,928 |
+| Combined | 13,908,609 | 14,009,104 | +100,495 | 14,155,776 (146,672 left) |
+
+BitgetUSDC builds the same family as Bitget, and the two were byte-equal at every earlier pair.
+
+### Landing recompose (tip `c5d7c3595af`)
+
+#2122 was merged automatically through `30afb26e9d8` (#1990, #2127, #2135), `102c854ae24` (#2129, #2133), `44eea84de4b` (#2131) and `c5d7c3595af` (#2093). None needed a manual hunk.
+
+- **`30afb26e9d8` pair.** Bitget 1,361,649 to 1,474,665 (+113,016). Combined 13,898,685 to 13,995,608 (+96,923, 160,168 left).
+- **#2131.** Carried: its own pair was byte-identical for Bitget, and -407 combined.
+- **On `c5d7c3595af`.** Composed Bitget is 1,475,547. That left 1,061 under 1,476,608, so the allowance became 1,478,656, which is measured + 3,109.

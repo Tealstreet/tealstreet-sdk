@@ -91,6 +91,7 @@ mod tests {
         assert_eq!(wire_stamp_ms(f64::NEG_INFINITY), f64::NEG_INFINITY);
         assert!(
             crate::signing::SignReceipt {
+                nonce: None,
                 stamp_ms: Some(wire_stamp_ms(9_007_199_254_740_992.)),
                 expiry_ms: None
             }

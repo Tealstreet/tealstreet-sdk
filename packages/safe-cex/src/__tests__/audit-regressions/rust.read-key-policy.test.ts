@@ -88,6 +88,16 @@ describe('ValidateOnly read keys', () => {
 });
 
 describe('PublicRead read keys', () => {
+  it('Backpack declares PublicRead in the bridge and real signer setup capsule', () => {
+    const policy = deriveSignerSetupPolicy('backpack');
+    expect(policy.readCredentials).toBe('publicRead');
+    expect(deriveBridgeConstruction('backpack', base).readCredentials).toBe('publicRead');
+    const { capsule } = construct({ ...base, publicDataOnly: true, secondary_key: 'read', secondary_secret: SENTINEL }, policy);
+    expect(JSON.parse(capsule).primary).toBeUndefined();
+    expect(capsule).not.toContain('primary-material');
+    expect(JSON.parse(capsule).secondary).toEqual({ key: 'read', secret: SENTINEL });
+  });
+
   const publicRead = { readCredentials: 'publicRead' as const };
   const read = { secondary_key: 'read', secondary_secret: SENTINEL };
 
@@ -118,7 +128,7 @@ describe('the unchanged default', () => {
 
   it('keeps bridge records and setup policy unchanged for undeclared families', () => {
     for (const name of Object.keys(rules.venues) as ExchangeName[]) {
-      if (name === 'cryptocom') continue;
+      if (name === 'cryptocom' || name === 'backpack') continue;
       expect(deriveBridgeConstruction(name, base)).not.toHaveProperty('readCredentials');
       expect(deriveSignerSetupPolicy(name)).not.toHaveProperty('readCredentials');
     }

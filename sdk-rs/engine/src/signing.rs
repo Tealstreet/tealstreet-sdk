@@ -273,7 +273,7 @@ impl Identities {
             || self
                 .primary
                 .as_ref()
-                .is_some_and(|primary| work.key_refs().any(|key| primary.owns(key)))
+                .is_some_and(|primary| work.any_key_ref(&|key| primary.owns(key)))
     }
 }
 
@@ -376,8 +376,23 @@ pub struct SignReceipt {
     pub stamp_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expiry_ms: Option<f64>,
+    #[cfg_attr(not(feature = "dispatch-nonce"), serde(skip))]
+    #[cfg_attr(
+        feature = "dispatch-nonce",
+        serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "nonce_decimal"
+        )
+    )]
+    pub nonce: Option<u64>,
 }
+#[path = "signing_nonce_decimal.rs"]
+#[cfg(feature = "dispatch-nonce")]
+mod nonce_decimal;
+
 impl SignReceipt {
+    #[cfg_attr(not(feature = "dispatch-nonce"), inline(never))]
     pub fn validate(&self) -> Result<(), SignError> {
         if [self.stamp_ms, self.expiry_ms]
             .into_iter()
@@ -387,6 +402,7 @@ impl SignReceipt {
                     || !(0. ..=9_007_199_254_740_991.).contains(&value)
                     || value.fract() != 0.
             })
+            || (!cfg!(feature = "dispatch-nonce") && self.nonce.is_some())
             || matches!((self.stamp_ms, self.expiry_ms), (Some(stamp), Some(expiry)) if expiry <= stamp)
         {
             return Err(SignError::InvalidRequest);
@@ -485,11 +501,13 @@ impl SignRequest {
     /// Refs come only from an identity, so an invalid one means the installed
     /// credentials lack that material: no retry of this request can sign.
     pub fn has_invalid_key_ref(&self) -> bool {
-        self.key_refs().any(|key| !valid_key_ref(key))
+        self.any_key_ref(&|key| !valid_key_ref(key))
     }
-    /// Every ref the operations name, including interpolated credentials.
-    pub fn key_refs(&self) -> impl Iterator<Item = &KeyRef> {
-        self.operations.iter().flat_map(|op| {
+    /// Whether any ref the operations name, including interpolated
+    /// credentials, passes `test`. A plain loop over `dyn`, so every caller
+    /// shares one body.
+    pub fn any_key_ref(&self, test: &dyn Fn(&KeyRef) -> bool) -> bool {
+        for op in &self.operations {
             let (key, payload) = match op {
                 Operation::Present { key }
                 | Operation::PublicAddress { key }
@@ -497,12 +515,18 @@ impl SignRequest {
                 Operation::Sign { key, payload, .. } => (Some(key), &payload[..]),
                 Operation::Sha256 { payload } => (None, &payload[..]),
             };
-            key.into_iter()
-                .chain(payload.iter().filter_map(|part| match part {
-                    PayloadPart::Credential { key } => Some(key),
-                    _ => None,
-                }))
-        })
+            if key.is_some_and(test) {
+                return true;
+            }
+            for part in payload {
+                if let PayloadPart::Credential { key } = part
+                    && test(key)
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
     /// Shared structural bounds also apply to injected providers. Expanded secret
     /// input bounds are enforced privately by the provider before allocation.

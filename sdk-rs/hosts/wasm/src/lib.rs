@@ -697,6 +697,7 @@ impl WasmEngine {
         let (protocol_now, revision) = self.inner.signing_clock(now);
         let stamp_ms = safe_cex_engine::time::wire_stamp_ms(protocol_now);
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(stamp_ms),
             expiry_ms: None,
         }
@@ -892,7 +893,7 @@ impl WasmEngine {
             let (signer, identities) = safe_cex_venues::local_signer_from_json_for_mode(
                 venue,
                 std::mem::take(&mut *input),
-                safe_cex_venues::signer_setup_public_data_only(&options),
+                &options,
             )
             .map_err(construction_error)?;
             options.signing = Some(identities);
@@ -1156,6 +1157,14 @@ impl WasmEngine {
         let socket = host_resource_id(socket)?;
         let socket = SocketId(socket);
         self.inner.handle(now, Event::WsClosed { socket, code });
+        Ok(self.flush())
+    }
+
+    /// Host-only: a `rejectRoute` connect had no route left, so nothing was dialled.
+    #[wasm_bindgen(js_name = wsRouteExhausted)]
+    pub fn ws_route_exhausted(&mut self, socket: f64, now: f64) -> Result<String, js_sys::Error> {
+        let socket = SocketId(host_resource_id(socket)?);
+        self.inner.handle(now, Event::WsRouteExhausted { socket });
         Ok(self.flush())
     }
 

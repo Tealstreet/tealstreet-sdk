@@ -459,7 +459,9 @@ impl<P> Cx<'_, P> {
         } = declaration;
         #[cfg(not(feature = "serial-plans"))]
         let has_barriers = !barriers.is_empty();
-        if (!cfg!(feature = "http-mutation-barriers") || physical) && has_barriers {
+        if (!cfg!(feature = "http-mutation-barriers") || physical || self.io.core.nonce_unscheduled)
+            && has_barriers
+        {
             return Err(Error::Invalid);
         }
         let (intent, old_read) = self.preflight_plan_origin(preflight)?;
