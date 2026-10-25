@@ -262,6 +262,29 @@ impl Signer for Provider {
     }
 }
 
+/// An installed ref whose material the provider lacks: an inline MissingKey.
+struct MissingProvider;
+impl Signer for MissingProvider {
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        panic!("immediate fixture")
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        Some(Err(SignError::MissingKey))
+    }
+}
+
+fn engine_missing(probe: Probe, identities: Identities) -> Engine<Probe> {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(probe);
+    engine.set_identities(identities).unwrap();
+    engine.set_signer(Some(Arc::new(MissingProvider))).unwrap();
+    engine.start(NOW);
+    engine.drain_actions().for_each(drop);
+    engine
+}
+
 fn engine(probe: Probe) -> (Engine<Probe>, Arc<AtomicUsize>) {
     engine_with(probe, Identities::default())
 }
@@ -539,4 +562,32 @@ fn c11i_required_absence_still_latches_missing_key() {
     let out = amend(&mut e, NOW, 1);
     assert_eq!(e.venue().failures[0].1, SignError::MissingKey.venue_error());
     assert_eq!(config_invalid(&out), 1, "{out:?}");
+}
+
+/// C11i (Optional arm): an Optional family whose primary has an INSTALLED ref
+/// still latches on a real inline provider MissingKey (#2119), so the typed
+/// Optional refusal never swallows a provider failure.
+#[test]
+fn c11i_optional_installed_ref_still_latches_on_provider_missing_key() {
+    let mut ids = Identities {
+        primary: Some(signing(true)),
+        secondary: None,
+    };
+    let policy: safe_cex_engine::signing::CredentialSetupPolicy =
+        serde_json::from_str(r#"{"primary":{"signing":"optional"}}"#).unwrap();
+    policy.apply_to_identities(&mut ids, false).unwrap();
+    assert!(ids.primary.as_ref().unwrap().signing_ref().is_ok());
+    let mut e = engine_missing(
+        Probe {
+            signed: vec![1],
+            ..Default::default()
+        },
+        ids,
+    );
+    let out = amend(&mut e, NOW, 1);
+    assert_eq!(config_invalid(&out), 1, "{out:?}");
+    assert_eq!(
+        failed(&out, 1).map(|error| error.message),
+        Some(SignError::MissingKey.venue_error().message)
+    );
 }

@@ -2,20 +2,19 @@
 //! D3 and D6): key presence, the typed login intent and the Optional
 //! absence flag, all derived by trusted setup.
 use safe_cex_crypto::signer::LocalSigner;
+use safe_cex_engine::CredentialSlot;
 use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::signing::{
     CredentialSetupPolicy, Identities, Identity, KeyPresence, KeyRef, PrimaryLogin, SetupFacts,
     SignError,
 };
-use safe_cex_engine::CredentialSlot;
 
 fn optional() -> CredentialSetupPolicy {
     serde_json::from_str(r#"{"primary":{"signing":"optional"}}"#).unwrap()
 }
 
 fn facts(setup: &str) -> SetupFacts {
-    let (_, _, facts) =
-        LocalSigner::from_json_with_facts(setup.into(), optional(), false).unwrap();
+    let (_, _, facts) = LocalSigner::from_json_with_facts(setup.into(), optional(), false).unwrap();
     facts
 }
 
@@ -95,16 +94,33 @@ fn c11r_optional_absence_is_derived_by_trusted_setup_only() {
         ids.primary.unwrap().signing_ref(),
         Err(SignError::MissingKey)
     );
-    let hop: Identity =
-        serde_json::from_str(&serde_json::to_string(&flagged).unwrap()).unwrap();
+    let hop: Identity = serde_json::from_str(&serde_json::to_string(&flagged).unwrap()).unwrap();
     assert_eq!(hop.signing_ref(), Err(SignError::MissingKey));
+    // Only an absent ref is flagged: an installed ref under Optional policy is
+    // the same identity Required setup builds.
+    let installed = r#"{"primary":{"key":"api-key","secret":"api-secret"}}"#;
+    let (_, optional_ids, _) =
+        LocalSigner::from_json_with_facts(installed.into(), optional(), false).unwrap();
+    let (_, required_ids, _) = LocalSigner::from_json_with_facts(
+        installed.into(),
+        CredentialSetupPolicy::default(),
+        false,
+    )
+    .unwrap();
+    let optional_primary = optional_ids.primary.unwrap();
+    assert!(optional_primary.signing_ref().is_ok());
+    assert_eq!(optional_primary, required_ids.primary.unwrap());
 }
 
 /// C11j: JSON naming the flag cannot set it, and the flag takes part in
 /// equality.
 #[test]
 fn c11j_flag_is_not_injectable_and_takes_part_in_equality() {
-    for field in ["signingNotConfigured", "signing_not_configured", "optionalAbsent"] {
+    for field in [
+        "signingNotConfigured",
+        "signing_not_configured",
+        "optionalAbsent",
+    ] {
         let json = format!(r#"{{"credential":"c","{field}":true}}"#);
         let parsed: Identity = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.signing_ref(), Err(SignError::MissingKey), "{field}");
