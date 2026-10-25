@@ -47,6 +47,8 @@ def modes():
     # session-bearer OFF control: Session bindings are refused (session_bearer_off.rs).
     grouped.setdefault(('http-plans', 'test-support'), []).append('session-bearer OFF control')
     grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'order-locks', 'test-support')] = ['explicit nonce control']
+    grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'serial-plans', 'test-support')] = [
+        'Kraken serial nonce prerequisite control']
     for family in families:
         tree = subprocess.check_output([
             'cargo', 'tree', '--locked', '--target', 'wasm32-unknown-unknown',

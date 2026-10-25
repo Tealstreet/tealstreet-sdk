@@ -8901,3 +8901,32 @@ reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements
 replaces duplicate Opened2100 with an actual Close/retry-at/new socket/Open and
 prepared read at that observation time. ORDER.createdAt1000, last_update1000,
 all financial assertions and the original cancellation request/ACK are unchanged.
+
+## Kraken local prerequisite policy and caller projection
+
+Inert prerequisite policy and shared-fixture checkpoint, started on
+9977ccf1aa6; no runtime change, activation or inventory prune. The overseer approved NEW Futures 20s physical calls and Spot 100s
+nontrade/token retry-chain bounds while preserving native Spot 20s physical
+timeouts, native retry ledgers, history 50-page/caller-wait caps and serial
+command length. Token work remains socket-epoch bound. The exact owner table is
+[RUST_KRAKEN_PRIVATE_PREREQUISITES.md](RUST_KRAKEN_PRIVATE_PREREQUISITES.md).
+
+Named follow-up: richer Kraken partial-write caller projection. Shared journal
+per-item Rejected/NotSent truth is retained; caller-visible errors deliberately
+keep native outcome=None after progress, accepted IDs or protective cancel.
+Source controls must assert journal truth and caller projection independently.
+Native cancel/ACK/replacement ordering remains serial; this grants no parallel
+nonce barrier authority. Namespace takeover still requires bounded owner review. Protective amendment
+uses the existing serial Plan and its cancel DATA/fact custody, with current
+Store provenance checked before replacement; no new release hook or parallel
+barrier authority is introduced. Hosted adapter and activation stay held.
+
+The takeover census covers issuers we own: SDK nonce core, native/WASM hosts,
+and tealstreet-next worker/process generations. Their epoch-bound fence and
+joined work-lease retirement precede atomic import of both reserved and
+released maxima, including the target's state. No proof of remote nonexecution
+is required. Another application using the same Kraken API key is outside the
+census, with native-equivalent exposure: an invalid-nonce collision is a
+definitive pre-execution refusal, not permission to replay the write. Unknown
+external issuers therefore do not block takeover. This ruling grants no hosted
+activation; the working exact-nonce adapter remains a prerequisite.
