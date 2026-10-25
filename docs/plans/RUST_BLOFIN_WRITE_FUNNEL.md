@@ -17,14 +17,24 @@ BloFin's last 8 request-inventory entries, all in `trading.rs`.
 | `:1303` job success                                        | `cx.done(json(ids))`                                       | `finish_plan_call` + `done_plan(json(ids))`; `done_empty_plan` when nothing is admitted                                                                      |
 | `:1405` job failure                                        | `effective`-adjusted outcome + `cx.fail`                   | `finish_plan_call` + `fail_plan`; the journal projects the outcome; the local `effective` edit is deleted                                                    |
 | `:1391` `matches!(request.step.effect, Effect::Place{..})` | Frozen macro in a Cx-escaping scope                        | Leaves with the conversion; the `orders_revision` bump moves to the failure and retirement paths                                                             |
-| `:1242` hedged leverage join                               | Two parallel POSTs, local join                             | Declared Plan with one all-Mutation barrier step (`admit_plan_with_barriers`)                                                                                |
+| `:1242` hedged leverage join                               | Two parallel POSTs, local join                             | W1: two serial Mutation calls (long, then short) in the job's Plan. W2: one all-Mutation barrier step (`admit_plan_with_barriers`)                           |
 | `:1630` join failure                                       | Local first-error aggregation                              | `fail_plan`; the journal projects (one 503 plus one Accepted is Unknown, IDs kept)                                                                           |
 
-- **W1** (one PR): every site except the hedged-leverage join, six
-  occurrences including the macro.
-- **W2** (one PR, after W1 lands): the barrier join. BloFin is the named first
-  consumer of `RUST_PLAN_MUTATION_PREPARE_BARRIER.md`, whose engine side has
-  landed with no venue using it yet.
+- **W1** (one PR): all 8 occurrences, including the macro, by direct
+  cutover (overseer approval, 2026-10-26). The hedged-leverage join runs as
+  two serial Mutation calls, long then short, in the job's one streamed Plan.
+  Short is admitted only from long's DATA (`continue_serial_plan`) after
+  long's Accepted fact is recorded. Keeping the join on legacy dispatch would
+  need a mixed Preflight/legacy FIFO, a start timer and a re-plan race, which
+  is migration-state code the cutover rule forbids.
+- **W1 interim behaviour (caller-visible, W1 only).** Short is sent only after
+  long is Accepted: one extra round trip, and a long failure means short is
+  never sent. That's strictly more conservative. CALLERS records it as a W1-to-W2
+  interim, and the READY note names it to the overseer.
+- **W2** (one PR, queued immediately after W1 lands): the barrier join, which
+  restores native parallel release. BloFin is the named first consumer of
+  `RUST_PLAN_MUTATION_PREPARE_BARRIER.md`, whose engine side has landed with
+  no venue using it yet. W2's scope and REDs are unchanged.
 
 Splitting keeps each size measurement and review scoped to one engine feature.
 
@@ -214,7 +224,11 @@ W1 (each fails on the base):
 - D-e: a failure after accepted rows keeps their IDs;
 - a released 503 seals Unknown, retirement restores Creating and Canceling
   rows, and the next queued command proceeds;
-- a late or duplicate response after a terminal changes nothing.
+- a late or duplicate response after a terminal changes nothing;
+- W1 serial hedged join: a long 503 or Unknown means short is never prepared and
+  the command seals Unknown; a long refusal means short is never prepared and
+  Rejected; long Accepted then short refused or 503 keeps long's accepted
+  effect in the journal (never NotSent, no commit); both Accepted commits once.
 
 W2:
 
@@ -229,7 +243,7 @@ changes, as in #2143.
 ## Delivery
 
 One PR per phase on `feat/rust-blofin-write-funnel` (W2 on its own branch).
-Each lands RED first, then source with the exact inventory prune (W1: 6
+Each lands RED first, then source with the exact inventory prune (W1: 8
 occurrences, W2: 2) and a CALLERS note for D-a to D-e. Local gates: the BloFin
 suite, clippy `-D warnings`, fmt, `check-bans.sh`, and the paired size. Then one
 push and one PR run.
