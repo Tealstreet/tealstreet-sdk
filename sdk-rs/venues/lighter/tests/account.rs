@@ -493,7 +493,16 @@ fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
     let mut timers = Timers::new();
     let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(options()));
     e.start(NOW);
-    let meta = requests(&mut e).pop().unwrap();
+    let meta = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
     reply(&mut e, &meta, 200, META);
     let lookup = drain(&mut e, &mut timers)
         .into_iter()
@@ -619,7 +628,7 @@ fn unmapped_initial_position_values_the_balance_only_with_its_native_pnl() {
         }
         let mut warning = false;
         for _ in 0..20 {
-            let actions = e.drain_actions().collect::<Vec<_>>();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
             if actions.is_empty() {
                 break;
             }

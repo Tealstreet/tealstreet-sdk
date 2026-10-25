@@ -25,6 +25,12 @@ import {
   resolveAsterDEXApiVersion,
   resolveAsterDEXV3AuthContext,
 } from './asterdex.types';
+import {
+  buildAsterDEXQueryString as buildQueryString,
+  isAsterDEXPublicEndpoint as isPublicEndpoint,
+  stripQueryString,
+  withoutAsterDEXSigningFields as withoutSigningFields,
+} from './asterdex.signing';
 import { asterDEXVirtualClock } from './asterdex.virtualClock';
 
 // The listen key is a POSTed read; its path is versioned, so match the suffix.
@@ -40,25 +46,6 @@ interface AsterDEXAPIOptions {
   v3SignerPrivateKey?: string;
   testnet?: boolean;
 }
-
-const PUBLIC_FAPI_PREFIXES = [
-  '/fapi/v1/ticker',
-  '/fapi/v1/klines',
-  '/fapi/v1/depth',
-  '/fapi/v1/trades',
-  '/fapi/v1/aggTrades',
-  '/fapi/v1/exchangeInfo',
-  '/fapi/v1/ping',
-  '/fapi/v1/time',
-  '/fapi/v3/ticker',
-  '/fapi/v3/klines',
-  '/fapi/v3/depth',
-  '/fapi/v3/trades',
-  '/fapi/v3/aggTrades',
-  '/fapi/v3/exchangeInfo',
-  '/fapi/v3/ping',
-  '/fapi/v3/time',
-] as const;
 
 const lastV3NonceBySigner = new Map<string, bigint>();
 const ASTERDEX_CODE_CHAIN_ID = {
@@ -113,16 +100,6 @@ const generateV1Signature = (queryString: string, secret: string): string => {
   return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
 };
 
-const buildQueryString = (params: Record<string, any>): string => {
-  // Build query string without sorting (order matters for signature)
-  // Filter out undefined, null, and empty string values
-  const filteredParams = Object.entries(params)
-    .filter(([_, value]) => value !== undefined && value !== null && value !== '')
-    .map(([key, value]) => `${key}=${String(value)}`); // No URL encoding for signature
-
-  return filteredParams.join('&');
-};
-
 const buildV3SigningPayload = (params: Record<string, any>): Record<string, string> => {
   const result: Record<string, string> = {};
   const sortedKeys = Object.keys(params).sort();
@@ -157,14 +134,6 @@ const generateV3Signature = (
   const signerKey = new ethers.SigningKey(normalizedPrivateKey);
   const signature = signerKey.sign(ethSignedHash);
   return ethers.Signature.from(signature).serialized;
-};
-
-const stripQueryString = (url: string): string => url.split('?')[0];
-
-const isPublicEndpoint = (url?: string): boolean => {
-  if (!url) return false;
-  const path = stripQueryString(url);
-  return PUBLIC_FAPI_PREFIXES.some((prefix) => path.startsWith(prefix) || path.includes(prefix));
 };
 
 const isAsterDEXCodeSignedEndpoint = (url?: string, method?: string): boolean => {
@@ -248,13 +217,6 @@ export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
 
   return rateLimitedAPI;
 };
-
-const SIGNING_FIELDS = ['signature', 'timestamp', 'recvWindow', 'user', 'signer', 'nonce'];
-
-const withoutSigningFields = (params: unknown): Record<string, any> =>
-  params && typeof params === 'object'
-    ? Object.fromEntries(Object.entries(params).filter(([key]) => !SIGNING_FIELDS.includes(key)))
-    : {};
 
 export const createAPI = (
   exchange: AsterDEXExchange,

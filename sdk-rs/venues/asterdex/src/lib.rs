@@ -1,55 +1,67 @@
 //! Aster perpetuals: typed public streams and versioned REST on the sans-I/O engine.
 mod account;
+#[cfg(test)]
+#[path = "../tests/support/fixture.rs"]
+mod fixture;
 mod history;
 mod request;
 pub mod sign;
 mod trading;
 mod wire;
 
+#[cfg(test)]
+use Options as VenueOptions;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
     json, num,
 };
 use serde_json::value::RawValue;
-use sign::{Credentials, Version};
+use sign::Version;
 use std::collections::{HashMap, VecDeque};
 use wire::*;
 
 const INTEREST_MS: f64 = 15_000.0;
 
+fn local_read_policy() -> Policy {
+    Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-    pub application_id: Option<String>,
-    pub auth_user_address: Option<String>,
-    pub auth_signer_address: Option<String>,
-    pub auth_private_key: Option<String>,
+    /// Provider refs; trusted setup owns the API key and signing material.
+    pub credentials: Option<Identity>,
+    /// Read agent refs. V3 setup may alias the primary wallet key for signing.
+    pub read_credentials: Option<Identity>,
+    /// Resolved by trusted setup from the key material; signing never guesses it.
     pub api_version: Option<Version>,
-    pub read_key: Option<String>,
-    pub read_secret: Option<String>,
+    /// V3 main wallet: `auth.userAddress`, else `applicationId`.
+    pub user_address: Option<String>,
+    /// V3 API wallet: `auth.signerAddress`, else the API key.
+    pub signer_address: Option<String>,
+    /// V3 read agent wallet: `auth.signerAddress`, else the read key.
+    pub read_signer_address: Option<String>,
     pub builder_address: Option<String>,
     pub builder_fee_rate_maker: Option<String>,
     pub builder_fee_rate_taker: Option<String>,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.auth_private_key);
-        safe_cex_crypto::secrets::erase(&mut self.read_key);
-        safe_cex_crypto::secrets::erase(&mut self.read_secret);
-    }
-}
 
 struct Urls {
     rest: &'static str,
@@ -140,11 +152,17 @@ struct BookState {
     last_id: Option<u64>,
 }
 
+/// One slot's provider refs and the V3 API wallet that signs for it.
+#[derive(Clone)]
+struct Slot {
+    identity: Identity,
+    signer: Option<String>,
+}
+
 pub struct AsterDex {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     version: Version,
-    credentials: Option<Credentials>,
-    read_credentials: Option<Credentials>,
+    credentials: Slots<Slot>,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
@@ -166,61 +184,28 @@ fn nonempty(value: Option<&str>) -> Option<&str> {
 
 impl AsterDex {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
-        let user = nonempty(options.auth_user_address.as_deref())
-            .or_else(|| nonempty(options.application_id.as_deref()));
-        let signer = nonempty(options.auth_signer_address.as_deref())
-            .or_else(|| nonempty(options.key.as_deref()));
-        let secret = nonempty(options.auth_private_key.as_deref())
-            .or_else(|| nonempty(options.secret.as_deref()));
-        let version = sign::resolve_version(options.api_version, user, signer, secret);
-        let credentials = if !options.public_data_only {
-            let secret = if version == Version::V3 {
-                secret
-            } else {
-                options.secret.as_deref().filter(|value| !value.is_empty())
-            };
-            options
-                .key
-                .as_ref()
-                .filter(|value| !value.is_empty())
-                .zip(secret)
-                .map(|(key, secret)| Credentials {
-                    version,
-                    key: key.clone(),
-                    secret: secret.to_owned(),
-                    user: user.map(str::to_owned),
-                    signer: signer.map(str::to_owned),
+        let slot = |identity: &Option<Identity>, signer: &Option<String>| {
+            // An incomplete identity cannot sign, as before setup moved here.
+            identity
+                .clone()
+                .filter(|id| id.validate().is_ok())
+                .map(|identity| Slot {
+                    identity,
+                    signer: nonempty(signer.as_deref()).map(str::to_owned),
                 })
-        } else {
-            None
         };
-        let read_credentials = options
-            .read_key
-            .as_ref()
-            .zip(options.read_secret.as_ref())
-            .map(|(key, secret)| Credentials {
-                version,
-                key: key.clone(),
-                secret: if version == Version::V3 {
-                    nonempty(options.auth_private_key.as_deref()).unwrap_or(secret)
-                } else {
-                    secret
-                }
-                .to_owned(),
-                user: credentials.as_ref().and_then(|c| c.user.clone()),
-                signer: Some(
-                    nonempty(options.auth_signer_address.as_deref())
-                        .unwrap_or(key)
-                        .to_owned(),
-                ),
-            });
+        // A read key keeps signing reads even for public-data-only accounts.
+        let credentials = Slots::new(
+            slot(&options.credentials, &options.signer_address)
+                .filter(|_| !options.public_data_only),
+            slot(&options.read_credentials, &options.read_signer_address),
+            SlotPolicy::default(),
+        );
         Self {
             urls: Urls::new(options.testnet),
+            version: options.api_version.unwrap_or_default(),
             options,
-            version,
             credentials,
-            read_credentials,
             account: account::AccountState::default(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
@@ -236,8 +221,39 @@ impl AsterDex {
         }
     }
 
+    /// Setup must resolve the version, and the primary needs both V3 wallets.
+    /// A read slot's error fails its own requests, as before, not startup.
+    fn signing_config_error(&self) -> Option<String> {
+        if !self.credentials.has_primary() && !self.credentials.secondary_supplied() {
+            return None;
+        }
+        if self.options.api_version.is_none() {
+            return Some("Aster signing requires a resolved API version".into());
+        }
+        let (_, primary) = self.credentials.select(CredentialRole::Mutation).ok()?;
+        self.auth(primary).err()
+    }
+
+    /// The recipe contract for one selected slot.
+    fn auth(&self, slot: &Slot) -> Result<sign::Auth, String> {
+        if self.version == Version::V1 {
+            return Ok(sign::Auth::V1);
+        }
+        let user = nonempty(self.options.user_address.as_deref());
+        let (Some(user), Some(signer)) = (user, slot.signer.as_deref()) else {
+            return Err("Missing required Aster v3 auth fields: Main Wallet Address, API Wallet Address, and Generated Private Key".into());
+        };
+        safe_cex_crypto::ethereum::get_address(user)?;
+        safe_cex_crypto::ethereum::get_address(signer)?;
+        Ok(sign::Auth::V3 {
+            user: user.into(),
+            signer: signer.into(),
+            nonce: sign::interim_nonce(),
+        })
+    }
+
     pub fn is_private(&self) -> bool {
-        !self.options.public_data_only && self.credentials.is_some()
+        self.credentials.has_primary()
     }
 
     fn path(&self, endpoint: &str) -> String {
@@ -680,9 +696,7 @@ impl Venue for AsterDex {
     }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(credentials) = &self.credentials
-            && let Err(error) = credentials.validate()
-        {
+        if let Some(error) = self.signing_config_error() {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
@@ -1039,6 +1053,34 @@ impl Venue for AsterDex {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if let Some(local) = self.local_read(&command) {
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let result = match local {
+                history::LocalRead::History(result) => {
+                    result.map(str::to_owned).map_err(str::to_owned)
+                }
+                history::LocalRead::Unsupported(interval) => Err(interval.unsupported("AsterDEX")),
+                history::LocalRead::Leverage(symbol) => cx
+                    .store
+                    .setting(symbol)
+                    .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
+                    .map(|s| {
+                        format!(
+                            "{{\"buyLeverage\":{},\"sellLeverage\":{}}}",
+                            num::format(s.leverage),
+                            num::format(s.leverage)
+                        )
+                    })
+                    .ok_or_else(|| format!("Aster leverage is not loaded for {symbol}")),
+            };
+            let _ = match result {
+                Ok(data) => cx.done_context(&context, data),
+                Err(error) => cx.fail_context(&context, error),
+            };
+            return;
+        }
         match command {
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
@@ -1106,10 +1148,6 @@ impl Venue for AsterDex {
                 from_ms,
                 to_ms,
             } => {
-                if !supported(interval) {
-                    cx.fail(command, interval.unsupported("AsterDEX"));
-                    return;
-                }
                 let mut path = format!(
                     "{}?symbol={symbol}&interval={interval}&limit={}",
                     self.path("klines"),
@@ -1148,24 +1186,6 @@ impl Venue for AsterDex {
                 self.get(cx, &path, Pending::DepthRead { command });
             }
             Command::FetchAccount { command } => self.fetch_account_info(cx, command),
-            Command::FetchLeverage { command, symbol } => {
-                let result = cx
-                    .store
-                    .setting(&symbol)
-                    .filter(|s| s.leverage.is_finite() && s.leverage > 0.0)
-                    .map(|s| {
-                        format!(
-                            "{{\"buyLeverage\":{},\"sellLeverage\":{}}}",
-                            num::format(s.leverage),
-                            num::format(s.leverage)
-                        )
-                    })
-                    .ok_or_else(|| format!("Aster leverage is not loaded for {symbol}"));
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                };
-            }
             Command::Query { command, query } => self.start_query(cx, command, query),
             command => self.on_trade_command(cx, command),
         }

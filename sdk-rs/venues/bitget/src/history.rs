@@ -1,6 +1,6 @@
 //! Native cursor reads; response lists stream and never enter the flush frame.
 use crate::wire::{Envelope, Identifier, Number};
-use crate::{BitgetFutures, Pending, paths, sign};
+use crate::{BitgetFutures, Pending, sign};
 use safe_cex_engine::paging::{self, WindowOrder};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, json::ArrayAt, num};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
@@ -22,7 +22,7 @@ pub struct History {
 }
 
 pub struct Request {
-    command: CommandId,
+    pub(crate) command: CommandId,
     detect_deadline: f64,
     query: Query,
     uta: bool,
@@ -409,27 +409,19 @@ impl BitgetFutures {
                 .collect::<Vec<_>>()
                 .join("&")
         );
-        let headers = if public {
-            vec![]
+        let at = if r.uta && matches!(r.query, Query::Income { .. }) {
+            ArrayAt::Path(&["data", "list"])
         } else {
-            match self.signed_headers(cx.now, Method::Get, &path, "") {
-                Ok(h) => h,
-                Err(e) => {
-                    cx.fail(r.command, e);
-                    return;
-                }
-            }
+            ArrayAt::Envelope(ARRAYS)
         };
-        cx.request_streamed(
+        let pending = Pending::History(Box::new(r));
+        self.send(
+            cx,
             Method::Get,
-            format!("{}{path}", paths::REST),
-            headers,
-            if r.uta && matches!(r.query, Query::Income { .. }) {
-                ArrayAt::Path(&["data", "list"])
-            } else {
-                ArrayAt::Envelope(ARRAYS)
-            },
-            Pending::History(Box::new(r)),
+            &path,
+            crate::Payload::Stream(at),
+            !public,
+            pending,
         );
     }
     pub(crate) fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {

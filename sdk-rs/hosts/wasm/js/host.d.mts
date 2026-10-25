@@ -260,12 +260,12 @@ export interface SigningIdentity {
   /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
   stableId?: string;
   /** Additional provider-owned signing refs; never an identity or nonce scope. */
-  extra?: { zklinkSeed?: string };
+  extra?: { zklinkSeed?: string; l1Wallet?: string };
 }
 export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
 export interface LocalIdentityMetadata {
   stableId?: string;
-  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text';
+  secretEncoding?: 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
   trimCredential?: boolean;
 }
 /** Trusted local setup metadata; credential strings arrive on the setup channel. */
@@ -299,6 +299,9 @@ export interface EngineHostOptions {
   ownsEngine?: boolean;
   /** Overrides local signing before startup. Context is advisory, not an allowlist. */
   signer?: Signer;
+  /** What `signer` can sign. Undeclared is unknown, so multi-release commands
+   * that check capability before their first release refuse as notSent. */
+  signerAlgorithms?: readonly SignAlgorithm[];
   /** Synchronous identity/ID and retry-jitter bytes, also used for host receipt IDs.
    * Defaults to Web Crypto. A seed here never replaces signing entropy. */
   entropy?: EntropyProvider;
@@ -317,7 +320,7 @@ export type EntropyProvider = (length: number) => Uint8Array;
 
 export interface CommandOptions {
   /** Override the host deadline for this call only; same bounds as commandTimeoutMs.
-   * Host metadata: never sent to the native engine or venue. */
+   * The effective wait also enters the engine as receipt metadata; never the venue. */
   timeoutMs?: number;
   /** Command-bound events while this request remains pending, including synchronous
    * dispatch. Internal fields.command is unchanged; routing hosts translate it.
@@ -376,6 +379,8 @@ export interface EngineBridgeConstruction {
   apiKeyIndexRequired: boolean;
   isolatedBookSubscriptions: boolean;
   dispatchSigning:boolean;
+  /** Declared read-key policy; absent installs the read key as before. */
+  readCredentials?: 'validateOnly' | 'publicRead';
 }
 
 export interface EngineConstruction {
@@ -424,9 +429,11 @@ export interface WasmEngineLike {
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
   /** Scalar status only: never drain work before the synchronous handoff. */
   httpClaim?(permit: string, now: number): string;
+  httpGroupPending?(permit: string): boolean;
+  httpClaimGroup?(permit: string, now: number, bounds: Float64Array): 0 | 1 | 2;
   /** Headers are name:value lines, with no added whitespace. */
   requiresExternalSigner?(): boolean;
-  useExternalSigner?(): void;
+  useExternalSigner?(algorithmsJson?: string): void;
   hostedSigningClock?(now: number): string;
   prepareHostedSigning?(inputJson: string, now: number): string;
   localHostedSigning?(id: number, now: number): string;

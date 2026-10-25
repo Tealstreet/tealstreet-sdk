@@ -3,9 +3,12 @@
 use crate::account::{OrderRow, id, side};
 use crate::sign::Params;
 use crate::{Cryptocom, Pending};
-use safe_cex_engine::history::{Completion, CursorHistory};
-use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
+use safe_cex_engine::request_context::Context;
+use safe_cex_engine::selected_read::{
+    LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
+};
 use safe_cex_engine::{CommandId, Cx, Method, Query, TimerId, VenueError, num};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -16,9 +19,10 @@ enum Kind {
     Fills,
     Orders,
     Income,
-    Trades,
 }
 pub struct Request {
+    root: ReadRoot,
+    leg: Option<ReadLeg>,
     kind: Kind,
     path: &'static str,
     symbol: Option<String>,
@@ -27,7 +31,7 @@ pub struct Request {
     from_ns: u64,
     to_ns: u64,
     limit: usize,
-    history: Box<CursorHistory<Row>>,
+    history: Box<ReadCursorHistory<Row>>,
     seen: HashSet<String>,
     page_count: usize,
     oldest: u64,
@@ -48,7 +52,6 @@ enum Row {
     Fill(Execution),
     Order(HistoricalOrder),
     Income(Income),
-    Trade(Trade),
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,18 +99,7 @@ struct Income {
     trade_id: Option<String>,
     category: &'static str,
 }
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Trade {
-    id: String,
-    symbol: String,
-    price: f64,
-    qty: f64,
-    quote_qty: f64,
-    timestamp: f64,
-    side: &'static str,
-}
-fn millis_ns(value: f64) -> Option<u64> {
+pub(crate) fn millis_ns(value: f64) -> Option<u64> {
     if !value.is_finite() || value < 0.0 {
         return None;
     }
@@ -172,16 +164,6 @@ struct IncomeRow<'a> {
     #[serde(borrow, default)]
     event_timestamp_ns: Option<&'a RawValue>,
 }
-#[derive(Deserialize)]
-struct TradeRow<'a> {
-    #[serde(borrow)]
-    d: &'a RawValue,
-    i: &'a str,
-    p: &'a str,
-    q: &'a str,
-    s: &'a str,
-    t: f64,
-}
 
 impl Request {
     fn params(&self) -> Params {
@@ -197,13 +179,29 @@ impl Request {
         }
         params
     }
-    fn push(&mut self, identity: String, time: u64, row: Row, matches: bool) {
+    pub(crate) fn root(&self) -> &Context {
+        self.root.context()
+    }
+    pub(crate) fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg
+            .as_ref()
+            .is_some_and(|leg| self.root.validate_delivery(cx, leg).is_ok())
+    }
+    fn retire_leg(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = self.leg.take() {
+            let _ = cx.finish_http_context(leg.context());
+        }
+    }
+    fn push(&mut self, cx: &Cx<'_, Pending>, identity: String, time: u64, row: Row, matches: bool) {
         self.page_count += 1;
         self.oldest = self.oldest.min(time);
         if time >= self.from_ns && time < self.to_ns && self.seen.insert(identity.clone()) {
             self.page_seen.push(identity);
-            if matches {
-                self.history.stage(row);
+            if matches
+                && let Some(leg) = &self.leg
+                && let Ok(mut page) = self.history.admit(cx, leg.context())
+            {
+                page.stage(row);
             }
         }
     }
@@ -213,8 +211,11 @@ impl Cryptocom {
     pub(crate) fn query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, path, symbol, order_id, income_kind, from_ms, to_ms, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(
-                    command,
+                let Ok(context) = cx.admit_http_command(crate::read_policy()) else {
+                    return;
+                };
+                let _ = cx.fail_context(
+                    &context,
                     "Crypto.com client order lookup is not supported by the Rust engine",
                 );
                 return;
@@ -266,32 +267,73 @@ impl Cryptocom {
                 to_ms,
                 limit,
             ),
-            Query::PublicTrades { symbol, limit } => (
-                Kind::Trades,
-                "public/get-trades",
-                Some(symbol),
-                None,
-                None,
-                None,
-                None,
-                limit,
-            ),
+            Query::PublicTrades { symbol, limit } => {
+                self.public_trades_start(cx, command, symbol, limit);
+                return;
+            }
         };
-        if !matches!(kind, Kind::Trades) && self.credentials.is_none() {
-            cx.fail(command, "Crypto.com credentials are required");
+        if self.credentials.is_none() {
+            let Ok(context) = cx.admit_http_command(crate::read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "Crypto.com credentials are required");
             return;
         }
         let to = to_ms.unwrap_or(cx.now);
         let from = from_ms.unwrap_or(to - 86_400_000.0);
         if !from.is_finite() || !to.is_finite() || from < 0.0 || to < from {
-            cx.fail(command, "Invalid history time range");
+            let Ok(context) = cx.admit_http_command(crate::read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "Invalid history time range");
             return;
         }
         let (Some(from_ns), Some(to_ns)) = (millis_ns(from), millis_ns(to)) else {
-            cx.fail(command, "History time range exceeds nanosecond bounds");
+            let Ok(context) = cx.admit_http_command(crate::read_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(&context, "History time range exceeds nanosecond bounds");
             return;
         };
+        let limit = if matches!(kind, Kind::Income) && from_ms.is_some() && to_ms.is_some() {
+            usize::MAX
+        } else {
+            limit.unwrap_or(100) as usize
+        };
+        if limit == 0 || from_ns == to_ns {
+            let Ok(context) = cx.admit_http_command(crate::read_policy()) else {
+                return;
+            };
+            let _ = cx.done_context(&context, "[]".into());
+            return;
+        }
+        if matches!(
+            cx.command_wait(),
+            Some(safe_cex_engine::CommandWait::Expired)
+        ) {
+            let _ = cx.reject_expired_command(safe_cex_engine::request_context::Operation::Read);
+            return;
+        }
+        let Ok(root) = SelectedRead::command_root(
+            cx,
+            self.selected_read(),
+            LocalRefusal {
+                diagnostic: None,
+                error: VenueError::new("Crypto.com credentials are required"),
+            },
+        ) else {
+            return;
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.context().clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(root.context(), error.read_venue_error());
+                return;
+            }
+        };
         let request = Request {
+            root,
+            leg: None,
             kind,
             path,
             symbol,
@@ -299,17 +341,9 @@ impl Cryptocom {
             income_kind,
             from_ns,
             to_ns,
-            limit: if matches!(kind, Kind::Income) && from_ms.is_some() && to_ms.is_some() {
-                usize::MAX
-            } else {
-                limit.unwrap_or(if matches!(kind, Kind::Trades) {
-                    25
-                } else {
-                    100
-                }) as usize
-            },
-            history: Box::new(CursorHistory::new(
-                Completion::new(command),
+            limit,
+            history: Box::new(ReadCursorHistory::new(
+                completion,
                 CursorWalk::starting_at(u32::MAX, to_ns.to_string()),
                 |_| "Crypto.com history page safety bound exhausted".into(),
                 |rows| {
@@ -324,13 +358,12 @@ impl Cryptocom {
             exact_page: true,
             page_seen: vec![],
         };
-        if request.limit == 0 || from_ns == to_ns {
-            cx.done(command, "[]".into());
-            return;
-        }
         self.history_request(cx, request);
     }
     pub(crate) fn history_request(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+        if cx.validate_read_root_context(request.root()).is_err() {
+            return;
+        }
         let next = self
             .history
             .next_by_path
@@ -341,39 +374,66 @@ impl Cryptocom {
             self.history.waiting.insert(timer, request);
             return;
         }
-        // Limits are per method/key, shared by initial reads, pages and retries.
+        let leg = match request.root.leg(
+            cx,
+            ReadLegPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+            },
+        ) {
+            Ok(leg) => leg,
+            Err(error) => {
+                self.history_reject(cx, request, error.read_venue_error());
+                return;
+            }
+        };
         *next = cx.now
             + match request.kind {
                 Kind::Fills | Kind::Orders => 1000.0,
                 Kind::Income => 100.0,
-                Kind::Trades => 10.0,
             };
-        if matches!(request.kind, Kind::Trades) {
-            let symbol = request.symbol.as_deref().unwrap_or("");
-            let url = format!(
-                "{}/public/get-trades?instrument_name={}&count={}",
-                self.rest,
-                crate::encode(symbol),
-                request.limit.min(150)
-            );
-            cx.request_streamed(
-                Method::Get,
-                url,
-                vec![],
-                ArrayAt::Path(&["result", "data"]),
-                Pending::History(request),
-            );
-        } else {
-            self.signed(
-                cx,
-                request.path,
-                &request.params(),
-                Pending::History(request),
-                true,
-            );
+        let path = request.path;
+        let params = request.params();
+        let url = format!("{}/{path}", self.rest);
+        if let Err((Pending::History(request), error)) = leg.queue(
+            cx,
+            ReadRequest {
+                method: Method::Post,
+                url: url.clone(),
+                body: None,
+                stream: Some(safe_cex_engine::json::ArrayAt::Path(&["result", "data"])),
+            },
+            |identity| {
+                Box::new(crate::sign::Envelope::http(
+                    identity.clone(),
+                    path,
+                    params,
+                    &url,
+                ))
+            },
+            |leg| {
+                Pending::History(Request {
+                    leg: Some(leg),
+                    ..request
+                })
+            },
+        ) {
+            self.history_reject(cx, request, error.read_venue_error());
         }
     }
+    pub(crate) fn history_reject(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        error: VenueError,
+    ) {
+        request.retire_leg(cx);
+        let _ = request.history.reject(cx, error);
+    }
     pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
+        if !request.delivered(cx) {
+            return;
+        }
         let parsed = match request.kind {
             Kind::Fills => serde_json::from_str::<FillRow>(item).map(|r| {
                 request.exact_page &= exact_ns(r.create_time_ns).is_some();
@@ -393,7 +453,7 @@ impl Cryptocom {
                     commission_asset: r.fee_instrument_name.unwrap_or_default().into(),
                     maker: r.taker_side == Some("MAKER"),
                 };
-                request.push(identity, time, Row::Fill(row), matches);
+                request.push(cx, identity, time, Row::Fill(row), matches);
             }),
             Kind::Orders => serde_json::from_str::<OrderRow>(item).and_then(|raw| {
                 let r: OrderHistoryRow<'_> = serde_json::from_str(item)?;
@@ -415,6 +475,7 @@ impl Cryptocom {
                     updated_time: order.last_update,
                 };
                 request.push(
+                    cx,
                     order.id,
                     ns(r.create_time_ns, created),
                     Row::Order(row),
@@ -453,25 +514,12 @@ impl Cryptocom {
                     category,
                 };
                 request.push(
+                    cx,
                     identity,
                     ns(r.event_timestamp_ns, r.event_timestamp_ms),
                     Row::Income(row),
                     true,
                 );
-            }),
-            Kind::Trades => serde_json::from_str::<TradeRow>(item).map(|r| {
-                let price = num::parse(r.p);
-                let qty = num::parse(r.q);
-                request.page_count += 1;
-                request.history.stage(Row::Trade(Trade {
-                    id: id(r.d),
-                    symbol: r.i.into(),
-                    price,
-                    qty,
-                    quote_qty: price * qty,
-                    timestamp: r.t,
-                    side: side_name(r.s),
-                }));
             }),
         };
         request.invalid |= parsed.is_err();
@@ -482,15 +530,14 @@ impl Cryptocom {
             return;
         }
         let mut next_bound = None;
-        if !matches!(request.kind, Kind::Trades)
-            && request.page_count > 0
+        if request.page_count > 0
             && request.history.accepted_len() + request.history.staged_len() < request.limit
             // A short page of only prior identities proves native exhaustion,
             // even when its rows omit exact cursors. Full pages may move older.
-            && !(request.page_seen.is_empty() && request.page_count < 100)
+            && (!request.page_seen.is_empty() || request.page_count >= 100)
         {
             if !request.exact_page {
-                request.history.reject(
+                let _ = request.history.reject(
                     cx,
                     VenueError::new("Crypto.com history page omitted nanosecond cursors"),
                 );
@@ -499,7 +546,7 @@ impl Cryptocom {
             let next = request.oldest.saturating_add(1);
             if request.oldest < request.from_ns { /* range exhausted */
             } else if next >= request.to_ns {
-                request.history.reject(
+                let _ = request.history.reject(
                     cx,
                     VenueError::new("Crypto.com history cursor did not advance"),
                 );
@@ -508,16 +555,23 @@ impl Cryptocom {
                 next_bound = Some(next);
             }
         }
-        let step = request.history.advance(CursorPage {
+        let Some(leg) = request.leg.as_ref() else {
+            return;
+        };
+        let Ok(mut page) = request.history.admit(cx, leg.context()) else {
+            return;
+        };
+        let step = page.advance(CursorPage {
             next: next_bound.map(|bound| bound.to_string()),
             rows: request.page_count,
             fresh: request.page_seen.len(),
             want_more: next_bound.is_some(),
         });
+        request.retire_leg(cx);
         match step {
             CursorStep::More(_) => {
                 let Some(next) = next_bound else {
-                    request.history.reject(
+                    let _ = request.history.reject(
                         cx,
                         VenueError::new("Crypto.com missing native history bound"),
                     );
@@ -533,20 +587,23 @@ impl Cryptocom {
                 self.history.waiting.insert(timer, request);
             }
             CursorStep::Done => self.history_finish(cx, request, Ok(())),
-            CursorStep::Stalled(_) => request.history.reject(
-                cx,
-                VenueError::new("Crypto.com history page safety bound exhausted"),
-            ),
+            CursorStep::Stalled(_) => {
+                let _ = request.history.reject(
+                    cx,
+                    VenueError::new("Crypto.com history page safety bound exhausted"),
+                );
+            }
         }
     }
     fn history_finish(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        request: Request,
+        mut request: Request,
         result: Result<(), VenueError>,
     ) {
+        request.retire_leg(cx);
         let limit = request.limit;
-        request.history.finish_with(cx, result, move |mut rows| {
+        let _ = request.history.finish_with(cx, result, move |mut rows| {
             rows.truncate(limit);
             serde_json::to_string(&rows).map_err(|error| VenueError::new(error.to_string()))
         });
@@ -555,18 +612,21 @@ impl Cryptocom {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
-        error: &str,
-        transport: bool,
+        error: VenueError,
+        recovery: crate::reads::FailureRecovery,
     ) {
-        let retry = if error.contains("40101") {
-            request.retries < 1
-        } else {
-            transport && request.retries < 3
-        };
-        if retry {
+        request.retire_leg(cx);
+        if cx.validate_read_root_context(request.root()).is_err() {
+            return;
+        }
+        if matches!(recovery, crate::reads::FailureRecovery::Strict) {
+            let _ = request.history.reject(cx, error);
+            return;
+        }
+        if recovery.retry(&error.message, request.retries) {
             // A failed page is never appended; preserve earlier complete pages.
             if !request.history.discard_staged_page() {
-                request
+                let _ = request
                     .history
                     .reject(cx, VenueError::new("Crypto.com history page reset failed"));
                 return;
@@ -582,7 +642,7 @@ impl Cryptocom {
             let timer = cx.set_timer(1000.0);
             self.history.waiting.insert(timer, request);
         } else {
-            self.history_finish(cx, request, Err(VenueError::new(error)));
+            self.history_finish(cx, request, Err(error));
         }
     }
 }

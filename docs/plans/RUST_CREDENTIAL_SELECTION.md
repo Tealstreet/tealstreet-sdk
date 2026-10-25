@@ -242,11 +242,16 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
 - Domains stay distinct: HL/TxFlow share `hyperliquid-agent` deliberately;
   Kraken and Aster keep their own. Each family keeps its current floor clock;
   clock policy is codex-5c57jl's lane.
-- Remote-signed families that need a monotonic domain require
-  `Identity.stable_id` (typed unavailable when absent). The hosted signing
-  facade passes `stable_id: None` today, so those families cannot be hosted
-  until trusted setup supplies one; the facade's caller-supplied `stamp_ms`
-  stays unchanged.
+- Remote-signed families that need a monotonic domain require a non-secret
+  key:
+  - `Identity.stable_id`, or
+  - a public identifier when the venue's own sequence is public (Aster V3
+    signer address, HL agent address).
+  
+  It is never a hash of key material, and never an address derived from a key
+  inside a venue. A family whose only identity is secret material (Kraken)
+  gets a typed unavailable when `stable_id` is absent. The hosted signing
+  facade's caller-supplied `stamp_ms` stays unchanged.
 - Kraken's secret-digest key moves to `stable_id` with its signer migration
   (codex-5c57jl, #1718). Today slots with an equal API key share one sequence
   even when their secrets differ (`kraken/account.rs:403-415`), so trusted
@@ -288,8 +293,17 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
   integer arithmetic.
 - Hyperliquid and TxFlow reserve through one `reserve_agent_nonce` helper.
   `crypto::nonce::ethereum_agent` is removed.
+- Lighter reserves from an engine `VenueCounter`:
+  - one per engine, as before. Two engines on one API key still rely on
+    Lighter's 21104 resync: sharing the counter would change allocation, and
+    the owner ruled nonce limits document-only;
+  - it is bounded by the signer's safe-integer range;
+  - it is seeded only from a validated `nextNonce` reply whose request epoch is
+    still current;
+  - `take` reserves before signing;
+  - sign errors, refusals, uncertain sends and the 21104 resync invalidate it,
+    which bumps the epoch.
 - Still to come:
-  - Lighter `VenueCounter`;
   - Aster V3 (`asterdex-v3`, ProtocolMs x1000), after its open PRs;
   - `DispatchContext::reserve_nonce`, after #1771.
 
@@ -305,10 +319,44 @@ pub struct VenueCounter; // per engine: seed(epoch, validated), take(), invalida
 
 Each adoption PR prunes its own rows.
 
+As built: `sdk-rs/scripts/check-credential-selection.py` +
+`credential-legacy-sites.json`, run by `check-bans.sh`. It freezes production
+venue sites naming `read_credentials`, `ReadCredentials`, `tag_account_read`,
+`ethereum_agent`, `nonce::next` or `NONCES`, plus native `Method::Get` egress
+inference and the TS method/venue-list inference. Inline `#[cfg(test)]` modules
+and test files are excluded (only the `#[cfg(test)] mod` items themselves).
+Counts are per file and term, so neighbouring edits by other lanes never churn
+them; `nonce` imports and `as` renames of frozen names fail outright. A rename
+still reads as a prune, so reviewers confirm every removed count is a real
+adoption. Option fields and setup validation that name
+`read_credentials` stay listed: the inventory is frozen, not required to reach
+zero.
+
+### C6. Explicit egress for unsigned requests (agreed with codex-uufub4)
+
+Bitrue's keyless catalog must leave via primary egress without a fabricated
+credential. The egress is captured at issuance, inside the same registry
+transaction, so the registered Context and completion root hold it exactly:
+- `Cx::http_context_with_egress(scope, policy, RoutingIntent)` is additive;
+  `http_context` passes none.
+- A credentialed context's egress must equal its slot's intent.
+- An unsigned context accepts only Primary (Public is a no-op; Secondary is
+  rejected).
+- Legs and retries inherit the egress and cannot widen it.
+- `routing_intent()` returns the egress, or the credential-derived intent when
+  none was given.
+
+uufub4's `admit_http_command_with_egress` later shares the same private
+transaction.
+
 ### C5. Out of scope here, owned elsewhere
 
 - WS/session auth credential use: always primary. `SessionAuth` adoption
   follows socket core #1771 (owns socket auth).
+- Session-login prerequisite gates (Paradex JWT, GRVT login, BreakoutProp
+  login/discover and similar token readiness) belong to claude-55ao7t's
+  background-session core. This core supplies only the key and subject a
+  session uses (`SessionAuth` selection).
 - Server-held key lifetime and teardown (audit §D host lifetime): see
   `codex-server-order-path-audit.md`; this core holds no key material.
 

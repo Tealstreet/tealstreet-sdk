@@ -4,13 +4,16 @@ use crate::{AsterDex, Pending};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId, num};
+use safe_cex_engine::{
+    Cx, ErrorKind, Fill, Method, Response, SocketChannel, SocketId, TimerId, VenueError, num,
+};
 use safe_cex_venue_binance::wire::{self, ListenKey, OpenOrder, OrderUpdateEvent};
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -18,6 +21,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Default)]
 pub struct AccountState {
+    /// listenKey upkeep session. Aster returns the active key on create and
+    /// extends it on keepalive, so an extra write is harmless (repeat-safe).
+    listen_key_session: Option<safe_cex_engine::request_context::Session>,
     pub socket: Option<SocketId>,
     open: bool,
     supervisor: Supervisor,
@@ -359,6 +365,7 @@ impl AsterDex {
         };
         self.signed(
             cx,
+            CredentialRole::Read { scope: None },
             Method::Get,
             &path,
             Query::new(),
@@ -383,6 +390,7 @@ impl AsterDex {
         let path = self.path("positionSide/dual");
         self.signed(
             cx,
+            CredentialRole::Read { scope: None },
             Method::Get,
             &path,
             Query::new(),
@@ -412,6 +420,7 @@ impl AsterDex {
         let path = self.path("listenKey");
         self.signed(
             cx,
+            CredentialRole::SessionAuth,
             Method::Post,
             &path,
             Query::new(),
@@ -444,6 +453,7 @@ impl AsterDex {
         };
         self.signed(
             cx,
+            CredentialRole::Read { scope: None },
             Method::Get,
             &path,
             Query::new(),
@@ -690,20 +700,36 @@ impl AsterDex {
                 struct Output {
                     user_id: String,
                 }
+                // Without an alias: V3's public signer address, else the trusted
+                // primary stableId; never the API key (WEEX precedent).
+                let fallback = match self.version {
+                    crate::sign::Version::V3 => self.options.signer_address.clone(),
+                    crate::sign::Version::V1 => None,
+                }
+                .or_else(|| {
+                    self.options
+                        .credentials
+                        .as_ref()
+                        .and_then(|id| id.stable_id.clone())
+                });
                 let result = if let Some(error) = &error {
-                    Err(error.clone())
+                    Err(VenueError::new(error.clone()))
                 } else {
                     serde_json::from_str::<Info>(body)
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| VenueError::new(e.to_string()))
                         .and_then(|info| {
-                            serde_json::to_string(&Output {
-                                user_id: info
-                                    .account_alias
-                                    .filter(|x| !x.is_empty())
-                                    .or_else(|| self.options.key.clone())
-                                    .unwrap_or_default(),
-                            })
-                            .map_err(|e| e.to_string())
+                            let user_id = info
+                                .account_alias
+                                .filter(|x| !x.is_empty())
+                                .or(fallback)
+                                .ok_or_else(|| {
+                                    VenueError::new(
+                                        "Aster account identity requires an account alias or a trusted primary stableId",
+                                    )
+                                    .kind(ErrorKind::Unsupported)
+                                })?;
+                            serde_json::to_string(&Output { user_id })
+                                .map_err(|e| VenueError::new(e.to_string()))
                         })
                 };
                 match result {
@@ -935,12 +961,50 @@ impl AsterDex {
             cx.close(socket);
         }
         self.account.open = false;
+        self.retire_listen_key_session(cx);
         self.account.key_epoch = self.account.key_epoch.wrapping_add(1);
         self.account.key_pending = false;
         if let Some(timer) = self.account.keepalive.take() {
             cx.clear_timer(timer);
         }
         self.account.supervisor.retry(cx);
+    }
+    pub(crate) fn listen_key_current(&self, pending: &Pending) -> bool {
+        matches!(
+            pending,
+            Pending::Account(Request::ListenKey { epoch } | Request::Keepalive { epoch })
+                if *epoch == self.account.key_epoch
+        )
+    }
+    /// Each create opens a new generation; keepalives reuse the live one.
+    pub(crate) fn listen_key_session(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        create: bool,
+        credential: &safe_cex_engine::request_context::Credential,
+    ) -> Option<safe_cex_engine::request_context::Session> {
+        let live = self
+            .account
+            .listen_key_session
+            .as_ref()
+            .is_some_and(|session| cx.session_live(session));
+        if create || !live {
+            self.retire_listen_key_session(cx);
+            self.account.listen_key_session = cx
+                .open_session(safe_cex_engine::request_context::SessionPolicy {
+                    credential: Some(credential.clone()),
+                    repeat_safe: true,
+                    // Signed: routed by its credential, never a session egress.
+                    private_egress: None,
+                })
+                .ok();
+        }
+        self.account.listen_key_session.clone()
+    }
+    fn retire_listen_key_session(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(session) = self.account.listen_key_session.take() {
+            let _ = cx.retire_session(&session);
+        }
     }
     pub(crate) fn on_account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
@@ -973,6 +1037,7 @@ impl AsterDex {
             let path = self.path("listenKey");
             self.signed(
                 cx,
+                CredentialRole::SessionAuth,
                 Method::Put,
                 &path,
                 Query::new(),

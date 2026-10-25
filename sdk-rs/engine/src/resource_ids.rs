@@ -121,6 +121,19 @@ pub(crate) fn action_ids_safe(mut action: &crate::Action) -> bool {
                         && safe(permit.attempt().request.0)
                         && safe(request.id.0)
                 }
+                HttpAction::BindGroup { permit, members } => {
+                    permit
+                        .members()
+                        .iter()
+                        .all(|permit| safe(permit.attempt().request.0))
+                        && members.iter().all(|member| {
+                            safe(member.preparation.attempt().request.0)
+                                && member
+                                    .request
+                                    .as_ref()
+                                    .is_none_or(|request| safe(request.id.0))
+                        })
+                }
                 HttpAction::Cancel {
                     preparation,
                     signing,

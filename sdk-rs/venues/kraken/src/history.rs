@@ -23,7 +23,6 @@ enum Read {
     Fills,
     Income,
     Orders,
-    Trades,
 }
 pub struct Request {
     history: Box<CursorHistory<Row>>,
@@ -94,7 +93,6 @@ enum Data {
     Execution(Execution),
     Income(Income),
     Order(HistoricalOrder),
-    Trade(Trade),
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,20 +138,9 @@ struct HistoricalOrder {
     created_time: f64,
     updated_time: f64,
 }
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Trade {
-    id: String,
-    symbol: String,
-    price: f64,
-    qty: f64,
-    quote_qty: f64,
-    timestamp: f64,
-    side: OrderSide,
-}
 #[derive(Default, Deserialize)]
 #[serde(transparent)]
-struct Atom<'a>(#[serde(borrow, deserialize_with = "atom")] Cow<'a, str>);
+pub(crate) struct Atom<'a>(#[serde(borrow, deserialize_with = "atom")] pub(crate) Cow<'a, str>);
 fn atom<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Cow<'de, str>, D::Error> {
     struct Visitor;
     impl<'de> serde::de::Visitor<'de> for Visitor {
@@ -225,21 +212,6 @@ struct LedgerWire<'a> {
     old_balance: Option<f64>,
     #[serde(default, deserialize_with = "optional_number")]
     new_balance: Option<f64>,
-}
-#[derive(Deserialize)]
-struct TradeWire<'a> {
-    #[serde(default, borrow)]
-    trade_id: Atom<'a>,
-    #[serde(default, borrow)]
-    uid: Cow<'a, str>,
-    #[serde(borrow)]
-    time: Cow<'a, str>,
-    #[serde(borrow)]
-    side: Cow<'a, str>,
-    #[serde(deserialize_with = "number")]
-    size: f64,
-    #[serde(deserialize_with = "number")]
-    price: f64,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -321,13 +293,11 @@ struct Envelope<'a> {
     #[serde(default)]
     elements: Option<serde::de::IgnoredAny>,
     #[serde(default)]
-    history: Option<serde::de::IgnoredAny>,
-    #[serde(default)]
     len: Option<usize>,
     #[serde(default, borrow)]
     continuation_token: Option<Cow<'a, str>>,
 }
-fn side(value: &str) -> Result<OrderSide, String> {
+pub(crate) fn side(value: &str) -> Result<OrderSide, String> {
     match value.to_ascii_lowercase().as_str() {
         "buy" => Ok(OrderSide::Buy),
         "sell" => Ok(OrderSide::Sell),
@@ -354,9 +324,10 @@ impl Kraken {
         };
         let (read, symbol, order, kind, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(
-                    *command,
-                    "Kraken does not support caller client order IDs or their lookup",
+                crate::public_context::local(
+                    cx,
+                    safe_cex_engine::request_context::Operation::Read,
+                    Err("Kraken does not support caller client order IDs or their lookup".into()),
                 );
                 return true;
             }
@@ -404,15 +375,7 @@ impl Kraken {
                 *to_ms,
                 *limit,
             ),
-            Query::PublicTrades { symbol, limit } => (
-                Read::Trades,
-                Some(symbol.clone()),
-                None,
-                None,
-                None,
-                None,
-                *limit,
-            ),
+            Query::PublicTrades { .. } => return false,
         };
         let to = to.unwrap_or(cx.now);
         let from = from.unwrap_or((to - WEEK).max(0.0));
@@ -422,9 +385,13 @@ impl Kraken {
             || to < from
             || to > 253_402_300_799_999.0
         {
-            cx.fail(
-                *command,
-                "Kraken history range must contain valid milliseconds in ascending order",
+            crate::public_context::local(
+                cx,
+                safe_cex_engine::request_context::Operation::Read,
+                Err(
+                    "Kraken history range must contain valid milliseconds in ascending order"
+                        .into(),
+                ),
             );
             return true;
         }
@@ -446,14 +413,7 @@ impl Kraken {
             kind,
             from,
             to,
-            limit: limit.filter(|n| *n > 0).map_or(
-                if read == Read::Trades {
-                    100
-                } else {
-                    usize::MAX
-                },
-                |n| n as usize,
-            ),
+            limit: limit.filter(|n| *n > 0).map_or(usize::MAX, |n| n as usize),
             count: 0,
             fresh: 0,
             oldest: f64::INFINITY,
@@ -505,28 +465,10 @@ impl Kraken {
                 }
                 ("/api/history/v3/orders", ArrayAt::Field("elements"))
             }
-            Read::Trades => {
-                params.push((
-                    "symbol",
-                    request.symbol.as_ref().unwrap().to_ascii_lowercase(),
-                ));
-                if let Some(cursor) = request.history.cursor() {
-                    params.push(("lastTime", cursor.to_owned()));
-                }
-                ("/derivatives/api/v3/history", ArrayAt::Field("history"))
-            }
         };
         let command = request.history.command();
         let form = form(&params);
-        if request.read == Read::Trades {
-            cx.request_streamed(
-                Method::Get,
-                format!("{}{path}?{form}", self.host()),
-                Vec::new(),
-                at,
-                Pending::History(Box::new(request)),
-            );
-        } else if let Err(error) = self.signed_streamed(
+        if let Err(error) = self.signed_streamed(
             cx,
             Method::Get,
             path,
@@ -550,7 +492,6 @@ impl Kraken {
             Read::Fills => self.history_fill(request, text),
             Read::Income => self.history_ledger(request, text),
             Read::Orders => self.history_order(request, text),
-            Read::Trades => self.history_trade(request, text),
         };
         if let Err(error) = result {
             request.failed = Some(error);
@@ -696,34 +637,6 @@ impl Kraken {
         }
         Ok(())
     }
-    fn history_trade(&self, request: &mut Request, text: &str) -> Result<(), String> {
-        let row: TradeWire<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        let time = timestamp(&row.time).ok_or("Kraken trade has an invalid ISO timestamp")?;
-        let id = if row.uid.is_empty() {
-            row.trade_id.0.into_owned()
-        } else {
-            row.uid.into_owned()
-        };
-        let native_side = side(&row.side)?;
-        if row.price <= 0.0 || row.size <= 0.0 || !(row.price * row.size).is_finite() {
-            return Err("Kraken trade has invalid economics".into());
-        }
-        if request.observe(time, &id)? {
-            request.history.stage(Row {
-                time,
-                data: Data::Trade(Trade {
-                    id,
-                    symbol: request.symbol.clone().unwrap(),
-                    price: row.price,
-                    qty: row.size,
-                    quote_qty: row.price * row.size,
-                    timestamp: time,
-                    side: native_side,
-                }),
-            });
-        }
-        Ok(())
-    }
     fn history_order(&self, request: &mut Request, text: &str) -> Result<(), String> {
         let event: OrderEventWire<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
         if !request.observe(event.timestamp, &event.uid)? {
@@ -819,7 +732,6 @@ impl Kraken {
             Read::Fills => envelope.fills.is_some(),
             Read::Income => envelope.logs.is_some(),
             Read::Orders => envelope.elements.is_some(),
-            Read::Trades => envelope.history.is_some(),
         };
         if !array_present {
             self.history_failed(cx, request, "required result array is absent");
@@ -863,13 +775,6 @@ impl Kraken {
             }
             Read::Fills => {
                 if request.count < FILLS_PAGE || request.oldest < request.from {
-                    None
-                } else {
-                    Some(iso(request.oldest.floor() + 1.0))
-                }
-            }
-            Read::Trades => {
-                if request.count < FILLS_PAGE || request.output_len() >= request.limit {
                     None
                 } else {
                     Some(iso(request.oldest.floor() + 1.0))
@@ -964,7 +869,7 @@ impl Kraken {
     }
 }
 
-fn stall_message(reason: Stall) -> String {
+pub(crate) fn stall_message(reason: Stall) -> String {
     match reason {
         Stall::PageBudget => "Kraken history is INCOMPLETE: page budget exhausted".into(),
         _ => "Kraken history failed: INCOMPLETE: history cursor made no progress or repeated a full boundary".into(),
@@ -1035,7 +940,7 @@ pub(crate) fn timestamp(text: &str) -> Option<f64> {
         + fraction;
     (ms >= 0.0).then_some(ms)
 }
-fn iso(ms: f64) -> String {
+pub(crate) fn iso(ms: f64) -> String {
     time::iso_millis(ms as i64)
 }
 #[cfg(test)]

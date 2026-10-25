@@ -2,7 +2,6 @@
 use crate::signing::{SignError, SignReceipt, SignRequest, SignResult, validate_result_shape};
 use crate::signing_headers::ResultHeaderPolicy;
 use crate::{Action, HttpRequest, RequestId, SocketId, TimerId};
-use std::collections::HashMap;
 
 /// Narrow send-time view: protocol clock and injected signing entropy only.
 /// Identity replay seeding never supplies nonce bytes to this context.
@@ -19,6 +18,22 @@ impl<'a> DispatchContext<'a> {
     /// for protocol freshness calculations.
     pub fn stamp_ms(&self) -> f64 {
         crate::time::wire_stamp_ms(self.now_ms)
+    }
+    /// A wire stamp never negative and, with a floor, strictly after the
+    /// released stamp it came from, even on a fixed or backward clock. Without
+    /// a floor it is `stamp_ms()` on valid nonnegative clocks.
+    pub fn stamp_after(&self, floor: Option<crate::StampFloor>) -> Result<f64, SignError> {
+        const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.;
+        let current = self.stamp_ms();
+        if !current.is_finite() {
+            return Err(SignError::InvalidRequest);
+        }
+        let next = floor.map_or(0., |floor| floor.millis() + 1.);
+        let stamp = current.max(0.).max(next);
+        if stamp > MAX_SAFE_INTEGER {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(stamp)
     }
     /// Draw anew on every preparation. Failure clears even partial output.
     pub fn signing_bytes(&self, bytes: &mut [u8]) -> Result<(), SignError> {
@@ -103,9 +118,9 @@ impl Pending {
 }
 #[derive(Default)]
 pub(crate) struct Dispatch {
-    pending: HashMap<RequestId, Pending>,
+    pending: crate::IdMap<RequestId, Pending>,
     /// Metadata only: materialised values live exclusively in the outbound action.
-    outbound: HashMap<RequestId, Pending>,
+    outbound: crate::IdMap<RequestId, Pending>,
     next: crate::resource_ids::ResourceIds,
 }
 pub(crate) enum Completion {
@@ -318,11 +333,20 @@ impl Dispatch {
         p.deadline = deadline;
         Ok(())
     }
-    pub fn activate_managed(&mut self, id: RequestId, deadline: f64) -> Result<(), SignError> {
-        let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
+    pub(crate) fn validate_managed_activation(
+        &self,
+        id: RequestId,
+        deadline: f64,
+    ) -> Result<(), SignError> {
+        let p = self.pending.get(&id).ok_or(SignError::Unavailable)?;
         if !p.managed || p.route_ready || !deadline.is_finite() || deadline <= p.staged_at {
             return Err(SignError::InvalidRequest);
         }
+        Ok(())
+    }
+    pub fn activate_managed(&mut self, id: RequestId, deadline: f64) -> Result<(), SignError> {
+        self.validate_managed_activation(id, deadline)?;
+        let p = self.pending.get_mut(&id).expect("validated managed recipe");
         // The route can only tighten the staged physical cap. Delayed provider
         // preparation and every stale retry retain the same immutable bound.
         p.deadline = p.deadline.min(deadline);

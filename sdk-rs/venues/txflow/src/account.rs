@@ -7,8 +7,11 @@ use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{
+    Context as HttpContext, Egress, Operation, Policy, RetryPolicy, Scope,
+};
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Response, TimerId, json};
+use safe_cex_engine::{Cx, Fill, Response, TimerId, Venue, json};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -32,6 +35,7 @@ pub struct AccountState {
     inflight: HashSet<String>,
     refresh_timer: Option<TimerId>,
     setting_timer: Option<TimerId>,
+    setting_context: Option<HttpContext>,
     setting_queue: VecDeque<String>,
     last_settings: f64,
     startup_at: f64,
@@ -92,6 +96,7 @@ pub enum Request {
     Setting {
         fence: Fence,
         coin: String,
+        context: HttpContext,
     },
 }
 #[derive(Deserialize)]
@@ -404,6 +409,12 @@ impl TxFlow {
             self.account.setting_queue = cx.store.markets().iter().map(|m| m.id.clone()).collect();
             self.next_setting(cx);
         }
+        if self.account.inflight.contains("state")
+            && self.account.inflight.contains("orders")
+            && (self.account.fills_exhausted || self.account.inflight.contains("fills"))
+        {
+            self.node.refresh_due = false;
+        }
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.account.started || !self.account.inflight.insert("orders".into()) {
@@ -436,12 +447,31 @@ impl TxFlow {
         };
         self.account.inflight.insert("setting".into());
         let body = self.account_body("activeAssetData", None, Some(&coin), false);
-        cx.request(
+        let context = match cx.http_context_with_egress(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+            Egress::Primary,
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.setting_failed(cx, &error.to_string());
+                return;
+            }
+        };
+        self.account.setting_context = Some(context.clone());
+        if let Err((pending, error)) = cx.request_managed_with_headers(
+            context.clone(),
             safe_cex_engine::Method::Post,
             format!("{}/info", self.rest()),
-            vec![
-                ("Content-Type", "application/json".into()),
-                ("x-api-version", crate::API_VERSION.into()),
+            &[
+                ("Content-Type", "application/json"),
+                ("x-api-version", crate::API_VERSION),
             ],
             Some(body),
             Pending::Account(Request::Setting {
@@ -450,9 +480,61 @@ impl TxFlow {
                     revision: self.account.settings_revision,
                 },
                 coin,
+                context,
             }),
-        );
+        ) {
+            self.on_request_failed(cx, pending, &error.to_string());
+        }
     }
+    fn setting_current(&self, fence: &Fence, context: &HttpContext) -> bool {
+        fence.generation == self.account.generation
+            && self.account.setting_context.as_ref() == Some(context)
+    }
+    fn finish_setting_context(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        fence: &Fence,
+        context: &HttpContext,
+    ) -> bool {
+        let current = self.setting_current(fence, context);
+        let _ = cx.finish_http_context(context);
+        if current {
+            self.account.setting_context = None;
+            self.account.inflight.remove("setting");
+        }
+        current
+    }
+    fn schedule_setting(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now.is_finite() {
+            self.account.setting_timer = Some(cx.set_timer(100.0));
+        }
+    }
+    fn setting_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
+        self.account.inflight.remove("setting");
+        self.schedule_setting(cx);
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+    }
+    pub(crate) fn account_delivery_live(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+    ) -> bool {
+        let Request::Setting { fence, context, .. } = request else {
+            return true;
+        };
+        if !self.setting_current(fence, context) {
+            let _ = cx.finish_http_context(context);
+            return false;
+        }
+        if cx.validate_background_read_http_delivery(context).is_err() {
+            if self.finish_setting_context(cx, fence, context) {
+                self.setting_failed(cx, "TxFlow setting delivery is no longer current");
+            }
+            return false;
+        }
+        true
+    }
+
     pub(crate) fn acknowledge_write(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.state_revision = self.account.state_revision.saturating_add(1);
         self.account.orders_revision = self.account.orders_revision.saturating_add(1);
@@ -477,6 +559,9 @@ impl TxFlow {
         cx.store.update_setting(symbol, |s| *s = *setting);
     }
     pub(crate) fn account_disconnected(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(context) = self.account.setting_context.take() {
+            let _ = cx.finish_http_context(&context);
+        }
         self.account.generation = self.account.generation.saturating_add(1);
         self.account.inflight.clear();
         self.account.setting_queue.clear();
@@ -998,13 +1083,19 @@ impl TxFlow {
                     }
                 }
             }
-            Request::Setting { fence, coin } => {
-                if fence.generation != self.account.generation {
+            Request::Setting {
+                fence,
+                coin,
+                context,
+            } => {
+                if !self.setting_current(&fence, &context) {
+                    let _ = cx.finish_http_context(&context);
                     return;
                 }
-                self.account.inflight.remove("setting");
-                self.account.setting_timer = Some(cx.set_timer(100.0));
                 if fence.revision != self.account.settings_revision {
+                    if self.finish_setting_context(cx, &fence, &context) {
+                        self.schedule_setting(cx);
+                    }
                     return;
                 }
                 match serde_json::from_str::<Envelope<AssetData>>(response.body)
@@ -1022,6 +1113,9 @@ impl TxFlow {
                         cx.store.update_setting(&symbol, |s| *s = setting);
                     }
                     Err(e) => cx.notice(Level::Warn, code::STREAM_MALFORMED, e),
+                }
+                if self.finish_setting_context(cx, &fence, &context) {
+                    self.schedule_setting(cx);
                 }
             }
         }
@@ -1248,15 +1342,17 @@ impl TxFlow {
             Request::State { fence, .. } => (fence.generation, "state"),
             Request::Orders { fence, .. } => (fence.generation, "orders"),
             Request::Fills { generation, .. } => (generation, "fills"),
-            Request::Setting { fence, .. } => (fence.generation, "setting"),
+            Request::Setting { fence, context, .. } => {
+                if self.finish_setting_context(cx, &fence, &context) {
+                    self.setting_failed(cx, error);
+                }
+                return;
+            }
         };
         if generation != self.account.generation {
             return;
         }
         self.account.inflight.remove(key);
-        if key == "setting" {
-            self.account.setting_timer = Some(cx.set_timer(100.0));
-        }
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
     }
 }
@@ -1264,3 +1360,7 @@ impl TxFlow {
 #[cfg(test)]
 #[path = "../tests/unit/account_coverage.rs"]
 mod account_coverage_tests;
+
+#[cfg(test)]
+#[path = "../tests/unit/setting_custody.rs"]
+mod setting_custody_tests;
