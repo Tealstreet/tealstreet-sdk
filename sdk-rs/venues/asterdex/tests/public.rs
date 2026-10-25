@@ -711,8 +711,16 @@ fn suppressed_public_feed_is_not_supervised() {
     assert!(h.sockets.is_empty(), "no public connects: {:?}", h.sockets);
     assert!(h.closed.is_empty(), "no public closes: {:?}", h.closed);
     // Unanswered reads now expire at their bound, so the interest and clock
-    // refreshes keep cycling; nothing else is issued.
-    assert!(h.fired >= 2);
+    // refreshes keep cycling at their cadence, and nothing else is issued.
+    // Each interest cycle is a 15 s refresh plus a 20 s expiry; the clock is
+    // one 300 s refresh plus four 5 s attempts.
+    let interest = 2 * (600_000.0_f64 / 35_000.0).ceil() as usize;
+    let clock = 1 + 4;
+    assert!(
+        (2..=interest + clock + 1).contains(&h.fired),
+        "fired {} timers",
+        h.fired
+    );
     assert!(
         h.requests.iter().all(|request| {
             let path = request.url.split('?').next().unwrap();
