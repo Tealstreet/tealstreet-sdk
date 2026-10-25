@@ -17,7 +17,7 @@ public-only accounts start no private socket, auth, signing or token request.
 
 The socket inventory counts references, not nine independent connections:
 four physical connect sites plus five calls to the legacy public connect helper.
-The exact seven rows total nine occurrences:
+The exact six path/fingerprint rows total nine occurrences:
 
 | Path relative to sdk-rs | Fingerprint | Count | Meaning |
 | --- | --- | ---: | --- |
