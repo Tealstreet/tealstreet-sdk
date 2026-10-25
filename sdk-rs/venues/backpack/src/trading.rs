@@ -1735,13 +1735,10 @@ mod managed_repair_gate_tests {
         use safe_cex_engine::signing::{Identity, KeyRef};
         use safe_cex_engine::test_support::ProbeVenue;
         let venue = Backpack::new(crate::Options {
-            identity: Some(Identity {
-                credential: KeyRef("credential".into()),
-                signing: KeyRef("signing".into()),
-                passphrase: None,
-                stable_id: None,
-                extra: Default::default(),
-            }),
+            identity: Some(Identity::new(
+                KeyRef("credential".into()),
+                Some(KeyRef("signing".into())),
+            )),
             ..Default::default()
         });
         let probe = ProbeVenue::new(venue, |venue: &mut Backpack, cx: &mut Cx<'_, Pending>| {

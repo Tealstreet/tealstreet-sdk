@@ -3,13 +3,10 @@ use safe_cex_venue_bingx::Options;
 #[test]
 fn credential_options_hold_only_opaque_refs() {
     let options = Options {
-        credentials: Some(Identity {
-            extra: Default::default(),
-            credential: KeyRef("ref:owned-primary".into()),
-            signing: KeyRef("ref:owned-signing".into()),
-            passphrase: None,
-            stable_id: None,
-        }),
+        credentials: Some(Identity::new(
+            KeyRef("ref:owned-primary".into()),
+            Some(KeyRef("ref:owned-signing".into())),
+        )),
         ..Default::default()
     };
     assert_eq!(

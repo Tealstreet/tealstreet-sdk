@@ -204,13 +204,10 @@ fn real_cancel_uses_the_out_of_band_remote_ed25519_answer() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use safe_cex_engine::signing::{Algorithm, Operation, PayloadPart, SignResult};
     use safe_cex_engine::signing::{Identity, KeyRef};
-    let identity = Identity {
-        credential: KeyRef("remote-credential".into()),
-        signing: KeyRef("remote-signing".into()),
-        passphrase: None,
-        stable_id: None,
-        extra: Default::default(),
-    };
+    let identity = Identity::new(
+        KeyRef("remote-credential".into()),
+        Some(KeyRef("remote-signing".into())),
+    );
     let mut e = identity_only_orders(
         &format!("[{ORDER}]"),
         identity.clone(),
@@ -389,13 +386,10 @@ fn public_data_only_mode_refuses_even_a_trusted_signing_identity() {
     use safe_cex_engine::signing::{Identity, KeyRef};
     let mut e = identity_only_orders_mode(
         &format!("[{ORDER}]"),
-        Identity {
-            credential: KeyRef("remote-credential".into()),
-            signing: KeyRef("remote-signing".into()),
-            passphrase: None,
-            stable_id: None,
-            extra: Default::default(),
-        },
+        Identity::new(
+            KeyRef("remote-credential".into()),
+            Some(KeyRef("remote-signing".into())),
+        ),
         std::sync::Arc::new(Remote),
         None,
         true,

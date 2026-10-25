@@ -72,7 +72,8 @@ impl SignStep for Http {
             let stamp = dispatch.stamp_ms();
             let params = self.params.clone().num("timestamp", stamp);
             let work = hmac_sha256_work(
-                &self.identity,
+                &self.identity.credential,
+                self.identity.signing_ref()?,
                 vec![PayloadPart::Bytes {
                     bytes: params.query().into_bytes(),
                 }],

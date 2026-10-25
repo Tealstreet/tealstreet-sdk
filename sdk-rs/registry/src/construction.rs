@@ -207,7 +207,7 @@ pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
                     present(&options.secret)
                         || identities
                             .and_then(|s| s.primary.as_ref())
-                            .is_some_and(|id| !id.signing.0.is_empty())
+                            .is_some_and(|id| id.signing_opt().is_some_and(|key| !key.0.is_empty()))
                 }
                 Input::RemoteSigner => mode.remote_signer,
                 Input::PayloadSigner => mode.payload_signer,
@@ -227,14 +227,12 @@ pub fn resolve(venue: &str, options: &EngineOptions) -> Option<Resolved> {
                             let address = |value: &Option<String>| {
                                 value.as_deref().is_some_and(|text| is_address(text.trim()))
                             };
-                            identities
-                                .primary
-                                .as_ref()
-                                .is_some_and(|id| !id.signing.0.is_empty())
-                                && (options.aster_api_version() == Version::V1
-                                    || (address(&options.asterdex.signer_address)
-                                        && (address(&options.asterdex.user_address)
-                                            || address(&options.application_id))))
+                            identities.primary.as_ref().is_some_and(|id| {
+                                id.signing_opt().is_some_and(|key| !key.0.is_empty())
+                            }) && (options.aster_api_version() == Version::V1
+                                || (address(&options.asterdex.signer_address)
+                                    && (address(&options.asterdex.user_address)
+                                        || address(&options.application_id))))
                         } else if options.aster_api_version() == Version::V3 {
                             options.aster_version(None) == Version::V3
                         } else {
