@@ -76,8 +76,19 @@ struct Probe {
     plan: Option<(Plan, Slot)>,
     plan_mode: bool,
     failures: Vec<(Error, VenueError)>,
+    /// C11: the installed identity a recipe without a signing ref carries
+    /// (an Optional-flagged slot); defaults to an unflagged absent ref.
+    absent: Option<Identity>,
+    /// C11: commands whose single Mutation is unsigned (no credential).
+    unsigned: Vec<u32>,
 }
 impl Probe {
+    fn identity(&self, signed: bool) -> Identity {
+        match (signed, &self.absent) {
+            (false, Some(absent)) => absent.clone(),
+            _ => signing(signed),
+        }
+    }
     fn plan_call(&mut self, cx: &mut Cx<'_, Context>, signed: bool) {
         let plan = self.plan.as_ref().unwrap().0.clone();
         let slot = cx.plan_slots(&plan).unwrap().remove(0);
@@ -88,7 +99,7 @@ impl Probe {
             Method::Post,
             "https://venue.test/write".into(),
             None,
-            Box::new(Recipe(signing(signed))),
+            Box::new(Recipe(self.identity(signed))),
             context,
         )
         .map_err(|(_, error)| error)
@@ -150,22 +161,27 @@ impl Venue for Probe {
                 Scope::Command(command),
                 Policy {
                     operation: Operation::Mutation,
-                    credential: Some(credential()),
+                    credential: (!self.unsigned.contains(&command)).then(credential),
                     timeout_ms: 20_000,
                     pacing: None,
                     retry: RetryPolicy::Never,
                 },
             )
             .unwrap();
-        cx.request_signed_managed(
-            context.clone(),
-            None,
-            Method::Post,
-            format!("https://venue.test/amend-{command}"),
-            None,
-            Box::new(Recipe(signing(self.signed.contains(&command)))),
-            context,
-        )
+        let url = format!("https://venue.test/amend-{command}");
+        if self.unsigned.contains(&command) {
+            cx.request_managed(context.clone(), None, Method::Post, url, None, context)
+        } else {
+            cx.request_signed_managed(
+                context.clone(),
+                None,
+                Method::Post,
+                url,
+                None,
+                Box::new(Recipe(self.identity(self.signed.contains(&command)))),
+                context,
+            )
+        }
         .map_err(|(_, error)| error)
         .unwrap();
     }
@@ -409,4 +425,118 @@ fn c4l_a_credential_only_primary_latches_beside_a_secondary() {
     assert_eq!(provided.load(Ordering::SeqCst), 0);
     assert_eq!(config_invalid(&out), 1, "{out:?}");
     assert_eq!(e.venue().failures[0].1, SignError::MissingKey.venue_error());
+}
+
+/// The Optional family's trusted setup: a credential-only primary whose
+/// absence is intentional (D6), derived by `apply_to_identities`.
+fn optional_identities() -> Identities {
+    let mut ids = Identities {
+        primary: Some(signing(false)),
+        secondary: None,
+    };
+    let policy: safe_cex_engine::signing::CredentialSetupPolicy =
+        serde_json::from_str(r#"{"primary":{"signing":"optional"}}"#).unwrap();
+    policy.apply_to_identities(&mut ids, false).unwrap();
+    ids
+}
+
+fn startup_failed(actions: &[Action]) -> bool {
+    actions
+        .iter()
+        .any(|a| matches!(a, Action::Notice(Notice::StartupFailed { .. })))
+}
+
+/// C11: an Optional family's intentional absence refuses only that signed
+/// operation, typed NotSent: no provider work, no latch, no config.invalid or
+/// StartupFailed, and later unsigned work still releases.
+#[test]
+fn c11_optional_absence_refuses_the_operation_without_a_latch() {
+    let ids = optional_identities();
+    let (mut e, provided) = engine_with(
+        Probe {
+            absent: ids.primary.clone(),
+            unsigned: vec![2],
+            ..Default::default()
+        },
+        ids,
+    );
+    let out = amend(&mut e, NOW, 1);
+    assert_eq!(provided.load(Ordering::SeqCst), 0);
+    assert!(http(&out).is_empty(), "{out:?}");
+    assert_eq!(
+        e.venue().failures[0].1,
+        SignError::SigningNotConfigured.venue_error()
+    );
+    assert_eq!(config_invalid(&out), 0, "no latch: {out:?}");
+    assert!(!startup_failed(&out), "{out:?}");
+    let peer = amend(&mut e, NOW + 1., 2);
+    assert_eq!(
+        http(&peer).len(),
+        1,
+        "unsigned work still releases: {peer:?}"
+    );
+    assert_eq!(config_invalid(&peer), 0);
+}
+
+/// C11p: in a sequential Mutation Plan the absent-ref call fails typed while
+/// the settled call's facts survive; there is no account latch.
+#[test]
+fn c11p_plan_keeps_settled_facts_when_an_optional_call_lacks_signing() {
+    let ids = optional_identities();
+    let (mut e, provided) = engine_with(
+        Probe {
+            plan_mode: true,
+            absent: ids.primary.clone(),
+            ..Default::default()
+        },
+        ids,
+    );
+    let out = amend(&mut e, NOW, 1);
+    let [request] = http(&out)[..] else {
+        panic!("the first call releases: {out:?}")
+    };
+    let request = request.clone();
+    e.handle(
+        NOW + 1.,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "settled-native-id",
+            },
+        },
+    );
+    let out = prepared_actions(&mut e, NOW + 1.);
+    assert_eq!(provided.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        e.venue().failures[0].1,
+        SignError::SigningNotConfigured.venue_error()
+    );
+    assert_eq!(config_invalid(&out), 0, "no latch: {out:?}");
+    let error = failed(&out, 1).expect("command 1 terminal");
+    assert_eq!(
+        error.partial.as_ref().map(|p| p.order_ids.clone()),
+        Some(vec!["settled-native-id".to_string()])
+    );
+}
+
+/// C11i (control): the same absent ref under Required policy keeps #2109's
+/// MissingKey latch.
+#[test]
+fn c11i_required_absence_still_latches_missing_key() {
+    let ids = Identities {
+        primary: Some(signing(false)),
+        secondary: None,
+    };
+    let (mut e, _) = engine_with(
+        Probe {
+            absent: ids.primary.clone(),
+            ..Default::default()
+        },
+        ids,
+    );
+    let out = amend(&mut e, NOW, 1);
+    assert_eq!(e.venue().failures[0].1, SignError::MissingKey.venue_error());
+    assert_eq!(config_invalid(&out), 1, "{out:?}");
 }
