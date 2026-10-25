@@ -85,3 +85,20 @@ CI in parallel with source reviews. Auditor exact-tree GO remains mandatory.
 Only scoped local builds, CARGO_BUILD_JOBS=4, one at a time. Original compile
 failures are not RED evidence. Record assertion failures separately from working
 controls and keep logs outside Git. No threshold or generic engine change.
+
+## Original execution receipt
+
+Plan commit b61a07f0314 precedes original test commit 87c21b39da6. On unchanged
+actual production, the dedicated target compiled and executed 11 controls:
+5 intended assertion RED, 6 GREEN, zero ignored. No compiler/setup failure.
+The three candle refusal REDs and missing-identity RED reach native kind None
+versus expected InvalidInput. The identity-success RED reaches its missing
+failure assertion because legacy emits CommandDone; its later kind/outcome
+checks remain source-stage gates. Every complete-batch/Store assertion before
+these boundaries passed. Native positive loops retain all documented variants;
+they are six passing test bodies, not a claim of independent RED variants.
+Scoped target strict Clippy and package fmt pass. Owner logs and full-tree proof
+are under /tmp/codex-orderly-local-read-original* and are not repository files.
+Only index, this plan and the new target differ from actual76f; all production,
+old fixtures, Cargo, maps and checkers are byte-exact. No push or CI at this
+checkpoint; bounded native/custody review is required before production.
