@@ -284,3 +284,14 @@ unmodified. The reviewer holds the immutable source/fixture/map artifact for
 bounded inspection. The auditor accepts the first-source34999 pair plus absolute
 WEEX and combined fit on this composition; no fresh bare-tip pair or unrelated
 Bybit/Bitget measurement is required for this venue-only source change.
+
+
+## Current composition fit and source review
+
+Bounded full source/native/API/fixture/map review is CLEAR at4b17b5a493c.
+The actual35ae composition measures WEEX1210327 and combined14039272 bytes,
+leaving133161 and116504 bytes under the unchanged budgets. Node and web are
+byte-identical in both modes. The measurement uses the same pinned toolchain,
+checked-in commands and CORES4/jobs4 as the first-source pair; both composed
+scratch targets were deleted. Later commits contain only these qualification
+notes and the plan index status. Frozen-head CI and auditor GO remain required.
