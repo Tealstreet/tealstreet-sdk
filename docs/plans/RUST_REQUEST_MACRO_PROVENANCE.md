@@ -58,12 +58,21 @@ conditions are proved:
 
 ### Closed single-hop private-import proof
 
-A visible glob normally refuses precision. The sole exception is a top-level,
-flat, single-segment `use crate::<ident>::*;` in the consumer. Resolve it via
-actual tracked plain `mod <ident>;` declarations to exactly one source file,
-without path/conditional/ambiguous declarations. Record the consumer/target
-module paths, declaration and target blob. Grouped, external, self/super,
-nested or otherwise unresolved consumer globs remain conservative.
+At each invocation, consider only imports in the same module or a containing
+block/fn scope, regardless of source order. Imports inside other functions or
+sibling/child modules do not reach it; cfg(test) alone is not a scope proof.
+Ambiguous brace/item boundaries refuse precision. A visible glob normally
+refuses precision. The sole exception is a top-level, flat, single-segment
+`use crate::<ident>::*;` in the consumer. Resolve it via actual tracked plain
+`mod <ident>;` declarations to exactly one source file, without path/conditional/
+ambiguous declarations. Record the consumer/target module paths, declaration,
+mod-chain files/blob hashes, enclosing scope and target blob. Grouped, external,
+self/super, nested or otherwise unresolved visible globs remain conservative.
+
+Ordinary use items in ancestors are not inherited as bare names in child modules;
+no traversal or exception is inferred for lib.rs use wire::*. Textual macros are
+different: any macro_rules or macro_use on the actual root-to-parent mod chain
+refuses precision, as do unresolved item-generating/ancestor macro hazards.
 
 The target has no macro definition (macro_rules or decl_macro), macro_use/export,
 extern crate, include/item-generating source, nested module or re-export of ANY

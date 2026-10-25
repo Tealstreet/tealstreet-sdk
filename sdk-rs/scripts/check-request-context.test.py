@@ -461,6 +461,7 @@ class DataMacroProvenance(unittest.TestCase):
                            'matches!(request.kind(), Kind::Normal)',
                            'matches!((request.kind), Kind::Normal)',
                            'matches!(request.kind, other!(Kind::Normal))',
+                           'matches!(request.kind, Kind::Normal if side_effect())',
                            'format!("{} {}", request.page, cx)',
                            'format!("{}", selector(request))']:
             with self.subTest(expression=expression):
@@ -485,6 +486,7 @@ class DataMacroProvenance(unittest.TestCase):
                         'for request in rows {}', 'if let Some(request) = other {}',
                         'while let Some(request) = other {}',
                         'match other { Some(request) => {}, _ => {} }',
+                        'match other { Row { request, .. } => {}, _ => {} }',
                         'each(|request| {});', 'each(|request: &Request| {});',
                         'let alias = request;']:
             for before in [True, False]:
@@ -574,9 +576,27 @@ class DataMacroModuleProvenance(unittest.TestCase):
 
     def test_ancestor_macro_shadow_stays_conservative(self):
         for prefix in ['macro_rules! matches { ($x:expr,$p:pat) => { true } }',
-                       'use external::custom as matches;', '#[macro_use] extern crate external;']:
+                       '#[macro_use] extern crate external;', '#[macro_use] mod sibling;']:
             with self.subTest(prefix=prefix):
                 self.assertTrue(self.inventory(root_source=prefix + 'mod wire; mod account;'))
+
+
+    def test_out_of_scope_globs_and_ordinary_ancestor_imports_do_not_reach_child(self):
+        for prefix in ['use external::custom as matches;', 'use wire::*;']:
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.inventory(root_source=prefix + 'mod wire; mod account;'), {})
+        for prefix in ['fn elsewhere() { use external::*; }',
+                       '#[cfg(test)] mod tests { use super::*; const TEXT: &str = r#"} {"#; }']:
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.inventory(consumer_prefix=prefix + 'use crate::wire::*;'), {})
+
+    def test_enclosing_block_imports_are_visible_even_after_invocation(self):
+        for body in ['use external::*; matches!(request.kind, Kind::Normal);',
+                     'matches!(request.kind, Kind::Normal); use external::*;',
+                     '{ use external::*; matches!(request.kind, Kind::Normal); }',
+                     'use super::*; matches!(request.kind, Kind::Normal);']:
+            with self.subTest(body=body):
+                self.assertTrue(ban.context_fingerprints(DataMacroProvenance.source(body))[0])
 
 
 if __name__ == '__main__':
