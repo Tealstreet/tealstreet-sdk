@@ -152,6 +152,7 @@ mod serial_plans {
         let result = if signed {
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -161,6 +162,7 @@ mod serial_plans {
         } else {
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
