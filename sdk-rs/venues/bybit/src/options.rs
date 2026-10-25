@@ -276,6 +276,7 @@ impl BybitLinear {
         };
         match cx.request_managed_with_headers(
             context.clone(),
+            None,
             Method::Get,
             url,
             &[("X-Referer", sign::BROKER_ID)],
@@ -384,6 +385,7 @@ impl BybitLinear {
         };
         match cx.request_signed_managed(
             context.clone(),
+            None,
             Method::Get,
             url,
             None,

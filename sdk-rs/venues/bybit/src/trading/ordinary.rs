@@ -514,7 +514,7 @@ impl BybitLinear {
             }),
             read: None,
         };
-        cx.request_signed_managed(context, method, url, body, Box::new(step), pending)
+        cx.request_signed_managed(context, None, method, url, body, Box::new(step), pending)
             .is_ok()
     }
 

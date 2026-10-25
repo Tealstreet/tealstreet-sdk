@@ -70,8 +70,16 @@ fn probe(
                 read: Some(context.clone()),
             };
             assert!(
-                cx.request_signed_managed(context, method, url, body, Box::new(step), pending)
-                    .is_ok()
+                cx.request_signed_managed(
+                    context,
+                    None,
+                    method,
+                    url,
+                    body,
+                    Box::new(step),
+                    pending
+                )
+                .is_ok()
             );
         }
     })

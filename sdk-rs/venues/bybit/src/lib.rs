@@ -795,6 +795,7 @@ impl BybitLinear {
         let queued = match signing {
             Some(signing) => cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 url,
                 None,
@@ -803,6 +804,7 @@ impl BybitLinear {
             ),
             None => cx.request_managed_with_headers(
                 context,
+                None,
                 Method::Get,
                 url,
                 &[("X-Referer", sign::BROKER_ID)],
@@ -1164,6 +1166,7 @@ impl BybitLinear {
         if cx
             .request_signed_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 format!("{origin}/v5/user/query-api"),
                 None,
