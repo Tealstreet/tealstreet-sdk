@@ -32,28 +32,35 @@ impl<P> Cx<'_, P> {
         self.core_ref()
             .validate_read_history_data(plan, slot, context)
     }
-    #[inline]
     pub(crate) fn prepare_read_history_page(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<PreparedHistoryPage, Error> {
-        self.core().prepare_read_history_page(plan, slot, context)
+        self.validate_read_history_data(plan, slot, context)?;
+        let cleanup = self
+            .io
+            .prepare_read_history_cleanup(plan.owner(), Some(context.leg()), 2)?;
+        Ok(PreparedHistoryPage {
+            plan: plan.clone(),
+            slot: slot.clone(),
+            context: context.clone(),
+            cleanup,
+        })
     }
     pub(crate) fn begin_read_history_commit(&mut self) {
         assert!(!self.io.core.http_owner_poison && !self.io.core.http_plan_poison);
         self.io.core.http_owner_poison = true;
     }
     #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     fn settle_read_history_page(&mut self, plan: &Plan, slot: &Slot, context: &Context) {
         self.core().settle_read_history_page(plan, slot, context)
     }
-    #[inline]
     pub(crate) fn commit_read_history_page(&mut self, prepared: PreparedHistoryPage) {
-        self.core().commit_read_history_page(prepared)
+        self.io.commit_read_history_cleanup(prepared.cleanup);
+        self.settle_read_history_page(&prepared.plan, &prepared.slot, &prepared.context);
+        self.io.core.http_owner_poison = false;
     }
     pub(crate) fn prepare_read_history_terminal(
         &mut self,
@@ -125,82 +132,6 @@ impl<P> Cx<'_, P> {
             marker,
         })
     }
-    #[inline]
-    pub(crate) fn commit_read_history_terminal(
-        &mut self,
-        prepared: PreparedHistoryTerminal,
-        result: Result<String, VenueError>,
-    ) {
-        self.core().commit_read_history_terminal(prepared, result)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
-    #[inline]
-    pub(crate) fn read_history_expiry_is_current(&self, plan: &Plan) -> Result<bool, Error> {
-        self.core_ref().read_history_expiry_is_current(plan)
-    }
-
-    #[inline]
-    pub(crate) fn validate_read_history_data(
-        &self,
-        plan: &Plan,
-        slot: &Slot,
-        context: &Context,
-    ) -> Result<Attempt, Error> {
-        self.core_ref()
-            .validate_read_history_data(plan, slot, context)
-    }
-
-    pub(crate) fn prepare_read_history_page(
-        &mut self,
-        plan: &Plan,
-        slot: &Slot,
-        context: &Context,
-    ) -> Result<PreparedHistoryPage, Error> {
-        self.validate_read_history_data(plan, slot, context)?;
-        let cleanup = self
-            .io
-            .prepare_read_history_cleanup(plan.owner(), Some(context.leg()), 2)?;
-        Ok(PreparedHistoryPage {
-            plan: plan.clone(),
-            slot: slot.clone(),
-            context: context.clone(),
-            cleanup,
-        })
-    }
-
-    fn settle_read_history_page(&mut self, plan: &Plan, slot: &Slot, context: &Context) {
-        self.io
-            .core
-            .request_contexts
-            .contexts
-            .remove(&context.leg());
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .plan_body_mut(plan)
-            .expect("prepared history Plan");
-        let index = body.schedule.ordinal(slot).expect("prepared history Slot");
-        body.schedule
-            .settle(slot)
-            .expect("prepared active history Slot");
-        body.entries[index].call = None;
-        body.entries[index].credit = Credit::Released;
-        body.handoff = self.io.core.http_delivery.clone();
-        body.refresh_availability(self.now);
-        self.rearm_plan(plan);
-    }
-
-    pub(crate) fn commit_read_history_page(&mut self, prepared: PreparedHistoryPage) {
-        self.io.commit_read_history_cleanup(prepared.cleanup);
-        self.settle_read_history_page(&prepared.plan, &prepared.slot, &prepared.context);
-        self.io.core.http_owner_poison = false;
-    }
-
     pub(crate) fn commit_read_history_terminal(
         &mut self,
         mut prepared: PreparedHistoryTerminal,
@@ -236,6 +167,51 @@ impl crate::engine::CoreCx<'_> {
     }
 }
 
+impl crate::engine::CoreCx<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
+    pub(crate) fn read_history_expiry_is_current(&self, plan: &Plan) -> Result<bool, Error> {
+        self.core_ref().read_history_expiry_is_current(plan)
+    }
+
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
+    pub(crate) fn validate_read_history_data(
+        &self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Attempt, Error> {
+        self.core_ref()
+            .validate_read_history_data(plan, slot, context)
+    }
+
+    fn settle_read_history_page(&mut self, plan: &Plan, slot: &Slot, context: &Context) {
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .plan_body_mut(plan)
+            .expect("prepared history Plan");
+        let index = body.schedule.ordinal(slot).expect("prepared history Slot");
+        body.schedule
+            .settle(slot)
+            .expect("prepared active history Slot");
+        body.entries[index].call = None;
+        body.entries[index].credit = Credit::Released;
+        body.handoff = self.io.core.http_delivery.clone();
+        body.refresh_availability(self.now);
+        self.rearm_plan(plan);
+    }
+}
+
 impl crate::engine::CoreRef<'_> {
     // Only some feature combinations call this.
     #[cfg_attr(feature = "http-plans", allow(dead_code))]
@@ -257,6 +233,8 @@ impl crate::engine::CoreRef<'_> {
         Ok(false)
     }
 
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     pub(crate) fn validate_read_history_data(
         &self,
         plan: &Plan,

@@ -467,6 +467,7 @@ impl TxFlow {
         self.account.setting_context = Some(context.clone());
         if let Err((pending, error)) = cx.request_managed_with_headers(
             context.clone(),
+            None,
             safe_cex_engine::Method::Post,
             format!("{}/info", self.rest()),
             &[

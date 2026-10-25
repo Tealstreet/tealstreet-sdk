@@ -77,6 +77,7 @@ impl Fixture {
         let request = cx
             .request_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 "https://history.test/page".into(),
                 None,

@@ -121,6 +121,7 @@ impl Fixture {
         let leg = cx.plan_leg_context(&plan, &slot).unwrap();
         if let Err((pending, error)) = cx.request_managed(
             leg.clone(),
+            None,
             Method::Get,
             format!("https://metadata.test/{page}"),
             None,
@@ -221,6 +222,7 @@ impl Venue for Fixture {
             self.retries += 1;
             cx.request_managed(
                 leg,
+                None,
                 Method::Get,
                 "https://metadata.test/retry".into(),
                 None,

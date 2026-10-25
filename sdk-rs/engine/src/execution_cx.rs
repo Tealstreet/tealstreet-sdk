@@ -392,53 +392,6 @@ impl crate::engine::CoreRef<'_> {
 
 #[cfg(feature = "http-plans")]
 impl<P> Cx<'_, P> {
-    #[inline]
-    pub fn begin_planned_execution(
-        &mut self,
-        preflight: &crate::request_context::Preflight,
-        steps: &[crate::request_context::plan::StepBound<'_>],
-        policy: crate::request_context::PlanPolicy,
-        window: Window,
-        key: &str,
-    ) -> Result<(crate::request_context::Plan, ExecutionHandle, Context), Error> {
-        self.core()
-            .begin_planned_execution(preflight, steps, policy, window, key)
-    }
-
-    #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
-    pub(super) fn finish_physical_plan(&mut self, owner: Owner, retired: Vec<RequestId>) {
-        self.core().finish_physical_plan(owner, retired)
-    }
-
-    #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
-    pub(super) fn seal_planned_execution(
-        &mut self,
-        plan: &crate::request_context::Plan,
-        fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
-        sealed: Vec<Sealed>,
-    ) {
-        self.core().seal_planned_execution(plan, fanout, sealed)
-    }
-
-    /// Fail every physical Plan left with no observer, outside any delivery:
-    /// its unsent work was already revoked and nothing may be published.
-    pub(super) fn fail_orphaned_plans(&mut self) {
-        if !self.io.core.request_contexts.has_planned_executions() {
-            return;
-        }
-        while let Some(plan) = self.io.core.request_contexts.orphaned_plan() {
-            let failed = self.fail_plan(&plan, VenueError::new("No execution observer remains"));
-            assert!(failed.is_ok(), "orphaned Plan seal {failed:?}");
-        }
-    }
-}
-
-#[cfg(feature = "http-plans")]
-impl crate::engine::CoreCx<'_> {
     /// Admit the founder's retained Preflight as a Plan owned by a new
     /// execution, in one transaction. The founder becomes that execution's
     /// first observer; the returned root is its own (detach/completion only,
@@ -486,6 +439,40 @@ impl crate::engine::CoreCx<'_> {
         Ok((plan, ExecutionHandle(root), founder_root))
     }
 
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(super) fn finish_physical_plan(&mut self, owner: Owner, retired: Vec<RequestId>) {
+        self.core().finish_physical_plan(owner, retired)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(super) fn seal_planned_execution(
+        &mut self,
+        plan: &crate::request_context::Plan,
+        fanout: Vec<(Result<String, VenueError>, Vec<String>)>,
+        sealed: Vec<Sealed>,
+    ) {
+        self.core().seal_planned_execution(plan, fanout, sealed)
+    }
+
+    /// Fail every physical Plan left with no observer, outside any delivery:
+    /// its unsent work was already revoked and nothing may be published.
+    pub(super) fn fail_orphaned_plans(&mut self) {
+        if !self.io.core.request_contexts.has_planned_executions() {
+            return;
+        }
+        while let Some(plan) = self.io.core.request_contexts.orphaned_plan() {
+            let failed = self.fail_plan(&plan, VenueError::new("No execution observer remains"));
+            assert!(failed.is_ok(), "orphaned Plan seal {failed:?}");
+        }
+    }
+}
+
+#[cfg(feature = "http-plans")]
+impl crate::engine::CoreCx<'_> {
     /// Retire a sealed physical Plan owner. It has no command: no notice,
     /// order lock or entry completion; observers are sealed separately.
     pub(super) fn finish_physical_plan(&mut self, owner: Owner, retired: Vec<RequestId>) {

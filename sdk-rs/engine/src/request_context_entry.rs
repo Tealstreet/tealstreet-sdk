@@ -160,154 +160,6 @@ impl<P> Io<P> {
         self.core.command_entry.as_ref().map(|entry| entry.command)
     }
 
-    #[inline]
-    pub(super) fn fresh_command_entry(&self) -> bool {
-        self.core_ref().fresh_command_entry()
-    }
-
-    #[inline]
-    pub(super) fn command_receipt(&self) -> Result<(u64, f64), crate::request_context::Error> {
-        self.core_ref().command_receipt()
-    }
-
-    #[inline]
-    pub(super) fn begin_command_entry(&mut self, command: Option<CommandId>) {
-        self.core_io().begin_command_entry(command)
-    }
-
-    #[inline]
-    pub(super) fn receive_command_wait(
-        &mut self,
-        command: CommandId,
-        deadline: Option<f64>,
-        now: f64,
-    ) {
-        self.core_io().receive_command_wait(command, deadline, now)
-    }
-    #[inline]
-    pub(super) fn end_command_entry(&mut self) {
-        self.core_io().end_command_entry()
-    }
-    #[inline]
-    pub(super) fn opaque_entry_activity(&mut self) {
-        self.core_io().opaque_entry_activity()
-    }
-    // Only some feature combinations call this.
-    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
-    #[inline]
-    pub(super) fn entry_bound(&self, command: CommandId) -> bool {
-        self.core_ref().entry_bound(command)
-    }
-}
-
-impl crate::engine::CoreIo<'_> {
-    #[inline]
-    pub(super) fn fresh_command_entry(&self) -> bool {
-        self.core_ref().fresh_command_entry()
-    }
-
-    #[inline]
-    pub(super) fn command_receipt(&self) -> Result<(u64, f64), crate::request_context::Error> {
-        self.core_ref().command_receipt()
-    }
-
-    pub(super) fn begin_command_entry(&mut self, command: Option<CommandId>) {
-        assert!(
-            self.core.command_entry.is_none(),
-            "nested native command entry"
-        );
-        self.core.command_entry = command.map(|command| Entry {
-            command,
-            resources: self.core.next_id,
-            state: State::Fresh,
-            receipt: self.core.command_waits.entry_receipt(command),
-        });
-    }
-
-    /// The command's terminal ends its caller wait (exact receipt inside its
-    /// own entry; the live command's otherwise).
-    pub(super) fn finish_command_wait(&mut self, command: CommandId) {
-        let entry = self
-            .core
-            .command_entry
-            .as_ref()
-            .filter(|entry| entry.command == command)
-            .map(|entry| entry.receipt);
-        let carried = self
-            .core
-            .command_waits
-            .stamp(command)
-            .is_some_and(|(receipt, _)| self.carries(receipt));
-        self.core.command_waits.finish(command, entry, carried);
-    }
-
-    #[inline]
-    fn carries(&self, receipt: u64) -> bool {
-        self.core_ref().carries(receipt)
-    }
-
-    /// Stamp one external receipt; past capacity, first drop expired stamps
-    /// that no held or deferred command carries.
-    pub(super) fn receive_command_wait(
-        &mut self,
-        command: CommandId,
-        deadline: Option<f64>,
-        now: f64,
-    ) {
-        if self.core.command_waits.stamps.len() >= WAIT_STAMPS {
-            let mut index = 0;
-            while let Some(&(_, receipt, at)) = self.core.command_waits.stamps.get(index) {
-                if at > now || self.carries(receipt) {
-                    index += 1;
-                } else {
-                    self.core.command_waits.stamps.swap_remove(index);
-                }
-            }
-        }
-        self.core.command_waits.receive(command, deadline);
-    }
-
-    pub(super) fn end_command_entry(&mut self) {
-        self.core.command_entry = None;
-    }
-
-    /// Existing resources are not a second ID allocator. Changing their state,
-    /// or staging an outbound operation without a new ID, burns fresh custody.
-    pub(super) fn opaque_entry_activity(&mut self) {
-        if let Some(entry) = &mut self.core.command_entry
-            && entry.state == State::Fresh
-        {
-            entry.state = State::Legacy;
-        }
-    }
-
-    #[inline]
-    pub(super) fn numeric_entry_completion_allowed(&self, command: CommandId) -> bool {
-        self.core_ref().numeric_entry_completion_allowed(command)
-    }
-
-    #[inline]
-    pub(super) fn entry_context_allowed(&self, scope: Scope) -> bool {
-        self.core_ref().entry_context_allowed(scope)
-    }
-
-    #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
-    pub(super) fn entry_bound(&self, command: CommandId) -> bool {
-        self.core_ref().entry_bound(command)
-    }
-
-    pub(super) fn entry_completed(&mut self, command: CommandId) {
-        if let Some(entry) = &mut self.core.command_entry
-            && entry.command == command
-        {
-            entry.state = State::Spent;
-        }
-    }
-}
-
-impl crate::engine::CoreIoRef<'_> {
     pub(super) fn fresh_command_entry(&self) -> bool {
         self.core.command_entry.as_ref().is_some_and(|entry| {
             entry.state == State::Fresh
@@ -337,6 +189,112 @@ impl crate::engine::CoreIoRef<'_> {
         Ok((receipt, deadline))
     }
 
+    pub(super) fn begin_command_entry(&mut self, command: Option<CommandId>) {
+        assert!(
+            self.core.command_entry.is_none(),
+            "nested native command entry"
+        );
+        self.core.command_entry = command.map(|command| Entry {
+            command,
+            resources: self.core.next_id,
+            state: State::Fresh,
+            receipt: self.core.command_waits.entry_receipt(command),
+        });
+    }
+
+    #[inline]
+    fn carries(&self, receipt: u64) -> bool {
+        self.core_ref().carries(receipt)
+    }
+
+    /// Stamp one external receipt; past capacity, first drop expired stamps
+    /// that no held or deferred command carries.
+    pub(super) fn receive_command_wait(
+        &mut self,
+        command: CommandId,
+        deadline: Option<f64>,
+        now: f64,
+    ) {
+        if self.core.command_waits.stamps.len() >= WAIT_STAMPS {
+            let mut index = 0;
+            while let Some(&(_, receipt, at)) = self.core.command_waits.stamps.get(index) {
+                if at > now || self.carries(receipt) {
+                    index += 1;
+                } else {
+                    self.core.command_waits.stamps.swap_remove(index);
+                }
+            }
+        }
+        self.core.command_waits.receive(command, deadline);
+    }
+    pub(super) fn end_command_entry(&mut self) {
+        self.core.command_entry = None;
+    }
+    #[inline]
+    pub(super) fn opaque_entry_activity(&mut self) {
+        self.core_io().opaque_entry_activity()
+    }
+    // Only some feature combinations call this.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    #[inline]
+    pub(super) fn entry_bound(&self, command: CommandId) -> bool {
+        self.core_ref().entry_bound(command)
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
+    /// The command's terminal ends its caller wait (exact receipt inside its
+    /// own entry; the live command's otherwise).
+    pub(super) fn finish_command_wait(&mut self, command: CommandId) {
+        let entry = self
+            .core
+            .command_entry
+            .as_ref()
+            .filter(|entry| entry.command == command)
+            .map(|entry| entry.receipt);
+        let carried = self
+            .core
+            .command_waits
+            .stamp(command)
+            .is_some_and(|(receipt, _)| self.carries(receipt));
+        self.core.command_waits.finish(command, entry, carried);
+    }
+
+    #[inline]
+    fn carries(&self, receipt: u64) -> bool {
+        self.core_ref().carries(receipt)
+    }
+
+    /// Existing resources are not a second ID allocator. Changing their state,
+    /// or staging an outbound operation without a new ID, burns fresh custody.
+    pub(super) fn opaque_entry_activity(&mut self) {
+        if let Some(entry) = &mut self.core.command_entry
+            && entry.state == State::Fresh
+        {
+            entry.state = State::Legacy;
+        }
+    }
+
+    #[inline]
+    pub(super) fn numeric_entry_completion_allowed(&self, command: CommandId) -> bool {
+        self.core_ref().numeric_entry_completion_allowed(command)
+    }
+
+    #[inline]
+    pub(super) fn entry_context_allowed(&self, scope: Scope) -> bool {
+        self.core_ref().entry_context_allowed(scope)
+    }
+
+    pub(super) fn entry_completed(&mut self, command: CommandId) {
+        if let Some(entry) = &mut self.core.command_entry
+            && entry.command == command
+        {
+            entry.state = State::Spent;
+        }
+    }
+}
+
+impl crate::engine::CoreIoRef<'_> {
     /// Whether a held cancellation, deferred cancel-all or released batch
     /// still carries `receipt`.
     fn carries(&self, receipt: u64) -> bool {
@@ -379,17 +337,38 @@ impl<P> Cx<'_, P> {
         self.io.end_command_entry();
     }
 
-    #[inline]
+    /// The caller's remaining wait, only inside this command's genuine entry
+    /// callback (before or after admission, never once rejected or spent)
+    /// and only for its own receipt. `None` in every borrowed callback.
     pub fn command_wait(&self) -> Option<CommandWait> {
-        self.core_ref().command_wait()
+        let (_, deadline) = self.io.command_receipt().ok()?;
+        if !self.now.is_finite() {
+            return None;
+        }
+        let left = (deadline - self.now).floor();
+        Some(if left >= 1.0 {
+            CommandWait::Remaining(left.min(f64::from(u32::MAX)) as u32)
+        } else {
+            CommandWait::Expired
+        })
     }
 
-    #[inline]
+    /// Finish an expired Fresh entry through the shared entry rejection: one
+    /// typed Timeout terminal (outcome NotSent for a mutation, none for a
+    /// read) with no admission, Context, request or timer. `Ok` means that
+    /// terminal was emitted and the command is finished (unlike admission's
+    /// `Ok`). `Revoked` and no effect unless the wait is `Expired` and Fresh.
     pub fn reject_expired_command(
         &mut self,
         operation: Operation,
     ) -> Result<(), CommandEntryError> {
-        self.core().reject_expired_command(operation)
+        if self.command_wait() != Some(CommandWait::Expired) {
+            return Err(CommandEntryError::Revoked);
+        }
+        match self.reject_command_entry(operation, crate::request_context::Error::TimedOut) {
+            CommandEntryError::Rejected(_) => Ok(()),
+            error => Err(error),
+        }
     }
 
     /// Admit the first HTTP Context of this genuine engine command callback.
@@ -443,29 +422,6 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreCx<'_> {
-    #[inline]
-    pub fn command_wait(&self) -> Option<CommandWait> {
-        self.core_ref().command_wait()
-    }
-
-    /// Finish an expired Fresh entry through the shared entry rejection: one
-    /// typed Timeout terminal (outcome NotSent for a mutation, none for a
-    /// read) with no admission, Context, request or timer. `Ok` means that
-    /// terminal was emitted and the command is finished (unlike admission's
-    /// `Ok`). `Revoked` and no effect unless the wait is `Expired` and Fresh.
-    pub fn reject_expired_command(
-        &mut self,
-        operation: Operation,
-    ) -> Result<(), CommandEntryError> {
-        if self.command_wait() != Some(CommandWait::Expired) {
-            return Err(CommandEntryError::Revoked);
-        }
-        match self.reject_command_entry(operation, crate::request_context::Error::TimedOut) {
-            CommandEntryError::Rejected(_) => Ok(()),
-            error => Err(error),
-        }
-    }
-
     /// Reject this genuine command entry without issuing anything.
     pub(in crate::engine) fn reject_command_entry(
         &mut self,
@@ -540,23 +496,5 @@ impl crate::engine::CoreCx<'_> {
             .actions
             .push(Action::Notice(Notice::CommandFailed { command, error }));
         CommandEntryError::Rejected(reason)
-    }
-}
-
-impl crate::engine::CoreRef<'_> {
-    /// The caller's remaining wait, only inside this command's genuine entry
-    /// callback (before or after admission, never once rejected or spent)
-    /// and only for its own receipt. `None` in every borrowed callback.
-    pub fn command_wait(&self) -> Option<CommandWait> {
-        let (_, deadline) = self.io.command_receipt().ok()?;
-        if !self.now.is_finite() {
-            return None;
-        }
-        let left = (deadline - self.now).floor();
-        Some(if left >= 1.0 {
-            CommandWait::Remaining(left.min(f64::from(u32::MAX)) as u32)
-        } else {
-            CommandWait::Expired
-        })
     }
 }

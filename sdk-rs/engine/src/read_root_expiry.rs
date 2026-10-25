@@ -19,9 +19,16 @@ impl<V: Venue> Drop for SweepScope<'_, V> {
 }
 
 impl<P> Io<P> {
-    #[inline]
+    /// A tracked root's own timer; one that fires early re-arms the same
+    /// identity for the exact deadline (true: consumed here).
     pub(super) fn read_root_timer(&mut self, timer: TimerId, now: f64) -> bool {
-        self.core_io().read_root_timer(timer, now)
+        let Some(&(at_ms, ..)) = self.core.read_roots.iter().find(|(.., own)| *own == timer) else {
+            return false;
+        };
+        if now < at_ms {
+            self.core.actions.push(Action::SetTimer { timer, at_ms });
+        }
+        true
     }
 }
 
@@ -38,18 +45,6 @@ impl crate::engine::CoreIo<'_> {
             let (.., timer) = self.core.read_roots.swap_remove(index);
             self.core.actions.push(Action::ClearTimer { timer });
         }
-    }
-
-    /// A tracked root's own timer; one that fires early re-arms the same
-    /// identity for the exact deadline (true: consumed here).
-    pub(super) fn read_root_timer(&mut self, timer: TimerId, now: f64) -> bool {
-        let Some(&(at_ms, ..)) = self.core.read_roots.iter().find(|(.., own)| *own == timer) else {
-            return false;
-        };
-        if now < at_ms {
-            self.core.actions.push(Action::SetTimer { timer, at_ms });
-        }
-        true
     }
 }
 
@@ -211,27 +206,6 @@ impl<P> Cx<'_, P> {
         })
     }
 
-    #[inline]
-    fn root_admission_checks(
-        &mut self,
-        command: CommandId,
-        credential: Option<&Credential>,
-        pacing: Option<Pacing>,
-    ) -> Result<(), Error> {
-        self.core()
-            .root_admission_checks(command, credential, pacing)
-    }
-
-    #[inline]
-    pub fn reject_unstamped_command(
-        &mut self,
-        operation: Operation,
-    ) -> Result<(), CommandEntryError> {
-        self.core().reject_unstamped_command(operation)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     /// Effect-free checks and fallible reservations before any identity spend.
     fn root_admission_checks(
         &mut self,

@@ -53,6 +53,7 @@ impl Venue for ReadPublicationProbe {
         self.socket = Some(cx.connect("wss://read-publication.test"));
         cx.request_managed(
             actual.clone(),
+            None,
             Method::Get,
             "https://read-publication.test/settings".into(),
             None,

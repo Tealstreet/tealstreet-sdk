@@ -13,6 +13,12 @@ pub(in super::super) struct State {
     /// The next read waits on a login Session: nothing may issue, complete or
     /// re-park it until that Session's drain or ended disposition.
     pub(super) session_parked: bool,
+    /// Parked by `park_preflight_for`: failable from any callback while it
+    /// holds nothing; `condition` is its engine bound's timer.
+    #[cfg(feature = "condition-waits")]
+    pub(super) condition_park: bool,
+    #[cfg(feature = "condition-waits")]
+    pub(super) condition: Option<crate::TimerId>,
 }
 
 impl State {
@@ -24,6 +30,10 @@ impl State {
             handoff: None,
             activation: super::ready::Activation::Initial,
             session_parked: false,
+            #[cfg(feature = "condition-waits")]
+            condition_park: false,
+            #[cfg(feature = "condition-waits")]
+            condition: None,
         }
     }
 
@@ -305,8 +315,6 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     #[inline]
     pub(in super::super::super) fn preflight_plan_origin(
         &self,
@@ -414,11 +422,13 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// `refusal` names a specific issue-time refusal for the Plan's terminal.
     #[inline(never)]
     pub(in super::super::super) fn fail_owned_admission(
         &mut self,
         admission: &Admission,
         reason: Error,
+        refusal: Option<&'static str>,
     ) {
         let Ok(Some(current)) = self.owned_http_admission(&admission.context) else {
             return;
@@ -432,12 +442,16 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .plan_from_context(&admission.context)
         {
-            let error =
-                VenueError::new("HTTP plan admission failed").kind(if reason == Error::TimedOut {
-                    crate::ErrorKind::Timeout
-                } else {
-                    crate::ErrorKind::Internal
-                });
+            let error = match refusal {
+                Some(refusal) => VenueError::new(refusal).kind(crate::ErrorKind::InvalidInput),
+                None => VenueError::new("HTTP plan admission failed").kind(
+                    if reason == Error::TimedOut {
+                        crate::ErrorKind::Timeout
+                    } else {
+                        crate::ErrorKind::Internal
+                    },
+                ),
+            };
             if admission.context.operation() == Operation::Mutation {
                 let delivery = Delivery {
                     context: admission.context.clone(),
@@ -516,81 +530,6 @@ impl<P> Cx<'_, P> {
             self.fail_preflight(&handle, error)
                 .expect("exact failed read custody");
         }
-    }
-
-    #[inline]
-    pub fn validate_preflight_delivery(
-        &self,
-        handle: &Preflight,
-        context: &Context,
-    ) -> Result<(), Error> {
-        self.core_ref().validate_preflight_delivery(handle, context)
-    }
-
-    #[inline]
-    pub fn finish_preflight_call(
-        &mut self,
-        handle: &Preflight,
-        context: &Context,
-    ) -> Result<(), Error> {
-        self.core().finish_preflight_call(handle, context)
-    }
-
-    #[inline]
-    pub fn preflight_retry_context(
-        &mut self,
-        handle: &Preflight,
-        context: &Context,
-        evidence: RetryEvidence,
-    ) -> Result<Context, Error> {
-        self.core()
-            .preflight_retry_context(handle, context, evidence)
-    }
-
-    #[inline]
-    pub fn preflight_read_context(
-        &mut self,
-        handle: &Preflight,
-        policy: Policy,
-        terms: CallTerms,
-    ) -> Result<Context, Error> {
-        self.core().preflight_read_context(handle, policy, terms)
-    }
-
-    #[inline]
-    pub(super) fn validate_preflight_read(
-        &self,
-        handle: &Preflight,
-        policy: &Policy,
-        terms: CallTerms,
-        parked: bool,
-    ) -> Result<(), Error> {
-        self.core_ref()
-            .validate_preflight_read(handle, policy, terms, parked)
-    }
-
-    #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
-    pub(super) fn issue_preflight_read(
-        &mut self,
-        handle: &Preflight,
-        policy: Policy,
-        terms: CallTerms,
-        parked: bool,
-    ) -> Result<Context, Error> {
-        self.core()
-            .issue_preflight_read(handle, policy, terms, parked)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
-    #[inline]
-    pub(in super::super::super) fn preflight_plan_origin(
-        &self,
-        handle: &Preflight,
-    ) -> Result<(PreflightPolicy, Option<Context>), Error> {
-        self.core_ref().preflight_plan_origin(handle)
     }
 
     #[inline]
@@ -699,6 +638,55 @@ impl crate::engine::CoreCx<'_> {
             .validate_preflight_read(handle, policy, terms, parked)
     }
 
+    #[inline]
+    pub(super) fn issue_preflight_read(
+        &mut self,
+        handle: &Preflight,
+        policy: Policy,
+        terms: CallTerms,
+        parked: bool,
+    ) -> Result<Context, Error> {
+        self.core()
+            .issue_preflight_read(handle, policy, terms, parked)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
+    pub(in super::super::super) fn preflight_plan_origin(
+        &self,
+        handle: &Preflight,
+    ) -> Result<(PreflightPolicy, Option<Context>), Error> {
+        self.core_ref().preflight_plan_origin(handle)
+    }
+
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
+    pub fn validate_preflight_delivery(
+        &self,
+        handle: &Preflight,
+        context: &Context,
+    ) -> Result<(), Error> {
+        self.core_ref().validate_preflight_delivery(handle, context)
+    }
+
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
+    pub(super) fn validate_preflight_read(
+        &self,
+        handle: &Preflight,
+        policy: &Policy,
+        terms: CallTerms,
+        parked: bool,
+    ) -> Result<(), Error> {
+        self.core_ref()
+            .validate_preflight_read(handle, policy, terms, parked)
+    }
+
     /// Issue a validated read in the caller's custody, with the current
     /// delivery (if any) as its predecessor.
     pub(super) fn issue_preflight_read(
@@ -795,6 +783,8 @@ impl crate::engine::CoreCx<'_> {
 }
 
 impl crate::engine::CoreRef<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     pub(in super::super::super) fn preflight_plan_origin(
         &self,
         handle: &Preflight,
@@ -813,6 +803,8 @@ impl crate::engine::CoreRef<'_> {
 
     /// Check exact response authority before native/cache publication. A live
     /// response still requires native decoding and snapshot freshness checks.
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     pub fn validate_preflight_delivery(
         &self,
         handle: &Preflight,
@@ -840,6 +832,8 @@ impl crate::engine::CoreRef<'_> {
     }
 
     /// The declared read's own terms, checked before any custody is spent.
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     pub(super) fn validate_preflight_read(
         &self,
         handle: &Preflight,

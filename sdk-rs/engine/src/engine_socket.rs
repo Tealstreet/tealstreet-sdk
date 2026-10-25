@@ -84,16 +84,32 @@ impl<P> Cx<'_, P> {
         }
         self.io.core.socket_effects.extend(effects);
     }
-    #[inline]
     pub fn register_socket_feed(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
-        self.core().register_socket_feed(policy)
+        self.io.opaque_entry_activity();
+        if self.io.core.socket_failed {
+            return Err(SocketError::NotPermitted);
+        }
+        let feed = self.io.core.socket_driver.register(policy)?;
+        self.io.core.managed_sockets = true;
+        Ok(feed)
     }
-    #[inline]
+    /// Keep login permission independent of a connect-origin native snapshot bound.
     pub fn register_socket_feed_with_snapshot(
         &mut self,
         policy: FeedPolicy,
     ) -> Result<FeedId, SocketError> {
-        self.core().register_socket_feed_with_snapshot(policy)
+        self.io.assert_actions_safe();
+        self.io.opaque_entry_activity();
+        if self.io.core.socket_failed {
+            return Err(SocketError::NotPermitted);
+        }
+        let feed = self
+            .io
+            .core
+            .socket_driver
+            .register_with_snapshot(policy, true)?;
+        self.io.core.managed_sockets = true;
+        Ok(feed)
     }
     /// Complete validated native snapshot proof from this exact text callback only.
     pub fn complete_socket_snapshot(&mut self) -> Result<(), SocketError> {
@@ -121,13 +137,28 @@ impl<P> Cx<'_, P> {
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
         self.io.core.socket_driver.state.authenticated(feed)
     }
-    #[inline]
+    /// Native one-shot frames ordered after current interests, retained with
+    /// their epoch until final drain. They are never persistent interests.
     pub fn send_after_socket_interests(
         &mut self,
         feed: FeedId,
         text: String,
     ) -> Result<(), SocketError> {
-        self.core().send_after_socket_interests(feed, text)
+        self.io.opaque_entry_activity();
+        let epoch = self.socket_epoch(feed).ok_or(SocketError::Stale)?;
+        if self.io.core.socket_failed
+            || self.io.core.socket_after.len() >= crate::socket_lifecycle::MAX_FRAMES
+            || text.len() > crate::socket_lifecycle::MAX_FRAME_BYTES
+        {
+            return Err(SocketError::Capacity);
+        }
+        self.io
+            .core
+            .socket_driver
+            .state
+            .reserve_external(text.len())?;
+        self.io.core.socket_after.push_back((epoch, text));
+        Ok(())
     }
     pub fn connect_socket(
         &mut self,
@@ -340,66 +371,17 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreCx<'_> {
-    pub fn register_socket_feed(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
-        self.io.opaque_entry_activity();
-        if self.io.core.socket_failed {
-            return Err(SocketError::NotPermitted);
-        }
-        let feed = self.io.core.socket_driver.register(policy)?;
-        self.io.core.managed_sockets = true;
-        Ok(feed)
-    }
-
-    /// Keep login permission independent of a connect-origin native snapshot bound.
-    pub fn register_socket_feed_with_snapshot(
-        &mut self,
-        policy: FeedPolicy,
-    ) -> Result<FeedId, SocketError> {
-        self.io.assert_actions_safe();
-        self.io.opaque_entry_activity();
-        if self.io.core.socket_failed {
-            return Err(SocketError::NotPermitted);
-        }
-        let feed = self
-            .io
-            .core
-            .socket_driver
-            .register_with_snapshot(policy, true)?;
-        self.io.core.managed_sockets = true;
-        Ok(feed)
-    }
-
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "managed-sockets", allow(dead_code))]
     #[inline]
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
         self.core_ref().socket_epoch(feed)
     }
-
-    /// Native one-shot frames ordered after current interests, retained with
-    /// their epoch until final drain. They are never persistent interests.
-    pub fn send_after_socket_interests(
-        &mut self,
-        feed: FeedId,
-        text: String,
-    ) -> Result<(), SocketError> {
-        self.io.opaque_entry_activity();
-        let epoch = self.socket_epoch(feed).ok_or(SocketError::Stale)?;
-        if self.io.core.socket_failed
-            || self.io.core.socket_after.len() >= crate::socket_lifecycle::MAX_FRAMES
-            || text.len() > crate::socket_lifecycle::MAX_FRAME_BYTES
-        {
-            return Err(SocketError::Capacity);
-        }
-        self.io
-            .core
-            .socket_driver
-            .state
-            .reserve_external(text.len())?;
-        self.io.core.socket_after.push_back((epoch, text));
-        Ok(())
-    }
 }
 
 impl crate::engine::CoreRef<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "managed-sockets", allow(dead_code))]
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
         self.io.core.socket_driver.state.epoch(feed)
     }

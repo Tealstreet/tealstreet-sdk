@@ -55,9 +55,9 @@ mod preflight_calls {
     }
     fn queue(cx: &mut Cx<'_, Context>, context: Context, signed: bool) -> Result<RequestId, (Context, Error)> {
         if signed {
-            cx.request_signed_managed(context.clone(), Method::Get, "https://venue.test/read".into(), None, Box::new(LongRecipe), context)
+            cx.request_signed_managed(context.clone(), None, Method::Get, "https://venue.test/read".into(), None, Box::new(LongRecipe), context)
         } else {
-            cx.request_managed(context.clone(), Method::Get, "https://venue.test/read".into(), None, context)
+            cx.request_managed(context.clone(), None, Method::Get, "https://venue.test/read".into(), None, context)
         }
     }
     impl Calls {
@@ -380,7 +380,7 @@ mod preflight_calls {
         let before = e.io.core.next_id;
         let refusal = cx(&mut e, 0., |cx| {
             if bad_headers {
-                cx.request_signed_managed(context.clone(), Method::Get, "https://venue.test/read".into(), None, Box::new(BadStaticHeaders), context)
+                cx.request_signed_managed(context.clone(), None, Method::Get, "https://venue.test/read".into(), None, Box::new(BadStaticHeaders), context)
             } else { queue(cx, context, false) }
         });
         assert_eq!(refusal.unwrap_err().1, Error::Invalid);
@@ -453,7 +453,7 @@ mod preflight_calls {
         for inherited in [false, true] {
             let mut e = crate::test_support::seeded_engine(Calls::default());
             let (_, context) = write_preflight(&mut e, inherited);
-            let refusal = cx(&mut e, 0., |cx| cx.request_signed_managed(context.clone(), Method::Get,
+            let refusal = cx(&mut e, 0., |cx| cx.request_signed_managed(context.clone(), None, Method::Get,
                 "https://venue.test/read".into(), None, Box::new(BadStaticHeaders), context));
             assert_eq!(refusal.unwrap_err().1, Error::Invalid);
             let actions = e.drain_actions().collect::<Vec<_>>();

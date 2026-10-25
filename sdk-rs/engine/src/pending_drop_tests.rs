@@ -50,6 +50,7 @@ impl Venue for Dropper {
             };
             cx.request_managed(
                 context,
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,

@@ -51,10 +51,11 @@ generic only because their methods hang off `Cx<'_, P>`. Those files are
   - Every P-free field of `Io<P>` moves into a non-generic `IoCore`, and
     `Io<P>` becomes `{ core: IoCore, pending, session_waits,
     socket_proposals, socket_continuations }`.
-  - `Io<P>` derefs to `IoCore`, so `self.io.field` keeps compiling.
-  - A site that borrows a P field and a core field at the same time names
-    `io.core.field` explicitly.
-  - No behaviour change; the size change is about 0.
+  - Every core access names `io.core.field` explicitly; there is no `Deref`,
+    since one split about 90 borrows that touch a P field and a core field
+    together. A script makes the rewrite, so a later recompose re-runs it.
+  - No behaviour change. Measured on ba6fb191239 (shipped wasm): families
+    -188 to +144 B, combined -9,814 B.
 - **S1, CoreCx.**
   - A non-generic `CoreCx<'a> { now, store, io: &mut IoCore }` carries the
     P-free Plan, Preflight, entry and execution bodies, and `Cx<P>` keeps

@@ -431,6 +431,12 @@ impl State {
 }
 
 impl ContextRegistry {
+    #[cfg(feature = "session-bearer")]
+    pub(in crate::engine) fn session_generation_live(&self, generation: u64) -> bool {
+        self.sessions.live(generation)
+    }
+
+    /// Issuer plus liveness only; binding a Bearer takes no session scope.
     pub(in crate::engine) fn validate_session(&self, session: &Session) -> Result<u64, Error> {
         let Owner::Session { generation } = session.owner() else {
             unreachable!("session handles always carry a session owner");
@@ -443,44 +449,100 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
-    #[inline]
+    /// Session lifetimes belong to session, socket and timer callbacks. A
+    /// retained Preflight's or a Plan's readiness scope may not mint, retire
+    /// or drain them.
     pub(super) fn session_scope(&self) -> Result<(), Error> {
-        self.core_ref().session_scope()
+        #[cfg(feature = "http-plans")]
+        if self.io.core.http_preflight_ready.is_some() || self.io.core.http_plan_ready.is_some() {
+            return Err(Error::State);
+        }
+        Ok(())
     }
 
-    #[inline]
+    /// Issue a session owner. It reserves no HTTP, timer or socket and has no
+    /// deadline; each operation captures its own bound in `session_context`.
     pub fn open_session(&mut self, policy: SessionPolicy) -> Result<Session, Error> {
-        self.core().open_session(policy)
+        self.session_scope()?;
+        let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        self.io
+            .core
+            .request_contexts
+            .sessions
+            .open(generation, policy)?;
+        Ok(Session::new(
+            &self.io.core.request_contexts.issuer,
+            generation,
+        ))
     }
 
-    #[inline]
+    /// A logical session operation with its own original raw bound. Mutations
+    /// on a session that is not repeat-safe wait for every earlier write to be
+    /// proven; an unresolved write blocks them until the session is retired.
+    /// Record a write's codec fact before `finish_http_context`: finishing
+    /// first discards the attempt, and its outcome stays unknown.
     pub fn session_context(&mut self, session: &Session, policy: Policy) -> Result<Context, Error> {
-        self.core().session_context(session, policy)
+        self.session_scope()?;
+        let generation = self.io.core.request_contexts.validate_session(session)?;
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        self.io
+            .core
+            .request_contexts
+            .issue_session(identity, generation, policy, self.now, None)
     }
 
-    #[inline]
+    /// A new physical leg of a session operation, keeping its exact raw bound.
+    /// A Read leg can never become a Mutation; any other owner is refused.
     pub fn session_leg_context(
         &mut self,
         parent: &Context,
         policy: Policy,
     ) -> Result<Context, Error> {
-        self.core().session_leg_context(parent, policy)
+        self.io.core.request_contexts.validate_legacy(parent)?;
+        self.io
+            .core
+            .request_contexts
+            .validate_send(parent, self.now)?;
+        let Owner::Session { generation } = parent.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.session_scope()?;
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        self.io.core.request_contexts.issue_session(
+            identity,
+            generation,
+            policy,
+            self.now,
+            Some(parent),
+        )
     }
 
-    #[inline]
+    /// Work owned by a command or the background that carries this session's
+    /// login or token: it rides the session's private egress, and retirement
+    /// fences its sends. Routing only: the scope still decides write authority.
     pub fn session_scoped_context(
         &mut self,
         session: &Session,
         scope: Scope,
         policy: Policy,
     ) -> Result<Context, Error> {
-        self.core().session_scoped_context(session, scope, policy)
+        self.session_scope()?;
+        let generation = self.io.core.request_contexts.validate_session(session)?;
+        let egress = self
+            .io
+            .core
+            .request_contexts
+            .sessions
+            .egress(generation)
+            .ok_or(Error::Invalid)?;
+        self.make_http_context(scope, policy, None, Some(egress))
     }
 
     /// Discard the session's work and revoke it, with no venue callback in
     /// between: unreleased attempts emit no HTTP, and late responses find no
     /// managed entry, so they never reach venue callbacks or reducers. Its
-    /// waiters come back to the caller as NotSent failures.
+    /// waiters come back to the caller as NotSent failures. Unreleased packets
+    /// other owners bound to its Bearer fail after the current callback.
     #[must_use = "returned waiters must be failed or re-dispatched"]
     pub fn retire_session(
         &mut self,
@@ -488,6 +550,16 @@ impl<P> Cx<'_, P> {
     ) -> Result<Vec<(Context, P, VenueError)>, Error> {
         self.session_scope()?;
         let generation = self.io.core.request_contexts.validate_session(session)?;
+        #[cfg(feature = "session-bearer")]
+        if self
+            .io
+            .core
+            .bearer_fenced
+            .try_reserve(self.io.bearer_bound_len(generation))
+            .is_err()
+        {
+            return Err(Error::Capacity);
+        }
         let waiters = self.drain_waits(generation, VenueError::new("Session retired"));
         self.io.retire_http_owner(session.owner());
         let registry = &mut self.io.core.request_contexts;
@@ -495,6 +567,8 @@ impl<P> Cx<'_, P> {
         registry
             .contexts
             .retain(|_, context| context.owner() != session.owner());
+        #[cfg(feature = "session-bearer")]
+        self.io.fence_bearer_generation(generation);
         Ok(waiters)
     }
 
@@ -576,6 +650,14 @@ impl<P> Cx<'_, P> {
         let Ok(generation) = self.io.core.request_contexts.validate_session(session) else {
             return vec![];
         };
+        // Also announces the bundle: parked Bind calls re-check after the
+        // callback. Without room to record it they stay parked to their window.
+        #[cfg(feature = "session-bearer")]
+        if !self.io.core.bearer_woken.contains(&generation)
+            && self.io.core.bearer_woken.try_reserve(1).is_ok()
+        {
+            self.io.core.bearer_woken.push(generation);
+        }
         // A Ready owner is live by its own deadline; a Failed one keeps its
         // hold until the venue fails the command, which removes the owner.
         // A parked Slot is issued now, with this drain's delivery as its
@@ -717,103 +799,7 @@ impl<P> Cx<'_, P> {
     }
 }
 
-impl crate::engine::CoreCx<'_> {
-    #[inline]
-    pub(super) fn session_scope(&self) -> Result<(), Error> {
-        self.core_ref().session_scope()
-    }
-
-    /// Issue a session owner. It reserves no HTTP, timer or socket and has no
-    /// deadline; each operation captures its own bound in `session_context`.
-    pub fn open_session(&mut self, policy: SessionPolicy) -> Result<Session, Error> {
-        self.session_scope()?;
-        let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        self.io
-            .core
-            .request_contexts
-            .sessions
-            .open(generation, policy)?;
-        Ok(Session::new(
-            &self.io.core.request_contexts.issuer,
-            generation,
-        ))
-    }
-
-    /// A logical session operation with its own original raw bound. Mutations
-    /// on a session that is not repeat-safe wait for every earlier write to be
-    /// proven; an unresolved write blocks them until the session is retired.
-    /// Record a write's codec fact before `finish_http_context`: finishing
-    /// first discards the attempt, and its outcome stays unknown.
-    pub fn session_context(&mut self, session: &Session, policy: Policy) -> Result<Context, Error> {
-        self.session_scope()?;
-        let generation = self.io.core.request_contexts.validate_session(session)?;
-        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        self.io
-            .core
-            .request_contexts
-            .issue_session(identity, generation, policy, self.now, None)
-    }
-
-    /// A new physical leg of a session operation, keeping its exact raw bound.
-    /// A Read leg can never become a Mutation; any other owner is refused.
-    pub fn session_leg_context(
-        &mut self,
-        parent: &Context,
-        policy: Policy,
-    ) -> Result<Context, Error> {
-        self.io.core.request_contexts.validate_legacy(parent)?;
-        self.io
-            .core
-            .request_contexts
-            .validate_send(parent, self.now)?;
-        let Owner::Session { generation } = parent.owner() else {
-            return Err(Error::Invalid);
-        };
-        self.session_scope()?;
-        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        self.io.core.request_contexts.issue_session(
-            identity,
-            generation,
-            policy,
-            self.now,
-            Some(parent),
-        )
-    }
-
-    /// Work owned by a command or the background that carries this session's
-    /// login or token: it rides the session's private egress, and retirement
-    /// fences its sends. Routing only: the scope still decides write authority.
-    pub fn session_scoped_context(
-        &mut self,
-        session: &Session,
-        scope: Scope,
-        policy: Policy,
-    ) -> Result<Context, Error> {
-        self.session_scope()?;
-        let generation = self.io.core.request_contexts.validate_session(session)?;
-        let egress = self
-            .io
-            .core
-            .request_contexts
-            .sessions
-            .egress(generation)
-            .ok_or(Error::Invalid)?;
-        self.make_http_context(scope, policy, None, Some(egress))
-    }
-}
-
-impl crate::engine::CoreRef<'_> {
-    /// Session lifetimes belong to session, socket and timer callbacks. A
-    /// retained Preflight's or a Plan's readiness scope may not mint, retire
-    /// or drain them.
-    pub(super) fn session_scope(&self) -> Result<(), Error> {
-        #[cfg(feature = "http-plans")]
-        if self.io.core.http_preflight_ready.is_some() || self.io.core.http_plan_ready.is_some() {
-            return Err(Error::State);
-        }
-        Ok(())
-    }
-}
+impl crate::engine::CoreCx<'_> {}
 
 impl<V: Venue> Engine<V> {
     /// A waiter's owner deadline passed before the venue drained it. Early
@@ -951,6 +937,9 @@ impl<V: Venue> Engine<V> {
             }
             self.assert_live();
             self.flush_http_owner_retirements();
+            // An expired-wait callback has no ready custody and may retire a
+            // Session; its fence drains before the next pass can return.
+            self.flush_bearer_fences(now);
         }
     }
 }

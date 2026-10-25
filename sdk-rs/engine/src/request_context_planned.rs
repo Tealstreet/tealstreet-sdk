@@ -32,6 +32,8 @@ struct Body {
     initial_custody: bool,
     history_bound: bool,
     history_latest_release: Option<Attempt>,
+    #[cfg(feature = "serial-plans")]
+    serial: Option<Box<serial::Serial>>,
 }
 
 struct Entry {
@@ -324,59 +326,6 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
-    #[inline]
-    pub fn admit_plan(
-        &mut self,
-        preflight: &Preflight,
-        steps: &[StepBound<'_>],
-        policy: PlanPolicy,
-    ) -> Result<Plan, Error> {
-        self.core().admit_plan(preflight, steps, policy)
-    }
-
-    #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
-    fn admit_declared_plan(
-        &mut self,
-        preflight: &Preflight,
-        declaration: AdmissionDeclaration<'_, '_, '_>,
-    ) -> Result<Plan, Error> {
-        self.core().admit_declared_plan(preflight, declaration)
-    }
-
-    #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
-    pub(in super::super) fn admit_physical_plan(
-        &mut self,
-        preflight: &Preflight,
-        steps: &[StepBound<'_>],
-        policy: PlanPolicy,
-    ) -> Result<(Plan, Option<(u64, Context)>), Error> {
-        self.core().admit_physical_plan(preflight, steps, policy)
-    }
-
-    #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
-    fn admit_plan_owned(
-        &mut self,
-        preflight: &Preflight,
-        declaration: AdmissionDeclaration<'_, '_, '_>,
-        physical: bool,
-    ) -> Result<(Plan, Option<(u64, Context)>), Error> {
-        self.core()
-            .admit_plan_owned(preflight, declaration, physical)
-    }
-
-    #[inline]
-    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
-        self.core_ref().plan_slots(plan)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     /// Admit only the final native plan. Mode/precondition reads retain their
     /// original generation and do not consume this checked whole-plan deadline.
     pub fn admit_plan(
@@ -435,6 +384,21 @@ impl crate::engine::CoreCx<'_> {
         declaration: AdmissionDeclaration<'_, '_, '_>,
         physical: bool,
     ) -> Result<(Plan, Option<(u64, Context)>), Error> {
+        #[cfg(feature = "serial-plans")]
+        return self.admit_plan_root(preflight, declaration, physical, None);
+        #[cfg(not(feature = "serial-plans"))]
+        self.admit_plan_root(preflight, declaration, physical)
+    }
+
+    /// A serial Plan shares the whole declared admission transaction, with its
+    /// own unbounded root and streamed journal.
+    fn admit_plan_root(
+        &mut self,
+        preflight: &Preflight,
+        declaration: AdmissionDeclaration<'_, '_, '_>,
+        physical: bool,
+        #[cfg(feature = "serial-plans")] serial: Option<serial::Serial>,
+    ) -> Result<(Plan, Option<(u64, Context)>), Error> {
         let extra = if physical { 2 } else { 0 };
         let AdmissionDeclaration {
             steps,
@@ -474,6 +438,13 @@ impl crate::engine::CoreCx<'_> {
             mutation_group::normalize(steps, &policy, barriers, &self.io.core.http_pacing)?;
         let bound = schedule.bound();
         let native_deadline = bound.deadline(self.now)?;
+        #[cfg(feature = "serial-plans")]
+        let deadline = if serial.is_some() {
+            serial::ROOT
+        } else {
+            receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap))
+        };
+        #[cfg(not(feature = "serial-plans"))]
         let deadline = receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap));
         Context::new(
             preflight.owner(),
@@ -515,6 +486,18 @@ impl crate::engine::CoreCx<'_> {
             entries[index].eligible_at = Some(at);
             entries[index].notified = false;
         }
+        #[cfg(feature = "serial-plans")]
+        let writes = match &serial {
+            Some(serial) => Some(
+                CommandWrites::new_reserved(serial::JOURNAL_ATTEMPTS, count)?
+                    .streamed_with(serial.refusals_complete),
+            ),
+            None if operation == Operation::Mutation => {
+                Some(CommandWrites::new_reserved(attempts, count)?)
+            }
+            None => None,
+        };
+        #[cfg(not(feature = "serial-plans"))]
         let writes = if operation == Operation::Mutation {
             Some(CommandWrites::new_reserved(attempts, count)?)
         } else {
@@ -643,6 +626,8 @@ impl crate::engine::CoreCx<'_> {
                 && self.io.core.http_plan_ready.is_none(),
             history_bound: false,
             history_latest_release: None,
+            #[cfg(feature = "serial-plans")]
+            serial: serial.map(Box::new),
         });
         if let Some(context) = old_read {
             self.io.retire_http_leg(&context);
@@ -706,6 +691,13 @@ impl crate::engine::CoreCx<'_> {
         Ok((handle, execution))
     }
 
+    #[inline]
+    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
+        self.core_ref().plan_slots(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     // Only some feature combinations call this.
     #[cfg_attr(feature = "http-plans", allow(dead_code))]
     #[inline]
@@ -763,6 +755,10 @@ impl<P> Cx<'_, P> {
                 .core
                 .request_contexts
                 .validate_plan(plan, self.now)?;
+            #[cfg(feature = "serial-plans")]
+            if body.serial.is_some() {
+                return Err(Error::State);
+            }
             let index = body.schedule.ordinal(slot)?;
             let entry = &body.entries[index];
             if entry.parked
@@ -834,6 +830,10 @@ impl<P> Cx<'_, P> {
                 .core
                 .request_contexts
                 .validate_plan(plan, self.now)?;
+            #[cfg(feature = "serial-plans")]
+            if body.serial.is_some() {
+                return Err(Error::State);
+            }
             self.io.core.request_contexts.validate(context, self.now)?;
             let index = body.schedule.ordinal(slot)?;
             let entry = &body.entries[index];
@@ -892,14 +892,49 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
-    #[inline]
+    /// Select a parked retry's next attempt at its Session's resume, under the
+    /// drain's delivery, inside the existing budget and declared window.
     pub(in crate::engine) fn resume_plan_retry(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<Context, Error> {
-        self.core().resume_plan_retry(plan, slot, context)
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let index = body.schedule.ordinal(slot)?;
+        let entry = &body.entries[index];
+        let call = entry
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context && matches!(call.stage, Stage::Parked))
+            .ok_or(Error::Revoked)?;
+        if !entry.parked {
+            return Err(Error::Revoked);
+        }
+        if call.selected >= call.terms.attempts {
+            return Err(Error::RetryForbidden);
+        }
+        call.window.physical_deadline(self.now)?;
+        let predecessor = self.io.core.http_delivery.clone();
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
+        body.schedule
+            .retry(slot)
+            .expect("remaining declared credit");
+        let entry = &mut body.entries[index];
+        entry.parked = false;
+        entry
+            .call
+            .as_mut()
+            .expect("validated call")
+            .select(self.now, predecessor)
+            .expect("validated retry");
+        self.note_session_resume(plan, context);
+        Ok(context.clone())
     }
 
     /// Issue a parked Slot's leg at its Session's resume, under the drain's
@@ -910,7 +945,7 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
     ) -> Result<Context, Error> {
-        let leg = self.make_plan_leg_context(plan, slot, intent, true)?;
+        let leg = self.make_plan_leg_context(plan, slot, intent, false, true)?;
         self.note_session_resume(plan, &leg);
         Ok(leg)
     }
@@ -921,7 +956,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, None, false)
+        self.make_plan_leg_context(plan, slot, None, false, false)
     }
 
     /// Narrow a write leg using the common engine intent rules before its first
@@ -932,7 +967,24 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: crate::classify::Intent,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(intent), false)
+        self.make_plan_leg_context(plan, slot, Some(intent), false, false)
+    }
+
+    /// The Plan form of `http_write_protection_cancel_leg`: an amend's cancel
+    /// leg of a position-bound cancel-then-recreate, declared before the leg's
+    /// journal registration. Never declare it for any other replacement.
+    pub fn plan_protection_cancel_leg_context(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+    ) -> Result<Context, Error> {
+        self.make_plan_leg_context(
+            plan,
+            slot,
+            Some(crate::classify::Intent::Cancel),
+            true,
+            false,
+        )
     }
 
     /// Handoff, initial or ready custody over this Plan's next issue.
@@ -963,6 +1015,7 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
+        protection_cancel: bool,
         resumed: bool,
     ) -> Result<Context, Error> {
         let body = self
@@ -984,6 +1037,29 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         let window = entry.terms.window(self.now, plan.deadline())?;
+        #[cfg(feature = "serial-plans")]
+        let (operation, retry, credential) = body.serial.as_ref().map_or_else(
+            || {
+                (
+                    body.policy.operation,
+                    body.policy.retry,
+                    body.policy.credential.clone(),
+                )
+            },
+            |serial| serial.terms(&body.policy.credential),
+        );
+        #[cfg(feature = "serial-plans")]
+        let mut context = Context::new(
+            plan.owner(),
+            entry.logical,
+            operation,
+            credential,
+            self.now,
+            window.deadline(),
+            body.policy.pacing,
+        )?
+        .with_retry(retry)?;
+        #[cfg(not(feature = "serial-plans"))]
         let mut context = Context::new(
             plan.owner(),
             entry.logical,
@@ -1011,7 +1087,9 @@ impl<P> Cx<'_, P> {
             .owner_entry_mut(plan.owner())
             .unwrap();
         let narrowed = match intent {
-            Some(intent) if owner.prepare_leg_intent(&context, intent, false)? => Some(intent),
+            Some(intent) if owner.prepare_leg_intent(&context, intent, protection_cancel)? => {
+                Some(intent)
+            }
             _ => None,
         };
         // Journal enrollment precedes headers, recipe preparation and all queue
@@ -1125,17 +1203,49 @@ impl<P> Cx<'_, P> {
         self.finish_plan_call_inner(plan, slot, context)
     }
 
-    #[inline]
     fn finish_plan_call_inner(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<(), Error> {
-        self.core().finish_plan_call_inner(plan, slot, context)
+        self.validate_plan_delivery(plan, context)?;
+        let body = self.io.core.request_contexts.plan_body(plan)?;
+        let index = body.schedule.ordinal(slot)?;
+        let call = body.entries[index]
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context)
+            .ok_or(Error::Revoked)?;
+        if context.operation() == Operation::Mutation {
+            self.io
+                .core
+                .request_contexts
+                .owner_entry(plan.owner())
+                .unwrap()
+                .writes
+                .as_ref()
+                .ok_or(Error::State)?
+                .validate_housekeeping(call.admission.attempt.request)?;
+        }
+        self.io.retire_http_leg(context);
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
+        body.schedule.settle(slot)?;
+        body.entries[index].call = None;
+        body.entries[index].credit = Credit::Released;
+        body.handoff = self.io.core.http_delivery.clone();
+        body.refresh_availability(self.now);
+        self.rearm_plan(plan);
+        Ok(())
     }
 
-    #[inline]
+    /// Select a declared Read retry without extending its owner or root. A
+    /// write refusal must use the opaque classified resend-grant operation.
     pub fn plan_retry_context(
         &mut self,
         plan: &Plan,
@@ -1143,8 +1253,11 @@ impl<P> Cx<'_, P> {
         context: &Context,
         evidence: RetryEvidence,
     ) -> Result<Context, Error> {
-        self.core()
-            .plan_retry_context(plan, slot, context, evidence)
+        if evidence == RetryEvidence::DefinitiveRefusal {
+            return Err(Error::RetryForbidden);
+        }
+        context.retry(evidence, self.now)?;
+        self.select_plan_retry(plan, slot, context)
     }
 
     /// Consume the existing classifier's exact-attempt write grant within the
@@ -1345,59 +1458,12 @@ impl<P> Cx<'_, P> {
     }
 
     #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     fn rearm_plan(&mut self, plan: &Plan) {
         self.core().rearm_plan(plan)
     }
 }
 
 impl crate::engine::CoreCx<'_> {
-    /// Select a parked retry's next attempt at its Session's resume, under the
-    /// drain's delivery, inside the existing budget and declared window.
-    pub(in crate::engine) fn resume_plan_retry(
-        &mut self,
-        plan: &Plan,
-        slot: &Slot,
-        context: &Context,
-    ) -> Result<Context, Error> {
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .validate_plan(plan, self.now)?;
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let index = body.schedule.ordinal(slot)?;
-        let entry = &body.entries[index];
-        let call = entry
-            .call
-            .as_ref()
-            .filter(|call| call.context == *context && matches!(call.stage, Stage::Parked))
-            .ok_or(Error::Revoked)?;
-        if !entry.parked {
-            return Err(Error::Revoked);
-        }
-        if call.selected >= call.terms.attempts {
-            return Err(Error::RetryForbidden);
-        }
-        call.window.physical_deadline(self.now)?;
-        let predecessor = self.io.core.http_delivery.clone();
-        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
-        body.schedule
-            .retry(slot)
-            .expect("remaining declared credit");
-        let entry = &mut body.entries[index];
-        entry.parked = false;
-        entry
-            .call
-            .as_mut()
-            .expect("validated call")
-            .select(self.now, predecessor)
-            .expect("validated retry");
-        self.note_session_resume(plan, context);
-        Ok(context.clone())
-    }
-
     /// A resume drained with no delivery is the resumed attempt's custody for
     /// the rest of this event only.
     fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {
@@ -1421,66 +1487,15 @@ impl crate::engine::CoreCx<'_> {
         self.io.core.session_resumed.push(request);
     }
 
+    /// Exact released DATA authority before any native or Store mutation.
+    // Only some feature combinations call this.
+    #[cfg_attr(
+        all(feature = "http-plans", not(feature = "serial-plans")),
+        allow(dead_code)
+    )]
     #[inline]
     pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
         self.core_ref().validate_plan_delivery(plan, context)
-    }
-
-    fn finish_plan_call_inner(
-        &mut self,
-        plan: &Plan,
-        slot: &Slot,
-        context: &Context,
-    ) -> Result<(), Error> {
-        self.validate_plan_delivery(plan, context)?;
-        let body = self.io.core.request_contexts.plan_body(plan)?;
-        let index = body.schedule.ordinal(slot)?;
-        let call = body.entries[index]
-            .call
-            .as_ref()
-            .filter(|call| call.context == *context)
-            .ok_or(Error::Revoked)?;
-        if context.operation() == Operation::Mutation {
-            self.io
-                .core
-                .request_contexts
-                .owner_entry(plan.owner())
-                .unwrap()
-                .writes
-                .as_ref()
-                .ok_or(Error::State)?
-                .validate_housekeeping(call.admission.attempt.request)?;
-        }
-        self.io.retire_http_leg(context);
-        self.io
-            .core
-            .request_contexts
-            .contexts
-            .remove(&context.leg());
-        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
-        body.schedule.settle(slot)?;
-        body.entries[index].call = None;
-        body.entries[index].credit = Credit::Released;
-        body.handoff = self.io.core.http_delivery.clone();
-        body.refresh_availability(self.now);
-        self.rearm_plan(plan);
-        Ok(())
-    }
-
-    /// Select a declared Read retry without extending its owner or root. A
-    /// write refusal must use the opaque classified resend-grant operation.
-    pub fn plan_retry_context(
-        &mut self,
-        plan: &Plan,
-        slot: &Slot,
-        context: &Context,
-        evidence: RetryEvidence,
-    ) -> Result<Context, Error> {
-        if evidence == RetryEvidence::DefinitiveRefusal {
-            return Err(Error::RetryForbidden);
-        }
-        context.retry(evidence, self.now)?;
-        self.select_plan_retry(plan, slot, context)
     }
 
     fn select_plan_retry(
@@ -1573,12 +1588,14 @@ impl crate::engine::CoreCx<'_> {
         let timer = body.timer;
         let at_ms = body.next_wake();
         self.io.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+        #[cfg(feature = "serial-plans")]
+        self.io.core.actions.push(serial::wake(timer, at_ms));
+        #[cfg(not(feature = "serial-plans"))]
         self.io.core.actions.push(Action::SetTimer { timer, at_ms });
     }
 }
 
 impl crate::engine::CoreRef<'_> {
-    /// Exact released DATA authority before any native or Store mutation.
     pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
         let body = self
             .io
@@ -1626,6 +1643,20 @@ impl Body {
             }
         }
     }
+    #[cfg(feature = "condition-waits")]
+    fn next_wake(&self) -> f64 {
+        let wake = self
+            .entries
+            .iter()
+            .filter(|entry| entry.credit == Credit::Unissued && !entry.notified && !entry.parked)
+            .filter_map(|entry| entry.eligible_at)
+            .fold(self.handle.deadline(), f64::min);
+        self.serial
+            .as_ref()
+            .and_then(|serial| serial.condition_deadline())
+            .map_or(wake, |at| wake.min(at))
+    }
+    #[cfg(not(feature = "condition-waits"))]
     fn next_wake(&self) -> f64 {
         self.entries
             .iter()
@@ -1702,18 +1733,6 @@ impl<P> Cx<'_, P> {
 }
 
 impl<P> Cx<'_, P> {
-    #[inline]
-    pub fn finish_plan_failed_call(
-        &mut self,
-        plan: &Plan,
-        slot: &Slot,
-        context: &Context,
-    ) -> Result<(), Error> {
-        self.core().finish_plan_failed_call(plan, slot, context)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     /// Retire one failed physical call while continuing independently declared
     /// work. This cannot publish effects, erase evidence or authorize a retry.
     pub fn finish_plan_failed_call(
@@ -1851,6 +1870,9 @@ impl ContextRegistry {
         if let Ok(body) = io.core.request_contexts.plan_body(plan) {
             let (timer, at_ms) = (body.timer, body.next_wake());
             io.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            #[cfg(feature = "serial-plans")]
+            io.core.actions.push(serial::wake(timer, at_ms));
+            #[cfg(not(feature = "serial-plans"))]
             io.core.actions.push(Action::SetTimer { timer, at_ms });
         }
     }
@@ -1889,6 +1911,10 @@ impl ContextRegistry {
                 })
             })
     }
+    #[cfg(all(test, feature = "serial-plans"))]
+    pub(in super::super) fn command_writes(&self, command: CommandId) -> Option<&CommandWrites> {
+        self.commands.get(&command)?.writes.as_ref()
+    }
     #[cfg(test)]
     pub(in super::super) fn plan_context_storage(&self) -> (usize, usize, usize) {
         (
@@ -1900,23 +1926,6 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
-    #[inline]
-    pub fn replace_plan_call(
-        &mut self,
-        plan: &Plan,
-        slot: &Slot,
-        context: &Context,
-    ) -> Result<(), Error> {
-        self.core().replace_plan_call(plan, slot, context)
-    }
-
-    #[inline]
-    pub fn done_empty_plan(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
-        self.core().done_empty_plan(preflight, result)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     /// Select a predeclared replacement sequence only after the existing journal
     /// proves an effects-free refusal. All descendants were reserved on admission.
     pub fn replace_plan_call(
@@ -2095,6 +2104,14 @@ impl<P> Cx<'_, P> {
 
 #[path = "request_context_history_plan.rs"]
 mod history;
+
+#[cfg(feature = "serial-plans")]
+#[path = "request_context_serial_plan.rs"]
+mod serial;
+
+#[cfg(feature = "condition-waits")]
+#[path = "request_context_condition_wait.rs"]
+mod condition_wait;
 
 #[cfg(all(test, not(feature = "http-mutation-barriers")))]
 #[path = "request_context_group_disabled_tests.rs"]

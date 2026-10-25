@@ -75,6 +75,7 @@ impl Venue for GroupProbe {
                 .unwrap();
             cx.request_managed(
                 leg.clone(),
+                None,
                 Method::Get,
                 "https://group.test/read".into(),
                 None,
@@ -398,6 +399,7 @@ fn a_member_cannot_issue_its_own_physical_request() {
     let managed = cx.io.core.managed_http.len();
     let sent = cx.request_managed(
         root.clone(),
+        None,
         crate::Method::Get,
         "https://venue.test/own-root".into(),
         None,
@@ -527,6 +529,7 @@ fn background_read(run: &mut Run, at: f64, previous: Option<ExecutionHandle>) ->
         .unwrap();
     cx.request_managed(
         leg.clone(),
+        None,
         Method::Get,
         "https://group.test/account".into(),
         None,

@@ -234,36 +234,6 @@ impl<P> Cx<'_, P> {
         })
     }
 
-    #[inline]
-    pub(in crate::engine) fn issue_preflight(
-        &mut self,
-        command: CommandId,
-        policy: PreflightPolicy,
-    ) -> Result<Preflight, Error> {
-        self.core().issue_preflight(command, policy)
-    }
-
-    #[inline]
-    pub fn done_preflight(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
-        self.core().done_preflight(preflight, result)
-    }
-
-    #[inline]
-    pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
-        self.core().inherit_preflight_uncertainty(preflight)
-    }
-
-    #[inline]
-    pub fn fail_preflight(
-        &mut self,
-        preflight: &Preflight,
-        error: impl Into<VenueError>,
-    ) -> Result<(), Error> {
-        self.core().fail_preflight(preflight, error)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     // Private issuer shared with pure engine state fixtures. Public initial
     // admission always obtains command/generation custody from the callback.
     pub(in crate::engine) fn issue_preflight(
@@ -317,15 +287,9 @@ impl crate::engine::CoreCx<'_> {
         self.finish_sealed_command(id, Some(result), seal)
     }
 
-    /// Record that an earlier attempt of this intent may have reached the venue.
-    /// Monotonic: every later failure of this command projects at least Unknown.
-    /// It grants no send, resend, renewal, import or success authority; the
-    /// resulting Unknown follows the existing Unknown reconciliation.
+    #[inline]
     pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
-        self.io
-            .core
-            .request_contexts
-            .inherit_preflight_uncertainty(preflight)
+        self.core().inherit_preflight_uncertainty(preflight)
     }
 
     /// Failure before any plan was admitted proves this command sent no write;
@@ -336,7 +300,11 @@ impl crate::engine::CoreCx<'_> {
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        #[cfg(feature = "condition-waits")]
+        let seal = self.seal_condition_preflight(preflight, error.into())?;
+        #[cfg(not(feature = "condition-waits"))]
         self.validate_preflight_failure_custody(preflight)?;
+        #[cfg(not(feature = "condition-waits"))]
         let seal = self.io.core.request_contexts.seal_preflight(
             preflight,
             self.now,
@@ -347,5 +315,18 @@ impl crate::engine::CoreCx<'_> {
             return Err(Error::Invalid);
         };
         self.finish_sealed_command(id, None, seal)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// Record that an earlier attempt of this intent may have reached the venue.
+    /// Monotonic: every later failure of this command projects at least Unknown.
+    /// It grants no send, resend, renewal, import or success authority; the
+    /// resulting Unknown follows the existing Unknown reconciliation.
+    pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
+        self.io
+            .core
+            .request_contexts
+            .inherit_preflight_uncertainty(preflight)
     }
 }

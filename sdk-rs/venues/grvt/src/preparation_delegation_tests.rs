@@ -80,6 +80,7 @@ impl Venue for Probe {
             assert!(
                 cx.request_managed_with_headers(
                     context,
+                    None,
                     Method::Post,
                     url,
                     &[("Content-Type", "application/json")],
