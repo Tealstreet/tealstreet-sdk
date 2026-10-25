@@ -2,8 +2,9 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
-    Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
+    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity,
+    KeyPresence, KeyRef, Operation, PayloadPart, SetupFacts, SignError, SignFuture, SignRequest,
+    SignResult, Signer,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -22,7 +23,8 @@ pub struct LocalSetup {
 #[derive(Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalIdentity {
-    #[serde(default)]
+    /// Omitted or `null` is Absent; `""` is Empty (D3).
+    #[serde(default, deserialize_with = "Secret::nullable")]
     pub key: Secret,
     #[serde(default)]
     pub secret: Secret,
@@ -74,14 +76,35 @@ impl<'de> serde::Deserialize<'de> for LocalExtras {
         deserializer.deserialize_map(Visitor)
     }
 }
+/// Setup material; the default is absent, which reads as empty bytes.
 #[derive(Default)]
-pub struct Secret(Zeroizing<String>);
+pub struct Secret(Option<Zeroizing<String>>);
 impl Secret {
     pub fn new(value: String) -> Self {
-        Self(Zeroizing::new(value))
+        Self(Some(Zeroizing::new(value)))
     }
     fn into_bytes(mut self) -> Vec<u8> {
-        std::mem::take(&mut *self.0).into_bytes()
+        self.0
+            .as_mut()
+            .map(|value| std::mem::take(&mut **value).into_bytes())
+            .unwrap_or_default()
+    }
+    fn is_empty(&self) -> bool {
+        self.0.as_deref().is_none_or(|value| value.is_empty())
+    }
+    /// Classified from the raw borrow with `str::trim`, before any trim policy.
+    fn presence(&self) -> KeyPresence {
+        match self.0.as_deref() {
+            None => KeyPresence::Absent,
+            Some(value) if value.is_empty() => KeyPresence::Empty,
+            Some(value) if value.trim().is_empty() => KeyPresence::Blank,
+            Some(_) => KeyPresence::Nonblank,
+        }
+    }
+    /// The key field alone reads `null` as absent.
+    fn nullable<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        <Option<String> as serde::Deserialize>::deserialize(deserializer)
+            .map(|value| Self(value.map(Zeroizing::new)))
     }
 }
 impl<'de> serde::Deserialize<'de> for Secret {
@@ -269,9 +292,9 @@ impl LocalSigner {
                 && (setup
                     .secondary
                     .as_ref()
-                    .is_some_and(|id| !id.secret.0.is_empty())
+                    .is_some_and(|id| !id.secret.is_empty())
                     || setup.primary.as_ref().is_none_or(|primary| {
-                        primary.secret.0.is_empty()
+                        primary.secret.is_empty()
                             || setup.secondary.as_ref().map(|id| id.secret_encoding)
                                 != Some(primary.secret_encoding)
                     }))
@@ -397,6 +420,36 @@ impl LocalSigner {
         let setup: LocalSetup =
             serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
         Self::from_setup_with_policy_and_mode(setup, policy, public_data_only)
+    }
+    /// Trusted setup plus its non-secret facts (D3): the primary key's raw
+    /// presence, read before the setup is consumed.
+    pub fn from_setup_with_facts(
+        setup: LocalSetup,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        let facts = SetupFacts::new(
+            setup
+                .primary
+                .as_ref()
+                .map_or(KeyPresence::Absent, |primary| primary.key.presence()),
+        );
+        let (signer, identities) =
+            Self::from_setup_with_policy_and_mode(setup, policy, public_data_only)?;
+        Ok((signer, identities, facts))
+    }
+    pub fn from_json_with_facts(
+        input: String,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        let input = Zeroizing::new(input);
+        if input.len() > 4 * 1024 * 1024 {
+            return Err(SignError::InvalidRequest);
+        }
+        let setup: LocalSetup =
+            serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
+        Self::from_setup_with_facts(setup, policy, public_data_only)
     }
     pub fn remove(&mut self, reference: &KeyRef) {
         self.keys.remove(reference);
