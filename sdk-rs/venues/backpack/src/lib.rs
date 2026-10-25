@@ -1084,6 +1084,15 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::History(request) => {
+                // Native history presents a released transport failure as Internal.
+                let error = if error.kind == Some(safe_cex_engine::ErrorKind::Network) {
+                    error.kind(safe_cex_engine::ErrorKind::Internal)
+                } else {
+                    error
+                };
+                self.history_failed(cx, *request, error);
+            }
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Candles { context, .. } => {
@@ -1104,6 +1113,7 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error);
@@ -1121,6 +1131,7 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             pending => self.on_request_failed(cx, pending, &error.message),
@@ -1170,7 +1181,9 @@ impl Venue for Backpack {
                     .outcome(safe_cex_engine::Outcome::Unknown);
                 self.trade_failed(cx, request, error)
             }
-            Pending::History(request) => self.history_failed(cx, *request, error),
+            Pending::History(request) => {
+                self.history_failed(cx, *request, safe_cex_engine::VenueError::new(error))
+            }
             Pending::Depth {
                 context,
                 symbol,

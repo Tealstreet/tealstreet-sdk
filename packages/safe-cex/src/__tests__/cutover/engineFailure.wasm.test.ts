@@ -42,7 +42,7 @@ it.each(['setTickerSymbols', 'setPollScale'] as const)(
       start: idle,
       wsOpen: idle,
       wsMessage: idle,
-      wsClose: idle,
+      wsClose: idle, wsRouteExhausted: idle,
       httpStart: idle,
       httpChunk: idle,
       httpEnd: idle,
