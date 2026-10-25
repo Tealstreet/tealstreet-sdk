@@ -696,6 +696,7 @@ fn work(
     ]);
     Ok(SignRequest {
         receipt: SignReceipt {
+            nonce: None,
             stamp_ms: Some(stamp_ms),
             expiry_ms: None,
         },

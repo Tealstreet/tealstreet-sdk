@@ -243,6 +243,7 @@ mod tests {
     fn work(expiry: Option<f64>) -> SignRequest {
         SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(1_000.),
                 expiry_ms: expiry,
             },
@@ -350,6 +351,7 @@ mod tests {
             },
             SignRequest {
                 receipt: SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(1_000.5),
                     expiry_ms: None,
                 },
@@ -497,6 +499,7 @@ mod tests {
             SignResult::new(
                 vec![vec![0x37; 32]],
                 SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(1_001.),
                     expiry_ms: None,
                 },
@@ -504,6 +507,7 @@ mod tests {
             SignResult::new(
                 vec![vec![0x37; 32]],
                 SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(f64::NAN),
                     expiry_ms: None,
                 },
