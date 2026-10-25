@@ -109,6 +109,7 @@ mod condition_waits {
         let result = if context.credential().is_some() {
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -118,6 +119,7 @@ mod condition_waits {
         } else {
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,

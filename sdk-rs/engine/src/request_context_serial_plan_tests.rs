@@ -152,6 +152,7 @@ mod serial_plans {
         let result = if signed {
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -161,6 +162,7 @@ mod serial_plans {
         } else {
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -1066,6 +1068,20 @@ mod serial_plans {
             "code1 fail_plan stays a failure"
         );
         assert!(failed(&refusals(false, false, &["reject", "reject"])).is_some());
+    }
+
+    #[test]
+    fn serial_07_an_id_less_accepted_call_is_an_effect_before_a_refusal() {
+        let error = failed(&refusals(false, false, &["ok:", "reject"]))
+            .expect("a refusal without the flag fails");
+        assert_eq!(error.outcome, None, "the accepted call took effect");
+    }
+
+    #[test]
+    fn serial_07_an_id_less_known_partial_call_is_an_effect_before_a_refusal() {
+        let error = failed(&refusals(false, false, &["mixed:", "reject"]))
+            .expect("a refusal without the flag fails");
+        assert_eq!(error.outcome, None, "the known-partial call took effect");
     }
 
     #[test]
