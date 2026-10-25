@@ -7,9 +7,11 @@ which includes #2165. Branch: fix/rust-request-macro-provenance.
 The overseer explicitly ruled the13 WEEX account occurrences false positives:
 all six HTTP endpoints already use managed SelectedRead. This is a separate
 checker PR, not the local account-custody audit and not a venue cutover.
-Status: plan and Python originals committed locally. The checker preview is
-unapplied; no runtime or inventory changes. Both exact preview reviews remain
-required before application.
+Status: both reviewers cleared the corrected immutable preview on actual
+6fb44235f3e. The exact checker and production-manifest patches are applied;
+all46 Python controls and full bans/ratchets pass on the reviewed base.
+Composed publication gates remain required. No venue, Rust runtime or build
+input changes.
 
 ## Exact problem
 
@@ -191,3 +193,19 @@ No shipping WASM size delta is claimed or inferred from Python test results;
 8x explicitly ruled no size measurement necessary for this Python-only change
 with runtime/build inputs unchanged. State that scope in the PR; do not relabel
 earlier #2165 measurements.
+
+## Reviewed application
+
+The corrected checker SHA256 is
+`fbc95231bfcd5be033769bbef10b174586d7fdd1c55fa3389347f9cf4e926b24`;
+the exact source patch is
+`5ec4bf2b630ee308f6a21f4084ce9f7239a1c369eb4631cb963c7463c681740a`.
+Hcm semantics and8x gate-integrity independently cleared this corrected
+preview; the earlier opaque-generator preview was withdrawn and is superseded.
+
+The canonical removal-only ledger decreases13 fingerprint counts by18
+occurrences: WEEX account8/13, WEEX history one occurrence (same retained
+fingerprint2->1), BingX trading2/2 and Bitrue account2/2. Twelve keys disappear
+completely. WEEX retains6 fingerprints/6 occurrences. Every removed payload,
+parameter binding, enclosing scope and tracked-module proof was reviewed.
+The test inventory and signing/credential/socket manifests remain unchanged.
