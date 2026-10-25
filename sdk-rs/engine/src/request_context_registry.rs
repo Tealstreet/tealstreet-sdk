@@ -1517,9 +1517,10 @@ impl<P> Cx<'_, P> {
         self.core().fail_replacement_context(root, child, error)
     }
 
-    #[inline]
+    /// Capture the logical raw deadline and engine-owned owner/leg generation.
+    /// This neither queues HTTP nor reserves admission, a transport or pacing.
     pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
-        self.core().http_context(scope, policy)
+        self.make_http_context(scope, policy, None, None)
     }
 
     #[inline]
@@ -1535,6 +1536,17 @@ impl<P> Cx<'_, P> {
     #[inline]
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
         self.core().http_leg_context(parent, policy)
+    }
+
+    #[inline]
+    fn make_http_context(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        parent: Option<&Context>,
+        egress: Option<Egress>,
+    ) -> Result<Context, Error> {
+        self.core().make_http_context(scope, policy, parent, egress)
     }
 
     /// Validate context provenance and retry policy without extending its bound.
@@ -1941,13 +1953,21 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
-    #[inline]
+    /// A resend of a write refused with a `RefusedResend` verdict. The journal
+    /// still refuses a second resend of the same logical leg.
     pub fn http_resend_context(
         &self,
         context: &Context,
         grant: ResendGrant,
     ) -> Result<Context, Error> {
-        self.core_ref().http_resend_context(context, grant)
+        self.io
+            .core
+            .request_contexts
+            .validate_send(context, self.now)?;
+        if self.io.core.request_contexts.latest_write(context)? != Some(grant.attempt) {
+            return Err(Error::Revoked);
+        }
+        context.retry(RetryEvidence::DefinitiveRefusal, self.now)
     }
 
     /// Retire a fully completed logical read/page join or write leg. Do not call
@@ -2024,12 +2044,6 @@ impl crate::engine::CoreCx<'_> {
             error.into(),
         )?;
         self.finish_sealed_command(id, None, seal)
-    }
-
-    /// Capture the logical raw deadline and engine-owned owner/leg generation.
-    /// This neither queues HTTP nor reserves admission, a transport or pacing.
-    pub fn http_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
-        self.make_http_context(scope, policy, None, None)
     }
 
     /// As `http_context`, with egress declared at issuance. Only unsigned
@@ -2332,17 +2346,6 @@ impl crate::engine::CoreCx<'_> {
         self.core_ref().write_intent(context)
     }
 
-    // Only some feature combinations call this.
-    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
-    #[inline]
-    pub fn http_resend_context(
-        &self,
-        context: &Context,
-        grant: ResendGrant,
-    ) -> Result<Context, Error> {
-        self.core_ref().http_resend_context(context, grant)
-    }
-
     #[inline]
     fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
         self.core_ref().current_write_delivery(context)
@@ -2421,25 +2424,6 @@ impl crate::engine::CoreRef<'_> {
             .find(|(leg, _)| *leg == context.leg())
             .map(|(_, intent)| *intent);
         leg.or(owner.intent).ok_or(Error::State)
-    }
-
-    /// A resend of a write refused with a `RefusedResend` verdict. The journal
-    /// still refuses a second resend of the same logical leg.
-    // Only some feature combinations call this.
-    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
-    pub fn http_resend_context(
-        &self,
-        context: &Context,
-        grant: ResendGrant,
-    ) -> Result<Context, Error> {
-        self.io
-            .core
-            .request_contexts
-            .validate_send(context, self.now)?;
-        if self.io.core.request_contexts.latest_write(context)? != Some(grant.attempt) {
-            return Err(Error::Revoked);
-        }
-        context.retry(RetryEvidence::DefinitiveRefusal, self.now)
     }
 
     fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {

@@ -371,9 +371,12 @@ impl crate::engine::CoreIoRef<'_> {
 }
 
 impl<P> Cx<'_, P> {
-    #[inline]
+    /// An engine refusal before the venue's entry ends under this receipt's
+    /// own entry, so a duplicate id never clears the live command's wait.
     pub(super) fn refuse_before_entry(&mut self, command: CommandId, error: impl Into<VenueError>) {
-        self.core().refuse_before_entry(command, error)
+        self.io.begin_command_entry(Some(command));
+        self.fail(command, error);
+        self.io.end_command_entry();
     }
 
     #[inline]
@@ -440,14 +443,6 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreCx<'_> {
-    /// An engine refusal before the venue's entry ends under this receipt's
-    /// own entry, so a duplicate id never clears the live command's wait.
-    pub(super) fn refuse_before_entry(&mut self, command: CommandId, error: impl Into<VenueError>) {
-        self.io.begin_command_entry(Some(command));
-        self.fail(command, error);
-        self.io.end_command_entry();
-    }
-
     #[inline]
     pub fn command_wait(&self) -> Option<CommandWait> {
         self.core_ref().command_wait()

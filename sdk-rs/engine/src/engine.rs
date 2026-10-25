@@ -1802,9 +1802,13 @@ impl<P> Io<P> {
     fn managed_socket_active(&self) -> bool {
         self.core_ref().managed_socket_active()
     }
-    #[inline]
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
-        self.core_io().take_signature(request)
+        let index = self
+            .core
+            .signatures
+            .iter()
+            .position(|(id, _)| *id == request)?;
+        Some(self.core.signatures.swap_remove(index).1)
     }
     #[inline]
     fn next(&mut self) -> u64 {
@@ -1864,15 +1868,6 @@ impl crate::engine::CoreIo<'_> {
     #[inline]
     fn managed_socket_active(&self) -> bool {
         self.core_ref().managed_socket_active()
-    }
-
-    fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
-        let index = self
-            .core
-            .signatures
-            .iter()
-            .position(|(id, _)| *id == request)?;
-        Some(self.core.signatures.swap_remove(index).1)
     }
 
     fn next(&mut self) -> u64 {
@@ -1985,9 +1980,10 @@ impl<P> Cx<'_, P> {
         crate::time::wire_stamp_ms(self.protocol_now())
     }
 
-    #[inline]
+    /// Feed a server-time observation captured at this callback's raw host time.
+    /// Replaces the per-engine correction; invalid observations preserve it.
     pub fn observe_protocol_time(&mut self, server_ms: f64) -> bool {
-        self.core().observe_protocol_time(server_ms)
+        self.io.core.protocol_clock.observe(self.now, server_ms)
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
@@ -2009,17 +2005,21 @@ impl<P> Cx<'_, P> {
         self.core().queue_socket_transport(socket, spec)
     }
 
-    #[inline]
+    /// Create an unsigned upgrade and stage it through the shared signing queue.
+    /// Public-role suppression and socket metadata are identical to `connect`.
     pub fn connect_signed(
         &mut self,
         spec: impl Into<SocketSpec>,
         step: Box<dyn crate::SignStep>,
     ) -> SocketId {
-        self.core().connect_signed(spec, step)
+        let socket = self.connect(spec);
+        if socket.0 == 0 {
+            return socket;
+        }
+        self.sign_socket_upgrade(socket, step);
+        socket
     }
     #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(not(feature = "managed-sockets"), allow(dead_code))]
     fn sign_socket_upgrade(&mut self, socket: SocketId, step: Box<dyn crate::SignStep>) {
         self.core().sign_socket_upgrade(socket, step)
     }
@@ -2216,14 +2216,21 @@ impl<P> Cx<'_, P> {
         id
     }
 
-    #[inline]
+    /// Stream the response of an already-issued request, including signed POST reads.
     pub fn stream_response(&mut self, request: RequestId, at: ArrayAt) {
-        self.core().stream_response(request, at)
+        self.io
+            .core
+            .streams
+            .insert(request, (at, ItemCheck::Splitter));
     }
 
-    #[inline]
+    /// Skip the splitter's per-element syntax pass for a streamed request
+    /// whose venue deserializes every element with serde_json and fails the
+    /// request on any error.
     pub fn venue_parses_items(&mut self, request: RequestId) {
-        self.core().venue_parses_items(request)
+        if let Some((_, check)) = self.io.core.streams.get_mut(&request) {
+            *check = ItemCheck::Venue;
+        }
     }
 
     #[inline]
@@ -2324,14 +2331,17 @@ impl<P> Cx<'_, P> {
         self.core().event(level, code, message, fields)
     }
 
-    #[inline]
     pub fn deactivate(&mut self) {
-        self.core().deactivate()
+        count_auth_failure(&mut self.io.core, None);
+        self.io
+            .core
+            .actions
+            .push(Action::Notice(Notice::Deactivate));
     }
 
-    #[inline]
+    /// Legacy numeric finalization. Managed commands use `done_context`.
     pub fn done(&mut self, command: CommandId, result: String) {
-        self.core().done(command, result)
+        let _ = self.finish_command(command, Ok(result), None);
     }
 
     #[inline]
@@ -2374,9 +2384,12 @@ impl<P> Cx<'_, P> {
         self.core().finish_sealed_command(command, success, seal)
     }
 
-    #[inline]
+    /// Every placement in this response is proven accepted or explicitly rejected.
     pub fn placement_resolved(&mut self, command: CommandId) {
-        self.core().placement_resolved(command)
+        #[cfg(feature = "order-locks")]
+        self.io.core.order_locks.resolved(command);
+        #[cfg(not(feature = "order-locks"))]
+        let _ = command;
     }
 
     #[inline]
@@ -2389,9 +2402,9 @@ impl<P> Cx<'_, P> {
         self.core().candle(symbol, interval, candle)
     }
 
-    #[inline]
+    /// Queue an execution for the next frame.
     pub fn fill(&mut self, fill: Fill) {
-        self.core().fill(fill)
+        self.io.core.fills.push((fill, None));
     }
 
     #[inline]
@@ -2401,12 +2414,6 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreCx<'_> {
-    /// Feed a server-time observation captured at this callback's raw host time.
-    /// Replaces the per-engine correction; invalid observations preserve it.
-    pub fn observe_protocol_time(&mut self, server_ms: f64) -> bool {
-        self.io.core.protocol_clock.observe(self.now, server_ms)
-    }
-
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
         let spec = spec.into();
         if self.io.managed_socket_active()
@@ -2442,21 +2449,6 @@ impl crate::engine::CoreCx<'_> {
             channel,
             context,
         });
-    }
-
-    /// Create an unsigned upgrade and stage it through the shared signing queue.
-    /// Public-role suppression and socket metadata are identical to `connect`.
-    pub fn connect_signed(
-        &mut self,
-        spec: impl Into<SocketSpec>,
-        step: Box<dyn crate::SignStep>,
-    ) -> SocketId {
-        let socket = self.connect(spec);
-        if socket.0 == 0 {
-            return socket;
-        }
-        self.sign_socket_upgrade(socket, step);
-        socket
     }
 
     fn sign_socket_upgrade(&mut self, socket: SocketId, step: Box<dyn crate::SignStep>) {
@@ -2552,23 +2544,6 @@ impl crate::engine::CoreCx<'_> {
                 timeout_ms: 0,
             },
         );
-    }
-
-    /// Stream the response of an already-issued request, including signed POST reads.
-    pub fn stream_response(&mut self, request: RequestId, at: ArrayAt) {
-        self.io
-            .core
-            .streams
-            .insert(request, (at, ItemCheck::Splitter));
-    }
-
-    /// Skip the splitter's per-element syntax pass for a streamed request
-    /// whose venue deserializes every element with serde_json and fails the
-    /// request on any error.
-    pub fn venue_parses_items(&mut self, request: RequestId) {
-        if let Some((_, check)) = self.io.core.streams.get_mut(&request) {
-            *check = ItemCheck::Venue;
-        }
     }
 
     /// Set host policy on an outbound action before the host drains it.
@@ -2716,19 +2691,6 @@ impl crate::engine::CoreCx<'_> {
                 fields,
             },
         );
-    }
-
-    pub fn deactivate(&mut self) {
-        count_auth_failure(self.io.core, None);
-        self.io
-            .core
-            .actions
-            .push(Action::Notice(Notice::Deactivate));
-    }
-
-    /// Legacy numeric finalization. Managed commands use `done_context`.
-    pub fn done(&mut self, command: CommandId, result: String) {
-        let _ = self.finish_command(command, Ok(result), None);
     }
 
     pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
@@ -2907,14 +2869,6 @@ impl crate::engine::CoreCx<'_> {
         Ok(())
     }
 
-    /// Every placement in this response is proven accepted or explicitly rejected.
-    pub fn placement_resolved(&mut self, command: CommandId) {
-        #[cfg(feature = "order-locks")]
-        self.io.core.order_locks.resolved(command);
-        #[cfg(not(feature = "order-locks"))]
-        let _ = command;
-    }
-
     /// Call only after accepting a complete, fresh authoritative order read.
     /// A read started before an uncertain placement cannot clear its fence.
     pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
@@ -2943,11 +2897,6 @@ impl crate::engine::CoreCx<'_> {
                 .candles
                 .push((symbol.to_owned(), interval, candle)),
         }
-    }
-
-    /// Queue an execution for the next frame.
-    pub fn fill(&mut self, fill: Fill) {
-        self.io.core.fills.push((fill, None));
     }
 
     /// Preserve optional per-execution financials without inventing values for

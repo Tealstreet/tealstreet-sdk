@@ -1113,19 +1113,19 @@ impl<P> Cx<'_, P> {
         Ok(plan.clone())
     }
 
-    #[inline]
+    /// Settle a call after validating DATA and recording write facts. Structural
+    /// progress grants no effect or successful command outcome by itself.
     pub fn finish_plan_call(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<(), Error> {
-        self.core().finish_plan_call(plan, slot, context)
+        self.io.core.request_contexts.validate_unbound_plan(plan)?;
+        self.finish_plan_call_inner(plan, slot, context)
     }
 
     #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     fn finish_plan_call_inner(
         &mut self,
         plan: &Plan,
@@ -1147,7 +1147,8 @@ impl<P> Cx<'_, P> {
             .plan_retry_context(plan, slot, context, evidence)
     }
 
-    #[inline]
+    /// Consume the existing classifier's exact-attempt write grant within the
+    /// declared call window. The journal alone owns one-resend consumption.
     pub fn plan_resend_context(
         &mut self,
         plan: &Plan,
@@ -1155,12 +1156,11 @@ impl<P> Cx<'_, P> {
         context: &Context,
         grant: ResendGrant,
     ) -> Result<Context, Error> {
-        self.core().plan_resend_context(plan, slot, context, grant)
+        self.http_resend_context(context, grant)?;
+        self.select_plan_retry(plan, slot, context)
     }
 
     #[inline]
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "http-plans", allow(dead_code))]
     fn select_plan_retry(
         &mut self,
         plan: &Plan,
@@ -1426,18 +1426,6 @@ impl crate::engine::CoreCx<'_> {
         self.core_ref().validate_plan_delivery(plan, context)
     }
 
-    /// Settle a call after validating DATA and recording write facts. Structural
-    /// progress grants no effect or successful command outcome by itself.
-    pub fn finish_plan_call(
-        &mut self,
-        plan: &Plan,
-        slot: &Slot,
-        context: &Context,
-    ) -> Result<(), Error> {
-        self.io.core.request_contexts.validate_unbound_plan(plan)?;
-        self.finish_plan_call_inner(plan, slot, context)
-    }
-
     fn finish_plan_call_inner(
         &mut self,
         plan: &Plan,
@@ -1492,19 +1480,6 @@ impl crate::engine::CoreCx<'_> {
             return Err(Error::RetryForbidden);
         }
         context.retry(evidence, self.now)?;
-        self.select_plan_retry(plan, slot, context)
-    }
-
-    /// Consume the existing classifier's exact-attempt write grant within the
-    /// declared call window. The journal alone owns one-resend consumption.
-    pub fn plan_resend_context(
-        &mut self,
-        plan: &Plan,
-        slot: &Slot,
-        context: &Context,
-        grant: ResendGrant,
-    ) -> Result<Context, Error> {
-        self.http_resend_context(context, grant)?;
         self.select_plan_retry(plan, slot, context)
     }
 

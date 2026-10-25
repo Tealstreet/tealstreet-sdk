@@ -125,9 +125,12 @@ impl<P> Cx<'_, P> {
         self.core().park_preflight(handle)
     }
 
-    #[inline]
+    /// Queue a single wake intent. This callback gains no authority over it.
     pub fn request_preflight_ready(&mut self, handle: &Preflight) -> Result<(), Error> {
-        self.core().request_preflight_ready(handle)
+        if !self.now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        self.io.core.request_contexts.queue_preflight_ready(handle)
     }
 
     pub(in crate::engine) fn owned_http_admission(
@@ -209,14 +212,6 @@ impl crate::engine::CoreCx<'_> {
             .preflight_state_mut(handle)?
             .activation = Activation::Parked;
         Ok(())
-    }
-
-    /// Queue a single wake intent. This callback gains no authority over it.
-    pub fn request_preflight_ready(&mut self, handle: &Preflight) -> Result<(), Error> {
-        if !self.now.is_finite() {
-            return Err(Error::Invalid);
-        }
-        self.io.core.request_contexts.queue_preflight_ready(handle)
     }
 }
 

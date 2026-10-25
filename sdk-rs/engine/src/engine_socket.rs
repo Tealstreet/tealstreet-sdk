@@ -39,13 +39,15 @@ impl<P> Cx<'_, P> {
         self.restore_socket_driver(driver);
         result
     }
-    #[inline]
+    // Shared out of line: every driver closure would otherwise inline the
+    // driver's default construction and drop.
+    #[inline(never)]
     fn take_socket_driver(&mut self) -> Driver {
-        self.core().take_socket_driver()
+        std::mem::take(&mut self.io.core.socket_driver)
     }
-    #[inline]
+    #[inline(never)]
     fn restore_socket_driver(&mut self, driver: Driver) {
-        self.core().restore_socket_driver(driver)
+        self.io.core.socket_driver = driver;
     }
     #[inline(never)]
     pub(super) fn socket_effects(&mut self, effects: Vec<Effect>) {
@@ -116,9 +118,8 @@ impl<P> Cx<'_, P> {
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
         self.core_ref().socket_epoch(feed)
     }
-    #[inline]
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
-        self.core_ref().socket_authenticated(feed)
+        self.io.core.socket_driver.state.authenticated(feed)
     }
     #[inline]
     pub fn send_after_socket_interests(
@@ -339,18 +340,6 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreCx<'_> {
-    // Shared out of line: every driver closure would otherwise inline the
-    // driver's default construction and drop.
-    #[inline(never)]
-    fn take_socket_driver(&mut self) -> Driver {
-        std::mem::take(&mut self.io.core.socket_driver)
-    }
-
-    #[inline(never)]
-    fn restore_socket_driver(&mut self, driver: Driver) {
-        self.io.core.socket_driver = driver;
-    }
-
     pub fn register_socket_feed(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
         self.io.opaque_entry_activity();
         if self.io.core.socket_failed {
@@ -385,13 +374,6 @@ impl crate::engine::CoreCx<'_> {
         self.core_ref().socket_epoch(feed)
     }
 
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "managed-sockets", allow(dead_code))]
-    #[inline]
-    pub fn socket_authenticated(&self, feed: FeedId) -> bool {
-        self.core_ref().socket_authenticated(feed)
-    }
-
     /// Native one-shot frames ordered after current interests, retained with
     /// their epoch until final drain. They are never persistent interests.
     pub fn send_after_socket_interests(
@@ -420,12 +402,6 @@ impl crate::engine::CoreCx<'_> {
 impl crate::engine::CoreRef<'_> {
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
         self.io.core.socket_driver.state.epoch(feed)
-    }
-
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "managed-sockets", allow(dead_code))]
-    pub fn socket_authenticated(&self, feed: FeedId) -> bool {
-        self.io.core.socket_driver.state.authenticated(feed)
     }
 }
 

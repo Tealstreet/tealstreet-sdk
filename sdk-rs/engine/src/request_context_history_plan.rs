@@ -41,9 +41,9 @@ impl<P> Cx<'_, P> {
     ) -> Result<PreparedHistoryPage, Error> {
         self.core().prepare_read_history_page(plan, slot, context)
     }
-    #[inline]
     pub(crate) fn begin_read_history_commit(&mut self) {
-        self.core().begin_read_history_commit()
+        assert!(!self.io.core.http_owner_poison && !self.io.core.http_plan_poison);
+        self.io.core.http_owner_poison = true;
     }
     #[inline]
     // Only some feature combinations call this.
@@ -170,11 +170,6 @@ impl crate::engine::CoreCx<'_> {
             context: context.clone(),
             cleanup,
         })
-    }
-
-    pub(crate) fn begin_read_history_commit(&mut self) {
-        assert!(!self.io.core.http_owner_poison && !self.io.core.http_plan_poison);
-        self.io.core.http_owner_poison = true;
     }
 
     fn settle_read_history_page(&mut self, plan: &Plan, slot: &Slot, context: &Context) {
