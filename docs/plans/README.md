@@ -437,4 +437,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Paradex subscription candle poll custody | Source and local size gates CLEAR; qualifying CI pending | Before changing poll Background Read ownership, stale generations, native fallback or completion/recovery timers. | [RUST_PARADEX_CANDLE_POLL_CONTEXT.md](RUST_PARADEX_CANDLE_POLL_CONTEXT.md) |
 
+| Backpack public-seed Read custody | Source/scoped checks CLEAR; exact-head CI pending | Before managing Markets, tickers and MarkPrices startup/recovery observations. | [RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md](RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md) |
+
 | Dispatch nonce reservation and release ordering | Plan and compiling RED phase | Before reserving a selected-key nonce in SignStep preparation or changing nonce receipt and release-floor custody. | [RUST_DISPATCH_NONCE_RESERVATION.md](RUST_DISPATCH_NONCE_RESERVATION.md) |
