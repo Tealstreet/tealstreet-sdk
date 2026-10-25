@@ -49,6 +49,18 @@ struct Entry {
     parked: bool,
 }
 
+// Preparation grants no authority; consume errors in the original admission
+// order so stale ownership still outranks an invalid declaration.
+#[cfg(feature = "serial-plans")]
+struct PreparedAdmission {
+    policy: PlanPolicy,
+    schedule: Result<Schedule, Error>,
+    terminals: Result<Vec<usize>, Error>,
+    has_barriers: bool,
+    #[cfg(feature = "http-mutation-barriers")]
+    barriers: Result<Vec<Range<usize>>, Error>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Credit {
     Unissued,
@@ -392,7 +404,28 @@ impl<P> Cx<'_, P> {
         physical: bool,
     ) -> Result<(Plan, Option<(u64, Context)>), Error> {
         #[cfg(feature = "serial-plans")]
-        return self.admit_plan_root(preflight, declaration, physical, None);
+        {
+            let AdmissionDeclaration {
+                steps,
+                policy,
+                terminals,
+                barriers,
+            } = declaration;
+            let prepared = PreparedAdmission {
+                schedule: Schedule::from_steps(steps),
+                terminals: terminal_ordinals(steps, &policy, terminals),
+                has_barriers: !barriers.is_empty(),
+                #[cfg(feature = "http-mutation-barriers")]
+                barriers: mutation_group::normalize(
+                    steps,
+                    &policy,
+                    barriers,
+                    &self.io.core.http_pacing,
+                ),
+                policy,
+            };
+            self.admit_plan_root(preflight, prepared, physical, None)
+        }
         #[cfg(not(feature = "serial-plans"))]
         self.admit_plan_root(preflight, declaration, physical)
     }
@@ -402,19 +435,32 @@ impl<P> Cx<'_, P> {
     fn admit_plan_root(
         &mut self,
         preflight: &Preflight,
-        declaration: AdmissionDeclaration<'_, '_, '_>,
+        #[cfg(feature = "serial-plans")] prepared: PreparedAdmission,
+        #[cfg(not(feature = "serial-plans"))] declaration: AdmissionDeclaration<'_, '_, '_>,
         physical: bool,
         #[cfg(feature = "serial-plans")] serial: Option<serial::Serial>,
     ) -> Result<(Plan, Option<(u64, Context)>), Error> {
         let extra = if physical { 2 } else { 0 };
+        #[cfg(feature = "serial-plans")]
+        let PreparedAdmission {
+            policy,
+            schedule,
+            terminals,
+            has_barriers,
+            #[cfg(feature = "http-mutation-barriers")]
+            barriers,
+        } = prepared;
+        #[cfg(not(feature = "serial-plans"))]
         let AdmissionDeclaration {
             steps,
             policy,
             terminals,
             barriers,
         } = declaration;
+        #[cfg(not(feature = "serial-plans"))]
+        let has_barriers = !barriers.is_empty();
         if (!cfg!(feature = "http-mutation-barriers") || physical || self.io.core.nonce_unscheduled)
-            && !barriers.is_empty()
+            && has_barriers
         {
             return Err(Error::Invalid);
         }
@@ -440,9 +486,17 @@ impl<P> Cx<'_, P> {
         if receipt_cap.is_some_and(|(_, cap)| !self.now.is_finite() || cap - self.now < 1.) {
             return Err(Error::TimedOut);
         }
+        #[cfg(feature = "serial-plans")]
+        let schedule = schedule?;
+        #[cfg(not(feature = "serial-plans"))]
         let schedule = Schedule::from_steps(steps)?;
+        #[cfg(feature = "serial-plans")]
+        let terminals = terminals?;
+        #[cfg(not(feature = "serial-plans"))]
         let terminals = terminal_ordinals(steps, &policy, terminals)?;
-        #[cfg(feature = "http-mutation-barriers")]
+        #[cfg(all(feature = "http-mutation-barriers", feature = "serial-plans"))]
+        let barriers = barriers?;
+        #[cfg(all(feature = "http-mutation-barriers", not(feature = "serial-plans")))]
         let barriers =
             mutation_group::normalize(steps, &policy, barriers, &self.io.core.http_pacing)?;
         let bound = schedule.bound();
@@ -2159,3 +2213,7 @@ mod condition_wait;
 #[cfg(all(test, not(feature = "http-mutation-barriers")))]
 #[path = "request_context_group_disabled_tests.rs"]
 mod disabled_barrier_tests;
+
+#[cfg(all(test, feature = "serial-plans"))]
+#[path = "request_context_schedule_admission_tests.rs"]
+mod schedule_admission_tests;
