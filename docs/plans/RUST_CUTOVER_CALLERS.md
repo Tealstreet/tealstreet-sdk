@@ -8978,6 +8978,21 @@ with unchanged fixed budgets and Node/Web parity. Combined is local evidence;
 frozen-head CI remains the family-size record. Remaining14F/20O request refs
 and all signing/credential inventory stay unchanged.
 
+### GRVT provider recipe: approved future external-signature contract
+
+Plan only: RUST_GRVT_PROVIDER_RECIPE.md; this is not an installed Rust GRVT
+provider path yet. At adoption, the local provider preserves exact native
+wire-byte parity through deterministic RFC6979 signing. An external provider
+may return fresh signatures differing ONLY in r/s/v: the EIP712 digest, pinned
+actual signer and every frozen order/unsigned field must remain identical,
+with low-s and signed_by verification. A different recovered signer or digest
+refuses the resend before release. External determinism is not required;
+deduplication follows the unchanged order identity. No cached signed bytes,
+nonce/expiry/client-ID renewal or attempt reset is permitted. Required future
+controls accept distinct valid signatures over one digest and refuse wrong
+signer/digest results. The overseer approved this criterion; recipe adoption,
+shared credential-only setup and measured GRVT WASM budget gates remain open.
+
 ## AsterDEX managed signed reads
 
 AsterDEX's signed reads now go through engine read Contexts (remaining-funnel
