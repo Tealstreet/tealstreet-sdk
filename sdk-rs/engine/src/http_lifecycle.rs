@@ -371,6 +371,7 @@ impl<P> Cx<'_, P> {
         let refusal = (generation.is_some()
             && self
                 .io
+                .core
                 .request_contexts
                 .validate_mutation_group_submission(&context)
                 .is_ok_and(|group| group.is_some()))
@@ -400,7 +401,11 @@ impl<P> Cx<'_, P> {
         }
         #[cfg(feature = "session-bearer")]
         match (generation, &result) {
-            (Some(generation), Ok(_)) => self.io.request_contexts.bind_leg_bearer(leg, generation),
+            (Some(generation), Ok(_)) => self
+                .io
+                .core
+                .request_contexts
+                .bind_leg_bearer(leg, generation),
             (Some(generation), Err(_)) => self.io.drop_empty_bearer_bound(generation),
             _ => {}
         }
@@ -418,7 +423,7 @@ impl<P> Cx<'_, P> {
         context: &Context,
         bearer: Option<&Session>,
     ) -> Result<Option<u64>, Error> {
-        let registry = &self.io.request_contexts;
+        let registry = &self.io.core.request_contexts;
         let generation = match bearer {
             Some(session) => Some(registry.validate_session(session)?),
             None => match registry.leg_bearer(context) {
@@ -429,7 +434,7 @@ impl<P> Cx<'_, P> {
             },
         };
         if let Some(generation) = generation {
-            self.io.request_contexts.reserve_leg_bearer()?;
+            self.io.core.request_contexts.reserve_leg_bearer()?;
             self.io.reserve_bearer_bound(generation)?;
         }
         Ok(generation)
@@ -465,25 +470,31 @@ impl<P> Cx<'_, P> {
             ManagedRecipe::Unsigned(headers) => (None, headers),
             ManagedRecipe::Signed(step) => (Some(step), &[][..]),
         };
-        if let Err(error) = self.io.request_contexts.validate_send(&context, self.now) {
+        if let Err(error) = self
+            .io
+            .core
+            .request_contexts
+            .validate_send(&context, self.now)
+        {
             return Err((pending, error));
         }
         #[cfg(feature = "http-mutation-barriers")]
         let group = match self
             .io
+            .core
             .request_contexts
             .validate_mutation_group_submission(&context)
         {
             Ok(key) => key.map(|key| Box::new(mutation_group::Member::new(key))),
             Err(error) => return Err((pending, error)),
         };
-        if let Err(error) = self.io.http_pacing.check(context.pacing(), self.now) {
+        if let Err(error) = self.io.core.http_pacing.check(context.pacing(), self.now) {
             return Err((pending, error));
         }
         if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
         }
-        if self.io.managed_http.len() >= 256 {
+        if self.io.core.managed_http.len() >= 256 {
             return Err((pending, Error::Capacity));
         }
         // Public codec declarations are captured exactly once. Validate borrowed
@@ -513,8 +524,8 @@ impl<P> Cx<'_, P> {
         #[cfg(not(feature = "http-plans"))]
         let needs_ids = true;
         if needs_ids
-            && (!self.io.next_id.available(3)
-                || (step.is_some() && !self.io.signing.available_id()))
+            && (!self.io.core.next_id.available(3)
+                || (step.is_some() && !self.io.core.signing.available_id()))
         {
             return Err((pending, Error::Capacity));
         }
@@ -562,10 +573,10 @@ impl<P> Cx<'_, P> {
             #[cfg(feature = "http-plans")]
             let attempt = admission
                 .and_then(|admission| admission.signing)
-                .unwrap_or_else(|| self.io.signing.next_id());
+                .unwrap_or_else(|| self.io.core.signing.next_id());
             #[cfg(not(feature = "http-plans"))]
-            let attempt = self.io.signing.next_id();
-            if let Err(error) = self.io.signing.stage_managed(
+            let attempt = self.io.core.signing.next_id();
+            if let Err(error) = self.io.core.signing.stage_managed(
                 attempt,
                 Action::Http(http.clone()),
                 step,
@@ -591,17 +602,21 @@ impl<P> Cx<'_, P> {
         };
         if let Err(error) = self
             .io
+            .core
             .request_contexts
             .register_attempt(&context, request, self.now)
         {
             if signing_attempt.is_some() {
-                self.io.signing.remove_request(request);
+                self.io.core.signing.remove_request(request);
             }
             return Err((pending, error));
         }
         #[cfg(feature = "http-plans")]
         if let Some(admission) = admission {
-            self.io.request_contexts.commit_owned_admission(admission);
+            self.io
+                .core
+                .request_contexts
+                .commit_owned_admission(admission);
         }
         #[cfg(feature = "session-bearer")]
         let intent = match (bearer, context.routing_intent()) {
@@ -621,7 +636,7 @@ impl<P> Cx<'_, P> {
         )
         .expect("validated physical HTTP window");
         let preparation = lifecycle.preparation();
-        self.io.managed_http.insert(
+        self.io.core.managed_http.insert(
             request,
             Managed {
                 lifecycle,
@@ -650,14 +665,15 @@ impl<P> Cx<'_, P> {
                 auth: None,
             },
         );
-        self.io.timers.insert(timer, ());
-        self.io.actions.push(Action::SetTimer {
+        self.io.core.timers.insert(timer, ());
+        self.io.core.actions.push(Action::SetTimer {
             timer,
             at_ms: deadline,
         });
         // A leg in flight owns the execution deadline through its own timer.
         self.io.rearm_execution_timer();
         self.io
+            .core
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
                 preparation,
@@ -675,15 +691,16 @@ impl<P> Io<P> {
         token: Preparation,
         now: f64,
     ) -> bool {
-        self.managed_http.get(&request).is_some_and(|managed| {
+        self.core.managed_http.get(&request).is_some_and(|managed| {
             managed.lifecycle.preparation() == token
                 && managed.lifecycle.accepts_response()
-                && managed.validate(&self.request_contexts, now).is_ok()
+                && managed.validate(&self.core.request_contexts, now).is_ok()
         })
     }
 
     pub(super) fn retire_http_leg(&mut self, context: &Context) {
         let requests = self
+            .core
             .managed_http
             .iter()
             .filter_map(|(request, managed)| {
@@ -698,17 +715,23 @@ impl<P> Io<P> {
     }
 
     pub(super) fn managed_preparation(&self, request: RequestId) -> Option<Preparation> {
-        Some(self.managed_http.get(&request)?.lifecycle.preparation())
+        Some(
+            self.core
+                .managed_http
+                .get(&request)?
+                .lifecycle
+                .preparation(),
+        )
     }
 
     pub(super) fn retire_http_command(&mut self, command: CommandId) {
         #[cfg(feature = "http-plans")]
-        if let Some(timer) = self.request_contexts.plan_timer(command) {
-            self.timers.remove(&timer);
-            self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-            self.actions.push(Action::ClearTimer { timer });
+        if let Some(timer) = self.core.request_contexts.plan_timer(command) {
+            self.core.timers.remove(&timer);
+            self.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            self.core.actions.push(Action::ClearTimer { timer });
         }
-        let requests = self.managed_http.iter().filter_map(|(request, managed)| {
+        let requests = self.core.managed_http.iter().filter_map(|(request, managed)| {
             matches!(managed.lifecycle.context().owner(), Owner::Command {id, ..} if id == command)
                 .then_some(*request)
         }).collect::<Vec<_>>();
@@ -729,6 +752,7 @@ impl<P> Io<P> {
     ) -> Result<Vec<RequestId>, crate::request_context::Error> {
         let capacity = crate::request_context::Error::Capacity;
         let count = self
+            .core
             .managed_http
             .values()
             .filter(|managed| managed.lifecycle.context().owner() == owner)
@@ -736,7 +760,8 @@ impl<P> Io<P> {
         let mut requests = Vec::new();
         requests.try_reserve_exact(count).map_err(|_| capacity)?;
         requests.extend(
-            self.managed_http
+            self.core
+                .managed_http
                 .iter()
                 .filter(|(_, managed)| managed.lifecycle.context().owner() == owner)
                 .map(|(request, _)| *request),
@@ -746,7 +771,10 @@ impl<P> Io<P> {
             .and_then(|n| n.checked_add(1))
             .and_then(|n| n.checked_add(notices))
             .ok_or(capacity)?;
-        self.actions.try_reserve(actions).map_err(|_| capacity)?;
+        self.core
+            .actions
+            .try_reserve(actions)
+            .map_err(|_| capacity)?;
         Ok(requests)
     }
 
@@ -754,10 +782,10 @@ impl<P> Io<P> {
     /// A sealed physical Plan owner: clear its timer and the requests listed
     /// before the seal (one already settled since then is simply skipped).
     pub(super) fn retire_physical_owner(&mut self, owner: Owner, requests: Vec<RequestId>) {
-        if let Some(timer) = self.request_contexts.physical_plan_timer(owner) {
-            self.timers.remove(&timer);
-            self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-            self.actions.push(Action::ClearTimer { timer });
+        if let Some(timer) = self.core.request_contexts.physical_plan_timer(owner) {
+            self.core.timers.remove(&timer);
+            self.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            self.core.actions.push(Action::ClearTimer { timer });
         }
         for request in requests {
             self.discard_managed(request);
@@ -766,6 +794,7 @@ impl<P> Io<P> {
 
     pub(super) fn retire_http_owner(&mut self, owner: Owner) {
         let requests = self
+            .core
             .managed_http
             .iter()
             .filter_map(|(request, managed)| {
@@ -780,6 +809,7 @@ impl<P> Io<P> {
     /// Unsent legs of an execution with no live owner get no send right.
     pub(super) fn revoke_unsent_execution_legs(&mut self) {
         let revoked = self
+            .core
             .managed_http
             .iter()
             .filter(|(_, managed)| {
@@ -788,6 +818,7 @@ impl<P> Io<P> {
                     crate::request_context::Owner::Execution { .. }
                 ) && managed.lifecycle.release().is_none()
                     && !self
+                        .core
                         .request_contexts
                         .execution_live(managed.lifecycle.context())
             })
@@ -800,7 +831,8 @@ impl<P> Io<P> {
 
     #[cfg(feature = "session-bearer")]
     fn bearer_bound_mut(&mut self, generation: u64) -> Option<&mut Vec<RequestId>> {
-        self.bearer_bound
+        self.core
+            .bearer_bound
             .iter_mut()
             .find(|(bound, _)| *bound == generation)
             .map(|(_, requests)| requests)
@@ -808,7 +840,8 @@ impl<P> Io<P> {
 
     #[cfg(feature = "session-bearer")]
     pub(super) fn bearer_bound_len(&self, generation: u64) -> usize {
-        self.bearer_bound
+        self.core
+            .bearer_bound
             .iter()
             .find(|(bound, _)| *bound == generation)
             .map_or(0, |(_, requests)| requests.len())
@@ -817,10 +850,11 @@ impl<P> Io<P> {
     #[cfg(feature = "session-bearer")]
     fn reserve_bearer_bound(&mut self, generation: u64) -> Result<(), Error> {
         if self.bearer_bound_mut(generation).is_none() {
-            self.bearer_bound
+            self.core
+                .bearer_bound
                 .try_reserve(1)
                 .map_err(|_| Error::Capacity)?;
-            self.bearer_bound.push((generation, Vec::new()));
+            self.core.bearer_bound.push((generation, Vec::new()));
         }
         self.bearer_bound_mut(generation)
             .expect("reserved above")
@@ -830,7 +864,8 @@ impl<P> Io<P> {
 
     #[cfg(feature = "session-bearer")]
     fn drop_empty_bearer_bound(&mut self, generation: u64) {
-        self.bearer_bound
+        self.core
+            .bearer_bound
             .retain(|(bound, requests)| *bound != generation || !requests.is_empty());
     }
 
@@ -839,17 +874,20 @@ impl<P> Io<P> {
     #[cfg(feature = "session-bearer")]
     pub(super) fn fence_bearer_generation(&mut self, generation: u64) {
         let Some(index) = self
+            .core
             .bearer_bound
             .iter()
             .position(|(bound, _)| *bound == generation)
         else {
             return;
         };
-        for request in self.bearer_bound.swap_remove(index).1 {
-            if let Some(managed) = self.managed_http.get(&request)
+        for request in self.core.bearer_bound.swap_remove(index).1 {
+            if let Some(managed) = self.core.managed_http.get(&request)
                 && managed.lifecycle.release().is_none()
             {
-                self.bearer_fenced.push(managed.lifecycle.preparation());
+                self.core
+                    .bearer_fenced
+                    .push(managed.lifecycle.preparation());
             }
         }
     }
@@ -859,9 +897,11 @@ impl<P> Io<P> {
         request: RequestId,
         cancel: Option<Action>,
     ) -> Option<Managed> {
-        let managed = self.managed_http.remove(&request)?;
+        let managed = self.core.managed_http.remove(&request)?;
         #[cfg(feature = "session-bearer")]
-        self.bearer_parked.retain(|(_, parked)| *parked != request);
+        self.core
+            .bearer_parked
+            .retain(|(_, parked)| *parked != request);
         #[cfg(feature = "session-bearer")]
         if let Some(bearer) = managed.bearer
             && let Some(bound) = self.bearer_bound_mut(bearer.generation())
@@ -871,19 +911,20 @@ impl<P> Io<P> {
         }
         #[cfg(feature = "http-mutation-barriers")]
         if managed.group.is_some() {
-            self.actions.retain(|action| !matches!(action,
+            self.core.actions.retain(|action| !matches!(action,
                 Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::BindGroup { members, .. }
                     if members.iter().any(|member| member.preparation.attempt().request == request))));
         }
-        self.request_contexts
+        self.core
+            .request_contexts
             .retire_attempt(managed.lifecycle.context(), request);
         self.rearm_execution_timer();
-        self.signing.remove_request(request);
-        self.timers.remove(&managed.timer);
-        self.actions.push(Action::ClearTimer {
+        self.core.signing.remove_request(request);
+        self.core.timers.remove(&managed.timer);
+        self.core.actions.push(Action::ClearTimer {
             timer: managed.timer,
         });
-        self.actions.push(cancel.unwrap_or_else(|| {
+        self.core.actions.push(cancel.unwrap_or_else(|| {
             Action::ManagedHttp(Box::new(HttpAction::Cancel {
                 preparation: managed.lifecycle.preparation(),
                 signing: managed.signing_attempt,
@@ -905,14 +946,14 @@ impl<P> Io<P> {
         if managed.lifecycle.context().operation() == Operation::Mutation
             && managed.lifecycle.release().is_some()
         {
-            self.http_responses.retire(request);
+            self.core.http_responses.retire(request);
         } else {
-            self.http_responses.remove(request);
+            self.core.http_responses.remove(request);
         }
-        self.streams.remove(&request);
-        self.incoming.remove(&request);
+        self.core.streams.remove(&request);
+        self.core.incoming.remove(&request);
         #[cfg(feature = "order-locks")]
-        self.order_read_tokens.remove(&request);
+        self.core.order_read_tokens.remove(&request);
         self.pending.remove(&request)
     }
 }
@@ -939,6 +980,7 @@ impl<V: Venue> Engine<V> {
             return false;
         }
         self.io
+            .core
             .managed_http
             .get(&token.attempt().request)
             .is_some_and(|managed| managed.lifecycle.expects_preparation(token))
@@ -947,17 +989,17 @@ impl<V: Venue> Engine<V> {
     /// Preparation is a host resource, never evidence of transport dispatch.
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         self.assert_live();
-        self.io.dispatch_now = now;
+        self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
-        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
             return;
         };
         if managed.lifecycle.preparation() != token {
             return;
         }
         let prepared_result = managed
-            .validate_send(&self.io.request_contexts, now)
+            .validate_send(&self.io.core.request_contexts, now)
             .and_then(|()| {
                 if prepared.expires_at.is_some_and(|at| at <= now) {
                     return Err(Error::TimedOut);
@@ -992,7 +1034,7 @@ impl<V: Venue> Engine<V> {
                     Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
                 if let Some(bearer) = managed.bearer.as_mut() {
                     match bearer
-                        .read(&self.venue, &self.io.request_contexts)
+                        .read(&self.venue, &self.io.core.request_contexts)
                         .and_then(|session| {
                             session
                                 .map(|session| {
@@ -1017,6 +1059,7 @@ impl<V: Venue> Engine<V> {
                     }
                 }
                 self.io
+                    .core
                     .actions
                     .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
                         preparation: token,
@@ -1036,13 +1079,13 @@ impl<V: Venue> Engine<V> {
 
     fn resume_prepared_signing(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         let request = token.attempt().request;
-        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
             return;
         };
         if managed.lifecycle.preparation() != token {
             return;
         }
-        if let Err(error) = managed.validate(&self.io.request_contexts, now) {
+        if let Err(error) = managed.validate(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,
                 token,
@@ -1057,6 +1100,7 @@ impl<V: Venue> Engine<V> {
         }
         match self
             .io
+            .core
             .http_pacing
             .check(managed.lifecycle.context().pacing(), now)
         {
@@ -1071,7 +1115,7 @@ impl<V: Venue> Engine<V> {
             }
             Ok(Some(at)) => {
                 managed.waiting_route = Some(prepared);
-                self.io.actions.push(Action::SetTimer {
+                self.io.core.actions.push(Action::SetTimer {
                     timer: managed.timer,
                     at_ms: at
                         .min(managed.lifecycle.deadline())
@@ -1087,7 +1131,7 @@ impl<V: Venue> Engine<V> {
         };
         // The token is read at the signed Bind; refuse before provider work.
         if let Some(bearer) = managed.bearer {
-            match bearer.current(&self.venue, &self.io.request_contexts) {
+            match bearer.current(&self.venue, &self.io.core.request_contexts) {
                 Ok(revision) if bearer.wakes(revision) => {}
                 Ok(_) => {
                     self.park_bearer(now, token, request);
@@ -1101,6 +1145,7 @@ impl<V: Venue> Engine<V> {
         }
         let ready = managed.lifecycle.begin_signing().and_then(|_| {
             self.io
+                .core
                 .signing
                 .activate_managed(attempt, managed.lifecycle.deadline())
                 .map_err(|_| Error::State)
@@ -1113,7 +1158,7 @@ impl<V: Venue> Engine<V> {
                 VenueError::new("HTTP signing preparation failed"),
             );
         } else if was_waiting {
-            self.io.actions.push(Action::SetTimer {
+            self.io.core.actions.push(Action::SetTimer {
                 timer: managed.timer,
                 at_ms: managed.lifecycle.deadline(),
             });
@@ -1134,14 +1179,14 @@ impl<V: Venue> Engine<V> {
         let Some(request) = pending.request_id() else {
             return;
         };
-        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
             if let Some(action) = outbound.as_mut() {
                 crate::signing_dispatch::wipe(action);
             }
             return;
         };
         let token = managed.lifecycle.preparation();
-        if let Err(reason) = managed.validate_send(&self.io.request_contexts, now) {
+        if let Err(reason) = managed.validate_send(&self.io.core.request_contexts, now) {
             if let Some(action) = outbound.as_mut() {
                 crate::signing_dispatch::wipe(action);
             }
@@ -1185,7 +1230,7 @@ impl<V: Venue> Engine<V> {
                 // Added after signing, so the venue signature never covers it.
                 if let Some(bearer) = managed.bearer.as_mut() {
                     let read = bearer
-                        .read(&self.venue, &self.io.request_contexts)
+                        .read(&self.venue, &self.io.core.request_contexts)
                         .and_then(|session| {
                             session
                                 .map(|session| {
@@ -1232,6 +1277,7 @@ impl<V: Venue> Engine<V> {
                     return;
                 }
                 self.io
+                    .core
                     .actions
                     .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
                         preparation: token,
@@ -1263,12 +1309,13 @@ impl<V: Venue> Engine<V> {
         mut error: VenueError,
     ) {
         self.assert_live();
-        self.io.dispatch_now = now;
+        self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
         #[cfg(feature = "http-plans")]
         if self
             .io
+            .core
             .managed_http
             .get(&request)
             .is_some_and(|managed| managed.lifecycle.preparation() == token)
@@ -1276,7 +1323,7 @@ impl<V: Venue> Engine<V> {
         {
             return;
         }
-        let Some(managed) = self.io.managed_http.get(&request) else {
+        let Some(managed) = self.io.core.managed_http.get(&request) else {
             return;
         };
         if managed.lifecycle.preparation() != token || managed.lifecycle.release().is_some() {
@@ -1292,22 +1339,23 @@ impl<V: Venue> Engine<V> {
             error.kind = Some(reason.kind());
         }
         if delivery.context.operation() == Operation::Mutation {
-            let _ = self.io.request_contexts.result(
+            let _ = self.io.core.request_contexts.result(
                 &delivery,
                 crate::request_context::WriteResult::Failed(error.clone()),
             );
         }
         self.io
+            .core
             .request_contexts
             .record_owned_read_failure(&delivery);
-        self.io.request_contexts.enter_delivery(&delivery);
+        self.io.core.request_contexts.enter_delivery(&delivery);
         if let Some(pending) = self.io.discard_managed(request) {
             self.begin_event_scope();
             #[cfg(feature = "http-plans")]
             {
-                self.io.http_history_failure = None;
+                self.io.core.http_history_failure = None;
             }
-            let previous = self.io.http_delivery.replace(delivery.clone());
+            let previous = self.io.core.http_delivery.replace(delivery.clone());
             self.venue.on_http_preparation_failed(
                 &mut Cx {
                     now,
@@ -1324,9 +1372,9 @@ impl<V: Venue> Engine<V> {
                 io: &mut self.io,
             }
             .finish_owned_read_failure(&delivery, error);
-            self.io.http_delivery = previous;
+            self.io.core.http_delivery = previous;
         }
-        self.io.request_contexts.exit_delivery(&delivery);
+        self.io.core.request_contexts.exit_delivery(&delivery);
         self.finish_event_scope(now);
         self.sweep_executions(now);
         self.flush_preflight_readiness(now);
@@ -1343,16 +1391,16 @@ impl<V: Venue> Engine<V> {
     #[cfg(feature = "session-bearer")]
     pub(super) fn flush_bearer_fences(&mut self, now: f64) {
         loop {
-            if !self.io.bearer_fenced.is_empty() {
-                let token = self.io.bearer_fenced.remove(0);
+            if !self.io.core.bearer_fenced.is_empty() {
+                let token = self.io.core.bearer_fenced.remove(0);
                 self.http_preparation_failed(
                     now,
                     token,
                     Error::Revoked,
                     bearer_refused(Error::Revoked),
                 );
-            } else if !self.io.bearer_woken.is_empty() {
-                let generation = self.io.bearer_woken.remove(0);
+            } else if !self.io.core.bearer_woken.is_empty() {
+                let generation = self.io.core.bearer_woken.remove(0);
                 self.wake_bearer_parks(now, generation);
             } else {
                 return;
@@ -1373,7 +1421,7 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "session-bearer")]
     fn park_bearer(&mut self, now: f64, token: Preparation, request: RequestId) {
-        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
             return;
         };
         let Some(bearer) = managed.bearer else {
@@ -1384,13 +1432,14 @@ impl<V: Venue> Engine<V> {
         let deadline = managed.lifecycle.deadline();
         if self
             .io
+            .core
             .bearer_parked
             .iter()
             .any(|(_, parked)| *parked == request)
         {
             return;
         }
-        if self.io.bearer_parked.try_reserve(1).is_err() {
+        if self.io.core.bearer_parked.try_reserve(1).is_err() {
             self.http_preparation_failed(
                 now,
                 token,
@@ -1399,11 +1448,14 @@ impl<V: Venue> Engine<V> {
             );
             return;
         }
-        self.io.actions.push(Action::SetTimer {
+        self.io.core.actions.push(Action::SetTimer {
             timer,
             at_ms: deadline,
         });
-        self.io.bearer_parked.push((bearer.generation(), request));
+        self.io
+            .core
+            .bearer_parked
+            .push((bearer.generation(), request));
     }
 
     /// In park order, re-prepare the first parked call of `generation` whose
@@ -1413,21 +1465,28 @@ impl<V: Venue> Engine<V> {
     fn wake_bearer_parks(&mut self, now: f64, generation: u64) {
         loop {
             let revision = self.venue.session_bearer_revision(generation);
-            let next = self.io.bearer_parked.iter().position(|(parked, request)| {
-                *parked == generation
-                    && self
-                        .io
-                        .managed_http
-                        .get(request)
-                        .and_then(|managed| managed.bearer)
-                        .is_some_and(|bearer| bearer.wakes(revision))
-            });
+            let next = self
+                .io
+                .core
+                .bearer_parked
+                .iter()
+                .position(|(parked, request)| {
+                    *parked == generation
+                        && self
+                            .io
+                            .core
+                            .managed_http
+                            .get(request)
+                            .and_then(|managed| managed.bearer)
+                            .is_some_and(|bearer| bearer.wakes(revision))
+                });
             let Some(index) = next else {
                 return;
             };
-            let (_, request) = self.io.bearer_parked.remove(index);
+            let (_, request) = self.io.core.bearer_parked.remove(index);
             let Some(token) = self
                 .io
+                .core
                 .managed_http
                 .get(&request)
                 .map(|managed| managed.lifecycle.preparation())
@@ -1445,17 +1504,19 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "http-mutation-barriers")]
         if self
             .io
+            .core
             .managed_http
             .get(&permit.attempt().request)
             .is_some_and(|managed| managed.group.is_some())
         {
             return Err(Error::Revoked);
         }
-        self.io.dispatch_now = now;
+        self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = permit.attempt().request;
         let managed = self
             .io
+            .core
             .managed_http
             .get_mut(&request)
             .ok_or(Error::Revoked)?;
@@ -1463,7 +1524,7 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
-        if let Err(error) = managed.validate_send(&self.io.request_contexts, now) {
+        if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,
                 preparation,
@@ -1473,7 +1534,7 @@ impl<V: Venue> Engine<V> {
             return Err(error);
         }
         if let Some(bearer) = managed.bearer {
-            match bearer.current(&self.venue, &self.io.request_contexts) {
+            match bearer.current(&self.venue, &self.io.core.request_contexts) {
                 Err(reason) => {
                     self.http_preparation_failed(now, preparation, reason, bearer_refused(reason));
                     return Err(reason);
@@ -1482,6 +1543,7 @@ impl<V: Venue> Engine<V> {
                     // The bound bundle is gone: never bind its revision again.
                     if let Some(fenced) = self
                         .io
+                        .core
                         .managed_http
                         .get_mut(&request)
                         .and_then(|managed| managed.bearer.as_mut())
@@ -1501,6 +1563,7 @@ impl<V: Venue> Engine<V> {
         }
         let release_flag = self
             .io
+            .core
             .request_contexts
             .release_flag(managed.lifecycle.context(), request)?;
         let pending = self.io.pending.get_mut(&request).ok_or(Error::Revoked)?;
@@ -1509,13 +1572,13 @@ impl<V: Venue> Engine<V> {
         let journal = managed.lifecycle.context().operation() == Operation::Mutation
             && !matches!(managed.lifecycle.context().owner(), Owner::Session { .. });
         if journal {
-            let capture = if self.io.streams.contains_key(&request) {
+            let capture = if self.io.core.streams.contains_key(&request) {
                 Err(Error::Invalid)
             } else {
                 self.venue.capture_http_reconciliation(&pending.value)
             }
             .and_then(|data| {
-                self.io.http_responses.insert(
+                self.io.core.http_responses.insert(
                     crate::request_context::ReconciliationRecord::new(
                         managed.lifecycle.context().owner(),
                         managed.lifecycle.context().leg(),
@@ -1538,55 +1601,64 @@ impl<V: Venue> Engine<V> {
         }
         let time = ReleaseTime {
             raw_ms: now,
-            protocol_ms: self.io.protocol_clock.at(now),
-            revision: self.io.protocol_clock.revision(),
+            protocol_ms: self.io.core.protocol_clock.at(now),
+            revision: self.io.core.protocol_clock.revision(),
         };
         let mut signing_release = None;
-        let result =
-            managed
-                .lifecycle
-                .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
-                    signing_release =
-                        Some(crate::SigningRelease::new(release.signature, release.time)?);
-                    self.venue.on_http_release(&mut pending.value, release)
-                });
+        let result = managed.lifecycle.claim(
+            permit,
+            time,
+            &mut self.io.core.http_pacing,
+            &mut |release| {
+                signing_release =
+                    Some(crate::SigningRelease::new(release.signature, release.time)?);
+                self.venue.on_http_release(&mut pending.value, release)
+            },
+        );
         if let Ok(Claim::Released(release)) = result {
             if let Some(released) = release_flag {
                 *released = true;
             }
             #[cfg(feature = "http-plans")]
             self.io
+                .core
                 .request_contexts
                 .record_read_plan_release(&managed.delivery());
             self.io
+                .core
                 .request_contexts
                 .execution_leg_released(managed.lifecycle.context());
             managed.recipe = None;
             managed.signing_attempt = None;
             self.io
+                .core
                 .request_contexts
                 .session_released(managed.lifecycle.context(), request);
             if journal {
-                self.io.http_write_revision = self.io.http_write_revision.saturating_add(1);
+                self.io.core.http_write_revision =
+                    self.io.core.http_write_revision.saturating_add(1);
                 let record = self
                     .io
+                    .core
                     .http_responses
                     .get_mut(request)
                     .expect("reconciliation reserved before admission");
                 record.release = Some(release);
                 record.order_revision = self.store.orders_revision();
-                record.write_revision = self.io.http_write_revision;
+                record.write_revision = self.io.core.http_write_revision;
             }
             #[cfg(feature = "order-locks")]
             {
                 if managed.lifecycle.context().operation() == Operation::Mutation {
                     match managed.lifecycle.context().owner() {
-                        Owner::Command { id, .. } => self.io.order_locks.note_command_write(id),
+                        Owner::Command { id, .. } => {
+                            self.io.core.order_locks.note_command_write(id)
+                        }
                         // A physical Plan write is sent for every observer.
                         #[cfg(feature = "http-plans")]
                         owner @ Owner::Execution { .. } => {
-                            for id in self.io.request_contexts.physical_observers(owner) {
-                                self.io.order_locks.note_command_write(id);
+                            for id in self.io.core.request_contexts.physical_observers(owner) {
+                                self.io.core.order_locks.note_command_write(id);
                             }
                         }
                         _ => {}
@@ -1596,9 +1668,10 @@ impl<V: Venue> Engine<V> {
                     let owner = managed.lifecycle.context().owner();
                     let token = self
                         .io
+                        .core
                         .request_contexts
-                        .read_mark(owner, self.io.order_locks.token());
-                    self.io.order_read_tokens.insert(request, token);
+                        .read_mark(owner, self.io.core.order_locks.token());
+                    self.io.core.order_read_tokens.insert(request, token);
                 }
             }
             self.venue.on_signing_release(
@@ -1610,7 +1683,7 @@ impl<V: Venue> Engine<V> {
             );
         }
         if journal && !matches!(result, Ok(Claim::Released(_))) {
-            self.io.http_responses.remove(request);
+            self.io.core.http_responses.remove(request);
         }
         if let Err(error) = result {
             self.http_preparation_failed(
@@ -1625,7 +1698,7 @@ impl<V: Venue> Engine<V> {
 
     fn reprepare_http(&mut self, now: f64, token: Preparation) {
         let request = token.attempt().request;
-        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
             return;
         };
         if managed.lifecycle.preparation() != token || managed.lifecycle.release().is_some() {
@@ -1634,9 +1707,10 @@ impl<V: Venue> Engine<V> {
         // However it leaves, a re-prepared call is no longer parked.
         #[cfg(feature = "session-bearer")]
         self.io
+            .core
             .bearer_parked
             .retain(|(_, parked)| *parked != request);
-        if let Err(error) = managed.validate_send(&self.io.request_contexts, now) {
+        if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,
                 token,
@@ -1660,14 +1734,14 @@ impl<V: Venue> Engine<V> {
             return;
         }
         if managed.waiting_route.take().is_some() {
-            self.io.actions.push(Action::SetTimer {
+            self.io.core.actions.push(Action::SetTimer {
                 timer: managed.timer,
                 at_ms: managed.lifecycle.deadline(),
             });
         }
         // Do not advance a lifecycle generation or take its retained recipe
         // unless a fresh signing attempt can also be allocated.
-        if managed.signing_attempt.is_some() && !self.io.signing.available_id() {
+        if managed.signing_attempt.is_some() && !self.io.core.signing.available_id() {
             self.http_preparation_failed(
                 now,
                 token,
@@ -1694,13 +1768,14 @@ impl<V: Venue> Engine<V> {
         if let Some(recipe) = managed
             .recipe
             .take()
-            .or_else(|| self.io.signing.remove_request(request))
+            .or_else(|| self.io.core.signing.remove_request(request))
         {
-            let next = self.io.signing.next_id();
-            self.io.signing.retry(next, recipe);
+            let next = self.io.core.signing.next_id();
+            self.io.core.signing.retry(next, recipe);
             managed.signing_attempt = Some(next);
         }
         self.io
+            .core
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Cancel {
                 preparation: token,
@@ -1712,6 +1787,7 @@ impl<V: Venue> Engine<V> {
         let mut http = managed.original.clone();
         http.timeout_ms = Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
         self.io
+            .core
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
                 preparation: managed.lifecycle.preparation(),
@@ -1726,7 +1802,7 @@ impl<V: Venue> Engine<V> {
         if self.failed() {
             return None;
         }
-        self.io.managed_http.get(&request)?.lifecycle.release()
+        self.io.core.managed_http.get(&request)?.lifecycle.release()
     }
 
     pub(super) fn expire_http_timer(&mut self, now: f64, event: &Event<'_>) -> bool {
@@ -1735,6 +1811,7 @@ impl<V: Venue> Engine<V> {
         };
         let Some((request, managed)) = self
             .io
+            .core
             .managed_http
             .iter()
             .find(|(_, managed)| managed.timer == *timer)
@@ -1752,6 +1829,7 @@ impl<V: Venue> Engine<V> {
                 let timer = managed.timer;
                 let deadline = managed.lifecycle.deadline();
                 self.io
+                    .core
                     .managed_http
                     .get_mut(&request)
                     .unwrap()
@@ -1759,7 +1837,7 @@ impl<V: Venue> Engine<V> {
                     .as_mut()
                     .unwrap()
                     .pacing_wait = false;
-                self.io.actions.push(Action::SetTimer {
+                self.io.core.actions.push(Action::SetTimer {
                     timer,
                     at_ms: deadline,
                 });
@@ -1771,7 +1849,7 @@ impl<V: Venue> Engine<V> {
                 self.resume_prepared_signing(now, token, prepared);
                 return true;
             }
-            self.io.actions.push(Action::SetTimer {
+            self.io.core.actions.push(Action::SetTimer {
                 timer: *timer,
                 at_ms: managed.lifecycle.deadline(),
             });
@@ -1781,9 +1859,9 @@ impl<V: Venue> Engine<V> {
         if self.expire_plan_before_http_failure(now, request) {
             return true;
         }
-        let managed = &self.io.managed_http[&request];
+        let managed = &self.io.core.managed_http[&request];
         if managed.lifecycle.release().is_some() {
-            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
+            let kind = std::mem::replace(&mut self.io.core.http_failure_kind, ErrorKind::Timeout);
             self.handle_event_with_read_timeout(
                 now,
                 Event::HttpFailed {
@@ -1792,7 +1870,7 @@ impl<V: Venue> Engine<V> {
                 },
                 true,
             );
-            self.io.http_failure_kind = kind;
+            self.io.core.http_failure_kind = kind;
             self.io.discard_managed(request);
         } else {
             self.http_preparation_failed(
@@ -1814,7 +1892,7 @@ impl<V: Venue> Engine<V> {
             | Event::HttpFailed { request, .. } => *request,
             _ => return true,
         };
-        let Some(managed) = self.io.managed_http.get(&request) else {
+        let Some(managed) = self.io.core.managed_http.get(&request) else {
             return true;
         };
         if !now.is_finite() || now >= managed.lifecycle.deadline() {
@@ -1831,6 +1909,7 @@ impl<V: Venue> Engine<V> {
             Event::HttpChunk { .. } | Event::HttpEnd { .. } if !started => false,
             Event::HttpStart { .. } => {
                 self.io
+                    .core
                     .managed_http
                     .get_mut(&request)
                     .expect("managed request exists")
@@ -1861,7 +1940,7 @@ impl<V: Venue> Engine<V> {
             | Event::HttpFailed { request, .. } => *request,
             _ => return false,
         };
-        if !self.io.http_responses.contains(request) {
+        if !self.io.core.http_responses.contains(request) {
             return false;
         }
         if !now.is_finite() {
@@ -1871,29 +1950,31 @@ impl<V: Venue> Engine<V> {
         // Invalid duplicate/order events for an active request are ignored by
         // the ordinary admission state machine. Only retirement during timeout
         // may turn a denied current event into a valid late response.
-        if !admitted && self.io.managed_http.contains_key(&request) {
+        if !admitted && self.io.core.managed_http.contains_key(&request) {
             return true;
         }
         let collected = match event {
             Event::HttpResponse { response, .. } => self
                 .io
+                .core
                 .http_responses
                 .start(request, response.status, response.headers)
                 .and_then(|()| {
                     self.io
+                        .core
                         .http_responses
                         .chunk(request, response.body.as_bytes())
                 }),
             Event::HttpStart {
                 status, headers, ..
-            } => self.io.http_responses.start(request, *status, headers),
-            Event::HttpChunk { data, .. } => self.io.http_responses.chunk(request, data),
+            } => self.io.core.http_responses.start(request, *status, headers),
+            Event::HttpChunk { data, .. } => self.io.core.http_responses.chunk(request, data),
             Event::HttpEnd { .. } => Ok(()),
             Event::HttpFailed { .. } => {
                 // A live request still needs the ordinary failure callback;
                 // a retired failure only consumes its late-response custody.
-                self.io.http_responses.remove(request);
-                return !self.io.managed_http.contains_key(&request);
+                self.io.core.http_responses.remove(request);
+                return !self.io.core.managed_http.contains_key(&request);
             }
             _ => unreachable!(),
         };
@@ -1904,7 +1985,7 @@ impl<V: Venue> Engine<V> {
         if !matches!(event, Event::HttpResponse { .. } | Event::HttpEnd { .. }) {
             return true;
         }
-        let record = match self.io.http_responses.complete(request) {
+        let record = match self.io.core.http_responses.complete(request) {
             Ok(record) => record,
             Err(error) => {
                 self.fail_write_collection(now, request, error);
@@ -1924,7 +2005,7 @@ impl<V: Venue> Engine<V> {
                     &mut crate::request_context::Reconciliation::new(
                         &record,
                         &mut self.store,
-                        self.io.http_write_revision,
+                        self.io.core.http_write_revision,
                     ),
                     &record.data,
                     response,
@@ -1935,23 +2016,24 @@ impl<V: Venue> Engine<V> {
             self.count_http_status(response.status);
             #[cfg(feature = "order-locks")]
             {
-                self.io.order_read_tokens.remove(&request);
+                self.io.core.order_read_tokens.remove(&request);
             }
             let delivery = self
                 .io
+                .core
                 .managed_http
                 .get(&request)
                 .expect("active capture has a managed request")
                 .delivery();
-            self.io.request_contexts.enter_delivery(&delivery);
+            self.io.core.request_contexts.enter_delivery(&delivery);
             #[cfg(feature = "http-plans")]
             {
-                self.io.http_history_failure = None;
+                self.io.core.http_history_failure = None;
             }
-            let previous = self.io.http_delivery.replace(delivery.clone());
+            let previous = self.io.core.http_delivery.replace(delivery.clone());
             if let Some(error) = proof.error() {
                 let venue = &self.venue;
-                let recorded = self.io.request_contexts.unproven_result(
+                let recorded = self.io.core.request_contexts.unproven_result(
                     &delivery,
                     response.status,
                     |evidence| venue.unproven_http_evidence(&pending.value, response, evidence),
@@ -1960,6 +2042,7 @@ impl<V: Venue> Engine<V> {
                     #[cfg(feature = "http-plans")]
                     let plan = self
                         .io
+                        .core
                         .request_contexts
                         .plan_from_context(&delivery.context);
                     let mut cx = Cx {
@@ -1970,6 +2053,7 @@ impl<V: Venue> Engine<V> {
                     #[cfg(feature = "http-plans")]
                     let sealed = if let Some(failure) = cx
                         .io
+                        .core
                         .request_contexts
                         .independent_plan_failure(&delivery, error.clone())
                     {
@@ -2001,9 +2085,10 @@ impl<V: Venue> Engine<V> {
                     true,
                     now,
                     &self.store,
-                    &mut self.io.actions,
+                    &mut self.io.core.actions,
                 );
-                self.io.http_write_reply = Some((response.status, response.headers.to_owned()));
+                self.io.core.http_write_reply =
+                    Some((response.status, response.headers.to_owned()));
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -2013,14 +2098,14 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
-                self.io.http_write_reply = None;
+                self.io.core.http_write_reply = None;
             }
-            self.io.http_delivery = previous;
-            self.io.request_contexts.exit_delivery(&delivery);
+            self.io.core.http_delivery = previous;
+            self.io.core.request_contexts.exit_delivery(&delivery);
             self.io.discard_managed(request);
         }
         drop(record);
-        self.io.http_responses.remove(request);
+        self.io.core.http_responses.remove(request);
         // Only active ordinary delivery owns event bookkeeping. Late codecs
         // never drive auth/retry/deferred commands or tickers.
         if ordinary {
@@ -2033,10 +2118,10 @@ impl<V: Venue> Engine<V> {
     }
 
     fn fail_write_collection(&mut self, now: f64, request: RequestId, _reason: Error) {
-        self.io.http_responses.remove(request);
-        if self.io.managed_http.contains_key(&request) {
+        self.io.core.http_responses.remove(request);
+        if self.io.core.managed_http.contains_key(&request) {
             // The venue answered (non-UTF-8 or oversize reply): never transport loss.
-            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Internal);
+            let kind = std::mem::replace(&mut self.io.core.http_failure_kind, ErrorKind::Internal);
             self.handle_event(
                 now,
                 Event::HttpFailed {
@@ -2044,7 +2129,7 @@ impl<V: Venue> Engine<V> {
                     error: "HTTP mutation response failed integrity bounds",
                 },
             );
-            self.io.http_failure_kind = kind;
+            self.io.core.http_failure_kind = kind;
             self.io.discard_managed(request);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
@@ -2073,6 +2158,7 @@ impl<P> Io<P> {
                 && leg.is_none_or(|leg| managed.lifecycle.context().leg() == leg)
         };
         let count = self
+            .core
             .managed_http
             .values()
             .filter(|managed| matches(managed))
@@ -2083,7 +2169,8 @@ impl<P> Io<P> {
             .map_err(|_| Error::Capacity)?;
         // Four per request cover Cancel, its timer clear, and execution-timer clear/rearm.
         // Additional notices cover Plan timer actions, the terminal and optional marker.
-        self.actions
+        self.core
+            .actions
             .try_reserve(
                 count
                     .checked_mul(4)
@@ -2091,7 +2178,7 @@ impl<P> Io<P> {
                     .ok_or(Error::Capacity)?,
             )
             .map_err(|_| Error::Capacity)?;
-        for (request, managed) in &self.managed_http {
+        for (request, managed) in &self.core.managed_http {
             if matches(managed) {
                 cleanup.push(PreparedReadCleanup {
                     request: *request,
@@ -2108,7 +2195,8 @@ impl<P> Io<P> {
     pub(super) fn commit_read_history_cleanup(&mut self, cleanup: Vec<PreparedReadCleanup>) {
         for item in cleanup {
             assert!(
-                self.managed_http
+                self.core
+                    .managed_http
                     .get(&item.request)
                     .is_some_and(|managed| managed.lifecycle.preparation() == item.preparation)
             );
@@ -2511,7 +2599,7 @@ mod tests {
             if pending.0.operation() == Operation::Mutation {
                 #[cfg(feature = "order-locks")]
                 assert!(
-                    cx.io.order_response_token.is_none(),
+                    cx.io.core.order_response_token.is_none(),
                     "write cannot inherit a prior read fence"
                 );
                 if self.retry_refusal && self.responses == 1 {
@@ -2942,6 +3030,7 @@ mod tests {
         // Ready B keeps only its original unsigned recipe, never presented bytes.
         let b = engine
             .io
+            .core
             .managed_http
             .get(&tokens[1].attempt().request)
             .unwrap();
@@ -2979,9 +3068,10 @@ mod tests {
             let mut engine = crate::test_support::seeded_engine(Probe::default());
             if full {
                 for n in 0..256 {
-                    let id = engine.io.signing.next_id();
+                    let id = engine.io.core.signing.next_id();
                     engine
                         .io
+                        .core
                         .signing
                         .stage(
                             id,
@@ -3045,9 +3135,9 @@ mod tests {
                 matches!(result, Err((Pending(returned), error)) if error == expected && returned == context)
             );
             assert!(cx.io.pending.is_empty());
-            assert!(cx.io.managed_http.is_empty());
-            assert!(cx.io.timers.is_empty());
-            assert!(cx.io.actions.is_empty());
+            assert!(cx.io.core.managed_http.is_empty());
+            assert!(cx.io.core.timers.is_empty());
+            assert!(cx.io.core.actions.is_empty());
         }
     }
 
@@ -3056,6 +3146,7 @@ mod tests {
     fn narrow_physical_window(engine: &mut Engine<Probe>, token: Preparation, deadline: f64) {
         let managed = engine
             .io
+            .core
             .managed_http
             .get_mut(&token.attempt().request)
             .unwrap();
@@ -3282,7 +3373,7 @@ mod tests {
             engine.venue.failures,
             [(Error::TimedOut, Some(crate::Outcome::NotSent))]
         );
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
     }
 
     #[test]
@@ -3297,7 +3388,7 @@ mod tests {
             narrow_physical_window(&mut engine, token, 50.);
             let (attempt, _) = work(&route(&mut engine, token, 10.));
             if stale {
-                assert!(engine.io.protocol_clock.observe(20., 520.));
+                assert!(engine.io.core.protocol_clock.observe(20., 520.));
             }
             engine.handle(
                 50.,
@@ -3333,11 +3424,12 @@ mod tests {
         bound(&signed(&mut engine, 11., attempt, input));
         engine
             .io
+            .core
             .signing
             .set_test_ids(crate::resource_ids::ResourceIds::starting_at(
                 crate::resource_ids::MAX_RESOURCE_ID + 1,
             ));
-        assert!(!engine.io.signing.available_id());
+        assert!(!engine.io.core.signing.available_id());
         assert!(!engine.failed());
         engine.reprepare_http(50., token);
         let actions = engine.drain_actions().collect::<Vec<_>>();
@@ -3358,10 +3450,10 @@ mod tests {
         });
         let old = tokens[0];
         narrow_physical_window(&mut engine, old, 500.);
-        let timer = engine.io.managed_http[&old.attempt().request].timer;
+        let timer = engine.io.core.managed_http[&old.attempt().request].timer;
         let (attempt, input) = work(&route(&mut engine, old, 10.));
         let permit = bound(&signed(&mut engine, 11., attempt, input));
-        assert!(engine.io.protocol_clock.observe(12., 512.));
+        assert!(engine.io.core.protocol_clock.observe(12., 512.));
         assert_eq!(engine.claim_http(12., permit), Err(Error::Stale));
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { request, preparation, .. } if request.timeout_ms == Some(488) && *preparation != old))));
@@ -3460,7 +3552,7 @@ mod tests {
             signed: true,
             ..Probe::default()
         });
-        assert!(engine.io.signing.next_work().is_none());
+        assert!(engine.io.core.signing.next_work().is_none());
         // Later route/provider can complete first; neither consumes admission.
         let (second, second_work) = work(&route(&mut engine, tokens[1], 100.));
         let (first, first_work) = work(&route(&mut engine, tokens[0], 101.));
@@ -3495,7 +3587,7 @@ mod tests {
         let old = tokens[0];
         let (attempt, input) = work(&route(&mut engine, old, 100.));
         let permit = bound(&signed(&mut engine, 101., attempt, input.clone()));
-        assert!(engine.io.protocol_clock.observe(102., 602.));
+        assert!(engine.io.core.protocol_clock.observe(102., 602.));
         assert_eq!(engine.claim_http(102., permit), Err(Error::Stale));
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { preparation, signing: Some(id) } if *preparation == old && *id == attempt))));
@@ -3541,6 +3633,7 @@ mod tests {
         });
         let attempt = engine
             .io
+            .core
             .managed_http
             .get(&tokens[0].attempt().request)
             .unwrap()
@@ -3580,6 +3673,7 @@ mod tests {
         // wire command borrowing its numeric ID.
         let context = engine
             .io
+            .core
             .managed_http
             .get(&tokens[0].attempt().request)
             .unwrap()
@@ -3594,8 +3688,8 @@ mod tests {
         .unwrap();
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { signing: Some(id), .. } if *id == attempt))));
-        assert!(engine.io.managed_http.is_empty());
-        assert!(engine.io.signing.next_work().is_none());
+        assert!(engine.io.core.managed_http.is_empty());
+        assert!(engine.io.core.signing.next_work().is_none());
         let late = signed(&mut engine, 12., attempt, input);
         assert!(
             late.iter()
@@ -3666,7 +3760,7 @@ mod tests {
             .venue
             .mutation_intent
             .unwrap_or(crate::classify::Intent::Place);
-        engine.io.request_contexts.dispatch = Some((command, intent));
+        engine.io.core.request_contexts.dispatch = Some((command, intent));
         let mut cx = Cx {
             now: at,
             store: &mut engine.store,
@@ -3687,7 +3781,7 @@ mod tests {
                 },
             )
             .unwrap();
-        cx.io.request_contexts.dispatch = None;
+        cx.io.core.request_contexts.dispatch = None;
         let request = if signed {
             cx.request_signed_managed(
                 context.clone(),
@@ -3709,7 +3803,7 @@ mod tests {
             )
         }
         .expect("public managed mutation must queue");
-        let managed = cx.io.managed_http.get(&request).unwrap();
+        let managed = cx.io.core.managed_http.get(&request).unwrap();
         (context, managed.lifecycle.preparation(), managed.timer)
     }
 
@@ -3779,8 +3873,8 @@ mod tests {
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
-        assert!(engine.io.incoming.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
+        assert!(engine.io.core.incoming.is_empty());
         engine.handle(
             6.,
             Event::HttpChunk {
@@ -3815,7 +3909,13 @@ mod tests {
             a,
             Action::Http(_) | Action::Notice(_) | Action::SetTimer { .. }
         )));
-        assert!(!engine.io.http_responses.contains(token.attempt().request));
+        assert!(
+            !engine
+                .io
+                .core
+                .http_responses
+                .contains(token.attempt().request)
+        );
     }
 
     #[test]
@@ -3939,7 +4039,7 @@ mod tests {
                     done,
                 ));
                 assert!(engine.io.pending.is_empty());
-                assert!(engine.io.managed_http.is_empty());
+                assert!(engine.io.core.managed_http.is_empty());
             }
         }
         let mut expected = Vec::new();
@@ -4005,7 +4105,7 @@ mod tests {
             assert!(engine.venue.discarded_owners.is_empty());
             assert!(engine.drain_actions().next().is_none());
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
         }
         let mut expected = [408, 500, 503, 600, u16::MAX]
             .map(|status| {
@@ -4117,9 +4217,9 @@ mod tests {
                 assert_eq!(partial.total, None);
                 assert_eq!(partial.failed_index, None);
             }
-            assert!(engine.io.http_delivery.is_none());
+            assert!(engine.io.core.http_delivery.is_none());
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
         }
     }
 
@@ -4188,7 +4288,7 @@ mod tests {
                     HttpAction::Cancel { preparation, .. } if *preparation == token))));
             }
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             assert_eq!(engine.venue.releases.len(), 3);
             // Reusing the numeric command gives a new owner generation. Old
             // responses and provider completions cannot discard or seal it.
@@ -4209,10 +4309,11 @@ mod tests {
             assert_eq!(*engine.venue.evidence_owners.borrow(), [original.owner()]);
             assert_eq!(engine.venue.discarded_owners, [original.owner()]);
             assert!(engine.venue.reconciliations.borrow().is_empty());
-            assert_eq!(engine.io.managed_http.len(), 1);
+            assert_eq!(engine.io.core.managed_http.len(), 1);
             assert!(
                 engine
                     .io
+                    .core
                     .managed_http
                     .contains_key(&fresh.attempt().request)
             );
@@ -4230,6 +4331,7 @@ mod tests {
         let (mut engine, _) = start(Probe::default());
         engine
             .io
+            .core
             .order_locks
             .acquire(
                 &Command::PlaceOrders {
@@ -4240,7 +4342,7 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(
+        assert!(engine.io.core.order_locks.defer(
             &Command::CancelSymbolOrders {
                 command: 8,
                 symbol: String::new(),
@@ -4265,7 +4367,7 @@ mod tests {
         }
         assert!(engine.venue.command_calls.is_empty());
         assert_eq!(engine.venue.responses, 0);
-        assert!(engine.io.http_delivery.is_none());
+        assert!(engine.io.core.http_delivery.is_none());
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert_eq!(
             actions
@@ -4326,7 +4428,7 @@ mod tests {
                 usize::from(timer_first)
             );
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
         }
     }
 
@@ -4340,14 +4442,20 @@ mod tests {
             let (_, token, _) = mutation(&mut engine, 7, 0.);
             let permit = bind(&mut engine, token, 1.);
             if !refuse_capture {
-                engine.io.streams.insert(
+                engine.io.core.streams.insert(
                     token.attempt().request,
                     (ArrayAt::Root, ItemCheck::Splitter),
                 );
             }
             assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
             assert!(engine.venue.releases.is_empty());
-            assert!(!engine.io.http_responses.contains(token.attempt().request));
+            assert!(
+                !engine
+                    .io
+                    .core
+                    .http_responses
+                    .contains(token.attempt().request)
+            );
             assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(crate::Outcome::NotSent))));
         }
     }
@@ -4364,10 +4472,10 @@ mod tests {
             let (attempt, input) = work(&route(&mut engine, token, 1.));
             let permit = bound(&signed(&mut engine, 1., attempt, input));
             engine.claim_http(2., permit).unwrap();
-            engine.io.auth_failure_counted = true;
+            engine.io.core.auth_failure_counted = true;
             #[cfg(feature = "order-locks")]
             {
-                engine.io.order_response_token = Some(123);
+                engine.io.core.order_response_token = Some(123);
             }
             engine.handle(
                 3.,
@@ -4382,7 +4490,7 @@ mod tests {
             );
             assert_eq!(engine.health().auth_failures, 1);
             if status == 503 {
-                assert!(!engine.io.auth_failure_counted);
+                assert!(!engine.io.core.auth_failure_counted);
                 let actions = engine.drain_actions().collect::<Vec<_>>();
                 assert!(actions.iter().any(|action| matches!(action,
                     Action::Notice(Notice::CommandFailed { command: 8, error })
@@ -4426,10 +4534,11 @@ mod tests {
         };
         engine
             .io
+            .core
             .order_locks
             .acquire(&placing, &engine.store, true)
             .unwrap();
-        assert!(engine.io.order_locks.defer(
+        assert!(engine.io.core.order_locks.defer(
             &Command::CancelSymbolOrders {
                 command: 8,
                 symbol: String::new()
@@ -4463,6 +4572,7 @@ mod tests {
         });
         engine
             .io
+            .core
             .order_locks
             .acquire(
                 &Command::PlaceOrders {
@@ -4473,15 +4583,15 @@ mod tests {
                 true,
             )
             .unwrap();
-        engine.io.order_locks.note_write();
-        assert!(engine.io.order_locks.defer(
+        engine.io.core.order_locks.note_write();
+        assert!(engine.io.core.order_locks.defer(
             &Command::CancelSymbolOrders {
                 command: 8,
                 symbol: String::new()
             },
             None
         ));
-        engine.io.order_locks.finish(7, true);
+        engine.io.core.order_locks.finish(7, true);
         let permit = bind(&mut engine, tokens[0], 1.);
         engine.claim_http(2., permit).unwrap();
         engine.handle(
@@ -4503,7 +4613,7 @@ mod tests {
             1
         );
         assert_eq!(engine.venue.responses, 1);
-        assert!(engine.io.http_delivery.is_none());
+        assert!(engine.io.core.http_delivery.is_none());
     }
 
     #[cfg(feature = "order-locks")]
@@ -4515,6 +4625,7 @@ mod tests {
         });
         engine
             .io
+            .core
             .order_locks
             .acquire(
                 &Command::PlaceOrders {
@@ -4525,7 +4636,7 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(
+        assert!(engine.io.core.order_locks.defer(
             &Command::CancelSymbolOrders {
                 command: 8,
                 symbol: String::new()
@@ -4547,6 +4658,7 @@ mod tests {
             let (mut engine, _) = start(Probe::default());
             engine
                 .io
+                .core
                 .order_locks
                 .acquire(
                     &Command::PlaceOrders {
@@ -4565,12 +4677,14 @@ mod tests {
             if state == 1 || state == 2 {
                 let delivery = engine
                     .io
+                    .core
                     .managed_http
                     .get(&first_token.attempt().request)
                     .unwrap()
                     .delivery();
                 engine
                     .io
+                    .core
                     .request_contexts
                     .result(
                         &delivery,
@@ -4590,12 +4704,14 @@ mod tests {
                 engine.claim_http(5., permit).unwrap();
                 let delivery = engine
                     .io
+                    .core
                     .managed_http
                     .get(&second.attempt().request)
                     .unwrap()
                     .delivery();
                 engine
                     .io
+                    .core
                     .request_contexts
                     .result(
                         &delivery,
@@ -4612,7 +4728,7 @@ mod tests {
             }
             .placement_resolved(7);
             fail_mutation(&mut engine, &first, 6.);
-            assert_eq!(engine.io.order_locks.uncertain(""), state == 3);
+            assert_eq!(engine.io.core.order_locks.uncertain(""), state == 3);
             let error = engine
                 .drain_actions()
                 .find_map(|a| match a {
@@ -4634,9 +4750,9 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     fn _cx_has_custody(cx: &Cx<'_, Pending>) -> bool {
-        cx.io.http_delivery.is_some()
-            || cx.io.order_response_token.is_some()
-            || cx.io.command_entry.is_some()
+        cx.io.core.http_delivery.is_some()
+            || cx.io.core.order_response_token.is_some()
+            || cx.io.core.command_entry.is_some()
     }
 
     /// Seal `command` (held under `lock`) as an uncertain write at `at`.
@@ -4645,6 +4761,7 @@ mod tests {
         let id = lock.completion_id().unwrap();
         engine
             .io
+            .core
             .order_locks
             .acquire(lock, &engine.store, false)
             .unwrap();
@@ -4734,12 +4851,13 @@ mod tests {
             engine.claim_http(1., permit).unwrap();
             let delivery = engine
                 .io
+                .core
                 .managed_http
                 .get(&token.attempt().request)
                 .unwrap()
                 .delivery();
-            engine.io.http_delivery = Some(delivery);
-            engine.io.http_write_reply = Some((200, String::new()));
+            engine.io.core.http_delivery = Some(delivery);
+            engine.io.core.http_write_reply = Some((200, String::new()));
             let (verdict, _) = Cx {
                 now: 2.,
                 store: &mut engine.store,
@@ -4747,34 +4865,34 @@ mod tests {
             }
             .http_write_failure(&context, &GONE, Some(&native), "order not exists", None)
             .unwrap();
-            engine.io.http_write_reply = None;
-            engine.io.http_delivery = None;
+            engine.io.core.http_write_reply = None;
+            engine.io.core.http_delivery = None;
             engine.finish_event_scope(2.);
             if intent != Intent::Cancel {
                 // Outside a cancel the absent-order row never applies.
                 assert_eq!(verdict, Verdict::Refused(crate::ErrorKind::Rejected));
                 assert!(engine.venue.reconciles.is_empty());
-                assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+                assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
                 continue;
             }
             assert_eq!(verdict, Verdict::Satisfied(SatisfiedIntent::Cancel));
             assert_eq!(engine.venue.reconciles, vec![None], "exactly one read");
             assert!(
-                engine.io.order_locks.uncertain("BTCUSDT"),
+                engine.io.core.order_locks.uncertain("BTCUSDT"),
                 "fenced, not cancelled"
             );
             engine.finish_event_scope(3.);
             assert_eq!(engine.venue.reconciles.len(), 1, "never asked twice");
             // Only a fresh order read clears the fence.
-            engine.io.order_response_token = Some(engine.io.order_locks.token());
+            engine.io.core.order_response_token = Some(engine.io.core.order_locks.token());
             Cx {
                 now: 4.,
                 store: &mut engine.store,
                 io: &mut engine.io,
             }
             .orders_reconciled(None);
-            engine.io.order_response_token = None;
-            assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+            engine.io.core.order_response_token = None;
+            assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
         }
     }
 
@@ -4811,6 +4929,7 @@ mod tests {
         };
         engine
             .io
+            .core
             .order_locks
             .acquire(&place, &engine.store, false)
             .unwrap();
@@ -4819,12 +4938,13 @@ mod tests {
         engine.claim_http(1., permit).unwrap();
         let delivery = engine
             .io
+            .core
             .managed_http
             .get(&token.attempt().request)
             .unwrap()
             .delivery();
-        engine.io.http_delivery = Some(delivery);
-        engine.io.http_write_reply = Some((200, String::new()));
+        engine.io.core.http_delivery = Some(delivery);
+        engine.io.core.http_write_reply = Some((200, String::new()));
         let native = Native {
             code: NativeCode::Int(110001),
             message: "order not exists",
@@ -4836,10 +4956,13 @@ mod tests {
         }
         .http_write_failure(&context, &GONE, Some(&native), "order not exists", None)
         .unwrap();
-        engine.io.http_write_reply = None;
-        engine.io.http_delivery = None;
+        engine.io.core.http_write_reply = None;
+        engine.io.core.http_delivery = None;
         engine.finish_event_scope(2.);
-        assert!(engine.io.order_locks.uncertain("BTCUSDT"), "fenced at once");
+        assert!(
+            engine.io.core.order_locks.uncertain("BTCUSDT"),
+            "fenced at once"
+        );
         assert!(
             engine.venue.reconciles.is_empty(),
             "a read now could not clear the held placement's fence"
@@ -4857,16 +4980,16 @@ mod tests {
             vec![Some(vec!["BTCUSDT".to_owned()])],
             "exactly one read once the placement finished"
         );
-        engine.io.order_response_token = Some(engine.io.order_locks.token());
+        engine.io.core.order_response_token = Some(engine.io.core.order_locks.token());
         Cx {
             now: 4.,
             store: &mut engine.store,
             io: &mut engine.io,
         }
         .orders_reconciled(Some("BTCUSDT"));
-        engine.io.order_response_token = None;
+        engine.io.core.order_response_token = None;
         assert!(
-            !engine.io.order_locks.uncertain("BTCUSDT"),
+            !engine.io.core.order_locks.uncertain("BTCUSDT"),
             "the read clears it"
         );
     }
@@ -5046,7 +5169,7 @@ mod tests {
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown) && error.kind == Some(ErrorKind::Internal))).count(), 1);
         assert_eq!(engine.venue.responses, 0);
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
         engine.handle(
             5.,
             Event::HttpResponse {
@@ -5095,13 +5218,13 @@ mod tests {
         response(&mut engine, token, 3.);
         assert_eq!(engine.venue().responses, 0);
         #[cfg(feature = "order-locks")]
-        let before = engine.io.order_locks.token();
+        let before = engine.io.core.order_locks.token();
         assert!(matches!(
             engine.claim_http(4., permit),
             Ok(Claim::Released(_))
         ));
         #[cfg(feature = "order-locks")]
-        assert_eq!(engine.io.order_locks.token(), before);
+        assert_eq!(engine.io.core.order_locks.token(), before);
         assert_eq!(engine.venue().receipts, 1);
         response(&mut engine, token, 5.);
         assert_eq!(engine.venue().responses, 1);
@@ -5109,7 +5232,7 @@ mod tests {
         response(&mut engine, token, 6.);
         assert_eq!(engine.venue().responses, 1);
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
     }
 
     #[test]
@@ -5197,10 +5320,10 @@ mod tests {
             cx.fail_http_attempt(&context, old, "old timer"),
             Err(Error::Revoked)
         );
-        assert!(cx.io.actions.is_empty());
-        assert!(cx.io.managed_http.contains_key(&replacement));
-        assert!(cx.io.request_contexts.validate(&context, 2.).is_ok());
-        assert!(cx.io.http_delivery.is_none());
+        assert!(cx.io.core.actions.is_empty());
+        assert!(cx.io.core.managed_http.contains_key(&replacement));
+        assert!(cx.io.core.request_contexts.validate(&context, 2.).is_ok());
+        assert!(cx.io.core.http_delivery.is_none());
     }
 
     #[test]
@@ -5291,6 +5414,7 @@ mod tests {
             }
             let timer = engine
                 .io
+                .core
                 .managed_http
                 .get(&token.attempt().request)
                 .unwrap()
@@ -5313,7 +5437,7 @@ mod tests {
             assert_eq!(engine.venue().failures.len(), 1);
             assert_eq!(engine.venue().responses, 0);
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
         }
     }
 
@@ -5354,6 +5478,7 @@ mod tests {
         // wire command borrowing its numeric ID.
         let context = engine
             .io
+            .core
             .managed_http
             .get(&tokens[0].attempt().request)
             .unwrap()
@@ -5369,7 +5494,7 @@ mod tests {
         assert_eq!(engine.claim_http(3., permit), Err(Error::Revoked));
         assert!(!engine.http_preparation_pending(tokens[1]));
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
         assert!(engine.venue().failures.is_empty());
         let results = engine
             .drain_actions()
@@ -5411,8 +5536,8 @@ mod tests {
             assert_eq!(engine.venue().items, 1);
             assert_eq!(engine.venue().responses, 0);
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.incoming.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.incoming.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             response(&mut engine, tokens[0], 4.);
             assert_eq!(engine.venue().items, 1);
             assert_eq!(engine.venue().responses, 0);
@@ -5450,7 +5575,7 @@ mod tests {
             engine.io.pending.contains_key(&request),
             "early end must not consume continuation"
         );
-        assert!(engine.io.managed_http.contains_key(&request));
+        assert!(engine.io.core.managed_http.contains_key(&request));
         engine.handle(
             4.,
             Event::HttpChunk {
@@ -5496,7 +5621,7 @@ mod tests {
         engine.handle(10., Event::HttpEnd { request });
         assert_eq!(engine.venue().responses, 1);
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
     }
 
     #[test]
@@ -5548,13 +5673,13 @@ mod tests {
                 matches!(result, Err((Pending(returned), Error::Invalid)) if returned == context)
             );
             assert!(cx.io.pending.is_empty());
-            assert!(cx.io.managed_http.is_empty());
-            assert!(cx.io.actions.is_empty());
-            assert!(cx.io.timers.is_empty());
-            assert!(cx.io.signing.next_work().is_none());
+            assert!(cx.io.core.managed_http.is_empty());
+            assert!(cx.io.core.actions.is_empty());
+            assert!(cx.io.core.timers.is_empty());
+            assert!(cx.io.core.signing.next_work().is_none());
             cx.fail_context(&context, "recipe mismatch").unwrap();
             assert!(
-                matches!(cx.io.actions.last(), Some(Action::Notice(Notice::CommandFailed { error, .. })) if error.outcome == Some(crate::Outcome::NotSent))
+                matches!(cx.io.core.actions.last(), Some(Action::Notice(Notice::CommandFailed { error, .. })) if error.outcome == Some(crate::Outcome::NotSent))
             );
         }
     }
@@ -5754,10 +5879,11 @@ mod tests {
             .unwrap();
         assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
         assert!(
             !engine
                 .io
+                .core
                 .http_responses
                 .contains(preparation.attempt().request)
         );
@@ -5958,7 +6084,7 @@ mod tests {
             let actions = engine.drain_actions().collect::<Vec<_>>();
             assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
             assert_eq!(engine.venue.releases.len(), 1);
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             assert!(engine.io.pending.is_empty());
         }
     }
@@ -5986,7 +6112,7 @@ mod tests {
             assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::NotSent))).count(), 1);
             assert!(actions.iter().all(|a| !matches!(a, Action::Http(_)) && !matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. }))));
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             assert!(!engine.signing_pending(attempt));
             assert!(engine.venue.releases.is_empty());
             assert_eq!(engine.venue.receipts, 0);
@@ -6010,7 +6136,7 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     fn fenced(engine: &mut Engine<Probe>) {
-        engine.io.order_locks.fence(Some(&["BTCUSDT".into()]));
+        engine.io.core.order_locks.fence(Some(&["BTCUSDT".into()]));
     }
 
     /// One logical order read spans several physical attempts (pages, coins);
@@ -6031,7 +6157,7 @@ mod tests {
         response(&mut engine, tokens[1], 501.);
         assert_eq!(engine.venue.responses, 1);
         assert!(
-            engine.io.order_locks.uncertain("BTCUSDT"),
+            engine.io.core.order_locks.uncertain("BTCUSDT"),
             "the first page predates the fence"
         );
     }
@@ -6051,7 +6177,7 @@ mod tests {
         release(&mut engine, tokens[1], 500.);
         response(&mut engine, tokens[1], 501.);
         assert_eq!(engine.venue.responses, 1);
-        assert!(engine.io.order_locks.uncertain("BTCUSDT"));
+        assert!(engine.io.core.order_locks.uncertain("BTCUSDT"));
     }
 
     #[cfg(feature = "order-locks")]
@@ -6067,7 +6193,7 @@ mod tests {
         release(&mut engine, tokens[0], 1.);
         release(&mut engine, tokens[1], 500.);
         response(&mut engine, tokens[1], 501.);
-        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+        assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
     }
 
     /// Separate owners are separate logical reads: a stale owner, retired or
@@ -6086,7 +6212,7 @@ mod tests {
         release(&mut engine, tokens[1], 500.);
         response(&mut engine, tokens[1], 501.);
         assert_eq!(engine.venue.responses, 2);
-        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+        assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
     }
 
     /// A write released under the reading command takes no read mark.
@@ -6104,7 +6230,7 @@ mod tests {
         fenced(&mut engine);
         release(&mut engine, tokens[0], 500.);
         response(&mut engine, tokens[0], 501.);
-        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+        assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
     }
 
     /// Marks live only as long as their owner's contexts; the registry's own
@@ -6118,7 +6244,7 @@ mod tests {
         });
         release(&mut engine, tokens[0], 1.);
         response(&mut engine, tokens[0], 2.);
-        assert_eq!(engine.io.request_contexts.read_mark_count(), 1);
+        assert_eq!(engine.io.core.request_contexts.read_mark_count(), 1);
         Cx {
             now: 5_000.,
             store: &mut engine.store,
@@ -6135,6 +6261,6 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(engine.io.request_contexts.read_mark_count(), 0);
+        assert_eq!(engine.io.core.request_contexts.read_mark_count(), 0);
     }
 }

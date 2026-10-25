@@ -84,7 +84,11 @@ impl ScopeProbe {
     fn assert_session_scope(&self, cx: &mut Cx<'_, Context>) {
         let attack = self.session_attack.unwrap();
         let session = self.session.as_ref().unwrap();
-        let before = (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len());
+        let before = (
+            cx.io.core.next_id,
+            cx.io.core.timers.len(),
+            cx.io.core.actions.len(),
+        );
         match attack {
             SessionAttack::Open => {
                 assert_eq!(cx.open_session(session_policy()).err(), Some(Error::State));
@@ -130,7 +134,11 @@ impl ScopeProbe {
             }
         }
         assert_eq!(
-            (cx.io.next_id, cx.io.timers.len(), cx.io.actions.len(),),
+            (
+                cx.io.core.next_id,
+                cx.io.core.timers.len(),
+                cx.io.core.actions.len(),
+            ),
             before,
             "foreign Session work must refuse before IDs, timers, holds or waiters change",
         );
@@ -306,8 +314,8 @@ impl Venue for ScopeProbe {
                 "all predecessor cleanup precedes readiness"
             );
             assert_eq!(self.retired, 1, "physical retirement precedes readiness");
-            assert!(cx.io.http_plan_expiring.is_none());
-            assert!(cx.io.actions.iter().any(|action| matches!(
+            assert!(cx.io.core.http_plan_expiring.is_none());
+            assert!(cx.io.core.actions.iter().any(|action| matches!(
                 action,
                 Action::Notice(Notice::CommandFailed { command: 10, .. })
             )));
@@ -344,14 +352,14 @@ impl Venue for ScopeProbe {
             }
             self.retire_ready_sockets(cx);
         }
-        assert!(cx.io.command_entry.is_none());
-        assert!(cx.io.http_delivery.is_none());
+        assert!(cx.io.core.command_entry.is_none());
+        assert!(cx.io.core.http_delivery.is_none());
         #[cfg(feature = "order-locks")]
-        assert!(cx.io.order_response_token.is_none());
+        assert!(cx.io.core.order_response_token.is_none());
         if let Some(leg) = self.leg.as_ref() {
-            cx.io.request_contexts.validate(leg, cx.now).unwrap();
-            let ids = cx.io.next_id;
-            let requests = cx.io.managed_http.len();
+            cx.io.core.request_contexts.validate(leg, cx.now).unwrap();
+            let ids = cx.io.core.next_id;
+            let requests = cx.io.core.managed_http.len();
             let mutation = Policy {
                 operation: Operation::Mutation,
                 ..policy()
@@ -402,9 +410,9 @@ impl Venue for ScopeProbe {
                     );
                 }
             }
-            assert_eq!(cx.io.next_id, ids);
-            assert_eq!(cx.io.managed_http.len(), requests);
-            cx.io.request_contexts.validate(leg, cx.now).unwrap();
+            assert_eq!(cx.io.core.next_id, ids);
+            assert_eq!(cx.io.core.managed_http.len(), requests);
+            cx.io.core.request_contexts.validate(leg, cx.now).unwrap();
         }
         cx.done_preflight(preflight, "cached".into()).unwrap();
     }
@@ -628,16 +636,16 @@ fn retired_and_wrong_issuer_wakes_cannot_reach_a_reused_numeric_id() {
     let mut foreign = crate::test_support::seeded_engine(ScopeProbe::default());
     command(&mut foreign, 20, 0.);
     let wrong = foreign.venue.parked.clone().unwrap();
-    let before = e.io.next_id;
+    let before = e.io.core.next_id;
     assert_eq!(
-        e.io.request_contexts.queue_preflight_ready(&old),
+        e.io.core.request_contexts.queue_preflight_ready(&old),
         Err(Error::Revoked)
     );
     assert_eq!(
-        e.io.request_contexts.queue_preflight_ready(&wrong),
+        e.io.core.request_contexts.queue_preflight_ready(&wrong),
         Err(Error::Revoked)
     );
-    assert_eq!(e.io.next_id, before);
+    assert_eq!(e.io.core.next_id, before);
     assert_eq!(e.venue.ready, 2);
     e.flush_preflight_readiness(2.);
     assert_eq!(e.venue.ready, 2);
@@ -659,22 +667,22 @@ fn queue_reservations_precede_ids_and_waking_never_allocates_or_renews() {
     for id in 1..=CAPACITY as u32 {
         command(&mut e, id, 0.);
     }
-    let ids = e.io.next_id;
-    assert_eq!(e.io.request_contexts.commands.len(), CAPACITY);
-    let ready_capacity = e.io.request_contexts.preflight_ready.capacity();
-    let initial_capacity = e.io.request_contexts.preflight_initial.capacity();
+    let ids = e.io.core.next_id;
+    assert_eq!(e.io.core.request_contexts.commands.len(), CAPACITY);
+    let ready_capacity = e.io.core.request_contexts.preflight_ready.capacity();
+    let initial_capacity = e.io.core.request_contexts.preflight_initial.capacity();
     assert!(ready_capacity >= CAPACITY);
     assert!(initial_capacity >= CAPACITY);
     command(&mut e, 999, 0.);
     assert_eq!(e.venue.last_refusal, Some(Error::Capacity));
-    assert_eq!(e.io.next_id, ids);
+    assert_eq!(e.io.core.next_id, ids);
     let handle = e.venue.parked.clone().unwrap();
     for at in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(
             with_cx(&mut e, at, |cx| cx.request_preflight_ready(&handle)),
             Err(Error::Invalid)
         );
-        assert!(e.io.request_contexts.preflight_ready.is_empty());
+        assert!(e.io.core.request_contexts.preflight_ready.is_empty());
     }
     with_cx(&mut e, 1., |cx| {
         cx.request_preflight_ready(&handle).unwrap();
@@ -685,19 +693,19 @@ fn queue_reservations_precede_ids_and_waking_never_allocates_or_renews() {
             Err(Error::Revoked)
         );
     });
-    assert_eq!(e.io.request_contexts.preflight_ready.len(), 1);
+    assert_eq!(e.io.core.request_contexts.preflight_ready.len(), 1);
     assert_eq!(
-        e.io.request_contexts.preflight_ready.capacity(),
+        e.io.core.request_contexts.preflight_ready.capacity(),
         ready_capacity
     );
     assert_eq!(
-        e.io.request_contexts.preflight_initial.capacity(),
+        e.io.core.request_contexts.preflight_initial.capacity(),
         initial_capacity
     );
-    assert_eq!(e.io.next_id, ids);
+    assert_eq!(e.io.core.next_id, ids);
     e.prepare_dispatch(1.);
     assert_eq!(e.venue.ready, 1);
-    assert_eq!(e.io.next_id, ids);
+    assert_eq!(e.io.core.next_id, ids);
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert_eq!(terminal(&actions, CAPACITY as u32), 1);
     assert_eq!(terminal(&actions, 999), 1);
@@ -722,7 +730,7 @@ fn retirement_clears_queued_wake_before_generation_reuse_and_rejects_live_foreig
     let wrong = foreign.venue.parked.clone().unwrap();
     assert_eq!(wrong.owner(), old.owner());
     assert_eq!(
-        e.io.request_contexts.queue_preflight_ready(&wrong),
+        e.io.core.request_contexts.queue_preflight_ready(&wrong),
         Err(Error::Revoked)
     );
     with_cx(&mut e, 1., |cx| {
@@ -733,16 +741,16 @@ fn retirement_clears_queued_wake_before_generation_reuse_and_rejects_live_foreig
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert_eq!(terminal(&actions, 20), 1);
     assert_eq!(e.venue.ready, 0);
-    assert!(e.io.request_contexts.preflight_ready.is_empty());
+    assert!(e.io.core.request_contexts.preflight_ready.is_empty());
     command(&mut e, 20, 2.);
     let new = e.venue.parked.clone().unwrap();
     assert_ne!(old.owner(), new.owner());
-    let ids = e.io.next_id;
+    let ids = e.io.core.next_id;
     assert_eq!(
-        e.io.request_contexts.queue_preflight_ready(&old),
+        e.io.core.request_contexts.queue_preflight_ready(&old),
         Err(Error::Revoked)
     );
-    assert_eq!(e.io.next_id, ids);
+    assert_eq!(e.io.core.next_id, ids);
     e.prepare_dispatch(2.);
     assert_eq!(e.venue.ready, 0);
     with_cx(&mut e, 3., |cx| cx.request_preflight_ready(&new)).unwrap();
@@ -759,16 +767,16 @@ fn an_empty_readiness_index_never_visits_live_legacy_or_execution_owners() {
         });
         command(&mut e, 10, 0.);
         crate::test_support::prepared_actions(&mut e, 0.);
-        let ids = e.io.next_id;
-        let plans = e.io.request_contexts.plan_scan_visits.get();
+        let ids = e.io.core.next_id;
+        let plans = e.io.core.request_contexts.plan_scan_visits.get();
         for _ in 0..8 {
             e.flush_preflight_readiness(1.);
         }
-        assert_eq!(e.io.next_id, ids);
-        assert_eq!(e.io.request_contexts.plan_scan_visits.get(), plans);
+        assert_eq!(e.io.core.next_id, ids);
+        assert_eq!(e.io.core.request_contexts.plan_scan_visits.get(), plans);
         assert_eq!(e.venue.ready, 0);
-        assert!(e.io.request_contexts.preflight_initial.is_empty());
-        assert!(e.io.actions.is_empty());
+        assert!(e.io.core.request_contexts.preflight_initial.is_empty());
+        assert!(e.io.core.actions.is_empty());
     }
 }
 
@@ -799,6 +807,7 @@ fn socket_callback_wake_cannot_drain_a_send_from_the_epoch_ready_just_retired() 
         // A genuine registered epoch's queued lifecycle effect is processed during drain.
         engine
             .io
+            .core
             .socket_effects
             .push_back(crate::socket_driver::Effect::Ping(epoch));
         let actions = engine.drain_actions().collect::<Vec<_>>();
@@ -885,7 +894,7 @@ fn expiry_cleanup_cannot_activate_or_fail_a_different_parked_preflight() {
     let handle = e.venue.parked.clone().unwrap();
     let plan = e.venue.plan.clone().unwrap();
     with_cx(&mut e, 2., |cx| cx.request_preflight_ready(&handle)).unwrap();
-    e.io.http_plan_expiring = Some(plan);
+    e.io.core.http_plan_expiring = Some(plan);
     with_cx(&mut e, 2., |cx| {
         assert_eq!(
             cx.validate_preflight_activation(&handle),
@@ -899,13 +908,14 @@ fn expiry_cleanup_cannot_activate_or_fail_a_different_parked_preflight() {
     e.flush_preflight_readiness(2.);
     assert_eq!(e.venue.ready, 0);
     assert!(matches!(
-        e.io.request_contexts
+        e.io.core
+            .request_contexts
             .preflight_state(&handle)
             .unwrap()
             .activation,
         Activation::Queued
     ));
-    e.io.http_plan_expiring = None;
+    e.io.core.http_plan_expiring = None;
     e.flush_preflight_readiness(2.);
     assert_eq!(e.venue.ready, 1);
 }
