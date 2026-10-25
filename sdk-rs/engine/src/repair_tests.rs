@@ -172,6 +172,8 @@ mod repair {
         foreign_successor: Option<Result<(), RepairRefusal>>,
         failures: usize,
         reconciles: Vec<Option<Vec<String>>>,
+        /// Finish the admitted leg instead of sending, as after a refused send.
+        refuse_send: bool,
     }
     impl Repairer {
         fn mark(cx: &Cx<'_, Context>) -> (crate::resource_ids::ResourceIds, usize) {
@@ -251,7 +253,11 @@ mod repair {
             match result {
                 Ok((root, context)) => {
                     self.roots.push((root, context.clone()));
-                    self.send(cx, context, Method::Delete);
+                    if self.refuse_send {
+                        cx.finish_http_context(&context).unwrap();
+                    } else {
+                        self.send(cx, context, Method::Delete);
+                    }
                 }
                 Err(_) => self.admit_spent_nothing.push(Self::mark(cx) == before),
             }
@@ -897,6 +903,46 @@ mod repair {
             "lock conflict refuses the foreground write"
         );
         assert!(preps(&actions).is_empty());
+    }
+
+    #[test]
+    fn a_refused_send_settles_its_root_once_with_nothing_sent() {
+        let mut e = minted(&["c1"]);
+        e.venue.refuse_send = true;
+        e.venue.groups = vec![vec![(0, "c1", "c1", "BTCUSD", "buy")]];
+        let actions = fire(&mut e, 2.);
+        assert_eq!(e.venue.admits, vec![Ok(())], "root admitted");
+        assert!(preps(&actions).is_empty(), "nothing prepared or sent");
+        assert_eq!(e.venue.notices.len(), 1, "{:?}", e.venue.notices);
+        assert!(e.venue.notices[0].contains("cancel: NotSent"), "{:?}", e.venue.notices);
+        assert_eq!(e.venue.notice_outside_entry, vec![true]);
+        e.handle_command(
+            3.,
+            Command::CancelOrders {
+                command: 9,
+                ids: vec!["c1".into()],
+            },
+            None,
+        )
+        .unwrap();
+        assert!(
+            !drain(&mut e).iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. }))),
+            "the root's lock was released"
+        );
+        assert_eq!(e.venue.notices.len(), 1, "settled exactly once");
+    }
+    #[test]
+    fn a_foreground_cancel_all_runs_beside_a_released_repair_cancel() {
+        let (mut e, token) = one_root(&["c1"]);
+        release(&mut e, token, 2.);
+        let actions = cancel_all(&mut e, 9, 2.5);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. }))),
+            "two cancels on one symbol do not conflict"
+        );
+        reply(&mut e, token, 3., 200, r#"{"code":0,"ids":["c1"]}"#);
+        assert_eq!(e.venue.notices.len(), 1);
+        assert!(e.venue.notices[0].contains("cancel: Accepted"), "{:?}", e.venue.notices);
     }
 
     // Snapshot origin (cancel-then-place).
