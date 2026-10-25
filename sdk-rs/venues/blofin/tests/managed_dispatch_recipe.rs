@@ -131,13 +131,11 @@ impl Venue for Probe {
         )
         .unwrap_or_else(|_| panic!("real managed admission"));
     }
-    fn on_http_release(
-        &mut self,
-        _: &mut Context,
-        release: &HttpRelease,
-    ) -> Result<Admission, Error> {
-        self.releases.push(*release);
-        Ok(Admission::Unscheduled)
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::Mutable(|this, _: &mut Context, release: &HttpRelease| {
+            this.releases.push(*release);
+            Ok(Admission::Unscheduled)
+        })
     }
     fn on_http_preparation_failed(
         &mut self,

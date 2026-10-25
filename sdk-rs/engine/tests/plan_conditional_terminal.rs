@@ -44,6 +44,7 @@ impl SignStep for Recipe {
     ) -> Result<SignRequest, SignError> {
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: Some(cx.stamp_ms() + 3_000.),
             },
