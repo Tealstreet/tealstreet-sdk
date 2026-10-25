@@ -322,3 +322,38 @@ discarded. Both corrected candidate builds explicitly recompiled the changed
 Paradex source after refreshing its timestamps; source content hashes still
 match the reviewed commit. The retained baseline builds had compiled the venue.
 Size evidence does not certify CPU, replay or qualifying CI.
+
+## Resumed actual-tip composition
+
+After the Codex pause, actual tip `76f1f7fc842` is plain-merged at `8053831de2b`.
+Only CALLERS conflicted and is resolved as the complete incoming document plus
+this slice's original section once. All generic engine, crypto, host, registry
+and harness paths are byte-exact to that tip. The incoming Session/Bearer API
+adds an absent bearer (`None`) at the existing discovery and poll managed sends;
+all other owned runtime and test blobs remain exact to the reviewed freeze.
+This slice does not bind a Session or acquire a bearer.
+
+The composed scoped Paradex crate passes 313 tests, 0 failed/ignored, with strict
+all-target Clippy, formatting and full bans/ratchets/selection passing. Exact
+request-manifest bytes are incoming minus only the two named poll singleton
+lines; signing and credential inventories are incoming-exact. New composed
+family/combined measurements are recorded before the freeze push. There is no
+owned generic engine delta requiring a Bybit/Bitget size change in this PR.
+
+The original PR run 40148094492 failed a genuine Bitget steady CPU two-run bound,
+followed by shared certification and dependent replay failures. It is not used
+as green proof or retried as an infra flake. The intended composed-head push
+gets one new PR-triggered run; no job rerun, rebase, force push or budget change.
+
+The resumed composition is independently CLEAR by claude-55ao7t at exact
+8053831de2b (read-only, no duplicate build). Node/web pairs on actual76f1:
+
+| Artifact | Before | After | Delta | Fixed budget | Remaining |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Paradex | 1,266,356 | 1,267,947 | +1,591 | 1,343,488 | 75,541 |
+| Combined | 13,900,838 | 13,902,861 | +2,023 | 14,155,776 | 252,915 |
+
+Both sides used the same archive path, locked inputs, fixed profiles and jobs4;
+all extracted Rust timestamps were refreshed and changed venue compilation was
+verified. Node and web hashes agree for each row. No budget or profile changes.
+These measurements certify size only; new qualifying CI is still required.
