@@ -2278,6 +2278,16 @@ impl crate::engine::CoreIo<'_> {
     }
 }
 
+impl crate::engine::IoCore {
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn bearer_bound_mut(&mut self, generation: u64) -> Option<&mut Vec<RequestId>> {
+        self.bearer_bound
+            .iter_mut()
+            .find(|(bound, _)| *bound == generation)
+            .map(|(_, requests)| requests)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6335,15 +6345,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(engine.io.core.request_contexts.read_mark_count(), 0);
-    }
-}
-
-impl crate::engine::IoCore {
-    #[cfg(feature = "session-bearer")]
-    pub(super) fn bearer_bound_mut(&mut self, generation: u64) -> Option<&mut Vec<RequestId>> {
-        self.bearer_bound
-            .iter_mut()
-            .find(|(bound, _)| *bound == generation)
-            .map(|(_, requests)| requests)
     }
 }
