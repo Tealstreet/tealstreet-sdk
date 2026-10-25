@@ -1165,10 +1165,14 @@ impl BybitLinear {
     /// A periodic read that failed in transport keeps the healthy stream and the
     /// last good state; the next tick retries. Bad content still reconnects.
     fn hyro_read_failed(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
-        let transient = std::mem::take(&mut self.account.hyro_transient);
-        let local = self.account.hyro_local_refusal;
-        if self.account.ready && (local || (transient && self.account.hyro_transient_streak < 3)) {
-            if !local {
+        let disposition = hyro_failure(
+            self.account.ready,
+            std::mem::take(&mut self.account.hyro_transient),
+            self.account.hyro_local_refusal,
+            self.account.hyro_transient_streak,
+        );
+        if let HyroFailure::Retry { counts } = disposition {
+            if counts {
                 self.account.hyro_transient_streak += 1;
             }
             cx.notice(
@@ -3030,9 +3034,53 @@ fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>, account: &mut 
     });
 }
 
+/// What one failed Hyro reconciliation read does to the private session.
+#[derive(Debug, PartialEq, Eq)]
+enum HyroFailure {
+    /// Keep the stream; the next tick re-reads. `counts` spends the streak.
+    Retry {
+        counts: bool,
+    },
+    Reconnect,
+}
+
+/// `transient`: this failure was transport or venue, not content. `local`:
+/// this snapshot had a read the engine refused before any I/O.
+fn hyro_failure(ready: bool, transient: bool, local: bool, streak: u8) -> HyroFailure {
+    if ready && (local || (transient && streak < 3)) {
+        HyroFailure::Retry { counts: !local }
+    } else {
+        HyroFailure::Reconnect
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hyro_failure_retries_transients_until_the_streak_and_never_counts_local_refusals() {
+        use HyroFailure::{Reconnect, Retry};
+        // (ready, transient, local, streak)
+        assert_eq!(hyro_failure(true, true, false, 0), Retry { counts: true });
+        assert_eq!(hyro_failure(true, true, false, 3), Reconnect);
+        assert_eq!(hyro_failure(true, true, true, 3), Retry { counts: false });
+        assert_eq!(
+            hyro_failure(true, false, false, 0),
+            Reconnect,
+            "content reconnects"
+        );
+        assert_eq!(
+            hyro_failure(false, true, false, 0),
+            Reconnect,
+            "not ready yet"
+        );
+        assert_eq!(
+            hyro_failure(false, true, true, 0),
+            Reconnect,
+            "not ready yet"
+        );
+    }
 
     #[test]
     fn recognizes_inverse_symbols() {
