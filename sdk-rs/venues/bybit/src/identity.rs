@@ -107,8 +107,8 @@ fn refuse(cx: &mut Cx<'_, Pending>, context: &Context, message: String, kind: Er
 impl BybitLinear {
     pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>) {
         let policy = self
-            .read_policy(true, crate::candles::read_policy().timeout_ms)
-            .unwrap_or_else(crate::candles::read_policy);
+            .read_policy(true, crate::policy::read_policy().timeout_ms)
+            .unwrap_or_else(crate::policy::read_policy);
         // The engine owns an initial admission refusal.
         let Ok(context) = cx.admit_http_command(policy) else {
             return;
