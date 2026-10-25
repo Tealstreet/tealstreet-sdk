@@ -430,4 +430,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Polymarket Gamma catalogue custody | Managed adoption; original and pressure controls pass, review/CI pending | Before adopting unsigned streamed catalogue pages; retain atomic cursor walk and native retry. | [RUST_POLYMARKET_CATALOGUE_CONTEXT.md](RUST_POLYMARKET_CATALOGUE_CONTEXT.md) |
 
-| Engine local command refusal helper | Plan; no source before S0 (#2103), #2114 and the overseer size review | Before hand-rolling an admit-then-fail_context local refusal in a venue. | [RUST_ENGINE_REFUSE_COMMAND.md](RUST_ENGINE_REFUSE_COMMAND.md) |
+| Engine local command refusal helper | Plan (approved in shape); prototype measured before source, after S0 (#2103) | Before hand-rolling an admit-then-fail_context local refusal in a venue. | [RUST_ENGINE_REFUSE_COMMAND.md](RUST_ENGINE_REFUSE_COMMAND.md) |
