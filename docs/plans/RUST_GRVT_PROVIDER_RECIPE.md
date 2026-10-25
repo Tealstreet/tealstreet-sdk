@@ -428,3 +428,29 @@ fe7lgm's exact 4e6c4f4f3bd re-review is plan-level CLEAR for custody and resend
 fit. The operation-versus-command precision above folds his follow-up; this
 remains a plan and future control specification, not source or constructor
 certification. The original bf61 controls are not changed by this wording.
+
+## Resume audit on 2026-10-26
+
+Plain-merged landing tip 34999f973f9 before further work. Only README and
+CALLERS conflicted; both keep complete incoming bytes plus the own suffix
+once. All incoming runtime, features, inventories and fixtures are retained,
+including #2138's GRVT entry-refusal cutover to cx.refuse_command. Do not
+restore the earlier temporary admission contexts when the recipe adopts.
+The original write-funnel target remains byte-exact to bf61d06542a; none of
+its historical RED or later source-gate suffixes was rerun in this docs audit.
+
+Rechecked live prerequisites rather than treating the old handoff as current:
+
+| Prerequisite | Verified state at this audit | Remaining action |
+| --- | --- | --- |
+| Credential-only phase 2, D1/D2 | PR #2132 OPEN, head 009e5cb3bb20; not in the landing tip | Actual landing before constructor integration; phase 2 alone does not implement the G3/G6 contract |
+| Credential-only revision 4, presence facts, Empty login intent and Optional operation-scoped absence | Owner m26ps4 accepted G2-G6 and the serial journal clarification; these consumer seams are still unlanded | Owner revision/source, kuhwxi review and actual adoption proof |
+| Seeded serial Session resend and status_exempt_refusal | Owner branch still at CLEARed plan 6208560a514; neither API is in the landing tip | fe7lgm's originals/source and actual landing before GRVT auth-resend adoption |
+| Non-default serial-plans, condition-waits, session-bearer | Landed declarations remain available | Explicit GRVT opt-ins and its own composed-tree size/budget review at adoption |
+
+The recipe remains blocked on those constructor and resend source seams;
+there is no GRVT source or runtime-clearance claim. This resume does not
+dispatch CI or push a partially integrated implementation. Generic engine
+changes require Bybit and Bitget measurements on the composed landing tree;
+each scratch measurement/review build removes its own target directory after
+preserving logs and size tables. No build or measurement ran in this audit.
