@@ -3082,6 +3082,13 @@ mod tests {
         );
     }
 
+    /// dazzy3 on #2106: a local refusal earlier in the snapshot never turns
+    /// this read's content failure into a retry; bad content reconnects now.
+    #[test]
+    fn hyro_content_failure_reconnects_even_after_a_local_refusal() {
+        assert_eq!(hyro_failure(true, false, true, 0), HyroFailure::Reconnect);
+    }
+
     #[test]
     fn recognizes_inverse_symbols() {
         assert!(is_inverse_symbol("BTCUSD"));
