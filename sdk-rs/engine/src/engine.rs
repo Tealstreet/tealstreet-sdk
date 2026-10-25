@@ -1639,6 +1639,10 @@ struct IoCore {
     socket_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
     #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
+    /// `V::SOCKET_CAPABILITIES`, copied once by `Engine::new` for admission in
+    /// `Cx`, which does not know the venue type. Never reassigned.
+    #[cfg(feature = "managed-sockets")]
+    socket_capabilities: crate::socket_lifecycle::SocketCapabilities,
     #[cfg(feature = "managed-sockets")]
     socket_failed: bool,
     #[cfg(feature = "managed-sockets")]
@@ -1753,6 +1757,8 @@ impl Default for IoCore {
             socket_message: None,
             #[cfg(feature = "managed-sockets")]
             managed_sockets: false,
+            #[cfg(feature = "managed-sockets")]
+            socket_capabilities: crate::socket_lifecycle::SocketCapabilities::FULL,
             #[cfg(feature = "managed-sockets")]
             socket_failed: false,
             #[cfg(feature = "managed-sockets")]
@@ -3096,6 +3102,10 @@ pub trait Venue {
     ) -> crate::socket_lifecycle::Control {
         crate::socket_lifecycle::Control::Other
     }
+    /// Optional managed-socket behaviour this venue uses; FULL unless narrowed.
+    #[cfg(feature = "managed-sockets")]
+    const SOCKET_CAPABILITIES: crate::socket_lifecycle::SocketCapabilities =
+        crate::socket_lifecycle::SocketCapabilities::FULL;
     #[cfg(feature = "managed-sockets")]
     fn socket_startup_ready(&self, _store: &Store) -> bool {
         false
@@ -3329,6 +3339,8 @@ impl<V: Venue> Engine<V> {
                     nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
                     #[cfg(feature = "dispatch-nonce")]
                     nonce_enabled: V::dispatch_nonce(),
+                    #[cfg(feature = "managed-sockets")]
+                    socket_capabilities: V::SOCKET_CAPABILITIES,
                     ..IoCore::default()
                 },
                 ..Io::default()
@@ -5353,7 +5365,7 @@ impl<V: Venue> Engine<V> {
         self.assert_live();
         self.io.assert_actions_safe();
         #[cfg(feature = "managed-sockets")]
-        if !self.io.socket_continuations.is_empty() {
+        if V::SOCKET_CAPABILITIES.handoff && !self.io.socket_continuations.is_empty() {
             self.arm_socket_continuations(self.io.core.dispatch_now);
             self.io.assert_actions_safe();
         }

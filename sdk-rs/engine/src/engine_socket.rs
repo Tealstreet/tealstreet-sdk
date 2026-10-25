@@ -323,6 +323,11 @@ impl<P> Cx<'_, P> {
         required_keys: &[&str],
         pending: P,
     ) -> Result<u64, SocketError> {
+        // Before any activity, allocation or retention: an undeclared handoff
+        // must leave no work for the venue's compiled-out continuation paths.
+        if !self.io.core.socket_capabilities.handoff {
+            return Err(SocketError::NotPermitted);
+        }
         self.io.opaque_entry_activity();
         if values.len() > MAX_INTERESTS || required_keys.len() > MAX_INTERESTS {
             return Err(SocketError::Capacity);
@@ -380,11 +385,10 @@ impl<V: Venue> Engine<V> {
                 .frames_ready(self.io.core.dispatch_now, |socket| {
                     self.io.core.signing.has_socket(socket)
                 })
-            || self
-                .io
-                .socket_continuations
-                .iter()
-                .any(|work| !work.armed && self.continuation_ready(work, self.io.core.dispatch_now))
+            || V::SOCKET_CAPABILITIES.handoff
+                && self.io.socket_continuations.iter().any(|work| {
+                    !work.armed && self.continuation_ready(work, self.io.core.dispatch_now)
+                })
             || self.io.core.socket_after.iter().any(|(epoch, _)| {
                 self.io.core.socket_driver.one_shot_ready(
                     *epoch,
@@ -532,7 +536,9 @@ impl<V: Venue> Engine<V> {
                     retry,
                 } = effect
                 {
-                    self.cancel_socket_continuations(retirement.epoch);
+                    if V::SOCKET_CAPABILITIES.handoff {
+                        self.cancel_socket_continuations(retirement.epoch);
+                    }
                     let pending = std::mem::take(&mut self.io.core.socket_after);
                     for (epoch, text) in pending {
                         if epoch == retirement.epoch {
@@ -585,7 +591,9 @@ impl<V: Venue> Engine<V> {
                             self.socket_failed_feed(now, epoch.feed(), error);
                             continue;
                         }
-                        self.rebase_socket_continuations(epoch.feed());
+                        if V::SOCKET_CAPABILITIES.handoff {
+                            self.rebase_socket_continuations(epoch.feed());
+                        }
                         (LifecycleEvent::Ready { epoch, reopened }, Some(epoch))
                     }
                     Effect::Authenticated { epoch, first } => {
@@ -631,12 +639,17 @@ impl<V: Venue> Engine<V> {
             }
             let event = match self.socket_replace(proposal.feed, proposal.update) {
                 Ok(revision) => {
-                    if let Some(mut work) = proposal.continuation {
-                        work.revision = revision;
-                        self.io.core.socket_continuation_bytes += work.bytes;
-                        self.io.socket_continuations.push_back(work);
+                    if V::SOCKET_CAPABILITIES.handoff {
+                        if let Some(mut work) = proposal.continuation {
+                            work.revision = revision;
+                            self.io.core.socket_continuation_bytes += work.bytes;
+                            self.io.socket_continuations.push_back(work);
+                        }
+                        self.rebase_socket_continuations(proposal.feed);
+                    } else {
+                        // Admission refused every handoff, so none can exist here.
+                        debug_assert!(proposal.continuation.is_none());
                     }
-                    self.rebase_socket_continuations(proposal.feed);
                     LifecycleEvent::InterestsCommitted {
                         feed: proposal.feed,
                         proposal: proposal.id,
@@ -663,7 +676,7 @@ impl<V: Venue> Engine<V> {
             return false;
         }
         if let Event::TimerFired { timer } = event {
-            if self.handle_socket_continuation(now, *timer) {
+            if V::SOCKET_CAPABILITIES.handoff && self.handle_socket_continuation(now, *timer) {
                 return true;
             }
             match self.io.core.socket_driver.timer_admissible(*timer, now) {
