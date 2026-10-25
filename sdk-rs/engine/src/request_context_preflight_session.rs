@@ -225,26 +225,9 @@ impl<P> Cx<'_, P> {
         Ok(context.clone())
     }
 
-    /// The read is issued: unpark, and a resume with no delivery is its
-    /// attempt's custody for the rest of this event only.
+    #[inline]
     fn resumed_preflight(&mut self, handle: &Preflight) {
-        let state = self
-            .io
-            .core
-            .request_contexts
-            .preflight_state_mut(handle)
-            .expect("resumed Preflight");
-        state.session_parked = false;
-        let request = state
-            .call
-            .first()
-            .expect("resumed call")
-            .admission
-            .attempt
-            .request;
-        if self.io.core.http_delivery.is_none() {
-            self.io.core.session_resumed.push(request);
-        }
+        self.core().resumed_preflight(handle)
     }
 
     /// The caller's receipt cap passed while the read was parked: seal the
@@ -266,6 +249,30 @@ impl<P> Cx<'_, P> {
         };
         self.finish_sealed_command(id, None, seal)
             .expect("exact parked Preflight expiry");
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// The read is issued: unpark, and a resume with no delivery is its
+    /// attempt's custody for the rest of this event only.
+    fn resumed_preflight(&mut self, handle: &Preflight) {
+        let state = self
+            .io
+            .core
+            .request_contexts
+            .preflight_state_mut(handle)
+            .expect("resumed Preflight");
+        state.session_parked = false;
+        let request = state
+            .call
+            .first()
+            .expect("resumed call")
+            .admission
+            .attempt
+            .request;
+        if self.io.core.http_delivery.is_none() {
+            self.io.core.session_resumed.push(request);
+        }
     }
 }
 
