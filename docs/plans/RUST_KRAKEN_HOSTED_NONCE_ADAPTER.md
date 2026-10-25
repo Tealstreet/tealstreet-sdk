@@ -20,9 +20,14 @@ allocator or a digest-only legacy WS fallback. Proposed shared-owner seam:
 
 - The engine-side provider validates the entire owned Kraken operation graph,
   receipt and bounded HTTP descriptor before any callback. Nonce comes ONLY from
-  the original receipt; exact canonical decimal survives the unchanged remote
+  the original receipt; presence/absence, complete receipt equality and descriptor/
+  header/form agreement are mandatory. Exact canonical decimal survives the remote
   HTTP config as Futures Nonce header / Spot nonce form field. Selected opaque
   refs stay local, bound to the configured account/slot, never peer-selected.
+  Bind exact credential presentation and the trusted stable subject too; a peer
+  must not silently substitute its primary identity for a selected Secondary.
+  Existing remote callbacks refuse Secondary and hosted captures select Primary:
+  explicit bound-slot transport/peer ownership is another shared API source gate.
 - The signing peer accepts method, exact canonical path/form, supplied nonce,
   protocol stamp and clock revision in a closed capture input. It selects its
   own installed identity, checks network/method/path/form and nonce agreement,

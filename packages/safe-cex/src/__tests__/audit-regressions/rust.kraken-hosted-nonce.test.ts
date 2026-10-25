@@ -113,10 +113,10 @@ it('keeps the existing HmacSha256 hosted Bybit route working as a control', asyn
   const host = { hostedSigning, hostedSigningClock: () => ({ stampMs: stamp, revision: '7' }) } as unknown as EngineHost;
   const output = await signHostedHttp('bybit', { key: '', secret: '' }, true, host, {
     id: 'working-control', type: 'http', exchangeName: 'bybit',
-    config: { method: 'GET', baseURL: 'https://api.bybit.com', url: '/v5/account/wallet-balance', params: { accountType: 'UNIFIED' } },
+    config: { method: 'POST', baseURL: 'https://api.bybit.com', url: '/v5/order/create', data: { symbol: 'BTCUSDT', side: 'Buy' } },
   });
   expect(output.error).toBeUndefined();
-  const payload = `${stamp}${key}20000accountType=UNIFIED`;
+  const payload = `${stamp}${key}20000{"symbol":"BTCUSDT","side":"Buy"}`;
   expect(output.config?.headers['X-BAPI-SIGN']).toBe(createHmac('sha256', 'control-secret').update(payload).digest('hex'));
   expect(hostedSigning).toHaveBeenCalledWith({ kind: 'http', payload, stampMs: stamp, revision: '7' });
 });
