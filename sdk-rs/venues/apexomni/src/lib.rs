@@ -23,6 +23,8 @@ pub struct Options {
     /// The provider identity for every signed request: opaque refs only. The
     /// venue holds no key material; the zkLink seed is its `zklinkSeed` role.
     pub identity: Option<safe_cex_engine::signing::Identity>,
+    /// Setup dropped a key that has no signing material; public data only.
+    pub credentials_ignored: bool,
     pub tick_interval_ms: Option<f64>,
 }
 safe_cex_crypto::redacted_debug!(Options);
@@ -231,6 +233,13 @@ impl Venue for ApexOmni {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.options.credentials_ignored {
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                safe_cex_engine::log::code::CONFIG_INVALID,
+                "ApeX API key ignored: it has no signing key, so the account shows public data only",
+            );
+        }
         self.start_public(cx);
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {

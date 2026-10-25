@@ -574,7 +574,11 @@ impl<P> Cx<'_, P> {
             ) {
                 return Err((
                     pending,
-                    if error == crate::signing::SignError::InvalidRequest {
+                    if matches!(
+                        error,
+                        crate::signing::SignError::InvalidRequest
+                            | crate::signing::SignError::MissingKey
+                    ) {
                         Error::Invalid
                     } else {
                         Error::Capacity
