@@ -432,3 +432,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | TxFlow unsigned account-setting poll custody | Managed source reviewed; scoped controls pass, fresh CI pending | Before managing activeAssetData; preserve private routing, native cadence and financial revision fences. | [RUST_TXFLOW_ACCOUNT_SETTING_CONTEXT.md](RUST_TXFLOW_ACCOUNT_SETTING_CONTEXT.md) |
 
 | Polymarket Gamma catalogue custody | Managed adoption; original and pressure controls pass, review/CI pending | Before adopting unsigned streamed catalogue pages; retain atomic cursor walk and native retry. | [RUST_POLYMARKET_CATALOGUE_CONTEXT.md](RUST_POLYMARKET_CATALOGUE_CONTEXT.md) |
+
+| Serial single-call schedule construction | Local cut; paired measurements and exact-patch review pending | Before changing serial topology construction or declared-admission error precedence. | [RUST_SERIAL_SINGLE_CALL_SCHEDULE.md](RUST_SERIAL_SINGLE_CALL_SCHEDULE.md) |

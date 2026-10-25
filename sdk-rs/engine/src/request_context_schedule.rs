@@ -54,6 +54,43 @@ pub struct Schedule {
 }
 
 impl Schedule {
+    #[cfg(feature = "serial-plans")]
+    pub(crate) fn from_single_call(terms: CallTerms) -> Result<Self, Error> {
+        let bound = PlanBound::from_single_call(terms)?;
+        let mut calls = Vec::new();
+        calls.try_reserve_exact(1).map_err(|_| Error::Capacity)?;
+        calls.push(Call {
+            sequence: 0,
+            terms,
+            fallback: None,
+            state: State::Available,
+        });
+        let mut indices = Vec::new();
+        indices.try_reserve_exact(1).map_err(|_| Error::Capacity)?;
+        indices.push(0);
+        let mut steps = Vec::new();
+        steps.try_reserve_exact(1).map_err(|_| Error::Capacity)?;
+        steps.push(indices);
+        let mut sequences = Vec::new();
+        sequences
+            .try_reserve_exact(2)
+            .map_err(|_| Error::Capacity)?;
+        sequences.push(Sequence {
+            steps,
+            cursor: 0,
+            parent: None,
+        });
+        Ok(Self {
+            issuer: Arc::new(()),
+            bound,
+            calls,
+            sequences,
+            used: 0,
+            reserved: bound.physical_attempts(),
+            cancelled: false,
+        })
+    }
+
     pub fn from_steps<'a>(steps: &'a [StepBound<'a>]) -> Result<Self, Error> {
         let bound = PlanBound::from_steps(steps)?;
         let mut calls = Vec::new();
