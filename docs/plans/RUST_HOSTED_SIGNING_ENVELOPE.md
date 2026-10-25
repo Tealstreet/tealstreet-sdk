@@ -25,19 +25,38 @@ preimage. New read-only metadata must come from the actual owning task/Selection
 not from callback options or advisory SignRequest.context. The exact export and
 original session-login task mapping are shared-owner source gates.
 
-Proposed engine seam, requiring m26ps4, fe7lgm and uufub4 review before source:
-Action::Sign gains typed engine-filled meta {attempt, deadline_ms, slot, role}.
-Slot comes from the owning Context Credential; role is retained from Selection
-at admission (SessionAuth for socket/REST login send_signed/connect_signed).
-The deadline comes from the already-computed absolute task window. EngineHost
-exports this read-only; it cannot reconstruct authority from received payloads,
-receive time or timeoutMs. Session-login mapping must use the genuine task.
-This is an API proposal, not a claim that the seam exists or is approved.
 Current Selection does not retain the full role/PrimaryReason, signing Pending
 does not retain selected slot/role, and send_signed/connect_signed may have no
-HTTP Context. Retain complete ownership at admission through the genuine owner;
+HTTP Context. The managed path sees Context Credential and routing intent;
+Selection::sign's non-managed path currently forwards the request/step then binds,
+leaving only route/read tags. Neither path currently exports the full role.
+
+Proposed carriers, requiring m26ps4, fe7lgm and uufub4 review before source:
+Selection retains its exact CredentialRole, including PrimaryReason and scope.
+The selected role rides managed Policy/Credential into Context and the retained
+signing task. A Selection-taking signing entry carries the same authority for
+non-managed and Session-login send_signed/connect_signed; route/read tags cannot
+substitute for that carrier. Slot comes from the owning selected Credential.
+Retain complete ownership at admission through the genuine owner;
 missing v2 metadata refuses before callback. Never infer Primary or SessionAuth
 from method, route, socket or algorithm. Existing v1 gains no invented metadata.
+
+Keep Action::Sign byte-identical. Prefer a feature-gated read-only accessor,
+Engine::sign_meta(signing_task_id) -> Option<SignMeta>, called by EngineHost while
+handling the existing action, linked only by Kraken and Paradex consumers.
+SignMeta retains task id, owner, absolute deadline, slot and exact role; owner
+distinguishes a managed Attempt/preparation from a genuine Session task and
+Session generation. Missing metadata is None and refuses v2 before callback.
+Do not add metadata fields to every family's Action or grow the v1 host wire.
+Exact accessor, carriers and feature forwarding remain source/API gates; none
+of these proposed APIs is claimed present or approved by this document.
+
+Export the absolute bound already computed at emission: minimum of the owning
+Context deadline and the signing-task bound, frozen at first emission, never
+recomputed on Bind re-sign. Session login uses its own login-task deadline,
+with its actual Session generation. A stale-Claim replacement task stays capped
+by the original owning window. EngineHost exports this read-only; receive time,
+timeoutMs and advisory context cannot reconstruct authority or extend a bound.
 
 Current remoteSignerProvider accepts HmacSha256, UTF-8 sign payloads and
 stamp/expiry receipts; it refuses nonce, result parts and remote Secondary.
@@ -67,17 +86,19 @@ sign-res.d = {
 } OR { id, type: op, v: 2, attemptId, error: closed sanitized code }
 ```
 
-- id is unique per provider invocation/preparation. attemptId is copied from the
-  owning signing attempt and includes its generation binding; it grants no
-  authority. Same-attempt repair gets a NEW id/work/receipt. Session auth uses
-  its genuine signing task/session generation, never a fabricated HTTP command.
-  Action::Sign.attempt is a signing-task RequestId, distinct from the stable
-  managed request_context::Attempt and preparation generation. The wire must
-  preserve that distinction: attemptId correlates the signing task; retained
-  managed-owner metadata identifies its Attempt/preparation, while session-owner
-  metadata binds its genuine session task/generation. Exact typed representation
-  is part of the engine API gate. Stale repair gets a NEW signing task,
-  correlation and preparation plus new receipt/MAC, retaining the managed
+- id is unique per provider invocation/preparation. Wire attemptId is ONLY the
+  Action::Sign.attempt signing-task RequestId, not a generated request/generation
+  pair; it grants no authority. It is distinct from the stable managed
+  request_context::Attempt and preparation generation retained at the origin.
+  Initially restrict v2 to managed work with a genuine Attempt generation and
+  Session signing tasks with a genuine Session generation. Other non-managed
+  tasks without defined ownership refuse v2; preserve their existing v1 path.
+  Session auth never fabricates an HTTP command. The accessor retains the real
+  managed-owner or Session-owner generation locally; binding.generation is the
+  separately confirmed account/slot installation generation, never inferred
+  from RequestId or conflated with an owner generation. Exact typed owner
+  representation is part of the engine API gate. Stale repair gets a NEW signing
+  task, correlation and preparation plus new receipt/MAC, retaining the managed
   Attempt; an old reply can never attach to the repair.
 - receipt is complete, including significant presence/absence. Nonce is a
   canonical decimal u64 JSON STRING end to end, never Number. A nonce-less
