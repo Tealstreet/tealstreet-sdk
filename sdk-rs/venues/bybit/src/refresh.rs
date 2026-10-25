@@ -30,7 +30,7 @@ struct Walk {
 }
 #[derive(Default)]
 struct List {
-    done: bool,
+    finished: bool,
     cursors: HashSet<String>,
     pages: usize,
     markets: Vec<Market>,
@@ -64,20 +64,19 @@ struct ResultPage {
     next_page_cursor: Option<String>,
 }
 impl BybitLinear {
-    pub(crate) fn refresh_markets(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if cx.public_feed_policy() == PublicFeedPolicy::Shared {
-            cx.fail(
-                command,
-                VenueError::new(
-                    "Refresh the shared public feed source, then restart provider and accounts",
-                )
-                .kind(ErrorKind::Unsupported),
-            );
-            return;
-        }
+    pub(crate) fn refresh_markets(&mut self, cx: &mut Cx<'_, Pending>) {
         let Ok(root) = cx.admit_http_command(refresh_policy()) else {
             return; // The engine owns initial admission rejection.
         };
+        if cx.public_feed_policy() == PublicFeedPolicy::Shared {
+            let refusal = VenueError::new(
+                "Refresh the shared public feed source, then restart provider and accounts",
+            )
+            .kind(ErrorKind::Unsupported)
+            .outcome(safe_cex_engine::Outcome::NotSent);
+            let _ = cx.fail_context(&root, refusal);
+            return;
+        }
         if let Some(walk) = self.market_refresh.active.as_ref() {
             match cx.join_execution(&walk.execution, &root, "") {
                 Ok(_) => return,
@@ -185,7 +184,12 @@ impl BybitLinear {
         if let Some(cursor) = cursor {
             query = query.str("cursor", cursor);
         }
-        if self.config_error.is_some() {
+        // Invalid options never send; every observer fails now, not at expiry.
+        if let Some(error) = self.config_error.clone() {
+            let error = VenueError::new(error)
+                .kind(ErrorKind::InvalidInput)
+                .outcome(safe_cex_engine::Outcome::NotSent);
+            self.fail_refresh(cx, error);
             return;
         }
         let walk = self
@@ -218,6 +222,7 @@ impl BybitLinear {
         };
         match cx.request_managed_with_headers(
             leg,
+            None,
             Method::Get,
             url,
             &[("X-Referer", sign::BROKER_ID)],
@@ -342,7 +347,7 @@ impl BybitLinear {
             .lists
             .get_mut(&(self.category, page.prelaunch))
             .expect("enabled category");
-        if list.done {
+        if list.finished {
             return;
         }
         list.pages += 1;
@@ -366,8 +371,8 @@ impl BybitLinear {
             self.request_refresh_page(cx, page.generation, page.prelaunch, Some(&cursor));
             return;
         }
-        list.done = true;
-        if walk.lists.values().all(|list| list.done) {
+        list.finished = true;
+        if walk.lists.values().all(|list| list.finished) {
             self.commit_refresh(cx);
         }
     }

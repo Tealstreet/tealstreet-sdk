@@ -173,8 +173,20 @@ impl Harness {
         self.collect();
     }
 
+    /// Dispatch with an explicit caller wait.
+    pub fn command_waiting(&mut self, command: Command, wait_ms: u32) {
+        self.engine
+            .handle_command(self.now, command, Some(wait_ms))
+            .expect("valid caller receipt");
+        self.collect();
+    }
+
+    /// Dispatch with the caller's default wait, as the host does.
     pub fn command(&mut self, command: Command) {
-        self.event(Event::Command(command));
+        self.engine
+            .handle_command(self.now, command, None)
+            .expect("valid caller receipt");
+        self.collect();
     }
 
     /// The most recent socket whose URL contains `path`.

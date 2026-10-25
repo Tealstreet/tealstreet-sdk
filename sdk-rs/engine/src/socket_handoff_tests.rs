@@ -129,6 +129,7 @@ impl Venue for Probe {
                 .unwrap();
             cx.request_managed(
                 context,
+                None,
                 Method::Get,
                 "https://fixture.invalid/seed".into(),
                 None,
