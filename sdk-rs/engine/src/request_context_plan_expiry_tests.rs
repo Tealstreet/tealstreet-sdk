@@ -33,7 +33,7 @@ mod plan_expiry_cleanup {
             }
             assert!(
                 cx.request_signed_managed(
-                    context.clone(),
+                    context.clone(), None,
                     Method::Post,
                     "https://venue.test/forbidden".into(),
                     None,
@@ -119,7 +119,7 @@ mod plan_expiry_cleanup {
                 };
                 cx.store.upsert_order(order);
                 cx.request_signed_managed(
-                    context.clone(),
+                    context.clone(), None,
                     Method::Post,
                     "https://venue.test/write".into(),
                     None,

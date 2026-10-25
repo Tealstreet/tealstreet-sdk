@@ -32,6 +32,8 @@ struct Body {
     initial_custody: bool,
     history_bound: bool,
     history_latest_release: Option<Attempt>,
+    #[cfg(feature = "serial-plans")]
+    serial: Option<Box<serial::Serial>>,
 }
 
 struct Entry {
@@ -382,6 +384,21 @@ impl<P> Cx<'_, P> {
         declaration: AdmissionDeclaration<'_, '_, '_>,
         physical: bool,
     ) -> Result<(Plan, Option<(u64, Context)>), Error> {
+        #[cfg(feature = "serial-plans")]
+        return self.admit_plan_root(preflight, declaration, physical, None);
+        #[cfg(not(feature = "serial-plans"))]
+        self.admit_plan_root(preflight, declaration, physical)
+    }
+
+    /// A serial Plan shares the whole declared admission transaction, with its
+    /// own unbounded root and streamed journal.
+    fn admit_plan_root(
+        &mut self,
+        preflight: &Preflight,
+        declaration: AdmissionDeclaration<'_, '_, '_>,
+        physical: bool,
+        #[cfg(feature = "serial-plans")] serial: Option<serial::Serial>,
+    ) -> Result<(Plan, Option<(u64, Context)>), Error> {
         let extra = if physical { 2 } else { 0 };
         let AdmissionDeclaration {
             steps,
@@ -421,6 +438,13 @@ impl<P> Cx<'_, P> {
             mutation_group::normalize(steps, &policy, barriers, &self.io.core.http_pacing)?;
         let bound = schedule.bound();
         let native_deadline = bound.deadline(self.now)?;
+        #[cfg(feature = "serial-plans")]
+        let deadline = if serial.is_some() {
+            serial::ROOT
+        } else {
+            receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap))
+        };
+        #[cfg(not(feature = "serial-plans"))]
         let deadline = receipt_cap.map_or(native_deadline, |(_, cap)| native_deadline.min(cap));
         Context::new(
             preflight.owner(),
@@ -462,6 +486,18 @@ impl<P> Cx<'_, P> {
             entries[index].eligible_at = Some(at);
             entries[index].notified = false;
         }
+        #[cfg(feature = "serial-plans")]
+        let writes = match &serial {
+            Some(serial) => Some(
+                CommandWrites::new_reserved(serial::JOURNAL_ATTEMPTS, count)?
+                    .streamed_with(serial.refusals_complete),
+            ),
+            None if operation == Operation::Mutation => {
+                Some(CommandWrites::new_reserved(attempts, count)?)
+            }
+            None => None,
+        };
+        #[cfg(not(feature = "serial-plans"))]
         let writes = if operation == Operation::Mutation {
             Some(CommandWrites::new_reserved(attempts, count)?)
         } else {
@@ -590,6 +626,8 @@ impl<P> Cx<'_, P> {
                 && self.io.core.http_plan_ready.is_none(),
             history_bound: false,
             history_latest_release: None,
+            #[cfg(feature = "serial-plans")]
+            serial: serial.map(Box::new),
         });
         if let Some(context) = old_read {
             self.io.retire_http_leg(&context);
@@ -699,6 +737,10 @@ impl<P> Cx<'_, P> {
                 .core
                 .request_contexts
                 .validate_plan(plan, self.now)?;
+            #[cfg(feature = "serial-plans")]
+            if body.serial.is_some() {
+                return Err(Error::State);
+            }
             let index = body.schedule.ordinal(slot)?;
             let entry = &body.entries[index];
             if entry.parked
@@ -770,6 +812,10 @@ impl<P> Cx<'_, P> {
                 .core
                 .request_contexts
                 .validate_plan(plan, self.now)?;
+            #[cfg(feature = "serial-plans")]
+            if body.serial.is_some() {
+                return Err(Error::State);
+            }
             self.io.core.request_contexts.validate(context, self.now)?;
             let index = body.schedule.ordinal(slot)?;
             let entry = &body.entries[index];
@@ -881,7 +927,7 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
     ) -> Result<Context, Error> {
-        let leg = self.make_plan_leg_context(plan, slot, intent, true)?;
+        let leg = self.make_plan_leg_context(plan, slot, intent, false, true)?;
         self.note_session_resume(plan, &leg);
         Ok(leg)
     }
@@ -910,7 +956,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, None, false)
+        self.make_plan_leg_context(plan, slot, None, false, false)
     }
 
     /// Narrow a write leg using the common engine intent rules before its first
@@ -921,7 +967,24 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: crate::classify::Intent,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(intent), false)
+        self.make_plan_leg_context(plan, slot, Some(intent), false, false)
+    }
+
+    /// The Plan form of `http_write_protection_cancel_leg`: an amend's cancel
+    /// leg of a position-bound cancel-then-recreate, declared before the leg's
+    /// journal registration. Never declare it for any other replacement.
+    pub fn plan_protection_cancel_leg_context(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+    ) -> Result<Context, Error> {
+        self.make_plan_leg_context(
+            plan,
+            slot,
+            Some(crate::classify::Intent::Cancel),
+            true,
+            false,
+        )
     }
 
     /// Handoff, initial or ready custody over this Plan's next issue.
@@ -952,6 +1015,7 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
+        protection_cancel: bool,
         resumed: bool,
     ) -> Result<Context, Error> {
         let body = self
@@ -973,6 +1037,29 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         let window = entry.terms.window(self.now, plan.deadline())?;
+        #[cfg(feature = "serial-plans")]
+        let (operation, retry, credential) = body.serial.as_ref().map_or_else(
+            || {
+                (
+                    body.policy.operation,
+                    body.policy.retry,
+                    body.policy.credential.clone(),
+                )
+            },
+            |serial| serial.terms(&body.policy.credential),
+        );
+        #[cfg(feature = "serial-plans")]
+        let mut context = Context::new(
+            plan.owner(),
+            entry.logical,
+            operation,
+            credential,
+            self.now,
+            window.deadline(),
+            body.policy.pacing,
+        )?
+        .with_retry(retry)?;
+        #[cfg(not(feature = "serial-plans"))]
         let mut context = Context::new(
             plan.owner(),
             entry.logical,
@@ -1000,7 +1087,9 @@ impl<P> Cx<'_, P> {
             .owner_entry_mut(plan.owner())
             .unwrap();
         let narrowed = match intent {
-            Some(intent) if owner.prepare_leg_intent(&context, intent, false)? => Some(intent),
+            Some(intent) if owner.prepare_leg_intent(&context, intent, protection_cancel)? => {
+                Some(intent)
+            }
             _ => None,
         };
         // Journal enrollment precedes headers, recipe preparation and all queue
@@ -1465,6 +1554,9 @@ impl<P> Cx<'_, P> {
         let timer = body.timer;
         let at_ms = body.next_wake();
         self.io.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+        #[cfg(feature = "serial-plans")]
+        self.io.core.actions.push(serial::wake(timer, at_ms));
+        #[cfg(not(feature = "serial-plans"))]
         self.io.core.actions.push(Action::SetTimer { timer, at_ms });
     }
 }
@@ -1484,6 +1576,20 @@ impl Body {
             }
         }
     }
+    #[cfg(feature = "condition-waits")]
+    fn next_wake(&self) -> f64 {
+        let wake = self
+            .entries
+            .iter()
+            .filter(|entry| entry.credit == Credit::Unissued && !entry.notified && !entry.parked)
+            .filter_map(|entry| entry.eligible_at)
+            .fold(self.handle.deadline(), f64::min);
+        self.serial
+            .as_ref()
+            .and_then(|serial| serial.condition_deadline())
+            .map_or(wake, |at| wake.min(at))
+    }
+    #[cfg(not(feature = "condition-waits"))]
     fn next_wake(&self) -> f64 {
         self.entries
             .iter()
@@ -1697,6 +1803,9 @@ impl ContextRegistry {
         if let Ok(body) = io.core.request_contexts.plan_body(plan) {
             let (timer, at_ms) = (body.timer, body.next_wake());
             io.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            #[cfg(feature = "serial-plans")]
+            io.core.actions.push(serial::wake(timer, at_ms));
+            #[cfg(not(feature = "serial-plans"))]
             io.core.actions.push(Action::SetTimer { timer, at_ms });
         }
     }
@@ -1734,6 +1843,10 @@ impl ContextRegistry {
                     })
                 })
             })
+    }
+    #[cfg(all(test, feature = "serial-plans"))]
+    pub(in super::super) fn command_writes(&self, command: CommandId) -> Option<&CommandWrites> {
+        self.commands.get(&command)?.writes.as_ref()
     }
     #[cfg(test)]
     pub(in super::super) fn plan_context_storage(&self) -> (usize, usize, usize) {
@@ -1924,6 +2037,14 @@ impl<P> Cx<'_, P> {
 
 #[path = "request_context_history_plan.rs"]
 mod history;
+
+#[cfg(feature = "serial-plans")]
+#[path = "request_context_serial_plan.rs"]
+mod serial;
+
+#[cfg(feature = "condition-waits")]
+#[path = "request_context_condition_wait.rs"]
+mod condition_wait;
 
 #[cfg(all(test, not(feature = "http-mutation-barriers")))]
 #[path = "request_context_group_disabled_tests.rs"]

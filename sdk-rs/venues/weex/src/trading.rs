@@ -1268,6 +1268,7 @@ impl WeexFutures {
             };
             if let Err((pending, error)) = cx.request_signed_managed(
                 context,
+                None,
                 step.method,
                 url,
                 body,

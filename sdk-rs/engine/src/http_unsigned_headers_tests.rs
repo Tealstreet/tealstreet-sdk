@@ -81,6 +81,7 @@ impl Venue for Probe {
             self.before_id = cx.io.core.next_id;
             self.result = Some(cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -269,6 +270,7 @@ fn public_headers_keep_duplicate_order_and_absent_or_empty_body_without_signing(
                     .unwrap();
                 cx.request_managed_with_headers(
                     context,
+                    None,
                     Method::Post,
                     "https://public.test/info".into(),
                     headers,
@@ -326,6 +328,7 @@ fn invalid_public_headers_return_original_pending_before_any_transport_allocatio
         assert_eq!(
             cx.request_managed_with_headers(
                 context,
+                None,
                 Method::Post,
                 "https://public.test/info".into(),
                 headers,
@@ -379,6 +382,7 @@ fn public_header_entry_preserves_private_expired_and_capacity_refusals() {
         assert_eq!(
             cx.request_managed_with_headers(
                 context,
+                None,
                 Method::Post,
                 "https://public.test/info".into(),
                 PUBLIC,
@@ -489,6 +493,7 @@ fn existing_context_and_credential_rejections_do_not_read_declaration() {
         assert!(
             cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -531,6 +536,7 @@ fn full_managed_capacity_does_not_read_or_allocate_for_the_refused_recipe() {
         assert_eq!(
             cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,

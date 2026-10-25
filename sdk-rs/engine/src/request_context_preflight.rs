@@ -306,7 +306,11 @@ impl<P> Cx<'_, P> {
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        #[cfg(feature = "condition-waits")]
+        let seal = self.seal_condition_preflight(preflight, error.into())?;
+        #[cfg(not(feature = "condition-waits"))]
         self.validate_preflight_failure_custody(preflight)?;
+        #[cfg(not(feature = "condition-waits"))]
         let seal = self.io.core.request_contexts.seal_preflight(
             preflight,
             self.now,

@@ -370,6 +370,7 @@ fn hook_panic_fences_queued_actions_claims_callbacks_and_native_queries_forever(
         let context = cx.http_context(Scope::Background, read_policy()).unwrap();
         cx.request_managed(
             context,
+            None,
             Method::Get,
             "https://venue.test/read".into(),
             None,
@@ -708,6 +709,7 @@ fn delivery_scope_outlives_temporary_marker_removal_owner_retirement_and_reuse()
     let request = cx(&mut e, 0., |cx| {
         cx.request_managed(
             context,
+            None,
             Method::Get,
             "https://venue.test/read".into(),
             None,
@@ -752,6 +754,7 @@ fn delivery_scope_outlives_temporary_marker_removal_owner_retirement_and_reuse()
     let request = cx(&mut e, 2., |cx| {
         cx.request_managed(
             background,
+            None,
             Method::Get,
             "https://venue.test/background".into(),
             None,

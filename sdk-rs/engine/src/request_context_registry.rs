@@ -206,6 +206,11 @@ pub(super) struct ContextRegistry {
     contexts: crate::IdMap<u64, Context>,
     commands: std::collections::HashMap<CommandId, CommandOwner>,
     sessions: session::Sessions,
+    /// (leg, Session generation) for each Bearer-bound leg; same-leg retries
+    /// and resends inherit it. Leg identities are never reused. Bounded by
+    /// CAPACITY, so a scan avoids another map type in every build.
+    #[cfg(feature = "session-bearer")]
+    bearer_legs: Vec<(u64, u64)>,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
     executions: execution::Executions,
@@ -215,6 +220,9 @@ pub(super) struct ContextRegistry {
     preflight_ready: VecDeque<Preflight>,
     #[cfg(feature = "http-plans")]
     preflight_initial: Vec<Preflight>,
+    /// Engine-bounded Preflight condition waits, by timer.
+    #[cfg(feature = "condition-waits")]
+    condition_preflights: Vec<(crate::TimerId, Preflight)>,
     /// Scoped delivery loans outlive temporary marker removal and even owner
     /// cleanup. Readiness may run only after the true outermost scope exits.
     #[cfg(feature = "http-plans")]
@@ -748,6 +756,34 @@ impl ContextRegistry {
             .get(&id)
             .and_then(|owner| owner.writes.as_ref())
             .is_some_and(|writes| writes.superseded(context.leg()))
+    }
+
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn leg_bearer(&self, context: &Context) -> Option<u64> {
+        let leg = context.leg();
+        self.bearer_legs
+            .iter()
+            .find(|(bound, _)| *bound == leg)
+            .map(|(_, generation)| *generation)
+    }
+
+    /// Prune bindings of retired legs, then reserve one slot before any effect.
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn reserve_leg_bearer(&mut self) -> Result<(), Error> {
+        if self.bearer_legs.len() >= CAPACITY {
+            let contexts = &self.contexts;
+            self.bearer_legs
+                .retain(|(leg, _)| contexts.contains_key(leg));
+        }
+        self.bearer_legs.try_reserve(1).map_err(|_| Error::Capacity)
+    }
+
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn bind_leg_bearer(&mut self, leg: u64, generation: u64) {
+        match self.bearer_legs.iter_mut().find(|(bound, _)| *bound == leg) {
+            Some((_, bound)) => *bound = generation,
+            None => self.bearer_legs.push((leg, generation)),
+        }
     }
 
     pub(super) fn validate(&self, context: &Context, now: f64) -> Result<(), Error> {
@@ -2176,7 +2212,8 @@ impl<P> Cx<'_, P> {
     /// The one declared exception for an amend's cancel leg: the old order of a
     /// cancel-then-recreate whose replacement is position-bound protection
     /// (reduce-only / close-on-trigger), so an absent old order is safe to
-    /// replace. Never declare it for any other replacement.
+    /// replace. Never declare it for any other replacement. Plan legs use it on
+    /// the leg Context before its first request.
     pub fn http_write_protection_cancel_leg(&mut self, context: &Context) -> Result<(), Error> {
         self.narrow_leg(context, crate::classify::Intent::Cancel, true)
     }

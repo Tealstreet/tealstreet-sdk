@@ -411,6 +411,35 @@ fn partial_amount_only_replaces_shared_family_but_inverse_keeps_its_distinct_fal
 }
 
 #[test]
+fn missing_mark_fallback_treats_tpsl_not_modified_as_satisfied() {
+    for profile in PROFILES
+        .into_iter()
+        .filter(|profile| !profile.variant.is_hyro())
+    {
+        let mut h = ready(profile);
+        seed(
+            &mut h,
+            profile,
+            "Sell",
+            "StopLoss",
+            "LastPrice",
+            false,
+            true,
+        );
+        h.engine.store_mut().set_tickers(Vec::new());
+        amend(&mut h, Some(100.049), None);
+        assert!(!h.has_request(profile.cancel_path()));
+        h.respond(
+            "/v5/position/trading-stop",
+            200,
+            r#"{"retCode":34040,"retMsg":"not modified","result":{}}"#,
+        );
+        assert_eq!(h.result(91), Some(&Ok("[]".into())), "{profile:?}");
+        assert!(!h.unknown.contains(&91));
+    }
+}
+
+#[test]
 fn missing_mark_fallback_retains_raw_fields_original_kind_and_ordinary_position_index() {
     for profile in PROFILES {
         for mark in [Some(0.0), Some(f64::NAN), None] {
@@ -549,6 +578,81 @@ fn documented_already_gone_batch_status_still_allows_partial_replacement() {
         amend(&mut h, Some(110.0), None);
         h.respond(profile.cancel_path(), 200, r#"{"retCode":0,"retMsg":"OK","retExtInfo":{"list":[{"code":110001,"msg":"order not exists or too late to cancel"}]}}"#);
         assert!(h.has_request("/v5/position/trading-stop"));
+    }
+}
+
+#[test]
+fn managed_partial_cancel_unresolved_code_cannot_borrow_benign_text_or_start_replacement() {
+    for profile in PROFILES
+        .into_iter()
+        .filter(|profile| !profile.variant.is_hyro())
+    {
+        for body in [
+            r#"{"retCode":10016,"retMsg":"order not exists or too late to cancel"}"#,
+            r#"{"retCode":0,"retMsg":"OK","retExtInfo":{"list":[{"code":10016,"msg":"order not exists or too late to cancel"}]}}"#,
+        ] {
+            let mut h = ready(profile);
+            seed(
+                &mut h,
+                profile,
+                "Sell",
+                "StopLoss",
+                "MarkPrice",
+                false,
+                true,
+            );
+            let before = h.engine.store().order("partial").unwrap().clone();
+            amend(&mut h, Some(110.0), None);
+            h.respond(profile.cancel_path(), 200, body);
+            assert!(
+                !h.has_request("/v5/position/trading-stop"),
+                "{profile:?} {body}"
+            );
+            assert!(!h.has_request("/v5/order/create"));
+            assert_eq!(h.engine.store().order("partial"), Some(&before));
+            assert!(h.result(91).unwrap().is_err());
+            assert!(h.unknown.contains(&91));
+        }
+    }
+}
+
+#[test]
+fn managed_partial_replacement_unresolved_noop_text_does_not_schedule_success_refresh() {
+    for profile in PROFILES
+        .into_iter()
+        .filter(|profile| !profile.variant.is_hyro())
+    {
+        let mut h = ready(profile);
+        seed(
+            &mut h,
+            profile,
+            "Sell",
+            "StopLoss",
+            "MarkPrice",
+            false,
+            true,
+        );
+        amend(&mut h, Some(110.0), None);
+        accept_cancel(&mut h, profile);
+        h.respond(
+            "/v5/position/trading-stop",
+            200,
+            r#"{"retCode":10016,"retMsg":"order not modified"}"#,
+        );
+        assert!(h.result(91).unwrap().is_err());
+        assert!(h.unknown.contains(&91));
+        // The Unknown seal reconciles once; that read is not a success refresh.
+        h.reconcile_once(EMPTY);
+        h.advance(250.0);
+        for path in [
+            "/v5/position/trading-stop",
+            "/v5/order/create",
+            "/v5/order/realtime",
+            "/v5/position/list",
+            "/v5/account/wallet-balance",
+        ] {
+            assert!(!h.has_request(path), "{profile:?} {path}");
+        }
     }
 }
 
@@ -878,6 +982,17 @@ fn already_gone_cancel_allows_replacement_but_replacement_failure_never_restores
                 h.result(91).unwrap().is_ok(),
                 matches!(outcome, "not-modified" | "accepted")
             );
+            // D2: the absent old leg is retired by the reconcile read, not by
+            // the answer; a replacement failure never restores it. Hyro's
+            // reconcile read is its full atomic snapshot.
+            assert!(h.has_request("/v5/order/realtime"), "{profile:?}/{outcome}");
+            while h.has_request("/v5/order/realtime") {
+                h.respond("/v5/order/realtime", 200, EMPTY);
+                if profile.variant.is_hyro() {
+                    h.respond("/v5/position/list", 200, EMPTY);
+                    h.respond("/v5/account/wallet-balance", 200, WALLET);
+                }
+            }
             assert!(
                 h.engine
                     .store()
