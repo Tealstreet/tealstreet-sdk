@@ -38,7 +38,8 @@ the six frozen macros leave the inventory as well.
    - Today the query uses the legacy `Completion::new(command)`
      (`history.rs:293`). It adopts a caller Read root at the exact receipt
      (`ReadCompletion::from_context`), as OKX history does. Each page is a 20 s
-     child leg at its actual send, with `RetryPolicy::Never` and no pacing. The
+     child leg at its actual send, capped by the caller root's deadline (as
+     Bybit's history slices are), with `RetryPolicy::Never` and no pacing. The
      keyless `[]` short-circuit and local refusals keep their order.
    - Selection is Secondary else Primary for GET, as `headers()` chose today,
      through `SelectedRead`.
@@ -56,20 +57,33 @@ the six frozen macros leave the inventory as well.
      preparation, policy or signing refusal becomes strict
      (`history.reject`). Today it routes through the recoverable
      `history.finish`, so after an accepted full page it now rejects with no
-     partial result or marker.
+     partial result or marker. The reason is the shared owner's contract
+     (`engine/src/history.rs`, `reject`): "Strict endpoint-policy rejection is
+     not a recoverable failed page, even when earlier pages were accepted.
+     Never publish its rows or marker."
+   - That is the rule BloFin general history (`request.reject` on a refused
+     leg) and OKX closed positions (`history.reject` on a refused leg) already
+     follow. #2133 changed only page failures, not refusals. Closed positions
+     are the one BloFin read that deviates today, and this aligns them. The
+     change is recorded in CALLERS.
    - An ordinary later-page transport/HTTP/parse failure still recovers the
      accepted rows with one INCOMPLETE.
 3. **Account reads** (`private_read`): startup margin and position-mode
    settings, the positions and balance refresh, and open and trigger order
    pages.
    - These are commandless, so each is one `SelectedRead::background` read, as
-     ApeX's snapshot legs are.
+     ApeX's snapshot legs are. Each has a 20 s window. A failure enters
+     `account_failed` and its existing retry and backoff.
    - Selection is credential-aware with the same Secondary-for-GET rule.
    - A selection or admission refusal maps to today's `account_failed` text and
      path. Startup's missing-passphrase rejection stays where it is.
    - The joined refresh families (positions plus balance, and open plus
      trigger order pages) keep their native generation join. Each leg is its
      own Background read, and no venue-local admission core is added.
+   - Every terminal finishes its leg's Context: a response, a failure, and a
+     late answer the native revision check drops as stale. A superseded leg
+     never lingers until engine expiry (the Bybit #1971 finding, fixed in
+     #2115).
 
 Invariants for every site:
 
@@ -82,8 +96,10 @@ Invariants for every site:
 
 ## Size gate
 
-This is a pre-S1 add, so combined must stay at or under +10K. Freeze a
-first-source paired measurement on the tip (Rust 1.99.0, Binaryen 132,
+This is a pre-S1 add, so combined must stay at or under +10K. S1 is in its
+landing slot, so measure on a tip that includes S1 if it has landed, and
+otherwise state which side of S1 the pair was taken on. Freeze a first-source
+paired measurement on that tip (Rust 1.99.0, Binaryen 132,
 `BINARYEN_CORES=4`, shipped profiles), BloFin venue plus combined, before the
 full source. If combined exceeds +10K, stop and report to the overseer. No
 budget is raised. After the measurement, delete the scratch `target/`.
@@ -105,6 +121,12 @@ Each RED fails on the base:
   with no partial or marker, while an ordinary later-page failure still keeps
   the accepted rows;
 - the inventory for these three files reaches 0.
+
+A regression control (GREEN on the base, since legacy reads hold no Context)
+pins leg hygiene. A refresh tick, then a WebSocket push that supersedes the
+positions revision, then the late REST answer: nothing is published from it,
+and its leg holds no owner capacity. This uses #2115's capacity probe against a
+run where the read completes normally.
 
 Existing GREEN controls stay byte-exact: the history, closed-positions,
 account, startup and HMAC dispatch fixtures.
