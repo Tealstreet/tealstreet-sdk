@@ -125,13 +125,19 @@ fn ready_snapshot(
     e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
     e.set_identities(identities).unwrap();
     e.start(1000.0);
-    let r = requests(&mut e).pop().unwrap();
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
     reply(&mut e, &r, 200, markets);
     let mut logs = vec![];
     let mut timers = vec![];
     let mut private = None;
     for _ in 0..6 {
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
         for a in actions {
             match a {
                 Action::Http(r) => {

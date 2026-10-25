@@ -563,7 +563,7 @@ fn before_primary_account_start(
     e.set_identities(identities).unwrap();
     if discovery_held {
         e.start(1000.);
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.);
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Http(request) if request.url == "https://api.backpack.exchange/api/v1/markets")).count(), 1, "genuine catalogue is held without delivering discovery");
         assert!(
             !actions
