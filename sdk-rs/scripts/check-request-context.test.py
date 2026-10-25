@@ -667,8 +667,9 @@ class DataMacroModuleProvenance(unittest.TestCase):
                 source = DataMacroProvenance.source(
                     generator + expression if local else expression,
                     prefix=prefix + ('' if local else generator))
-                with self.subTest(generator=generator, local=local):
+                with self.subTest(generator=generator, local=local, boundary='source'):
                     self.assertTrue(ban.context_fingerprints(source)[0])
+                with self.subTest(generator=generator, local=local, boundary='tracked'):
                     self.assertTrue(self.inventory(consumer_prefix=prefix +
                         ('' if local else generator) + 'use crate::wire::*;',
                         body=generator + expression if local else expression))
@@ -676,9 +677,10 @@ class DataMacroModuleProvenance(unittest.TestCase):
     def test_generator_after_invocation_and_unknown_expression_position_stay_conservative(self):
         expression = 'matches!(request.kind, Kind::Normal);'
         for generator in ['install!();', 'let value = install!();']:
-            with self.subTest(generator=generator):
+            with self.subTest(generator=generator, boundary='source'):
                 self.assertTrue(ban.context_fingerprints(
                     DataMacroProvenance.source(expression + generator))[0])
+            with self.subTest(generator=generator, boundary='tracked'):
                 self.assertTrue(self.inventory(body=expression + generator))
 
     def test_disjoint_generator_scopes_do_not_broaden_visibility(self):
