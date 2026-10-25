@@ -131,6 +131,7 @@ impl SignStep for WsAuth {
         )?;
         // Native auth generates this expiry; hosted auth preserves caller bytes.
         work.receipt = SignReceipt {
+            nonce: None,
             stamp_ms: None,
             expiry_ms: Some(expiry),
         };

@@ -119,6 +119,7 @@ impl SignStep for Envelope {
             ],
             self.context.clone(),
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(stamp),
                 expiry_ms: None,
             },

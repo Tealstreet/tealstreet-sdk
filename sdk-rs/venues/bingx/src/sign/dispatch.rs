@@ -79,6 +79,7 @@ impl SignStep for Http {
                 }],
                 context,
                 SignReceipt {
+                    nonce: None,
                     stamp_ms: Some(stamp),
                     expiry_ms: None,
                 },

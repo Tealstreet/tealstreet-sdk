@@ -173,6 +173,7 @@ impl safe_cex_engine::SignStep for Http {
             .map_or("", |(_, rest)| rest.split('/').next().unwrap_or(""));
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(stamp),
                 expiry_ms: None,
             },

@@ -23,6 +23,7 @@ fn work(
         payload,
         context,
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(stamp_ms),
             expiry_ms: None,
         },

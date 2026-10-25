@@ -98,6 +98,7 @@ impl SignStep for Http {
         let text = payload(instruction, &declaration.rows, stamp, declaration.window);
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(stamp),
                 expiry_ms: None,
             },

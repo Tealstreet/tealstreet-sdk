@@ -86,6 +86,7 @@ impl SignStep for Http {
             .ok_or(SignError::InvalidRequest)?;
         let stamp = dispatch.stamp_after(self.floor)?;
         let receipt = SignReceipt {
+            nonce: None,
             stamp_ms: Some(stamp),
             expiry_ms: None,
         };

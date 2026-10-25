@@ -1531,6 +1531,9 @@ where
 /// Every Io field that does not name the venue's pending type, so engine
 /// code that only touches these can be shared across venues.
 struct IoCore {
+    nonce_unscheduled: bool,
+    #[cfg(feature = "dispatch-nonce")]
+    nonce_enabled: bool,
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     #[cfg(feature = "http-plans")]
@@ -1665,6 +1668,9 @@ impl Default for IoCore {
     #[inline]
     fn default() -> Self {
         Self {
+            nonce_unscheduled: false,
+            #[cfg(feature = "dispatch-nonce")]
+            nonce_enabled: false,
             request_contexts: Default::default(),
             http_delivery: None,
             #[cfg(feature = "http-plans")]
@@ -2229,6 +2235,13 @@ impl<P> Cx<'_, P> {
     }
 
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        if step.nonce_claim().is_some() {
+            self.io
+                .core
+                .signing_admission
+                .push((outbound, crate::signing::SignError::InvalidRequest));
+            return;
+        }
         self.io.opaque_entry_activity();
         self.io.assert_action_safe(&outbound);
         let attempt = self.io.core.signing.next_id();
@@ -2760,6 +2773,32 @@ pub enum SigningTarget<'a, P> {
     },
 }
 
+/// Exactly one final HTTP admission mode, fixed at engine construction.
+/// Mutable scheduler admission cannot participate in an atomic nonce release.
+pub enum HttpRelease<V: Venue> {
+    Mutable(
+        fn(
+            &mut V,
+            &mut V::Pending,
+            &crate::request_context::HttpRelease,
+        ) -> Result<crate::request_context::Admission, crate::request_context::Error>,
+    ),
+    NonceUnscheduled(
+        fn(
+            &V,
+            &V::Pending,
+            &crate::request_context::HttpRelease,
+        ) -> Result<(), crate::request_context::Error>,
+    ),
+}
+
+impl<V: Venue> Copy for HttpRelease<V> {}
+impl<V: Venue> Clone for HttpRelease<V> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
     /// Read-only native evidence from an unproven managed mutation envelope.
@@ -2879,14 +2918,22 @@ pub trait Venue {
         &[]
     }
 
-    /// Final synchronous admission. This callback cannot queue more work or
-    /// alter the engine's clocks, preparation/signing state or original bound.
-    fn on_http_release(
-        &mut self,
-        _pending: &mut Self::Pending,
-        _release: &crate::request_context::HttpRelease,
-    ) -> Result<crate::request_context::Admission, crate::request_context::Error> {
-        Ok(crate::request_context::Admission::Unscheduled)
+    /// Immutable nonce capability; the engine captures its permission at construction.
+    /// This selector grants no claim or release authority.
+    #[inline]
+    fn dispatch_nonce() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+
+    /// Captured once at engine construction; the two admission modes are exclusive.
+    fn http_release() -> HttpRelease<Self>
+    where
+        Self: Sized,
+    {
+        HttpRelease::Mutable(|_, _, _| Ok(crate::request_context::Admission::Unscheduled))
     }
 
     /// Explicit pure group admission; the default refuses group support.
@@ -3093,9 +3140,15 @@ pub trait Venue {
     fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, text: &str);
     fn on_close(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, code: u16);
     /// Opts in to `on_route_exhausted`; every other venue sees today's close.
-    const ROUTE_EXHAUSTION: bool = false;
+    #[inline]
+    fn route_exhaustion() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
     /// Every route was refused, so the host dialled nothing. Called only when
-    /// `ROUTE_EXHAUSTION` is set.
+    /// `route_exhaustion` returns true.
     fn on_route_exhausted(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId) {}
     fn on_response(
         &mut self,
@@ -3222,6 +3275,7 @@ fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
 
 pub struct Engine<V: Venue> {
     venue: V,
+    http_release: HttpRelease<V>,
     store: Store,
     io: Io<V::Pending>,
     started: bool,
@@ -3267,13 +3321,18 @@ impl<V: Venue> Engine<V> {
             venue.http_pacing_sets(),
         )
         .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
+        let http_release = V::http_release();
         Ok(Self {
             venue,
+            http_release,
             store,
             io: Io {
                 core: IoCore {
                     entropy: Some(entropy),
                     http_pacing,
+                    nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
+                    #[cfg(feature = "dispatch-nonce")]
+                    nonce_enabled: V::dispatch_nonce(),
                     ..IoCore::default()
                 },
                 ..Io::default()
@@ -4085,7 +4144,7 @@ impl<V: Venue> Engine<V> {
                 if !exhausted {
                     cx.io.core.health.count(log_code::WS_CLOSED);
                 }
-                if exhausted && V::ROUTE_EXHAUSTION {
+                if exhausted && V::route_exhaustion() {
                     self.venue.on_route_exhausted(&mut cx, socket)
                 } else {
                     self.venue.on_close(&mut cx, socket, code)
@@ -4729,6 +4788,7 @@ impl<V: Venue> Engine<V> {
         if match &completion {
             Completion::Ready(pending, _)
             | Completion::Stale(pending)
+            | Completion::NonceStale(pending)
             | Completion::Failed(pending, _) => pending.managed,
         } {
             self.managed_sign_completed(now, completion);
@@ -4747,7 +4807,7 @@ impl<V: Venue> Engine<V> {
                     outbound: Box::new(outbound),
                 });
             }
-            Completion::Stale(mut pending) => {
+            Completion::Stale(mut pending) | Completion::NonceStale(mut pending) => {
                 if pending.timer.0 != 0 {
                     self.io.core.actions.push(Action::ClearTimer {
                         timer: pending.timer,
@@ -5119,7 +5179,10 @@ impl<V: Venue> Engine<V> {
                                 }
                                 self.io.core.actions.push(outbound);
                             }
-                            Some(Completion::Stale(mut pending)) => {
+                            Some(
+                                Completion::Stale(mut pending)
+                                | Completion::NonceStale(mut pending),
+                            ) => {
                                 pending.timer = TimerId(0);
                                 let next = self.io.core.signing.next_id();
                                 self.io.core.signing.retry(next, pending);

@@ -484,8 +484,23 @@ pub struct SignReceipt {
     pub stamp_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expiry_ms: Option<f64>,
+    #[cfg_attr(not(feature = "dispatch-nonce"), serde(skip))]
+    #[cfg_attr(
+        feature = "dispatch-nonce",
+        serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "nonce_decimal"
+        )
+    )]
+    pub nonce: Option<u64>,
 }
+#[path = "signing_nonce_decimal.rs"]
+#[cfg(feature = "dispatch-nonce")]
+mod nonce_decimal;
+
 impl SignReceipt {
+    #[cfg_attr(not(feature = "dispatch-nonce"), inline(never))]
     pub fn validate(&self) -> Result<(), SignError> {
         if [self.stamp_ms, self.expiry_ms]
             .into_iter()
@@ -495,6 +510,7 @@ impl SignReceipt {
                     || !(0. ..=9_007_199_254_740_991.).contains(&value)
                     || value.fract() != 0.
             })
+            || (!cfg!(feature = "dispatch-nonce") && self.nonce.is_some())
             || matches!((self.stamp_ms, self.expiry_ms), (Some(stamp), Some(expiry)) if expiry <= stamp)
         {
             return Err(SignError::InvalidRequest);

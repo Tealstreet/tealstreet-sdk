@@ -38,6 +38,7 @@ impl SignStep for Recipe {
             receipt: SignReceipt {
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: Some(cx.stamp_ms() + 3_000.),
+                ..Default::default()
             },
             context: Default::default(),
             operations: vec![SignOperation::Sign {

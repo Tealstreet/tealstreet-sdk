@@ -506,6 +506,7 @@ fn recording_provider_independently_signs_the_expected_atomic_work() {
             path: "/fapi/v1/contracts".into(),
         },
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(1234.),
             expiry_ms: None,
         },

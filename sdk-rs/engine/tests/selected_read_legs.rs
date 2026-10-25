@@ -54,6 +54,7 @@ impl SignStep for Recipe {
             Vec::new(),
             Default::default(),
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: None,
             },

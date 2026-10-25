@@ -204,6 +204,7 @@ fn work(
         .clone()
         .ok_or(SignError::InvalidRequest)?;
     let receipt = SignReceipt {
+        nonce: None,
         stamp_ms: Some(stamp),
         expiry_ms: None,
     };
@@ -230,6 +231,7 @@ fn signed_headers(
     let stamp = stamp.ok_or(SignError::InvalidRequest)?;
     if result.receipt
         != (SignReceipt {
+            nonce: None,
             stamp_ms: Some(stamp),
             expiry_ms: None,
         })

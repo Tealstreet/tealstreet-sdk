@@ -293,19 +293,17 @@ impl Venue for PublicMetadata {
         )
         .unwrap();
     }
-    fn on_http_release(
-        &mut self,
-        pending: &mut Pending,
-        release: &http::HttpRelease,
-    ) -> Result<http::Admission, http::Error> {
-        if self.pause_on_release {
-            self.scheduler
-                .pause(&0, release.time.raw_ms + 1_000.)
-                .unwrap();
-        }
-        self.scheduler
-            .admit_http(pending.attempt, release)
-            .map_err(|_| http::Error::Invalid)
+    fn http_release() -> crate::HttpRelease<Self> {
+        crate::HttpRelease::Mutable(|this, pending: &mut Pending, release| {
+            if this.pause_on_release {
+                this.scheduler
+                    .pause(&0, release.time.raw_ms + 1_000.)
+                    .unwrap();
+            }
+            this.scheduler
+                .admit_http(pending.attempt, release)
+                .map_err(|_| http::Error::Invalid)
+        })
     }
     fn on_http_preparation_failed(
         &mut self,
