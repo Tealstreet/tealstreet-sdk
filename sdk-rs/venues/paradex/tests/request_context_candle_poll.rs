@@ -974,3 +974,59 @@ fn native_all_declared_nonsecond_intervals_keep_route_selection() {
         no_http(&out);
     }
 }
+
+fn hold_peer(e: &mut TestEngine, id: u32, now: f64) {
+    e.handle_command(
+        now,
+        Command::FetchCandles {
+            command: id,
+            symbol: "__hold".into(),
+            interval: Interval::M1,
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        },
+        Some(120000),
+    )
+    .unwrap();
+    assert!(e.drain_actions().next().is_none());
+}
+#[test]
+fn successful_poll_releases_the_last_context_slot_for_a_genuine_peer() {
+    let mut e = boot(false);
+    for id in 1000..1255 {
+        hold_peer(&mut e, id, NOW);
+    }
+    validate_peers(&mut e, NOW, 255);
+    let a = subscribe(&mut e, NOW, Interval::M1);
+    let (token, _) = preparation(&a);
+    let r = release(&mut e, NOW, token);
+    expect_last_after(&mut e, NOW + 1., &r, KLINES);
+    validate_peers(&mut e, NOW + 1., 255);
+    hold_peer(&mut e, 2000, NOW + 1.);
+    validate_peers(&mut e, NOW + 1., 256);
+}
+#[test]
+fn strict_preparation_refusal_releases_the_last_context_slot_for_a_genuine_peer() {
+    let mut e = boot(false);
+    for id in 1000..1255 {
+        hold_peer(&mut e, id, NOW);
+    }
+    validate_peers(&mut e, NOW, 255);
+    let a = subscribe(&mut e, NOW, Interval::M1);
+    let (token, _) = preparation(&a);
+    e.http_preparation_failed(
+        NOW + 1.,
+        token,
+        Error::Invalid,
+        VenueError::new("fixture last-credit refusal").kind(ErrorKind::Unsupported),
+    );
+    let out = e.drain_actions().collect::<Vec<_>>();
+    no_http(&out);
+    no_bind(&out);
+    no_candles(&mut e, NOW + 1.);
+    timer(&out, NOW + 3001.);
+    validate_peers(&mut e, NOW + 1., 255);
+    hold_peer(&mut e, 2000, NOW + 1.);
+    validate_peers(&mut e, NOW + 1., 256);
+}

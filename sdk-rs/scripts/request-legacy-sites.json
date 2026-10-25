@@ -533,8 +533,6 @@
     "d04c9c210338abd029de862338a9937ff19e38f96097cbfba0efb4bbf2728caf": 1
   },
   "venues/paradex/src/public.rs": {
-    "094a464645386463fbc12779495700591cd0fc4570d7257183d9928fc29b60f5": 1,
-    "f4ff4cf72ac7033d5f05a949c3bebdf69840234f87e83ff025e63bdb7d7999b6": 1,
     "d5350d6b7eb9bb6083de59c2c42f6ec4de997ccda8d28c277c0803969d9f2a77": 1
   },
   "venues/paradex/src/trading.rs": {

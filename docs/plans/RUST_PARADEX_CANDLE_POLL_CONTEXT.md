@@ -1,6 +1,6 @@
 # Paradex subscription candle poll Read custody
 
-Status: local plan only; originals and source await scope/native/API review.
+Status: managed source local; original controls pass, source/size/CI gates pending.
 Owner: codex-9czdjh. Proposed native reviewer: codex-hcmq3f.
 Base: actual `9b05c9ac4528212b3c681f0f45f5980192b4342e` (#2102 landed).
 
@@ -250,3 +250,48 @@ A preliminary fixture counter included eight startup items; it was corrected to
 measure the per-request delta before this checkpoint. That fixture failure is
 not a custody RED. No source, Cargo, existing fixture or inventory change is part
 of these originals. The target is reviewed independently before source.
+
+## Original review and slot-release source pins
+
+hcmq3f gave bounded originals/native/caller/API-shape CLEAR at
+`13f6a5dc13aac8910362984ad027d083fdc96bdb`, confirming the 17 RED / 13 GREEN
+receipt and exact incoming preservation. Keep all 30 original bodies unchanged.
+Add source-stage controls which actually consume the last freed Background slot
+after success and after strict typed refusal; validating retained peer roots alone
+does not demonstrate release. A new genuine 256th Command Read must fit under the
+remaining 255 peers, without retiring a second peer.
+
+`retired_generation_preparation_cannot_bind` is specifically an expiry-plus-
+replacement control: the old preparation returns at its 20s equality, while the
+replacement is still live. It does not prove or promise cancellation before that
+deadline when a subscriber leaves. Keep the no-immediate-unsubscribe-cancel scope.
+
+## Local source checkpoint
+
+All 30 original bodies remain a byte-exact prefix and pass. Two appended controls
+admit a genuine 256th Command Read after poll success and after typed refusal
+under 255 retained peers, proving retirement. The three focused targets execute
+103 passing tests (public 41, unchanged command candles 30, poll 32).
+
+One existing public reference-count fixture previously required no new action
+from a stale success. Managing its physical HTTP now clears exactly one deadline
+timer; the fixture explicitly requires that sole ClearTimer and no other action.
+This is a disclosed managed-cleanup expectation change, not a relaxed native
+publication/fallback assertion. No other existing fixture or financial assertion
+changed. The initial source compile required copying the already-Copy interval
+into the queued-discovery snapshot before the new mutable call; no native order
+or queued value changed.
+
+The canonical scanner leaves exactly the conservative discovery fingerprint:
+public 3 -> 1, family 39 -> 37. The manifest raw delta deletes only the two named
+singleton lines; all foreign bytes/order are retained. No Cargo/profile/shared
+engine, host, private account/history or signing source change. Paired optimized
+Paradex and combined builds remain held behind the nonce owner's measurement;
+no size, source-review, push, CI or readiness claim at this local checkpoint.
+
+Scoped Paradex crate: **313 PASS / 0 failed / 0 ignored**, including all 32 poll
+controls and every existing target. Strict all-target crate Clippy, formatting
+and diff checks pass with CARGO_BUILD_JOBS=4. Source contains only the poll
+Background custody plus narrow typed/error guards; default malformed-stream
+forwarding remains engine-released failure handling, rather than demanding a
+DATA grant on a timed-out physical context.

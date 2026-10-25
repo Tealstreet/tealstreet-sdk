@@ -8241,3 +8241,33 @@ Unissued admission/queue pressure backs off the first page without recursive
 page admission. Private startup, midpoint progression, cursor geometry, quoted
 HTTP data and signing/key selection retain their native behavior. No command or
 financial outcome is created by this Background Read adoption.
+
+## Paradex subscription candle poll custody
+
+Each native poll route now owns a fresh unsigned Background Read with Never
+retry. **NEW:** its 20s admission-to-expiry bound includes Prepare, Bind, route
+waits and transport; native packets had no explicit timeout. A released klines
+failure can still use the single TradingView fallback under a fresh 20s child,
+with original captured bounds/revision. There is no 20s cap across both routes.
+Unreleased admission/queue/preparation refusal is strict for that cycle: no
+recursive fallback, one finite current-generation completion + 3s timer. New
+refusal warnings use REQUEST_FAILED and the typed engine error's message;
+preparation fields stay intact through the callback. Polls emit no command or
+money outcome and add no auth evidence. A nonfinite Event clock queues no HTTP,
+Prepare, Bind, poll timer or recovery action.
+
+**NEW:** stale subscription generations cannot decode, publish, warn, fall back,
+schedule or recover. An outstanding Context remains bounded and retires on its
+callback/expiry; final unsubscribe does not promise immediate HTTP cancellation.
+A trade revision change suppresses only candle publication: current-generation
+cleanup, completion + 3s polling and native strict-20s/inclusive-30s trade-channel
+recovery remain. Duplicate reference counts and overlapping native startup
+cycles gain no new coalescing. Row order, last-row/volume merge, both native
+wires and decoders, command candle ownership, socket behavior and outer
+public-response account.start delegation are preserved.
+
+Inventory removes exactly two raw poll senders: public 3 -> 1, family 39 -> 37.
+The remaining conservative discovery macro witness is retained. The old stale
+response fixture's no-action count is explicitly superseded by exactly one
+ClearTimer for the retired managed HTTP deadline; no native publication,
+fallback, recovery, notice or poll timer is permitted in that suffix.

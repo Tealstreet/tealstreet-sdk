@@ -1989,3 +1989,19 @@ Optimized Node/web before 1,331,336 and after 1,339,096 bytes (+7,760) fit the u
 1,343,488-byte venue budget, using wasm-bindgen 0.2.129 and Binaryen 132. Profiles,
 budgets and build inputs are unchanged. Local controls/measurements do not certify
 replay, CPU, memory, final integration or CI readiness.
+
+## Paradex subscription candle poll controls
+
+The unchanged-source target executes 30 controls: 17 assertion RED / 13 GREEN,
+0 ignored. All 30 bodies remain a byte-exact prefix after adoption. Two additive
+source controls consume a genuine 256th Command Read under 255 live peers after
+poll success and typed preparation refusal, proving the final slot is released.
+Capacity recovery and previously gated Prepare/Bind/deadline/refusal suffixes now
+execute. Native last-row financial values, both hosts, interval routing, fallback,
+revision cleanup and recovery threshold equality are pinned.
+
+One existing public fixture now expects exactly one ClearTimer after stale DATA,
+reflecting retirement of the managed HTTP deadline; its native no-publication /
+no-next-poll behavior remains. Scoped execution/strict checks and paired
+Paradex/combined sizes are recorded in the poll plan before freeze. No budget or
+profile change, CPU/CI or native-family private adoption inference follows.
