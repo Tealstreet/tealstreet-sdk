@@ -17,11 +17,37 @@ that collection cut; adoption adds roughly 6.2 KB. Bybit already uses opt-z.
 No threshold, profile, feature omission required by native behavior, or allowance
 increase is proposed here.
 
-Raw attribution supplied by 55ao7t/overseer: std/alloc about +38 KB, generic
-engine about +19 KB, Lifecycle 8.8 KB, Driver 6 KB, and host-inlined socket paths
-about +16 KB. These buckets/symbols are not an additive shipped-byte budget:
-inlining and collection ownership overlap, and Binaryen changes reachability.
-The baseline and adoption comparisons above are distinct experiments.
+**Attribution correction:** the earlier host-inlined +16 KB bucket and
+ActionOut/managed-HTTP host growth were artifacts, not socket code. The earlier
+normalizer stripped only sixteen-digit crate hashes; safe_cex_wasm's fifteen-
+digit hash made unchanged host symbols appear removed and re-added. Supersede
+that attribution and the initial coarse std/alloc and engine bucket figures.
+
+55ao7t's corrected paired raw diff on actual #2127 landing 89a469d42b8 compares
+Bybit without managed-sockets with feature-linked Bybit, **without adoption**.
+It normalizes hashes with [0-9a-f]{8,16} and excludes the function-names section
+(about +68.5 KB of names). Reported raw code+data growth is about 56.6 KB:
+
+| Corrected raw bucket | Approximate growth |
+| --- | ---: |
+| engine::engine | 14.1 KB |
+| socket_lifecycle | 11.0 KB |
+| alloc::collections | 6.8 KB |
+| socket_driver | 6.2 KB |
+| alloc::vec | 6.1 KB |
+| core::slice | 5.6 KB |
+| core::iter | 1.7 KB |
+| .rodata | 1.6 KB |
+| socket::Supervisor | 0.7 KB |
+| Bybit venue | 98 B |
+| safe_cex_wasm host | **0 net** |
+
+ActionOut::serialize is 4,005 raw bytes on both sides. WasmEngine's command,
+new and hosted-signing functions are identical. These rounded buckets are
+attribution, not additive shipped savings; remaining symbols and shared callers
+also matter. Shipped bytes in that exact pair are **1,397,322 -> 1,444,400**,
+**+47,078 B** for linking the feature alone. This is distinct from the earlier
+adoption prototype and the c6a5 (a) experiment below; do not mix their absolutes.
 
 The earlier unconfirmed five-row baseline table was superseded pending a fresh
 pair. 55ao7t now reports the following **fresh paired** builds on exact c6a5
@@ -50,10 +76,11 @@ baseline; measure the prototype on the exact common composition/toolchain.
 | --- | --- | --- |
 | #2127 sorted Vec map/set | 55ao7t; LANDED 89a469d42b8, tree 1d1261cb055 | Reported paired Bybit-ms -8,086 B, OKX -3,258, Phemex -8,079, Bitget 0, combined -11,350; not additional savings against a prototype already based on #2127. |
 | (a) outline socket ingress/drain | 55ao7t; experiment completed and dropped, no PR | Fresh paired zero shipped bytes in all five compositions; not a remaining candidate. |
-| (c) field-driven ActionOut encoder | 55ao7t; hosts/wasm/src/lib.rs | Unmeasured; preserve exact serialization. |
-| (d) shared replacement block | 55ao7t; replace_with_repair helper | Unmeasured; no replacement semantic change. |
+| (c) field-driven ActionOut encoder | Dropped as a socket lever by overseer | Corrected attribution shows zero host/encoder socket growth. General family shrink would be a separate assignment. |
+| (d) shared replacement block | 55ao7t; #2140, fe7lgm CLEAR, run 40198956107 in progress when reported | replace_with_repair helper; no replacement semantic change or final CI claim here. |
+| Unstable sort for unique interest entries | 55ao7t; approved measurement, local only | Map::from_entries stable sort adds roughly 5 KB raw slice code; caller duplicate refusal must remain ahead of construction. No shipped saving claimed yet. |
 | S1 generic Cx/Io extraction | dazzy3, local d826748665e on refactor/rust-engine-plan-core-s1 | 101 P-free methods into CoreCx/CoreIo/CoreRef; dyn PendingDiscard for one removal. Only socket_epoch moves from engine_socket.rs. |
-| Further socket structure | This design; implementation unassigned | Driver generic methods, Engine socket dispatch, continuations and storage are outside S1 and 55ao7t's levers. |
+| Further socket structure | This design; implementation unassigned | Driver generic methods, Engine socket dispatch, continuations and storage are outside S1 and 55ao7t's retained levers. |
 
 S1 on tip 76f1 reports combined -170,424 B, but single-family mean **+1,436 B**,
 Bybit **+1,945 B**, Bitget -321 B. One Pending type already has one instantiation.
@@ -63,7 +90,8 @@ missing 44 KB and must not be credited as a per-family saving.
 Current source already marks process_pending_socket_work, socket_refused,
 socket_effects, take/restore_socket_driver, Driver::finish_ingress and
 Driver::finish_control inline-never. Do not propose those
-existing attributes as new cuts. Keep (c), (d) separate from this design;
+existing attributes as new cuts. Keep (d) and the unique-entry sort experiment
+separate from this design; (a) is null and (c) is no longer a socket lever;
 none of the estimates below may be added to their results without a union build.
 
 ## Proposed structure, in measurement order
@@ -207,9 +235,10 @@ Bitget is expected to have zero socket-only change, verified on every real pair.
 | Explicit NONE non-adopter declaration | Up to the roughly 47 KB linked-feature overhead for a genuine non-adopter; **zero credit for adopted Bybit** | Not applicable to adopters | 0 | No promise; other adopters retain core |
 
 Dazzy3's earlier rough -10 to -20 KB family hypothesis included (a)/(c)/(d)
-and queue consolidation. It overlapped this table and preceded (a)'s zero-byte
-result; it is not an active combined savings estimate. Remaining (c)/(d) plus
-storage cuts need their own measured union. These ranges do not establish
+and queue consolidation. It overlapped this table, preceded (a)'s zero-byte
+result and relied on the now-corrected host attribution. It is not an active
+combined savings estimate. Remaining (d), unique-entry sorting and storage cuts
+need their own measured union. No host-encoder reduction is credited to sockets. These ranges do not establish
 recovery of 44 KB. If paired union results remain short, report
 the remaining bytes and code reachability before proposing another structural
 change; Bybit stays parked and its allowance/CPU bounds remain unchanged.
@@ -247,7 +276,9 @@ No source, tests, Cargo, build scripts, allowances, inventory or CI changed here
 Coordination: dazzy3 confirmed the socket methods above are outside S1 and supplied
 its adverse single-family evidence; 55ao7t confirmed ownership of (a)/(c)/(d)
 and corrected the duplicated (a) measurement, then supplied the fresh null
-result recorded above. #2127 is landed; (d), then (c), remain 55ao7t's work.
+result recorded above. Corrected post-#2127 raw attribution supersedes the old
+host buckets: (c) is dropped as a socket lever. #2127 is landed; (d) and the
+approved unique-entry unstable-sort measurement remain 55ao7t's work.
 Dazzy3 CLEARed ec4b70f0316 as a
 plan; 55ao7t reported no blockers, with baseline provenance, remaining handoff
 collections and the (d) cut-line corrections incorporated here. Pending-based
