@@ -1005,6 +1005,16 @@ gated head. Shipped bytes:
 | bitget | 1,362,767 | 1,361,861 | -906 | 1,363,968 |
 | bybit | 1,336,606 | 1,336,691 | +85 | 1,343,488 |
 
+Re-measured the same way on tip `9b05c9ac452` (#2102's size stack), where the
+interim own-delta rule no longer applies:
+
+| Build | Tip | Head | Delta | Budget |
+| --- | --- | --- | --- | --- |
+| combined | 13,837,708 | 13,838,700 | +992 | 14,155,776 |
+| asterdex | 1,320,874 | 1,320,867 | -7 | 1,343,488 |
+| bitget | 1,292,885 | 1,293,084 | +199 | 1,363,968 |
+| bybit | 1,313,276 | 1,313,361 | +85 | 1,343,488 |
+
 The off-mode refusal itself costs about 66 bytes on bybit. The PR run's wasm
 families job is the full every-family evidence. Results: OFF lib 876 and
 session_bearer_off 1/2; ON lib 1092, session_bearer 61, barrier 14; clippy
