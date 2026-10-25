@@ -252,6 +252,34 @@ mod tests {
         }
     }
 
+    /// "A Secondary slot never signs a write or a login" holds by construction.
+    #[cfg(feature = "dispatch-nonce")]
+    #[test]
+    fn nonce_selection_keeps_writes_and_logins_primary_while_reads_use_the_secondary() {
+        let identity = |name: &str| {
+            crate::signing::Identity::new(
+                crate::signing::KeyRef(format!("{name}-key")),
+                Some(crate::signing::KeyRef(format!("{name}-sign"))),
+            )
+            .with_stable_id(Some(format!("{name}/account")))
+        };
+        let both = Slots::new(
+            Some(identity("primary")),
+            Some(identity("secondary")),
+            SlotPolicy::default(),
+        );
+        let (read, ..) = both.select(Read { scope: BALANCE }).unwrap();
+        assert_eq!(
+            read.slot(),
+            CredentialSlot::Secondary,
+            "the secondary serves reads"
+        );
+        for role in [Mutation, SessionAuth] {
+            let (selection, ..) = both.select_with_nonce(role, &crate::nonce::KRAKEN).unwrap();
+            assert_eq!(selection.slot(), CredentialSlot::Primary);
+        }
+    }
+
     #[test]
     fn without_a_read_key_only_primary_only_reads_declare_an_egress() {
         let only = slots(true, false, SlotPolicy::default());

@@ -58,9 +58,12 @@ single-venue build other than the adopters stay byte-identical.
      - Read and PrimaryRead go with an `Operation::Read` Context;
      - Mutation goes with a Mutation Context;
      - SessionAuth goes with an `Owner::Session` Context;
-     - a Session-owned Context takes only SessionAuth;
-     - a Secondary slot never goes with Mutation or SessionAuth.
-     On the nonce path the claim's role is checked the same way.
+     - a Session-owned Context takes only SessionAuth.
+     On the nonce path the claim's role is checked the same way. "A Secondary
+     slot never signs Mutation or SessionAuth" is not an admission check: it
+     holds by construction, because `Slots::select` (and `select_with_nonce`)
+     maps both roles to Primary. A credential-selection control pins that with
+     a reads-serving secondary configured (m26ps4).
    - `Credential` and `Policy` are unchanged (venues build them as literals).
 3. **Accessor.** `Engine::sign_meta(task: RequestId) -> Option<SignMeta>`.
 
@@ -144,11 +147,17 @@ with `dispatch-nonce`):
 10. A nonce recipe on plain `request_signed_managed` reports the claim's role.
     A nonce stale repair gives a new task with the same managed Attempt and the
     same raw deadline and role, and the old task is `None`.
-11. Each role/Context mismatch (Read role on a Mutation Context, Mutation on a
-    Read Context, SessionAuth on a Command Context, Mutation on a Session
-    Context, Secondary with Mutation) is `Invalid` with nothing queued, on the
-    selected path and, where reachable, the nonce path.
-12. Canceled and expired tasks are `None`.
+11. Each role/Context mismatch (Read role on a Mutation Context, a Secondary
+    Read role on a Mutation Context, Mutation on a Read Context, SessionAuth on
+    a Command Context, Mutation on a Session Context) is `Invalid` with nothing
+    queued, on the selected path and, where reachable, the nonce path.
+12. Canceled (a real preparation failure) and expired (the real deadline
+    timer) tasks are `None`, with no further work for the old task.
+13. The stale and completion controls echo each task's exact `Action::Sign`
+    receipt, re-sign 5 s after Prepare inside the 20 s window, and pin a
+    fractional raw deadline and non-empty read scopes (9czdjh).
+14. GREEN: `select` and `select_with_nonce` return Primary for Mutation and
+    SessionAuth while a reads-serving secondary selects Secondary for Read.
 
 ## Gates
 

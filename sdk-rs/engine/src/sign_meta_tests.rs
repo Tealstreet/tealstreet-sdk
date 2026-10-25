@@ -221,7 +221,7 @@ mod sign_meta {
     }
     fn place(e: &mut Engine<Signer>) {
         e.handle_command(
-            1.,
+            1.25,
             Command::PlaceOrders {
                 command: 7,
                 orders: vec![
@@ -250,8 +250,8 @@ mod sign_meta {
             })
             .expect("real Prepare")
     }
-    /// Prepare, then return the host-visible signing task.
-    fn sign_task(e: &mut Engine<Signer>, token: Preparation, now: f64) -> RequestId {
+    /// Prepare, then return the host-visible signing task and its exact receipt.
+    fn sign_task(e: &mut Engine<Signer>, token: Preparation, now: f64) -> (RequestId, Receipt) {
         e.http_prepared(
             now,
             token,
@@ -262,46 +262,44 @@ mod sign_meta {
         );
         sign_action(&drain(e)).expect("host-visible Action::Sign")
     }
-    fn sign_action(actions: &[Action]) -> Option<RequestId> {
+    type Receipt = crate::signing::SignReceipt;
+    fn sign_action(actions: &[Action]) -> Option<(RequestId, Receipt)> {
         actions.iter().find_map(|a| match a {
             // Exhaustive: the host-facing Sign shape is pinned unchanged.
             Action::Sign {
                 attempt,
                 work,
                 timeout_ms,
-            } if !work.operations.is_empty() && *timeout_ms > 0 => Some(*attempt),
+            } if !work.operations.is_empty() && *timeout_ms > 0 => Some((*attempt, work.receipt)),
             _ => None,
         })
     }
-    fn signed(e: &mut Engine<Signer>, task: RequestId, now: f64) -> Vec<Action> {
+    fn no_sign(actions: &[Action]) -> bool {
+        sign_action(actions).is_none()
+    }
+    /// The host's answer, echoing the task's exact receipt.
+    fn signed<V: Venue>(e: &mut Engine<V>, task: RequestId, receipt: Receipt, now: f64) -> Vec<Action> {
         e.handle(
             now,
             Event::Signed {
                 attempt: task,
-                result: Ok(crate::signing::SignResult::new(
-                    vec![b"value".to_vec()],
-                    crate::signing::SignReceipt {
-                        nonce: None,
-                        stamp_ms: Some(now),
-                        expiry_ms: Some(now + 3_000.),
-                    },
-                )),
+                result: Ok(crate::signing::SignResult::new(vec![b"value".to_vec()], receipt)),
             },
         );
-        drain(e)
+        e.drain_actions().collect()
     }
-    fn mutation() -> (Engine<Signer>, Preparation, RequestId) {
+    fn mutation() -> (Engine<Signer>, Preparation, RequestId, Receipt) {
         let mut e = engine(Signer::default());
         drain(&mut e);
         place(&mut e);
         let token = preparation(&drain(&mut e));
-        let task = sign_task(&mut e, token, 1.5);
-        (e, token, task)
+        let (task, receipt) = sign_task(&mut e, token, 1.5);
+        (e, token, task, receipt)
     }
 
     #[test]
     fn a_selected_managed_mutation_reports_its_attempt_deadline_slot_and_role() {
-        let (e, token, task) = mutation();
+        let (e, token, task, _) = mutation();
         let context = e.venue.context.clone().unwrap();
         assert_eq!(
             e.sign_meta(task),
@@ -321,7 +319,7 @@ mod sign_meta {
     fn a_primary_read_keeps_its_exact_reason_and_scope() {
         let role = CredentialRole::PrimaryRead {
             reason: PrimaryReason::PostUnknownOrderRead,
-            scope: None,
+            scope: Some(crate::AccountReadScope::Orders),
         };
         let mut e = engine(Signer {
             mode: Mode::Read,
@@ -330,7 +328,7 @@ mod sign_meta {
             ..Default::default()
         });
         let token = preparation(&drain(&mut e));
-        let task = sign_task(&mut e, token, 0.5);
+        let (task, _) = sign_task(&mut e, token, 0.5);
         let meta = e.sign_meta(task);
         assert!(meta.is_some(), "selected read metadata");
         let meta = meta.unwrap();
@@ -339,7 +337,9 @@ mod sign_meta {
     }
     #[test]
     fn a_secondary_read_reports_the_secondary_slot() {
-        let role = CredentialRole::Read { scope: None };
+        let role = CredentialRole::Read {
+            scope: Some(crate::AccountReadScope::Balance),
+        };
         let mut e = engine(Signer {
             mode: Mode::Read,
             role: Some(role),
@@ -347,7 +347,7 @@ mod sign_meta {
             ..Default::default()
         });
         let token = preparation(&drain(&mut e));
-        let task = sign_task(&mut e, token, 0.5);
+        let (task, _) = sign_task(&mut e, token, 0.5);
         let meta = e.sign_meta(task);
         assert!(meta.is_some(), "selected read metadata");
         let meta = meta.unwrap();
@@ -361,7 +361,7 @@ mod sign_meta {
             ..Default::default()
         });
         let token = preparation(&drain(&mut e));
-        let task = sign_task(&mut e, token, 0.5);
+        let (task, _) = sign_task(&mut e, token, 0.5);
         let generation = match e.venue.session.as_ref().unwrap().owner() {
             crate::request_context::Owner::Session { generation } => generation,
             other => panic!("fixture session owner {other:?}"),
@@ -374,15 +374,18 @@ mod sign_meta {
     }
     #[test]
     fn a_stale_re_sign_moves_metadata_to_the_new_task_with_the_same_owner_and_deadline() {
-        let (mut e, _, first) = mutation();
+        let (mut e, _, first, receipt) = mutation();
         let before = e.sign_meta(first);
         assert!(before.is_some(), "first task metadata");
         let before = before.unwrap();
-        // Past the step's 3 s freshness: the engine re-prepares a new task.
-        let actions = signed(&mut e, first, 5.);
+        assert_eq!(before.deadline_ms, 20_001.25, "raw unrounded deadline");
+        // 5 s after Prepare, past the step's 3 000 ms freshness and inside the
+        // 20 s window: the engine re-prepares under a new task.
+        let actions = signed(&mut e, first, receipt, 5_000.);
         let token = preparation(&actions);
-        let second = sign_task(&mut e, token, 5.5);
+        let (second, renewed) = sign_task(&mut e, token, 5_000.5);
         assert_ne!(first, second);
+        assert_ne!(receipt, renewed, "a new real receipt");
         assert_eq!(e.sign_meta(first), None, "a superseded task has no metadata");
         let after = e.sign_meta(second);
         assert!(after.is_some(), "current task metadata");
@@ -391,9 +394,23 @@ mod sign_meta {
     }
     #[test]
     fn a_completed_task_has_no_metadata() {
-        let (mut e, _, task) = mutation();
+        let (mut e, _, task, receipt) = mutation();
         assert!(e.sign_meta(task).is_some(), "prepared task metadata");
-        signed(&mut e, task, 2.);
+        let actions = signed(&mut e, task, receipt, 2.);
+        assert!(no_sign(&actions), "a valid completion, not a repair");
+        assert_eq!(e.sign_meta(task), None);
+    }
+    #[test]
+    fn a_canceled_preparation_has_no_metadata_and_no_further_work() {
+        let (mut e, token, task, _) = mutation();
+        assert!(e.sign_meta(task).is_some(), "live task metadata");
+        e.http_preparation_failed(
+            2.,
+            token,
+            Error::Invalid,
+            VenueError::new("provider refused").kind(crate::ErrorKind::Internal),
+        );
+        assert!(no_sign(&drain(&mut e)), "no work for the old task");
         assert_eq!(e.sign_meta(task), None);
     }
     #[test]
@@ -405,7 +422,7 @@ mod sign_meta {
         drain(&mut plain);
         place(&mut plain);
         let token = preparation(&drain(&mut plain));
-        let task = sign_task(&mut plain, token, 1.5);
+        let (task, _) = sign_task(&mut plain, token, 1.5);
         assert_eq!(plain.sign_meta(task), None, "no captured role");
         assert_eq!(plain.sign_meta(RequestId(u64::MAX >> 12)), None);
         let mut unmanaged = engine(Signer {
@@ -413,7 +430,7 @@ mod sign_meta {
             role: Some(CredentialRole::Mutation),
             ..Default::default()
         });
-        let task = sign_action(&drain(&mut unmanaged)).expect("non-managed Sign");
+        let (task, _) = sign_action(&drain(&mut unmanaged)).expect("non-managed Sign");
         assert_eq!(unmanaged.sign_meta(task), None, "no owner: v1 only");
     }
     #[test]
@@ -445,7 +462,7 @@ mod sign_meta {
         }));
     }
     #[test]
-    fn a_secondary_slot_cannot_sign_a_mutation() {
+    fn a_secondary_read_role_cannot_sign_a_mutation_context() {
         refused(engine(Signer {
             role: Some(CredentialRole::Read { scope: None }),
             secondary: true,
@@ -495,7 +512,7 @@ mod sign_meta {
             },
         );
         actions.extend(drain(&mut e));
-        let task = sign_action(&actions).expect("host-visible Action::Sign");
+        let (task, _) = sign_action(&actions).expect("host-visible Action::Sign");
         assert!(e.sign_meta(task).is_some(), "live task metadata");
         let deadline = e.venue.context.as_ref().unwrap().deadline();
         let timer = actions
@@ -686,7 +703,7 @@ mod sign_meta {
             .unwrap();
             e
         }
-        fn task(e: &mut Engine<Nonced>, token: Preparation, now: f64) -> RequestId {
+        fn task(e: &mut Engine<Nonced>, token: Preparation, now: f64) -> (RequestId, Receipt) {
             e.http_prepared(
                 now,
                 token,
@@ -708,7 +725,7 @@ mod sign_meta {
         fn a_nonce_recipe_reports_its_claims_role_and_keeps_it_across_stale_repair() {
             let mut e = nonced(Path::Plain);
             let token = preparation(&e.drain_actions().collect::<Vec<_>>());
-            let first = task(&mut e, token, 1.5);
+            let (first, receipt) = task(&mut e, token, 1.5);
             let before = e.sign_meta(first);
             assert!(before.is_some(), "claim role recorded automatically");
             let before = before.unwrap();
@@ -720,23 +737,15 @@ mod sign_meta {
                     generation: token.attempt().generation,
                 }
             );
-            // Past freshness: the repair reserves a new nonce under a new task.
-            e.handle(
-                5.,
-                Event::Signed {
-                    attempt: first,
-                    result: Ok(crate::signing::SignResult::new(
-                        vec![b"value".to_vec()],
-                        crate::signing::SignReceipt {
-                            nonce: e.sign_meta(first).map(|_| 0),
-                            stamp_ms: Some(5.),
-                            expiry_ms: None,
-                        },
-                    )),
-                },
+            // Past freshness, inside the window: the repair reserves a new
+            // nonce under a new task. The host echoes the exact receipt.
+            let actions = signed(&mut e, first, receipt, 5_000.);
+            let token = preparation(&actions);
+            let (second, renewed) = task(&mut e, token, 5_000.5);
+            assert!(
+                renewed.nonce > receipt.nonce,
+                "a new, higher real nonce, never one derived from metadata"
             );
-            let token = preparation(&e.drain_actions().collect::<Vec<_>>());
-            let second = task(&mut e, token, 5.5);
             assert_ne!(first, second);
             assert_eq!(e.sign_meta(first), None);
             let after = e.sign_meta(second);
