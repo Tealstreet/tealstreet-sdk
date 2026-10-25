@@ -8581,6 +8581,36 @@ catalogue repair, live ticker overlay, private-startup eligibility and retry
 jitter/counters stay unchanged. Account, trading, signing and socket production
 remain outside this adoption. Only the shared public-seed raw HTTP site is pruned.
 
+## Asymmetric key typing for Sign (P4 follow-up)
+
+`LocalSigner` now types signing keys by trusted declaration
+(`RUST_SIGNER_PREREQUISITES.md`, "Asymmetric key typing (P4 follow-up)").
+Caller-visible changes:
+
+- **Asymmetric `Sign` needs a declaration.** `Ed25519`, `Es256`,
+  `Secp256k1Digest`, `StarkDigest` and `SchnorrDigest` sign only on a ref
+  whose `signing_algorithm` matches. Anything else is `InvalidRequest`, in
+  every build and before any arm runs. A declared ref never MACs. Undeclared
+  refs keep MAC behaviour exactly, and role refs are unchanged.
+- **Who declares.**
+  - AsterDEX V3 wallets are declared from the explicit resolved
+    `asterdex.api_version` on both setup paths; V1 declares nothing.
+  - Backpack's seed is declared `ed25519` by its registry setup.
+  - `schnorrDigest` is now a declarable `signingAlgorithm` (codegen and TS),
+    for Lighter.
+  - Callers who build a `LocalSigner` directly for an asymmetric family must
+    pass a policy declaring it (`from_setup_with_policy`), or use
+    `LocalSigner::insert_declared`. That call is atomic and refuses MAC
+    algorithms and role refs. It never retypes a ref an aliased secondary
+    shares with the primary (rotating within the same algorithm is fine).
+    A plain `insert` on such a ref keeps its algorithm. Unshared refs may be
+    retyped.
+- **`local_signer_from_json_for_mode(venue, input, &EngineOptions)`.** The
+  third argument is now the parsed account options, not a bool. Public intent
+  derives from them (`signer_setup_public_data_only`), and so do resolved
+  setup facts such as AsterDEX's version. `local_signer_from_json_for`, which
+  has no options, refines nothing.
+
 ## AsterDEX managed public reads and clock
 
 AsterDEX's public reads and its `/time` clock now go through engine read

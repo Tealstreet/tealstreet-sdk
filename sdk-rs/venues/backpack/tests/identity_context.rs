@@ -286,15 +286,18 @@ fn live() -> Driver {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
     let secret = STANDARD.encode([8u8; 32]);
-    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-        primary: None,
-        secondary: Some(LocalIdentity {
-            key: Secret::new("read-key".into()),
-            secret: Secret::new(secret.clone()),
-            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
-            ..Default::default()
-        }),
-    })
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: None,
+            secondary: Some(LocalIdentity {
+                key: Secret::new("read-key".into()),
+                secret: Secret::new(secret.clone()),
+                secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+                ..Default::default()
+            }),
+        },
+        ed25519_seeds(),
+    )
     .unwrap();
     let mut e = engine(Options {
         read_identity: identities.secondary.clone(),
@@ -523,4 +526,16 @@ fn genuine_short_caller_wait_cannot_publish_identity_at_expiry() {
         "the genuine caller bound is exclusive at its expiry"
     );
     unchanged(&e);
+}
+
+/// Backpack seeds are Ed25519 keys, declared as the provider builder does.
+fn ed25519_seeds() -> safe_cex_engine::signing::CredentialSetupPolicy {
+    let ed25519 = Some(safe_cex_engine::signing::IdentitySetupPolicy {
+        signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+        ..Default::default()
+    });
+    safe_cex_engine::signing::CredentialSetupPolicy {
+        primary: ed25519,
+        secondary: ed25519,
+    }
 }
