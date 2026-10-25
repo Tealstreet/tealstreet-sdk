@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Paradex command candle Read custody | Local source; scoped controls pass, source review pending | Before changing command candle fallback, caller deadlines or its two terminal inventory prunes. | [RUST_PARADEX_CANDLE_COMMAND_CONTEXT.md](RUST_PARADEX_CANDLE_COMMAND_CONTEXT.md) |
 | Request-context inventory precision | Implementation and rebaseline; review pending | Before changing `check-request-context.py`, its manifests, or what counts as a legacy `Cx` call. | [RUST_REQUEST_CONTEXT_PRECISION.md](RUST_REQUEST_CONTEXT_PRECISION.md) |
 | BreakoutProp options refusal (unreachable arm deleted) | One-site prune; engine pre-entry refusal pinned by a control | Before changing BreakoutProp options handling or its capability flags. | [RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md](RUST_BREAKOUTPROP_OPTIONS_LOCAL_CONTEXT.md) |
 | BingX local candle refusal custody | Draft conversion; source review/CI pending | Before replacing the three synchronous candle refusals; remote/key-selection paths excluded. | [RUST_BINGX_LOCAL_CANDLE_CONTEXT.md](RUST_BINGX_LOCAL_CANDLE_CONTEXT.md) |
@@ -298,6 +299,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Plan session wait | Slot, retry and Preflight (N7) park implemented; N7 review pending (zs5e83, m26ps4) | Before a command Plan or retained Preflight leg must wait for a venue login Session. | [RUST_PLAN_SESSION_WAIT.md](RUST_PLAN_SESSION_WAIT.md) |
 | Streamed serial Plan | REDs frozen; source next | Before an ordered write funnel (OKX, Bitget) streams calls with no declared count. | [RUST_PLAN_SERIAL_STREAM.md](RUST_PLAN_SERIAL_STREAM.md) |
 | Condition wait | Plan; ruling and review before REDs | Before a venue parks a Preflight or serial Plan on a venue condition with its own bound (Bitget detection). | [RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md) |
+| Command decoder size | Plan and wire-compat harness; review before source | Before replacing the internally tagged CommandIn decoder with a borrowed tag scan. | [RUST_COMMAND_DECODER.md](RUST_COMMAND_DECODER.md) |
 | BingX FetchAccount selected Read | Plan; original REDs next | Before replacing identity entry/failure custody with the frozen shared selected-read helper or pruning its two terminals. | [RUST_BINGX_IDENTITY_CONTEXT.md](RUST_BINGX_IDENTITY_CONTEXT.md) |
 | Local fixed-setting Mutation success | Plan; API review before original REDs | Before replacing keyless KuCoin Spot and Bitrue fixed-setting successes with genuine-entry local completion. | [RUST_LOCAL_SETTING_SUCCESS.md](RUST_LOCAL_SETTING_SUCCESS.md) |
 | [Bitget CPU option-B follow-up](RUST_BITGET_CPU_OPTION_B_FOLLOWUP.md) | Shared second-runner CPU remeasurement, two-run mean and fail-closed certification; enabled for every CPU-gated suite, with unchanged tapes and thresholds. |
@@ -418,3 +420,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Orderly public seed custody | Plan and original REDs; source held on actual 5b | Before managing the shared unsigned markets/tickers seed sender and its per-leg timeout. | [RUST_ORDERLY_PUBLIC_SEED_CONTEXT.md](RUST_ORDERLY_PUBLIC_SEED_CONTEXT.md) |
 | Crypto.com full private dispatch and RequestContext | Plan and original controls; shared source after 5b | Before removing the final eight private witnesses and raw signing funnel. | [RUST_CRYPTOCOM_PRIVATE_REQUEST_CONTEXT.md](RUST_CRYPTOCOM_PRIVATE_REQUEST_CONTEXT.md) |
 | Metadata/settings freshness | Opt-in isolation implemented; source/OFF-row reviews and local size gates clear; fresh CI pending | Before metadata read coalescing, per-symbol write fences, atomic publication or family feature/size isolation. | [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md) |
+
+| TxFlow unsigned account-setting poll custody | Managed source reviewed; scoped controls pass, fresh CI pending | Before managing activeAssetData; preserve private routing, native cadence and financial revision fences. | [RUST_TXFLOW_ACCOUNT_SETTING_CONTEXT.md](RUST_TXFLOW_ACCOUNT_SETTING_CONTEXT.md) |
+
+| Polymarket Gamma catalogue custody | Managed adoption; original and pressure controls pass, review/CI pending | Before adopting unsigned streamed catalogue pages; retain atomic cursor walk and native retry. | [RUST_POLYMARKET_CATALOGUE_CONTEXT.md](RUST_POLYMARKET_CATALOGUE_CONTEXT.md) |
