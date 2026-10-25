@@ -175,8 +175,13 @@ W1's serial interim. Every other job keeps W1's serial Plan unchanged.
   steps are exactly the two hedged leverage legs (`job.join`) admits a declared
   Plan instead of a serial one:
   `admit_plan_with_barriers(preflight, [StepBound{wait_ms: 0, calls: [long,
-short]}], PlanPolicy{independent_calls: false, Mutation, Primary, pacing: None,
-retry: Never}, [MutationBarrierBound{step: 0}])`. Each call is
+short]}], PlanPolicy{independent_calls: true, Mutation, Primary, pacing: None,
+retry: Never}, [MutationBarrierBound{step: 0}])`. `independent_calls` is set on
+  this job only (hcmq3f P2): with it off, the engine seals an unproven 408 or
+  5xx at once (`independent_plan_failure` is None) and retires the sibling,
+  which cannot keep native's wait-both join. The engine test
+  `default_plan_keeps_direct_abort_without_a_native_failure_callback` pins
+  exactly that. Every other job keeps W1's serial Plan. Each call is
   `CallBound{timeout_ms: 20_000, attempts: 1, retry_window: FreshAttempt,
 after_refusal: []}`.
 - **Issue.** From entry custody, take the Plan's two slots in declaration order
@@ -200,22 +205,29 @@ after_refusal: []}`.
   Accepted projects to outcome None, as native's `succeeded` edit did.
 - **Retirement.** Unchanged from W1: the engine-sealed join moves to
   `retired`, restores, reconciles and refreshes the account.
-- **Join versus seal (dazzy3 P1, fe7lgm P1, 4yjlw0 2).** A released 408 or 5xx
-  is an engine unproven seal. It emits the root terminal at once (Unknown,
-  with prior facts kept) and retires the sibling, so the venue learns of it
-  through retirement, not through a second answer. The join never waits for
-  the other leg after a seal, and that leg's later answer is ignored.
-  - Accepted first, then the 503: Unknown, long's fact kept, no commit.
-  - The 503 first: Unknown at the 503, before the sibling answers. That
-    earlier terminal is a caller-visible timing difference from native's
-    join, which waited for both answers. The late Accepted adds no commit and
-    no second terminal.
-  - In both orders the account refresh comes through the W1 retirement path.
+- **Join versus seal (dazzy3 P1, fe7lgm P1, 4yjlw0 2, hcmq3f P2).** Under
+  `independent_calls`, an engine-recorded failed delivery (released 408 or 5xx,
+  transport or deadline) reaches the venue as typed `on_http_failed`. The venue
+  records no second fact, calls `finish_plan_failed_call` for that slot, and
+  counts the leg settled. Normal DATA records one Setting fact, then
+  `finish_plan_call`. Each slot settles once; a duplicate response or failure
+  changes nothing. The final `fail_plan` or `done_plan` comes only after both
+  slots settle, unless the engine already hard-retired the owner (root expiry),
+  which goes through W1's retirement path and advances the FIFO.
+  - Either order of one 503 and one Accepted: after the first answer there is
+    no terminal and no refresh, and the sibling is still current. After the
+    second, there is exactly one Unknown terminal, no commit and one account
+    refresh. That matches native's wait-both join, so there's no timing
+    difference to record.
+- Pre-commit group abort (a preparation, signing or deadline failure before the
+  barrier opens) goes through the shared NotSent owner-retirement path and never
+  waits for a second callback that cannot come.
 - **Which error is reported (fe7lgm P3, 4yjlw0 1).** Native's `finish_join`
   overwrites `joined.error` on each failing leg, so it reports the LAST failing
   leg's text, kept Unknown if any leg was unproven. W2 keeps that rule (the
-  last failing fact by arrival). The outcome and kind are the journal's
-  projection, never the venue's.
+  last failing fact by arrival), per fe7lgm's "pin whichever native does".
+  hcmq3f's review wrote "first error"; that point is returned to hcmq3f. The
+  outcome and kind are the journal's projection, never the venue's.
 - **Outcome of one refusal plus one Accepted (fe7lgm P2).** This must be the
   journal's projection through `fail_plan`. The engine's `failure_projection`
   gives None when a leg was released, none is uncertain and not all were
@@ -312,10 +324,11 @@ W2 (each fails on W1's serial interim):
 - one documented refusal plus one Accepted gives outcome None, no commit and the
   account refresh;
 - both refused gives Rejected;
-- 503 ordering: a 503 first and then a late Accepted, and an Accepted first
-  and then a 503, each give exactly one Unknown terminal, no commit, and the
-  account refresh. In the 503-first order the terminal exists before the
-  sibling answers;
+- 503 ordering (hcmq3f P2): in both orders, after the first answer there is no
+  terminal and no refresh and the sibling is still current; after the second,
+  exactly one Unknown terminal, no commit and one refresh;
+- a duplicate response or a duplicate failure for a settled leg changes
+  nothing, and root expiry retires the job once and the FIFO proceeds;
 - reported error: a short refusal before long's Accepted, and after it, gives
   outcome None and the refusal's text and kind. Both refused, in both orders,
   reports the last refusal's text;

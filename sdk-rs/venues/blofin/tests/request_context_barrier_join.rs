@@ -257,39 +257,46 @@ fn both_accepted_commit_once() {
     assert_eq!(leverage(&h), 30.0);
 }
 
-/// dazzy3 P1: a released 5xx seals the Plan; the other leg's answer, in
-/// either order, adds no second terminal and no commit.
+/// hcmq3f P2: under `independent_calls` the join waits for both legs in either
+/// order; the first answer leaves no terminal, no refresh and a current sibling.
 fn one_503_and_one_accepted(first_503: bool) {
     let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
     set_leverage(&mut h);
     let (long, short) = legs(&h);
     let (long, short) = (long.expect("long"), short.expect("short"));
     let positions = count(&h, "account/positions");
-    if first_503 {
-        answer(&mut h, &long, 503, "Service Unavailable");
-        // The unproven seal is the terminal; the sibling has not answered.
-        assert_eq!(terminals(&h, 7).len(), 1, "terminal at the 503");
-        answer(&mut h, &short, 200, OK);
+    let (first, second) = if first_503 {
+        ((&long, 503, "Service Unavailable"), (&short, 200, OK))
     } else {
-        answer(&mut h, &short, 200, OK);
-        answer(&mut h, &long, 503, "Service Unavailable");
-    }
+        ((&short, 200, OK), (&long, 503, "Service Unavailable"))
+    };
+    answer(&mut h, first.0, first.1, first.2);
+    assert!(
+        terminals(&h, 7).is_empty(),
+        "no terminal before both settle"
+    );
+    assert_eq!(
+        count(&h, "account/positions"),
+        positions,
+        "no early refresh"
+    );
+    answer(&mut h, second.0, second.1, second.2);
     assert_eq!(failure(&h, 7).outcome, Some(Outcome::Unknown));
     assert_ne!(leverage(&h), 30.0);
     assert_eq!(
         count(&h, "account/positions"),
         positions + 1,
-        "native join refresh"
+        "one join refresh"
     );
 }
 
 #[test]
-fn a_503_then_a_late_accepted_is_one_unknown_without_commit() {
+fn a_503_then_an_accepted_waits_for_both_and_is_one_unknown() {
     one_503_and_one_accepted(true);
 }
 
 #[test]
-fn an_accepted_then_a_503_is_one_unknown_without_commit() {
+fn an_accepted_then_a_503_waits_for_both_and_is_one_unknown() {
     one_503_and_one_accepted(false);
 }
 
@@ -492,4 +499,65 @@ fn a_leverage_that_becomes_hedged_while_queued_takes_the_barrier() {
     );
     let (long, short) = legs(&h);
     assert!(long.is_some() && short.is_some(), "{:?}", h.pending);
+}
+
+#[test]
+fn a_duplicate_answer_for_a_settled_leg_changes_nothing() {
+    let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
+    set_leverage(&mut h);
+    let (long, short) = legs(&h);
+    let (long, short) = (long.expect("long"), short.expect("short"));
+    answer(&mut h, &long, 503, "Service Unavailable");
+    answer(&mut h, &long, 200, OK);
+    event(
+        &mut h,
+        Event::HttpFailed {
+            request: long.id,
+            error: "late duplicate",
+        },
+    );
+    assert!(
+        terminals(&h, 7).is_empty(),
+        "long settled once; short still current"
+    );
+    answer(&mut h, &short, 200, OK);
+    assert_eq!(failure(&h, 7).outcome, Some(Outcome::Unknown));
+    answer(&mut h, &short, 200, OK);
+    assert_eq!(terminals(&h, 7).len(), 1);
+    assert_ne!(leverage(&h), 30.0);
+}
+
+#[test]
+fn root_expiry_retires_the_join_once_and_the_fifo_proceeds() {
+    let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
+    set_leverage(&mut h);
+    event(
+        &mut h,
+        Event::Command(Command::SetMarginType {
+            command: 8,
+            symbol: "BTCUSDT".into(),
+            isolated: false,
+        }),
+    );
+    let deadline = h.now + 20_000.0;
+    let timers: Vec<_> = h
+        .actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms <= deadline && *timer != h.tick => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in timers {
+        h.now = h.now.max(at);
+        event(&mut h, Event::TimerFired { timer });
+    }
+    assert_eq!(terminals(&h, 7).len(), 1);
+    assert_eq!(
+        count(&h, "set-margin-mode"),
+        1,
+        "the queued command proceeds"
+    );
 }
