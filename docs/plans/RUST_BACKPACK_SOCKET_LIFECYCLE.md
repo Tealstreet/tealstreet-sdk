@@ -1,11 +1,13 @@
 # Backpack public and private socket lifecycle
 
-Status: plan/API and original controls CLEAR; source proposal under review.
+Status: plan/originals and bounded runtime SOURCE/API CLEAR; applied for scoped
+qualification. Further fixture review, paired sizes and frozen CI remain gates.
 Original baseline is actual landing tip34999f973f9ac9581cd4342d5cf23e4fa06c0142,
 which includes account-read #2139 at3f2c90991c26cbf639a5001095bea962c9e1e295.
 Owner codex-mxb4mq; native/API reviewer codex-hcmq3f. Runtime, Cargo features, inventories and CI remain unchanged at the original
 control checkpoint. Overseer approved BOTH native lifecycles. hcmq3f cleared
-plan/API ccfdd72 and originals3d541; exact source application remains gated.
+plan/API ccfdd72, originals3d541 and exact runtime c5e5; source is applied after
+that CLEAR, with qualification evidence and remaining fixture gates below.
 
 ## Approved slice and inventory
 
@@ -284,3 +286,42 @@ Unchanged-runtime target37 compiles/runs12workingGREEN/25intendedassertRED,
 and exact-fit/one-over suffixes remain gated until source execution. hcm has
 separately CLEARed pure fixture-forwarding8f89dd21. Source remains UNAPPLIED
 until exact cadence/frame delta CLEAR; paired size and qualification gates stay.
+
+The exact c5e5 cadence/frame runtime and forwarding8f89 are now applied after
+hcm SOURCE/API CLEAR. Lifecycle37/37 passes, including every former gated
+capacity, nonfinite, cleanup and early/equality/late suffix. Merged native
+baseline account35/supervision11 passed before application; initial qualification
+then exposed fixture readiness assumptions, not compile or infrastructure errors.
+
+The native fixture adaptation is narrow: five previously unopened private-data
+tests get a real first Opened at their existing1000 clock and drain the resulting
+real preparation/signing work. Supervision explicitly drives only its captured
+current zero-delay snapshot handoff after the actual subscription release.
+Only two repeated-reread fixtures supersede their observation clock/socket:
+one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit and
+unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without_repair.
+Their duplicate Opened events become genuine Close, captured retry at its
+advertised time, new physical socket, one Opened, and same-time prepared read
+responses. Payload financial timestamps and every existing assertion stay exact.
+Unrelated ready/ws/reply helpers, fixtures and clocks remain unchanged. hcm's
+fixture-direction ruling permits this necessary clock adaptation; exact artifact
+preservation review and successful native rerun remain gates.
+
+The additional account-read overlap sites native_live_stale_positions_keep_next_without_publication,
+balance_overlap (including its254-peer fanout consumer), and
+native_balance_older_than_committed_never_wins_after_two_more_discards now use
+real first-open/settled refreshes before the original poll, then genuine reconnect
+for the newer snapshot. Relative fill/discard/acceptance spacing follows that
+actual opening. fill() derives wire E from the observation clock, so those generated
+E values and observation-derived Store timestamps shift with it. This necessary
+fixture-clock supersession is approved; raw financial literals, prices, amounts,
+fill counts, all assertion predicates and production reducers remain unchanged.
+
+Two further fixture-only clock supersessions are approved: public
+rest_query_success_failure_and_stream_resubscription_have_independent_state
+resubscribes and answers its held query/new seed at3 after its existing removal
+at3; unrelated subscribe() callers retain0. Trading
+reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements
+replaces duplicate Opened2100 with an actual Close/retry-at/new socket/Open and
+prepared read at that observation time. ORDER.createdAt1000, last_update1000,
+all financial assertions and the original cancellation request/ACK are unchanged.

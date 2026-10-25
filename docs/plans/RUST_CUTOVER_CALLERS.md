@@ -8741,3 +8741,58 @@ until their own slices.
 Follow-up (engine owner): a shared ReadFailure backoff. The engine grants read
 resends but has no delay policy, so AsterDEX keeps its own 1/2/3 s timer, as
 other families do. That timer goes away when the shared backoff lands.
+
+### Backpack public and private sockets
+
+Both native connections use engine feed/epoch custody with the existing 20s idle,
+5s ping, 1s–16s backoff and 10s connect policy. Private authentication remains the
+native freshly signed SUBSCRIBE, then PING and loaded-Orders-guarded account
+reads, once per real Opened epoch; there is no ACK wait or managed-signing claim.
+Public 4002 retains native half-RTT publication, and current malformed text still
+refreshes AnyText liveness. Account HTTP reducers, fill/poll and repair behavior
+stay outside this lifecycle adoption.
+
+Public additions/removals commit their local demand only with the exact interest
+proposal. Refusal rolls back that change and preserves committed peers. Each
+book snapshot waits for its own genuine depth-interest handoff; surviving keys
+keep current rebased wake custody when another key is removed. Native book
+recovery requests the same handoff before its existing bounded HTTP observation.
+
+NEW resource-pressure policy: unresolved current-epoch interests may make at most
+three capacity observations, 1s apart, after the initial refusal. Only Capacity
+schedules this work. A captured early timer rearms to its original not-before
+without consuming an observation; equality or later delivery consumes one.
+Commits do not reset cooldown/exhaustion, and resolved demand cancels its exact
+timer. Nonfinite time schedules no work. This grants no HTTP, authentication or
+socket retry authority. The native encoder refuses serialized frames above
+65,536 bytes as Capacity before shared emission. Engine Ready replay failures
+retain the inherited fail-closed feed disposition; they are separate from
+recoverable venue proposals. Both legacy socket sites and their family row are
+removed together; no generic engine, signer or credential migration is included.
+
+Native fixture qualification replaces duplicate Opened reread triggers only in
+one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit and
+unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without_repair
+with real reconnects and replies at their captured advertised observation times.
+This supersedes only those fixture clocks/socket IDs; payload timestamps and
+all native financial/assertion predicates remain unchanged. Other fixture clocks
+and shared startup/message/reply helpers remain intact.
+
+The additional account-read overlap sites native_live_stale_positions_keep_next_without_publication,
+balance_overlap (including its254-peer fanout consumer), and
+native_balance_older_than_committed_never_wins_after_two_more_discards now use
+real first-open/settled refreshes before the original poll, then genuine reconnect
+for the newer snapshot. Relative fill/discard/acceptance spacing follows that
+actual opening. fill() derives wire E from the observation clock, so those generated
+E values and observation-derived Store timestamps shift with it. This necessary
+fixture-clock supersession is approved; raw financial literals, prices, amounts,
+fill counts, all assertion predicates and production reducers remain unchanged.
+
+Two further fixture-only clock supersessions are approved: public
+rest_query_success_failure_and_stream_resubscription_have_independent_state
+resubscribes and answers its held query/new seed at3 after its existing removal
+at3; unrelated subscribe() callers retain0. Trading
+reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements
+replaces duplicate Opened2100 with an actual Close/retry-at/new socket/Open and
+prepared read at that observation time. ORDER.createdAt1000, last_update1000,
+all financial assertions and the original cancellation request/ACK are unchanged.

@@ -53,6 +53,8 @@ fn required_amend_preparation_refusal_restores_only_unchanged_cancel_state() {
     use safe_cex_engine::request_context::{Error, HttpAction};
     for stream_fill in [false, true] {
         let (mut e, socket) = ready_orders(&format!("[{ORDER}]"));
+        e.handle(1000.0, Event::WsOpened { socket });
+        safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
         e.handle(
             2000.,
             Event::Command(Command::AmendOrder {
