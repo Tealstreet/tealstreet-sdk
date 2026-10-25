@@ -228,6 +228,7 @@ impl WeexFutures {
         };
         let queued = cx.request_managed_with_headers(
             leg,
+            None,
             Method::Get,
             format!("{}{}?{query}", paths::REST, paths::DEPTH),
             &[],

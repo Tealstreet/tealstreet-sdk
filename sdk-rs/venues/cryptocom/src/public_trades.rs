@@ -203,6 +203,7 @@ impl Cryptocom {
         trade.leg = Some(leg.clone());
         match cx.request_managed(
             leg,
+            None,
             Method::Get,
             url,
             None,

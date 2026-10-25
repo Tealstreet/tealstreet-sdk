@@ -17,6 +17,7 @@ use paths::Paths;
 pub use paths::{Category, Endpoints, Variant};
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::{CredentialRole, Selection, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -30,6 +31,17 @@ use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
+
+/// What a signed request's key is for; `BybitLinear::select_key` turns it
+/// into an engine `Slots::select` role.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KeyUse {
+    /// Any configured key, the read key first.
+    Read,
+    /// The read key only beside a primary (option Greeks, ordinary Plan reads).
+    AccountRead,
+    Write,
+}
 
 /// Bybit answers pings on public and private sockets alike; a socket silent
 /// for the idle timeout is treated as dead, since a half-open socket never closes.
@@ -665,17 +677,10 @@ impl BybitLinear {
         signed: bool,
         timeout_ms: u32,
     ) -> Option<safe_cex_engine::request_context::Policy> {
-        use safe_cex_engine::request_context::{Credential, Policy, RetryPolicy};
+        use safe_cex_engine::request_context::{Policy, RetryPolicy};
         let credential = if signed {
-            let (slot, identity) = match (&self.read_credentials, &self.credentials) {
-                (Some(read), _) => (safe_cex_engine::CredentialSlot::Secondary, read),
-                (None, Some(primary)) => (safe_cex_engine::CredentialSlot::Primary, primary),
-                (None, None) => return None,
-            };
-            Some(Credential {
-                slot,
-                reference: identity.credential.clone(),
-            })
+            let (selection, identity) = self.select_key(KeyUse::Read)?;
+            Some(selection.credential(identity.credential.clone()))
         } else {
             None
         };
@@ -732,11 +737,33 @@ impl BybitLinear {
         &self,
         method: Method,
     ) -> Option<&safe_cex_engine::signing::Identity> {
-        if method == Method::Get {
-            self.read_credentials.as_ref().or(self.credentials.as_ref())
+        let key = if method == Method::Get {
+            KeyUse::Read
         } else {
-            self.credentials.as_ref()
-        }
+            KeyUse::Write
+        };
+        self.select_key(key).map(|(_, identity)| identity)
+    }
+
+    /// The only key choice: the engine's slot rules over Bybit's two keys.
+    pub(crate) fn select_key(
+        &self,
+        key: KeyUse,
+    ) -> Option<(Selection, &safe_cex_engine::signing::Identity)> {
+        let policy = SlotPolicy {
+            secondary_requires_primary: key == KeyUse::AccountRead,
+        };
+        let role = match key {
+            KeyUse::Read | KeyUse::AccountRead => CredentialRole::Read { scope: None },
+            KeyUse::Write => CredentialRole::Mutation,
+        };
+        let slots = Slots::new(
+            self.credentials.as_ref(),
+            self.read_credentials.as_ref(),
+            policy,
+        );
+        let (selection, identity) = slots.select(role).ok()?;
+        Some((selection, *identity))
     }
 
     pub(crate) fn queue_read(
@@ -768,6 +795,7 @@ impl BybitLinear {
         let queued = match signing {
             Some(signing) => cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 url,
                 None,
@@ -776,6 +804,7 @@ impl BybitLinear {
             ),
             None => cx.request_managed_with_headers(
                 context,
+                None,
                 Method::Get,
                 url,
                 &[("X-Referer", sign::BROKER_ID)],
@@ -1102,7 +1131,11 @@ impl BybitLinear {
         let Some(origin) = self.environment_probe_origin else {
             return false;
         };
-        let Some(credentials) = self.read_credentials.as_ref().or(self.credentials.as_ref()) else {
+        // Owned, so the probe can mark its attempt while it holds the key.
+        let Some((selection, credentials)) = self
+            .select_key(KeyUse::Read)
+            .map(|(selection, identity)| (selection, identity.clone()))
+        else {
             return false;
         };
         if credentials.validate().is_err() {
@@ -1111,20 +1144,12 @@ impl BybitLinear {
         let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window)
             .with_header_policy(self.signing_policy.header_policy());
         self.environment_probe_attempted = true;
-        use safe_cex_engine::request_context::{Credential, Operation, Policy, RetryPolicy, Scope};
-        let slot = if self.read_credentials.is_some() {
-            safe_cex_engine::CredentialSlot::Secondary
-        } else {
-            safe_cex_engine::CredentialSlot::Primary
-        };
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
         let Ok(context) = cx.http_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
-                credential: Some(Credential {
-                    slot,
-                    reference: credentials.credential.clone(),
-                }),
+                credential: Some(selection.credential(credentials.credential.clone())),
                 timeout_ms: ENVIRONMENT_PROBE_TIMEOUT_MS,
                 pacing: None,
                 retry: RetryPolicy::Never,
@@ -1141,6 +1166,7 @@ impl BybitLinear {
         if cx
             .request_signed_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 format!("{origin}/v5/user/query-api"),
                 None,

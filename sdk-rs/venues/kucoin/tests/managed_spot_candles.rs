@@ -678,6 +678,7 @@ impl Venue for Capacity {
                         assert!(
                             cx.request_managed(
                                 root.clone(),
+                                None,
                                 Method::Get,
                                 "https://fixture.invalid/parked".into(),
                                 None,
