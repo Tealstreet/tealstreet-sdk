@@ -107,24 +107,28 @@ barrier refusal unchanged. A first generic original demanding its admission
 was a mistaken geometry probe; its log is preserved as superseded evidence,
 not an accepted Kraken RED. The corrected baseline tests preserve that refusal.
 
-The actual shared gap is late immutable provenance: NonceUnscheduled's pure
-callback has no current Store parameter. An old venue snapshot cannot validate
-the original at the final Cancel Claim. Pin an engine-owned immutable release
-view/guard carrier with fe7lgm and uufub4: current Store plus the exact retained
-pending/owner/release, validated before nonce-floor commit, never a mutable
-scheduler callback or callback under the nonce lock. Native response ACK and
-execution-during-cancel suppression then gate a later Place under the same
-command/journal. No simultaneous cancel/place egress or no-op protection.
+fe7lgm's engine disposition uses the existing streamed serial Plan, with no new
+release hook, Store-view API or prepare-all seam. From the command's genuine
+WriteAfterReads Preflight, admit_serial_plan admits Cancel with no declared
+barriers. Leave NonceUnscheduled's nonempty-barrier refusal in admit_plan_root
+unchanged. A venue snapshot never substitutes for the current Store.
 
-Local API proposal: dispatch-nonce-gated HttpReleaseView borrows the exact
-Context, release (including Attempt) and current engine Store, with no mutation
-or send authority. A defaulted object-safe Venue::validate_nonce_http_release
-receives pending plus this view. Engine fills it only for a genuine retained
-nonce Claim, after owner/Session validity and before pure admission/floor commit.
-No cached Store snapshot or arbitrary host view is accepted. First declare the
-read-only API and compile a late-Store-change RED; wire Claim only after core
-review. Existing HttpRelease registration, ordinary/OFF paths and parallel
-barrier refusal stay unchanged. Source size gates still cover all four artifacts.
+In Cancel's own validated DATA delivery, record its native write fact first;
+validate_serial_continuation requires that leg's recorded answer. Recheck the
+original filled/price/amount/kind/trigger provenance against the current Store,
+preserving the native account removal/tombstone ordering. Only an Accepted
+cancel with unchanged provenance and no observed execution admits Place through
+continue_serial_plan under the same command and journal. Rejected/Unknown,
+changed provenance or execution suppresses Place: finish_plan_call then
+fail_plan, retaining the cancel fact and any accepted cancel ID. Never rewrite
+an accepted Cancel to NotSent. The engine API intentionally supports serial
+continuation after some definitive rejections; Kraken's protective consumer
+must therefore enforce its stricter Accepted-only rule explicitly.
+
+Each call obtains its own reservation from the dispatcher after the previous
+call's DATA. Place's nonce must exceed Cancel's released nonce. Each call keeps
+its independent eight-credit repair budget; no write resend is added. The
+uncommitted release-view declaration was removed without being wired or run.
 
 The separate future parallel nonce-group seam stays out of this cut. It needs
 complete member/subject/evolving-floor validation before any commit. Existing
@@ -137,12 +141,15 @@ callback after the first change. A stale member retains exact Attempts, windows
 and each eight-credit nonce ledger, cancels its exact preparation, and causes
 whole-group revalidation. This requires a separate shared-owner-reviewed plan.
 
-Required serial controls: original provenance changes while provider/Prepare/
-Bind is parked; final Claim must release no Cancel and advance no floor/journal;
-unchanged provenance releases Cancel alone; replacement stays absent until the
-real native cancel ACK; full execution while cancel is in flight suppresses
-replacement; post-cancel replacement refusal keeps truthful journal and native
-caller projection. Keep all 26 landed adoption originals and old wire controls.
+Required serial controls: replacement admission outside Cancel's exact DATA
+refuses, including a delivery without a recorded fact; Rejected/Unknown cancel
+seals with its truthful fact and no replacement; provenance change or execution
+during cancellation suppresses replacement; only after the real Accepted cancel
+ACK does Place reserve its higher nonce; no write resend. Post-cancel replacement
+refusal keeps truthful journal and native caller projection. Shared-fixture
+controls prove engine custody only, not native adoption. Keep all 26 landed
+adoption originals and old wire controls; native consumer REDs/source remain
+separate gates.
 
 ## Local delivery gates
 

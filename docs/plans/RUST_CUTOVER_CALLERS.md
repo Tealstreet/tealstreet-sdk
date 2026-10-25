@@ -8826,5 +8826,7 @@ per-item Rejected/NotSent truth is retained; caller-visible errors deliberately
 keep native outcome=None after progress, accepted IDs or protective cancel.
 Source controls must assert journal truth and caller projection independently.
 Native cancel/ACK/replacement ordering remains serial; this grants no parallel
-nonce barrier authority. Namespace takeover and shared current-Store release
-guard still require bounded owner review; hosted adapter and activation stay held.
+nonce barrier authority. Namespace takeover still requires bounded owner review. Protective amendment
+uses the existing serial Plan and its cancel DATA/fact custody, with current
+Store provenance checked before replacement; no new release hook or parallel
+barrier authority is introduced. Hosted adapter and activation stay held.
