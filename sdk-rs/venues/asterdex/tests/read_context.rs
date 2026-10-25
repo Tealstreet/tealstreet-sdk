@@ -214,7 +214,16 @@ fn stream(engine: &mut Engine<AsterDex>, now: f64, request: &HttpRequest, body: 
 
 /// Startup finished: clock, discovery and seeds answered.
 fn ready() -> Engine<AsterDex> {
+    ready_with_clock().0
+}
+
+/// Also returns the clock's 300 s refresh timer.
+fn ready_with_clock() -> (Engine<AsterDex>, safe_cex_engine::TimerId) {
     let (mut engine, mut output) = synced();
+    let (refresh, _) = timers(&output)
+        .into_iter()
+        .find(|(_, at)| *at == START + 300_000.0)
+        .expect("the clock's refresh timer");
     for _ in 0..8 {
         let Some(request) = output.requests.first().cloned() else {
             break;
@@ -233,7 +242,7 @@ fn ready() -> Engine<AsterDex> {
         };
         output.requests.extend(next.requests);
     }
-    engine
+    (engine, refresh)
 }
 
 fn command(engine: &mut Engine<AsterDex>, now: f64, command: Command) -> Output {
@@ -412,4 +421,45 @@ fn a_negative_public_envelope_fails_the_candle_command_once() {
     assert_eq!(results.len(), 1);
     assert!(results[0].is_err());
     assert_eq!(failed.legacy, 0);
+}
+
+#[test]
+fn a_clock_admission_refusal_retries_the_same_attempt_without_consuming_it() {
+    let (mut engine, refresh) = ready_with_clock();
+    let now = START + 300_000.0;
+    // Live command reads hold every managed slot.
+    let mut held = Vec::new();
+    for id in 0..256 {
+        engine.handle(
+            now,
+            Event::Command(Command::FetchCandles {
+                command: 1_000 + id,
+                symbol: "BTCUSDT".into(),
+                interval: safe_cex_engine::model::Interval::M1,
+                limit: Some(1),
+                from_ms: None,
+                to_ms: None,
+            }),
+        );
+        held.extend(drain(&mut engine, now).requests);
+    }
+    engine.handle(now, Event::TimerFired { timer: refresh });
+    let refused = drain(&mut engine, now);
+    assert!(refused.requests.iter().all(|r| !r.url.ends_with("/time")));
+    assert!(
+        !refused.actions.iter().any(|action| matches!(
+            action,
+            Action::Notice(Notice::Event(event)) if event.message.contains("time sync failed")
+        )),
+        "a refused admission is not a failed attempt"
+    );
+    let (retry, at) = *timers(&refused).first().expect("a short admission retry");
+    assert!(at - now <= 1_000.0, "{}", at - now);
+    // Freeing one slot lets the same first attempt go direct.
+    let freed = stream(&mut engine, now, &held[0], KLINES);
+    assert!(freed.legacy == 0);
+    engine.handle(at, Event::TimerFired { timer: retry });
+    let resumed = drain(&mut engine, at);
+    let clock = find(&resumed, "/time");
+    assert_eq!(clock.route, Some(RequestRoute::Direct));
 }

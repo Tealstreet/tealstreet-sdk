@@ -87,6 +87,7 @@ mod tests {
     }
     fn receipt(expiry_ms: f64) -> SignReceipt {
         SignReceipt {
+            nonce: None,
             stamp_ms: None,
             expiry_ms: Some(expiry_ms),
         }
@@ -138,6 +139,7 @@ mod tests {
     fn stamped(stamp_ms: Option<f64>) -> SigningRelease {
         SigningRelease::new(
             SignReceipt {
+                nonce: None,
                 stamp_ms,
                 expiry_ms: None,
             },

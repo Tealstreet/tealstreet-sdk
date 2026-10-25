@@ -152,6 +152,37 @@ pub struct Orderly {
     history: history::HistoryState,
     funding: funding::FundingState,
 }
+fn complete_local_read(cx: &mut Cx<'_, Pending>, result: Result<String, VenueError>) {
+    match cx.command_wait() {
+        Some(safe_cex_engine::CommandWait::Remaining(_)) => {}
+        Some(safe_cex_engine::CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Read);
+            return;
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Read);
+            return;
+        }
+    }
+    let Ok(context) = cx.admit_http_command(Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }) else {
+        return;
+    };
+    match result {
+        Ok(result) => {
+            let _ = cx.done_context(&context, result);
+        }
+        Err(error) => {
+            let _ = cx.fail_context(&context, error);
+        }
+    }
+}
+
 impl Orderly {
     fn seed_context(pending: &Pending) -> Option<(Seed, &Context)> {
         match pending {
@@ -1247,7 +1278,7 @@ impl Venue for Orderly {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval,
                 limit,
@@ -1255,11 +1286,11 @@ impl Venue for Orderly {
                 to_ms,
             } => {
                 let Some(native) = self.native.get(&symbol) else {
-                    cx.fail(command, "Orderly unknown symbol");
+                    complete_local_read(cx, Err("Orderly unknown symbol".into()));
                     return;
                 };
                 if !interval_valid(interval) {
-                    cx.fail(command, interval.unsupported("Orderly"));
+                    complete_local_read(cx, Err(interval.unsupported("Orderly").into()));
                     return;
                 }
                 if limit == Some(0)
@@ -1269,7 +1300,7 @@ impl Venue for Orderly {
                         .any(|n| !n.is_finite() || !(0.0..=253402300799000.0).contains(&n))
                     || from_ms.zip(to_ms).is_some_and(|(a, b)| a > b)
                 {
-                    cx.fail(command, "Orderly invalid candle parameters");
+                    complete_local_read(cx, Err("Orderly invalid candle parameters".into()));
                     return;
                 }
                 if from_ms.is_some() || to_ms.is_some() {
@@ -1277,7 +1308,7 @@ impl Venue for Orderly {
                     let from = from_ms.unwrap_or(0.0);
                     let to = to_ms.unwrap_or(cx.now);
                     if from > to {
-                        cx.done(command, "[]".into());
+                        complete_local_read(cx, Ok("[]".into()));
                         return;
                     }
                     // Both bounds are mandatory on the native history endpoint.
@@ -1339,12 +1370,9 @@ impl Venue for Orderly {
             }
             Command::SetTickerSymbols { .. } => {}
             Command::Query { command, query } => self.history_command(cx, command, query),
-            Command::FetchAccount { command } => {
+            Command::FetchAccount { command: _ } => {
                 let result: Result<String, String> = self.account_identity();
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
-                }
+                complete_local_read(cx, result.map_err(Into::into));
             }
             trade => self.trade_command(cx, trade),
         }
