@@ -8843,3 +8843,13 @@ nonce barrier authority. Namespace takeover still requires bounded owner review.
 uses the existing serial Plan and its cancel DATA/fact custody, with current
 Store provenance checked before replacement; no new release hook or parallel
 barrier authority is introduced. Hosted adapter and activation stay held.
+
+The takeover census covers issuers we own: SDK nonce core, native/WASM hosts,
+and tealstreet-next worker/process generations. Their epoch-bound fence and
+joined work-lease retirement precede atomic import of both reserved and
+released maxima, including the target's state. No proof of remote nonexecution
+is required. Another application using the same Kraken API key is outside the
+census, with native-equivalent exposure: an invalid-nonce collision is a
+definitive pre-execution refusal, not permission to replay the write. Unknown
+external issuers therefore do not block takeover. This ruling grants no hosted
+activation; the working exact-nonce adapter remains a prerequisite.

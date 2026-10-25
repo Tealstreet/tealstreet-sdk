@@ -21,7 +21,7 @@ custody, no public raw nonce seed and no callback under the nonce-store lock:
 1. Before taking any live issuer over, its owning hosts must register every
    legacy issuer and retain a physical-work lease for every prepared/reserved,
    queued, signer-pending and sent request. Registration and reservation share
-   the nonce-store fence. Existing untracked issuers are a hard refusal, never
+   the nonce-store fence. An untracked owned issuer refuses takeover, never
    an assumed deployment drain. Native and browser/WASM host coverage are separate.
 2. A trusted construction/host transition coordinator closes issuance for the
    complete legacy namespace set. Old signer instances and new signer creation
@@ -34,7 +34,7 @@ custody, no public raw nonce seed and no callback under the nonce-store lock:
    validates the full source set and target subject, imports max of all reserved
    maxima AND max of all released maxima (including existing target state),
    permanently retires legacy issuance and opens dispatch takeover. Missing or
-   stale evidence, unknown issuers, overflow, storage failure or target mismatch
+   stale evidence, unknown owned issuers, overflow, storage failure or target mismatch
    leaves every floor/phase unchanged. No partial source import. Existing raw
    reservations conservatively count toward the release floor if exact release
    tracking did not exist, but only after real host drain; they cannot be ignored.
@@ -46,12 +46,23 @@ trusted account subject before the transition; no secret-derived dispatch subjec
 Equal API keys with different secrets require a single account transition over
 ALL legacy digests for that subject, never one digest at a time. A source key
 cannot be assigned to two targets. Separate processes/WASM memories require an
-explicit coordinator and full issuer census; an in-process unit test proves no
+explicit coordinator and full owned-issuer census; an in-process unit test proves no
 cross-process rollout. Production remains closed until that host proof exists.
+
+The overseer's takeover ruling limits that census to issuers we own: the SDK
+nonce core, native and WASM hosts, and tealstreet-next worker/process generations.
+Use of the same API key by an external application is outside this census,
+with the same exposure as native. Kraken's invalid-nonce rejection is a
+definitive pre-execution refusal; an external nonce collision is classified as
+that refusal, never evidence to replay a write. Unknown external issuers are
+not a takeover hold. Joined local resource retirement does not prove remote
+nonexecution, and no such proof is required. Import both maxima so the new
+issuer starts strictly above every observed nonce. SDK source comes first,
+then the tealstreet-next master PR; activation still waits on the hosted adapter.
 
 Controls first: reservation racing fence; existing signer after fence; stale epoch;
 held provider/Prepare/Bind and live sent request block takeover; cancel without
-resource retirement still blocks; unknown issuer refuses; two source digests and
+resource retirement still blocks; unknown owned issuer refuses; two source digests and
 an existing higher target merge both maxima atomically; reverse release cannot
 move the floor down; UINT64_MAX stays exhausted; unrelated subjects are unchanged;
 failed takeover changes no maxima; no new dispatch reservation before takeover.
@@ -75,7 +86,7 @@ for takeover, while their existing unfenced legacy requests continue unchanged.
 The next shared source review must bind issuer registration and every reservation
 to a host generation, with an exact request-to-lease handoff through preparation,
 signing and transport retirement. Lost or merely dropped leases must keep the
-fence closed. Old raw entry use without that handoff marks the generation
+fence closed. Owned old raw entry use without that handoff marks the generation
 untracked; it never mints drain evidence. Host completion proves resource drain
 only, retaining uncertain venue outcomes. Only a complete reviewed generation
 can produce the opaque fenced/drained capability consumed by the atomic import;
