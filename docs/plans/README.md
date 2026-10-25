@@ -462,3 +462,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Serial Session resend | Originals CLEAR; source review and paired size gates pending | Before a serial call's one authentication resend waits for a login round trip (GRVT code 1000). | [RUST_SERIAL_SESSION_RESEND.md](RUST_SERIAL_SESSION_RESEND.md) |
 | Backpack public and private socket lifecycle | Source/API/native CLEAR; D1 local gates and combined size green; family record/CI pending | Before adopting Backpack feed epochs/interests, native private auth lifecycle, or enabling managed-sockets. | [RUST_BACKPACK_SOCKET_LIFECYCLE.md](RUST_BACKPACK_SOCKET_LIFECYCLE.md) |
+
+| WOO socket adoption and request funnel | Plan review pending; inactive #1930 adopted by mxb4mq | Before importing reviewed WOO sockets or converting its 30 request / 20 signing sites. | [RUST_WOO_ADOPTION_AND_FUNNEL.md](RUST_WOO_ADOPTION_AND_FUNNEL.md) |
