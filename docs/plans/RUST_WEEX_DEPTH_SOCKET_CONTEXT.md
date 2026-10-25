@@ -333,3 +333,11 @@ their original first Opened1002; all234 trading assertions,23 raw payloads,
 financial events and old command/response clocks remain exact. The initial
 catalogue read remains independently unanswered. This introduces neither global
 autostart nor a new command-before-start support contract.
+
+A reverse-catalogue ticker control additionally pins native removal ordering.
+New subscriptions follow proposed demand; unsubscribe batches follow the previous
+committed order, because removed topics are absent from the proposal. On fd8 the
+new control reaches a literal ETH/BTC-versus-BTC/ETH unsubscribe assertion failure;
+the narrow selector correction passes all39 controls with strict Clippy and fmt.
+The prior38 control bodies remain unchanged. This correction changes no IDs,
+hourly quota, recovery cadence or custody authority.

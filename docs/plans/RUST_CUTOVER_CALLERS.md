@@ -8860,3 +8860,7 @@ fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliation
 Their first Opened1002, all prior assertions/payloads and financial/event clocks
 stay exact; the new initial catalogue read is unanswered. No global autostart
 or new command-before-start compatibility is implied.
+
+Native topic ordering is retained in both directions: subscriptions use the
+proposed order, while removed topics use their previous committed order. A
+reverse-catalogue ticker control pins the exact unsubscribe wire order.

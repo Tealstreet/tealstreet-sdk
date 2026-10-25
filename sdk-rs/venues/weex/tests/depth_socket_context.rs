@@ -1835,3 +1835,45 @@ fn oversized_encoded_frame_refuses_atomically_and_preserves_healthy_peer_and_ids
     assert_eq!(pong.sent(), [(socket, r#"{"method":"PONG","id":4}"#)]);
     assert_eq!(store(&d), before);
 }
+
+#[test]
+fn removing_multiple_tickers_preserves_their_committed_native_wire_order() {
+    let mut info: serde_json::Value = serde_json::from_str(INFO).unwrap();
+    info["symbols"].as_array_mut().unwrap().reverse();
+    let mut d = Driver::new(support::setup::engine(options(false, false)));
+    d.e.start(NOW);
+    let initial = d.take(NOW, false);
+    let tickers = d.response(
+        NOW,
+        request(&initial, "exchangeInfo"),
+        200,
+        &info.to_string(),
+    );
+    let _ = d.response(NOW, request(&tickers, "24hr"), 200, DAILY);
+    let boot = d.response(NOW, request(&tickers, "bookTicker"), 200, TICKERS);
+    assert_eq!(
+        d.e.store()
+            .markets()
+            .iter()
+            .map(|m| m.symbol.as_str())
+            .collect::<Vec<_>>(),
+        [B, A]
+    );
+    let socket = boot.socket(SocketChannel::Public);
+    let opened = d.event(NOW, Event::WsOpened { socket }, false);
+    assert_eq!(
+        opened.sent(),
+        [(
+            socket,
+            r#"{"method":"SUBSCRIBE","params":["ETHUSDT@ticker","BTCUSDT@ticker"],"id":1}"#
+        )]
+    );
+    let removed = ticker_demand(&mut d, NOW + 1., vec!["unavailable-native-symbol"]);
+    assert_eq!(
+        removed.sent(),
+        [(
+            socket,
+            r#"{"method":"UNSUBSCRIBE","params":["ETHUSDT@ticker","BTCUSDT@ticker"],"id":2}"#
+        )]
+    );
+}

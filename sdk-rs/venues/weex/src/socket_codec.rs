@@ -101,11 +101,14 @@ impl WeexFutures {
         if !now.is_finite() {
             return Err(SocketError::InvalidTime);
         }
-        let order = self
-            .sockets
-            .pending
-            .as_ref()
-            .map_or(&self.sockets.committed, |p| &p.1);
+        let order = if subscribe {
+            self.sockets
+                .pending
+                .as_ref()
+                .map_or(&self.sockets.committed, |p| &p.1)
+        } else {
+            &self.sockets.committed
+        };
         let mut ordered: Vec<_> = items.iter().collect();
         ordered.sort_by_key(|item| {
             order
