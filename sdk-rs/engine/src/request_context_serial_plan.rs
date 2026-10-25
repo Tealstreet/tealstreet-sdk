@@ -13,6 +13,8 @@ pub(super) const JOURNAL_ATTEMPTS: usize = 2;
 pub(super) struct Serial {
     pub(super) refusals_complete: bool,
     call: SerialCall,
+    #[cfg(feature = "session-bearer")]
+    pub(super) session_seed: Option<(u64, u64)>,
     /// Read calls sign with the Preflight's read role (or go unsigned), never
     /// with the Plan's write credential.
     read: Option<Credential>,
@@ -46,6 +48,11 @@ impl Next {
 }
 
 impl Serial {
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn allows_session_read_resend(&self) -> bool {
+        self.call.operation == Operation::Read && self.call.attempts == 2
+    }
+
     #[cfg(feature = "condition-waits")]
     pub(super) fn condition_deadline(&self) -> Option<f64> {
         self.condition.map(|(_, at)| at).filter(|at| *at < ROOT)
@@ -80,7 +87,7 @@ pub(super) fn wake(timer: TimerId, at_ms: f64) -> Action {
 }
 
 fn retry_policy(call: SerialCall) -> RetryPolicy {
-    if call.attempts > 1 {
+    if call.attempts > 1 && call.operation == Operation::Mutation {
         RetryPolicy::DefinitiveRefusal
     } else {
         RetryPolicy::Never
@@ -90,7 +97,9 @@ fn retry_policy(call: SerialCall) -> RetryPolicy {
 fn validate_call(call: SerialCall) -> Result<(), Error> {
     if call.timeout_ms == 0
         || !(1..=2).contains(&call.attempts)
-        || (call.attempts > 1 && call.operation != Operation::Mutation)
+        || (!cfg!(feature = "session-bearer")
+            && call.operation == Operation::Read
+            && call.attempts > 1)
     {
         return Err(Error::Invalid);
     }
@@ -158,6 +167,8 @@ impl<P> Cx<'_, P> {
             Some(Serial {
                 refusals_complete: policy.refusals_complete,
                 call: first,
+                #[cfg(feature = "session-bearer")]
+                session_seed: None,
                 read: intent.read_credential,
                 #[cfg(feature = "condition-waits")]
                 condition: None,
@@ -273,8 +284,11 @@ impl crate::engine::CoreCx<'_> {
             // A released Read's failure retries once more as a fresh Read; no
             // DATA or write fact is invented for it.
             Stage::Active { failed: true }
-                if matches!(wake, Next::After(_)) && context.operation() == Operation::Read =>
+                if !wake.parks() && context.operation() == Operation::Read =>
             {
+                if wake == Next::Now && call.released_failure.is_none() {
+                    return Err(Error::Revoked);
+                }
                 if !self
                     .io
                     .core
@@ -407,9 +421,82 @@ impl crate::engine::CoreCx<'_> {
         };
         body.handoff = handoff;
         body.serial.as_mut().expect("validated serial Plan").call = next;
+        #[cfg(feature = "session-bearer")]
+        {
+            body.serial
+                .as_mut()
+                .expect("validated serial Plan")
+                .session_seed = None;
+        }
         let slot = body.schedule.available().next().expect("next serial call");
         self.io.core.request_contexts.reserved_contexts += 1;
         self.rearm_plan(plan);
         Ok(slot)
+    }
+}
+
+#[cfg(feature = "session-bearer")]
+impl<P> Cx<'_, P> {
+    /// Select the current serial call's one authentication resend. Its bundle
+    /// floor is the refused attempt's bound revision, never the cache's now.
+    pub fn serial_plan_session_resend(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        evidence: crate::request_context::SessionResend,
+    ) -> Result<Context, Error> {
+        self.validate_plan_delivery(plan, context)?;
+        let registry = &self.io.core.request_contexts;
+        let body = registry.validate_plan(plan, self.now)?;
+        if body.serial.is_none() {
+            return Err(Error::State);
+        }
+        let index = body.schedule.ordinal(slot)?;
+        let call = body.entries[index]
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context)
+            .ok_or(Error::Revoked)?;
+        if call.terms.attempts != 2 || call.selected >= 2 {
+            return Err(Error::RetryForbidden);
+        }
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        if !call.matches(delivery) {
+            return Err(Error::Revoked);
+        }
+        let seed = self.io.serial_session_revision(delivery)?;
+        match evidence {
+            crate::request_context::SessionResend::Write(grant)
+                if context.operation() == Operation::Mutation =>
+            {
+                self.http_resend_context(context, grant)?;
+            }
+            crate::request_context::SessionResend::Read
+                if context.operation() == Operation::Read => {}
+            _ => return Err(Error::Invalid),
+        }
+        let context = self.select_plan_retry(plan, slot, context)?;
+        self.io
+            .core
+            .request_contexts
+            .plan_body_mut(plan)
+            .expect("selected serial Plan")
+            .serial
+            .as_mut()
+            .expect("validated serial Plan")
+            .session_seed = Some(seed);
+        Ok(context)
+    }
+}
+
+#[cfg(feature = "session-bearer")]
+impl ContextRegistry {
+    pub(in super::super::super) fn serial_session_seed(
+        &self,
+        context: &Context,
+    ) -> Option<(u64, u64)> {
+        let plan = self.plan_from_context(context)?;
+        self.plan_body(&plan).ok()?.serial.as_ref()?.session_seed
     }
 }
