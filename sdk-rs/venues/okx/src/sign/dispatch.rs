@@ -4,7 +4,7 @@ use safe_cex_engine::signing::{
     Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
     hmac_sha256_work,
 };
-use safe_cex_engine::{Action, DispatchContext, SignStep, num};
+use safe_cex_engine::{Action, DispatchContext, Method, SignStep, num};
 
 fn work(
     identity: &Identity,
@@ -18,7 +18,8 @@ fn work(
         .clone()
         .ok_or(SignError::InvalidRequest)?;
     let mut work = hmac_sha256_work(
-        identity,
+        &identity.credential,
+        identity.signing_ref()?,
         payload,
         context,
         SignReceipt {
@@ -143,6 +144,14 @@ impl SignStep for Http {
             ("OK-ACCESS-PASSPHRASE", passphrase.into()),
         ];
         headers.append(&mut http.headers);
+        // Managed requests carry no caller headers; native writes send JSON.
+        if http.method != Method::Get
+            && !headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("Content-Type"))
+        {
+            headers.push(("Content-Type", "application/json".into()));
+        }
         http.headers = headers;
         Ok(())
     }
