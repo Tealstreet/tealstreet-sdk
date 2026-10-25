@@ -993,6 +993,25 @@ impl Venue for AsterDex {
         }
     }
 
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.on_resync_ready(cx, plan);
+    }
+
+    fn on_condition_wait_expired(
+        &mut self,
+        _cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::ConditionOwner,
+        _error: VenueError,
+    ) {
+        if let safe_cex_engine::request_context::ConditionOwner::Plan(plan) = owner {
+            self.on_resync_expired(plan);
+        }
+    }
+
     fn on_http_preflight_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,

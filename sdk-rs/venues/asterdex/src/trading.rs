@@ -3,16 +3,17 @@
 use crate::account::venue_error;
 use crate::sign::{Query, Version};
 use crate::{AsterDex, Options, Pending};
+use safe_cex_engine::classify::{
+    CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
+};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::model::{
     CancelOrderRef, MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts,
     PositionSide, StopTriggerType, StpMode, TimeInForce,
 };
-use safe_cex_engine::classify::{CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact};
-use safe_cex_engine::request_context::plan::{CallBound, RetryWindow, Slot, StepBound};
+use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
-    Context, Operation, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
-    RetryPolicy,
+    Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
 };
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -32,14 +33,21 @@ impl Request {
     /// Bounded native correlation for the engine journal: no credential or packet.
     pub(crate) fn reconciliation(
         &self,
-    ) -> Result<safe_cex_engine::request_context::ReconciliationData, safe_cex_engine::request_context::Error>
-    {
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
         let data = match &self.call {
             Call::Place { symbol, .. } => format!("place:{symbol}"),
             Call::Cancel { id, .. } => format!("cancel:{id}"),
             _ => "setting".to_owned(),
         };
         safe_cex_engine::request_context::ReconciliationData::new(data)
+    }
+
+    /// A resend after a resync is the plan's next serial call.
+    pub(crate) fn resume(&mut self, plan: Plan, slot: Slot) {
+        self.plan = Some((plan, slot));
     }
 
     pub(crate) fn plan(&self) -> Option<&(Plan, Slot)> {
@@ -63,20 +71,76 @@ impl Request {
 /// write unknown.
 pub(crate) const ASTER: CodeTable = CodeTable {
     rows: &[
-        Row { key: Key::Int(-1000), verdict: Verdict::Unknown(None), only: None },
-        Row { key: Key::Int(-1007), verdict: Verdict::Unknown(Some(ErrorKind::Timeout)), only: None },
-        Row { key: Key::Int(-1001), verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)), only: None },
-        Row { key: Key::Int(-1006), verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)), only: None },
-        Row { key: Key::Int(-1008), verdict: Verdict::Refused(ErrorKind::VenueUnavailable), only: None },
-        Row { key: Key::Int(-1003), verdict: Verdict::Refused(ErrorKind::RateLimited), only: None },
-        Row { key: Key::Int(-1015), verdict: Verdict::Refused(ErrorKind::RateLimited), only: None },
-        Row { key: Key::Int(-1022), verdict: Verdict::Refused(ErrorKind::AuthInvalid), only: None },
-        Row { key: Key::Int(-2014), verdict: Verdict::Refused(ErrorKind::AuthInvalid), only: None },
-        Row { key: Key::Int(-2015), verdict: Verdict::Refused(ErrorKind::AuthInvalid), only: None },
-        Row { key: Key::Int(-1002), verdict: Verdict::Refused(ErrorKind::AuthPermission), only: None },
-        Row { key: Key::Int(-5025), verdict: Verdict::Refused(ErrorKind::AuthPermission), only: None },
-        Row { key: Key::Range(-1199, -1100), verdict: Verdict::Refused(ErrorKind::InvalidInput), only: None },
-        Row { key: Key::Range(-4999, -4000), verdict: Verdict::Refused(ErrorKind::InvalidInput), only: None },
+        Row {
+            key: Key::Int(-1000),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1007),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1001),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1006),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1008),
+            verdict: Verdict::Refused(ErrorKind::VenueUnavailable),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1003),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1015),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1022),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2014),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2015),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1002),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-5025),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-1199, -1100),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-4999, -4000),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
     ],
     success: &[Key::Int(200)],
     unlisted: Verdict::Refused(ErrorKind::Rejected),
@@ -86,8 +150,16 @@ pub(crate) const ASTER: CodeTable = CodeTable {
 /// Only while a write still has its single resend: V1 -1022 and -1021.
 pub(crate) const ASTER_RESEND: CodeTable = CodeTable {
     rows: &[
-        Row { key: Key::Int(-1022), verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid), only: None },
-        Row { key: Key::Int(-1021), verdict: Verdict::RefusedResend(ErrorKind::Rejected), only: None },
+        Row {
+            key: Key::Int(-1022),
+            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-1021),
+            verdict: Verdict::RefusedResend(ErrorKind::Rejected),
+            only: None,
+        },
     ],
     success: &[Key::Int(200)],
     unlisted: Verdict::Refused(ErrorKind::Rejected),
@@ -127,6 +199,8 @@ struct Planned {
 #[derive(Default)]
 struct Job {
     plan: Option<Plan>,
+    /// The next serial call's slot, from admission or the last continuation.
+    slot: Option<Slot>,
     reserved_places: usize,
     steps: VecDeque<Planned>,
     ids: Vec<String>,
@@ -423,13 +497,17 @@ impl AsterDex {
         self.start_trade(cx, id, Operation::Mutation, prune_on_refusal, job);
     }
 
-    /// A read: V3 reads under the caller's root; V1 refuses locally.
+    /// A read: its native local refusals first, then a read under the root.
     pub(crate) fn fetch_stp_mode(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if self.version != Version::V3 {
-            let refusal = Err("Aster self-trade prevention requires V3".into());
-            self.start_trade(cx, command, Operation::Read, false, refusal);
-            return;
-        }
+        let plan = if self.version != Version::V3 {
+            Err("Aster self-trade prevention requires V3".into())
+        } else {
+            Ok(single(Method::Get, "stpMode", Query::new(), Call::StpRead))
+        };
+        self.start_trade(cx, command, Operation::Read, false, plan);
+    }
+
+    fn read_stp_mode(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
         let Some(root) = crate::command_read_root(cx) else {
             return;
         };
@@ -440,7 +518,14 @@ impl AsterDex {
             plan: None,
             root: Some(root),
         });
-        self.signed(cx, Call::StpRead.role(), Method::Get, &path, Query::new(), pending);
+        self.signed(
+            cx,
+            Call::StpRead.role(),
+            Method::Get,
+            &path,
+            Query::new(),
+            pending,
+        );
     }
     fn start_trade(
         &mut self,
@@ -450,23 +535,6 @@ impl AsterDex {
         prune_on_refusal: bool,
         job: Result<Job, String>,
     ) {
-        let write = operation == Operation::Mutation;
-        let credential = self
-            .credentials
-            .select(CredentialRole::Mutation)
-            .ok()
-            .map(|(selection, slot)| selection.credential(slot.identity.credential.clone()));
-        let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
-            purpose: if write {
-                PreflightPurpose::WriteAfterReads
-            } else {
-                PreflightPurpose::ReadOnly
-            },
-            read_credential: None,
-            write_credential: credential.clone().filter(|_| write),
-        }) else {
-            return;
-        };
         let job = job
             .map_err(|error| {
                 (VenueError::new(error).kind(ErrorKind::InvalidInput), prune_on_refusal)
@@ -505,19 +573,46 @@ impl AsterDex {
                 }
                 Ok(job)
             });
+        // A local refusal owns its command Context before any diagnostic.
         let job = match job {
             Ok(job) => job,
             Err((mut error, prune)) => {
+                let Ok(context) = cx.admit_http_command(Policy {
+                    operation,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                }) else {
+                    return;
+                };
                 if prune {
                     self.prune_trade_acknowledged(cx);
                 }
-                if write {
+                if operation == Operation::Mutation {
                     error.outcome = Some(Outcome::NotSent);
                 }
-                cx.command_error(id, error.message.clone());
-                let _ = cx.fail_preflight(&preflight, error);
+                let _ = cx.command_error_context(&context, error.message.clone());
+                let _ = cx.fail_context(&context, error);
                 return;
             }
+        };
+        if operation == Operation::Read {
+            self.read_stp_mode(cx, id);
+            return;
+        }
+        // A valid job's plan needs the write credential the job validated.
+        let credential = self
+            .credentials
+            .select(CredentialRole::Mutation)
+            .ok()
+            .map(|(selection, slot)| selection.credential(slot.identity.credential.clone()));
+        let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
+            purpose: PreflightPurpose::WriteAfterReads,
+            read_credential: None,
+            write_credential: credential,
+        }) else {
+            return;
         };
         // Nothing signs before a fresh clock: the entry parks until it settles.
         if !self.clock_fresh(cx.now) {
@@ -551,41 +646,48 @@ impl AsterDex {
         self.admit_trade(cx, id, &preflight, job);
     }
 
-    fn admit_trade(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId, preflight: &Preflight, mut job: Job) {
+    fn admit_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: CommandId,
+        preflight: &Preflight,
+        mut job: Job,
+    ) {
         let credential = self
             .credentials
             .select(CredentialRole::Mutation)
             .ok()
             .map(|(selection, slot)| selection.credential(slot.identity.credential.clone()));
-        // Each native step is one serial call; the second attempt exists only
-        // for the -1022/-1021 single resend.
-        let calls = [CallBound {
-            timeout_ms: 20_000,
-            attempts: 2,
-            retry_window: RetryWindow::FreshAttempt,
-            after_refusal: &[],
-        }];
-        let steps: Vec<_> = job
-            .steps
-            .iter()
-            .map(|_| StepBound {
-                wait_ms: 0,
-                calls: &calls,
-            })
-            .collect();
-        let plan = cx.admit_plan(
-            preflight,
-            &steps,
-            PlanPolicy {
-                independent_calls: job.continue_on_error,
-                operation: Operation::Mutation,
-                credential,
-                pacing: None,
-                retry: RetryPolicy::DefinitiveRefusal,
-            },
-        );
-        match plan {
-            Ok(plan) => job.plan = Some(plan),
+        // A job with no native step sends nothing: it ends on its preflight.
+        if job.steps.is_empty() {
+            let _ = match job.error {
+                Some(error) => {
+                    cx.command_error(id, error.message.clone());
+                    cx.fail_preflight(preflight, error)
+                }
+                None => cx.done_empty_plan(
+                    preflight,
+                    job.result
+                        .unwrap_or_else(|| serde_json::to_string(&job.ids).unwrap_or_default()),
+                ),
+            };
+            return;
+        }
+        let Some(credential) = credential else {
+            let error = not_sent("Missing required Aster credentials").kind(ErrorKind::AuthInvalid);
+            let _ = cx.fail_preflight(preflight, error);
+            return;
+        };
+        let policy = SerialPolicy {
+            credential,
+            pacing: None,
+            refusals_complete: true,
+        };
+        match cx.admit_serial_plan(preflight, serial(), policy) {
+            Ok((plan, slot)) => {
+                job.plan = Some(plan);
+                job.slot = Some(slot);
+            }
             Err(error) => {
                 let _ = cx.fail_preflight(preflight, error.venue_error());
                 return;
@@ -615,15 +717,8 @@ impl AsterDex {
         };
         let plan = job.plan.clone().expect("an admitted job holds its plan");
         if let Some(step) = next {
-            // Each serial step takes the plan's next slot when it dequeues.
-            let slot = match cx.plan_slots(&plan).map(|slots| slots.into_iter().next()) {
-                Ok(Some(slot)) => slot,
-                Ok(None) => return,
-                Err(error) => {
-                    self.trading.jobs.remove(&id);
-                    let _ = cx.fail_plan(&plan, error.venue_error());
-                    return;
-                }
+            let Some(slot) = job.slot.take() else {
+                return;
             };
             let path = self.path(step.endpoint);
             // The request layer consumes the pending request and reports any
@@ -673,7 +768,8 @@ impl AsterDex {
         let command = request.command;
         let root = request.root.clone();
         let plan = request.plan.clone();
-        let was_place = matches!(&request.call, Call::Place { .. });
+        let call = &request.call;
+        let was_place = matches!(call, Call::Place { .. });
         let cancelled = match &request.call {
             Call::Cancel { id, .. } => vec![id.clone()],
             _ => vec![],
@@ -690,7 +786,7 @@ impl AsterDex {
         let outcome = match outcome {
             Err((-2011, ref message))
                 if matches!(
-                    &request.call,
+                    call,
                     Call::Cancel {
                         filled_at_amend: None,
                         ..
@@ -863,12 +959,35 @@ impl AsterDex {
                     }
                 }
                 Err((_, message)) => cx.http_write_unproven(leg, message.clone()).map(|_| None),
-                Ok(()) => cx.http_write_unproven(leg, "Aster write reply was not proven").map(|_| None),
+                Ok(()) => cx
+                    .http_write_unproven(leg, "Aster write reply was not proven")
+                    .map(|_| None),
             };
         }
-        // The fact is recorded; settle the call before the job advances.
+        // The fact is recorded: continue the serial plan into the next native
+        // step, or settle this last call before the terminal.
         if let (Some(leg), Some((plan, slot))) = (leg, &plan) {
-            let _ = cx.finish_plan_call(plan, slot, leg);
+            let continues = self.trading.jobs.get(&command).is_some_and(|job| {
+                !job.steps.is_empty() && (job.continue_on_error || outcome.is_ok())
+            });
+            if continues {
+                match cx.continue_serial_plan(plan, slot, leg, serial()) {
+                    Ok(next) => {
+                        if let Some(job) = self.trading.jobs.get_mut(&command) {
+                            job.slot = Some(next);
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(job) = self.trading.jobs.get_mut(&command) {
+                            job.steps.clear();
+                            job.error
+                                .get_or_insert(VenueError::new(error.venue_error().message));
+                        }
+                    }
+                }
+            } else {
+                let _ = cx.finish_plan_call(plan, slot, leg);
+            }
         }
         if was_place && outcome.is_err() {
             self.account.order_revision = self.account.order_revision.wrapping_add(1);
@@ -1284,6 +1403,15 @@ fn empty_order() -> PlaceOrderOpts {
         implied_volatility: None,
     }
 }
+/// One native step: a Mutation with its one classified V1 -1022 resend.
+pub(crate) fn serial() -> SerialCall {
+    SerialCall {
+        operation: Operation::Mutation,
+        timeout_ms: 20_000,
+        attempts: 2,
+    }
+}
+
 fn single(method: Method, endpoint: &'static str, query: Query, call: Call) -> Job {
     Job {
         steps: VecDeque::from([Planned {
