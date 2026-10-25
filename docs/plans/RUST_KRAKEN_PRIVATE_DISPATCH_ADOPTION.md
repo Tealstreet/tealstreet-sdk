@@ -1,226 +1,149 @@
-# Kraken Futures and Spot private dispatch adoption
+# Kraken Futures and Spot native private dispatch adoption
 
-Plan-only checkpoint, local and unpublished. Inventory/native reference:
-`feat/rust-rewrite` at `49f7d1857b66fc14f5164c8ca82ce42d48a53c1d`
-(fetched before writing). The implementation branch retains the reviewed local
-recipe `cbc6c9b963483bb5754c3c91337ad6ee6ef22379`; this document does not merge
-prerequisites, change source, activate a private caller, or authorize publication.
-Owner: codex-9czdjh. HMAC review: claude-4yjlw0; credential/selection review:
-claude-m26ps4; nonce core: codex-uufub4; socket fit: codex-5c57jl; Session fit:
-claude-55ao7t. Preserve #1876's managed-write originals and #1798's Spot book.
+Plan-first refresh on actual rewrite tip `35ae6c6b2548c79f426c3f5c4d66e4e2e349a86a`.
+Nonce #2093 landed `c5d7c3595af`; recipe #2096 landed `a44553d0404`.
+Owner codex-9czdjh; plan/dispatch reviewer codex-uufub4. No production change
+at this checkpoint. NX mode 2 remains parked; #2126 remains HELD.
 
-## Size and exact request inventory
+## Inventory contract
 
-There are **three physical legacy HTTP sends**, not six independently removable
-account-read sites. The reference request checker inventories Kraken at 22
-occurrences. Replacing the three sends removes exactly three singleton hashes:
-**22 -> 19**, before any separately demonstrated terminal/test-reference removal.
-No site is counted merely because its caller now selects a recipe.
+The current request inventory is **18**, with **3 physical sends** and **15
+completion/conservative-reference occurrences**. The coherent private cutover
+proposes 18 -> 0 only after each owner and terminal is genuinely converted;
+changing the three funnels alone earns only 18 -> 15. Hash prefixes below
+identify the existing singleton/multiplicity rows, never replacement exemptions.
 
-| Physical funnel | Native expression and source | Guaranteed removal |
+| Request path under venues/kraken/src | Existing hashes (multiplicity) | Required conversion |
 | --- | --- | --- |
-| Futures `signed_request` | account.rs:375, `cx.request(method, url, headers, body, pending)` | 1 |
-| Futures `signed_streamed` | account.rs:388, `cx.request_streamed_body(method, url, headers, body, at, pending)` | 1 |
-| Spot `send_private` | spot/account.rs:241, the private `cx.request(Method::Post, ...)` | 1 |
+| account.rs (2) | 34b6cbe60cec, fc8a5b682da0 | signed_request and signed_streamed physical sends |
+| spot/account.rs (4) | 29a69618a4d6; 3ca5b7c3e3f6; 6aa843b32406 x2 | private POST plus its completion/reference owners |
+| history.rs (5) | c873db6fc77d; f02822ef2a04 x2; da0f2867dd12; 865ee8f27182 | retained history root/pages and completion references |
+| trading.rs (5) | 604f28d91adf; ca37246cf805; 06eea309fa05; 9584979d6cce x2 | genuine queued command/step/terminal owners |
+| spot/trading.rs (2) | 12b11a734392, 06eea309fa05 | genuine queued command terminals |
 
-Exact own request-manifest removal map, each value currently one:
+The signing inventory has **29** rows: 19 production and 10 secondary-test rows.
+Remove production raw Options/Sensitive custody, signer construction/access and
+secret eligibility checks: 11 lib.rs rows, four spot/mod.rs rows and one
+spot/account.rs row. Preserve the other three native diagnostic strings and
+all test assertions; text containing "secret" is not evidence of custody.
+Thus the custody-removal projection is 16 rows, not a claim that 29 -> 0.
+Delete the now-orphaned production Signer/primitive implementation and direct
+crypto dependencies; retain native wire oracles only in test code. Enable
+Kraken sign.rs/sign-module scanning with the migrated-family checker treatment;
+separately enumerate every remaining diagnostic, encoding/algorithm declaration
+and test-oracle row before freezing its reviewed map. No primitive exceptions,
+renames or file moves merely to obtain a prune. Replace the eight credential
+inventory accesses with retained Slots/Identity selection; report socket-map
+changes separately. Foreign manifest bytes/order stay exact.
 
-```json
-{
-  "venues/kraken/src/account.rs": {
-    "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1,
-    "fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6": 1
-  },
-  "venues/kraken/src/spot/account.rs": {
-    "29a69618a4d60ba5b2b3e3872f6ab2e1c20013d981a27fb056e9a0d633b3ceb6": 1
-  }
-}
-```
+## Physical funnels and retained authority
 
-After this send-only accounting, remaining inventory is history.rs 5,
-secondary_tests.rs 4, spot/account.rs 3, spot/trading.rs 2, trading.rs 5: 19.
-The terminals and conservative references in those files need their own genuine
-owner/completion conversion and scanner proof; the three funnel replacements
-alone do not remove them. If coherent command adoption necessarily changes a
-terminal, re-derive and review its exact additional delta before claiming it.
-Preserve foreign inventory bytes/order. Do not rename a raw sender/reference to
-manufacture a prune or add a staging/bootstrap exception without an exact grant.
+| Funnel | Native consumers and required roles |
+| --- | --- |
+| Futures signed_request | accounts GET/background Read; leveragepreferences GET/command Read; sendorder, cancelorder, batchorder, editorder POST and leveragepreferences PUT/Mutation |
+| Futures signed_streamed | openorders/openpositions/leveragepreferences/background Read; fills GET/Read; account-log and orders under /api/history/ use PrimaryRead with History reason |
+| Spot send_private POST | Balance/OpenOrders/Primary Read; GetWebSocketsToken/SessionAuth signed Read; AddOrder/AmendOrder/CancelOrder/Primary Mutation |
 
-## Funnel consumers and immutable selection
+Futures Secondary requires Primary and applies only to GET outside canonical
+/api/history/. Fills must remain Secondary-eligible. Spot is Primary-only.
+Use retained AdmittedRead/ReadLeg::queue_with_nonce and the exact identity/claim
+constructor; no reselect after identity replacement. Commands keep their real
+root and capped lifetime through queue, serial steps and pages. Background calls
+get independent contexts; token login uses the real Session, no REST bearer.
+Adopt actual dispatcher prepare/Bind/Claim and validate root/current leg before
+stream item, status/codec, native reducer, Store publication or completion.
+Retire each physical leg before its successor and retire owners exactly once.
 
-The production unit must move every private signer consumer coherently. The
-funnel boundaries are an inventory map, not permission to run selected account
-reads beside a legacy private nonce allocator.
+Trusted setup installs provider material outside the venue; options retain
+metadata/opaque identities only. Wire registry/native/WASM dispatch-signing
+feature forwarding; retain dispatch-nonce for both products. Activate Spot's
+landed #2078 ValidateOnly row: validate ignored read material first, wipe it,
+never install/transmit it. Preserve native primary/read Base64 and keyless,
+public-only, read-only precedence/notices. Consume D1's signing_ref() conversion
+when #2132 actually lands; do not import its unpublished head.
 
-### Futures ordinary signed requests
+## Native preservation controls, before source
 
-`account_refresh` issues GET `/derivatives/api/v3/accounts` through
-`signed_request`. The trading dequeue uses the same funnel for:
+Commit compiling originals first, retaining the existing 23 opt-in adoption
+originals and all #1876 write and #1798 book assertions. Record actual runtime
+REDs versus GREENs and honestly gated suffixes; no ignored tests or setup errors
+count as a behavioral RED. Make the adoption target default once implemented.
 
-- POST `/derivatives/api/v3/sendorder`, `/cancelorder`, `/batchorder`, `/editorder`;
-- PUT `/derivatives/api/v3/leveragepreferences`;
-- GET `/derivatives/api/v3/leveragepreferences` for the command read fallback.
+- Capture current-native wire fixtures on both Futures hosts and Spot. At the
+  dispatcher-selected exact decimal nonce, compare native oracle and real
+  provider output byte-for-byte: method, URL/query, body including None versus
+  empty, ordered headers/API key, signature and challenge/subscription frames.
+  Recompute HMAC independently with node:crypto and pin literal vectors.
+  Futures keeps sorted form, /derivatives stripping and APIKey/Authent/Nonce/
+  Content-Type order. Spot keeps insertion-order form with nonce LAST and
+  API-Key/API-Sign/Content-Type/Accept order. No production nonce override.
+- Cover every funnel/role above, distinct and equal primary/read API keys with
+  different signing material, identity replacement after admission, cross-engine
+  and cross-product sequence sharing, reversed releases, parked signer and stale
+  final Claim: exact canceled preparation, same Attempt, fresh larger nonce and
+  newly recomputed MAC. Canonical u64 controls retain the distinction between
+  genuine reservations and maximum-value codec/recipe-only proof.
+- Genuine capacity/credit reuse, held Prepare/Bind, clock nonfinite/equality/
+  MAX_SAFE, expired command and Background/session cleanup, streamed prefix then
+  stale end, duplicate/late provider and HTTP results: no late publication,
+  provisional effects, extra terminal or leaked request/sign task.
+- Preserve cursor limits/order/economics, serial trade ordering, protective amend
+  provenance and partial-effect outcome projection. Spot keeps its one invalid-
+  signature resend and independent three nontrade transport retries; a new nonce
+  never grants write resend authority. Preserve permission-on-write distinctions.
+- Replace Futures challenge signing with epoch-bound shared send_signed and the
+  landed #2080 Progress contract: native 15s open plus one accepted challenge's
+  15s renewal, no early Accepted/Ready, 180s payload watchdog unchanged. Preserve
+  all public/private subscription/ACK/book behavior. Spot token Session retires
+  on socket epoch close; stale token responses never subscribe.
 
-Declare roles at actual call sites, never infer authority from HTTP method.
-Account and leverage GETs are Read; actual writes are Mutation. Futures Slots
-use `secondary_requires_primary: true`: read-only configuration performs no
-private startup/provider/socket work. Preserve `Slots::has_primary()` lifecycle
-checks and native silent Missing handling; do not reintroduce raw signer gates.
-A Secondary claim is refused by the recipe for non-GET or canonical
-`/api/history/` even if a call site supplies the wrong role.
+## Source and activation prerequisites
 
-Background account snapshots need fresh Background Read contexts, current
-account/revision guards and exact scope cleanup. The command leverage read must
-retain its genuine original command authority, capped caller lifetime and
-original Selection; queuing and waiting cannot re-admit it as a new command.
-Mutations need their coherent original owner/queue/terminal conversion, effect
-journal and existing refusal/resend taxonomy. Preserve waiting/step ordering,
-prior effects, progress identities and native reducers. No Read cast, fabricated
-attempt, broad retry grant or local no-I/O success substitute is allowed.
+1. **Namespace continuity (uufub4):** legacy reservations use a decoded-secret
+   digest; dispatch uses a tagged trusted stable subject. Sharing the same map
+   is insufficient. The separately reviewed takeover must enforce a legacy
+   issuance fence and drain all outstanding prepared/sent legacy work at its
+   owning host boundary, then atomically import BOTH reserved and released
+   high-water maxima into the trusted subject before activation. A namespace
+   alias or an assumed deployment drain proves neither. Its shared mechanism
+   and host protocol remain OPEN; no source until approved and controlled.
+   Equal API keys must share
+   the trusted subject even with different secrets. No secret/key-hash fallback,
+   response seed, venue counter or mixed account-only adoption. Separate memories
+   and processes remain a deployment coordination boundary.
+2. **Native release/owner fit (uufub4):** use genuine NonceUnscheduled admission,
+   never a no-op fixture callback. Check serial Mutation/journal/barrier and
+   retained queue semantics against landed APIs: mutable scheduler callbacks
+   cannot run inside the nonce commit. Any missing shared seam goes to its core
+   owner, not a Kraken bypass. Nonempty barriers are currently refused by
+   admit_plan_root for NonceUnscheduled; protective amendment/replacement
+   barriers remain mandatory, so a genuine nonce-compatible shared seam is a
+   prerequisite, not a barrier deletion. Ordinary no-barrier serial plans still
+   need real release/journal/reconciliation controls. Spot physical20s is native;
+   Futures physical20s is only a proposal. Numeric logical command/history/serial
+   root bounds, retry windows and typed prerelease policy remain OPEN. Pin a
+   per-operation owner/window table and CALLERS disposition before source.
+3. **Construction/socket/host fit:** obtain exact setup and whole-family socket
+   review before deleting the last native signer. Hosted adapters must forward
+   the exact engine-reserved decimal nonce and signed bytes, never re-reserve or
+   fall back. Prove the working adapter before enabling bridge dispatch signing;
+   do not break existing hosted users or infer native-family proof from the old
+   isolated engine+recipe harness. Unsupported mode behavior needs an explicit
+   owner ruling rather than an unannounced refusal window.
 
-### Futures streamed signed requests
+## Freeze and landing
 
-`account_refresh` streams GET openorders/openpositions/leveragepreferences with
-native `openOrders`/`openPositions`/`leveragePreferences` fields. These are Read
-and use Secondary when configured with Primary, otherwise Primary.
+Plain-merge the actual landing tip before paired measurements. Measure bare tip
+and composition, same archive path/toolchain/locked inputs/profiles: Kraken
+family and combined, Node and web, hashes and own byte deltas; use current tracked
+budgets unchanged. If any own generic engine code is needed, also measure Bybit
+and Bitget on that composition. Serial JOBS=4; delete each own scratch target
+after measurement, retain sources/logs/receipts. No size estimate is a pass.
 
-Private history shares this physical funnel:
-
-| Native method/path | Declared selection | Native streamed field |
-| --- | --- | --- |
-| GET `/derivatives/api/v3/fills` | Read, Secondary if configured with Primary | `fills` |
-| GET `/api/history/v3/account-log` | PrimaryRead, reason History | `logs` |
-| GET `/api/history/v3/orders` | PrimaryRead, reason History | `elements` |
-
-The fills path must not be accidentally promoted merely because its caller is
-history. Only canonical `/api/history/` is native Primary-only. Keep native
-forms, cursor, caps, row identity/economics, accepted-row recovery and errors.
-Caller-owned private history retains one original root and Selection across
-pages; each physical page/retry gets a fresh child/claim from the retained
-snapshot. Keep public PublicTrades and landed candle callbacks byte-exact.
-Validate live root/current child before item staging, DATA, metadata or Store
-publication. Retire each physical leg before a successor, and complete only its
-original owner. Released failure binding and accepted-row recovery require the
-history/core owner's exact source fit; do not reuse a DATA validator on an
-expired physical child or invent a new partial-recovery policy.
-
-### Spot common private POST
-
-The one `send_private` funnel serves POST `/0/private/Balance`, `/OpenOrders`,
-`/GetWebSocketsToken`, `/AddOrder`, `/AmendOrder`, `/CancelOrder`. Slots are
-Primary-only, including the two account Reads. Token bootstrap is SessionAuth
-selection plus a signed session Read; it is not a Mutation merely because it
-uses POST. Trade operations remain genuine Mutations under their queue owners.
-
-Preserve native form insertion order and append nonce LAST; preserve the
-API-Key/API-Sign/Content-Type/Accept header order, endpoint and 20 s physical
-bound. Balance/order generation, revision and snapshot/provenance reducers stay
-native. Preserve one invalid-signature resend and the independent three
-non-trade transport retries with native zero-delay scheduling; each eligible
-reissue has a fresh dispatcher reservation/receipt/MAC and retained selection.
-A Mutation resend requires the genuine classifier-issued grant; a recipe nonce
-or signature error never grants resend authority. Preserve all native auth
-rejection/deactivation and permission-on-write distinctions.
-
-GetWebSocketsToken uses the Session owner's reviewed `open_session` /
-`session_context` pattern, no REST Bearer. Keep the token venue-owned for native
-WS frames. Explicitly retire the session on socket close/epoch change, then
-reopen for the next generation; late token responses must not reach the venue
-or subscribe. No fake Session for Futures socket challenge signing.
-
-## Hard gates before production adoption
-
-1. **Actual nonce and recipe landings.** Combo-6b must land before the nonce
-   draft is published; then the reviewed nonce and recipe PRs must land in
-   order, and this adoption must integrate their actual landing tips. Local
-   nonce `ed5120dbeb11e41e0e2d8059b32aeaace3e98c58` and recipe `cbc6c9b9634`
-   are review references, not landed dependencies. Check current immutable
-   successor pins before source. The isolated proof harness and its Cargo.lock
-   hunk never land in core/consumer production.
-2. **Retained SelectedRead nonce accessor.** Consume the landed equivalent of
-   reviewed `641b5ab50be8316d52cb7d02745e838a9f25e6b8`:
-   `AdmittedRead`/`ReadLeg::queue_with_nonce(..., &KRAKEN, |identity, claim| ...)`.
-   Use the exact retained `&Identity` plus non-Clone `NonceClaim` in
-   `Http::futures`/`Http::spot`; no slot lookup, copied helper, getter exposing
-   authority or reselect after key replacement. `NonceClaim::slot()` is metadata
-   only. Plain queue cannot smuggle a claim. Reserve only at dispatcher prepare;
-   global released-floor fencing and bounded same-attempt repair stay core-owned.
-3. **Spot ValidateOnly, #2078.** Consume m26ps4's actual reviewed landing and
-   activate `krakenspot.bridge.readCredentials = validateOnly` at cutover. The
-   ignored read key is validated once with native error precedence, wiped and
-   never installed/transmitted. Invalid read material must outrank malformed
-   primary Base64; the reviewed correction is `825d203d5d3`. Futures installs
-   its read identity normally. Do not wire Spot setup while this is held.
-4. **Nonce namespace continuity.** Native counters use sha256(decoded secret);
-   selected dispatch uses the trusted stable subject. Their namespaces differ.
-   Equal API keys with different secrets must receive the same trusted subject;
-   Futures/Spot and cross-engine uses must share the intended sequence. No
-   key-hash/secret-digest fallback, parsed response seed or venue allocator.
-   Obtain nonce/credential-owner review of either a continuity mechanism or an
-   explicitly coordinated all-callers transition that proves old/new ordering,
-   including live legacy instances. Moving all three funnels alone is not proof
-   against a higher outstanding old nonce. This remains an explicit OPEN gate;
-   no small account-read-only activation can bypass it.
-5. **#2080 Futures socket auth progress and whole-family fit.** Consume the
-   actual socket-progress landing and obtain 5c57jl's final Kraken source fit.
-   OPEN starts native 15 s; one accepted nonempty challenge renews it for 15 s
-   while authentication remains pending. Progress is not Accepted/Ready and
-   creates no CONNECT-origin auth clock; preserve the separate 180 s payload
-   watchdog. Capture challenge once per exact FeedId/socket epoch and request
-   shared epoch-bound `send_signed`; provider completion and final send must
-   refuse retired/equality-expired sockets. Never use a venue auth timer,
-   synthetic issuer/Session or snapshot opt-in as a substitute. Resolve the
-   known mixed managed/legacy socket dispatch hazard for public and private
-   sockets as a whole-family fit, preserving #1798's book region and all native
-   subscription/ACK behavior. #2080 alone is not Kraken adoption proof.
-6. **Setup, declared policy and host admission.** Base64/untrimmed trusted
-   setup preserves both native CONFIG_INVALID notices and validation order;
-   metadata-only venue options and declared HmacSha512 feature/provider admission
-   must compose with registry and WASM dispatch-signing wiring. Record approved
-   CALLERS changes: Secondary read-key egress/explicit Primary, missing or
-   malformed trusted stable_id -> InvalidRequest/InvalidInput/NotSent before
-   IDs/provider/I/O with no auth-health counters, and raw clock above MAX_SAFE
-   ms -> InvalidTime refusal (no nonce-to-f64 cast). Do not silently impose a
-   new 20 s lifetime on an existing account/session/paginated logical root;
-   size/cap any new physical policy explicitly with native originals and review.
-7. **Proof scope and hosted boundary.** The CLEAR real WASM engine+actual recipe
-   proof (core d3f78f17074, recipe cbc, harness 0768b56a) is not actual-family
-   adoption: its fixture has no-op NonceUnscheduled release. Real native family
-   construction, account/read/write/session/socket release, stale repair and
-   HMAC wire behavior still need proof on the integrated consumer. V5 proves
-   only canonical u64-max codec+recipe MAC, never a reservation. Hosted canonical
-   reserved-nonce forwarding is a tealstreet-next owner gate, outside this SDK
-   slice: forward the engine's exact decimal nonce, never reserve again on the
-   server. Do not claim hosted/private readiness without that consumer proof;
-   unsupported adapters refuse before private I/O. Namespace continuity and
-   hosted forwarding remain separate gates.
-
-## Plan-first implementation and evidence order
-
-After gates are concrete, commit compiling originals before production. Preserve
-all existing originals, including #1876 and the recipe/adoption checkpoint;
-label missing-API specs honestly rather than counting compile errors as runtime
-REDs. Cover each of the three funnels and every listed role/wire case, Primary
-and Secondary, public-only/keyless/read-only, malformed Base64/read validation,
-missing/malformed/valid stable subjects, clock edge and exact header/form MAC.
-
-Exercise selected snapshots after identity replacement; reversed dispatch,
-provider park, stale final Claim and repaired fresh MAC; equal-key/different-
-secret and cross-product/cross-engine monotonicity; all native retry budgets;
-command receipt expiry, Background cleanup, genuine capacity and recovery;
-strict preparation refusal versus native released-failure recovery; no duplicate
-terminal/Store mutation after retirement. Preserve existing native account and
-financial assertions and disclose suffixes gated by earlier REDs.
-
-Production must compose caller owners, all private HMAC callers and required
-socket/session transitions coherently. Request the exact primitive/credential
-checker flips and maps from resulting source before any bootstrap grant or
-prune. The guaranteed request projection remains 3, not all 22. Recipe-only
-preparation may not activate a private caller to make a smaller PR look green.
-
-HMAC, credential, nonce, socket/session and native preservation reviews precede
-freeze. Scoped changed-crate tests only, CARGO_BUILD_JOBS=4, one local build at a
-time; full suites in CI. Re-run bans/ratchets/selection against the actual tip,
-freeze/push only when authorized, and use one PR-triggered Rust run. This
-checkpoint changes only this document and makes no source, test execution,
-READY, draft publication, CI or adoption claim.
+Docs-only direction CLEAR permits compiling originals while production remains
+HELD on the prerequisites above. It approves no new core seam or numeric policy.
+After prerequisite closure: source, scoped Kraken checks/strict Clippy,
+required workspace compatibility check, fmt/full bans/ratchets/selection and
+preservation receipts; uufub4 dispatch review plus setup/HMAC/socket fit for the
+changed surfaces. One freeze push and one PR-triggered run; READY to 8x5tm1 only
+when green and reviewed, then exact-tree GO and guarded head-matched landing.
