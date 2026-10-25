@@ -93,8 +93,8 @@ fn ready_snapshot(
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     // Public deterministic test seed; never a real exchange account.
     let secret = STANDARD.encode([7u8; 32]);
-    let (provider, identities) =
-        safe_cex_crypto::signer::LocalSigner::from_setup(safe_cex_crypto::signer::LocalSetup {
+    let (provider, identities) = safe_cex_crypto::signer::LocalSigner::from_setup_with_policy(
+        safe_cex_crypto::signer::LocalSetup {
             primary: Some(safe_cex_crypto::signer::LocalIdentity {
                 key: safe_cex_crypto::signer::Secret::new("test-public-key".into()),
                 secret: safe_cex_crypto::signer::Secret::new(secret.clone()),
@@ -102,8 +102,16 @@ fn ready_snapshot(
                 ..Default::default()
             }),
             secondary: None,
-        })
-        .unwrap();
+        },
+        safe_cex_engine::signing::CredentialSetupPolicy {
+            primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
+    .unwrap();
     let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         identity: identities.primary.clone(),
         read_identity: None,
@@ -117,13 +125,19 @@ fn ready_snapshot(
     e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
     e.set_identities(identities).unwrap();
     e.start(1000.0);
-    let r = requests(&mut e).pop().unwrap();
+    let r = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
     reply(&mut e, &r, 200, markets);
     let mut logs = vec![];
     let mut timers = vec![];
     let mut private = None;
     for _ in 0..6 {
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
         for a in actions {
             match a {
                 Action::Http(r) => {
@@ -182,4 +196,48 @@ fn ready_snapshot(
         }
     }
     (e, private.expect("private socket"), logs, timers)
+}
+
+/// Install the actual deterministic credentials used by direct account fixtures.
+pub fn configured_account(mut options: Options) -> Driver {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{
+        Algorithm, CredentialSetupPolicy, IdentitySetupPolicy, KeyEncoding,
+    };
+    let identity = |key: &str, seed: &str| LocalIdentity {
+        key: Secret::new(key.into()),
+        secret: Secret::new(seed.into()),
+        secret_encoding: KeyEncoding::Base64,
+        ..Default::default()
+    };
+    let slot = IdentitySetupPolicy {
+        signing_algorithm: Some(Algorithm::Ed25519),
+        ..Default::default()
+    };
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: options
+                .key
+                .as_deref()
+                .zip(options.secret.as_deref())
+                .map(|(key, seed)| identity(key, seed)),
+            secondary: options
+                .read_credentials
+                .as_ref()
+                .map(|read| identity(&read.key, &read.secret)),
+        },
+        CredentialSetupPolicy {
+            primary: Some(slot),
+            secondary: Some(slot),
+        },
+    )
+    .unwrap();
+    options.identity = identities.primary.clone();
+    options.read_identity = identities.secondary.clone();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Backpack::new(options));
+    engine
+        .set_signer(Some(std::sync::Arc::new(provider)))
+        .unwrap();
+    engine.set_identities(identities).unwrap();
+    engine
 }

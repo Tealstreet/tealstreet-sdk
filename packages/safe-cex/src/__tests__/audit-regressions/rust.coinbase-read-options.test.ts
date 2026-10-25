@@ -69,7 +69,7 @@ function fixture(name: (typeof aliases)[number], saved: Partial<ExchangeOptions>
     snapshotFrame: () => new Uint8Array(consumerFrame({ markets: [], tickers: [] })),
     wsOpen: idle,
     wsMessage: idle,
-    wsClose: idle,
+    wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,

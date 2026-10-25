@@ -702,13 +702,12 @@ fn late_uta_write_wait_has_a_deadline_after_probe_failure() {
         r#"{"code":"40014","msg":"bad passphrase","data":null}"#,
     );
     h.timer_after(10_000.0);
-    assert!(
-        h.done[0]
-            .1
-            .as_ref()
-            .unwrap_err()
-            .contains("account detection")
-    );
+    // TS-visible since slice 3: the job still ends at the detection bound, but
+    // the sent and definitively refused 40085 call is the projected terminal
+    // (Rejected, its native text), not a NotSent detection failure.
+    let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+    assert!(error.message.contains("40085"), "{}", error.message);
 }
 
 #[test]
@@ -1129,7 +1128,9 @@ fn acknowledged_cancel_route_survives_missing_store_preflight_but_not_an_unknown
                 },
             }),
         );
-        let out = plain(h.engine.drain_actions());
+        let out = plain(
+            safe_cex_engine::test_support::prepared_actions(&mut h.engine, 2000.0).into_iter(),
+        );
         if mixed {
             assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(out.iter().any(|a| matches!(
@@ -1217,17 +1218,24 @@ fn write_failures_are_classified_without_changing_their_text() {
             r#"{"code":"429","msg":"Too Many Requests"}"#,
             (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
         ),
-        (503, r#"{"code":"50000","msg":"busy"}"#, unknown),
+        // Ruled 2026-10-25: a 5xx write is the engine's unproven answer.
+        (
+            503,
+            r#"{"code":"50000","msg":"busy"}"#,
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+        ),
         (200, r#"{"code":"45001","msg":"unknown"}"#, unknown),
+        // Ruled 2026-10-25: Bitget lists every order as not placed, so Rejected.
         (
             200,
             r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"balance"}]}}"#,
-            (None, None),
+            (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
         ),
+        // An acknowledgement that accounts for no order is the engine's unproven reply.
         (
             200,
             r#"{"code":"00000","data":{"successList":[],"failureList":[]}}"#,
-            unknown,
+            (Some(ErrorKind::Internal), Some(Outcome::Unknown)),
         ),
     ] {
         let mut h = Harness::classic();

@@ -1,6 +1,6 @@
 //! Backpack's public-only read-key-only provider seam
-//! (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md). The `backpack` row is not
-//! declared yet, so these declare PublicRead through the test-only seam.
+//! (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md). Policy overrides keep
+//! the undeclared and PublicRead contracts independent of venue adoption.
 use super::construction::ReadCredentialsPolicy::PublicRead;
 use super::construction::test_policy;
 use super::*;
@@ -144,6 +144,8 @@ fn public_only_with_an_invalid_read_key_installs_nothing_and_keeps_the_typed_sta
 /// Control: undeclared, public-only installs nothing, exactly as today.
 #[test]
 fn undeclared_public_only_is_unchanged() {
+    let _undeclared =
+        test_policy::declare("backpack", construction::ReadCredentialsPolicy::Install);
     assert_eq!(
         construction::read_credentials_policy("backpack"),
         construction::ReadCredentialsPolicy::Install
@@ -211,4 +213,26 @@ fn public_only_read_provider_grants_no_hosted_or_startup_authority() {
         )),
         "public-only startup produced signing work"
     );
+}
+
+#[test]
+fn valid_read_status_always_installs_the_real_secondary() {
+    let _declared = test_policy::declare("backpack", PublicRead);
+    for public in [false, true] {
+        for primary in [false, true] {
+            let setup = setup(public, primary, Some(READ_SEED));
+            assert!(matches!(setup.read_status, Some(Ok(()))));
+            assert!(setup.provider.is_some());
+            assert_eq!(setup.identities.primary.is_some(), !public && primary);
+            let read = setup
+                .identities
+                .secondary
+                .as_ref()
+                .expect("valid status installs read identity");
+            let expected =
+                safe_cex_crypto::ed25519::sign(b"instruction=fillHistoryQueryAll", &[9u8; 32])
+                    .unwrap();
+            assert_eq!(signature(&setup, &read.signing), expected.to_vec());
+        }
+    }
 }

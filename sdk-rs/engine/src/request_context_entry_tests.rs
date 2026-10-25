@@ -533,6 +533,7 @@ impl crate::SignStep for ParkedStep {
     ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
         Ok(crate::signing::SignRequest {
             receipt: crate::signing::SignReceipt {
+                nonce: None,
                 stamp_ms: Some(0.),
                 expiry_ms: None,
             },
@@ -914,4 +915,122 @@ fn duplicate_active_command_id_is_rejected_before_the_venue_sees_it() {
         )));
         assert!(e.io.core.active_commands.contains(&7));
     }
+}
+
+fn refused(actions: &[Action]) -> Vec<crate::VenueError> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error.clone()),
+            _ => None,
+        })
+        .collect()
+}
+fn no_io(actions: &[Action]) -> bool {
+    !actions.iter().any(|a| {
+        matches!(
+            a,
+            Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
+        )
+    })
+}
+fn refusing(callback: fn(&mut Cx<'_, ()>), fill: Option<usize>, now: f64) -> Vec<Action> {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill,
+        callback: Some(callback),
+        ..Default::default()
+    });
+    e.start(0.);
+    e.drain_actions().for_each(drop);
+    e.handle(now, Event::Command(command()));
+    e.drain_actions().collect()
+}
+#[test]
+fn a_local_refusal_settles_the_entry_with_its_exact_error_and_no_io() {
+    let actions = refusing(
+        |cx| {
+            cx.refuse_command(
+                Operation::Mutation,
+                crate::VenueError::new("venue refuses hedged mode")
+                    .kind(crate::ErrorKind::Unsupported)
+                    .outcome(crate::Outcome::NotSent),
+            )
+        },
+        Some(0),
+        1.,
+    );
+    assert!(no_io(&actions));
+    let errors = refused(&actions);
+    assert_eq!(errors.len(), 1, "one terminal");
+    assert_eq!(errors[0].message, "venue refuses hedged mode");
+    assert_eq!(errors[0].kind, Some(crate::ErrorKind::Unsupported));
+    assert_eq!(errors[0].outcome, Some(crate::Outcome::NotSent));
+    assert_eq!(terminal_count(&actions), 1);
+}
+#[test]
+fn a_bare_read_refusal_keeps_its_message() {
+    let actions = refusing(
+        |cx| cx.refuse_command(Operation::Read, "unknown market"),
+        Some(0),
+        1.,
+    );
+    assert!(no_io(&actions));
+    let errors = refused(&actions);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "unknown market");
+}
+#[test]
+fn a_bare_mutation_refusal_projects_not_sent() {
+    let actions = refusing(
+        |cx| cx.refuse_command(Operation::Mutation, "unsupported command"),
+        Some(0),
+        1.,
+    );
+    let errors = refused(&actions);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].message, "unsupported command");
+    assert_eq!(
+        errors[0].outcome,
+        Some(crate::Outcome::NotSent),
+        "nothing was sent"
+    );
+}
+#[test]
+fn a_full_owner_registry_gives_the_typed_admission_refusal() {
+    let actions = refusing(
+        |cx| cx.refuse_command(Operation::Read, "native text"),
+        None,
+        1.,
+    );
+    assert!(no_io(&actions));
+    let errors = refused(&actions);
+    assert_eq!(errors.len(), 1, "exactly one terminal");
+    assert_ne!(
+        errors[0].message, "native text",
+        "the engine's refusal, not the venue text"
+    );
+}
+#[test]
+fn an_invalid_clock_gives_the_typed_admission_refusal() {
+    for now in [f64::NAN, f64::INFINITY] {
+        let actions = refusing(
+            |cx| cx.refuse_command(Operation::Read, "native text"),
+            Some(0),
+            now,
+        );
+        let errors = refused(&actions);
+        assert_eq!(errors.len(), 1, "exactly one terminal");
+        assert_ne!(errors[0].message, "native text");
+    }
+}
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "refuse_command outside a genuine command entry")]
+fn a_refusal_outside_a_genuine_entry_is_a_caller_bug() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        outside: Some(|cx| cx.refuse_command(Operation::Read, "late")),
+        ..Default::default()
+    });
+    e.start(0.);
 }

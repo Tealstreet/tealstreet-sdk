@@ -3325,3 +3325,17 @@ Architecture gate: No. The venue consumes shared root/child admission, delivery,
 retirement and typed failure APIs; it adds no issuer, local timer or authority map.
 The old saturated-candles raw-send expectation is explicitly superseded by shared
 Capacity; its literal native wire assertions remain after genuine recovery.
+
+## Paradex subscription candle polls
+
+Two unsigned poll senders consume existing Background Read Contexts, managed
+Prepare/Bind/Claim, exact Background delivery and retirement. No new engine API,
+issuer, authority map, local HTTP timer, signer or socket supervisor. The native
+subscription generation gates continuations; trade revision gates publication
+only. Context retirement precedes fallback or native next-poll scheduling,
+after synchronous successful publication. Nonfinite admission refuses scheduling.
+
+The overseer approved the new 20s bound, strict pre-release cleanup and stale
+continuation suppression; CALLERS discloses them. Original plan/native/API and
+30-control review are CLEAR at b34798899c2 and 13f6a5dc13a. Exact source review,
+paired family/combined size and qualifying CI remain separate gates.

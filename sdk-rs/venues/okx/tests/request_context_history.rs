@@ -102,19 +102,48 @@ fn done(output: &[Action]) -> Option<&str> {
         _ => None,
     })
 }
-fn soft_failure(output: &[Action]) {
+fn incomplete_markers(output: &[Action]) -> Vec<usize> {
+    output
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE))
+        .map(|(index, _)| index)
+        .collect()
+}
+fn failed(output: &[Action]) -> Vec<&safe_cex_engine::VenueError> {
+    output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: OWNER,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect()
+}
+/// A failure with no accepted rows rejects: an empty result would read as "no history".
+fn strict_failure(output: &[Action]) {
     assert!(
         !output
             .iter()
             .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_))),
-        "expired root cannot issue another page"
+        "a failed root cannot issue another page"
     );
-    assert_eq!(
-        done(output),
-        Some("[]"),
-        "native query failure discards accepted pages"
+    assert!(
+        done(output).is_none(),
+        "no empty success for a failed first page"
     );
-    assert_eq!(output.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandError { command: OWNER, message }) if message.starts_with("OKX history: "))).count(), 1);
+    assert_eq!(failed(output).len(), 1);
+    assert!(incomplete_markers(output).is_empty());
+}
+fn order_ids(result: &str) -> Vec<String> {
+    let rows: serde_json::Value = serde_json::from_str(result).expect("history JSON");
+    rows.as_array()
+        .expect("history rows")
+        .iter()
+        .map(|row| row["id"].as_str().expect("order id").to_owned())
+        .collect()
 }
 fn managed(output: &[Action], endpoint: &str) {
     assert!(
@@ -294,10 +323,17 @@ fn finite_local_precedence_and_native_lookup_sentinels_remain_compatible() {
     );
 }
 #[test]
-fn native_failed_later_query_page_discards_prefix_and_keeps_soft_result() {
+fn failed_later_query_page_keeps_accepted_rows_with_one_incomplete_marker() {
+    let first_of_failing_page = page(1)
+        .split("},{")
+        .next()
+        .and_then(|head| head.split_once("[{"))
+        .map(|(_, row)| format!("{{{row}}}"))
+        .expect("first row of page 1");
     for body in [
         r#"{"code":"51000","msg":"bad request","data":[]}"#.to_owned(),
         support::envelope("42"),
+        support::envelope(&format!("{first_of_failing_page},42")),
     ] {
         let mut engine = ready();
         deliver(&mut engine, NOW, orders(), None);
@@ -308,7 +344,53 @@ fn native_failed_later_query_page_discards_prefix_and_keeps_soft_result() {
         engine.handle(NOW + 110., Event::TimerFired { timer });
         let second = request(actions(&mut engine, NOW + 110.));
         reply(&mut engine, &second, NOW + 120., &body);
-        soft_failure(&actions(&mut engine, NOW + 120.));
+        let output = actions(&mut engine, NOW + 120.);
+        assert!(
+            !output
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+        );
+        assert!(
+            failed(&output).is_empty(),
+            "accepted rows are a partial, not a failure"
+        );
+        let result = done(&output).expect("accepted rows are published");
+        let ids = order_ids(result);
+        assert!(!ids.is_empty());
+        assert!(
+            ids.iter().all(|id| id.parse::<usize>().unwrap() > 99_900),
+            "only the accepted page: the failing page's parsed rows are dropped"
+        );
+        let markers = incomplete_markers(&output);
+        assert_eq!(markers.len(), 1, "one command-owned incomplete marker");
+        let done_at = output
+            .iter()
+            .position(|a| {
+                matches!(
+                    a,
+                    Action::Notice(Notice::CommandDone { command: OWNER, .. })
+                )
+            })
+            .unwrap();
+        assert!(
+            markers[0] < done_at,
+            "the marker precedes the result it qualifies"
+        );
+    }
+}
+#[test]
+fn failed_first_query_page_is_a_typed_rejection_not_an_empty_result() {
+    for body in [
+        r#"{"code":"51000","msg":"bad request","data":[]}"#.to_owned(),
+        support::envelope("42"),
+    ] {
+        let mut engine = ready();
+        deliver(&mut engine, NOW, orders(), None);
+        let first = request(actions(&mut engine, NOW));
+        reply(&mut engine, &first, NOW + 10., &body);
+        let output = actions(&mut engine, NOW + 10.);
+        strict_failure(&output);
+        assert!(failed(&output)[0].message.starts_with("OKX history: "));
     }
 }
 #[test]
@@ -449,11 +531,8 @@ fn child_timeout_distinguishes_unreleased_and_released_query_work() {
         engine.handle(NOW + 20_000., Event::TimerFired { timer });
         let output = actions(&mut engine, NOW + 20_000.);
         if released {
-            soft_failure(&output);
-            assert!(!output.iter().any(|a| matches!(
-                a,
-                Action::Notice(Notice::CommandFailed { command: OWNER, .. })
-            )));
+            strict_failure(&output);
+            assert_eq!(failed(&output)[0].kind, Some(ErrorKind::Timeout));
         } else {
             assert!(done(&output).is_none());
             let failures: Vec<_> = output

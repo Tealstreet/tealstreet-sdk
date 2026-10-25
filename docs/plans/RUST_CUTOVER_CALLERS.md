@@ -295,7 +295,7 @@ downstream edit. PR numbers refer to Tealstreet/tealstreet-sdk.
 | #1630 / `b2092b50a` | Hyperliquid rolling-retention order-history marker carries its query command before completion; retained rows and transition/time/limit policy stay unchanged. |
 | #1631 / `e9049c794` | OKX closed-position cap and noncomposite history cap/cursor-stall markers carry their query command. EEA composite failures and existing financial/history policy stay unchanged. |
 | #1632 / `41cd4914a` | Paradex bounded history page-budget marker carries its query command before partial completion. Unbounded page-cap and other stall failures stay unchanged. |
-| #1633 / `a29812d8e` | Bitunix history transport/HTTP/envelope/malformed-row failures now reject instead of resolving earlier rows as complete. Genuine remaining-page caps or stalled order/income paging retain rows with command-attributed `history.incomplete`; a completed final page does not get a false cap marker. Callers must preserve failure versus partial versus complete outcomes before coverage. |
+| #1633 / `a29812d8e` | (Later-page rejection superseded; see [Bitunix histories: shared cursor and accepted-page completion](#bitunix-histories-shared-cursor-and-accepted-page-completion): a failure after accepted rows now returns them with one `history.incomplete`.) Bitunix history transport/HTTP/envelope/malformed-row failures now reject instead of resolving earlier rows as complete. Genuine remaining-page caps or stalled order/income paging retain rows with command-attributed `history.incomplete`; a completed final page does not get a false cap marker. Callers must preserve failure versus partial versus complete outcomes before coverage. |
 | #1627 / `9a4446203` | WEEX income lifetime-budget, truncated-chunk, advertised-cursor, failed-page and terminal-failure markers now carry their query command. Existing retained rows, chunk continuation, pacing and terminal rejection policy stay unchanged; a marker on a rejected query is not a successful partial array. |
 | #1637 / `673565c2e` | Runtime bridge policy now follows engine capability flags/enums; shared construction rules retain synchronous policy and expose optional `construction().bridge`. Capability-dependent public calls wait for an existing startup; no-start/failed-start calls reject with method-named `ExchangeError` `invalidInput`/`notSent`. Worker forwarding stays first. NX explicit readiness is recommended; typed rejection handling is required. See [Runtime capability readiness](#runtime-capability-readiness-1637). |
 | #1636 / `62adf7651` | A usable Bitunix catalogue starts private initialization before ticker seeding finishes. Valid public rows survive malformed typed peers; unusable required seeds retry without false loaded-empty readiness. Independent discovery retries honor rate floors and use existing startup.degraded/recovered codes. Ticker recovery does not restart private settings/polling; private/history failure policy and caller shapes stay unchanged. |
@@ -1492,7 +1492,7 @@ markers rather than broadcast them.
 | Hyperliquid #1630 | Rolling-retention limit in order history (2,000 raw rows). |
 | OKX #1631 | Closed-position page cap; noncomposite history page cap and non-advancing cursor. EEA composite paths retain their strict failures. |
 | Paradex #1632 | Bounded history page-budget exhaustion; unbounded cap and other stalled walks still fail. |
-| Bitunix #1633 | Order/income paging with more rows possible but a cap or stalled progress; complete terminal pages do not get a cap marker. Failed reads reject. |
+| Bitunix #1633 | Order/income paging with more rows possible but a cap or stalled progress; complete terminal pages do not get a cap marker. A failure before accepted rows rejects; after accepted rows it returns them with the marker (shared cursor owner, superseding #1633's later-page rejection). |
 | WEEX #1627 | Income lifetime request budget, truncated chunks, advertised additional cursor rows, failed pages and terminal query failure. Existing continuation versus rejection policy remains. |
 | WEEX #1670 | Parsed empty native fill identities after query filters. Valid peers remain; an all-skipped in-scope result is a flagged empty success. |
 
@@ -1503,9 +1503,11 @@ query's engine command ID, separate from venue/context data and query options.
 These fixes change ownership metadata, not the retained rows, paging bounds or
 failure policy of those six venue patches. No new frame or result schema is
 introduced; producer and existing host behavior now join up for these paths.
-Bitunix #1633 additionally rejects history transport/HTTP/envelope or malformed
+Bitunix #1633 additionally rejected history transport/HTTP/envelope or malformed
 row failures instead of returning accumulated earlier rows as a successful
-array. Its genuinely capped/stalled order or income walks still return retained
+array. The later shared cursor owner (see Bitunix histories: shared cursor and
+accepted-page completion) keeps that rejection only before any accepted rows;
+after them it returns the accepted pages with one `history.incomplete`. Its genuinely capped/stalled order or income walks still return retained
 rows with the attributed marker; a final page with no more work no longer gets
 a false cap warning. Keep query failure, partial retained rows and a complete
 result distinct; an error is not an empty/complete history window.
@@ -3210,8 +3212,11 @@ longer becomes an empty complete result. Its 20-page budget resets per window,
 raw duplicate rows stay intact, and one owner retains earlier incompleteness
 across later windows. Adjacent repeated cursors and non-adjacent cycles now stop
 early with incomplete coverage. OKX keeps its initial upper-bound cursor, lower
-bound, 100 ms continuing-page delay and immediate unchanged-cursor exhaustion;
-non-adjacent cycles stop with incomplete coverage. Neither method's arguments
+bound and 100 ms continuing-page delay. Each next page asks `after = oldest + 1`
+(the bound is exclusive), so rows sharing the oldest millisecond across a page
+break are fetched again and the re-sent boundary rows are dropped by count. A
+page that cannot advance (a full page inside one millisecond, or rows not older
+than the cursor) and non-adjacent cycles stop with incomplete coverage. Neither method's arguments
 change. This slice covers closed-position reads only; both venues' general
 history reads and the broader query-marker fan-out remain unfinished. No NX
 migration, deployment or B11 closure is claimed.
@@ -6658,9 +6663,11 @@ managed Primary intent uses the host's default primary egress (physical routeNon
 Whole-root expiry is strict: one Timeout with no financial outcome, rows,
 INCOMPLETE marker or soft[]; parked continuations and late DATA cannot resume or
 finish a reused command. Ordinary released page transport/HTTP/parse failure or
-a child-only timeout while the root is live still emits the native command_error
-then soft[] for queries, discarding every prior page. Lookup rejects instead of
-claiming absence. Provider/preparation refusals before release are strict typed NotSent failures.
+a child-only timeout while the root is live emits the native command_error, then
+a query returns its accepted pages (rows of the failed page are dropped) with one
+command-owned INCOMPLETE marker; with no accepted rows it rejects with the typed
+failure instead of a soft[]. EEA composite reads stay strict failures, as their
+caps and stalls are. Lookup rejects instead of claiming absence. Provider/preparation refusals before release are strict typed NotSent failures.
 Synchronous child/submission refusals are also strict, with the shared Read
 projection (outcome None). Native
 lookup codec errors retain their untyped kind. Serialization errors finalized
@@ -7753,6 +7760,76 @@ waited with no deadline. A reply that arrives after its read expired publishes
 nothing and opens no sockets. Admission or queue refusals fail promptly into
 the same native backoff. The TS-visible startup results are unchanged.
 
+## Bitget private-WS egress route parity (TS #8093)
+
+The Rust Bitget venue now matches TS #8093 on private-socket egress, for
+`bitget`, `bitgetusdc` and `bitgetinverse`:
+
+- **Egress refusals.** A pre-login 40018 (IP-bound key) or 40024 (restricted
+  location) leaves the refused route. It logs "Bitget private WS login refused
+  this egress IP (…); trying the next route" as a warning, not an error. Only
+  the first refusal of a streak redials at once; later refusals follow the
+  native backoff.
+- **Exhaustion.** When the host has no route left, Bitget logs one
+  `auth.rejected` error, "Bitget private WS login rejected: <code> <msg> — the
+  API key's IP whitelist allows none of Tealstreet's WebSocket egress IPs", and
+  stops the private socket. It is never `StartupFailed` and never a
+  deactivation. Startup still settles because it is REST-gated, and account
+  polling stands in for the stream.
+- **UTA routing.** The UTA (v3) private socket takes TS's `privateUta` route
+  instead of connecting direct. `packages/safe-cex/src/transport/tealstreet/routing/routingTable.ts`
+  drops its UTA `directUrls` bypass in this same cutover. The engine routing
+  plan gains `privateWsRoutes`.
+
+Host contract (TS, WASM and native are identical): `SocketContext.rejectRoute`
+(omitted when false) asks the host to advance exactly one route candidate. It
+composes with `recover`, which still means the same thing, but `recover`'s
+jump to the last route does not apply on that connect. With no route left, the
+host dials nothing and reports `wsRouteExhausted` after `connect` returns, as
+that socket's only terminal: no open or close follows it. A custom host that
+ignores the flag stays bounded by the venue's backoff, but loses route
+parity.
+
+Not carried from TS: the tunnel counters (2 unauthenticated closes, 6 failed
+connects). The Rust venue cannot tell a tunnel route from a direct one. The
+hosts' existing silent-connect walk advances a tunnel that closes or never
+opens after 2 silent connects instead.
+
+## Bitget trading write job under a streamed serial Plan
+
+PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder, SetLeverage,
+SetMarginType and SetPositionMode for `bitget`, `bitgetusdc` and
+`bitgetinverse` now run as one command-owned streamed serial Plan behind a
+WriteAfterReads Preflight. The following are unchanged: entry precedence,
+planning, batching, endpoints, bodies, the `X-CHANNEL-API-CODE` header, the
+in-job reads signed with the Read role, the one fresh resend for an HTTP-200
+40009, the replan after an HTTP-200 40085, the native read retries, the
+accepted-ID order and the queue order.
+
+TS-visible changes:
+
+- **Per-call bound.** Each call ends at 20 s as a typed Timeout. A released
+  write that times out is Unknown and reconciles. Native had no request deadline.
+- **Capacity.** More than 256 concurrent commands are refused Capacity,
+  NotSent, before any send. That count covers the active job plus queued
+  writes. Placements stay bound by the existing 64 order-lock scopes.
+- **408/5xx before the native code.** A write answered 408 or 5xx is the
+  engine's unproven answer: "HTTP response does not prove the write outcome",
+  `VenueUnavailable`, Unknown. It reconciles on the next account tick. That
+  covers 500+40009, which no longer resends, and 500+40085, which no longer
+  replans (ruled 2026-10-25).
+- **401/403/429 by status.** These keep their native kinds, but the
+  projected failure no longer carries the native venue code.
+- **All-refused batch.** A 200/`00000` batch whose every row is in
+  `failureList` projects Rejected, because Bitget lists every order as not
+  placed. A mixed batch keeps outcome none with the accepted IDs.
+- **Empty acknowledgement.** An acknowledgement that accounts for no order is
+  kind Internal, Unknown.
+- **Refusal after a replan.** If a job that was replanned after a refused
+  40085 later fails (for example, detection expires), the terminal is that
+  40085 refusal (Rejected, its native text) rather than a NotSent detection
+  failure.
+
 ### TxFlow immediate local command custody
 
 Fifteen local occurrences now consume genuine command entry through shared Read
@@ -8479,6 +8556,159 @@ venue that adopts the hook:
 - **Header order.** The bundle goes First, or immediately after a named header
   (`After`, falling back to First), as declared with the bundle. Collision and
   whole-packet count/byte limits refuse NotSent, wiping the inserted copies.
+
+
+## Backpack supported-history Read custody
+
+Fills/orders/funding select Read(scope=None) once through default Slots and
+retain that exact provider binding for every page. Public trades retain a real
+keyless caller root with static X-Broker-Id:1200 and native Public egress.
+All four routes use one ReadCursorHistory under the genuine caller receipt.
+Each physical page has a NEW 20,000ms cap, clipped to the original root, no
+pacing and Never retry; page boundaries never renew the caller wait. Exact
+root/leg DATA admission precedes streamed rows, status, diagnostics and final
+success. Accepted-prefix failure cleanup keeps native paging/economic facts,
+drops unaccepted page rows/IDs/skips and retires the exact leg before another.
+The Backpack publicRead row preserves saved-read-key private GET history in
+public_data_only through a read-only provider; no primary or hosted authority.
+
+History native error presentation: only a released Backpack history transport
+Network failure retains the native Internal kind; message/outcome/code remain
+unchanged. Preparation and physical Timeout retain their typed causes.
+
+## Paradex subscription candle poll custody
+
+Each native poll route now owns a fresh unsigned Background Read with Never
+retry. **NEW:** its 20s admission-to-expiry bound includes Prepare, Bind, route
+waits and transport; native packets had no explicit timeout. A released klines
+failure can still use the single TradingView fallback under an independent
+Background Context with its own fresh 20s bound and original captured
+bounds/revision. There is no 20s cap across both routes.
+Unreleased admission/queue/preparation refusal is strict for that cycle: no
+recursive fallback, one finite current-generation completion + 3s timer. New
+refusal warnings use REQUEST_FAILED and the typed engine error's message;
+preparation fields stay intact through the callback. Polls emit no command or
+money outcome and add no auth evidence. A nonfinite Event clock queues no HTTP,
+Prepare, Bind, poll timer or recovery action.
+
+**NEW:** stale subscription generations cannot decode, publish, warn, fall back,
+schedule or recover. An outstanding Context remains bounded and retires on its
+callback/expiry; final unsubscribe does not promise immediate HTTP cancellation.
+A trade revision change suppresses only candle publication: current-generation
+cleanup, completion + 3s polling and native strict-20s/inclusive-30s trade-channel
+recovery remain. Duplicate reference counts and overlapping native startup
+cycles gain no new coalescing. Row order, last-row/volume merge, both native
+wires and decoders, command candle ownership, socket behavior and outer
+public-response account.start delegation are preserved.
+
+Inventory removes exactly two raw poll senders: public 3 -> 1, family 39 -> 37.
+The remaining conservative discovery macro witness is retained. The old stale
+response fixture's no-action count is explicitly superseded by exactly one
+ClearTimer for the retired managed HTTP deadline; no native publication,
+fallback, recovery, notice or poll timer is permitted in that suffix.
+
+## Backpack public-seed Read custody
+
+Markets, daily tickers and MarkPrices issue keyless Background Read observations
+through managed Prepare/Bind/Claim and ArrayAt::Root streaming. Every observation
+has a NEW 20,000ms admission-to-expiry cap, Public egress, no pacing, Never retry,
+and static X-Broker-Id:1200. Native keyed Backoff recovery starts a distinct
+bounded observation; it renews no caller root and reuses no retired authority.
+Exact current Context/DATA validation precedes parsing, row diagnostics, status
+and native publication. Successful publication uses live DATA, then retires the
+completing Context before startup successors or backoff work. Failure cleanup
+retires first. Nonfinite callback time permits native failed-mark fallback but
+cannot schedule recovery or issue another observation. Native rows, partial
+catalogue repair, live ticker overlay, private-startup eligibility and retry
+jitter/counters stay unchanged. Account, trading, signing and socket production
+remain outside this adoption. Only the shared public-seed raw HTTP site is pruned.
+
+## Asymmetric key typing for Sign (P4 follow-up)
+
+`LocalSigner` now types signing keys by trusted declaration
+(`RUST_SIGNER_PREREQUISITES.md`, "Asymmetric key typing (P4 follow-up)").
+Caller-visible changes:
+
+- **Asymmetric `Sign` needs a declaration.** `Ed25519`, `Es256`,
+  `Secp256k1Digest`, `StarkDigest` and `SchnorrDigest` sign only on a ref
+  whose `signing_algorithm` matches. Anything else is `InvalidRequest`, in
+  every build and before any arm runs. A declared ref never MACs. Undeclared
+  refs keep MAC behaviour exactly, and role refs are unchanged.
+- **Who declares.**
+  - AsterDEX V3 wallets are declared from the explicit resolved
+    `asterdex.api_version` on both setup paths; V1 declares nothing.
+  - Backpack's seed is declared `ed25519` by its registry setup.
+  - `schnorrDigest` is now a declarable `signingAlgorithm` (codegen and TS),
+    for Lighter.
+  - Callers who build a `LocalSigner` directly for an asymmetric family must
+    pass a policy declaring it (`from_setup_with_policy`), or use
+    `LocalSigner::insert_declared`. That call is atomic and refuses MAC
+    algorithms and role refs. It never retypes a ref an aliased secondary
+    shares with the primary (rotating within the same algorithm is fine).
+    A plain `insert` on such a ref keeps its algorithm. Unshared refs may be
+    retyped.
+- **`local_signer_from_json_for_mode(venue, input, &EngineOptions)`.** The
+  third argument is now the parsed account options, not a bool. Public intent
+  derives from them (`signer_setup_public_data_only`), and so do resolved
+  setup facts such as AsterDEX's version. `local_signer_from_json_for`, which
+  has no options, refines nothing.
+
+## Dispatch nonce reservation contract
+
+A nonce-bearing managed HTTP recipe reserves at its actual signing prepare,
+from its trusted selected stable subject. This differs from queue-time nonce
+allocation: parked requests do not reserve ahead of requests that prepare first.
+The exact nonce is a canonical decimal u64 receipt field, independent of the
+safe-integer wire timestamp and #2024 StampFloor. Raw clocks above MAX_SAFE
+milliseconds refuse before provider/I/O; missing trusted stable subjects are
+InvalidInput/NotSent, with no secret hash fallback or authentication evidence.
+
+Pure venue admission and every other fallible admission run before the nonce
+mutex is acquired. Under that mutex, the engine checks the floor, commits
+Released and pacing, then advances the process-global floor with max. Observers
+and journal updates follow after the mutex is released. A newer reservation
+alone never supersedes older unreleased work.
+A nonce at or below that floor is discarded before apply or final Claim and
+re-prepared under the same physical identity and immutable deadline. The fixed
+MAX_NONCE_REPREPARES = 8 bounds nonce-only pre-send repairs per physical attempt:
+eight allows bounded local repair without an unbounded provider loop. A ninth
+supersession exhausts the bound as one Internal/NotSent terminal, with nothing
+sent during repair and no physical retry credit or authentication-health effect.
+Clock, route and Bearer repairs do not consume this nonce-only budget. A genuine
+new physical retry/resend starts its own fresh reservation and repair count.
+
+Only explicitly registered NonceUnscheduled venues can queue nonce work; the
+mutable scheduler admission path is exclusive. An unsupported registration,
+wrong selected binding or reused claim refuses before new request/signing IDs.
+A changed or hidden claim at prepare refuses before reservation/provider work. Engine ordering ends at the host handoff, not network arrival.
+A NonceUnscheduled venue refuses every nonempty mutation-barrier declaration
+before origin validation, IDs or credits. Ordinary Plans stay supported; group
+support requires a separate member-order proof and has no individual fallback.
+The existing Kraken secret-digest allocator stays only for its uncut-over native
+consumer, whose stable-namespace continuity and hosted nonce transport need
+separate certification before adoption.
+
+Selected reads carry nonce authority only through `queue_with_nonce`, minted
+from their private retained selection. Ordinary AdmittedRead/ReadLeg queues
+reject a declared nonce claim before request/signing IDs. The nonce queue
+requires the exact authority it just minted; missing, substituted or invalid
+subject claims return the pending wrapper with typed InvalidInput for contextual
+settlement. Nonce-free selected queues and direct managed Slots-claim requests
+keep their existing paths. Each physical retry/queue mints afresh; no reselection
+or reservation occurs while the read snapshot is held.
+
+
+The non-default engine feature `dispatch-nonce` includes reservation, canonical
+wire nonce receipts and the atomic release/repair fence together. Only the Kraken
+crate enables it; Kraken Spot and Futures share that family. Other standalone
+families retain stamp-only signing and reject a present wire nonce or a manually
+supplied nonce receipt. Public Rust opaque types/fields remain nameable, but
+feature-off minting refuses before recipe construction and physical IDs. Native
+host nonce controls require its explicit `dispatch-nonce` forwarding feature.
+
+### Backpack account GET observations
+
+Info, Positions, Balance and Orders each select one genuine installed Read identity from native-ready primary plus GET secondary, then hold a Background Read with a NEW 20s per-observation bound, no pacing and RetryPolicy::Never. Positions/Orders retain Root streaming; Info/Balance remain nonstreamed. Native revision/token fences govern publication independently of physical custody. DATA precedes rows, diagnostics and Store publication; exact retirement precedes corrective Balance, accepted repairs and original Next. Local configuration/selection refusals stay silent. Finite Capacity/TimedOut admission, the reviewed transient precommit kinds and owned expiry coalesce the existing 10s account poll only when absent; later polling creates a distinct observation. No immediate retry/Next or timer at nonfinite clocks. Native released transport/status/parse presentation and continuation remain intact. GET signing preserves native fractional receive-window truncation to zero; every non-GET still rejects zero. Direct constructors must install the valid read identity/provider alongside valid saved read status; registry construction supplies that atomic tuple. Raw nonstream writes and private WebSocket signing remain outside this adoption.
 
 ### GRVT provider recipe: approved future external-signature contract
 

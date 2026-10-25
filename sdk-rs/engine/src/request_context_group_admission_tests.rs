@@ -5,7 +5,7 @@ use crate::request_context::{
 };
 use crate::{Command, CredentialSlot, Response, SocketId, Venue};
 
-struct Consumer(usize);
+struct Consumer<const NONCE: bool = false>(usize);
 fn credential() -> Credential {
     Credential {
         slot: CredentialSlot::Primary,
@@ -20,7 +20,16 @@ fn call(timeout_ms: u32) -> CallBound<'static> {
         after_refusal: &[],
     }
 }
-impl Venue for Consumer {
+impl<const NONCE: bool> Venue for Consumer<NONCE> {
+    fn http_release() -> crate::HttpRelease<Self> {
+        if NONCE {
+            crate::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+        } else {
+            crate::HttpRelease::Mutable(|_, _, _| {
+                Ok(crate::request_context::Admission::Unscheduled)
+            })
+        }
+    }
     type Pending = Context;
     fn start(&mut self, _: &mut Cx<'_, Context>) {}
     fn http_pacing(&self) -> &[Pacing] {
@@ -136,7 +145,7 @@ impl Venue for Consumer {
                     true,
                 )
                 .map(|(plan, _)| plan),
-            11 => cx.admit_plan(&preflight, &steps, policy),
+            11 | 17 => cx.admit_plan(&preflight, &steps, policy),
             12 => cx.admit_plan_with_terminals(&preflight, &steps, policy, &[]),
             13 => cx
                 .begin_planned_execution(
@@ -149,7 +158,7 @@ impl Venue for Consumer {
                 .map(|(plan, _, _)| plan),
             _ => cx.admit_plan_with_barriers(&preflight, &steps, policy, barriers),
         };
-        if self.0 < 10 || self.0 == 15 {
+        if self.0 < 10 || self.0 == 15 || self.0 == 16 {
             assert_eq!(
                 result.err(),
                 Some(if self.0 == 1 {
@@ -166,7 +175,12 @@ impl Venue for Consumer {
                     cx.io.core.request_contexts.plan_context_storage()
                 )
             );
-            cx.fail_preflight(&preflight, "fixture complete").unwrap();
+            if self.0 == 16 {
+                cx.fail_preflight(&preflight, Error::Invalid.venue_error())
+                    .unwrap();
+            } else {
+                cx.fail_preflight(&preflight, "fixture complete").unwrap();
+            }
         } else {
             let plan = result.unwrap();
             let body = cx.io.core.request_contexts.plan_body(&plan).unwrap();
@@ -195,7 +209,11 @@ impl Venue for Consumer {
     }
 }
 fn check(mode: usize) {
-    let mut engine = crate::test_support::seeded_engine(Consumer(mode));
+    check_registration::<false>(mode);
+}
+fn check_registration<const NONCE: bool>(mode: usize) {
+    assert!(!Consumer::<NONCE>::dispatch_nonce());
+    let mut engine = crate::test_support::seeded_engine(Consumer::<NONCE>(mode));
     engine.start(0.);
     engine.handle(
         1.,
@@ -207,6 +225,12 @@ fn check(mode: usize) {
         }),
     );
     let actions = engine.drain_actions().collect::<Vec<_>>();
+    if mode == 16 {
+        assert!(actions.iter().any(|action| matches!(action,
+            Action::Notice(crate::Notice::CommandFailed { command: 7, error })
+            if error.kind == Some(crate::ErrorKind::InvalidInput)
+                && error.outcome == Some(crate::Outcome::NotSent))));
+    }
     assert_eq!(
         actions
             .iter()
@@ -347,4 +371,13 @@ fn group_custody_refuses_foreign_stale_and_out_of_order_without_effects() {
 #[test]
 fn expanded_nonzero_set_floor_is_refused_before_group_ids_or_storage() {
     check(15);
+}
+
+#[test]
+fn nonce_unscheduled_barrier_refuses_before_ids_storage_or_credits() {
+    check_registration::<true>(16);
+}
+#[test]
+fn nonce_unscheduled_ordinary_plan_still_admits() {
+    check_registration::<true>(17);
 }

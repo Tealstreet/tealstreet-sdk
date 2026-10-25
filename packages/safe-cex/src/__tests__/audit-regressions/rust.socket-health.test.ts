@@ -58,6 +58,7 @@ const setup = async () => {
       if (text === 'drop') return JSON.stringify([{ op: 'wsClose', socket }]);
       return '[]';
     },
+    wsRouteExhausted: () => '',
     wsClose: (socket, code) => {
       engineCloses.push([socket, code]);
       return JSON.stringify([connect(channels.get(socket)!)]);

@@ -154,6 +154,7 @@ class FrameSource implements WasmEngineLike {
   wsOpen = this.start;
   wsMessage = this.start;
   wsClose = this.start;
+  wsRouteExhausted = this.start;
   httpStart = this.start;
   httpChunk = this.start;
   httpEnd = this.start;

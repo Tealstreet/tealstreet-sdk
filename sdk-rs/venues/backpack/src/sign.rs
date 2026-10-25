@@ -67,7 +67,7 @@ impl SignStep for Http {
         let is_batch = declaration.method == Method::Post && declaration.path == "/api/v1/orders";
         if declaration.rows.is_empty()
             || (!is_batch && declaration.rows.len() != 1)
-            || declaration.window == 0
+            || (declaration.window == 0 && declaration.method != Method::Get)
             || http.method != declaration.method
             || http.body != declaration.body
         {
@@ -98,6 +98,7 @@ impl SignStep for Http {
         let text = payload(instruction, &declaration.rows, stamp, declaration.window);
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(stamp),
                 expiry_ms: None,
             },

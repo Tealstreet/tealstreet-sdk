@@ -54,6 +54,7 @@ fn work(
     let receipt = SignReceipt {
         stamp_ms: Some(stamp_ms),
         expiry_ms: None,
+        nonce: None,
     };
     receipt.validate()?;
     let mut request = hmac_sha256_work(
@@ -90,6 +91,7 @@ fn values(stamp_ms: Option<f64>, result: &SignResult) -> Result<(&str, String, &
         != (SignReceipt {
             stamp_ms: Some(stamp_ms),
             expiry_ms: None,
+            nonce: None,
         })
         || result.values.len() != 3
         || result.values[1].len() != 32
@@ -199,6 +201,7 @@ impl SignStep for Http {
         SignReceipt {
             stamp_ms: Some(stamp_ms),
             expiry_ms: None,
+            nonce: None,
         }
         .validate()?;
         let nonce = nonce(dispatch)?;
