@@ -5,10 +5,15 @@ use crate::wire::*;
 use crate::{Backpack, Connection, Pending, REST, WS};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
+use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Error, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    AdmittedRead, BackgroundReadError, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
 use safe_cex_engine::socket::Tick;
 use safe_cex_engine::{Cx, Fill, Method, OrderSnapshotToken, Response, SocketId, TimerId};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -24,7 +29,11 @@ pub enum Next {
     Finish,
     None,
 }
-pub enum Request {
+pub struct Request {
+    read: AdmittedRead,
+    data: ReadData,
+}
+enum ReadData {
     Info {
         revision: u64,
     },
@@ -50,6 +59,17 @@ pub enum Request {
         token: OrderSnapshotToken,
         next: Next,
     },
+}
+
+impl ReadData {
+    fn next(&self) -> Next {
+        match self {
+            Self::Info { .. } => Next::Positions,
+            Self::Positions { next, .. }
+            | Self::Balance { next, .. }
+            | Self::Orders { next, .. } => *next,
+        }
+    }
 }
 
 pub struct Account {
@@ -305,7 +325,6 @@ impl Backpack {
         params: Params,
         body: Option<String>,
         pending: Pending,
-        stream: bool,
     ) -> Result<(), String> {
         let read_credentials = self
             .options
@@ -344,11 +363,7 @@ impl Backpack {
                 format!("?{query}")
             }
         );
-        if stream {
-            cx.request_streamed(method, url, headers, ArrayAt::Root, pending);
-        } else {
-            cx.request(method, url, headers, body, pending);
-        }
+        cx.request(method, url, headers, body, pending);
         Ok(())
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -380,49 +395,116 @@ impl Backpack {
             self.account_info(cx);
         }
     }
-    fn account_info(&self, cx: &mut Cx<'_, Pending>) {
-        let _ = self.signed(
+    fn account_recover(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now.is_finite() && self.account.tick.is_none() {
+            self.account.tick = Some(cx.set_poll_timer(10000.0));
+        }
+    }
+    fn account_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &'static str,
+        data: ReadData,
+        stream: bool,
+    ) {
+        if self
+            .options
+            .read_credentials_status
+            .is_some_and(|status| status.is_err())
+            || (self.options.read_credentials_status.is_some()
+                && self.options.read_identity.is_none())
+        {
+            return;
+        }
+        let primary = self
+            .account
+            .credentials
+            .as_ref()
+            .and(self.options.identity.clone());
+        let slots = Slots::new(
+            primary,
+            self.options.read_identity.clone(),
+            SlotPolicy::default(),
+        );
+        let selected = SelectedRead::select(&slots, ReadRole::Read { scope: None });
+        let read = match SelectedRead::background(
             cx,
-            Method::Get,
+            selected,
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(read) => read,
+            Err(BackgroundReadError::Admission(Error::Capacity | Error::TimedOut)) => {
+                self.account_recover(cx);
+                return;
+            }
+            Err(_) => return,
+        };
+        let declaration = crate::sign::Request {
+            method: Method::Get,
+            path: path.into(),
+            rows: vec![Params::new()],
+            body: None,
+            window: self
+                .account
+                .credentials
+                .as_ref()
+                .map_or(60000, |primary| primary.window),
+        };
+        if let Err((pending, reason)) = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{REST}{path}"),
+                body: None,
+                stream: stream.then_some(ArrayAt::Root),
+            },
+            |identity| Box::new(crate::sign::Http::new(identity.clone(), declaration)),
+            |read| Pending::Account(Box::new(Request { read, data })),
+        ) {
+            let Pending::Account(request) = pending else {
+                unreachable!("account queue retains its exact request")
+            };
+            self.account_precommit_failed(cx, request, reason, reason.read_venue_error());
+        }
+    }
+    fn account_info(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account_read(
+            cx,
             "/api/v1/account",
-            Params::new(),
-            None,
-            Pending::Account(Request::Info {
+            ReadData::Info {
                 revision: self.account.leverage_revision,
-            }),
+            },
             false,
         );
     }
     pub(crate) fn positions_read(&mut self, cx: &mut Cx<'_, Pending>, next: Next) {
         self.account.positions_revision += 1;
-        let _ = self.signed(
+        self.account_read(
             cx,
-            Method::Get,
             "/api/v1/position",
-            Params::new(),
-            None,
-            Pending::Account(Request::Positions {
+            ReadData::Positions {
                 rows: SnapshotBuilder::default(),
                 hold: false,
                 revision: self.account.positions_revision,
                 next,
-            }),
+            },
             true,
         );
     }
     fn balance_read(&mut self, cx: &mut Cx<'_, Pending>, recalculate: bool, next: Next) {
         self.account.balance_revision += 1;
-        let _ = self.signed(
+        self.account_read(
             cx,
-            Method::Get,
             "/api/v1/capital/collateral",
-            Params::new(),
-            None,
-            Pending::Account(Request::Balance {
+            ReadData::Balance {
                 revision: self.account.balance_revision,
                 recalculate,
                 next,
-            }),
+            },
             false,
         );
     }
@@ -438,20 +520,17 @@ impl Backpack {
             self.next_account(cx, next);
             return;
         };
-        let _ = self.signed(
+        self.account_read(
             cx,
-            Method::Get,
             "/api/v1/orders",
-            Params::new(),
-            None,
-            Pending::Account(Request::Orders {
+            ReadData::Orders {
                 rows: SnapshotBuilder::default(),
                 repairs: vec![],
                 unpriced: vec![],
                 hold: false,
                 token,
                 next,
-            }),
+            },
             true,
         );
     }
@@ -494,8 +573,14 @@ impl Backpack {
         pending: &mut Request,
         item: &str,
     ) {
-        match pending {
-            Request::Positions { rows, hold, .. } => {
+        if cx
+            .validate_background_read_http_delivery(pending.read.context())
+            .is_err()
+        {
+            return;
+        }
+        match &mut pending.data {
+            ReadData::Positions { rows, hold, .. } => {
                 let Ok(r) = serde_json::from_str::<PositionRow<'_>>(item) else {
                     self.reject_position(cx, rows, hold, item);
                     return;
@@ -521,7 +606,7 @@ impl Backpack {
                     ));
                 }
             }
-            Request::Orders {
+            ReadData::Orders {
                 rows,
                 repairs,
                 unpriced: pending_unpriced,
@@ -641,26 +726,33 @@ impl Backpack {
     pub(crate) fn account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Request,
+        pending: Box<Request>,
         response: Response<'_>,
     ) {
-        if !(200..300).contains(&response.status) {
-            self.account_failed(
-                cx,
-                pending,
-                &format!("Backpack HTTP {}: {}", response.status, response.body),
-            );
+        if cx
+            .validate_background_read_http_delivery(pending.read.context())
+            .is_err()
+        {
+            let _ = cx.finish_http_context(pending.read.context());
             return;
         }
-        let failure_next = match &pending {
-            Request::Info { .. } => Next::Positions,
-            Request::Positions { next, .. }
-            | Request::Balance { next, .. }
-            | Request::Orders { next, .. } => *next,
-        };
+        let Request { read, data } = *pending;
+        let next = data.next();
+        if !(200..300).contains(&response.status) {
+            cx.retried_failure(
+                "backpack.account:613",
+                format!("Backpack HTTP {}: {}", response.status, response.body),
+            );
+            if cx.finish_http_context(read.context()).is_ok() && cx.now.is_finite() {
+                self.next_account(cx, next);
+            }
+            return;
+        }
+        let mut corrective_balance = None;
+        let mut repairs = Vec::new();
         let result = (|| {
-            match pending {
-                Request::Info { revision } => {
+            match data {
+                ReadData::Info { revision } => {
                     let r: AccountRow =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
                     if revision == self.account.leverage_revision {
@@ -671,13 +763,12 @@ impl Backpack {
                         };
                         self.leverage_settings(cx);
                     }
-                    self.positions_read(cx, Next::Balance);
                 }
-                Request::Positions {
+                ReadData::Positions {
                     rows,
                     hold,
                     revision,
-                    next,
+                    next: _,
                 } => {
                     if hold {
                         return Err("Backpack invalid positions".into());
@@ -691,12 +782,11 @@ impl Backpack {
                             rows.commit(cx.store.positions().iter().cloned(), |p| p.id.clone());
                         cx.store.set_positions(rows);
                     }
-                    self.next_account(cx, next);
                 }
-                Request::Balance {
+                ReadData::Balance {
                     revision,
                     recalculate,
-                    next,
+                    next: _,
                 } => {
                     let r: Collateral =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
@@ -717,18 +807,17 @@ impl Backpack {
                             },
                         });
                         if !current {
-                            self.balance_read(cx, recalculate, Next::None);
+                            corrective_balance = Some(recalculate);
                         }
                     }
-                    self.next_account(cx, next);
                 }
-                Request::Orders {
+                ReadData::Orders {
                     rows,
-                    repairs,
+                    repairs: native_repairs,
                     unpriced,
                     hold,
                     token,
-                    next,
+                    next: _,
                 } => {
                     if hold {
                         return Err("Backpack invalid orders".into());
@@ -748,38 +837,81 @@ impl Backpack {
                         rows.commit(current.iter().cloned(), |o| o.id.clone())
                     });
                     if accepted {
-                        for repair in repairs {
-                            self.start_repair(cx, repair);
-                        }
+                        repairs = native_repairs;
                     }
-                    self.next_account(cx, next);
                 }
             }
             Ok::<(), String>(())
         })();
-        if let Err(e) = result {
-            cx.notice(Level::Error, code::STREAM_MALFORMED, e);
-            self.next_account(cx, failure_next);
-            if self.account.tick.is_none() {
-                self.account.tick = Some(cx.set_poll_timer(10000.0));
+        if let Err(message) = &result {
+            cx.notice(Level::Error, code::STREAM_MALFORMED, message);
+        }
+        if cx.finish_http_context(read.context()).is_err() || !cx.now.is_finite() {
+            return;
+        }
+        if result.is_ok() {
+            if let Some(recalculate) = corrective_balance {
+                self.balance_read(cx, recalculate, Next::None);
             }
+            for repair in repairs {
+                self.start_repair(cx, repair);
+            }
+        }
+        self.next_account(cx, next);
+        if result.is_err() {
+            self.account_recover(cx);
         }
     }
     pub(crate) fn account_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Request,
+        pending: Box<Request>,
         error: &str,
     ) {
+        if cx.finish_http_context(pending.read.context()).is_err() || !cx.now.is_finite() {
+            return;
+        }
         cx.retried_failure("backpack.account:613", error);
-        let next = match pending {
-            Request::Info { .. } => Next::Positions,
-            Request::Positions { next, .. } => next,
-            Request::Orders { next, .. } | Request::Balance { next, .. } => next,
-        };
-        self.next_account(cx, next);
+        self.next_account(cx, pending.data.next());
     }
-
+    pub(crate) fn account_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Box<Request>,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if error.kind == Some(safe_cex_engine::ErrorKind::Timeout) {
+            if cx.finish_http_context(pending.read.context()).is_ok() {
+                self.account_recover(cx);
+            }
+        } else {
+            self.account_failed(cx, pending, &error.message);
+        }
+    }
+    pub(crate) fn account_precommit_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Box<Request>,
+        reason: Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if cx.finish_http_context(pending.read.context()).is_err() {
+            return;
+        }
+        let transient = matches!(reason, Error::Capacity | Error::TimedOut)
+            || (reason == Error::Invalid
+                && matches!(
+                    error.kind,
+                    Some(
+                        safe_cex_engine::ErrorKind::Network
+                            | safe_cex_engine::ErrorKind::Timeout
+                            | safe_cex_engine::ErrorKind::Internal
+                    )
+                ));
+        if transient {
+            self.account_recover(cx);
+        }
+    }
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         let Some(c) = &self.account.credentials else {
             return;

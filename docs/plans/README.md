@@ -444,4 +444,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Dispatch nonce reservation and release ordering | Source/review/local gates CLEAR; refreshed exact-head CI pending | Before reserving a selected-key nonce in SignStep preparation or changing nonce receipt and release-floor custody. | [RUST_DISPATCH_NONCE_RESERVATION.md](RUST_DISPATCH_NONCE_RESERVATION.md) |
 
-| OKX ordered write ownership | Plan CLEAR (dazzy3); source-stage REDs in, source next | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |
+| Backpack account GET Read custody | Plan CLEAR; originals reproduced, review pending | Before managing Info, Positions, Balance and Orders observations; preserve native snapshots and continuation order. | [RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md](RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md) |
+
+| OKX ordered write ownership | Plan CLEAR (dazzy3); source implemented, source review next | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |
