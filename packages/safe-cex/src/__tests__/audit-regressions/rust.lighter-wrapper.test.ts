@@ -30,7 +30,7 @@ const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lig
     snapshotFrame: () => new Uint8Array(),
     wsOpen: noop,
     wsMessage: noop,
-    wsClose: noop,
+    wsClose: noop, wsRouteExhausted: noop,
     httpStart: noop,
     httpChunk: noop,
     httpEnd: noop,

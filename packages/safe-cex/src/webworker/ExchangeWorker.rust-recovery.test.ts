@@ -115,6 +115,7 @@ class ControlledEngine implements WasmEngineLike {
   wsOpen = () => '[]';
   wsMessage = this.wsOpen;
   wsClose = this.wsOpen;
+  wsRouteExhausted = this.wsOpen;
   httpStart = this.wsOpen;
   httpChunk = this.wsOpen;
   httpEnd = this.wsOpen;

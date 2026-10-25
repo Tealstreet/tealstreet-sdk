@@ -294,6 +294,17 @@ impl Supervisor {
         self.retry = Some(cx.set_timer(delay));
     }
 
+    /// Reconnect at once without counting a failure: the venue refused this
+    /// route, not the transport. The caller bounds how often it skips backoff.
+    pub fn retry_now<P>(&mut self, cx: &mut Cx<'_, P>) {
+        if self.retry.is_some() {
+            return;
+        }
+        self.cancel(cx);
+        self.phase = Phase::Waiting;
+        self.retry = Some(cx.set_timer(0.0));
+    }
+
     pub fn cancel<P>(&mut self, cx: &mut Cx<'_, P>) {
         if let Some(timer) = self.watch.take() {
             cx.clear_timer(timer);

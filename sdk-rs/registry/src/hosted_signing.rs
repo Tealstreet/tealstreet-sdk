@@ -255,6 +255,7 @@ pub fn prepare(
             revision: _,
         } => {
             let receipt = SignReceipt {
+                nonce: None,
                 stamp_ms: Some(stamp_ms),
                 expiry_ms: None,
             };

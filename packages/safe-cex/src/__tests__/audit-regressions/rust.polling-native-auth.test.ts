@@ -59,7 +59,7 @@ function fixture(options: Partial<ExchangeOptions> = {}, initial: unknown[] = []
       return JSON.stringify(inbound.splice(0));
     },
     wsOpen: idle,
-    wsClose: idle,
+    wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,

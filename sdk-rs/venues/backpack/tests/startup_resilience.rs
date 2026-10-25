@@ -17,8 +17,8 @@ fn public_engine() -> Engine<Backpack> {
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/markets") => Some(request),
             _ => None,
@@ -49,8 +49,8 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
             .expect("shared exponential retry timer");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) if request.url.contains("/markets") => Some(request),
                 _ => None,
@@ -82,8 +82,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
         ..Default::default()
     }));
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/markets") => Some(request),
             _ => None,
@@ -102,8 +102,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
     );
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
-    let reads = engine
-        .drain_actions()
+    let reads = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -132,8 +132,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -150,8 +150,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
             },
         },
     );
-    let ticker = engine
-        .drain_actions()
+    let ticker = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -177,8 +177,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
         .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine
-        .drain_actions()
+    let retry = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url == ticker.url => Some(r),
             _ => None,
@@ -191,8 +191,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
 fn entirely_malformed_ticker_source_retries_without_publishing_an_empty_seed() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -209,8 +209,8 @@ fn entirely_malformed_ticker_source_retries_without_publishing_an_empty_seed() {
             },
         },
     );
-    let ticker = engine
-        .drain_actions()
+    let ticker = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -237,8 +237,8 @@ fn entirely_malformed_ticker_source_retries_without_publishing_an_empty_seed() {
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine
-        .drain_actions()
+    let retry = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url == ticker.url => Some(r),
             _ => None,
@@ -252,8 +252,8 @@ fn late_ticker_seed_preserves_supplied_live_fields_and_uses_one_public_session()
     for live_trade in [false, true] {
         let mut engine = public_engine();
         engine.start(0.0);
-        let catalogue = engine
-            .drain_actions()
+        let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -270,7 +270,7 @@ fn late_ticker_seed_preserves_supplied_live_fields_and_uses_one_public_session()
                 },
             },
         );
-        let early = engine.drain_actions().collect::<Vec<_>>();
+        let early = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0);
         assert_eq!(
             early
                 .iter()

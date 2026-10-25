@@ -525,3 +525,125 @@ the compare-not-overwrite admission; each family conversion gates on those.
 for every family that needs a public value, with no venue derivation. The
 pre-release recovery check is one shared helper that every family calls,
 not a check written per venue.
+
+## Asymmetric key typing (P4 follow-up)
+
+Plan, 2026-10-24. Owner claude-19pt8s; requested by claude-ddi2il. Reviewers:
+codex-uufub4 (engine/custody) and claude-m26ps4 (credential semantics). The
+gap was found reviewing Lighter #1967. It is cross-family, so it is fixed
+once in the provider.
+
+**Problem.** `LocalSigner` signs with an asymmetric algorithm (`Ed25519`,
+`Es256`, `Secp256k1Digest`, `StarkDigest`, `SchnorrDigest`) using any
+ordinary ref. A MAC secret that happens to parse as a valid key (a 32-byte
+HMAC secret is a valid secp256k1 or Ed25519 key) therefore signs. The
+signature is then a stable function of the MAC secret under another
+algorithm. In the other direction, a wallet key can be used as an HMAC key.
+P4 closed this for public operations through `signing_algorithm`; `Sign`
+still has the gap.
+
+**Rule** (provider; `can_sign` mirrors it):
+- Asymmetric `Sign` on an ordinary ref requires
+  `signing_algorithm == algorithm`, declared by trusted setup policy.
+- MAC `Sign` (`HmacSha256`, `HmacSha512`, `Sha256SecretSuffix`) on a ref
+  declared asymmetric is refused, so a declared wallet key is never a MAC key.
+- Undeclared refs keep MAC behaviour exactly, so HMAC families are untouched.
+- Role refs are unchanged. A role is its declaration (P6b), and
+  `ZkLinkContract` stays role-only.
+- **Check order.** The declaration check runs before the algorithm arm. An
+  undeclared ref is `InvalidRequest` even in a build without the arm, and a
+  declared ref in such a build stays `Unsupported`. Tests that pin
+  `Unsupported` therefore use declared setups.
+- Refusals are `InvalidRequest` and happen before any signing. Injected
+  host/remote providers enforce their own custody; this is the local
+  provider's rule.
+
+**Declarations for families that sign asymmetric today** (tip `6a6845c4491`):
+- **AsterDEX V3** signs `Secp256k1Digest`; V1 is HMAC on the same slot. The
+  declaration therefore depends on the resolved API version.
+  - The registry's `signer_setup_policy_for(venue, &EngineOptions)` refines the
+    static policy for setup-mapped families. For Aster V3 it declares
+    `secp256k1Digest` on both slots: the primary wallet, and the read agent's
+    own wallet or the primary alias. V1 declares nothing.
+  - Both trusted paths use it: native `prepare_local_signer_for` and WASM
+    `local_signer_from_json_for_mode`, which gains the parsed options it
+    already has.
+  - **Version source.** It reads only the explicit resolved
+    `asterdex.api_version` that the venue uses: native setup resolves it in
+    `asterdex_setup` before the policy is built, and TS sends it explicitly.
+    It never re-infers the version from the shape of the material. `None`
+    declares nothing, which fails closed because the venue already refuses a
+    missing or contradictory version.
+  - **Alias.** A V3 read agent with `signingFromPrimary` has no ref of its
+    own. It signs through the primary's ref and its single declaration: no
+    second copy, and nothing silently dropped. A V3 read agent with its own
+    hex wallet gets its own declaration.
+  - The TS mapping and golden are unchanged; the declaration is Rust policy,
+    never caller setup.
+- **Backpack**: `backpack_provider` installs its seed with a policy
+  declaring `ed25519` (it used policy-free `from_setup`).
+- **Coinbase** (recipes only, not admitted): `Es256` or `Ed25519` by key type.
+  Its test setup declares the algorithm, and the conversion (#1881) declares
+  it from the key format in trusted setup.
+- **Unlanded, ordered after combo-5b**: Orderly #1937 (`ed25519`), Lighter
+  #1967 (`schnorrDigest`; its part 3 already plans the declaration) and P6b
+  #1973 (roles, unaffected). This PR updates their test setups once they
+  land, which is why it touches `crypto/src/signer.rs` after them.
+
+**Raw `insert`.** Tests that `insert` asymmetric material get a trusted
+`LocalSigner::insert_declared(ref, bytes, algorithm)`.
+- It accepts only asymmetric algorithms.
+- It is atomic: it replaces any old declaration in the same step.
+- It refuses a role ref, and an algorithm that differs from the one setup
+  declared for a ref an aliased secondary shares. That binding survives a
+  plain `insert`, which keeps a shared ref's algorithm the way a role keeps
+  its role, and only `remove` ends it. Unshared raw refs may be retyped.
+
+Plain `insert` on an unshared ref stays undeclared (P4); on a shared alias
+ref it keeps the slots' algorithm (above).
+
+**Version parity.** The refinement reads the same explicit
+`asterdex.api_version` field the venue reads, so setup and the venue never
+disagree about V1 and V3. Native setup resolves it, defaults and overrides
+included, before the policy is built. With `None`, both refuse.
+
+**REDs** (existing API, shown failing first). Each one is its own test per
+algorithm or case, so every variant runs. In the default build every RED
+fails. With all arms enabled, `es256` and `starkDigest` already refuse the
+32-byte test secret through key-form checks, so the undeclared case there
+proves the rule only through `secp256k1Digest`, `ed25519` and
+`schnorrDigest`.
+- R1: a 32-byte HMAC secret installed undeclared signs `Secp256k1Digest` and
+  `Ed25519` today; it must be `InvalidRequest`.
+- R2: a ref declared `secp256k1Digest` signs `HmacSha256` today; it must be
+  `InvalidRequest`.
+- R3: `can_sign` reports `Supported` for undeclared asymmetric use wherever
+  the arm is implemented. Today the arms are not implemented, so this is
+  pinned as a control, not a RED.
+- Controls: Aster V3 setup (native and JSON) signs `Secp256k1Digest`, and V1
+  still signs HMAC. Backpack, Coinbase and existing HMAC families are
+  byte-unchanged.
+
+**Tests.**
+- Every refusal pair: undeclared, wrong declaration, MAC on a declared ref.
+- The alias rule.
+- Aster V1/V3 on both setup paths, including:
+  - the V3 Code (EIP-712) endpoints signing `Secp256k1Digest` on the declared
+    ref;
+  - the aliased read agent and a read agent with its own wallet;
+  - `api_version: None` declaring nothing.
+- `registry/tests/backpack_admission.rs`, kept in the focused runs. Its valid
+  RFC 8032 seed case would expose a missing declaration that the setup probe
+  masks as a width error.
+- The Coinbase recipes.
+- `insert_declared` refusing a MAC algorithm.
+- Disabled-arm `Unsupported` with declared setups.
+
+**Ordering.** This touches `crypto/src/signer.rs`, which #1937, #1967 and
+#1973 also change. It is ordered after combo-5b and merges their landing
+before review.
+
+**Architecture gate.** Is this a per-venue fix of a cross-cutting concern?
+No. It adds one provider rule for every algorithm family, and declarations
+come from shared trusted policy. The only family-specific code is Aster's
+version refinement, inside the shared policy function.

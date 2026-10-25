@@ -303,7 +303,11 @@ impl BitgetFutures {
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
-        if index == 3 && (self.account.startup_rejected || self.account.supervisor.is_waiting()) {
+        if index == 3
+            && (self.account.startup_rejected
+                || self.account.route_exhausted
+                || self.account.supervisor.is_waiting())
+        {
             return;
         }
         let url = if index == 3 {
@@ -317,24 +321,26 @@ impl BitgetFutures {
         };
         let recover =
             index == 3 && std::mem::take(&mut self.account.needs_recovery) && !self.account.uta;
+        // Composes with `recover`: the host leaves the route, recovery still runs.
+        let reject_route = index == 3 && std::mem::take(&mut self.account.reject_route);
         let connection = &mut self.sockets[index];
         if let Some(socket) = connection.socket.take() {
             cx.close(socket);
         }
-        connection.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(url)
-                    .channel(if index == 3 {
-                        safe_cex_engine::SocketChannel::Private
-                    } else {
-                        safe_cex_engine::SocketChannel::Public
-                    })
-                    .feed(
-                        ["primary", "secondary-1", "secondary-2", "private"][index],
-                        recover,
-                    ),
-            ),
-        );
+        let mut spec = safe_cex_engine::SocketSpec::new(url)
+            .channel(if index == 3 {
+                safe_cex_engine::SocketChannel::Private
+            } else {
+                safe_cex_engine::SocketChannel::Public
+            })
+            .feed(
+                ["primary", "secondary-1", "secondary-2", "private"][index],
+                recover,
+            );
+        if reject_route {
+            spec = spec.reject_route();
+        }
+        connection.socket = Some(cx.connect(spec));
         connection.open = false;
         if index == 3 {
             self.account.authenticated = false;
@@ -765,6 +771,17 @@ impl Venue for BitgetFutures {
             self.private_message(cx, text);
         } else {
             self.public_message(cx, text);
+        }
+    }
+    #[inline]
+    fn route_exhaustion() -> bool {
+        true
+    }
+    fn on_route_exhausted(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.sockets[3].socket == Some(socket) {
+            self.private_route_exhausted(cx);
+        } else {
+            self.on_close(cx, socket, safe_cex_engine::ROUTE_EXHAUSTED_CLOSE);
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _: u16) {

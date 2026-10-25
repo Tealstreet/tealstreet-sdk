@@ -31,10 +31,7 @@ fn probe(venue: Backpack) -> ProbeVenue<Backpack, impl FnMut(&mut Backpack, &mut
                     path,
                     Default::default(),
                     None,
-                    Pending::Markets {
-                        rows: vec![],
-                        skipped: vec![],
-                    },
+                    Pending::SigningProbe,
                     false,
                 )
                 .unwrap();
