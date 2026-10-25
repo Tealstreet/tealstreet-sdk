@@ -334,15 +334,18 @@ fn native_public_only_saved_read_key_preserves_three_private_routes() {
     use safe_cex_venue_backpack::{Backpack, Options};
     let seed = STANDARD.encode([9u8; 32]);
     for route in [Route::Fills, Route::Orders, Route::Funding] {
-        let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-            primary: None,
-            secondary: Some(LocalIdentity {
-                key: Secret::new("saved-read-key".into()),
-                secret: Secret::new(seed.clone()),
-                secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
-                ..Default::default()
-            }),
-        })
+        let (provider, identities) = LocalSigner::from_setup_with_policy(
+            LocalSetup {
+                primary: None,
+                secondary: Some(LocalIdentity {
+                    key: Secret::new("saved-read-key".into()),
+                    secret: Secret::new(seed.clone()),
+                    secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+                    ..Default::default()
+                }),
+            },
+            ed25519_seeds(),
+        )
         .unwrap();
         let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
             public_data_only: true,
@@ -444,15 +447,18 @@ fn provider_read_identity_owns_history_signature(route: Route) {
     use safe_cex_venue_backpack::{Backpack, Options};
     let selected_seed = STANDARD.encode([9u8; 32]);
     let raw_seed = STANDARD.encode([8u8; 32]);
-    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-        primary: None,
-        secondary: Some(LocalIdentity {
-            key: Secret::new("provider-read-key".into()),
-            secret: Secret::new(selected_seed.clone()),
-            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
-            ..Default::default()
-        }),
-    })
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: None,
+            secondary: Some(LocalIdentity {
+                key: Secret::new("provider-read-key".into()),
+                secret: Secret::new(selected_seed.clone()),
+                secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+                ..Default::default()
+            }),
+        },
+        ed25519_seeds(),
+    )
     .unwrap();
     assert!(identities.primary.is_none());
     let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
@@ -521,20 +527,23 @@ fn before_primary_account_start(
     use safe_cex_venue_backpack::{Backpack, Options};
     let primary_seed = STANDARD.encode([7u8; 32]);
     let read_seed = STANDARD.encode([9u8; 32]);
-    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-        primary: (!public_only).then(|| LocalIdentity {
-            key: Secret::new("primary-before-start".into()),
-            secret: Secret::new(primary_seed.clone()),
-            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
-            ..Default::default()
-        }),
-        secondary: secondary.then(|| LocalIdentity {
-            key: Secret::new("secondary-before-start".into()),
-            secret: Secret::new(read_seed.clone()),
-            secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
-            ..Default::default()
-        }),
-    })
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: (!public_only).then(|| LocalIdentity {
+                key: Secret::new("primary-before-start".into()),
+                secret: Secret::new(primary_seed.clone()),
+                secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+                ..Default::default()
+            }),
+            secondary: secondary.then(|| LocalIdentity {
+                key: Secret::new("secondary-before-start".into()),
+                secret: Secret::new(read_seed.clone()),
+                secret_encoding: safe_cex_engine::signing::KeyEncoding::Base64,
+                ..Default::default()
+            }),
+        },
+        ed25519_seeds(),
+    )
     .unwrap();
     let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         public_data_only: public_only,
@@ -648,5 +657,17 @@ fn native_secondary_history_works_before_start_and_with_held_discovery() {
                 assert_eq!(done(&respond(&mut e, &request, 2036., "[]")), ["[]"]);
             }
         }
+    }
+}
+
+/// Backpack seeds are Ed25519 keys, declared as the provider builder does.
+fn ed25519_seeds() -> safe_cex_engine::signing::CredentialSetupPolicy {
+    let ed25519 = Some(safe_cex_engine::signing::IdentitySetupPolicy {
+        signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+        ..Default::default()
+    });
+    safe_cex_engine::signing::CredentialSetupPolicy {
+        primary: ed25519,
+        secondary: ed25519,
     }
 }

@@ -727,6 +727,7 @@ impl crate::SignStep for ReplacementRecipe {
     ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
         Ok(crate::signing::SignRequest {
             receipt: crate::signing::SignReceipt {
+                nonce: None,
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: None,
             },

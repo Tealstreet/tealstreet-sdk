@@ -109,13 +109,11 @@ impl Venue for Probe {
             .expect("unexpected fixture preparation failure")
             .push((reason, error));
     }
-    fn on_http_release(
-        &mut self,
-        _: &mut u8,
-        _: &crate::request_context::HttpRelease,
-    ) -> Result<crate::request_context::Admission, Error> {
-        self.releases += 1;
-        Ok(crate::request_context::Admission::Unscheduled)
+    fn http_release() -> crate::HttpRelease<Self> {
+        crate::HttpRelease::Mutable(|this, _, _| {
+            this.releases += 1;
+            Ok(crate::request_context::Admission::Unscheduled)
+        })
     }
     fn on_command(&mut self, _: &mut Cx<'_, u8>, _: Command) {}
     fn on_open(&mut self, _: &mut Cx<'_, u8>, _: SocketId) {}

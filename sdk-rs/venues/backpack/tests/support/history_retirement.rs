@@ -1,7 +1,7 @@
 //! Inspect real retained handles without exposing a production context counter.
 use super::*;
 use safe_cex_engine::book::Book;
-use safe_cex_engine::request_context::{Admission, Error, HttpRelease};
+use safe_cex_engine::request_context::{Admission, Error};
 use safe_cex_engine::{Action, Command, Event, Notice, SocketId, TimerId, Venue};
 
 struct ObservedHistory {
@@ -52,23 +52,21 @@ impl Venue for ObservedHistory {
     fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, error: &str) {
         panic!("unexpected failure: {error}");
     }
-    fn on_http_release(
-        &mut self,
-        pending: &mut Pending,
-        _: &HttpRelease,
-    ) -> Result<Admission, Error> {
-        let Pending::History(request) = pending else {
-            panic!("history release only");
-        };
-        let context = request.root.context();
-        if let Some(root) = &self.root {
-            assert_eq!(root, context, "every page keeps the original root");
-        } else {
-            self.root = Some(context.clone());
-        }
-        self.released += 1;
-        assert_eq!(self.retired.len() + 1, self.released);
-        Ok(Admission::Unscheduled)
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::Mutable(|this, pending: &mut Pending, _| {
+            let Pending::History(request) = pending else {
+                panic!("history release only");
+            };
+            let context = request.root.context();
+            if let Some(root) = &this.root {
+                assert_eq!(root, context, "every page keeps the original root");
+            } else {
+                this.root = Some(context.clone());
+            }
+            this.released += 1;
+            assert_eq!(this.retired.len() + 1, this.released);
+            Ok(Admission::Unscheduled)
+        })
     }
     fn book(&self, _: &str) -> Option<&Book> {
         None
@@ -83,15 +81,24 @@ fn fifty_pages_retire_every_exact_leg_and_the_original_root() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
     use safe_cex_engine::signing::KeyEncoding;
-    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-        primary: None,
-        secondary: Some(LocalIdentity {
-            key: Secret::new("read-key".into()),
-            secret: Secret::new(STANDARD.encode([9; 32])),
-            secret_encoding: KeyEncoding::Base64,
-            ..Default::default()
-        }),
-    })
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: None,
+            secondary: Some(LocalIdentity {
+                key: Secret::new("read-key".into()),
+                secret: Secret::new(STANDARD.encode([9; 32])),
+                secret_encoding: KeyEncoding::Base64,
+                ..Default::default()
+            }),
+        },
+        safe_cex_engine::signing::CredentialSetupPolicy {
+            primary: None,
+            secondary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+                ..Default::default()
+            }),
+        },
+    )
     .unwrap();
     let backpack = Backpack::new(crate::Options {
         public_data_only: true,
