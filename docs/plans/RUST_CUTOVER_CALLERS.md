@@ -8780,3 +8780,20 @@ unchanged. Fixture-only admission-clock supersession aligns six catalogue starts
 to their already-existing epoch response time, with all response/event clocks,
 payloads and financial assertions retained and truncated-stream0->1->2 unchanged.
 Standalone custody controls retain genuine delayed/equality expiry coverage.
+
+## Kraken local prerequisite policy and caller projection
+
+Local, unpushed prerequisite work on 9977ccf1aa6; no activation or inventory
+prune. The overseer approved NEW Futures 20s physical calls and Spot 100s
+nontrade/token retry-chain bounds while preserving native Spot 20s physical
+timeouts, native retry ledgers, history 50-page/caller-wait caps and serial
+command length. Token work remains socket-epoch bound. The exact owner table is
+[RUST_KRAKEN_PRIVATE_PREREQUISITES.md](RUST_KRAKEN_PRIVATE_PREREQUISITES.md).
+
+Named follow-up: richer Kraken partial-write caller projection. Shared journal
+per-item Rejected/NotSent truth is retained; caller-visible errors deliberately
+keep native outcome=None after progress, accepted IDs or protective cancel.
+Source controls must assert journal truth and caller projection independently.
+Native cancel/ACK/replacement ordering remains serial; this grants no parallel
+nonce barrier authority. Namespace takeover and shared current-Store release
+guard still require bounded owner review; hosted adapter and activation stay held.

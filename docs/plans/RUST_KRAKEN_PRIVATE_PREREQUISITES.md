@@ -4,8 +4,8 @@ Local, unpushed on actual 9977ccf1aa6, authorized by the overseer while #2156
 qualifies. Companion to landed RUST_KRAKEN_PRIVATE_DISPATCH_ADOPTION.md and its
 26 original controls. No bridge activation, hosted adapter, inventory prune or
 native signing cutover is authorized by a prototype result. Owner codex-9czdjh;
-uufub4 reviews nonce/dispatch and fe7lgm the shared engine seam. Numeric rows
-below are explicit proposals for owner disposition, not native parity claims.
+uufub4 reviews nonce/dispatch and fe7lgm the shared engine seam. Numeric table B was approved by claude-ddi2il on 2026-10-26. New bounds
+are disclosed policy, not native parity claims.
 
 ## A. Enforced legacy fence, drain and atomic takeover
 
@@ -56,7 +56,7 @@ an existing higher target merge both maxima atomically; reverse release cannot
 move the floor down; UINT64_MAX stays exhausted; unrelated subjects are unchanged;
 failed takeover changes no maxima; no new dispatch reservation before takeover.
 
-## B. Owner/window and terminal policy proposal
+## B. Approved owner/window and terminal policy
 
 Native Futures sends have timeout_ms=None; Spot explicitly sets 20,000ms per
 physical request. Do not claim a native Futures 20s contract. Shared command entry
@@ -84,11 +84,13 @@ retry timer/poll cadence remain literal; nonfinite events cannot schedule NaN.
 
 Before send, Mutation refusal is typed NotSent; released unanswered writes are
 Unknown and must not be resent. Native genuine response classification, message
-prefixes and accepted IDs are preserved. Shared journal owns terminal truth and
-partial-progress receipts: native trading_finish currently strips Rejected or
-NotSent to None after an accepted ID/effective write/cancel. Its shared-journal
-projection must be explicitly ruled and disclosed before native source adoption;
-no venue callback erases released write evidence. This is an OPEN behavior gate.
+prefixes and accepted IDs are preserved. The shared journal retains truthful per-item Rejected/NotSent outcomes and
+partial-progress receipts. The caller-visible terminal stays byte-compatible:
+native trading_finish strips Rejected/NotSent to None after effective progress,
+accepted IDs or a protective cancellation. Apply that projection only to the
+caller clone, never to the journal evidence. The overseer approved this explicit
+divergence; CALLERS names a follow-up for richer caller projection. Pin both
+truthful journal evidence and the exact native caller None in source controls.
 
 ## C. Nonce-compatible protective barriers
 
@@ -98,39 +100,39 @@ for real cancel response, suppress replacement after execution, and retain
 amend_canceled/accepted IDs in failure messages. Spot uses its native AmendOrder.
 Do not convert the Futures serial pair into simultaneous group HTTP egress.
 
-The shared plan barrier API currently refuses all nonempty barriers under
-NonceUnscheduled, even with genuine nonce capability. Group Claim also commits
-ordinary Lifecycles without an atomic group nonce-floor check. Removing only
-the admission guard would release nonce work unsafely. The shared owner must
-pin whether the required Kraken barrier is a serial provenance/ACK barrier,
-a prepare-all custody barrier with staged sends, or an existing parallel
-MutationBarrierBound used only for genuinely parallel native work. No native
-cancellation/replacement ordering is changed to fit an API.
+The required Kraken barrier is SERIAL provenance and real-ACK custody, per
+uufub4's b4a1689 review. It does not authorize parallel MutationBarrierBound
+admission or prepare-all as an assumed prerequisite. Keep nonempty parallel
+barrier refusal unchanged. A first generic original demanding its admission
+was a mistaken geometry probe; its log is preserved as superseded evidence,
+not an accepted Kraken RED. The corrected baseline tests preserve that refusal.
 
-For genuine parallel groups, proposed private atomic commit: prepare all fallible
-admission, reconciliation storage and pure venue validation outside the store
-lock; then validate every nonce against an evolving per-subject released floor
-in declared send order and commit all Lifecycles/floors under ONE lock using an
-engine-private infallible closure. No Mutable scheduler callback or public
-arbitrary commit closure. Same-subject group nonces must strictly increase in
-native dispatch order; a stale/invalid sibling releases no member and advances
-no floor or journal. Pure admission precedes this transaction; observations
-and native callbacks follow the completed transaction with the lock released.
+The actual shared gap is late immutable provenance: NonceUnscheduled's pure
+callback has no current Store parameter. An old venue snapshot cannot validate
+the original at the final Cancel Claim. Pin an engine-owned immutable release
+view/guard carrier with fe7lgm and uufub4: current Store plus the exact retained
+pending/owner/release, validated before nonce-floor commit, never a mutable
+scheduler callback or callback under the nonce lock. Native response ACK and
+execution-during-cancel suppression then gate a later Place under the same
+command/journal. No simultaneous cancel/place egress or no-op protection.
 
-A stale nonce sibling requires bounded group reprepare/cancel custody, retaining
-managed Attempts and caller windows, replacing the precise affected preparation
-and receipt/MAC, without spending credits for Bearer/route repairs. The existing
-eight nonce-repair budget is not raised or silently reset. No no-op release hook,
-barrier deletion, partial release or journal early publication counts as proof.
+The separate future parallel nonce-group seam stays out of this cut. It needs
+complete member/subject/evolving-floor validation before any commit. Existing
+http_group_claim::prepare_group_commit publishes insert_group records before
+release: those records are NOT merely reserved capacity and cannot precede a
+failing nonce transaction. A later design must reserve storage outside lock,
+then commit private Lifecycle/journal/floor changes infallibly together; observe
+and call native code only after unlock. No allocation, fallible step or arbitrary
+callback after the first change. A stale member retains exact Attempts, windows
+and each eight-credit nonce ledger, cancels its exact preparation, and causes
+whole-group revalidation. This requires a separate shared-owner-reviewed plan.
 
-First real Engine original: genuine nonce-capable NonceUnscheduled Plan with a
-nonempty Mutation barrier must admit and retain Prepare/Bind/Claim custody;
-legacy default NonceUnscheduled without permission must still refuse before
-IDs. Further controls: reverse provider completion, held sibling, stale final
-Claim race, equal/reversed same-subject nonces, independent subjects, partial
-provider failure, immutable protective provenance, cancel ACK before replacement,
-execution during cancel, zero partial observations/reconciliation/floors, exact
-capacity recovery and disposed resources. Keep all old 26 native originals.
+Required serial controls: original provenance changes while provider/Prepare/
+Bind is parked; final Claim must release no Cancel and advance no floor/journal;
+unchanged provenance releases Cancel alone; replacement stays absent until the
+real native cancel ACK; full execution while cancel is in flight suppresses
+replacement; post-cancel replacement refusal keeps truthful journal and native
+caller projection. Keep all 26 landed adoption originals and old wire controls.
 
 ## Local delivery gates
 
