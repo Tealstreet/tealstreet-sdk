@@ -307,20 +307,12 @@ impl ContextRegistry {
 impl<P> Cx<'_, P> {
     // Only some feature combinations call this.
     #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
     pub(in super::super::super) fn preflight_plan_origin(
         &self,
         handle: &Preflight,
     ) -> Result<(PreflightPolicy, Option<Context>), Error> {
-        self.validate_preflight_activation(handle)?;
-        let state = self.io.core.request_contexts.preflight_state(handle)?;
-        if let Some(call) = state.call.first() {
-            self.validate_preflight_delivery(handle, &call.context)?;
-            Ok((state.policy.clone(), Some(call.context.clone())))
-        } else if state.admits_handoff(self.io.core.http_delivery.as_ref()) {
-            Ok((state.policy.clone(), None))
-        } else {
-            Err(Error::Revoked)
-        }
+        self.core_ref().preflight_plan_origin(handle)
     }
 
     pub(in super::super::super) fn with_owned_read_failure(
@@ -526,32 +518,13 @@ impl<P> Cx<'_, P> {
         }
     }
 
-    /// Check exact response authority before native/cache publication. A live
-    /// response still requires native decoding and snapshot freshness checks.
+    #[inline]
     pub fn validate_preflight_delivery(
         &self,
         handle: &Preflight,
         context: &Context,
     ) -> Result<(), Error> {
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let call = self.io.core.request_contexts.read_call(handle, context)?;
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
-            return Err(Error::Revoked);
-        }
-        if self.now >= call.admission.deadline {
-            return Err(Error::TimedOut);
-        }
-        let managed = self
-            .io
-            .core
-            .managed_http
-            .get(&delivery.attempt.request)
-            .ok_or(Error::Revoked)?;
-        if !managed.released_delivery(delivery) {
-            return Err(Error::Revoked);
-        }
-        Ok(())
+        self.core_ref().validate_preflight_delivery(handle, context)
     }
 
     #[inline]
@@ -584,7 +557,7 @@ impl<P> Cx<'_, P> {
         self.core().preflight_read_context(handle, policy, terms)
     }
 
-    /// The declared read's own terms, checked before any custody is spent.
+    #[inline]
     pub(super) fn validate_preflight_read(
         &self,
         handle: &Preflight,
@@ -592,27 +565,8 @@ impl<P> Cx<'_, P> {
         terms: CallTerms,
         parked: bool,
     ) -> Result<(), Error> {
-        let state = self.io.core.request_contexts.preflight_state(handle)?;
-        if policy.operation != Operation::Read
-            || policy.credential != state.policy.read_credential
-            || terms.wait_ms != 0
-            || terms.timeout_ms != policy.timeout_ms
-            || (terms.attempts > 1 && policy.retry == RetryPolicy::Never)
-        {
-            return Err(Error::Invalid);
-        }
-        let window = terms.window(self.now, state.read_bound(parked))?;
-        Context::new(
-            handle.owner(),
-            1,
-            Operation::Read,
-            policy.credential.clone(),
-            self.now,
-            window.deadline(),
-            policy.pacing,
-        )?
-        .with_retry(policy.retry)?;
-        Ok(())
+        self.core_ref()
+            .validate_preflight_read(handle, policy, terms, parked)
     }
 
     #[inline]
@@ -631,48 +585,21 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreCx<'_> {
+    #[inline]
     pub(in super::super::super) fn preflight_plan_origin(
         &self,
         handle: &Preflight,
     ) -> Result<(PreflightPolicy, Option<Context>), Error> {
-        self.validate_preflight_activation(handle)?;
-        let state = self.io.core.request_contexts.preflight_state(handle)?;
-        if let Some(call) = state.call.first() {
-            self.validate_preflight_delivery(handle, &call.context)?;
-            Ok((state.policy.clone(), Some(call.context.clone())))
-        } else if state.admits_handoff(self.io.core.http_delivery.as_ref()) {
-            Ok((state.policy.clone(), None))
-        } else {
-            Err(Error::Revoked)
-        }
+        self.core_ref().preflight_plan_origin(handle)
     }
 
-    /// Check exact response authority before native/cache publication. A live
-    /// response still requires native decoding and snapshot freshness checks.
+    #[inline]
     pub fn validate_preflight_delivery(
         &self,
         handle: &Preflight,
         context: &Context,
     ) -> Result<(), Error> {
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let call = self.io.core.request_contexts.read_call(handle, context)?;
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
-            return Err(Error::Revoked);
-        }
-        if self.now >= call.admission.deadline {
-            return Err(Error::TimedOut);
-        }
-        let managed = self
-            .io
-            .core
-            .managed_http
-            .get(&delivery.attempt.request)
-            .ok_or(Error::Revoked)?;
-        if !managed.released_delivery(delivery) {
-            return Err(Error::Revoked);
-        }
-        Ok(())
+        self.core_ref().validate_preflight_delivery(handle, context)
     }
 
     /// Retire one validated native read. Only this successful handoff permits a
@@ -760,7 +687,7 @@ impl crate::engine::CoreCx<'_> {
         self.issue_preflight_read(handle, policy, terms, false)
     }
 
-    /// The declared read's own terms, checked before any custody is spent.
+    #[inline]
     pub(super) fn validate_preflight_read(
         &self,
         handle: &Preflight,
@@ -768,27 +695,8 @@ impl crate::engine::CoreCx<'_> {
         terms: CallTerms,
         parked: bool,
     ) -> Result<(), Error> {
-        let state = self.io.core.request_contexts.preflight_state(handle)?;
-        if policy.operation != Operation::Read
-            || policy.credential != state.policy.read_credential
-            || terms.wait_ms != 0
-            || terms.timeout_ms != policy.timeout_ms
-            || (terms.attempts > 1 && policy.retry == RetryPolicy::Never)
-        {
-            return Err(Error::Invalid);
-        }
-        let window = terms.window(self.now, state.read_bound(parked))?;
-        Context::new(
-            handle.owner(),
-            1,
-            Operation::Read,
-            policy.credential.clone(),
-            self.now,
-            window.deadline(),
-            policy.pacing,
-        )?
-        .with_retry(policy.retry)?;
-        Ok(())
+        self.core_ref()
+            .validate_preflight_read(handle, policy, terms, parked)
     }
 
     /// Issue a validated read in the caller's custody, with the current
@@ -883,5 +791,82 @@ impl crate::engine::CoreCx<'_> {
             .contexts
             .insert(context.leg(), context.clone());
         Ok(context)
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    pub(in super::super::super) fn preflight_plan_origin(
+        &self,
+        handle: &Preflight,
+    ) -> Result<(PreflightPolicy, Option<Context>), Error> {
+        self.validate_preflight_activation(handle)?;
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
+        if let Some(call) = state.call.first() {
+            self.validate_preflight_delivery(handle, &call.context)?;
+            Ok((state.policy.clone(), Some(call.context.clone())))
+        } else if state.admits_handoff(self.io.core.http_delivery.as_ref()) {
+            Ok((state.policy.clone(), None))
+        } else {
+            Err(Error::Revoked)
+        }
+    }
+
+    /// Check exact response authority before native/cache publication. A live
+    /// response still requires native decoding and snapshot freshness checks.
+    pub fn validate_preflight_delivery(
+        &self,
+        handle: &Preflight,
+        context: &Context,
+    ) -> Result<(), Error> {
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let call = self.io.core.request_contexts.read_call(handle, context)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
+            return Err(Error::Revoked);
+        }
+        if self.now >= call.admission.deadline {
+            return Err(Error::TimedOut);
+        }
+        let managed = self
+            .io
+            .core
+            .managed_http
+            .get(&delivery.attempt.request)
+            .ok_or(Error::Revoked)?;
+        if !managed.released_delivery(delivery) {
+            return Err(Error::Revoked);
+        }
+        Ok(())
+    }
+
+    /// The declared read's own terms, checked before any custody is spent.
+    pub(super) fn validate_preflight_read(
+        &self,
+        handle: &Preflight,
+        policy: &Policy,
+        terms: CallTerms,
+        parked: bool,
+    ) -> Result<(), Error> {
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
+        if policy.operation != Operation::Read
+            || policy.credential != state.policy.read_credential
+            || terms.wait_ms != 0
+            || terms.timeout_ms != policy.timeout_ms
+            || (terms.attempts > 1 && policy.retry == RetryPolicy::Never)
+        {
+            return Err(Error::Invalid);
+        }
+        let window = terms.window(self.now, state.read_bound(parked))?;
+        Context::new(
+            handle.owner(),
+            1,
+            Operation::Read,
+            policy.credential.clone(),
+            self.now,
+            window.deadline(),
+            policy.pacing,
+        )?
+        .with_retry(policy.retry)?;
+        Ok(())
     }
 }

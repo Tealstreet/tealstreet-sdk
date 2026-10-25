@@ -340,11 +340,9 @@ impl crate::engine::CoreCx<'_> {
         Ok(())
     }
 
-    /// Begin/join run only in the observer command's own genuine callback,
-    /// in addition to the registry's exact root/issuer/generation checks.
+    #[inline]
     fn entry_callback(&self, root: &Context) -> bool {
-        matches!(root.owner(), Owner::Command { id, .. } if self.io.entry_bound(id))
-            && self.io.core.http_delivery.is_none()
+        self.core_ref().entry_callback(root)
     }
 
     fn finish_sealed(&mut self, sealed: Vec<Sealed>) {
@@ -380,6 +378,15 @@ impl crate::engine::CoreCx<'_> {
         }
         let sealed = self.io.core.request_contexts.expire_executions(self.now);
         self.finish_sealed(sealed);
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    /// Begin/join run only in the observer command's own genuine callback,
+    /// in addition to the registry's exact root/issuer/generation checks.
+    fn entry_callback(&self, root: &Context) -> bool {
+        matches!(root.owner(), Owner::Command { id, .. } if self.io.entry_bound(id))
+            && self.io.core.http_delivery.is_none()
     }
 }
 

@@ -370,26 +370,9 @@ impl<P> Cx<'_, P> {
             .admit_plan_owned(preflight, declaration, physical)
     }
 
-    /// Structural availability only; issuing a slot requires its exact Plan,
-    /// original eligibility and one-use reserved physical admission.
+    #[inline]
     pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .validate_plan(plan, self.now)?;
-        let mut slots = Vec::new();
-        slots
-            .try_reserve_exact(body.entries.len())
-            .map_err(|_| Error::Capacity)?;
-        for slot in body.schedule.available() {
-            let index = body.schedule.ordinal(&slot)?;
-            let entry = &body.entries[index];
-            if !entry.parked && entry.eligible_at.is_some_and(|at| at <= self.now) {
-                slots.push(slot);
-            }
-        }
-        Ok(slots)
+        self.core_ref().plan_slots(plan)
     }
 }
 
@@ -723,6 +706,15 @@ impl crate::engine::CoreCx<'_> {
         Ok((handle, execution))
     }
 
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
+    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
+        self.core_ref().plan_slots(plan)
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
     /// Structural availability only; issuing a slot requires its exact Plan,
     /// original eligibility and one-use reserved physical admission.
     // Only some feature combinations call this.
@@ -1054,36 +1046,9 @@ impl<P> Cx<'_, P> {
         Ok(context)
     }
 
-    /// Exact released DATA authority before any native or Store mutation.
+    #[inline]
     pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .validate_plan(plan, self.now)?;
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        let call = body
-            .entries
-            .iter()
-            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *context))
-            .ok_or(Error::Revoked)?;
-        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
-            return Err(Error::Revoked);
-        }
-        if self.now >= call.admission.deadline {
-            return Err(Error::TimedOut);
-        }
-        if !self
-            .io
-            .core
-            .managed_http
-            .get(&delivery.attempt.request)
-            .is_some_and(|managed| managed.released_delivery(delivery))
-        {
-            return Err(Error::Revoked);
-        }
-        Ok(())
+        self.core_ref().validate_plan_delivery(plan, context)
     }
 
     pub(crate) fn bind_read_plan_history(&mut self, plan: &Plan) -> Result<Plan, Error> {
@@ -1456,36 +1421,9 @@ impl crate::engine::CoreCx<'_> {
         self.io.core.session_resumed.push(request);
     }
 
-    /// Exact released DATA authority before any native or Store mutation.
+    #[inline]
     pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .validate_plan(plan, self.now)?;
-        self.io.core.request_contexts.validate(context, self.now)?;
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        let call = body
-            .entries
-            .iter()
-            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *context))
-            .ok_or(Error::Revoked)?;
-        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
-            return Err(Error::Revoked);
-        }
-        if self.now >= call.admission.deadline {
-            return Err(Error::TimedOut);
-        }
-        if !self
-            .io
-            .core
-            .managed_http
-            .get(&delivery.attempt.request)
-            .is_some_and(|managed| managed.released_delivery(delivery))
-        {
-            return Err(Error::Revoked);
-        }
-        Ok(())
+        self.core_ref().validate_plan_delivery(plan, context)
     }
 
     /// Settle a call after validating DATA and recording write facts. Structural
@@ -1661,6 +1599,40 @@ impl crate::engine::CoreCx<'_> {
         let at_ms = body.next_wake();
         self.io.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
         self.io.core.actions.push(Action::SetTimer { timer, at_ms });
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    /// Exact released DATA authority before any native or Store mutation.
+    pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let call = body
+            .entries
+            .iter()
+            .find_map(|entry| entry.call.as_ref().filter(|call| call.context == *context))
+            .ok_or(Error::Revoked)?;
+        if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
+            return Err(Error::Revoked);
+        }
+        if self.now >= call.admission.deadline {
+            return Err(Error::TimedOut);
+        }
+        if !self
+            .io
+            .core
+            .managed_http
+            .get(&delivery.attempt.request)
+            .is_some_and(|managed| managed.released_delivery(delivery))
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(())
     }
 }
 

@@ -1715,6 +1715,52 @@ impl<P> Cx<'_, P> {
     }
 }
 
+/// The shared-borrow form of `CoreIo`, so venue-independent `&self` checks
+/// are compiled once.
+struct CoreIoRef<'a> {
+    core: &'a IoCore,
+}
+
+/// The shared-borrow form of `CoreCx`; see `CoreIoRef`.
+struct CoreRef<'a> {
+    now: f64,
+    io: CoreIoRef<'a>,
+}
+
+impl<P> Io<P> {
+    #[inline]
+    fn core_ref(&self) -> CoreIoRef<'_> {
+        CoreIoRef { core: &self.core }
+    }
+}
+
+impl<P> Cx<'_, P> {
+    #[inline]
+    fn core_ref(&self) -> CoreRef<'_> {
+        CoreRef {
+            now: self.now,
+            io: self.io.core_ref(),
+        }
+    }
+}
+
+impl CoreIo<'_> {
+    #[inline]
+    fn core_ref(&self) -> CoreIoRef<'_> {
+        CoreIoRef { core: &*self.core }
+    }
+}
+
+impl CoreCx<'_> {
+    #[inline]
+    fn core_ref(&self) -> CoreRef<'_> {
+        CoreRef {
+            now: self.now,
+            io: self.io.core_ref(),
+        }
+    }
+}
+
 impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
@@ -1752,15 +1798,9 @@ impl<P> Io<P> {
         self.core_io().queue_reconcile(symbols, at)
     }
 
+    #[inline]
     fn managed_socket_active(&self) -> bool {
-        #[cfg(feature = "managed-sockets")]
-        {
-            self.core.managed_sockets
-        }
-        #[cfg(not(feature = "managed-sockets"))]
-        {
-            false
-        }
+        self.core_ref().managed_socket_active()
     }
     #[inline]
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
@@ -1821,15 +1861,9 @@ impl crate::engine::CoreIo<'_> {
         self.core.reconcile_due = vec![(None, latest)];
     }
 
+    #[inline]
     fn managed_socket_active(&self) -> bool {
-        #[cfg(feature = "managed-sockets")]
-        {
-            self.core.managed_sockets
-        }
-        #[cfg(not(feature = "managed-sockets"))]
-        {
-            false
-        }
+        self.core_ref().managed_socket_active()
     }
 
     fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
@@ -1876,6 +1910,19 @@ impl crate::engine::CoreIo<'_> {
                 .any(|(a, _)| !crate::resource_ids::action_ids_safe(a))
         {
             self.core.next_id.invalidate();
+        }
+    }
+}
+
+impl crate::engine::CoreIoRef<'_> {
+    fn managed_socket_active(&self) -> bool {
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.core.managed_sockets
+        }
+        #[cfg(not(feature = "managed-sockets"))]
+        {
+            false
         }
     }
 }
@@ -2189,13 +2236,9 @@ impl<P> Cx<'_, P> {
         self.core().request_timeout(id, timeout_ms)
     }
 
+    #[inline]
     pub fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
-        self.io
-            .core
-            .entropy
-            .as_ref()
-            .ok_or("Engine entropy providers are required")?
-            .identity(bytes)
+        self.core_ref().fill_entropy(bytes)
     }
     pub fn fill_signing_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
         self.io
@@ -2576,13 +2619,9 @@ impl crate::engine::CoreCx<'_> {
         }
     }
 
+    #[inline]
     pub fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
-        self.io
-            .core
-            .entropy
-            .as_ref()
-            .ok_or("Engine entropy providers are required")?
-            .identity(bytes)
+        self.core_ref().fill_entropy(bytes)
     }
 
     /// Spreads a failed-request retry delay into `[0.75, 1.0] * delay_ms` so
@@ -2919,6 +2958,17 @@ impl crate::engine::CoreCx<'_> {
         let financials =
             (financials.realized_pnl.is_some() || financials.fee.is_some()).then_some(financials);
         self.io.core.fills.push((fill, financials));
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    pub fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.io
+            .core
+            .entropy
+            .as_ref()
+            .ok_or("Engine entropy providers are required")?
+            .identity(bytes)
     }
 }
 

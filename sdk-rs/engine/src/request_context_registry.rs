@@ -1836,8 +1836,7 @@ impl<P> Cx<'_, P> {
             .http_write_result_with_reports(context, result, reports)
     }
 
-    /// Classify the delivered write reply. The engine supplies the status,
-    /// headers and the command's intent; the codec supplies native evidence.
+    #[inline]
     pub fn classify_write(
         &self,
         context: &Context,
@@ -1845,21 +1844,8 @@ impl<P> Cx<'_, P> {
         native: Option<&crate::classify::Native<'_>>,
         message: impl Into<String>,
     ) -> Result<crate::classify::Fact, Error> {
-        let (status, headers) = self.io.core.http_write_reply.as_ref().ok_or(Error::State)?;
-        let response = crate::Response {
-            status: *status,
-            headers,
-            body: "",
-        };
-        let delivery = self.current_write_delivery(context)?;
-        Ok(crate::classify::fact(
-            table,
-            self.write_intent(context)?,
-            crate::classify::Released::Response(&response),
-            native,
-            message,
-        )
-        .for_attempt(delivery.attempt.request))
+        self.core_ref()
+            .classify_write(context, table, native, message)
     }
 
     #[inline]
@@ -1906,37 +1892,6 @@ impl<P> Cx<'_, P> {
     ) -> Result<WriteResult, Error> {
         self.core()
             .http_write_batch(context, table, expected, items, message, reports)
-    }
-
-    /// The intent the engine recorded for this leg's logical command.
-    /// Background (session) writes classify as placements; a command owner
-    /// created outside dispatch has no trusted intent.
-    fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
-        // Session writes (listen keys, logins) change account state, not orders.
-        if matches!(context.owner(), Owner::Session { .. }) {
-            return Ok(crate::classify::Intent::Setting);
-        }
-        if !matches!(context.owner(), Owner::Command { .. })
-            && !self
-                .io
-                .core
-                .request_contexts
-                .physical_owner(context.owner())
-        {
-            return Ok(crate::classify::Intent::Place);
-        }
-        let owner = self
-            .io
-            .core
-            .request_contexts
-            .owner_entry(context.owner())
-            .ok_or(Error::Revoked)?;
-        let leg = owner
-            .leg_intents
-            .iter()
-            .find(|(leg, _)| *leg == context.leg())
-            .map(|(_, intent)| *intent);
-        leg.or(owner.intent).ok_or(Error::State)
     }
 
     /// Narrow one leg's intent, before its first attempt, where the command
@@ -1986,30 +1941,13 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
-    /// A resend of a write refused with a `RefusedResend` verdict. The journal
-    /// still refuses a second resend of the same logical leg.
+    #[inline]
     pub fn http_resend_context(
         &self,
         context: &Context,
         grant: ResendGrant,
     ) -> Result<Context, Error> {
-        self.io
-            .core
-            .request_contexts
-            .validate_send(context, self.now)?;
-        if self.io.core.request_contexts.latest_write(context)? != Some(grant.attempt) {
-            return Err(Error::Revoked);
-        }
-        context.retry(RetryEvidence::DefinitiveRefusal, self.now)
-    }
-
-    fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
-        if delivery.context != *context || !context.issued_by(&self.io.core.request_contexts.issuer)
-        {
-            return Err(Error::Revoked);
-        }
-        Ok(delivery.clone())
+        self.core_ref().http_resend_context(context, grant)
     }
 
     /// Retire a fully completed logical read/page join or write leg. Do not call
@@ -2239,8 +2177,7 @@ impl crate::engine::CoreCx<'_> {
             .result_with_reports(delivery, result, reports)
     }
 
-    /// Classify the delivered write reply. The engine supplies the status,
-    /// headers and the command's intent; the codec supplies native evidence.
+    #[inline]
     pub fn classify_write(
         &self,
         context: &Context,
@@ -2248,21 +2185,8 @@ impl crate::engine::CoreCx<'_> {
         native: Option<&crate::classify::Native<'_>>,
         message: impl Into<String>,
     ) -> Result<crate::classify::Fact, Error> {
-        let (status, headers) = self.io.core.http_write_reply.as_ref().ok_or(Error::State)?;
-        let response = crate::Response {
-            status: *status,
-            headers,
-            body: "",
-        };
-        let delivery = self.current_write_delivery(context)?;
-        Ok(crate::classify::fact(
-            table,
-            self.write_intent(context)?,
-            crate::classify::Released::Response(&response),
-            native,
-            message,
-        )
-        .for_attempt(delivery.attempt.request))
+        self.core_ref()
+            .classify_write(context, table, native, message)
     }
 
     /// Record the delivered write attempt's native answer. Refusals exist only
@@ -2403,6 +2327,71 @@ impl crate::engine::CoreCx<'_> {
         let _ = context;
     }
 
+    #[inline]
+    fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
+        self.core_ref().write_intent(context)
+    }
+
+    // Only some feature combinations call this.
+    #[cfg_attr(not(feature = "http-plans"), allow(dead_code))]
+    #[inline]
+    pub fn http_resend_context(
+        &self,
+        context: &Context,
+        grant: ResendGrant,
+    ) -> Result<Context, Error> {
+        self.core_ref().http_resend_context(context, grant)
+    }
+
+    #[inline]
+    fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
+        self.core_ref().current_write_delivery(context)
+    }
+
+    fn record_write(
+        &mut self,
+        delivery: &Delivery,
+        result: WriteResult,
+        reports: Option<RejectionReports>,
+    ) -> Result<(), Error> {
+        match reports {
+            Some(reports) => self
+                .io
+                .core
+                .request_contexts
+                .result_with_reports(delivery, result, reports),
+            None => self.io.core.request_contexts.result(delivery, result),
+        }
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    /// Classify the delivered write reply. The engine supplies the status,
+    /// headers and the command's intent; the codec supplies native evidence.
+    pub fn classify_write(
+        &self,
+        context: &Context,
+        table: &crate::classify::CodeTable,
+        native: Option<&crate::classify::Native<'_>>,
+        message: impl Into<String>,
+    ) -> Result<crate::classify::Fact, Error> {
+        let (status, headers) = self.io.core.http_write_reply.as_ref().ok_or(Error::State)?;
+        let response = crate::Response {
+            status: *status,
+            headers,
+            body: "",
+        };
+        let delivery = self.current_write_delivery(context)?;
+        Ok(crate::classify::fact(
+            table,
+            self.write_intent(context)?,
+            crate::classify::Released::Response(&response),
+            native,
+            message,
+        )
+        .for_attempt(delivery.attempt.request))
+    }
+
     /// The intent the engine recorded for this leg's logical command.
     /// Background (session) writes classify as placements; a command owner
     /// created outside dispatch has no trusted intent.
@@ -2460,22 +2449,6 @@ impl crate::engine::CoreCx<'_> {
             return Err(Error::Revoked);
         }
         Ok(delivery.clone())
-    }
-
-    fn record_write(
-        &mut self,
-        delivery: &Delivery,
-        result: WriteResult,
-        reports: Option<RejectionReports>,
-    ) -> Result<(), Error> {
-        match reports {
-            Some(reports) => self
-                .io
-                .core
-                .request_contexts
-                .result_with_reports(delivery, result, reports),
-            None => self.io.core.request_contexts.result(delivery, result),
-        }
     }
 }
 
@@ -3712,13 +3685,13 @@ mod write_tests {
             let narrowed = cx.http_write_leg_intent(&context, leg);
             assert_eq!(narrowed.is_ok(), allowed, "{commanded:?} -> {leg:?}");
             if allowed {
-                assert_eq!(cx.write_intent(&context), Ok(leg));
+                assert_eq!(cx.core_ref().write_intent(&context), Ok(leg));
                 assert_eq!(
                     cx.http_write_leg_intent(&context, leg),
                     Err(Error::Duplicate)
                 );
             } else {
-                assert_eq!(cx.write_intent(&context), Ok(commanded));
+                assert_eq!(cx.core_ref().write_intent(&context), Ok(commanded));
             }
         }
         // The command's own intent is a no-op; nothing narrows after a send.
@@ -3748,7 +3721,7 @@ mod write_tests {
             cx.http_write_leg_intent(&context, Intent::Cancel),
             Err(Error::State)
         );
-        assert_eq!(cx.write_intent(&context), Ok(Intent::Place));
+        assert_eq!(cx.core_ref().write_intent(&context), Ok(Intent::Place));
 
         // The one declared amend-cancel exception: only an amend's leg, once,
         // before any attempt; any other command refuses it.
@@ -3783,7 +3756,7 @@ mod write_tests {
                 "{commanded:?}"
             );
             let expected = if allowed { Intent::Cancel } else { commanded };
-            assert_eq!(cx.write_intent(&context), Ok(expected));
+            assert_eq!(cx.core_ref().write_intent(&context), Ok(expected));
         }
     }
 

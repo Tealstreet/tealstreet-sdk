@@ -112,11 +112,13 @@ impl<P> Cx<'_, P> {
         self.io.core.socket_message = None;
         Ok(())
     }
+    #[inline]
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
-        self.io.core.socket_driver.state.epoch(feed)
+        self.core_ref().socket_epoch(feed)
     }
+    #[inline]
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
-        self.io.core.socket_driver.state.authenticated(feed)
+        self.core_ref().socket_authenticated(feed)
     }
     #[inline]
     pub fn send_after_socket_interests(
@@ -378,14 +380,16 @@ impl crate::engine::CoreCx<'_> {
         Ok(feed)
     }
 
+    #[inline]
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
-        self.io.core.socket_driver.state.epoch(feed)
+        self.core_ref().socket_epoch(feed)
     }
 
     // Only some feature combinations call this.
     #[cfg_attr(feature = "managed-sockets", allow(dead_code))]
+    #[inline]
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
-        self.io.core.socket_driver.state.authenticated(feed)
+        self.core_ref().socket_authenticated(feed)
     }
 
     /// Native one-shot frames ordered after current interests, retained with
@@ -410,6 +414,18 @@ impl crate::engine::CoreCx<'_> {
             .reserve_external(text.len())?;
         self.io.core.socket_after.push_back((epoch, text));
         Ok(())
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
+        self.io.core.socket_driver.state.epoch(feed)
+    }
+
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "managed-sockets", allow(dead_code))]
+    pub fn socket_authenticated(&self, feed: FeedId) -> bool {
+        self.io.core.socket_driver.state.authenticated(feed)
     }
 }
 

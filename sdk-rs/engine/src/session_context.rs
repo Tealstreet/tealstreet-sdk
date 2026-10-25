@@ -443,15 +443,9 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
-    /// Session lifetimes belong to session, socket and timer callbacks. A
-    /// retained Preflight's or a Plan's readiness scope may not mint, retire
-    /// or drain them.
+    #[inline]
     pub(super) fn session_scope(&self) -> Result<(), Error> {
-        #[cfg(feature = "http-plans")]
-        if self.io.core.http_preflight_ready.is_some() || self.io.core.http_plan_ready.is_some() {
-            return Err(Error::State);
-        }
-        Ok(())
+        self.core_ref().session_scope()
     }
 
     #[inline]
@@ -724,15 +718,9 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreCx<'_> {
-    /// Session lifetimes belong to session, socket and timer callbacks. A
-    /// retained Preflight's or a Plan's readiness scope may not mint, retire
-    /// or drain them.
+    #[inline]
     pub(super) fn session_scope(&self) -> Result<(), Error> {
-        #[cfg(feature = "http-plans")]
-        if self.io.core.http_preflight_ready.is_some() || self.io.core.http_plan_ready.is_some() {
-            return Err(Error::State);
-        }
-        Ok(())
+        self.core_ref().session_scope()
     }
 
     /// Issue a session owner. It reserves no HTTP, timer or socket and has no
@@ -811,6 +799,19 @@ impl crate::engine::CoreCx<'_> {
             .egress(generation)
             .ok_or(Error::Invalid)?;
         self.make_http_context(scope, policy, None, Some(egress))
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    /// Session lifetimes belong to session, socket and timer callbacks. A
+    /// retained Preflight's or a Plan's readiness scope may not mint, retire
+    /// or drain them.
+    pub(super) fn session_scope(&self) -> Result<(), Error> {
+        #[cfg(feature = "http-plans")]
+        if self.io.core.http_preflight_ready.is_some() || self.io.core.http_plan_ready.is_some() {
+            return Err(Error::State);
+        }
+        Ok(())
     }
 }
 
