@@ -5946,6 +5946,20 @@ without native `110001`/`170213`, seals Unknown and reconciles via a fresh
 snapshot; it is never reported gone. Follow-up: capture real Hyro cancel,
 amend and already-gone replies when a Hyro account is available, then pin
 them as fixtures.
+
+### Bybit Hyro placements on planned executions (Hyro H2)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Hyro `placeOrders` leaves the legacy group executor: one planned execution per retained intent, with identical concurrent callers joining it as observers | Every observer gets the same receipts and terminal; nothing is sent twice | None. |
+| A lost or unproven create | `Unknown` at once, naming its link; never resent within the same call | Reconcile by `orderLinkId`; a retry re-reads first. |
+| A retry of an intent whose lot may have been sent | Re-reads that link (realtime, then history) before any create; a recovered order returns its identity with no create; one link is created at most twice, ever | None. |
+| A retry beside an earlier call's lot that is live or may exist | Never `Rejected` or `NotSent`; its failures are `Unknown`, as legacy | None. |
+| An identical caller arriving while a retry re-reads | Waits and takes that call's outcome: the same ids on success, `Unknown` otherwise; it never sends, as legacy waiters | None. |
+| Duplicate-link refusals `10014` / `110072` on create | `Unknown` (the order may exist); cancel and amend still refuse | None. |
+| A create ACK that crosses a snapshot | Success at once, with no lookup or row | None. |
+| A native `10002` / `10004` refusal on create | Re-signed and resent once with the corrected clock | None. |
+| A local admission or queue refusal of a Hyro reconciliation read | Retries next tick without spending the reconnect streak | None. |
 ## Bitunix public REST Read authority
 
 Markets, tickers and FetchCandles use shared managed unsigned HTTP with a20s
