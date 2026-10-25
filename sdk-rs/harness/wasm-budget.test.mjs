@@ -16,9 +16,9 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 test('only Bitget and Bybit carry venue allowances, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['bitget', 'bitgetusdc', 'bybit']);
   for (const venue of ['bitget', 'bitgetusdc']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1_343_488 + 131_072);
-    assert.equal(wasmBudgetError(1_474_560, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_474_561, 'venue', venue), /exceeds 1474560/);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1_343_488 + 133_120);
+    assert.equal(wasmBudgetError(1_476_608, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_476_609, 'venue', venue), /exceeds 1476608/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.bybit, 1_343_488 + 61_440);
   assert.equal(wasmBudgetError(1_404_928, 'venue', 'bybit'), undefined);

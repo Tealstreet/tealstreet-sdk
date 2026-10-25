@@ -857,8 +857,8 @@ impl BitgetFutures {
         let ids = serde_json::to_string(&job.ids).expect("order ids");
         match &job.plan {
             None => {
-                let done = cx.done_empty_plan(&job.preflight, ids);
-                debug_assert!(done.is_ok(), "empty Plan terminal stranded");
+                let ended = cx.done_empty_plan(&job.preflight, ids);
+                debug_assert!(ended.is_ok(), "empty Plan terminal stranded");
             }
             Some(plan) => {
                 if let Some((slot, context)) = current {

@@ -368,7 +368,7 @@ pass (`CARGO_BUILD_JOBS=4`).
 
 Sam's directive is that there is no TS fallback for now. Under it, the overseer ruled (2026-10-25) that slice 3 lands on Rust with the Bitget allowance raised to the measured size plus a small margin. Sam set the directive, not this number. The allowance is shrink-only, and codex-ih35js's engine cuts are meant to bring it back down.
 
-- **Allowance.** `WASM_VENUE_OVERRIDES` for `bitget` and `bitgetusdc` goes from 1,409,024 (venue + 64 KiB) to **1,474,560 (venue + 128 KiB)**. That leaves 2,533 bytes of margin over the composed number. The change is in `sdk-rs/harness/wasm-budget.mjs`, with its test.
+- **Allowance.** `WASM_VENUE_OVERRIDES` for `bitget` and `bitgetusdc` goes from 1,409,024 (venue + 64 KiB) to **1,476,608 (venue + 130 KiB)**. That is the final composed Bitget size plus about 3K (3,142 bytes of margin), under the overseer's 1,480,000 cap. The change is in `sdk-rs/harness/wasm-budget.mjs`, with its test.
 - **Recompose.** Commit `546f585f187` is composed on tip `76f1f7fc842`, using dazzy3's S0 recipe:
   - Step 0 merged `60056af11b7` first.
   - The whole-file `request_context_planned.rs` from this branch was taken, then `s0_rewrite.py` was run (idempotent).
@@ -383,3 +383,17 @@ Sam's directive is that there is no TS fallback for now. Under it, the overseer 
 | Combined | 13,900,838 | 14,001,947 | +101,109 | 14,155,776 (153,829 left) |
 
 The family delta is smaller than the earlier +132,398 because S0 and the landed engine work since `9b05c9ac452` now carry part of the shared cost.
+
+### Final composition on #2110 (`e3d1d70a5d1`)
+
+#2110 landed first, and merging it made this branch's engine delta vanish. What remains is the Bitget venue, its tests, the budget, the plan docs and the request inventory. #2111 (`7ada358c446`), which landed earlier, added +2,503 to Bitget, so the allowance was re-set on this final tree.
+
+Paired sizes, local wasm-opt, bare `e3d1d70a5d1` against composed:
+
+| Bundle | Bare tip | Composed | Delta | Budget |
+| --- | ---: | ---: | ---: | ---: |
+| Bitget / BitgetUSDC family | 1,360,487 | 1,473,466 | +112,979 | 1,476,608 |
+| Bybit family | 1,396,154 | 1,396,154 | +0 | 1,404,928 |
+| Combined | 13,908,609 | 14,009,104 | +100,495 | 14,155,776 (146,672 left) |
+
+BitgetUSDC builds the same family as Bitget, and the two were byte-equal at every earlier pair.
