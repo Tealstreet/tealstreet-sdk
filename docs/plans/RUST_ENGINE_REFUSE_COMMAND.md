@@ -52,10 +52,12 @@ pub fn refuse_command(&mut self, operation: Operation, error: impl Into<VenueErr
   refusal, so the method returns.
 - `#[inline(never)]` keeps one body per family even at opt-level z. `Cx<P>` is
   generic, so each family instantiates it once.
-- It adds `debug_assert!` on a `Revoked` admission, on the settle result, and
-  on `Operation::Mutation` errors being `NotSent`. These asserts change debug
-  and test behaviour, so every site must carry the two proofs under Tests
-  before it moves.
+- It adds `debug_assert!` on a `Revoked` admission and on the settle result.
+  These asserts change debug and test behaviour, so every site must carry the
+  genuine-entry proof under Tests before it moves. There is no NotSent assert:
+  the engine projects `NotSent` for an unsent Mutation itself (pinned by
+  `a_bare_mutation_refusal_projects_not_sent`), and GRVT passes a bare string
+  for both operations.
 - It leaves the error's outcome alone, so nothing changes for callers.
 
 ## Call sites
@@ -150,12 +152,10 @@ CI's merge-ref figure includes landing growth, so it is not the gate.
      `on_venue_action` `ScheduleCancel` (`lib.rs:1444`), so it is genuine.
      A site reachable from a timer or response callback does not move. It is
      reported instead, since today it silently drops the refusal.
-  2. **NotSent by construction.** Each Mutation site builds its error with the
-     venue's `not_sent(..)`. Examples:
-     - Hyperliquid `trading.rs:162`/`:180` bind `not_sent(..)` and add only a
-       kind;
-     - #2114's ten Lighter `refuse` callers all pass `not_sent(..)`.
-     A site that cannot show this gets a test, or does not move.
+  2. **NotSent.** The engine projects `NotSent` for an unsent Mutation, so a
+     site's own outcome is never what makes it NotSent. Sites that already
+     build `not_sent(..)` (Hyperliquid `trading.rs:162`/`:180`, Lighter
+     `refuse`) keep it unchanged.
 - **Per family:** the existing local-refusal controls stay green unchanged
   (Backpack, Lighter #2114, and the others' entry tests).
 
@@ -167,10 +167,20 @@ CI's merge-ref figure includes landing growth, so it is not the gate.
    and WOO (1, the single-site case). Measure each and the combined per the
    method above, and report. The phases go ahead only if every family is
    within the gate. If one grows, stop and report.
-4. P1: the helper plus its engine REDs and controls.
-5. P2: Backpack and Lighter, with measured sizes.
-6. P3: the remaining in-scope families, one commit each, each within the
-   gate.
+4. **Prototype result (2026-10-25):** Lighter -380, GRVT -750, WOO +55,
+   Bitget, BitgetUSDC and Bybit 0, combined -1,240. The overseer approved
+   phased source.
+5. **Phase 1:** the helper, its engine REDs, and Lighter (7). Paired on
+   `c6a5c4bb0a4`: Lighter -380, combined -407, Bitget, BitgetUSDC and Bybit 0.
+   - Backpack (3) measured +115 with Lighter: its three sites already sat in
+     per-call helpers, so the generic body added code instead of removing
+     copies.
+   - Under the gate it stays unmigrated; it is queued for after S1's `CoreCx`
+     makes the helper non-generic.
+6. **Phase 2:** GRVT (10) with WOO (1). WOO's +55 is accepted only if the
+   phase is net negative (overseer).
+7. **Phase 3:** the remaining in-scope families, one commit each, each within
+   the gate.
 
 ## Appendix: strict-shape sites at `b0008964fbb`
 
