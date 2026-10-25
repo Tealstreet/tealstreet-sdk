@@ -340,6 +340,7 @@ impl Bound {
 #[derive(Default)]
 struct Batch {
     routes: Vec<Route>,
+    canceled: Vec<Preparation>,
     work: Vec<Work>,
     bound: Vec<Bound>,
     failed: Vec<(u32, VenueError)>,
@@ -365,7 +366,7 @@ fn drain<const CAPABILITY: u8>(engine: &mut Engine<NonceProbe<true, CAPABILITY>>
                     permit,
                     request,
                 }),
-                HttpAction::Cancel { .. } => {}
+                HttpAction::Cancel { preparation, .. } => batch.canceled.push(preparation)
                 HttpAction::BindGroup { .. } => panic!("nonce fixture declares no barriers"),
             },
             Action::Sign { attempt, work, .. } => batch.work.push(Work { attempt, work }),
@@ -1203,6 +1204,7 @@ fn bearer_revision_fence_precedes_nonce_floor_and_preserves_nonce_repair_credits
     assert!(b.nonce() > a.nonce());
     assert_eq!(send(&mut engine, &b, 1_005.), b.nonce());
     let mut stale = a;
+    let mut stale_preparation = routes[0].token;
     for revision in 2..=10 {
         let now = 1_006. + (revision - 2) as f64 * 3.;
         engine.venue().trace.lock().unwrap().bearer_revision = Some(revision);
@@ -1210,9 +1212,12 @@ fn bearer_revision_fence_precedes_nonce_floor_and_preserves_nonce_repair_credits
         assert_eq!(engine.venue().trace.lock().unwrap().releases.len(), 1);
         let mut batch = drain(&mut engine);
         assert!(batch.work.is_empty() && batch.bound.is_empty() && batch.failed.is_empty());
+        assert_eq!(batch.canceled, [stale_preparation]);
         assert_eq!(batch.routes.len(), 1);
         let route = batch.routes.remove(0);
         assert_eq!(route.token.attempt(), stale.permit.attempt());
+        assert_ne!(route.token, stale_preparation);
+        stale_preparation = route.token;
         let work = ready(&mut engine, &route, now + 1.);
         stale = bind(&mut engine, work, now + 2.);
         assert!(stale.nonce() > b.nonce());
