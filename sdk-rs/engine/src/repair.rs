@@ -3,7 +3,8 @@
 //! docs/plans/RUST_REPAIR_MUTATION_AUTHORITY.md.
 //!
 //! Inert declarations for the original controls; source follows reviewed REDs.
-use crate::request_context::{Context, Credential};
+use crate::request_context::{Context, Credential, Preflight};
+use crate::store::OrderSnapshotToken;
 use crate::{CommandId, Cx, RequestId};
 
 /// Spendable repair authority. Opaque; only the issuing engine validates it.
@@ -51,6 +52,8 @@ pub enum RepairRefusal {
     StoreMissing,
     /// A live, spent-unresolved or Unknown entitlement already covers it.
     Duplicate,
+    /// The snapshot receipt or its tokens no longer match the Store.
+    Stale,
     Spent,
     Retired,
     /// Members disagree on issuer, primary, intent, origin kind or side.
@@ -64,13 +67,21 @@ pub enum RepairRefusal {
     Invalid,
 }
 
-/// Adapter-declared reason an unspent subject no longer needs repair.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Retire {
-    /// The Store shows the bound order filled, cancelled or rejected.
+/// An accepted whole Orders snapshot committed inside one exact live
+/// Background Read DATA delivery. Only `commit_repair_snapshot` issues it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct SnapshotReceipt {
+    pub(crate) id: u64,
+}
+
+/// Why an unspent subject no longer needs repair. Core checks each proof.
+#[derive(Clone, Copy, Debug)]
+pub enum Retire<'a> {
+    /// The Store shows the subject's order closed or cancelled.
     Terminal,
-    /// A complete definitive order read postdating the subject generation.
-    CompleteRead,
+    /// A complete accepted snapshot, begun after the subject was minted, that
+    /// no longer contains it.
+    CompleteRead(&'a SnapshotReceipt),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,19 +117,37 @@ pub enum RepairNotice<'a> {
 }
 
 impl<P> Cx<'_, P> {
-    /// Mint cancel authority for subjects owed by the current admitted command.
+    /// Mint cancel authority for subjects owed by the current admitted
+    /// command. The Preflight must be this Bound entry's WriteAfterReads
+    /// Preflight; its primary write credential becomes the repair's signer.
     pub fn mint_command_repair(
         &mut self,
-        _primary: Credential,
+        _preflight: &Preflight,
         _subjects: Vec<Subject>,
     ) -> Result<Entitlement, RepairRefusal> {
         Err(RepairRefusal::Invalid)
     }
 
-    /// Mint cancel-then-place authority for one published snapshot order.
-    pub fn mint_snapshot_repair(
+    /// Commit an accepted whole Orders snapshot inside the exact live
+    /// Background Read DATA delivery of `read`, as `Store::commit_orders_snapshot`.
+    pub fn commit_repair_snapshot<I, F>(
         &mut self,
         _read: &Context,
+        _tokens: I,
+        _publish: F,
+    ) -> Option<SnapshotReceipt>
+    where
+        I: IntoIterator<Item = OrderSnapshotToken>,
+        F: FnOnce(&[crate::model::Order]) -> Vec<crate::model::Order>,
+    {
+        None
+    }
+
+    /// Mint cancel-then-place authority for one order that this delivery's
+    /// committed snapshot published, before the Read retires.
+    pub fn mint_snapshot_repair(
+        &mut self,
+        _receipt: &SnapshotReceipt,
         _primary: Credential,
         _subject: Subject,
         _symbol: &str,
@@ -153,7 +182,7 @@ impl<P> Cx<'_, P> {
         &mut self,
         _entitlement: &Entitlement,
         _key: &str,
-        _proof: Retire,
+        _proof: Retire<'_>,
     ) -> Result<(), RepairRefusal> {
         Err(RepairRefusal::Invalid)
     }
