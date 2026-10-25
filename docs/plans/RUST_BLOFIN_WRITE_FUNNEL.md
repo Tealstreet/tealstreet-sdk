@@ -84,22 +84,48 @@ successful terminal.
 
 ### Decisions for review (each is caller-visible)
 
-- **D-a, unclassified row and setting refusals.** Today an explicit non-zero
-  row or setting code on a well-formed envelope is outcome `None`
-  ("undocumented codes stay unclassified", ERROR_CLASSIFICATION #35).
-  Classification offers only Refused, Unknown or Satisfied.
-  - Proposal: the CodeTable's `unlisted` verdict for a well-formed row or
-    setting refusal is **Refused**. The venue reported that row as not executed.
-    Shape violations stay Unknown.
-  - The caller sees `rejected` instead of no outcome. That is consistent with
-    the shared contract, but a reviewer must accept it.
-- **D-b, Verify failure.** After an Accepted cancel, a failed final-detail
-  verification (wrong state, fill moved, not exactly one row) is `fail_plan`.
-  The journal projects from the Accepted cancel fact, so the result is never
-  NotSent and the cancel stays effective. Pinned by a RED.
-- **D-c, cancel "gone".** Code 1000 or "does not exist" on a plain cancel is
-  `Satisfied(Cancel)`. When a replacement depends on it, it stays a stop
-  ("requires a confirmed cancellation"), as today.
+- **D-a, row and setting refusal codes (4yjlw0; OKX #2117 Option B
+  precedent).**
+  - Documented pre-execution refusal codes become explicit CodeTable rows with
+    verdict Refused. Each row cites BloFin's official error-code reference (URL
+    and revision in the table's doc comment), or a TS mapping that already
+    treats it as a refusal. The exact list is fixed in the RED commit and
+    reviewed there.
+  - The table's `unlisted` verdict is **Unknown** (outcome `None`), not
+    Refused. On a serial Plan a Rejected fact passes
+    `validate_serial_continuation`, so an unlisted refusal must not authorize
+    the next batch or step. A caller told Rejected may also resubmit a write
+    that actually landed; Unknown reconciles first.
+  - Exact-row versus range precedence gets a unit test, as #2117 does.
+  - Shape violations stay Unknown. CALLERS records that undocumented codes
+    report Unknown.
+- **D-b, Verify failure.**
+  - After an Accepted cancel, a failed final-detail verification (wrong state,
+    fill moved, not exactly one row) is `fail_plan`. The Verify GET is a Read
+    call with no write fact, so the Accepted cancel is the only effect
+    evidence.
+  - The engine already projects this case. In
+    `engine/src/request_context.rs` `failure_projection`, a released Accepted
+    fact with no uncertainty and not all-rejected gives outcome `None`, never
+    NotSent or Rejected. So no venue-side clamp replaces the deleted
+    `effective` field.
+  - The D-b RED pins the result. If it fails, a minimal clamp returns rather
+    than the field.
+- **D-c, cancel "gone".**
+  - Code 1000 or "does not exist" on a cancel is `Satisfied(Cancel)`.
+  - Satisfied projects to `WriteResult::Accepted{[]}`, so the engine would
+    permit continuing to a dependent replacement. Stopping is therefore a venue
+    decision: when a replacement depends on the cancel, the venue stops before
+    `continue_serial_plan` ("requires a confirmed cancellation", as today). Its
+    RED asserts no replacement Prepare, not just the terminal, the shape of
+    #2117's `a_dependent_replacement_never_runs_after_its_cancel_is_refused`.
+  - `http_write_fact` on `Satisfied(Cancel)` arms the absent-order fence and
+    queues one reconcile. BloFin implements `reconcile_uncertain` to issue its
+    fresh order snapshot (the open-order pages) and calls
+    `cx.orders_reconciled` on a clean committed snapshot. Otherwise
+    cancel-all for that symbol would stay fenced for good (#2117's gap 3). A
+    RED drives a "gone" cancel, then the reconcile snapshot across its pages,
+    and shows the fence cleared.
 - **D-d, progress abort.** A target that filled or closed between steps (Store
   observation) ends the job with `finish_plan_call` + `fail_plan` before the
   next delayed continuation. Pinned by a RED.
@@ -147,9 +173,11 @@ W1 (each fails on the base):
   with exact native bytes, and the Verify GET is a managed Read;
 - a 350 ms and a 1000 ms pause are `continue_serial_plan_after` continuations
   with no early send;
-- D-a: a well-formed row refusal is Rejected, a shape mismatch is Unknown;
+- D-a: a documented row refusal is Rejected, an unlisted code is Unknown, a
+  shape mismatch is Unknown, and exact-row versus range precedence holds;
 - D-b: a Verify failure after an Accepted cancel is never NotSent;
-- D-c: plain-cancel "gone" is satisfied, and replacement-cancel "gone" stops;
+- D-c: plain-cancel "gone" is satisfied; replacement-cancel "gone" stops with
+  no replacement Prepare; the reconcile snapshot clears the absent-order fence;
 - D-d: a progress abort settles before the next continuation;
 - D-e: a failure after accepted rows keeps their IDs;
 - a released 503 seals Unknown, retirement restores Creating and Canceling
