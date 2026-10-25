@@ -248,3 +248,47 @@ fn a_superseded_account_leg_publishes_nothing_and_holds_no_capacity() {
         "the dropped leg must not hold capacity"
     );
 }
+
+/// dazzy3 on #2143: a delivered error (here a body without its list) on a
+/// superseded account leg validates custody, leaves the newer positions
+/// untouched and finishes its Context, like a delivered success.
+#[test]
+fn a_superseded_account_leg_answered_with_a_stream_error_changes_nothing() {
+    let run = |error: bool| {
+        let mut h = Harness::new();
+        h.seed();
+        let tick = h.tick;
+        h.handle(10_000.0, Event::TimerFired { timer: tick });
+        h.collect_at(10_000.0);
+        let positions = h.take("account/positions");
+        h.ws(&format!(
+            r#"{{"arg":{{"channel":"positions"}},"data":[{POSITION}]}}"#
+        ));
+        let pushed = h.e.store().positions().len();
+        let body = if error {
+            r#"{"code":"50001","msg":"busy"}"#.to_owned()
+        } else {
+            r#"{"code":"0","data":[]}"#.to_owned()
+        };
+        h.respond_at(positions, &body, 10_001.0);
+        assert_eq!(
+            h.e.store().positions().len(),
+            pushed,
+            "the superseded answer changes no account state"
+        );
+        // A completed positions read joins its balance read; answer it too so
+        // both runs end with no account leg in flight.
+        if let Some(index) = h.pending.iter().position(|r| r.url.contains("balances")) {
+            let balance = h.pending.remove(index);
+            h.respond_at(balance, r#"{"code":"0","data":[]}"#, 10_001.0);
+        }
+        capacity_refusals(&mut h, 10_002.0)
+    };
+    let completed = run(false);
+    assert!(completed > 0, "the probe reaches owner capacity");
+    assert_eq!(
+        run(true),
+        completed,
+        "the errored leg must not hold capacity"
+    );
+}

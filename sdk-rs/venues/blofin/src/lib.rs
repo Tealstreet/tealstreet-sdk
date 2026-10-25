@@ -610,6 +610,40 @@ impl Blofin {
         cx.book_changed(symbol);
     }
 }
+impl Blofin {
+    /// A delivered error (a stream-shape or malformed body) carries a response,
+    /// so a managed read validates its custody first, as `on_response` does: a
+    /// stale or superseded leg only closes its Context and changes nothing.
+    fn delivered_failure(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        match pending {
+            Pending::Account(read, request) => {
+                let current = cx
+                    .validate_background_read_http_delivery(read.context())
+                    .is_ok();
+                let _ = cx.finish_http_context(read.context());
+                if current {
+                    self.account_failed(cx, request, error);
+                }
+            }
+            Pending::History(mut request) => {
+                if request.valid_delivery(cx) {
+                    self.history_failed(cx, request, VenueError::new(error));
+                } else {
+                    request.release(cx);
+                }
+            }
+            Pending::Closed(mut request) => {
+                if request.valid_delivery(cx) {
+                    Self::closed_failed(cx, request, VenueError::new(error));
+                } else {
+                    request.release(cx);
+                }
+            }
+            other => self.on_request_failed(cx, other, error),
+        }
+    }
+}
+
 impl Venue for Blofin {
     fn guard_pending_placements(&self) -> bool {
         true
@@ -941,7 +975,7 @@ impl Venue for Blofin {
                     };
                 self.public_failure(cx, context, *pending, error);
             }
-            other => self.on_request_failed(cx, other, error),
+            other => self.delivered_failure(cx, other, error),
         }
     }
     fn on_stream_error(
@@ -963,7 +997,7 @@ impl Venue for Blofin {
                     };
                 self.public_failure(cx, context, *pending, error);
             }
-            other => self.on_request_failed(
+            other => self.delivered_failure(
                 cx,
                 other,
                 &format!(

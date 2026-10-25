@@ -249,7 +249,7 @@ impl Harness {
         }
     }
     pub fn ws(&mut self, text: &str) {
-        self.now = 1.0;
+        self.now = self.now.max(1.0);
         self.e.handle(
             1.0,
             Event::WsMessage {

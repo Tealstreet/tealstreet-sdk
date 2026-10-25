@@ -113,7 +113,7 @@ impl Request {
                 && self.history.validate_delivery(cx, leg.context()).is_ok()
         })
     }
-    fn release(&mut self, cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn release(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(leg) = self.leg.take() {
             let _ = cx.finish_http_context(leg.context());
         }
@@ -816,6 +816,8 @@ impl Blofin {
         response: Response<'_>,
     ) {
         if !request.valid_delivery(cx) {
+            // A stale or mismatched delivery still closes its own leg.
+            request.release(cx);
             return;
         }
         if let Err(error) = check(&response) {
@@ -853,10 +855,16 @@ impl Blofin {
         };
         let step = {
             let Some(leg) = &request.leg else { return };
-            let Ok(mut admitted) = request.history.admit(cx, leg.context()) else {
-                return;
-            };
-            admitted.advance(page)
+            request
+                .history
+                .admit(cx, leg.context())
+                .map(|mut admitted| admitted.advance(page))
+        };
+        let step = match step {
+            Ok(step) => step,
+            // A retired root already has the engine's terminal; anything else is strict.
+            Err(RequestError::Revoked) => return request.release(cx),
+            Err(error) => return request.reject(cx, error.read_venue_error()),
         };
         match step {
             CursorStep::More(_) => {

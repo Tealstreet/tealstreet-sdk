@@ -30,6 +30,15 @@ pub struct Request {
 }
 
 impl Request {
+    pub(crate) fn release(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = self.leg.take() {
+            let _ = cx.finish_http_context(leg.context());
+        }
+    }
+    fn reject(mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        self.release(cx);
+        let _ = self.history.reject(cx, error);
+    }
     pub(crate) fn valid_delivery(&self, cx: &Cx<'_, Pending>) -> bool {
         self.leg.as_ref().is_some_and(|leg| {
             self.root.validate_delivery(cx, leg).is_ok()
@@ -223,7 +232,8 @@ impl Blofin {
                 Pending::Closed(request)
             },
         ) {
-            let _ = request.history.reject(cx, reason.read_venue_error());
+            // The queue closure stored the leg; finish it before the strict reject.
+            request.reject(cx, reason.read_venue_error());
         }
     }
 
@@ -269,6 +279,8 @@ impl Blofin {
         response: Response<'_>,
     ) {
         if !request.valid_delivery(cx) {
+            // A stale or mismatched delivery still closes its own leg.
+            request.release(cx);
             return;
         }
         if let Err(error) = check(&response) {
@@ -281,21 +293,26 @@ impl Blofin {
                 VenueError::new("malformed positions-history row"),
             );
         }
+        let page = CursorPage {
+            next: request.oldest.take(),
+            rows: request.count,
+            fresh: request.added,
+            want_more: request.count >= PAGE,
+        };
         let step = {
             let Some(leg) = &request.leg else { return };
-            let Ok(mut page) = request.history.admit(cx, leg.context()) else {
-                return;
-            };
-            page.advance(CursorPage {
-                next: request.oldest.take(),
-                rows: request.count,
-                fresh: request.added,
-                want_more: request.count >= PAGE,
-            })
+            request
+                .history
+                .admit(cx, leg.context())
+                .map(|mut admitted| admitted.advance(page))
         };
-        if let Some(leg) = request.leg.take() {
-            let _ = cx.finish_http_context(leg.context());
-        }
+        let step = match step {
+            Ok(step) => step,
+            // A retired root already has the engine's terminal; anything else is strict.
+            Err(RequestError::Revoked) => return request.release(cx),
+            Err(error) => return request.reject(cx, error.read_venue_error()),
+        };
+        request.release(cx);
         match step {
             CursorStep::Done | CursorStep::Stalled(_) => {
                 let _ = request.history.finish(cx, Ok(()));

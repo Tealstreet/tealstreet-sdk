@@ -31,10 +31,12 @@ pub fn trusted_engine(mut options: Options) -> Engine<Blofin> {
                 ..Default::default()
             }),
         };
-        if let Ok((provider, identities)) = LocalSigner::from_setup(setup) {
-            options.identities = identities;
-            signer = Some(std::sync::Arc::new(provider));
-        }
+        // The registry refuses an invalid setup; a fixture must not quietly
+        // fall back to a signerless engine.
+        let (provider, identities) =
+            LocalSigner::from_setup(setup).expect("valid BloFin fixture setup");
+        options.identities = identities;
+        signer = Some(std::sync::Arc::new(provider));
     }
     let identities = options.identities.clone();
     let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(options));
