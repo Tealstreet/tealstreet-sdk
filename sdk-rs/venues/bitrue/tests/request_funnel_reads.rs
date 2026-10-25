@@ -16,6 +16,7 @@ const LISTEN: &str = r#"{"code":200,"data":{"listenKey":"futures-key"}}"#;
 const EMPTY: &str = r#"{"code":"0","data":{"account":[{"marginCoin":"USDT","totalEquity":100,"accountNormal":80,"accountLock":5,"totalPositionNormal":7,"sumOpenRealizedAmount":2,"positionVos":[]}]}}"#;
 const POSITION: &str = r#"{"code":"0","data":{"account":[{"marginCoin":"USDT","totalEquity":100,"accountNormal":80,"accountLock":5,"totalPositionNormal":7,"sumOpenRealizedAmount":2,"positionVos":[{"contractName":"E-BTC-USDT","positions":[{"side":"BUY","volume":2,"openPrice":100,"leverageLevel":25,"positionType":2,"positionBalance":200,"forceLiquidationPrice":50}]}]}]}}"#;
 const NO_ORDERS: &str = r#"{"code":"0","data":[]}"#;
+const WAIT_MS: u32 = 20_000;
 const SIGNATURE_REFUSED: &str =
     r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#;
 
@@ -169,8 +170,15 @@ impl Harness {
             },
         );
     }
+    /// A command whose caller waits `WAIT_MS`: its Read root expires then.
     fn command(&mut self, at: f64, command: Command) {
-        self.handle(at, Event::Command(command));
+        self.command_waiting(at, command, WAIT_MS);
+    }
+    fn command_waiting(&mut self, at: f64, command: Command, wait_ms: u32) {
+        self.now = self.now.max(at);
+        let now = self.now;
+        self.e.handle_command(now, command, Some(wait_ms)).unwrap();
+        self.release();
     }
     fn terminals(&self, id: u32) -> Vec<Result<String, VenueError>> {
         self.actions
@@ -323,7 +331,7 @@ fn a_client_order_lookup_completes_once_through_its_own_read() {
     );
     let read = h.take("/openOrders");
     assert_eq!(h.intent(&read), RoutingIntent::Secondary);
-    // The command's own 20 s bound expires before the late answer.
+    // The caller's 20 s wait expires before the late answer.
     h.fire_timers_until(start + 20_001.0);
     h.respond(&read, 200, NO_ORDERS);
     let terminals = h.terminals(41);
@@ -334,33 +342,32 @@ fn a_client_order_lookup_completes_once_through_its_own_read() {
     );
 }
 
+fn leverage(id: u32) -> Command {
+    Command::FetchLeverage {
+        command: id,
+        symbol: "BTCUSDT".into(),
+    }
+}
+fn answer_snapshots(h: &mut Harness, body: &str) {
+    while h.count("/account") > 0 {
+        h.reply("/account", body);
+    }
+}
+
 #[test]
 fn joined_leverage_owners_complete_from_one_background_snapshot_each_once() {
     let mut h = Harness::started();
     let first = h.now;
-    h.command(
-        first,
-        Command::FetchLeverage {
-            command: 51,
-            symbol: "BTCUSDT".into(),
-        },
-    );
+    // The first joiner's caller wait expires before the shared snapshot answers.
+    h.command_waiting(first, leverage(51), 5_000);
     let snapshot = h.take("/account");
     assert_eq!(h.intent(&snapshot), RoutingIntent::Secondary);
-    // The second owner joins later, so the first owner's bound expires first.
-    h.command(
-        first + 15_000.0,
-        Command::FetchLeverage {
-            command: 52,
-            symbol: "BTCUSDT".into(),
-        },
-    );
-    h.fire_timers_until(first + 20_001.0);
+    h.command(first + 1_000.0, leverage(52));
+    h.fire_timers_until(first + 5_001.0);
     h.respond(&snapshot, 200, POSITION);
-    // A snapshot requested for the later joiner may follow; answer it.
-    while h.count("/account") > 0 {
-        h.reply("/account", POSITION);
-    }
+    // The later joiner waits for a snapshot issued after it joined, as native.
+    answer_snapshots(&mut h, POSITION);
+    h.fire_timers_until(h.now);
     let expired = h.terminals(51);
     assert_eq!(expired.len(), 1, "{expired:?}");
     assert_eq!(
@@ -370,4 +377,42 @@ fn joined_leverage_owners_complete_from_one_background_snapshot_each_once() {
     let live = h.terminals(52);
     assert_eq!(live.len(), 1, "{live:?}");
     assert!(live[0].as_ref().unwrap().contains("\"buyLeverage\":25"));
+}
+
+#[test]
+fn a_failed_leverage_snapshot_fails_every_live_owner_once_after_the_delivery() {
+    let mut h = Harness::started();
+    let first = h.now;
+    h.command(first, leverage(53));
+    h.command(first, leverage(54));
+    answer_snapshots(&mut h, r#"{"code":"-1","msg":"busy"}"#);
+    for id in [53, 54] {
+        assert!(
+            h.terminals(id).is_empty(),
+            "{id}: never inside the delivery"
+        );
+    }
+    h.fire_timers_until(h.now);
+    for id in [53, 54] {
+        let terminals = h.terminals(id);
+        assert_eq!(terminals.len(), 1, "{id}: {terminals:?}");
+        assert!(terminals[0].is_err());
+    }
+}
+
+#[test]
+fn a_leverage_completion_after_every_owner_expired_does_nothing() {
+    let mut h = Harness::started();
+    let first = h.now;
+    h.command_waiting(first, leverage(55), 2_000);
+    let snapshot = h.take("/account");
+    h.fire_timers_until(first + 2_001.0);
+    h.respond(&snapshot, 200, POSITION);
+    h.fire_timers_until(h.now);
+    let terminals = h.terminals(55);
+    assert_eq!(terminals.len(), 1, "{terminals:?}");
+    assert_eq!(
+        terminals[0].as_ref().unwrap_err().kind,
+        Some(ErrorKind::Timeout)
+    );
 }

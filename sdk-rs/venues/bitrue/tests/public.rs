@@ -8,14 +8,16 @@ use support::Options;
 fn contracts() -> &'static str {
     r#"[{"symbol":"E-BTC-USDT","pricePrecision":2,"multiplier":0.001,"minOrderVolume":1,"maxMarketVolume":1000,"maxLimitVolume":2000,"minOrderMoney":1,"status":1},{"symbol":"E-ETH-USDT","pricePrecision":2,"multiplier":0.01,"minOrderVolume":1,"maxMarketVolume":1000,"status":1}]"#
 }
+fn drain(e: &mut Engine<Bitrue>, now: f64) -> std::vec::IntoIter<Action> {
+    safe_cex_engine::test_support::prepared_actions(e, now).into_iter()
+}
 fn boot() -> (Engine<Bitrue>, SocketId) {
     let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
     });
     e.start(0.0);
-    let request = e
-        .drain_actions()
+    let request = drain(&mut e, 0.0)
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -35,8 +37,7 @@ fn boot() -> (Engine<Bitrue>, SocketId) {
             },
         },
     );
-    let socket = e
-        .drain_actions()
+    let socket = drain(&mut e, 1.0)
         .find_map(|a| {
             if let Action::WsConnect {
                 socket,
@@ -54,7 +55,7 @@ fn boot() -> (Engine<Bitrue>, SocketId) {
         })
         .unwrap();
     e.handle(2.0, Event::WsOpened { socket });
-    e.drain_actions();
+    drain(&mut e, 2.0);
     (e, socket)
 }
 fn message(e: &mut Engine<Bitrue>, socket: SocketId, text: &str) {
@@ -76,16 +77,14 @@ fn markets_have_native_multiplier_and_conservative_leverage() {
 fn public_reconnect_preserves_the_declared_role_and_upstream_url() {
     let (mut e, socket) = boot();
     e.handle(4.0, Event::WsClosed { socket, code: 1006 });
-    let (timer, at) = e
-        .drain_actions()
+    let (timer, at) = drain(&mut e, 4.0)
         .find_map(|action| match action {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
         })
         .expect("public reconnect timer");
     e.handle(at, Event::TimerFired { timer });
-    let (replacement, url, channel) = e
-        .drain_actions()
+    let (replacement, url, channel) = drain(&mut e, at)
         .find_map(|action| match action {
             Action::WsConnect {
                 socket,
@@ -173,8 +172,7 @@ fn fallback_only_after_no_primary_and_full_unsubscribe() {
             symbol: "E-BTC-USDT".into(),
         }),
     );
-    let timer = e
-        .drain_actions()
+    let timer = drain(&mut e, 2.0)
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
                 (at_ms == 3002.0).then_some(timer)
@@ -184,7 +182,7 @@ fn fallback_only_after_no_primary_and_full_unsubscribe() {
         })
         .unwrap();
     e.handle(3002.0, Event::TimerFired { timer });
-    assert!(e.drain_actions().any(
+    assert!(drain(&mut e, 3002.0).any(
         |a| matches!(a,Action::WsSend{text,..}if text.contains("market_e_btcusdt_depth_step0"))
     ));
     e.handle(
@@ -193,8 +191,7 @@ fn fallback_only_after_no_primary_and_full_unsubscribe() {
             symbol: "E-BTC-USDT".into(),
         }),
     );
-    let sends = e
-        .drain_actions()
+    let sends = drain(&mut e, 3003.0)
         .filter(|a| matches!(a,Action::WsSend{text,..}if text.contains("unsub")))
         .count();
     assert_eq!(sends, 2);
@@ -209,8 +206,7 @@ fn fallback_only_after_no_primary_and_full_unsubscribe() {
 fn public_ping_echoes_numeric_token() {
     let (mut e, socket) = boot();
     message(&mut e, socket, r#"{"ping":1721131206}"#);
-    let sends: Vec<_> = e
-        .drain_actions()
+    let sends: Vec<_> = drain(&mut e, 3.0)
         .filter_map(|a| {
             if let Action::WsSend { text, .. } = a {
                 Some(text)
@@ -240,8 +236,7 @@ fn candle_history_uses_singapore_time_and_filters_requested_window() {
         socket,
         r#"{"event_rep":"rep","channel":"market_e_btcusdt_kline_1min","data":[{"ds":"2024-01-01 08:00:00","open":1,"high":3,"low":1,"close":2,"vol":1000},{"ds":"2024-01-01 07:59:00","open":1,"high":3,"low":1,"close":2,"vol":1000}]}"#,
     );
-    let result = e
-        .drain_actions()
+    let result = drain(&mut e, 3.0)
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
                 Some(result)
@@ -273,8 +268,7 @@ fn subscriptions_before_markets_are_retained() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let request = e
-        .drain_actions()
+    let request = drain(&mut e, 0.0)
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -294,8 +288,7 @@ fn subscriptions_before_markets_are_retained() {
             },
         },
     );
-    let socket = e
-        .drain_actions()
+    let socket = drain(&mut e, 1.0)
         .find_map(|a| {
             if let Action::WsConnect {
                 socket,
@@ -311,7 +304,7 @@ fn subscriptions_before_markets_are_retained() {
         .unwrap();
     e.handle(2.0, Event::WsOpened { socket });
     assert!(
-        e.drain_actions()
+        drain(&mut e, 2.0)
             .any(|a| matches!(a,Action::WsSend{text,..}if text.contains("simple_depth_step0")))
     );
 }
@@ -323,8 +316,7 @@ fn supervisor_backs_off_open_flaps_and_closes_a_stalled_handshake() {
     let mut previous = 0.0;
     for nominal in [1000.0, 2000.0, 4000.0] {
         e.handle(now, Event::WsClosed { socket, code: 1006 });
-        let (timer, at) = e
-            .drain_actions()
+        let (timer, at) = drain(&mut e, now)
             .find_map(|a| match a {
                 Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
                 _ => None,
@@ -335,7 +327,7 @@ fn supervisor_backs_off_open_flaps_and_closes_a_stalled_handshake() {
         previous = at - now;
         now = at;
         e.handle(now, Event::TimerFired { timer });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = drain(&mut e, now).collect();
         socket = actions
             .iter()
             .find_map(|a| match a {
@@ -345,7 +337,7 @@ fn supervisor_backs_off_open_flaps_and_closes_a_stalled_handshake() {
             .unwrap();
         if nominal < 4000.0 {
             e.handle(now, Event::WsOpened { socket });
-            e.drain_actions().for_each(drop);
+            drain(&mut e, now).for_each(drop);
         } else {
             let timer = actions
                 .iter()
@@ -356,7 +348,7 @@ fn supervisor_backs_off_open_flaps_and_closes_a_stalled_handshake() {
                 .unwrap();
             e.handle(now + 10_000.0, Event::TimerFired { timer });
             assert!(
-                e.drain_actions()
+                drain(&mut e, now + 10_000.0)
                     .any(|a| matches!(a, Action::WsClose {socket:s} if s == socket))
             );
         }
@@ -372,8 +364,8 @@ struct Suppressed {
 }
 
 impl Suppressed {
-    fn collect(&mut self, e: &mut Engine<Bitrue>) {
-        for action in e.drain_actions() {
+    fn collect(&mut self, e: &mut Engine<Bitrue>, now: f64) {
+        for action in drain(e, now) {
             match action {
                 Action::Http(r) => self.requests.push(r.id),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
@@ -395,7 +387,7 @@ fn suppressed_public_feed_is_not_supervised() {
     e.set_public_feed_policy(PublicFeedPolicy::Shared).unwrap();
     e.start(0.0);
     let mut h = Suppressed::default();
-    h.collect(&mut e);
+    h.collect(&mut e, 0.0);
     let request = h.requests.remove(0);
     let response = Response {
         status: 200,
@@ -403,7 +395,7 @@ fn suppressed_public_feed_is_not_supervised() {
         body: contracts(),
     };
     e.handle(1.0, Event::HttpResponse { request, response });
-    h.collect(&mut e);
+    h.collect(&mut e, 1.0);
     assert_eq!(e.store().markets().len(), 2, "public startup completed");
     let mut fired = 0;
     while let Some(&(timer, at)) = h
@@ -414,7 +406,7 @@ fn suppressed_public_feed_is_not_supervised() {
     {
         h.timers.retain(|(t, _)| *t != timer);
         e.handle(at, Event::TimerFired { timer });
-        h.collect(&mut e);
+        h.collect(&mut e, at);
         fired += 1;
     }
     assert_eq!(

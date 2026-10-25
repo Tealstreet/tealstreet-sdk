@@ -3,8 +3,10 @@
 //! trades use the documented websocket history request, not a REST guess.
 use crate::wire::{Number, Text, check};
 use crate::{Bitrue, Job, Pending};
-use safe_cex_engine::history::{Completion, HistoryRows};
+use safe_cex_engine::history::{HistoryRows, ReadCompletion, ReadHistoryRows};
+use safe_cex_engine::request_context::Context;
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::selected_read::ReadRoot;
 use safe_cex_engine::{
     CommandId, Cx, ErrorKind, Method, Outcome, Query, Response, VenueError, json, json::ArrayAt,
     num,
@@ -23,7 +25,10 @@ fn local_read_policy() -> Policy {
 }
 
 pub struct Request {
-    owner: Box<HistoryRows<Execution>>,
+    owner: Box<ReadHistoryRows<Execution>>,
+    root: ReadRoot,
+    /// The page's rows, admitted together once its leg's answer validates.
+    rows: Vec<Execution>,
     symbol: String,
     order_id: Option<String>,
     from_ms: Option<f64>,
@@ -37,10 +42,14 @@ pub struct Request {
 impl Request {
     pub(crate) fn sign_failed(self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
         error.outcome = None;
-        self.owner.finish(cx, Err(error));
+        let _ = self.owner.finish(cx, Err(error));
+    }
+    pub(crate) fn root(&self) -> &ReadRoot {
+        &self.root
     }
     pub(crate) fn reset(&mut self) {
         self.owner.discard_staged_page();
+        self.rows.clear();
         self.seen.clear();
         self.failed = false;
         self.received = 0;
@@ -153,7 +162,7 @@ impl Bitrue {
                 Query::OrderByClientId {
                     symbol,
                     client_order_id,
-                } => self.lookup_order(cx, command, symbol, client_order_id),
+                } => self.lookup_order(cx, symbol, client_order_id),
                 Query::PublicTrades { symbol, limit } => self.public_trades(cx, symbol, limit),
                 Query::OrderHistory { .. } => {
                     let Ok(context) = cx.admit_http_command(local_read_policy()) else {
@@ -237,6 +246,16 @@ impl Bitrue {
         if let Some(to) = to_ms {
             path.push_str(&format!("&endTime={}", num::format(to.floor())));
         }
+        let Some(root) = self.command_root(cx) else {
+            return;
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.context().clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(root.context(), error.read_venue_error());
+                return;
+            }
+        };
         self.send(
             cx,
             Method::Get,
@@ -244,10 +263,9 @@ impl Bitrue {
             None,
             Some(ArrayAt::EnvelopeField("data")),
             Job::History(Request {
-                owner: Box::new(HistoryRows::new(
-                    Completion::new(command),
-                    encode_executions,
-                )),
+                owner: Box::new(HistoryRows::new(completion, encode_executions)),
+                root,
+                rows: Vec::new(),
                 symbol,
                 order_id,
                 from_ms,
@@ -326,7 +344,7 @@ impl Bitrue {
         {
             return;
         }
-        request.owner.stage(Execution {
+        request.rows.push(Execution {
             id: row.trade_id.to_string(),
             timestamp: (time / 1000.0).floor(),
             symbol: request.symbol.clone(),
@@ -346,14 +364,15 @@ impl Bitrue {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut request: Request,
+        leg: Option<&Context>,
         response: Response<'_>,
     ) {
         if let Err(error) = check(&response) {
-            request.owner.finish(cx, Err(VenueError::new(error)));
+            let _ = request.owner.finish(cx, Err(VenueError::new(error)));
             return;
         }
         if request.failed {
-            request.owner.finish(
+            let _ = request.owner.finish(
                 cx,
                 Err(VenueError::new("Malformed Bitrue execution history")),
             );
@@ -362,12 +381,23 @@ impl Bitrue {
         // fromId advances forward from a trade ID; no backward cursor is
         // documented for the default recent page. A full filtered page cannot
         // establish absence of older matches, so never present it as complete.
-        if request.received >= request.limit && request.owner.staged_len() < request.limit {
-            request.owner.reject(cx, VenueError::new("INCOMPLETE: Bitrue native fill page is full before local filters reach the requested limit"));
+        if request.received >= request.limit && request.rows.len() < request.limit {
+            let _ = request.owner.reject(cx, VenueError::new("INCOMPLETE: Bitrue native fill page is full before local filters reach the requested limit"));
             return;
         }
-        request.owner.accept_page();
-        request.owner.finish_with(cx, Ok(()), |mut rows| {
+        let Some(leg) = leg else {
+            return;
+        };
+        match request.owner.admit(cx, leg) {
+            Ok(mut page) => {
+                for row in std::mem::take(&mut request.rows) {
+                    page.stage(row);
+                }
+                page.accept_page();
+            }
+            Err(_) => return,
+        }
+        let _ = request.owner.finish_with(cx, Ok(()), |mut rows| {
             rows.sort_by(|a, b| b.time_ms.total_cmp(&a.time_ms));
             rows.truncate(request.limit);
             encode_executions(&rows)
@@ -380,7 +410,7 @@ impl Bitrue {
         request: Request,
         error: &str,
     ) {
-        request.owner.finish(cx, Err(VenueError::new(error)));
+        let _ = request.owner.finish(cx, Err(VenueError::new(error)));
     }
 }
 
