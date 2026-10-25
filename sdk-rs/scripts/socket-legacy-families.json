@@ -20,7 +20,6 @@
     "mexc": "venues/mexc/src/",
     "orderly": "venues/orderly/src/",
     "paradex": "venues/paradex/src/",
-    "polymarket": "venues/polymarket/src/",
-    "woo": "venues/woo/src/"
+    "polymarket": "venues/polymarket/src/"
   }
 }

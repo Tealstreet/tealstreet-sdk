@@ -8977,3 +8977,33 @@ WEEX1212633->1274315 (+61682) and combined13908680->13920684 (+12004),
 with unchanged fixed budgets and Node/Web parity. Combined is local evidence;
 frozen-head CI remains the family-size record. Remaining14F/20O request refs
 and all signing/credential inventory stay unchanged.
+## WOO engine-owned socket lifecycle
+
+WOO public and private feeds use the shared Engine epoch, supervision, auth and
+subscription lifecycle. Duplicate opens, pre-open data and retired or expired
+socket events cannot replay subscriptions, authenticate a replacement, publish
+native data or refresh private health. Private authentication refusal retains
+WOO's reconnect/backoff policy and existing error notice; malformed proof does
+not authenticate. Account snapshots and reconciliation state survive retirement.
+
+Current public book, candle and trade interests retain native reference counts,
+wire bytes and replay order. Retirement clears the retiring public books and
+advances their native seed generation before reconnect; late old HTTP seeds and
+socket updates cannot repopulate the new generation. Shared/None public policies
+suppress the public transport. Private setup, request/signature construction,
+account reducers, polling and financial freshness fences keep their contracts.
+
+Hosts continue using the existing connect/send/close/timer interface. WOO's
+private auth frame and fixed subscriptions keep their native field order, with
+the post-auth ping following subscription release. Other venue families keep
+their current adapters, including Sam's excluded Bitunix boundary.
+
+WOO dynamic and reconnect book seeds now use the landed released-interest
+continuation: the complete subscription batch is returned first, then a genuine
+subsequent timer ingress may issue the native HTTP seed. This is host handoff,
+not peer acknowledgement. Current-epoch deltas received between those steps
+remain buffered for the existing snapshot join. Required-interest removal,
+retirement and stale or expired wakes cannot issue a seed for newer work.
+Native one-second snapshot retry timing and request/reducer freshness stay with
+their existing owners. A synchronous shared admission-capacity refusal retires
+the matching public feed with shared backoff; due seeds survive its reconnect.
