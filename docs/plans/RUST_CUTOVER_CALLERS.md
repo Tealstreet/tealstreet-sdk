@@ -3212,8 +3212,11 @@ longer becomes an empty complete result. Its 20-page budget resets per window,
 raw duplicate rows stay intact, and one owner retains earlier incompleteness
 across later windows. Adjacent repeated cursors and non-adjacent cycles now stop
 early with incomplete coverage. OKX keeps its initial upper-bound cursor, lower
-bound, 100 ms continuing-page delay and immediate unchanged-cursor exhaustion;
-non-adjacent cycles stop with incomplete coverage. Neither method's arguments
+bound and 100 ms continuing-page delay. Each next page asks `after = oldest + 1`
+(the bound is exclusive), so rows sharing the oldest millisecond across a page
+break are fetched again and the re-sent boundary rows are dropped by count. A
+page that cannot advance (a full page inside one millisecond, or rows not older
+than the cursor) and non-adjacent cycles stop with incomplete coverage. Neither method's arguments
 change. This slice covers closed-position reads only; both venues' general
 history reads and the broader query-marker fan-out remain unfinished. No NX
 migration, deployment or B11 closure is claimed.
@@ -7791,6 +7794,41 @@ Not carried from TS: the tunnel counters (2 unauthenticated closes, 6 failed
 connects). The Rust venue cannot tell a tunnel route from a direct one. The
 hosts' existing silent-connect walk advances a tunnel that closes or never
 opens after 2 silent connects instead.
+
+## Bitget trading write job under a streamed serial Plan
+
+PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder, SetLeverage,
+SetMarginType and SetPositionMode for `bitget`, `bitgetusdc` and
+`bitgetinverse` now run as one command-owned streamed serial Plan behind a
+WriteAfterReads Preflight. The following are unchanged: entry precedence,
+planning, batching, endpoints, bodies, the `X-CHANNEL-API-CODE` header, the
+in-job reads signed with the Read role, the one fresh resend for an HTTP-200
+40009, the replan after an HTTP-200 40085, the native read retries, the
+accepted-ID order and the queue order.
+
+TS-visible changes:
+
+- **Per-call bound.** Each call ends at 20 s as a typed Timeout. A released
+  write that times out is Unknown and reconciles. Native had no request deadline.
+- **Capacity.** More than 256 concurrent commands are refused Capacity,
+  NotSent, before any send. That count covers the active job plus queued
+  writes. Placements stay bound by the existing 64 order-lock scopes.
+- **408/5xx before the native code.** A write answered 408 or 5xx is the
+  engine's unproven answer: "HTTP response does not prove the write outcome",
+  `VenueUnavailable`, Unknown. It reconciles on the next account tick. That
+  covers 500+40009, which no longer resends, and 500+40085, which no longer
+  replans (ruled 2026-10-25).
+- **401/403/429 by status.** These keep their native kinds, but the
+  projected failure no longer carries the native venue code.
+- **All-refused batch.** A 200/`00000` batch whose every row is in
+  `failureList` projects Rejected, because Bitget lists every order as not
+  placed. A mixed batch keeps outcome none with the accepted IDs.
+- **Empty acknowledgement.** An acknowledgement that accounts for no order is
+  kind Internal, Unknown.
+- **Refusal after a replan.** If a job that was replanned after a refused
+  40085 later fails (for example, detection expires), the terminal is that
+  40085 refusal (Rejected, its native text) rather than a NotSent detection
+  failure.
 
 ### TxFlow immediate local command custody
 
