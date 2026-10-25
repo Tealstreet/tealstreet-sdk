@@ -7,6 +7,7 @@ use safe_cex_engine::{
 mod support;
 use safe_cex_venue_weex::WeexFutures;
 use serde_json::{Value, json};
+use support::PreparedActions;
 use support::setup::Options;
 
 fn engine() -> Engine<WeexFutures> {
@@ -1409,7 +1410,7 @@ fn fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliat
     let socket=import_orders_with_socket(&mut e,json!([{"orderId":"1","symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"PARTIALLY_FILLED","origQty":"0.2","executedQty":"0.1","price":"59000","updateTime":1773295700000u64}]),json!([])).unwrap();
     e.handle(1002.0, Event::WsOpened { socket });
     let before_fill: Vec<_> = e
-        .drain_actions()
+        .prepared_actions(1002.)
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -1473,7 +1474,7 @@ fn fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliat
         .unwrap();
     e.handle(3001.0, Event::TimerFired { timer: refresh });
     let fresh = e
-        .drain_actions()
+        .prepared_actions(3001.)
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -2132,4 +2133,62 @@ fn a_read_only_account_still_fetches_leverage_with_its_secondary_identity() {
     assert_eq!(key.1, "read-key");
     let actions = raw_response(&mut e, &r, ISOLATED_CONFIG);
     assert!(done(&actions).is_ok());
+}
+
+#[test]
+fn a_late_settings_failure_cannot_clear_a_reused_commands_write_fence() {
+    let mut e = engine();
+    let setting = || Command::SetLeverage {
+        command: 71,
+        symbol: "BTCUSDT".into(),
+        leverage: 30.,
+        side: None,
+    };
+    let actions = command(&mut e, setting());
+    let old = writes(&actions).pop().unwrap();
+    assert!(e.store().metadata_write_pending("BTCUSDT"));
+    let completed = response(&mut e, &old, json!({"code":"200"}));
+    assert_eq!(done(&completed).unwrap(), "[]");
+    assert!(!e.store().metadata_write_pending("BTCUSDT"));
+
+    e.handle(2001., Event::Command(setting()));
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 2001.);
+    let current = writes(&actions).pop().unwrap();
+    assert_ne!(old.id, current.id);
+    assert!(e.store().metadata_write_pending("BTCUSDT"));
+    e.handle(
+        2002.,
+        Event::HttpFailed {
+            request: old.id,
+            error: "late old failure",
+        },
+    );
+    let stale = safe_cex_engine::test_support::prepared_actions(&mut e, 2002.);
+    assert!(!stale.iter().any(|action| matches!(
+        action,
+        Action::Notice(
+            Notice::CommandDone { command: 71, .. } | Notice::CommandFailed { command: 71, .. }
+        )
+    )));
+    assert!(e.store().metadata_write_pending("BTCUSDT"));
+
+    e.handle(
+        2003.,
+        Event::HttpFailed {
+            request: current.id,
+            error: "current failure",
+        },
+    );
+    let current = safe_cex_engine::test_support::prepared_actions(&mut e, 2003.);
+    assert_eq!(
+        current
+            .iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 71, .. })
+            ))
+            .count(),
+        1
+    );
+    assert!(!e.store().metadata_write_pending("BTCUSDT"));
 }

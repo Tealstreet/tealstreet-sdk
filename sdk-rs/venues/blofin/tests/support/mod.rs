@@ -37,19 +37,42 @@ impl Harness {
     pub fn with_signing_entropy(fill: safe_cex_engine::entropy::Fill) -> Self {
         Self::with_entropy(INSTRUMENT, false, 0.0, Some(fill))
     }
+    /// Trusted setup with the venue's refs adjusted, e.g. a missing passphrase ref.
+    #[allow(dead_code)]
+    pub fn with_identities(adjust: impl FnOnce(&mut safe_cex_engine::signing::Identities)) -> Self {
+        Self::build(INSTRUMENT, false, 0.0, None, adjust)
+    }
     fn with_entropy(
         instruments: &str,
         broker_attribution: bool,
         now: f64,
         fill: Option<safe_cex_engine::entropy::Fill>,
     ) -> Self {
+        Self::build(instruments, broker_attribution, now, fill, |_| {})
+    }
+    fn build(
+        instruments: &str,
+        broker_attribution: bool,
+        now: f64,
+        fill: Option<safe_cex_engine::entropy::Fill>,
+        adjust: impl FnOnce(&mut safe_cex_engine::signing::Identities),
+    ) -> Self {
+        // Trusted setup registers the same opaque refs the venue holds.
+        let (signer, mut identities) = safe_cex_crypto::signer::LocalSigner::from_json(
+            r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#.into(),
+        )
+        .unwrap();
+        adjust(&mut identities);
         let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
             broker_attribution,
             key: Some("key".into()),
             secret: Some("secret".into()),
             passphrase: Some("pass".into()),
+            identities: identities.clone(),
             ..Options::default()
         }));
+        e.set_signer(Some(std::sync::Arc::new(signer))).unwrap();
+        e.set_identities(identities).unwrap();
         if let Some(fill) = fill {
             e.set_signing_entropy(fill).unwrap();
         }
@@ -168,7 +191,7 @@ impl Harness {
     pub fn respond(&mut self, r: HttpRequest, body: &str) {
         self.respond_at(r, body, 0.0);
     }
-    fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
+    pub fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
         self.e.handle(
             now,
             Event::HttpResponse {

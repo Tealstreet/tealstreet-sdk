@@ -57,20 +57,32 @@ export function performanceMetricErrors(metrics, mode) {
   return errors;
 }
 
-export function performanceFailures(ts, rust) {
-  const errors = [];
-  for (const [field, label] of [
-    ['cpuMs', 'main-thread CPU'], ['steadyCpuMs', 'steady-state CPU'],
-    ['processCpuMs', 'process CPU'], ['retainedBytes', 'retained memory'],
-  ]) {
+export const CPU_FIELDS = Object.freeze(['cpuMs', 'steadyCpuMs', 'processCpuMs']);
+const OBJECTIVES = Object.freeze([
+  ['cpuMs', 'main-thread CPU'], ['steadyCpuMs', 'steady-state CPU'],
+  ['processCpuMs', 'process CPU'], ['retainedBytes', 'retained memory'],
+]);
+
+/** The original bound, also used by the separate two-run certifier. */
+export function performanceObjectives(ts, rust) {
+  return OBJECTIVES.map(([field, label]) => {
     const reference = median(ts.map((sample) => sample[field]));
     const candidate = median(rust.map((sample) => sample[field]));
+    const category = SMALL_WINDOW_FIELDS.includes(field) && reference < SMALL_WINDOW_MS ? 'small' : 'relative';
+    const limit = category === 'small' ? reference + smallWindowAllowanceMs(reference) : reference * (1 - REQUIRED_IMPROVEMENT);
+    return { field, label, reference, candidate, category, limit, ratio: candidate / limit };
+  });
+}
+
+export function performanceFailures(ts, rust) {
+  const errors = [];
+  for (const { label, reference, candidate, category, limit } of performanceObjectives(ts, rust)) {
     if (!Number.isFinite(reference) || reference <= 0 || !Number.isFinite(candidate))
       errors.push(`performance ${label}: no valid positive TS baseline`);
-    else if (SMALL_WINDOW_FIELDS.includes(field) && reference < SMALL_WINDOW_MS) {
-      if (!(candidate <= reference + smallWindowAllowanceMs(reference)))
+    else if (category === 'small') {
+      if (!(candidate <= limit))
         errors.push(`performance ${label}: Rust must be within max(1 ms, 5%) of a sub-${SMALL_WINDOW_MS} ms TS objective (ts=${reference}, rust=${candidate})`);
-    } else if (!(candidate <= reference * (1 - REQUIRED_IMPROVEMENT)))
+    } else if (!(candidate <= limit))
       errors.push(`performance ${label}: Rust must be at least 10% below TS (ts=${reference}, rust=${candidate})`);
   }
   return errors;

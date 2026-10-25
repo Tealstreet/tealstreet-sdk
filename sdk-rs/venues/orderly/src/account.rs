@@ -2038,7 +2038,7 @@ mod margin_mode_rows {
         let mut e = safe_cex_engine::test_support::seeded_engine(venue);
         e.start(1000.0);
         for _ in 0..8 {
-            let out: Vec<_> = e.drain_actions().collect();
+            let out = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
             for action in out {
                 if let Action::Http(r) = action {
                     if r.url.ends_with("/v1/client/margin_modes") {

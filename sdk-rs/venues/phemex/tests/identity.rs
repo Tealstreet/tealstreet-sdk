@@ -1,9 +1,11 @@
 //! Native rare identity reads: route/signer, exact IDs, failure ownership and no state commits.
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
-use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
+mod support;
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Method, Notice, Response};
+use safe_cex_venue_phemex::PhemexPerpetuals;
+use support::{Options, PreparedEngine as Engine};
 const NOW: f64 = 1000.0;
 fn engine(read: bool, public: bool) -> Engine<PhemexPerpetuals> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::prepared_engine(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: read.then(|| safe_cex_engine::ReadCredentials {
@@ -13,7 +15,7 @@ fn engine(read: bool, public: bool) -> Engine<PhemexPerpetuals> {
         }),
         public_data_only: public,
         ..Default::default()
-    }));
+    });
 
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 123.0,
@@ -187,14 +189,13 @@ fn identity_public_only_fails_before_network_even_with_saved_credentials() {
 
 #[test]
 fn identity_without_credentials_fails_before_network() {
-    let mut e =
-        safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options::default()));
+    let mut e = support::prepared_engine(Options::default());
     result(ask(&mut e), true).unwrap_err();
 }
 
 #[test]
 fn identity_rejects_incomplete_saved_read_credentials_without_primary_fallback() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(PhemexPerpetuals::new(Options {
+    let mut e = support::prepared_engine(Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: Some(safe_cex_engine::ReadCredentials {
@@ -203,7 +204,7 @@ fn identity_rejects_incomplete_saved_read_credentials_without_primary_fallback()
             passphrase: None,
         }),
         ..Default::default()
-    }));
+    });
     let error = result(ask(&mut e), true).unwrap_err();
     assert!(error.contains("Secondary read credentials"));
 }

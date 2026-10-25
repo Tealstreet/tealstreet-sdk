@@ -15,6 +15,25 @@ fn options() -> Options {
     }
 }
 
+// ProbeVenue ignores responses; this native carrier grants no Context authority.
+fn probe_pending() -> Pending {
+    Pending::Candles {
+        root: None,
+        context: None,
+        symbol: String::new(),
+        interval: Interval::M1,
+        generation: None,
+        rows: vec![],
+        failed: false,
+        page: CandlePage {
+            from: 0.,
+            to: 0.,
+            step: 60_000.,
+            pages: 0,
+        },
+    }
+}
+
 fn probe(venue: Kraken) -> ProbeVenue<Kraken, impl FnMut(&mut Kraken, &mut Cx<'_, Pending>)> {
     ProbeVenue::new(venue, |venue, cx| {
         for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
@@ -24,10 +43,7 @@ fn probe(venue: Kraken) -> ProbeVenue<Kraken, impl FnMut(&mut Kraken, &mut Cx<'_
                     method,
                     "/derivatives/api/v3/secondary-test",
                     String::new(),
-                    Pending::Markets {
-                        rows: vec![],
-                        failed: false,
-                    },
+                    probe_pending(),
                 )
                 .unwrap();
         }
@@ -38,10 +54,7 @@ fn probe(venue: Kraken) -> ProbeVenue<Kraken, impl FnMut(&mut Kraken, &mut Cx<'_
                 "/api/history/v3/account-log",
                 String::new(),
                 safe_cex_engine::json::ArrayAt::Root,
-                Pending::Markets {
-                    rows: vec![],
-                    failed: false,
-                },
+                probe_pending(),
             )
             .unwrap();
     })

@@ -411,6 +411,8 @@ impl BybitLinear {
                 &entry.preflight,
                 &steps,
                 PlanPolicy {
+                    // An unproven reply seals the batch (the pre-#2012 semantics this adopts).
+                    independent_calls: false,
                     operation: Operation::Mutation,
                     credential: entry.write_credential.clone(),
                     pacing: None,

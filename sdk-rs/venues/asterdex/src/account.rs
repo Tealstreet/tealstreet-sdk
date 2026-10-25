@@ -21,6 +21,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Default)]
 pub struct AccountState {
+    /// listenKey upkeep session. Aster returns the active key on create and
+    /// extends it on keepalive, so an extra write is harmless (repeat-safe).
+    listen_key_session: Option<safe_cex_engine::request_context::Session>,
     pub socket: Option<SocketId>,
     open: bool,
     supervisor: Supervisor,
@@ -958,12 +961,50 @@ impl AsterDex {
             cx.close(socket);
         }
         self.account.open = false;
+        self.retire_listen_key_session(cx);
         self.account.key_epoch = self.account.key_epoch.wrapping_add(1);
         self.account.key_pending = false;
         if let Some(timer) = self.account.keepalive.take() {
             cx.clear_timer(timer);
         }
         self.account.supervisor.retry(cx);
+    }
+    pub(crate) fn listen_key_current(&self, pending: &Pending) -> bool {
+        matches!(
+            pending,
+            Pending::Account(Request::ListenKey { epoch } | Request::Keepalive { epoch })
+                if *epoch == self.account.key_epoch
+        )
+    }
+    /// Each create opens a new generation; keepalives reuse the live one.
+    pub(crate) fn listen_key_session(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        create: bool,
+        credential: &safe_cex_engine::request_context::Credential,
+    ) -> Option<safe_cex_engine::request_context::Session> {
+        let live = self
+            .account
+            .listen_key_session
+            .as_ref()
+            .is_some_and(|session| cx.session_live(session));
+        if create || !live {
+            self.retire_listen_key_session(cx);
+            self.account.listen_key_session = cx
+                .open_session(safe_cex_engine::request_context::SessionPolicy {
+                    credential: Some(credential.clone()),
+                    repeat_safe: true,
+                    // Signed: routed by its credential, never a session egress.
+                    private_egress: None,
+                })
+                .ok();
+        }
+        self.account.listen_key_session.clone()
+    }
+    fn retire_listen_key_session(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(session) = self.account.listen_key_session.take() {
+            let _ = cx.retire_session(&session);
+        }
     }
     pub(crate) fn on_account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {

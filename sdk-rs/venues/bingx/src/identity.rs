@@ -1,6 +1,11 @@
 //! Rare account identity reads never commit live account state.
 use crate::{Bingx, Pending};
-use safe_cex_engine::{CommandId, Cx, Method, Response};
+use safe_cex_engine::credential_selection::CredentialUnavailable;
+use safe_cex_engine::request_context::RetryPolicy;
+use safe_cex_engine::selected_read::{
+    AdmittedRead, LocalRefusal, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
+use safe_cex_engine::{Cx, Method, Response, VenueError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -65,87 +70,86 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
     Ok(Identity { user_id })
 }
 
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
-    let result = result
-        .and_then(|identity| serde_json::to_string(&identity).map_err(|error| error.to_string()));
-    match result {
-        Ok(data) => cx.done(command, data),
-        Err(error) => fail_command(cx, command, error),
-    }
-}
-
-/// Native and signer identity failures share one command completion.
-pub(crate) fn fail_command(
-    cx: &mut Cx<'_, Pending>,
-    command: CommandId,
-    error: impl Into<safe_cex_engine::VenueError>,
-) {
-    let error = error.into();
-    cx.command_error(command, &error.message);
-    cx.fail(command, error);
-}
 impl Bingx {
-    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if let Some(error) = self.config_error {
-            finish(cx, command, Err(error.into()));
-            return;
-        }
-
-        let Some(credentials) = self.credentials.as_ref() else {
-            finish(
-                cx,
-                command,
-                Err("BingX account identity requires credentials".into()),
-            );
+    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>) {
+        let selected = if self.config_error.is_some() {
+            Err(CredentialUnavailable::Missing)
+        } else {
+            SelectedRead::select(&self.account.slots, ReadRole::Read { scope: None })
+        };
+        let message = self
+            .config_error
+            .unwrap_or("BingX account identity requires credentials");
+        let Ok(read) = SelectedRead::command(
+            cx,
+            selected,
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+            LocalRefusal {
+                diagnostic: Some(message.into()),
+                error: message.into(),
+            },
+        ) else {
             return;
         };
-        if let Err((pending, error)) = crate::managed::read(
+        const PATH: &str = "/openApi/swap/v3/user/balance";
+        let (url, _, body) = crate::sign::Params::new().render(Method::Get, PATH, Vec::new());
+        if let Err((pending, error)) = read.queue(
             cx,
-            credentials,
-            crate::managed::Read {
+            ReadRequest {
                 method: Method::Get,
-                path: "/openApi/swap/v3/user/balance",
-                params: crate::sign::Params::new(),
-                at: None,
+                url,
+                body,
+                stream: None,
             },
-            Pending::Identity(command),
-            safe_cex_engine::request_context::Scope::Command(command),
+            |identity| {
+                Box::new(crate::sign::dispatch::Http::new(
+                    identity.clone(),
+                    Method::Get,
+                    PATH,
+                    crate::sign::Params::new(),
+                ))
+            },
+            Pending::Identity,
         ) {
-            <Self as safe_cex_engine::Venue>::on_sign_error(self, cx, *pending, error);
-        }
-    }
-    pub(crate) fn identity_response_context(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        context: &safe_cex_engine::request_context::Context,
-        response: Response<'_>,
-    ) {
-        match parse(response).and_then(|identity| {
-            serde_json::to_string(&identity).map_err(|error| error.to_string())
-        }) {
-            Ok(data) => {
-                let _ = cx.done_context(context, data);
-            }
-            Err(error) => {
-                let _ = cx.command_error_context(context, error.clone());
-                let _ = cx.fail_context(context, error);
-            }
+            <Self as safe_cex_engine::Venue>::on_sign_error(self, cx, pending, error.venue_error());
         }
     }
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        read: AdmittedRead,
         response: Response<'_>,
     ) {
-        finish(cx, command, parse(response));
+        if cx
+            .validate_read_http_delivery(read.context(), read.context())
+            .is_err()
+        {
+            return;
+        }
+        match parse(response).and_then(|identity| {
+            serde_json::to_string(&identity).map_err(|error| error.to_string())
+        }) {
+            Ok(data) => {
+                let _ = cx.done_context(read.context(), data);
+            }
+            Err(error) => self.identity_failed(cx, read, error.into()),
+        }
     }
     pub(crate) fn identity_failed(
         &self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        error: &str,
+        read: AdmittedRead,
+        error: VenueError,
     ) {
-        finish(cx, command, Err(error.into()));
+        if cx
+            .command_error_context(read.context(), error.message.clone())
+            .is_ok()
+        {
+            let _ = cx.fail_context(read.context(), error);
+        }
     }
 }

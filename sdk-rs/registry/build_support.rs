@@ -40,6 +40,8 @@ struct Rule {
 #[serde(rename_all = "camelCase")]
 enum SetupMapping {
     Asterdex,
+    #[serde(rename = "apexomni")]
+    ApexOmni,
 }
 
 #[derive(Default, Deserialize)]
@@ -68,12 +70,30 @@ struct RemoteSigningWire {
     exchange_name: String,
     extra_data: Option<RemoteExtraData>,
     request_id: Option<String>,
+    seconds_suffix: Option<SecondsSuffix>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum RemoteExtraData {
     BybitExpiry,
     BinanceSpot,
+    SecondsTimestamp,
+}
+/// The signed literal after a seconds login stamp, e.g. `GET` + `/user/verify`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SecondsSuffix {
+    method: String,
+    path: String,
+}
+impl SecondsSuffix {
+    fn valid(&self) -> bool {
+        (1..=16).contains(&self.method.len())
+            && self.method.bytes().all(|byte| byte.is_ascii_uppercase())
+            && (2..=256).contains(&self.path.len())
+            && self.path.starts_with('/')
+            && self.path.bytes().all(|byte| byte.is_ascii_graphic())
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -90,6 +110,17 @@ struct IdentitySetupPolicy {
     passphrase: Option<SetupFieldPolicy>,
     secret_encoding: Option<KeyEncoding>,
     extra: Option<ExtraKeyPolicy>,
+    signing_algorithm: Option<SigningAlgorithm>,
+}
+
+/// Only asymmetric algorithms may be declared; the provider refuses others.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum SigningAlgorithm {
+    Ed25519,
+    Es256,
+    Secp256k1Digest,
+    StarkDigest,
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,6 +131,7 @@ enum KeyEncoding {
     Hex,
     Pem,
     Base64Text,
+    Base58,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +156,7 @@ enum ExtraFieldPolicy {
 #[serde(rename_all = "camelCase")]
 enum ExtraKey {
     ZklinkSeed,
+    L1Wallet,
 }
 
 #[derive(Debug, Deserialize)]
@@ -144,6 +177,17 @@ struct BridgeRule {
     api_key_index_required: bool,
     isolated_book_subscriptions: bool,
     dispatch_signing: bool,
+    read_credentials: ReadCredentialsPolicy,
+}
+
+/// What trusted setup does with a family's read key; absent installs it.
+#[derive(Default, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum ReadCredentialsPolicy {
+    #[default]
+    Install,
+    ValidateOnly,
+    PublicRead,
 }
 
 #[derive(Default, Debug, Deserialize)]
@@ -188,14 +232,15 @@ fn rule(value: &Rule) -> String {
     };
     let bridge = &value.bridge;
     let bridge = format!(
-        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {} }}",
+        "BridgeRule {{ spot: {}, demo: DemoRule::{:?}, primary_credentials_only: {}, payload_signing: {}, api_key_index_required: {}, isolated_book_subscriptions: {}, dispatch_signing: {}, read_credentials: ReadCredentialsPolicy::{:?} }}",
         bridge.spot,
         bridge.demo,
         bridge.primary_credentials_only,
         bridge.payload_signing,
         bridge.api_key_index_required,
         bridge.isolated_book_subscriptions,
-        bridge.dispatch_signing
+        bridge.dispatch_signing,
+        bridge.read_credentials
     );
     let slot = |value: &Option<IdentitySetupPolicy>| match value {
         Some(value) => {
@@ -220,8 +265,12 @@ fn rule(value: &Rule) -> String {
                     )
                 },
             );
+            let signing_algorithm = value.signing_algorithm.as_ref().map_or_else(
+                || "None".into(),
+                |algorithm| format!("Some(safe_cex_engine::signing::Algorithm::{algorithm:?})"),
+            );
             format!(
-                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra} }})",
+                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm} }})",
                 value.trim_credential
             )
         }
@@ -311,7 +360,13 @@ pub fn generate(json: &str) -> Result<String, String> {
                         || id.bytes().any(|byte| byte.is_ascii_control())
                 })
                 || (wire.request_id.is_some()
-                    && !matches!(wire.extra_data, Some(RemoteExtraData::BinanceSpot))))
+                    && !matches!(wire.extra_data, Some(RemoteExtraData::BinanceSpot)))
+                || matches!(wire.extra_data, Some(RemoteExtraData::SecondsTimestamp))
+                    != wire.seconds_suffix.is_some()
+                || wire
+                    .seconds_suffix
+                    .as_ref()
+                    .is_some_and(|suffix| !suffix.valid()))
         {
             return Err("invalid delegated wire declaration".into());
         }
@@ -347,11 +402,15 @@ mod tests {
             "default":{"canSign":[],"privateEligible":[]},
             "venues":{
                 "mexc":{"signerSetup":{"primary":{"trimCredential":true},"secondary":{"trimCredential":false}}},
-                "empty":{"signerSetup":{"primary":{}}}
+                "empty":{"signerSetup":{"primary":{}}},
+                "evm":{"signerSetup":{"primary":{"signingAlgorithm":"secp256k1Digest"}}}
             }
         }"#).unwrap();
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None }) }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest) }), secondary: None }"));
+        // MAC algorithms are never declarable.
+        assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"hmacSha256"}}}}}"#).is_err());
         assert!(output.contains("CredentialSetupPolicy { primary: None, secondary: None }"));
     }
 
@@ -376,6 +435,15 @@ mod tests {
         }
     }
 
+    // P6b R3: the l1Wallet role compiles like zklinkSeed.
+    #[test]
+    fn l1_wallet_extra_key_compiles() {
+        let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "p":{"signerSetup":{"primary":{"extra":{"key":"l1Wallet","field":"requiredForPrivate","encoding":"hex"}}}}
+        }}"#).unwrap();
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
+    }
+
     #[test]
     fn declared_encoding_and_extra_key_compile_and_unknown_values_fail_closed() {
         let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
@@ -384,9 +452,11 @@ mod tests {
         }}"#).unwrap();
         assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
         assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None })"));
+        let base58 = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"secretEncoding":"base58"}}}}}"#;
+        assert!(generate(base58).unwrap().contains("KeyEncoding::Base58"));
         for field in [
-            r#"{"secretEncoding":"base58"}"#,
-            r#"{"extra":{"key":"l1Wallet"}}"#,
+            r#"{"secretEncoding":"base32"}"#,
+            r#"{"extra":{"key":"unknownRole"}}"#,
             r#"{"extra":{"key":"zklinkSeed","name":"x"}}"#,
             r#"{"extra":{"key":"zklinkSeed","field":"requiredWithPrimaryFallback"}}"#,
             r#"{"extra":{"key":"zklinkSeed","field":null}}"#,
@@ -395,6 +465,29 @@ mod tests {
                 r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"signerSetup":{{"primary":{field}}}}}}}}}"#
             );
             assert!(generate(&rules).is_err());
+        }
+    }
+
+    #[test]
+    fn read_credentials_policy_compiles_and_unknown_values_fail_closed() {
+        let output = generate(
+            r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "validated":{"bridge":{"readCredentials":"validateOnly"}},
+            "public":{"bridge":{"readCredentials":"publicRead"}},
+            "plain":{}
+        }}"#,
+        )
+        .unwrap();
+        for variant in ["ValidateOnly", "PublicRead", "Install"] {
+            assert!(output.contains(&format!(
+                "read_credentials: ReadCredentialsPolicy::{variant}"
+            )));
+        }
+        for value in [r#""ignore""#, "true", "null"] {
+            let rules = format!(
+                r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"v":{{"bridge":{{"readCredentials":{value}}}}}}}}}"#
+            );
+            assert!(generate(&rules).is_err(), "{value}");
         }
     }
 

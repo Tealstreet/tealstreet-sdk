@@ -5,6 +5,7 @@ use crate::{
     wire::*,
 };
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -15,6 +16,16 @@ const SUBMIT: &str = "/api/v1/private/order/submit";
 const BATCH: &str = "/api/v1/private/order/submit_batch";
 const PLAN: &str = "/api/v1/private/planorder/place/v2";
 const STOP: &str = "/api/v1/private/stoporder/place";
+
+fn local_mutation_policy() -> Policy {
+    Policy {
+        operation: Operation::Mutation,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
 
 pub struct Request {
     pub command: CommandId,
@@ -839,34 +850,34 @@ impl MexcFutures {
             _ => return,
         };
         if let Err(error) = &steps {
-            cx.command_error(command, error);
-            cx.fail(command, not_sent(error.as_str()));
+            let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                return;
+            };
+            let _ = cx.command_error_context(&context, error);
+            let _ = cx.fail_context(&context, not_sent(error.as_str()));
             return;
         }
         if self.credentials.is_none() {
-            cx.fail(
-                command,
+            let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
                 not_sent("MEXC trading needs an API key").kind(ErrorKind::AuthInvalid),
             );
             return;
         }
-        match steps {
-            Err(error) => {
-                cx.command_error(command, &error);
-                cx.fail(command, not_sent(error));
-            }
-            Ok(steps) => {
-                self.trading.queue.push_back(Job {
-                    command,
-                    steps,
-                    ids: vec![],
-                    gap,
-                    total_orders,
-                    failed_index: None,
-                    effective: false,
-                });
-                self.advance_trade(cx);
-            }
+        if let Ok(steps) = steps {
+            self.trading.queue.push_back(Job {
+                command,
+                steps,
+                ids: vec![],
+                gap,
+                total_orders,
+                failed_index: None,
+                effective: false,
+            });
+            self.advance_trade(cx);
         }
     }
     fn advance_trade(&mut self, cx: &mut Cx<'_, Pending>) {

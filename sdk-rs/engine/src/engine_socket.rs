@@ -34,11 +34,22 @@ pub(super) struct Continuation<P> {
 
 impl<P> Cx<'_, P> {
     fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
-        let mut driver = std::mem::take(&mut self.io.socket_driver);
+        let mut driver = self.take_socket_driver();
         let result = f(&mut driver, self);
-        self.io.socket_driver = driver;
+        self.restore_socket_driver(driver);
         result
     }
+    // Shared out of line: every driver closure would otherwise inline the
+    // driver's default construction and drop.
+    #[inline(never)]
+    fn take_socket_driver(&mut self) -> Driver {
+        std::mem::take(&mut self.io.socket_driver)
+    }
+    #[inline(never)]
+    fn restore_socket_driver(&mut self, driver: Driver) {
+        self.io.socket_driver = driver;
+    }
+    #[inline(never)]
     pub(super) fn socket_effects(&mut self, effects: Vec<Effect>) {
         if self.io.socket_effects.len().saturating_add(effects.len()) > MAX_EFFECTS {
             self.io.socket_failed = true;
@@ -74,6 +85,38 @@ impl<P> Cx<'_, P> {
         self.io.managed_sockets = true;
         Ok(feed)
     }
+    /// Keep login permission independent of a connect-origin native snapshot bound.
+    pub fn register_socket_feed_with_snapshot(
+        &mut self,
+        policy: FeedPolicy,
+    ) -> Result<FeedId, SocketError> {
+        self.io.assert_actions_safe();
+        self.io.opaque_entry_activity();
+        if self.io.socket_failed {
+            return Err(SocketError::NotPermitted);
+        }
+        let feed = self.io.socket_driver.register_with_snapshot(policy, true)?;
+        self.io.managed_sockets = true;
+        Ok(feed)
+    }
+    /// Complete validated native snapshot proof from this exact text callback only.
+    pub fn complete_socket_snapshot(&mut self) -> Result<(), SocketError> {
+        self.io.assert_actions_safe();
+        self.io.opaque_entry_activity();
+        let (epoch, received_at) = self.io.socket_message.ok_or(SocketError::Stale)?;
+        if self.now != received_at {
+            return Err(SocketError::InvalidTime);
+        }
+        self.io
+            .socket_driver
+            .validate_snapshot_completion(epoch, self.now)?;
+        if !self.io.next_id.available(1) {
+            return Err(SocketError::Capacity);
+        }
+        self.with_socket_driver(|d, cx| d.complete_snapshot(cx, epoch))?;
+        self.io.socket_message = None;
+        Ok(())
+    }
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
         self.io.socket_driver.state.epoch(feed)
     }
@@ -108,6 +151,14 @@ impl<P> Cx<'_, P> {
             return Err(SocketError::NotPermitted);
         }
         self.io.socket_driver.preflight_begin(feed, self.now)?;
+        if self
+            .io
+            .socket_driver
+            .snapshot_connect_ids(feed)
+            .is_some_and(|count| !self.io.next_id.available(count))
+        {
+            return Err(SocketError::Capacity);
+        }
         let role = self.io.socket_driver.state.policy(feed)?.role.clone();
         if role == SocketChannel::Public && self.io.public_feed_policy != PublicFeedPolicy::Direct {
             return Err(SocketError::NotPermitted);
@@ -254,10 +305,12 @@ impl<P> Cx<'_, P> {
         if values.len() > MAX_INTERESTS || required_keys.len() > MAX_INTERESTS {
             return Err(SocketError::Capacity);
         }
-        let values_by_key: std::collections::BTreeMap<_, _> =
-            values.iter().map(|i| (i.key.as_ref(), i)).collect();
-        if values_by_key.len() != values.len() {
-            return Err(SocketError::InvalidInterest);
+        // Inserted one by one: `collect` would add its own sort and bulk build.
+        let mut values_by_key = std::collections::BTreeMap::new();
+        for value in &values {
+            if values_by_key.insert(value.key.as_ref(), value).is_some() {
+                return Err(SocketError::InvalidInterest);
+            }
         }
         let mut seen = std::collections::BTreeSet::new();
         let mut required = Vec::with_capacity(required_keys.len());
@@ -328,6 +381,11 @@ impl<V: Venue> Engine<V> {
     fn socket_native(&mut self, now: f64, event: LifecycleEvent) -> Result<(), SocketError> {
         self.assert_live();
         // Lifecycle work is independent of the HTTP codec that queued it.
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_history_failure = None;
+        }
+        let message = self.io.socket_message.take();
         let delivery = self.io.http_delivery.take();
         let mut cx = Cx {
             now,
@@ -339,6 +397,7 @@ impl<V: Venue> Engine<V> {
         // callback or hide invalid output behind a socket-retirement filter.
         self.io.assert_actions_safe();
         self.io.http_delivery = delivery;
+        self.io.socket_message = message;
         result
     }
     fn socket_enqueue(&mut self, now: f64, effects: Vec<Effect>) {
@@ -391,6 +450,20 @@ impl<V: Venue> Engine<V> {
             return;
         }
         self.process_pending_socket_work(now);
+    }
+    /// One shared notice for a refused lifecycle step.
+    #[inline(never)]
+    fn socket_refused(&mut self, now: f64, what: &str, error: SocketError) {
+        Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        }
+        .notice(
+            Level::Error,
+            log_code::SUBSCRIPTION_REJECTED,
+            format!("Managed socket {what} refused: {error:?}"),
+        );
     }
     #[inline(never)]
     fn process_pending_socket_work(&mut self, now: f64) {
@@ -455,30 +528,12 @@ impl<V: Venue> Engine<V> {
                         },
                     );
                     if let Err(error) = result {
-                        let mut cx = Cx {
-                            now,
-                            store: &mut self.store,
-                            io: &mut self.io,
-                        };
-                        cx.notice(
-                            Level::Error,
-                            log_code::SUBSCRIPTION_REJECTED,
-                            format!("Managed socket invalidation refused: {error:?}"),
-                        );
+                        self.socket_refused(now, "invalidation", error);
                     }
                     if let Err(error) = self.socket_mutate(now, |d, cx| {
                         d.acknowledge_retirement(cx, retirement, result.is_ok(), retry)
                     }) {
-                        let mut cx = Cx {
-                            now,
-                            store: &mut self.store,
-                            io: &mut self.io,
-                        };
-                        cx.notice(
-                            Level::Error,
-                            log_code::SUBSCRIPTION_REJECTED,
-                            format!("Managed socket retirement refused: {error:?}"),
-                        );
+                        self.socket_refused(now, "retirement", error);
                     }
                     continue;
                 }
@@ -561,16 +616,7 @@ impl<V: Venue> Engine<V> {
         }
     }
     fn socket_failed_feed(&mut self, now: f64, feed: FeedId, error: SocketError) {
-        let mut cx = Cx {
-            now,
-            store: &mut self.store,
-            io: &mut self.io,
-        };
-        cx.notice(
-            Level::Error,
-            log_code::SUBSCRIPTION_REJECTED,
-            format!("Managed socket operation refused: {error:?}"),
-        );
+        self.socket_refused(now, "operation", error);
         let effects = self.socket_mutate(now, |d, cx| d.stop_feed(cx, feed).into_iter().collect());
         self.socket_enqueue(now, effects);
     }
@@ -648,7 +694,10 @@ impl<V: Venue> Engine<V> {
                         text,
                     ),
                 };
-                let other = matches!(control, Control::Other);
+                let other = matches!(
+                    control,
+                    Control::Other | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
+                );
                 let ready = self.venue.socket_startup_ready(&self.store);
                 self.assert_live();
                 let work = self.io.socket_driver.observe_control(now, epoch, &control);
@@ -670,7 +719,10 @@ impl<V: Venue> Engine<V> {
                         store: &mut self.store,
                         io: &mut self.io,
                     };
+                    assert!(cx.io.socket_message.is_none());
+                    cx.io.socket_message = Some((epoch, now));
                     Self::deliver_socket_message(&mut self.venue, &mut cx, socket, text);
+                    cx.io.socket_message = None;
                 }
             }
             Event::WsBinary { data, .. } => {
@@ -972,6 +1024,11 @@ impl<V: Venue> Engine<V> {
         }
         self.io.socket_continuation_bytes -= work.bytes;
         self.assert_live();
+        #[cfg(feature = "http-plans")]
+        {
+            self.io.http_history_failure = None;
+        }
+        let message = self.io.socket_message.take();
         let delivery = self.io.http_delivery.take();
         let entry = self.io.command_entry.take();
         #[cfg(feature = "order-locks")]
@@ -989,6 +1046,7 @@ impl<V: Venue> Engine<V> {
         );
         self.io.assert_actions_safe();
         self.io.http_delivery = delivery;
+        self.io.socket_message = message;
         self.io.command_entry = entry;
         #[cfg(feature = "order-locks")]
         {
@@ -1704,6 +1762,113 @@ mod tests {
         );
         assert_eq!(e.io.socket_driver.state.desired(feed).unwrap().len(), 1);
     }
+    #[test]
+    fn auth_progress_invalid_deadlines_leave_watch_and_auth_bound_unchanged() {
+        for now in [f64::NAN, f64::INFINITY, f64::MAX] {
+            let (mut e, _) = engine();
+            let mut supervisor = crate::socket::Supervisor::new(Config {
+                auth_timeout_ms: Some(15_000.),
+                ..Config::default()
+            });
+            {
+                let mut cx = Cx {
+                    now: 0.,
+                    store: &mut e.store,
+                    io: &mut e.io,
+                };
+                supervisor.connecting(&mut cx);
+                supervisor.opened(&mut cx);
+            }
+            let actions = e.io.actions.len();
+            let timers = e.io.timers.clone();
+            supervisor.authentication_progress(&mut Cx {
+                now,
+                store: &mut e.store,
+                io: &mut e.io,
+            });
+            assert_eq!(e.io.actions.len(), actions);
+            assert_eq!(e.io.timers, timers);
+            assert_eq!(
+                supervisor.expired(15_000.),
+                Some(crate::socket::Timeout::Auth)
+            );
+        }
+    }
+
+    #[test]
+    fn auth_progress_overflow_cannot_replace_the_existing_watch() {
+        let (mut e, _) = engine();
+        let mut supervisor = crate::socket::Supervisor::new(Config {
+            auth_timeout_ms: Some(f64::MAX),
+            ..Config::default()
+        });
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            supervisor.connecting(&mut cx);
+            supervisor.opened(&mut cx);
+        }
+        let actions = e.io.actions.len();
+        let timers = e.io.timers.clone();
+        supervisor.authentication_progress(&mut Cx {
+            now: f64::MAX / 2.,
+            store: &mut e.store,
+            io: &mut e.io,
+        });
+        assert_eq!(e.io.actions.len(), actions);
+        assert_eq!(e.io.timers, timers);
+        assert_eq!(
+            supervisor.expired(60_000.),
+            Some(crate::socket::Timeout::Idle)
+        );
+    }
+
+    #[test]
+    fn auth_progress_timer_exhaustion_is_fatal_before_replacing_the_old_bound() {
+        let (mut e, _) = engine();
+        let mut supervisor = crate::socket::Supervisor::new(Config {
+            auth_timeout_ms: Some(15_000.),
+            ..Config::default()
+        });
+        {
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            supervisor.connecting(&mut cx);
+            supervisor.opened(&mut cx);
+        }
+        let actions = e.io.actions.len();
+        let timers = e.io.timers.clone();
+        e.io.next_id =
+            crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
+        let trapped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            supervisor.authentication_progress(&mut Cx {
+                now: 14_000.,
+                store: &mut e.store,
+                io: &mut e.io,
+            });
+        }));
+        assert!(trapped.is_err());
+        assert!(e.failed());
+        assert_eq!(e.io.actions.len(), actions);
+        assert_eq!(e.io.timers, timers);
+        assert_eq!(
+            supervisor.expired(15_000.),
+            Some(crate::socket::Timeout::Auth)
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                e.drain_actions().for_each(drop);
+            }))
+            .is_err()
+        );
+    }
+
     struct Step;
     impl crate::SignStep for Step {
         fn prepare(
@@ -1872,6 +2037,98 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(sent, vec!["native-follow-up"]);
         assert!(!e.has_actions());
+    }
+    #[test]
+    fn snapshot_connect_preflights_exact_owned_resource_count() {
+        for (timeout, ceiling, admitted) in
+            [(20_000., 2, true), (1_000., 2, false), (1_000., 3, true)]
+        {
+            let mut store = Store::default();
+            let mut io = Io::<()> {
+                next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                ..Default::default()
+            };
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let mut declared = policy();
+            declared.auth = AuthMode::Required;
+            declared.supervision.auth_timeout_ms = Some(timeout);
+            let feed = cx.register_socket_feed_with_snapshot(declared).unwrap();
+            let result = cx.connect_socket(feed, "wss://snapshot.test");
+            if admitted {
+                assert!(result.is_ok());
+                assert!(!cx.io.next_id.available(1));
+                assert!(cx.socket_epoch(feed).is_some());
+            } else {
+                assert_eq!(result, Err(SocketError::Capacity));
+                assert!(cx.io.actions.is_empty());
+                assert!(cx.io.next_id.available(ceiling));
+                assert!(cx.socket_epoch(feed).is_none());
+            }
+        }
+    }
+    #[test]
+    fn snapshot_invalid_policy_does_not_register_a_feed() {
+        let mut store = Store::default();
+        let mut io = Io::<()>::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        assert_eq!(
+            cx.register_socket_feed_with_snapshot(policy()),
+            Err(SocketError::InvalidPolicy)
+        );
+        assert!(cx.io.actions.is_empty());
+        assert_eq!(cx.register_socket_feed(policy()).unwrap().index(), 0);
+    }
+    #[test]
+    fn snapshot_completion_capacity_preserves_proof_and_duplicate_is_inert() {
+        for ceiling in [3, 4] {
+            let mut store = Store::default();
+            let mut io = Io::<()> {
+                next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                ..Default::default()
+            };
+            let mut cx = Cx {
+                now: 0.,
+                store: &mut store,
+                io: &mut io,
+            };
+            let mut declared = policy();
+            declared.auth = AuthMode::Required;
+            declared.supervision.auth_timeout_ms = Some(20_000.);
+            let feed = cx.register_socket_feed_with_snapshot(declared).unwrap();
+            let epoch = cx.connect_socket(feed, "wss://snapshot.test").unwrap();
+            cx.with_socket_driver(|d, cx| d.ingress(cx, epoch.socket(), Ingress::Open));
+            cx.with_socket_driver(|d, cx| {
+                d.control(
+                    cx,
+                    epoch,
+                    crate::socket_lifecycle::Control::Auth(
+                        crate::socket_lifecycle::AuthEvidence::Accepted,
+                    ),
+                    false,
+                )
+            });
+            cx.io.socket_message = Some((epoch, 0.));
+            if ceiling == 3 {
+                let actions = cx.io.actions.len();
+                assert_eq!(cx.complete_socket_snapshot(), Err(SocketError::Capacity));
+                assert_eq!(cx.io.actions.len(), actions);
+                assert_eq!(cx.io.socket_message, Some((epoch, 0.)));
+                cx.io.next_id = crate::resource_ids::ResourceIds::starting_at(4);
+            }
+            assert_eq!(cx.complete_socket_snapshot(), Ok(()));
+            cx.io.socket_message = Some((epoch, 0.));
+            let actions = cx.io.actions.len();
+            assert_eq!(cx.complete_socket_snapshot(), Err(SocketError::Stale));
+            assert_eq!(cx.io.actions.len(), actions);
+        }
     }
 }
 
