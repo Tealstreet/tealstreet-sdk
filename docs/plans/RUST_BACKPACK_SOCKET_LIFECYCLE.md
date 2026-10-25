@@ -188,3 +188,27 @@ frozen push, one PR-triggered qualifying run; no WIP pushes or duplicate dispatc
 On full green plus source CLEAR, mark READY and send head/tree/size/run evidence
 to auditor8x5tm1. Auditor exact-tree GO precedes the overseer's merge. No source,
 original execution, build/size, CI, readiness or landing proof is claimed here.
+
+## Original-control checkpoint
+
+Plan/API direction CLEAR from hcmq3f at exactccfdd72. New isolated
+socket_lifecycle target drives real installed Ed25519 provider setup and genuine
+startup HTTP Prepare/Bind/Claim before capturing public/private socket IDs.
+Production, Cargo features, inventories and existing fixture files are unchanged.
+
+Executed on unchanged runtime: own19 controls =5 native working GREEN and14
+intended assertion RED,0ignored. The existing account35 and public_supervision11
+both pass unchanged. New REDs are financial publication before open/at idle
+expiry/at NaN and both infinities, duplicate auth/subscription effects and native
+diagnostics before open. No missing import/API, setup or compilation failure.
+Private wire positives independently sign the literal native subscribe payload
+with deterministic Ed25519 material and check the exact serialized frame, PING,
+and Orders/Positions/Balance sequence, including no-ACK reconnect and public
+suppression/private-positive mode. Source-stage timer/no-work assertions after
+an earlier failing denial remain gated until source goes GREEN; no suffix proof
+is inferred from the original RED receipt.
+
+Original receipt/logs stay outside Git. Original/native-control review precedes
+source application. Keep the19 bodies unchanged, add further lifecycle/pressure
+controls at source stage, retain all native assertion/wire clocks, and execute
+every gated suffix before sourcefreeze. No source, size/CI or READY claim here.
