@@ -1044,6 +1044,15 @@ export class EngineHost {
               this.socketClosed(id, code ?? 1006);
               this.run(this.invoke(engine.wsClose, id, code ?? 1006, transport.now()));
             },
+            // A rejectRoute connect with no route left: nothing was dialled, and this
+            // is the socket's only terminal (no open or close follows).
+            onRouteExhausted: () => {
+              if (this.deferHttpNotification(callbacks.onRouteExhausted, undefined)) return;
+              if (this.disposed || !socket || this.sockets.get(id) !== socket) return;
+              this.sockets.delete(id);
+              if (this.socketRecords.get(id) === record) this.socketRecords.delete(id);
+              this.run(this.invoke(engine.wsRouteExhausted, id, transport.now()));
+            },
           };
           socket = transport.connect(action.url, callbacks);
         } catch {

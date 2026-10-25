@@ -24,7 +24,7 @@ it.each([
     capabilities: () => engineCapabilities('blofin'),
     start: noop, command: noop, takeFrame: () => new Uint8Array(consumerFrame({ loaded: nativeLoaded })),
     snapshotFrame: () => new Uint8Array(), wsOpen: noop, wsMessage: noop,
-    wsClose: noop, httpStart: noop, httpChunk: noop, httpEnd: noop,
+    wsClose: noop, wsRouteExhausted: noop, httpStart: noop, httpChunk: noop, httpEnd: noop,
     httpFailed: noop, timer: noop,
   };
   const construct = vi.fn(function (_venue: string, _options: string) { return engine; });
