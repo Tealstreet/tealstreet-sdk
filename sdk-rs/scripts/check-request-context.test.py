@@ -693,5 +693,14 @@ class DataMacroModuleProvenance(unittest.TestCase):
                          'match result { Err(_) => { install!(); }, _ => {} }'), {})
 
 
+    def test_generator_refusal_never_changes_actual_sender_or_wrapper_hashes(self):
+        raw = 'matches!(cx.request(1), Kind::Normal);'
+        for prefix, body in [('install!();', raw), ('', 'install!();' + raw)]:
+            with self.subTest(prefix=prefix):
+                expected = {'venues/reference/src/account.rs': dict(ban.fingerprints(raw))}
+                self.assertEqual(self.inventory(consumer_prefix=prefix + 'use crate::wire::*;', body=body),
+                                 expected)
+
+
 if __name__ == '__main__':
     unittest.main()
