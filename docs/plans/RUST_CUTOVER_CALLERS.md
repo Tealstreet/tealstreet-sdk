@@ -6793,6 +6793,34 @@ when one is configured, otherwise the primary key. An unanswered read ends at
 20 s and startup discovery retries on its native backoff. URLs, row decoding,
 partial-catalogue rules, the seeded ticker count and the 429 pause are unchanged.
 
+## BingX ordinary trading uses the complete native Plan
+
+PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder and native settings
+writes admit the full serial request list under genuine WriteAfterReads
+Preflight. Each physical attempt keeps its native 20s timeout; a parsed numeric
+100001 proof permits one fresh signature attempt with the same client order ID
+and bytes apart from timestamp/signature. Signature-like text, HTTP408/5xx,
+malformed ACKs, effect-bearing refusal IDs and unlisted codes never grant resend.
+Unknown errors keep native diagnostics and proven IDs in the shared journal.
+80014 is a Place-only InvalidInput refusal; earlier accepted per-request IDs
+produce KnownPartial rather than whole failure. Ordinary cancellation batches
+continue independent siblings after provider/transport/delivered gateway failure;
+other commands keep their native stop-on-error behavior. No failed call is
+retried by that continuation.
+
+80016 means absent order, not confirmed cancellation. It succeeds only for a
+validated ordinary Cancel leg and leaves the local order unchanged until the
+required fresh-owner full order read reconciles it; the symbol remains fenced
+until orders_reconciled. An old snapshot cannot clear that fence or overwrite a
+newly completed read. Unknown/system responses and malformed replies are now
+explicit Unknown (malformed codec replies carry Internal); native messages and
+accepted prefix IDs remain. Exact delivery and write-effect eligibility precede
+Store reducers. Root expiry and retirement use shared typed cleanup once.
+The declaration/citations and native controls are in RUST_BINGX_TRADING_CONTEXT.
+Metadata, session/account queries, history and the remaining shared staging
+funnels are separate conversions. This caller branch depends on #1939 and does
+not alter the frozen engine source.
+
 ## Lighter synchronous history Read custody
 
 The seven native local history replies (unsupported client ID/income category,

@@ -94,6 +94,7 @@ pub struct Account {
     poll: Option<TimerId>,
     repair: Option<TimerId>,
     orders_revision: u64,
+    orders_snapshot_revision: Option<u64>,
     positions_revision: u64,
     settings_revision: u64,
     balance_revision: u64,
@@ -552,6 +553,14 @@ impl Account {
         if self.orders_in_flight.is_some() {
             return;
         }
+        self.start_order_read(cx, credentials);
+    }
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
+        self.bump_orders();
+        self.start_order_read(cx, credentials);
+    }
+    /// A fence needs a new owner even if an older snapshot is still pending.
+    fn start_order_read(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
         self.orders_in_flight = Some(self.orders_revision);
         self.read_snapshot(
             cx,
@@ -1047,9 +1056,13 @@ impl Account {
                 skipped,
                 unavailable,
             } => {
-                self.orders_in_flight = None;
+                if self.orders_in_flight == Some(revision) {
+                    self.orders_in_flight = None;
+                }
                 if revision != self.orders_revision {
-                    self.fetch_orders(cx, credentials);
+                    if self.orders_snapshot_revision != Some(self.orders_revision) {
+                        self.fetch_orders(cx, credentials);
+                    }
                     return;
                 }
                 if unavailable {
@@ -1070,6 +1083,7 @@ impl Account {
                     }
                 }
                 self.orders_seeded = true;
+                let complete = skipped.is_empty();
                 self.observations.extend(metas);
                 // A malformed row never removes the known open order it names.
                 let unidentified = skipped.iter().any(String::is_empty);
@@ -1090,6 +1104,10 @@ impl Account {
                 });
                 rows.extend(kept);
                 cx.store.set_orders(rows);
+                if complete {
+                    self.orders_snapshot_revision = Some(revision);
+                    cx.orders_reconciled(None);
+                }
             }
         }
     }
@@ -1144,7 +1162,11 @@ impl Account {
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
-            Request::OpenOrders { .. } => self.orders_in_flight = None,
+            Request::OpenOrders { revision, .. } => {
+                if self.orders_in_flight == Some(revision) {
+                    self.orders_in_flight = None;
+                }
+            }
         }
     }
 
