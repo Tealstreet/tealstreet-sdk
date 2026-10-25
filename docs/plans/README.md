@@ -434,4 +434,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Backpack supported-history Read custody | Source reviews CLEAR; full CI next | Before moving four history routes onto one caller-bound Read owner and activating publicRead. | [RUST_BACKPACK_HISTORY_READ_CUSTODY.md](RUST_BACKPACK_HISTORY_READ_CUSTODY.md) |
 
+| Paradex subscription candle poll custody | Source and local size gates CLEAR; qualifying CI pending | Before changing poll Background Read ownership, stale generations, native fallback or completion/recovery timers. | [RUST_PARADEX_CANDLE_POLL_CONTEXT.md](RUST_PARADEX_CANDLE_POLL_CONTEXT.md) |
+
 | Backpack public-seed Read custody | Plan before originals; runtime gated | Before managing Markets, tickers and MarkPrices startup/recovery observations. | [RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md](RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md) |
