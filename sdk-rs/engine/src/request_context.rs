@@ -2298,6 +2298,7 @@ impl CommandWrites {
             if let Some(result) = attempt.result {
                 self.evidence.release_identities(result.order_ids());
                 if terminal {
+                    stream.effects |= matches!(result, WriteResult::KnownPartial(_));
                     match result {
                         WriteResult::Accepted { order_ids } => {
                             stream.effects = true;
