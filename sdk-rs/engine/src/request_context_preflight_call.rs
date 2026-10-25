@@ -18,7 +18,7 @@ pub(in super::super) struct State {
     #[cfg(feature = "condition-waits")]
     pub(super) condition_park: bool,
     #[cfg(feature = "condition-waits")]
-    pub(super) condition: Option<TimerId>,
+    pub(super) condition: Option<crate::TimerId>,
 }
 
 impl State {
