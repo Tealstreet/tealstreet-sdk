@@ -3617,3 +3617,83 @@ fn hyro_retry_while_reconnecting_beside_a_live_lot_is_never_not_sent() {
         "lot 0 is live"
     );
 }
+
+/// Review M2 (#2106): an identical caller arriving while the founder's link
+/// reads run waits for the founder and gets its outcome, as legacy waiters did.
+fn reconciling_founder(h: &mut Harness) -> String {
+    place(h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost acknowledgement",
+    });
+    place(h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request(&format!("orderLinkId={id}")),
+        "the founder re-reads"
+    );
+    id
+}
+
+#[test]
+fn hyro_identical_caller_during_reconcile_gets_the_founders_success() {
+    let mut h = ready(Variant::Hyrotrader);
+    let id = reconciling_founder(&mut h);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(outcome(&h, 3), None, "the waiter is parked, not refused");
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    while h.has_request("/v5/order/history") {
+        h.respond("/v5/order/history", 200, &lookup_row(&id, "Filled"));
+    }
+    assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+    assert_eq!(h.result(3), Some(&Ok("[\"recovered\"]".into())));
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "nothing is sent for the waiter"
+    );
+}
+
+#[test]
+fn hyro_waiter_whose_deadline_fires_first_is_unknown_never_not_sent() {
+    let mut h = ready(Variant::Hyrotrader);
+    reconciling_founder(&mut h);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    h.advance(600_000.0);
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "nothing is sent for the waiter"
+    );
+}
+
+#[test]
+fn hyro_waiter_takes_its_own_founders_outcome_not_a_later_founders() {
+    let mut h = ready(Variant::Hyrotrader);
+    let id = reconciling_founder(&mut h);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    // The founder's reads fail: it seals Unknown and the intent stays.
+    let filter = format!("orderLinkId={id}");
+    while h.has_request(&filter) {
+        h.respond(&filter, 502, "upstream timeout");
+    }
+    assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+    // A later founder of the same intent proves the order; the waiter is unmoved.
+    place(&mut h, 4, vec![order("BTCUSDT", 1.0)]);
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    while h.has_request("/v5/order/history") {
+        h.respond("/v5/order/history", 200, &lookup_row(&id, "Filled"));
+    }
+    assert_eq!(h.result(4), Some(&Ok("[\"recovered\"]".into())));
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(
+        h.done.iter().filter(|(c, _)| *c == 3).count(),
+        1,
+        "one terminal"
+    );
+}
