@@ -211,3 +211,34 @@ fn seconds_timestamp_wire_requires_exactly_one_declared_method_path_suffix() {
         assert!(build_support::generate(&rules(wire)).is_err(), "{wire}");
     }
 }
+
+#[test]
+fn hosted_material_policy_is_strict_and_does_not_change_native_output() {
+    let declaration = r#"{"privateFields":["key","secret","passphrase","starkPrivateKey","polymarket.apiSecret","polymarket.apiPassphrase"],"keyPublicWithPayloadSigner":true}"#;
+    let table = |policy: &str| {
+        format!(
+            r#"{{"default":{{"canSign":[],"privateEligible":[]}},"venues":{{"test":{{{policy}}}}}}}"#
+        )
+    };
+    let ordinary = build_support::generate(&table("")).unwrap();
+    let declared =
+        build_support::generate(&table(&format!(r#""hostedMaterial":{declaration}"#))).unwrap();
+    assert_eq!(declared, ordinary);
+    let raw = include_str!("../../../packages/safe-cex/src/exchanges/rust/construction-rules.json");
+    let mut plain: serde_json::Value = serde_json::from_str(raw).unwrap();
+    for row in plain["venues"].as_object_mut().unwrap().values_mut() {
+        row.as_object_mut().unwrap().remove("hostedMaterial");
+    }
+    assert_eq!(
+        build_support::generate(raw).unwrap(),
+        build_support::generate(&plain.to_string()).unwrap()
+    );
+    for policy in [
+        r#"{"privateFields":["secrett"]}"#,
+        r#"{"privateFields":[]}"#,
+        r#"{"privateFields":["secret"],"keyPublicWithPayloadSigner":true}"#,
+        r#"{"privateFields":["key"],"unexpected":true}"#,
+    ] {
+        assert!(build_support::generate(&table(&format!(r#""hostedMaterial":{policy}"#))).is_err());
+    }
+}

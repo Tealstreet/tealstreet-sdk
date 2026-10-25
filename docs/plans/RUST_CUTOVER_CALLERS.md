@@ -8580,3 +8580,19 @@ cannot schedule recovery or issue another observation. Native rows, partial
 catalogue repair, live ticker overlay, private-startup eligibility and retry
 jitter/counters stay unchanged. Account, trading, signing and socket production
 remain outside this adoption. Only the shared public-seed raw HTTP site is pruned.
+
+## Hosted Rust wallet-material construction refusal
+
+Paradex and Polymarket callers selecting hostedMode or remoteSigner must provide
+only public metadata. Construction now refuses private fields synchronously as
+invalidInput/notSent, including public-only accounts, before options retention,
+WASM loading or I/O. Paradex key is public only under the configured payloadSigner
+contract; addresses remain public. Polymarket key, L2 apiSecret/apiPassphrase and
+both families' secret/passphrase/starkPrivateKey must be absent or empty. No callback or
+engine fallback is introduced; local mode is unchanged. This supersedes the
+Paradex wrapper fixture that allowed remote HTTP plus local JWT signing and the
+keyless routing fixture that constructed a hosted local-key Paradex account.
+Rust selection remains unchanged; the constructor refuses rather than falling back.
+The shared constructor applies declarative construction-rules rows, with no
+venue-name branch. See RUST_SIGNER_REMOTE_WIRE_AND_IMPORT.md for the owner ruling
+and original REDs.

@@ -22,6 +22,7 @@ enum Input {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Rule {
+    hosted_material: Option<HostedMaterialPolicy>,
     can_sign: Option<Vec<Vec<Input>>>,
     private_eligible: Option<Vec<Vec<Input>>>,
     explicit_private_error: Option<String>,
@@ -34,6 +35,27 @@ struct Rule {
     /// Family-specific trusted setup mapping, declared rather than name-matched.
     #[serde(default)]
     setup_mapping: Option<SetupMapping>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostedMaterialPolicy {
+    private_fields: Vec<HostedPrivateField>,
+    #[serde(default)]
+    key_public_with_payload_signer: bool,
+}
+
+#[derive(PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum HostedPrivateField {
+    Key,
+    Secret,
+    Passphrase,
+    StarkPrivateKey,
+    #[serde(rename = "polymarket.apiSecret")]
+    PolymarketApiSecret,
+    #[serde(rename = "polymarket.apiPassphrase")]
+    PolymarketApiPassphrase,
 }
 
 #[derive(Debug, Deserialize)]
@@ -323,6 +345,14 @@ pub fn generate(json: &str) -> Result<String, String> {
         return Err("default signing and private conditions are required".into());
     }
     for policy in std::iter::once(&rules.default).chain(rules.venues.values()) {
+        // This host setup policy is validated here but emits no native runtime policy.
+        if let Some(material) = &policy.hosted_material
+            && (material.private_fields.is_empty()
+                || (material.key_public_with_payload_signer
+                    && !material.private_fields.contains(&HostedPrivateField::Key)))
+        {
+            return Err("invalid hosted material policy".into());
+        }
         if policy
             .remote_signing
             .passphrase_header

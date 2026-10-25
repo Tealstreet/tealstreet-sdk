@@ -31,13 +31,32 @@ export type RemoteSigningPolicy = Readonly<{
   }>;
 }>;
 
+type HostedPrivateField = 'key' | 'secret' | 'passphrase' | 'starkPrivateKey' | 'polymarket.apiSecret' | 'polymarket.apiPassphrase';
+type HostedMaterialPolicy = { privateFields: HostedPrivateField[]; keyPublicWithPayloadSigner?: boolean };
+
 type Rule = {
+  hostedMaterial?: HostedMaterialPolicy;
   canSign?: string[][]; privateEligible?: string[][]; explicitPrivateError?: string;
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
   /** Family-specific trusted setup mapping, declared rather than name-matched. */
   setupMapping?: 'asterdex' | 'apexomni';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
+};
+
+/** Field contracts determine custody; public and private Stark felts have the same shape. */
+export const hasHostedPrivateMaterial = (name: ExchangeName, options: ExchangeOptions): boolean => {
+  if (!options.hostedMode && !options.remoteSigner) return false;
+  const policy = (rules.venues as Record<string, Rule>)[name]?.hostedMaterial;
+  if (!policy) return false;
+  const fields: Record<HostedPrivateField, string | undefined> = {
+    key: options.key, secret: options.secret, passphrase: options.passphrase,
+    starkPrivateKey: options.starkPrivateKey,
+    'polymarket.apiSecret': options.polymarket?.apiSecret,
+    'polymarket.apiPassphrase': options.polymarket?.apiPassphrase,
+  };
+  return policy.privateFields.some((field) =>
+    !(field === 'key' && policy.keyPublicWithPayloadSigner && typeof options.payloadSigner === 'function') && Boolean(fields[field]));
 };
 
 /** Trusted setup policy; unspecified fields retain explicit caller metadata. */

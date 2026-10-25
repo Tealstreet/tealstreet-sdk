@@ -81,7 +81,7 @@ import {
   workerCallClientOrderIds,
 } from '../base';
 import type { BaseWebSocket } from '../base.ws';
-import { deriveBridgeConstruction, derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupMapping, deriveSignerSetupPolicy } from './construction';
+import { hasHostedPrivateMaterial, deriveBridgeConstruction, derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupMapping, deriveSignerSetupPolicy } from './construction';
 import { RustSocketHandle } from './rustSockets';
 import { type AsterDEXPublicSetup, mapAsterDEXSignerSetup } from './asterdexSignerSetup';
 import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
@@ -612,6 +612,10 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    if (hasHostedPrivateMaterial(exchangeName, options)) {
+      const message = 'Hosted Rust accounts accept public signing metadata only';
+      throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+    }
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
     if (options.localSigner !== undefined && !bridgeConstruction.dispatchSigning) {
       const message = 'Local signer setup is not supported for this Rust venue yet';

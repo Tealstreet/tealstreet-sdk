@@ -179,11 +179,33 @@ Consequences for this plan:
 - Before P8 admits keyless hosted signing for either family, NX must stop
   sending their signing material, for example by moving it out of `key` or
   excluding it from `INIT_FIELDS`.
-- **SDK guard (conditional; not implemented).** This waits on Sam's pending
-  decision: stop now, or keep until the hosted-leases hardening. If adopted,
-  hosted (`hostedMode` / `remoteSigner`) Rust construction for Paradex and
-  Polymarket is refused when `key` parses as private-key material. The engine would otherwise hold a key it is meant never to see.
-  The refusal is typed (`invalidInput`, at construction) and never echoes the key.
+- **SDK guard (approved 2026-10-25; SDK source checkpoint).** Sam's
+  overseer ruled to refuse hosted Rust material now, before hosted-leases
+  hardening. A hosted account is selected explicitly by `hostedMode` or
+  `remoteSigner`; key length and scalar range never select its mode.
+  - Paradex: without a configured `payloadSigner`, a nonempty `key` is private
+    by its existing field contract and refuses. With `payloadSigner`, `key` is
+    public subkey metadata, including the same 66-character felt. Its public
+    and private forms cannot be distinguished by parsing.
+  - Polymarket: any nonempty `key`, `polymarket.apiSecret` or
+    `polymarket.apiPassphrase` refuses. The API-key id, funder address,
+    signer type and market slugs are public metadata.
+  - Both families refuse nonempty `secret`, `passphrase` and `starkPrivateKey` in hosted
+    mode, including explicit public-only accounts. Empty fields are absent;
+    whitespace is nonempty material. Paradex account/subkey addresses stay
+    public. Local construction and payload-callback-only local construction
+    keep their existing contract.
+  - Refuse synchronously before `BaseExchange` retains options, WASM loading,
+    provider invocation or I/O, using `invalidInput` / `notSent` and a fixed
+    message that never echoes the material. Never fall back to a local key,
+    another callback or another engine. This enables no new hosted recipe.
+  - Family rows in `construction-rules.json` declare private fields and the
+    payload-callback key contract. The shared constructor applies them
+    generically. The native table compiler validates their closed field grammar
+    but emits exactly the same native runtime policy.
+  - Reviewer: claude-m26ps4, shared setup/field-contract direction. The original
+    dedicated target executed 38 controls: 26 intended assertion RED and
+    12 GREEN on unchanged runtime at `6d13105b9b4`; no setup or compile failures.
 
 ### Proof
 

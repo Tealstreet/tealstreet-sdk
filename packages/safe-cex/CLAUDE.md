@@ -138,6 +138,15 @@ The delegated provider initializes UTF-8 codecs only when provider work begins.
 Importing the native registry before its host installs TextEncoder/TextDecoder
 must remain supported; signing and frame I/O require those runtime codecs.
 
+Hosted Rust Paradex and Polymarket construction refuses private material with
+`invalidInput`/`notSent` before retaining options or loading WASM. Hosted intent
+is `hostedMode` or `remoteSigner`, including public-only accounts. Paradex `key`
+is public only with a configured `payloadSigner`; otherwise a nonempty key
+refuses. Polymarket key/L2 secret/passphrase and either family's secret,
+passphrase or starkPrivateKey refuse. This follows declarative construction-rules field
+contracts, never scalar parsing. Local and payload-callback-only modes keep
+their existing behavior.
+
 Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
 both `createExchange` (including saved-account/public factories) and
 `ExchangeWorker`. Registry defaults remain independent of that opt-in.
