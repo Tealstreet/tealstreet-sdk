@@ -65,14 +65,6 @@
     "23b3e9939bcd241c677784173074726099fd82f1db03f61be1253da68284b203": 1,
     "974264f5bfd3c268b4c30755e61c8269f51a1cd01ebaf1e6a51c77a8e58659cb": 2
   },
-  "venues/bybit/src/account.rs": {
-    "7e4a3661bd2f079cb2fd3b4b596f7eef242ebfe5fbd13ccbb558a0dbcd26f75e": 1
-  },
-  "venues/bybit/src/lib.rs": {
-    "386a577181c5a17b4a85abe0c193d881536d6a3fdc3ac4dec82f0681865bfa57": 1,
-    "914d8478f1d42bb51af9781252934d30705b1b5a520f72db075e320a9fc12dcc": 1,
-    "964f681c5fe6876e3a66908bc6a144f76fc7585b0568f4f82bb471492bb0c755": 1
-  },
   "venues/coinbase/src/account.rs": {
     "80d6da32d1ff894feb349435b11b1d16783adf7f241e52f37faea1214194f2e0": 1
   },

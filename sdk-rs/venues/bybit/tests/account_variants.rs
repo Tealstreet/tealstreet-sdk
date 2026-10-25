@@ -800,7 +800,7 @@ fn only_public_idle_closes(h: &Harness) {
     let idle = h
         .logs
         .iter()
-        .filter(|m| m.contains("Bybit socket closed (4000)"))
+        .filter(|m| m.contains("Bybit socket closed (idle timeout)"))
         .count();
     assert_eq!(
         closes, idle,

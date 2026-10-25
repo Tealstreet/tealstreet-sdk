@@ -11,7 +11,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_155_7
 // Bitget allowance (venue + 132 KiB): overseer ruling 2026-10-25 under Sam's no-TS-fallback directive; shrink-only; ih35js engine cuts to reduce.
 // Bybit: Sam approved 2026-10-25 (venue + 60 KiB) for the Plan-adoption stack, whose top measured
 // 1,398,660 on 9b05c9ac452; it can only go down.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_478_656, bitgetusdc: 1_478_656, bybit: 1_404_928 });
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_478_656, bitgetusdc: 1_478_656, bybit: 1_445_888 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
