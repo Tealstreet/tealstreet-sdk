@@ -403,7 +403,7 @@ impl<V: Venue> Engine<V> {
                 .frames_ready(self.io.core.dispatch_now, |socket| {
                     self.io.core.signing.has_socket(socket)
                 })
-            || V::SOCKET_CAPABILITIES.handoff
+            || V::socket_capabilities().handoff
                 && self.io.socket_continuations.iter().any(|work| {
                     !work.armed && self.continuation_ready(work, self.io.core.dispatch_now)
                 })
@@ -554,7 +554,7 @@ impl<V: Venue> Engine<V> {
                     retry,
                 } = effect
                 {
-                    if V::SOCKET_CAPABILITIES.handoff {
+                    if V::socket_capabilities().handoff {
                         self.cancel_socket_continuations(retirement.epoch);
                     }
                     let pending = std::mem::take(&mut self.io.core.socket_after);
@@ -609,7 +609,7 @@ impl<V: Venue> Engine<V> {
                             self.socket_failed_feed(now, epoch.feed(), error);
                             continue;
                         }
-                        if V::SOCKET_CAPABILITIES.handoff {
+                        if V::socket_capabilities().handoff {
                             self.rebase_socket_continuations(epoch.feed());
                         }
                         (LifecycleEvent::Ready { epoch, reopened }, Some(epoch))
@@ -657,7 +657,7 @@ impl<V: Venue> Engine<V> {
             }
             let event = match self.socket_replace(proposal.feed, proposal.update) {
                 Ok(revision) => {
-                    if V::SOCKET_CAPABILITIES.handoff {
+                    if V::socket_capabilities().handoff {
                         if let Some(mut work) = proposal.continuation {
                             work.revision = revision;
                             self.io.core.socket_continuation_bytes += work.bytes;
@@ -694,7 +694,7 @@ impl<V: Venue> Engine<V> {
             return false;
         }
         if let Event::TimerFired { timer } = event {
-            if V::SOCKET_CAPABILITIES.handoff && self.handle_socket_continuation(now, *timer) {
+            if V::socket_capabilities().handoff && self.handle_socket_continuation(now, *timer) {
                 return true;
             }
             match self.io.core.socket_driver.timer_admissible(*timer, now) {

@@ -174,9 +174,11 @@ OKX and TxFlow.
 
 **API.**
 - `SocketCapabilities { handoff: bool }` (Copy) with `FULL = { handoff: true }`,
-  and `const SOCKET_CAPABILITIES: SocketCapabilities = SocketCapabilities::FULL`
-  as a Venue trait default: no specialization and no per-Pending impls.
-- Engine<V> dispatch reads `V::SOCKET_CAPABILITIES.handoff` directly, so a
+  and a Venue trait default `fn socket_capabilities() -> SocketCapabilities`
+  returning FULL, bounded `where Self: Sized` like `dispatch_nonce` so `Venue`
+  stays dyn compatible (an associated const would not): no specialization and
+  no per-Pending impls. The trivial body inlines, so call sites still fold.
+- Engine<V> dispatch reads `V::socket_capabilities().handoff` directly, so a
   narrow venue's continuation arms, rebase, cancel and drain are statically
   omitted.
 - Admission reads only a private, immutable IoCore copy of that same
@@ -203,7 +205,7 @@ S1 CoreCx are also outside step 1.
 Bybit declares `handoff: false` only in its adoption PR.
 
 **Original controls, before plumbing.**
-1. The construction mirror equals `V::SOCKET_CAPABILITIES` for FULL and narrow
+1. The construction mirror equals `V::socket_capabilities()` for FULL and narrow
    test venues.
 2. One Pending type serves a FULL venue and a narrow venue.
 3. Narrow set_socket_interests_then is NotPermitted with zero proposal IDs,

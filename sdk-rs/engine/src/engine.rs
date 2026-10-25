@@ -1642,7 +1642,7 @@ struct IoCore {
     socket_message: Option<(crate::socket_lifecycle::Epoch, f64)>,
     #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
-    /// `V::SOCKET_CAPABILITIES`, copied once by `Engine::new` for admission in
+    /// `V::socket_capabilities()`, copied once by `Engine::new` for admission in
     /// `Cx`, which does not know the venue type. Never reassigned.
     #[cfg(feature = "managed-sockets")]
     socket_capabilities: crate::socket_lifecycle::SocketCapabilities,
@@ -3294,8 +3294,14 @@ pub trait Venue {
     }
     /// Optional managed-socket behaviour this venue uses; FULL unless narrowed.
     #[cfg(feature = "managed-sockets")]
-    const SOCKET_CAPABILITIES: crate::socket_lifecycle::SocketCapabilities =
-        crate::socket_lifecycle::SocketCapabilities::FULL;
+    /// An associated function, not a const, so `Venue` stays dyn compatible.
+    #[inline]
+    fn socket_capabilities() -> crate::socket_lifecycle::SocketCapabilities
+    where
+        Self: Sized,
+    {
+        crate::socket_lifecycle::SocketCapabilities::FULL
+    }
     #[cfg(feature = "managed-sockets")]
     fn socket_startup_ready(&self, _store: &Store) -> bool {
         false
@@ -3530,7 +3536,7 @@ impl<V: Venue> Engine<V> {
                     #[cfg(feature = "dispatch-nonce")]
                     nonce_enabled: V::dispatch_nonce(),
                     #[cfg(feature = "managed-sockets")]
-                    socket_capabilities: V::SOCKET_CAPABILITIES,
+                    socket_capabilities: V::socket_capabilities(),
                     ..IoCore::default()
                 },
                 ..Io::default()
@@ -5555,7 +5561,7 @@ impl<V: Venue> Engine<V> {
         self.assert_live();
         self.io.assert_actions_safe();
         #[cfg(feature = "managed-sockets")]
-        if V::SOCKET_CAPABILITIES.handoff && !self.io.socket_continuations.is_empty() {
+        if V::socket_capabilities().handoff && !self.io.socket_continuations.is_empty() {
             self.arm_socket_continuations(self.io.core.dispatch_now);
             self.io.assert_actions_safe();
         }
