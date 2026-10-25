@@ -7,6 +7,7 @@ description = "Native (tokio) host for the sans-I/O exchange engine"
 
 [features]
 dispatch-nonce = ["safe-cex-engine/dispatch-nonce"]
+nonce-drain = []
 default = ["venues"]
 http-plans = ["safe-cex-engine/http-plans"]
 http-mutation-barriers = ["http-plans", "safe-cex-engine/http-mutation-barriers"]
@@ -38,3 +39,7 @@ serde_json.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 safe-cex-engine = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util", "signal", "test-util"] }
+
+[[test]]
+name = "nonce_drain"
+required-features = ["nonce-drain"]
