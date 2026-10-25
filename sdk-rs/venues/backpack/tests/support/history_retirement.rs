@@ -1,7 +1,7 @@
 //! Inspect real retained handles without exposing a production context counter.
 use super::*;
 use safe_cex_engine::book::Book;
-use safe_cex_engine::request_context::{Admission, Error, HttpRelease};
+use safe_cex_engine::request_context::{Admission, Error};
 use safe_cex_engine::{Action, Command, Event, Notice, SocketId, TimerId, Venue};
 
 struct ObservedHistory {
@@ -52,23 +52,21 @@ impl Venue for ObservedHistory {
     fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, error: &str) {
         panic!("unexpected failure: {error}");
     }
-    fn on_http_release(
-        &mut self,
-        pending: &mut Pending,
-        _: &HttpRelease,
-    ) -> Result<Admission, Error> {
-        let Pending::History(request) = pending else {
-            panic!("history release only");
-        };
-        let context = request.root.context();
-        if let Some(root) = &self.root {
-            assert_eq!(root, context, "every page keeps the original root");
-        } else {
-            self.root = Some(context.clone());
-        }
-        self.released += 1;
-        assert_eq!(self.retired.len() + 1, self.released);
-        Ok(Admission::Unscheduled)
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::Mutable(|this, pending: &mut Pending, _| {
+            let Pending::History(request) = pending else {
+                panic!("history release only");
+            };
+            let context = request.root.context();
+            if let Some(root) = &this.root {
+                assert_eq!(root, context, "every page keeps the original root");
+            } else {
+                this.root = Some(context.clone());
+            }
+            this.released += 1;
+            assert_eq!(this.retired.len() + 1, this.released);
+            Ok(Admission::Unscheduled)
+        })
     }
     fn book(&self, _: &str) -> Option<&Book> {
         None
