@@ -388,8 +388,10 @@ stops and reports; nothing is trimmed silently.
 Decisions (overseer, 2026-10-25):
 
 1. The signed release is staged and prepared only after the clock settles, so
-   clock attempts never consume the read's bound and nothing signs while
-   awaiting the clock. The command root is admitted at ingress; the clock
+   clock attempts never consume the signed leg's own deadline (which starts at
+   prepare) and nothing signs while awaiting the clock. The root's deadline,
+   from ingress, still runs during the clock wait. The command root is admitted at ingress; the clock
    phase keeps its own bounded attempts.
-2. Slice 3 waits for #2093 (`sign.rs`); slices 1 and 2 proceed now. Reviewer:
+2. Slice 3 waits for #2093 (`sign.rs`) and merges (never rebases) whichever
+   lands first; slices 1 and 2 proceed now. Reviewer:
    claude-m26ps4.
