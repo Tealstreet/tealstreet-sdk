@@ -95,8 +95,12 @@ sign-res.d = {
   tasks without defined ownership refuse v2; preserve their existing v1 path.
   Session auth never fabricates an HTTP command. The accessor retains the real
   managed-owner or Session-owner generation locally; binding.generation is the
-  separately confirmed account/slot installation generation, never inferred
-  from RequestId or conflated with an owner generation. Exact typed owner
+  peer-confirmed account/slot generation from capability negotiation, constant
+  for one engine instance. It is not an engine installation counter: none
+  exists today; set_identities/set_signer refuse after start and no event
+  replaces or clears credentials. Any peer generation change reconstructs the
+  account. Never infer it from RequestId or conflate it with an owner generation.
+  Exact typed owner
   representation is part of the engine API gate. Stale repair gets a NEW signing
   task, correlation and preparation plus new receipt/MAC, retaining the managed
   Attempt; an old reply can never attach to the repair.
