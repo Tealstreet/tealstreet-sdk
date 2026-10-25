@@ -3551,3 +3551,40 @@ fn cancel_orders_with_symbols_is_refused_not_left_open() {
         );
     }
 }
+
+/// Review M1 (#2106): a retry whose remaining lot is refused again cannot
+/// report Rejected or NotSent while an earlier call's lot is live on Hyro;
+/// a client would read either as nothing placed and send a replacement.
+#[test]
+fn hyro_retry_refused_beside_a_live_lot_is_never_rejected_or_not_sent() {
+    let mut h = ready(Variant::Hyrotrader);
+    let orders = vec![order("BTCUSDT", 1.0), order("ETHUSDT", 1.0)];
+    place(&mut h, 1, orders.clone());
+    created(&mut h, "live");
+    let refused = h.take("/v5/order/create");
+    let id = link(&refused);
+    h.reply(
+        refused.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    answer_link_reads(&mut h, &id);
+    place(&mut h, 2, orders);
+    answer_link_reads(&mut h, &id);
+    let retry = h.take("/v5/order/create");
+    h.reply(
+        retry.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    answer_link_reads(&mut h, &id);
+    let sealed = outcome(&h, 2);
+    assert!(sealed.is_some(), "the retry has one terminal");
+    assert!(
+        !matches!(
+            sealed,
+            Some(safe_cex_engine::Outcome::Rejected | safe_cex_engine::Outcome::NotSent)
+        ),
+        "lot 0 is live: {sealed:?}"
+    );
+}
