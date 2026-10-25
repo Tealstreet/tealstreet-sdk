@@ -462,6 +462,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Serial Session resend | Originals CLEAR; source review and paired size gates pending | Before a serial call's one authentication resend waits for a login round trip (GRVT code 1000). | [RUST_SERIAL_SESSION_RESEND.md](RUST_SERIAL_SESSION_RESEND.md) |
 
-| GRVT serial write funnel | Plan and original controls only; shared revision-gated waits, parsed auth grant, provider recipe and header ordering OPEN | Before changing the five trading terminals, FIFO custody, signing or cached-session headers. | [RUST_GRVT_WRITE_FUNNEL.md](RUST_GRVT_WRITE_FUNNEL.md) |
+| GRVT serial write funnel | Plan/originals CLEAR; shared serial resend and Session support landed; native cutover held on G3/G6 | Before changing the five trading terminals, FIFO custody, signing or cached-session headers. | [RUST_GRVT_WRITE_FUNNEL.md](RUST_GRVT_WRITE_FUNNEL.md) |
 
-| GRVT EIP712 provider recipe and installed construction | Plan only; no builds or source | Before installing the minimal hosted/local signing inputs, removing raw GRVT keys, or composing serial resend with Session headers. | [RUST_GRVT_PROVIDER_RECIPE.md](RUST_GRVT_PROVIDER_RECIPE.md) |
+| GRVT EIP712 provider recipe and installed construction | Local recipe source CLEAR; D1 carry review; installed construction held on G3/G6 | Before installing the minimal hosted/local signing inputs, removing raw GRVT keys, or composing serial resend with Session headers. | [RUST_GRVT_PROVIDER_RECIPE.md](RUST_GRVT_PROVIDER_RECIPE.md) |

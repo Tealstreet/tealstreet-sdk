@@ -265,11 +265,14 @@ earlier proposal-only status at review. Their presence is not GRVT adoption:
 its dependency will explicitly enable them after exact consumer composition
 checks. No global or unrelated-family opt-in. The GRVT registry family also
 opts into shared dispatch-signing; local crypto uses existing secp256k1.
-Seeded serial auth resend and the parsed-status exemption are not present in
-this actual tree and remain separate fe7lgm source gates. His CLEARed plan is
-6208560a514; REDs and source are not written yet. The status_exempt_refusal
-hook is consulted only for Unproven status, and GRVT returns true only for
-a parsed full JSON envelope with code == 1000, never a partial/text match.
+Seeded serial auth resend and the parsed-status exemption landed in #2146 at
+f895d0d70187ee37d2af4bbe17ee81d51cc5c81e, implemented by codex-zs5e83 and
+source-reviewed by fe7lgm. This branch contains that actual landing. The
+status_exempt_refusal hook is consulted only for fully received Unproven
+responses (408 and all 5xx). The future GRVT override returns true only for a
+parsed full JSON envelope with code == 1000, never a partial/text match.
+The native override, same-call ledger and installed consumer remain adoption
+work; landed engine support alone does not make the bf61 originals GREEN.
 
 condition-waits is required specifically for a woken front command that must
 re-park from on_http_preflight_ready when the native builder/prerequisite is
@@ -430,7 +433,7 @@ fit. The operation-versus-command precision above folds his follow-up; this
 remains a plan and future control specification, not source or constructor
 certification. The original bf61 controls are not changed by this wording.
 
-## Resume audit on 2026-10-26
+## Historical resume audit before #2132 and #2146
 
 Plain-merged landing tip 34999f973f9 before further work. Only README and
 CALLERS conflicted; both keep complete incoming bytes plus the own suffix
@@ -449,8 +452,8 @@ Rechecked live prerequisites rather than treating the old handoff as current:
 | Seeded serial Session resend and status_exempt_refusal | Owner branch still at CLEARed plan 6208560a514; neither API is in the landing tip | fe7lgm's originals/source and actual landing before GRVT auth-resend adoption |
 | Non-default serial-plans, condition-waits, session-bearer | Landed declarations remain available | Explicit GRVT opt-ins and its own composed-tree size/budget review at adoption |
 
-The recipe remains blocked on those constructor and resend source seams;
-there is no GRVT source or runtime-clearance claim. This resume does not
+At that audit the recipe was blocked on constructor and resend source seams;
+there was no GRVT source or runtime-clearance claim. That audit did not
 dispatch CI or push a partially integrated implementation. Generic engine
 changes require Bybit and Bitget measurements on the composed landing tree;
 each scratch measurement/review build removes its own target directory after
@@ -554,5 +557,18 @@ credential and absent signing ref, and requires the order recipe constructor
 to refuse InvalidRequest before producing work. It invents no credential or
 signing ref. This is a pure recipe admission control, not an Empty login intent,
 engine G6 journal/latch control or installed GRVT constructor certification.
-G3/G6 and native queue/login cutover remain held; the composed scoped receipt
-must pass before source-carry review.
+G3/G6 and native queue/login cutover remain held. On the composed ca747c16f9e
+checkpoint, 14 library, 42 unchanged trading and one security control pass
+(57 total, none ignored), alongside strict GRVT lib/tests clippy, workspace
+formatting and full bans/ratchets. The own scratch target was removed.
+The credential-only probe requires an absent signing ref, without pinning the
+pre-phase-3 MissingKey spelling; the recipe still refuses InvalidRequest before
+work. It does not substitute for the future operation/journal/latch controls.
+
+m26ps4 confirms #2149 is the landed revision-4 design, not its implementation.
+D3/D6 phase-3 source remains local, with review and CI still required; do not
+compose it before LANDED. Actual installed construction will consume the shared
+from_setup_with_facts / SetupFacts::primary_login seam after that landing.
+The Empty-intent, Optional operation refusal, no-latch and prior-journal controls
+remain required. No GRVT production feature, queue, login or inventory cutover
+is enabled at this recipe checkpoint.

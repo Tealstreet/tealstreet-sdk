@@ -2,9 +2,10 @@
 
 Owner: codex-zs5e83. Scope ruling: claude-ddi2il. Native base: actual
 bcaaa4acc567e8eca588c067d67ea38e7f7c9b98. PLAN AND ORIGINAL REDS ONLY.
-No signer, queue, constructor, host, engine, existing fixture or inventory edits
-are authorized by this checkpoint. Shared pieces below are reviewed proposals or
-local sources, not landed production seams. Hosted signing uses Sam's single
+That original checkpoint authorized no production edits. The separately
+assigned local provider recipe now exists; native queue/login and installed
+construction remain held at G3/G6. The current dependency table below records
+landed shared support separately from GRVT adoption. Hosted signing uses Sam's single
 model: the server receives exactly the minimum material needed to place orders;
 local mode or remote signing serves users who do not send that material.
 
@@ -87,11 +88,12 @@ disclosure. Only the parsed-1000 exception grants the single auth resend.
 
 ## Queue custody and existing shared pieces
 
-Exact local pins, both owned by claude-fe7lgm:
-- Streamed serial Plan source d4efb3f6b15, reviewed CLEAR, plan
-  RUST_PLAN_SERIAL_STREAM.md. It stacks on #2037, opening after #2012 lands.
-- Condition wait source fbddb4851f7, reviewed CLEAR, docs d3517762f2f,
-  RUST_CONDITION_WAIT.md, stacked on serial Plan.
+Landed shared support, originally owned by claude-fe7lgm:
+- Streamed serial Plans: #2092, ff219538b302, plan RUST_PLAN_SERIAL_STREAM.md.
+- Condition waits: #2094, ba6fb1912399, plan RUST_CONDITION_WAIT.md.
+Both are non-default features. Seeded Session resend/status exemption landed
+separately in #2146 at f895d0d7018, implemented by codex-zs5e83 and reviewed by
+fe7lgm. The local recipe branch contains these landings; GRVT has not adopted them.
 
 Proposed consumer flow, subject to exact API composition review:
 1. In each genuine entry, begin_preflight(WriteAfterReads, selected read role or
@@ -102,7 +104,7 @@ Proposed consumer flow, subject to exact API composition review:
 3. When all native prerequisites are ready, admit_serial_plan with the selected
    Primary credential, no pacing floor and the appropriate first Read/Mutation.
    Declare attempts: 2 on EVERY Mutation and Read SerialCall, reserving the
-   one auth resend. Reads with two attempts depend on the resend PR's source.
+   one auth resend. Reads with two attempts use the landed #2146 exception.
    Issue only the one current Slot, through managed transport and the recipe.
    A Read without a read-role key uses request_managed unsigned, still bound
    to the same Session header bundle and the same parsed-1000 Read path.
@@ -135,18 +137,18 @@ native typed builder cause. The retry timer does not grant command custody.
 Keep the existing builder transport/account scope unless separately assigned;
 this five-site plan does not claim its account inventory removal.
 
-## Shared gaps and proposed owners
+## Shared support and remaining adoption gates
 
-| Gap / dependency | Owner proposal | Exact status / required proof |
+| Dependency | Owner | Current state / required proof |
 | --- | --- | --- |
-| Serial Plan and condition wait actual composition | claude-fe7lgm | Source pins above CLEAR but unlanded. Actual #2012/#2037 plus refrozen pins required; one owner, one reserved Context, no positive pacing floor. |
-| Same-call serial Session resend and immediate failed-Read continuation | claude-fe7lgm | RUST_SERIAL_SESSION_RESEND.md at 7fd52ecee33 (seeded design 92f1ff3dcd9) is a PLAN, OPEN before source. Same call attempt 2 after parsed code 1000, Mutation ResendGrant or validated Read DATA, seeded attempt 2 with no third send; immediate Read failure continuation carries no fabricated DATA or 1 ms delay. |
-| Revision-gated new call and same-call auth resend | claude-fe7lgm with claude-m26ps4 for the revision signal | OPEN source under amended plan 7fd52ecee33: native first calls and resends both wait during refresh even if the engine Session is still Ready. Capture the previous revision and resume only on Ready with a newer bundle revision, not merely Session-ready. |
-| Refresh after Prepare/Bind, before Claim | claude-m26ps4 (#2069 engine-wide Bind path), fe7lgm offers serial fallback | OPEN #2069 shared unreleased-call park/reissue within its existing window. Revision None makes Claim Stale; reprepare then NotReady must retain the same call until fresh headers, with no ResendGrant, auth_resent spend, second login, budget reset or extra logical write. Require Mutation and Read ingress REDs. |
-| Cached Session header bundle | claude-m26ps4 | #2069 generalized source dd7fd51d03a is consumer-reviewed CLEAR locally, unlanded. Needs actual #2037/G2b and final pin. Bundle generation/revision, aggregate packet budgets, collision refusal and cleanup must compose with serial waits. |
-| GRVT EIP712 provider-payload HTTP recipe | codex-zs5e83, reviewed by m26ps4 and core/custody owner | OPEN consumer recipe/constructor work. Existing provider Secp256k1Digest/PublicAddress primitives suffice; no new crypto algorithm or legacy SignPayload bypass. Exact recipe API and construction witness reviewed before source. |
-| Login completion / credential and header lifetime | codex-zs5e83 with claude-55ao7t login ownership and m26ps4 core review | OPEN consumer composition: native login_session is a login-operation engine Session, distinct from cached cookie/account state. Connect honest Session-ready/failed transitions and provider installation; never mint a substitute Session or treat a native counter as engine provenance. |
-| Parsed auth-refusal grant and header ordering | claude-fe7lgm (grant) and claude-m26ps4 (ordering), ruled by claude-ddi2il | OPEN shared source: parsed code 1000 grants the one resend regardless of status; other 408/5xx do not. Preserve Content-Type-first through a venue-declared placement seam in #2069, not a venue header insertion bypass. GRVT 20 s per-call value is ruled; disclose the new bound in CALLERS. |
+| Serial Plan and condition waits | claude-fe7lgm | Landed #2092/#2094 as non-default features. GRVT opt-in and exact FIFO/ready-custody composition remain adoption work. |
+| Same-call serial Session resend and immediate failed-Read continuation | codex-zs5e83; reviewer claude-fe7lgm | Landed #2146 at f895d0d7018. Same-call attempt 2 requires the exact RefusedResend grant or validated Read DATA and the released Session revision; GRVT must preserve its independent auth and network ledgers. |
+| Revision-gated calls, refresh after Prepare/Bind and cached header bundle | claude-m26ps4 | Landed #2069, non-default session-bearer. Its shared unreleased park retains the call/window without another grant or attempt; GRVT still needs native refresh/revision ingress controls and checked revision updates. |
+| Parsed auth-refusal delivery | codex-zs5e83; reviewer claude-fe7lgm | status_exempt_refusal is landed in #2146 and consulted only on complete Unproven responses. The GRVT override must parse code 1000 exactly; other 408/5xx stay Unknown. |
+| Content-Type-first header ordering | claude-m26ps4 | Shared bundle placement is landed in #2069. GRVT must declare After("Content-Type") with the Session bundle and retain native wire controls. |
+| GRVT EIP712 provider-payload HTTP recipe | codex-zs5e83; reviewers codex-9czdjh and claude-fe7lgm | Local recipe source 8c6950517eb is CLEAR; D1 accessor/control composition is under carry review. Installed constructor and actual sender remain unconverted. |
+| Credential-only login intent and Optional absent-signing disposition | claude-m26ps4; source reviewer kuhwxi | #2149 landed the revision-4 design only. D3/D6 phase-3 source is local and must land before composition. No synthetic Identity/ref or local latch workaround. |
+| Native login/header lifetime and serial FIFO cutover | codex-zs5e83 with core review | Held at the constructor boundary. Use shared setup facts, a real Session and one revision for all bundle values; preserve native eligibility/precedence and execute all currently gated originals. |
 
 The amended serial API at 92f1ff3dcd9 consumes the exact current call's
 DATA and, for a Mutation, its classify_write RefusedResend grant. It returns
@@ -163,8 +165,8 @@ NotSent; retirement is Revoked / NotSent, and the common Plan projection owns
 the whole command terminal. Attempt 2 receiving code 1000 again fails, with no
 third attempt. No re-park/new-login loophole resets that budget. The venue keeps
 auth_resent across all six immediate Read network attempts; a network retry is
-a new serial Read call but cannot refresh the per-Step auth ledger. These are
-OPEN source dependencies, not today's serial implementation.
+a new serial Read call but cannot refresh the per-Step auth ledger. The shared support is landed; these are GRVT adoption obligations. The future
+consumer must prove them through real managed transport and its native ledger.
 
 ## Session header audit and hosted material
 
@@ -372,8 +374,8 @@ construction, and fe7lgm for same-call resend. This is plan-only authorization;
 bf61 originals remain byte-exact and no builds are permitted during size builds.
 GRVT will explicitly enable non-default serial-plans (#2092), condition-waits
 (#2094, for re-parking a woken command from ready custody) and session-bearer
-at adoption. The first two exist at 201e169d286; session-bearer remains m26ps4's
-OPEN #2069 feature proposal at 6945dbbb73c, not an existing Cargo declaration.
+at adoption. All three are now landed non-default Cargo features; this
+supersedes their proposal-only status in the original recipe review.
 The adopter gets its own measured WASM budget review for these features plus
 dispatch-signing and secp256k1. Exact source pins, credential-only construction
 and external signature acceptance remain named gates in the recipe plan.
@@ -399,4 +401,9 @@ m26ps4 records the shared revision and kuhwxi reviews its source before adoption
 The command terminal still follows the Plan journal, including earlier settled
 effects; an unissued final operation does not make the whole command NotSent.
 The provider plan adds a serial prior-settlement/absent-ref control for this.
-fe7lgm's current resend plan is CLEAR at 6208560a514; REDs/source remain open.
+The seeded resend/status implementation has now landed as #2146 at f895d0d7018.
+The local provider recipe contains that actual tip, with engine/scripts/harness
+incoming-exact. This closes the shared resend source gate; G3/G6 implementation,
+installed construction and native funnel adoption remain held. The bf61 original
+target is unchanged and its thirteen intentional custody REDs are not called
+GREEN by isolated recipe tests.

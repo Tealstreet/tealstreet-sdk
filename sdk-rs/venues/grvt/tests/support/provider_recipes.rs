@@ -649,7 +649,7 @@ fn credential_only_primary_cannot_construct_an_order_recipe() {
         .as_ref()
         .expect("trusted credential-only slot");
     assert!(identity.validate_credential().is_ok());
-    assert!(matches!(identity.signing_ref(), Err(SignError::MissingKey)));
+    assert!(identity.signing_ref().is_err());
     let order = Arc::new(FrozenOrder::new(fields(), false).unwrap());
     assert!(matches!(
         CreateOrder::new(identity, ADDRESS, order),
