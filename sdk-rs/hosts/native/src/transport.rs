@@ -34,7 +34,26 @@ pub type PayloadSignerFuture =
     Pin<Box<dyn Future<Output = Result<PayloadSignerResult, String>> + Send>>;
 pub type PayloadSigner = Arc<dyn Fn(PayloadSignRequest) -> PayloadSignerFuture + Send + Sync>;
 
+#[cfg(feature = "nonce-drain")]
+pub struct Drained {
+    _sealed: (),
+}
+#[cfg(feature = "nonce-drain")]
+impl std::fmt::Debug for Drained {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Drained")
+    }
+}
+#[cfg(feature = "nonce-drain")]
+pub type DrainFuture = Pin<Box<dyn Future<Output = Drained> + Send>>;
+
 pub trait Transport {
+    /// Seal new work and join owned resources. Unsupported transports cannot
+    /// produce retirement evidence; ordinary transport use remains available.
+    #[cfg(feature = "nonce-drain")]
+    fn drain(&self) -> Option<DrainFuture> {
+        None
+    }
     /// Managed requests require explicit route preparation. The default fails
     /// closed; a custom transport must implement the same final-handoff seam.
     fn prepare_http(
