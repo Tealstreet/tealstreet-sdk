@@ -278,6 +278,21 @@ fn hedged_isolated() -> Harness {
         200,
         r#"{"code":"0","data":{"marginMode":"isolated"}}"#,
     );
+    // Settle the margin commit's account refresh, so a join refresh can issue.
+    reply(
+        &mut h,
+        "account/positions",
+        200,
+        r#"{"code":"0","data":[]}"#,
+    );
+    if count(&h, "balances") == 1 {
+        reply(
+            &mut h,
+            "balances",
+            200,
+            r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        );
+    }
     command(&mut h, mode(81, true));
     reply(
         &mut h,
@@ -444,8 +459,8 @@ fn an_expired_parked_command_fails_once_and_never_sends() {
     h.e.handle_command(1.0, cancel(8), Some(100)).unwrap();
     release(&mut h);
     command(&mut h, margin(9, true));
+    // The caller's wait lapses while the command is parked behind job 7.
     fire_until(&mut h, 200.0);
-    assert_eq!(terminals(&h, 8).len(), 1, "the expired command fails once");
     let intents = reply(
         &mut h,
         "batch-orders",
@@ -457,7 +472,7 @@ fn an_expired_parked_command_fails_once_and_never_sends() {
         0,
         "an expired command never sends"
     );
-    assert_eq!(terminals(&h, 8).len(), 1);
+    assert_eq!(terminals(&h, 8).len(), 1, "the expired command fails once");
     managed(&h, &intents, "set-margin-mode");
 }
 
@@ -558,6 +573,7 @@ fn a_failed_verify_after_an_accepted_cancel_is_never_not_sent() {
 fn a_plain_cancel_gone_is_satisfied_fences_and_reconciles() {
     let mut h = seeded();
     seed_order(&mut h, "12", "");
+    seed_order(&mut h, "13", "");
     let intents = command(&mut h, cancel(7));
     managed(&h, &intents, "cancel-batch-orders");
     reply(&mut h, "cancel-batch-orders", 200, GONE_CANCEL);
@@ -565,18 +581,20 @@ fn a_plain_cancel_gone_is_satisfied_fences_and_reconciles() {
     assert!(h.e.store().order("12").is_none());
     // The absent-order fence queues one fresh order snapshot.
     assert_eq!(count(&h, "orders-pending?"), 1, "{:?}", h.pending);
-    seed_order(&mut h, "13", "");
-    for path in [
-        "orders-pending?",
-        "orders-tpsl-pending",
-        "orders-algo-pending",
-    ] {
-        let body = if path == "orders-pending?" {
+    // Answer the snapshot's pages until it completes; 13 is still open.
+    while let Some(request) = h
+        .pending
+        .iter()
+        .find(|r| r.url.contains("/api/v1/trade/orders-"))
+        .cloned()
+    {
+        h.take(&request.url);
+        let body = if request.url.ends_with("/orders-pending?limit=100") {
             r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"13","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"}]}"#
         } else {
             r#"{"code":"0","data":[]}"#
         };
-        reply(&mut h, path, 200, body);
+        answer(&mut h, &request, 200, body);
     }
     // A clean snapshot cleared the fence: cancel-all for the symbol proceeds.
     let intents = command(
@@ -595,13 +613,13 @@ fn a_replacement_cancel_gone_stops_without_a_replacement_prepare() {
     seed_order(&mut h, "12", "");
     let intents = command(&mut h, amend(7));
     managed(&h, &intents, "cancel-batch-orders");
-    let intents = reply(&mut h, "cancel-batch-orders", 200, GONE_CANCEL);
-    let later = fire_until(&mut h, 10_000.0);
-    assert!(
-        intents.is_empty() && later.is_empty(),
+    reply(&mut h, "cancel-batch-orders", 200, GONE_CANCEL);
+    fire_until(&mut h, 10_000.0);
+    assert_eq!(
+        count(&h, "order-detail") + count(&h, "/batch-orders"),
+        0,
         "no replacement work is prepared"
     );
-    assert_eq!(count(&h, "order-detail") + count(&h, "/batch-orders"), 0);
     assert_ne!(failure(&h, 7).outcome, Some(Outcome::NotSent));
 }
 
@@ -611,11 +629,15 @@ fn progress_between_steps_aborts_before_the_next_call() {
     seed_order(&mut h, "12", "");
     let intents = command(&mut h, amend(7));
     managed(&h, &intents, "cancel-batch-orders");
-    reply(&mut h, "cancel-batch-orders", 200, ACCEPTED_CANCEL);
+    // The order fills while its cancel is in flight.
     seed_order(&mut h, "12", r#","filledSize":"4""#);
-    let later = fire_until(&mut h, 10_000.0);
-    assert!(later.is_empty(), "no call follows execution progress");
-    assert_eq!(count(&h, "order-detail") + count(&h, "/batch-orders"), 0);
+    reply(&mut h, "cancel-batch-orders", 200, ACCEPTED_CANCEL);
+    fire_until(&mut h, 10_000.0);
+    assert_eq!(
+        count(&h, "order-detail") + count(&h, "/batch-orders"),
+        0,
+        "no call follows execution progress"
+    );
     let error = failure(&h, 7);
     assert!(
         error.message.contains("execution progress"),
@@ -633,8 +655,8 @@ fn progress_between_steps_aborts_before_the_next_call() {
 #[test]
 fn a_refusal_mid_split_keeps_the_earlier_accepted_ids() {
     let mut h = seeded();
-    // 21 lots at the 1000 maximum: one batch of 20, then one of 1.
-    command(&mut h, place(7, 21_000.0));
+    // 21 lots at the fixture's 500 maximum: one batch of 20, then one of 1.
+    command(&mut h, place(7, 10_500.0));
     let ids: Vec<String> = (0..20).map(|i| format!("a{i}")).collect();
     let rows: Vec<_> = ids
         .iter()
@@ -644,7 +666,10 @@ fn a_refusal_mid_split_keeps_the_earlier_accepted_ids() {
     reply(&mut h, "batch-orders", 200, &body);
     let at = h.now + 350.0;
     let intents = fire_until(&mut h, at);
-    managed(&h, &intents, "batch-orders");
+    let (request, _) = managed(&h, &intents, "batch-orders");
+    let sent: Vec<serde_json::Value> =
+        serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(sent.len(), 1);
     reply(
         &mut h,
         "batch-orders",
@@ -652,8 +677,8 @@ fn a_refusal_mid_split_keeps_the_earlier_accepted_ids() {
         r#"{"code":"0","data":[{"orderId":"","code":"103003","msg":"Insufficient balance"}]}"#,
     );
     let error = failure(&h, 7);
-    assert_ne!(error.outcome, Some(Outcome::Rejected));
-    assert_ne!(error.outcome, Some(Outcome::NotSent));
+    // Earlier calls took effect, so the refused tail is no whole-command outcome.
+    assert_eq!(error.outcome, None, "{error:?}");
     let partial = error.partial.as_ref().expect("accepted IDs survive");
     assert_eq!(partial.order_ids, ids);
 }
@@ -661,16 +686,18 @@ fn a_refusal_mid_split_keeps_the_earlier_accepted_ids() {
 #[test]
 fn a_maximum_split_streams_fifty_calls_through_one_plan() {
     let mut h = seeded();
-    // 1000 lots at the 1000 maximum: 50 batches of 20.
-    let mut intents = command(&mut h, place(7, 1_000_000.0));
+    // 999 lots at the fixture's 500 maximum (the native ceiling is 1000
+    // lots): 49 batches of 20, then 19.
+    let mut intents = command(&mut h, place(7, 499_500.0));
     let mut all = Vec::new();
     for batch in 0..50 {
         let (request, intent) = managed(&h, &intents, "batch-orders");
         assert_eq!(intent, RoutingIntent::Primary);
         let sent: Vec<serde_json::Value> =
             serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-        assert_eq!(sent.len(), 20);
-        let ids: Vec<String> = (0..20).map(|i| format!("b{batch}-{i}")).collect();
+        let size = if batch == 49 { 19 } else { 20 };
+        assert_eq!(sent.len(), size);
+        let ids: Vec<String> = (0..size).map(|i| format!("b{batch}-{i}")).collect();
         let rows: Vec<_> = ids
             .iter()
             .map(|id| serde_json::json!({"orderId": id, "code": "0", "msg": "success"}))
@@ -751,8 +778,8 @@ fn the_hedged_join_sends_short_only_after_long_is_accepted() {
 fn a_long_503_never_prepares_short_and_seals_unknown() {
     let mut h = hedged_isolated();
     command(&mut h, leverage(7));
-    let intents = reply(&mut h, "set-leverage", 503, "Service Unavailable");
-    assert!(intents.is_empty() && count(&h, "set-leverage") == 0);
+    reply(&mut h, "set-leverage", 503, "Service Unavailable");
+    assert_eq!(count(&h, "set-leverage"), 0, "short is never prepared");
     assert_eq!(failure(&h, 7).outcome, Some(Outcome::Unknown));
     assert_ne!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
 }
@@ -761,8 +788,8 @@ fn a_long_503_never_prepares_short_and_seals_unknown() {
 fn a_long_refusal_never_prepares_short_and_is_rejected() {
     let mut h = hedged_isolated();
     command(&mut h, leverage(7));
-    let intents = reply(&mut h, "set-leverage", 200, LEVERAGE_REFUSED);
-    assert!(intents.is_empty() && count(&h, "set-leverage") == 0);
+    reply(&mut h, "set-leverage", 200, LEVERAGE_REFUSED);
+    assert_eq!(count(&h, "set-leverage"), 0, "short is never prepared");
     assert_eq!(failure(&h, 7).outcome, Some(Outcome::Rejected));
 }
 

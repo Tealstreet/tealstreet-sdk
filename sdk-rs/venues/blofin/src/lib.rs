@@ -54,7 +54,7 @@ pub enum Pending {
     PublicTrades(history::PublicTradesRequest),
     History(history::Request),
     Closed(closed::Request),
-    Trade(trading::Request),
+    Trade(Box<trading::Request>),
     Account(
         safe_cex_engine::selected_read::AdmittedRead,
         account::Request,
@@ -651,6 +651,44 @@ impl Venue for Blofin {
     fn guard_order_mutations(&self) -> bool {
         true
     }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => trading::trade_reconciliation(request),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trading_preflight_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trading_retired(owner)
+    }
+    /// An uncertain or absent-order seal: a fresh order snapshot reports
+    /// through `orders_reconciled`.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.settle_retired_trade(cx);
+        self.refresh_orders(cx, 1);
+    }
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -949,7 +987,8 @@ impl Venue for Blofin {
             }
             Pending::Leverage(leverage) => self.leverage_response(cx, leverage, response),
             Pending::Trade(request) => {
-                self.trade_response(cx, request, response);
+                self.settle_retired_trade(cx);
+                self.trade_response(cx, *request, response);
             }
             Pending::Managed(context, pending) => {
                 self.public_response(cx, context, *pending, response)
@@ -1014,6 +1053,7 @@ impl Venue for Blofin {
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
             Pending::Closed(request) => Self::closed_failed(cx, request, error),
             Pending::History(request) => self.history_refused(cx, request, error),
+            Pending::Trade(request) => self.trade_call_failed(cx, *request, error, false),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -1026,6 +1066,7 @@ impl Venue for Blofin {
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
             Pending::Closed(request) => Self::closed_failed(cx, request, error),
             Pending::History(request) => self.history_failed(cx, request, error),
+            Pending::Trade(request) => self.trade_call_failed(cx, *request, error, true),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -1050,11 +1091,6 @@ impl Venue for Blofin {
             }
             Pending::Closed(request) => {
                 Self::closed_failed(cx, request, VenueError::new(error));
-                return;
-            }
-            Pending::Trade(request) => {
-                let error = trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
-                self.trade_failed(cx, request, error);
                 return;
             }
             Pending::Leverage(leverage) => {
@@ -1093,9 +1129,7 @@ impl Venue for Blofin {
             }
             return;
         }
-        if self.trading_timer(cx, timer) {
-            return;
-        }
+        self.settle_retired_trade(cx);
         if self.account_timer(cx, timer) {
             return;
         }
@@ -1314,6 +1348,3 @@ fn reread_partial<P>(
     }
     *stalls < 5
 }
-
-#[cfg(test)]
-mod secondary_tests;

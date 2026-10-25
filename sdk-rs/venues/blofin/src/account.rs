@@ -243,17 +243,7 @@ impl Blofin {
     pub(crate) fn read_selection(
         &self,
     ) -> (Result<SelectedRead, CredentialUnavailable>, &'static str) {
-        let identities = &self.options.identities;
-        let slots = Slots::new(
-            identities
-                .primary
-                .clone()
-                .filter(|_| !self.options.public_data_only),
-            identities.secondary.clone(),
-            SlotPolicy {
-                secondary_requires_primary: true,
-            },
-        );
+        let slots = self.credential_slots();
         let refusal = match slots.select(CredentialRole::Read { scope: None }) {
             Ok((_, identity)) if identity.passphrase.is_some() => None,
             Ok(_) => Some("BloFin requires a passphrase"),
@@ -267,6 +257,35 @@ impl Blofin {
             selected,
             refusal.unwrap_or("BloFin requires API credentials"),
         )
+    }
+    fn credential_slots(&self) -> Slots<safe_cex_engine::signing::Identity> {
+        let identities = &self.options.identities;
+        Slots::new(
+            identities
+                .primary
+                .clone()
+                .filter(|_| !self.options.public_data_only),
+            identities.secondary.clone(),
+            SlotPolicy {
+                secondary_requires_primary: true,
+            },
+        )
+    }
+    /// The trading job's credential for `role`: Primary for writes, and for
+    /// the Verify GET the same Secondary-else-Primary selection reads use.
+    pub(crate) fn trade_identity(
+        &self,
+        role: CredentialRole,
+    ) -> Option<(
+        safe_cex_engine::request_context::Credential,
+        safe_cex_engine::signing::Identity,
+    )> {
+        let slots = self.credential_slots();
+        let (selection, identity) = slots.select(role).ok()?;
+        Some((
+            selection.credential(identity.credential.clone()),
+            identity.clone(),
+        ))
     }
     pub(crate) fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
         let Some(market) = cx.store.market(&symbol) else {
@@ -471,52 +490,6 @@ impl Blofin {
         !self.options.public_data_only
             && self.options.key.as_ref().is_some_and(|s| !s.is_empty())
             && self.options.secret.as_ref().is_some_and(|s| !s.is_empty())
-    }
-    pub(crate) fn headers(
-        &self,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
-        path: &str,
-        method: Method,
-        now: f64,
-        body: &str,
-    ) -> Result<Vec<(&'static str, String)>, String> {
-        if !self.signed() {
-            return Err("BloFin requires API credentials".into());
-        }
-        let read = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get);
-        let pass = self
-            .options
-            .passphrase
-            .as_deref()
-            .map(|primary| {
-                read.and_then(|r| r.passphrase.as_deref())
-                    .unwrap_or(primary)
-            })
-            .filter(|s| !s.is_empty())
-            .ok_or("BloFin requires a passphrase")?;
-        let secret = read.map_or(self.options.secret.as_deref().unwrap(), |r| {
-            r.secret.as_str()
-        });
-        let nonce = safe_cex_crypto::uuid::uuid_with_entropy(fill)?;
-        let timestamp = num::format(safe_cex_engine::time::wire_stamp_ms(now));
-        Ok(vec![
-            (
-                "ACCESS-KEY",
-                read.map_or_else(|| self.options.key.clone().unwrap(), |r| r.key.clone()),
-            ),
-            (
-                "ACCESS-SIGN",
-                sign::signature(secret, path, method.as_str(), &timestamp, &nonce, body),
-            ),
-            ("ACCESS-NONCE", nonce),
-            ("ACCESS-TIMESTAMP", timestamp),
-            ("ACCESS-PASSPHRASE", pass.to_owned()),
-            ("Content-Type", "application/json".into()),
-        ])
     }
     /// One Background read per account leg, signed by the #2084 recipe; the
     /// native revision checks stay the join. A refused selection, admission or
