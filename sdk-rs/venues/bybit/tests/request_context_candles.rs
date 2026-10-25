@@ -136,10 +136,21 @@ fn a_candle_stream_ending_mid_list_is_a_malformed_reply_and_publishes_nothing() 
 }
 
 #[test]
-fn cached_balance_info_and_disabled_product_refusals_need_command_authority() {
+fn cached_balance_info_and_trade_refusals_at_capacity_need_command_authority() {
     let mut h = ready();
+    // Park until admission refuses: background reads hold some slots, so the
+    // available capacity is measured, not assumed.
     let reads = support::park_owners(&mut h);
-    assert!(!reads.is_empty());
+    let refused = h
+        .done
+        .iter()
+        .filter(|(id, result)| (1_000..1_256).contains(id) && result.is_err())
+        .count();
+    assert!(
+        !reads.is_empty() && refused > 0,
+        "the park reaches capacity"
+    );
+    assert_eq!(reads.len() + refused, 256);
     h.requests.clear();
     h.command(Command::Venue {
         command: 46,
@@ -152,20 +163,22 @@ fn cached_balance_info_and_disabled_product_refusals_need_command_authority() {
             limit: Some(1),
         },
     });
-    // A write command's refusal stays NotSent even when admission is refused.
+    // A write on an enabled product needs a read slot for its plan.
     h.command(Command::SetLeverage {
         command: 49,
-        symbol: "BTC-27MAR26-100000-C".into(),
+        symbol: "BTCUSDT".into(),
         leverage: 2.0,
         side: None,
     });
     assert_eq!(failure(&h, 49).outcome, Some(Outcome::NotSent));
     for command in [46, 47, 49] {
         let error = failure(&h, command);
+        // Today's kind; G1 (#1955) types occupancy refusals as retryable
+        // Capacity, and this assertion moves with it.
         assert_eq!(
             error.kind,
             Some(ErrorKind::Internal),
-            "{command}: the owner cap refuses before any answer"
+            "{command}: capacity refuses before any answer"
         );
         assert_eq!(h.done.iter().filter(|(id, _)| *id == command).count(), 1);
     }
@@ -173,20 +186,22 @@ fn cached_balance_info_and_disabled_product_refusals_need_command_authority() {
         h.requests.is_empty(),
         "no HTTP for a cached or refused answer"
     );
-    // Freeing one owner lets the cached answer complete with no I/O.
-    let read = reads.into_iter().next().unwrap();
-    h.reply(read.id, 200, r#"{"retCode":10001,"retMsg":"params error"}"#);
-    h.requests.clear();
-    let timers = h.timers.len();
-    let orders = h.engine.store().orders().len();
-    h.command(Command::Venue {
-        command: 48,
-        action: VenueAction::FetchBalanceInfo,
+}
+
+#[test]
+fn a_disabled_product_write_refuses_at_its_gate_before_any_io() {
+    let mut h = ready();
+    h.command(Command::SetLeverage {
+        command: 49,
+        symbol: "BTC-27MAR26-100000-C".into(),
+        leverage: 2.0,
+        side: None,
     });
-    assert_eq!(h.result(48), Some(&Ok("null".to_owned())));
-    assert!(h.requests.is_empty());
-    assert_eq!(h.timers.len(), timers, "no timer");
-    assert_eq!(h.engine.store().orders().len(), orders, "no Store activity");
+    let error = failure(&h, 49);
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 49).count(), 1);
+    assert!(h.requests.is_empty(), "the gate answers before any I/O");
 }
 
 #[test]

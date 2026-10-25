@@ -175,13 +175,19 @@ fn later_page_rejection_returns_accepted_rows_but_first_page_rejection_fails() {
             if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
             && event.fields == vec![("command", safe_cex_engine::Value::Num(5.0))]
     )));
-    // 10002 is Bybit's receive-window rejection; its text is replaced so no signed
-    // payload reaches a notice (#1351).
+    // 10002 is Bybit's receive-window rejection: re-read once, then its text is
+    // replaced so no signed payload reaches a notice (#1351).
     fetch(&mut h, 15, None, Some(1.0), Some(2.0));
-    h.respond(
-        "/v5/position/closed-pnl",
-        200,
-        r#"{"retCode":10002,"retMsg":"invalid request","result":{}}"#,
+    for _ in 0..2 {
+        h.respond(
+            "/v5/position/closed-pnl",
+            200,
+            r#"{"retCode":10002,"retMsg":"invalid request","result":{}}"#,
+        );
+    }
+    assert!(
+        !h.has_request("/v5/position/closed-pnl"),
+        "one re-read only"
     );
     assert_eq!(
         h.result(15),

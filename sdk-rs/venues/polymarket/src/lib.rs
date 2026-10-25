@@ -251,6 +251,7 @@ impl Polymarket {
         self.catalogue_context = Some(context.clone());
         match cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             url,
             None,
@@ -360,6 +361,7 @@ impl Polymarket {
         if cx
             .request_managed_with_headers(
                 context.clone(),
+                None,
                 Method::Post,
                 format!("{REST}/midpoints"),
                 &[("Content-Type", "application/json")],
@@ -719,6 +721,7 @@ impl Polymarket {
                 };
                 match cx.request_managed(
                     read.context.clone(),
+                    None,
                     Method::Get,
                     path,
                     None,

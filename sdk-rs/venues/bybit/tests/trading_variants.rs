@@ -166,6 +166,22 @@ fn lookup_row(link: &str, status: &str) -> String {
     )
 }
 
+/// H2: a Hyro link read (realtime then history, filtered by orderLinkId)
+/// answered as a complete absence on both axes.
+fn answer_link_absent(h: &mut Harness, link: &str) {
+    let filter = format!("orderLinkId={link}");
+    assert!(h.has_request(&filter), "a link-filtered read");
+    while h.has_request(&filter) {
+        h.respond(&filter, 200, EMPTY);
+    }
+}
+fn outcome(h: &Harness, command: u32) -> Option<safe_cex_engine::Outcome> {
+    h.outcomes
+        .iter()
+        .find(|(id, _)| *id == command)
+        .and_then(|(_, outcome)| *outcome)
+}
+
 #[test]
 fn inverse_create_keeps_native_integer_quantity_and_exact_split_total() {
     let mut h = ready(Variant::Inverse);
@@ -420,11 +436,14 @@ fn hyro_lost_ack_recovers_terminal_identity_without_recreating() {
         request: create.id,
         error: "lost acknowledgement",
     });
+    // H2 (Q3): Unknown at once; the reconcile link read recovers it for the retry.
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
     h.respond("/v5/order/realtime", 200, EMPTY);
     h.respond("/v5/order/history", 200, &lookup_row(&id, "Filled"));
-    assert_eq!(h.result(1), Some(&Ok("[\"recovered\"]".into())));
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
     assert!(h.engine.store().order("recovered").is_none());
-    assert!(h.requests.is_empty());
+    assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
 }
 
 #[test]
@@ -445,7 +464,8 @@ fn hyro_partial_recovery_publishes_authoritative_quantity_and_price() {
     );
     let row = h.engine.store().order("recovered").unwrap();
     assert_eq!((row.price, row.filled, row.remaining), (101.0, 0.4, 0.6));
-    assert!(h.requests.is_empty());
+    // H2 (Q7): only the reconcile snapshot remains beside the link read.
+    assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
 }
 
 #[test]
@@ -460,17 +480,20 @@ fn hyro_unknown_lookup_keeps_original_identity_and_accepted_siblings() {
         request: create.id,
         error: "lost",
     });
+    // H2: the lost create seals Unknown, keeping its link and the accepted sibling.
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    assert!(h.result(1).unwrap().as_ref().unwrap_err().contains(&id));
+    // Its reconcile read is incomplete, so the identity stays unresolved.
     h.respond(
-        "/v5/order/realtime",
+        &format!("orderLinkId={id}"),
         500,
         r#"{"retCode":10016,"retMsg":"unavailable"}"#,
     );
-    assert!(h.result(1).unwrap().as_ref().unwrap_err().contains(&id));
-    assert!(h.requests.is_empty());
+    assert!(!h.has_request("/v5/order/create"));
+    // The caller's retry re-reads first; proven absent, it sends the same link.
     place(&mut h, 2, orders);
     assert!(!h.has_request("/v5/order/create"));
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
+    answer_link_absent(&mut h, &id);
     let retry = h.take("/v5/order/create");
     assert_eq!(link(&retry), id);
     assert!(body(&retry).contains("ETHUSDT"));
@@ -509,7 +532,8 @@ fn hyro_malformed_or_cyclic_lookup_never_authorizes_replacement() {
         });
         h.respond("/v5/order/realtime", 200, malformed);
         assert!(h.result(1).unwrap().is_err());
-        assert!(h.requests.is_empty());
+        // H2 (Q7): only the reconcile snapshot remains beside the link read.
+        assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
     }
 }
 
@@ -555,13 +579,11 @@ fn hyro_ack_crossing_snapshot_is_reconciled_without_optimistic_resurrection() {
         200,
         r#"{"retCode":0,"result":{"orderId":"accepted"}}"#,
     );
-    assert!(h.result(1).is_none());
-    assert!(h.engine.store().order("accepted").is_none());
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
+    // H2 (Q6): the ACK proves acceptance; no confirmation lookup and no
+    // optimistic row across the moved snapshot.
     assert_eq!(h.result(1), Some(&Ok("[\"accepted\"]".into())));
     assert!(h.engine.store().order("accepted").is_none());
-    assert!(h.requests.is_empty());
+    assert!(!h.paths().iter().any(|path| path.contains("orderLinkId=")));
 }
 
 #[test]
@@ -581,9 +603,8 @@ fn hyro_lookup_crossing_snapshot_keeps_discovered_identity_for_caller_retry() {
     h.reply(lookup.id, 200, &lookup_row(&id, "New"));
     assert!(h.result(1).unwrap().is_err());
     assert!(h.engine.store().order("recovered").is_none());
+    // H2 (Q3): the reconcile read already found it; the retry reads nothing.
     place(&mut h, 2, vec![opts]);
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
     assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
     assert!(h.requests.is_empty());
     assert!(h.engine.store().order("recovered").is_none());
@@ -595,21 +616,27 @@ fn hyro_private_terminal_observation_blocks_stale_recovered_open_row() {
     place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
     let create = h.take("/v5/order/create");
     let id = link(&create);
-    h.message("/v5/private", &format!(r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"recovered","orderLinkId":"{id}","orderStatus":"Filled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"1","leavesQty":"0"}}]}}"#));
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
     });
-    h.respond("/v5/order/realtime", 200, &lookup_row(&id, "New"));
+    // H2 (Q3): Unknown at once. The terminal observation lands while the link
+    // read is out; that read's stale open row must not resurrect the order.
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    let read = h.take(&format!("orderLinkId={id}"));
+    h.message("/v5/private", &format!(r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"recovered","orderLinkId":"{id}","orderStatus":"Filled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"1","leavesQty":"0"}}]}}"#));
+    h.reply(read.id, 200, &lookup_row(&id, "New"));
     assert_eq!(
         h.engine.store().order("recovered").unwrap().status,
         safe_cex_engine::model::OrderStatus::Closed
     );
-    assert_eq!(h.result(1), Some(&Ok("[\"recovered\"]".into())));
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+    assert!(!h.has_request("/v5/order/create"));
 }
 
 #[test]
-fn hyro_two_complete_absences_reuse_original_id_but_never_loop_writes() {
+fn hyro_complete_absence_never_resends_in_the_same_call() {
     let mut h = ready(Variant::Hyrotrader);
     place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
     let create = h.take("/v5/order/create");
@@ -618,18 +645,11 @@ fn hyro_two_complete_absences_reuse_original_id_but_never_loop_writes() {
         request: create.id,
         error: "lost",
     });
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
-    let retry = h.take("/v5/order/create");
-    assert_eq!(link(&retry), id);
-    h.event(Event::HttpFailed {
-        request: retry.id,
-        error: "lost again",
-    });
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
+    answer_link_absent(&mut h, &id);
+    // R1(a): no automatic same-link resend; the call stays Unknown with its link.
+    assert!(!h.has_request("/v5/order/create"));
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
     assert!(h.result(1).unwrap().as_ref().unwrap_err().contains(&id));
-    assert!(h.requests.is_empty());
 }
 
 #[test]
@@ -637,15 +657,17 @@ fn hyro_cyclic_lookup_is_incomplete_and_keeps_unknown_outcome() {
     let mut h = ready(Variant::Hyrotrader);
     place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
     let create = h.take("/v5/order/create");
+    let id = link(&create);
     h.event(Event::HttpFailed {
         request: create.id,
         error: "lost",
     });
+    // H2 (Q7): a link-filtered page that still names another page is no absence.
     let page = r#"{"retCode":0,"result":{"list":[],"nextPageCursor":"same"}}"#;
-    h.respond("/v5/order/realtime", 200, page);
-    h.respond("/v5/order/realtime", 200, page);
+    h.respond(&format!("orderLinkId={id}"), 200, page);
     assert!(h.result(1).unwrap().is_err());
-    assert!(h.requests.is_empty());
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
 }
 
 #[test]
@@ -1014,7 +1036,8 @@ fn hyro_recovered_rows_validate_raw_numbers_and_exact_symbol_even_when_terminal(
             };
             h.respond("/v5/order/realtime", 200, &row);
             assert!(h.result(1).unwrap().is_err(), "{status} {bad}");
-            assert!(h.requests.is_empty());
+            // H2 (Q7): only the reconcile snapshot remains beside the link read.
+            assert!(!h.has_request("/v5/order/create") && !h.has_request("orderLinkId="));
             assert!(h.engine.store().order("recovered").is_none());
         }
     }
@@ -1212,6 +1235,7 @@ fn hyro_conditional_retry_preserves_identity_and_body_after_ticker_crosses_trigg
     opts.trigger_price = Some(70000.0);
     place(&mut h, 1, vec![opts.clone()]);
     let create = h.take("/v5/order/create");
+    let id = link(&create);
     let original = body(&create).to_owned();
     assert!(original.contains("\"triggerDirection\":\"1\""));
     h.event(Event::HttpFailed {
@@ -1223,8 +1247,8 @@ fn hyro_conditional_retry_preserves_identity_and_body_after_ticker_crosses_trigg
     assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 71000.0);
     place(&mut h, 2, vec![opts]);
     assert!(!h.has_request("/v5/order/create"));
-    h.respond("/v5/order/realtime", 200, EMPTY);
-    h.respond("/v5/order/history", 200, EMPTY);
+    // H2 (Q7): the reconcile snapshot's order read is also out; answer the link.
+    answer_link_absent(&mut h, &id);
     let retry = h.take("/v5/order/create");
     assert_eq!(body(&retry), original);
     h.reply(
@@ -1452,9 +1476,10 @@ fn shared_hyro_failure_is_correlated_to_each_waiter_before_its_completion() {
     assert_eq!(h.command_errors[0].0, 91);
     assert_eq!(h.command_errors[1].0, 92);
     assert_eq!(h.command_errors[0].1, h.command_errors[1].1);
+    // H2: one execution's seal reports to every observer, then completes each.
     assert_eq!(
         h.command_notices,
-        [(91, "error"), (91, "done"), (92, "error"), (92, "done")]
+        [(91, "error"), (92, "error"), (91, "done"), (92, "done")]
     );
     assert!(h.result(91).unwrap().is_err());
     assert!(h.result(92).unwrap().is_err());
@@ -2015,6 +2040,42 @@ fn spot_tpsl_streamed_before_the_seed_and_committed_after_it_is_relabelled() {
     }
     let order = h.engine.store().order("stop").expect("spot stop stored");
     assert_eq!(order.kind, OrderType::StopLoss);
+}
+
+/// Two same-ID sends per leg is a bound on the retained intent, not per
+/// caller: a resumed identical call must not send the uncertain create again.
+/// Amended (ruling Q4, R1(a)): one send per call, re-read before each resume.
+#[test]
+fn hyro_resumed_call_cannot_exceed_two_same_id_creates() {
+    let mut h = ready(Variant::Hyrotrader);
+    let mut sends = 0;
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    sends += 1;
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    answer_link_absent(&mut h, &id);
+    assert!(h.result(1).unwrap().is_err());
+    for command in [2, 3] {
+        place(&mut h, command, vec![order("BTCUSDT", 1.0)]);
+        answer_link_absent(&mut h, &id);
+        while h.has_request("/v5/order/create") {
+            let create = h.take("/v5/order/create");
+            sends += 1;
+            assert_eq!(link(&create), id);
+            h.event(Event::HttpFailed {
+                request: create.id,
+                error: "lost",
+            });
+            answer_link_absent(&mut h, &id);
+        }
+        assert!(h.result(command).unwrap().is_err());
+        assert!(h.unknown.contains(&command));
+    }
+    assert_eq!(sends, 2, "same orderLinkId physically sent more than twice");
 }
 
 #[test]
@@ -3201,6 +3262,250 @@ fn hyro_cancel_is_never_resent_on_text_alone() {
     assert!(!h.has_request("/v5/order/cancel"), "no write resend");
 }
 
+/// R2: a duplicate-link refusal on create may mean the order exists, so it is
+/// Unknown for Place; on cancel the same code stays a refusal.
+#[test]
+fn duplicate_link_codes_are_unknown_for_place_only() {
+    for code in [10014, 110072] {
+        let mut h = ready(Variant::Linear);
+        place(&mut h, 120, vec![order("BTCUSDT", 1.0)]);
+        while h.has_request("/v5/position/list") {
+            h.respond(
+                "/v5/position/list",
+                200,
+                r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+            );
+        }
+        let create = h.take("/v5/order/create");
+        h.reply(
+            create.id,
+            200,
+            &format!(r#"{{"retCode":{code},"retMsg":"duplicate"}}"#),
+        );
+        assert_eq!(
+            h.outcomes,
+            [(120, Some(safe_cex_engine::Outcome::Unknown))],
+            "{code} on create"
+        );
+
+        let mut h = ready(Variant::Linear);
+        let row = r#"{"category":"linear","symbol":"BTCUSDT","orderId":"dup-cancel","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}"#;
+        h.message(
+            "/v5/private",
+            &format!(r#"{{"topic":"order","data":[{row}]}}"#),
+        );
+        h.command(Command::CancelOrders {
+            command: 122,
+            ids: vec!["dup-cancel".into()],
+        });
+        let path = if h.has_request("/v5/order/cancel-batch") {
+            "/v5/order/cancel-batch"
+        } else {
+            "/v5/order/cancel"
+        };
+        let cancel = h.take(path);
+        h.reply(
+            cancel.id,
+            200,
+            &format!(r#"{{"retCode":{code},"retMsg":"duplicate"}}"#),
+        );
+        assert_eq!(
+            h.outcomes,
+            [(122, Some(safe_cex_engine::Outcome::Rejected))],
+            "{code} on cancel"
+        );
+    }
+}
+
+/// H2: a lost ACK is Unknown at once; one link-filtered reconcile read finds
+/// the order, and the caller's retry returns it with no create.
+#[test]
+fn hyro_lost_ack_is_unknown_and_one_link_read_recovers_for_the_retry() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost acknowledgement",
+    });
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    let filter = format!("orderLinkId={id}");
+    let realtime = h.take(&filter);
+    assert!(realtime.url.contains("/v5/order/realtime"));
+    h.reply(realtime.id, 200, EMPTY);
+    let history = h.take(&filter);
+    assert!(history.url.contains("/v5/order/history"));
+    h.reply(history.id, 200, &lookup_row(&id, "Filled"));
+    assert!(!h.has_request(&filter), "one reconcile read per lost ACK");
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(!h.has_request("/v5/order/create"));
+    assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+}
+
+/// H2 (Q5), M2: an identical intent arriving while a resume is still
+/// re-reading waits for it; nothing is sent in parallel.
+#[test]
+fn hyro_identical_intent_during_a_resume_read_waits_and_sends_nothing() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    answer_link_absent(&mut h, &id);
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request(&format!("orderLinkId={id}")),
+        "the resume re-reads"
+    );
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(outcome(&h, 3), None, "the identical caller waits");
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+/// H2 (#1939): an ACK that arrives after its create's window sealed Unknown is
+/// reconciled into the retained intent; a retry returns it without a resend.
+#[test]
+fn hyro_late_ack_after_unknown_is_reconciled_without_a_resend() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    h.advance(20_001.0);
+    assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+    h.reply(
+        create.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"late"}}"#,
+    );
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    while h.has_request("orderLinkId=") {
+        h.respond("orderLinkId=", 200, EMPTY);
+    }
+    assert!(!h.has_request("/v5/order/create"), "never a second create");
+    assert_eq!(h.result(2), Some(&Ok("[\"late\"]".into())));
+}
+
+fn answer_link_reads(h: &mut Harness, link: &str) {
+    let filter = format!("orderLinkId={link}");
+    while h.has_request(&filter) {
+        h.respond(&filter, 200, EMPTY);
+    }
+}
+
+/// Review A: a retry's definitive refusal cannot rule out the earlier lost
+/// create landing later, so the lot keeps its link (never re-minted) and the
+/// call is Unknown; later retries only re-read.
+#[test]
+fn hyro_refused_retry_after_a_lost_ack_never_mints_a_new_link() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    answer_link_reads(&mut h, &id);
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    answer_link_reads(&mut h, &id);
+    let retry = h.take("/v5/order/create");
+    assert_eq!(link(&retry), id);
+    h.reply(
+        retry.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+    answer_link_reads(&mut h, &id);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    answer_link_reads(&mut h, &id);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "no new link is ever sent"
+    );
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+}
+
+/// Review 1: an acceptance the private stream observed is never downgraded
+/// by a contradictory refusal of the same create.
+#[test]
+fn hyro_observed_acceptance_outranks_a_later_refusal() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.message("/v5/private", &format!(r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"seen","orderLinkId":"{id}","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1"}}]}}"#));
+    h.reply(
+        create.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(h.result(2), Some(&Ok("[\"seen\"]".into())));
+    assert!(!h.has_request("/v5/order/create"));
+}
+
+/// Review 3: on a lost ACK every observer gets one error report, then one
+/// Unknown terminal naming the link.
+#[test]
+fn hyro_lost_ack_reports_to_each_observer_before_its_terminal() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 91, vec![order("BTCUSDT", 1.0)]);
+    place(&mut h, 92, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    for command in [91, 92] {
+        let notices: Vec<_> = h
+            .command_notices
+            .iter()
+            .filter(|(c, _)| *c == command)
+            .map(|(_, notice)| *notice)
+            .collect();
+        assert_eq!(notices, ["error", "done"], "command {command}");
+        let errors: Vec<_> = h
+            .command_errors
+            .iter()
+            .filter(|(c, _)| *c == command)
+            .collect();
+        assert!(errors[0].1.contains(&id));
+        assert_eq!(
+            outcome(&h, command),
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+        assert!(
+            h.result(command)
+                .unwrap()
+                .as_ref()
+                .unwrap_err()
+                .contains(&id)
+        );
+    }
+}
+
+/// A Hyro create refused 10002 is resent once, signed with the clock Bybit
+/// named in the refusal.
+#[test]
+fn hyro_recv_window_refusal_resend_uses_bybit_clock() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    h.reply(create.id, 200, &recv_window_refusal(h.now));
+    // The restored one-time resend signs with Bybit's corrected clock.
+    let resend = h.take("/v5/order/create");
+    assert_eq!(link(&resend), link(&create));
+    assert_eq!(
+        Harness::header(&resend, "X-BAPI-TIMESTAMP"),
+        Some((h.now + 600_000.).floor().to_string())
+    );
+}
+
 /// Bybit has no symbol-addressed cancel: the command is refused before any
 /// I/O instead of finishing without a terminal.
 #[test]
@@ -3237,4 +3542,150 @@ fn cancel_orders_with_symbols_is_refused_not_left_open() {
             "{variant:?}"
         );
     }
+}
+
+/// Review M1 (#2106): a retry whose remaining lot is refused again cannot
+/// report Rejected or NotSent while an earlier call's lot is live on Hyro;
+/// a client would read either as nothing placed and send a replacement.
+#[test]
+fn hyro_retry_refused_beside_a_live_lot_is_never_rejected_or_not_sent() {
+    let mut h = ready(Variant::Hyrotrader);
+    let orders = vec![order("BTCUSDT", 1.0), order("ETHUSDT", 1.0)];
+    place(&mut h, 1, orders.clone());
+    created(&mut h, "live");
+    let refused = h.take("/v5/order/create");
+    let id = link(&refused);
+    h.reply(
+        refused.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    answer_link_reads(&mut h, &id);
+    place(&mut h, 2, orders);
+    answer_link_reads(&mut h, &id);
+    let retry = h.take("/v5/order/create");
+    h.reply(
+        retry.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    answer_link_reads(&mut h, &id);
+    let sealed = outcome(&h, 2);
+    assert!(sealed.is_some(), "the retry has one terminal");
+    assert!(
+        !matches!(
+            sealed,
+            Some(safe_cex_engine::Outcome::Rejected | safe_cex_engine::Outcome::NotSent)
+        ),
+        "lot 0 is live: {sealed:?}"
+    );
+}
+
+/// Review M1 (#2106): the reconnecting refusal of a retry's remaining lot is
+/// not NotSent while an earlier call's lot is live on Hyro.
+#[test]
+fn hyro_retry_while_reconnecting_beside_a_live_lot_is_never_not_sent() {
+    let mut h = ready(Variant::Hyrotrader);
+    let orders = vec![order("BTCUSDT", 1.0), order("ETHUSDT", 1.0)];
+    place(&mut h, 1, orders.clone());
+    created(&mut h, "live");
+    let refused = h.take("/v5/order/create");
+    let id = link(&refused);
+    h.reply(
+        refused.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"insufficient balance"}"#,
+    );
+    answer_link_reads(&mut h, &id);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    place(&mut h, 2, orders);
+    assert!(!h.has_request("/v5/order/create"), "nothing is sent");
+    let sealed = outcome(&h, 2);
+    assert!(sealed.is_some(), "the retry has one terminal");
+    assert_ne!(
+        sealed,
+        Some(safe_cex_engine::Outcome::NotSent),
+        "lot 0 is live"
+    );
+}
+
+/// Review M2 (#2106): an identical caller arriving while the founder's link
+/// reads run waits for the founder and gets its outcome, as legacy waiters did.
+fn reconciling_founder(h: &mut Harness) -> String {
+    place(h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost acknowledgement",
+    });
+    place(h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request(&format!("orderLinkId={id}")),
+        "the founder re-reads"
+    );
+    id
+}
+
+#[test]
+fn hyro_identical_caller_during_reconcile_gets_the_founders_success() {
+    let mut h = ready(Variant::Hyrotrader);
+    let id = reconciling_founder(&mut h);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    assert_eq!(outcome(&h, 3), None, "the waiter is parked, not refused");
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    while h.has_request("/v5/order/history") {
+        h.respond("/v5/order/history", 200, &lookup_row(&id, "Filled"));
+    }
+    assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+    assert_eq!(h.result(3), Some(&Ok("[\"recovered\"]".into())));
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "nothing is sent for the waiter"
+    );
+}
+
+#[test]
+fn hyro_waiter_whose_deadline_fires_first_is_unknown_never_not_sent() {
+    let mut h = ready(Variant::Hyrotrader);
+    reconciling_founder(&mut h);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    h.advance(600_000.0);
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "nothing is sent for the waiter"
+    );
+}
+
+#[test]
+fn hyro_waiter_takes_its_own_founders_outcome_not_a_later_founders() {
+    let mut h = ready(Variant::Hyrotrader);
+    let id = reconciling_founder(&mut h);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    // The founder's reads fail: it seals Unknown and the intent stays.
+    let filter = format!("orderLinkId={id}");
+    while h.has_request(&filter) {
+        h.respond(&filter, 502, "upstream timeout");
+    }
+    assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+    // A later founder of the same intent proves the order; the waiter is unmoved.
+    place(&mut h, 4, vec![order("BTCUSDT", 1.0)]);
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    while h.has_request("/v5/order/history") {
+        h.respond("/v5/order/history", 200, &lookup_row(&id, "Filled"));
+    }
+    assert_eq!(h.result(4), Some(&Ok("[\"recovered\"]".into())));
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(
+        h.done.iter().filter(|(c, _)| *c == 3).count(),
+        1,
+        "one terminal"
+    );
 }

@@ -86,6 +86,7 @@ impl Polymarket {
                 };
                 if let Err((Pending::Book { read, .. }, reason)) = cx.request_managed(
                     read.context.clone(),
+                    None,
                     Method::Get,
                     format!("{}/book?token_id={}", crate::REST, crate::encode(&token)),
                     None,
