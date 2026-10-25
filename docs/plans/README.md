@@ -461,5 +461,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | OKX ordered write ownership | Source GO (dazzy3); exact-head CI green | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |
 
 | Serial Session resend | Originals CLEAR; source review and paired size gates pending | Before a serial call's one authentication resend waits for a login round trip (GRVT code 1000). | [RUST_SERIAL_SESSION_RESEND.md](RUST_SERIAL_SESSION_RESEND.md) |
+| Backpack public and private socket lifecycle | Source/API/native CLEAR; D1 local gates and combined size green; family record/CI pending | Before adopting Backpack feed epochs/interests, native private auth lifecycle, or enabling managed-sockets. | [RUST_BACKPACK_SOCKET_LIFECYCLE.md](RUST_BACKPACK_SOCKET_LIFECYCLE.md) |
 
 | Hyperliquid trading ownership and EIP-712 dispatch | Plan first; 15 frozen entries, actual-agent nonce/setup/pacing gates OPEN | Before adopting the shared trading FIFO, signed /exchange, amendment or journal terminals. | [RUST_HYPERLIQUID_TRADING_CONTEXT.md](RUST_HYPERLIQUID_TRADING_CONTEXT.md) |
