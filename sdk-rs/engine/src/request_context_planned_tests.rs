@@ -10,10 +10,14 @@ mod planned_calls {
     #[derive(Default)]
     struct Plans {
         plan: Option<Plan>,
+        preflight: Option<crate::request_context::Preflight>,
         slot: Option<Slot>,
         long: bool,
         write: bool,
         leg_intent: Option<crate::classify::Intent>,
+        // Issue the first leg as a declared protection cancel (amend commands).
+        protection: bool,
+        amend: bool,
         check_intent_refusals: bool,
         expected_intents: std::collections::VecDeque<crate::classify::Intent>,
         continue_failure: bool,
@@ -38,6 +42,31 @@ mod planned_calls {
         responses: usize,
         timers: usize,
         retired: usize,
+        /// Issue the first leg in admission custody but never queue it.
+        issue_only: bool,
+        unqueued: Option<Context>,
+        /// Park the first Slot on this Session in admission custody.
+        park_on: Option<crate::request_context::Session>,
+        park_token: Option<Context>,
+        park_result: Option<Result<(), Error>>,
+        repark_on: Option<crate::request_context::Session>,
+        /// Park the second parallel Slot on this Session too.
+        park_second: Option<crate::request_context::Session>,
+        /// Issue the second parallel Slot as a leg bound to this Session (#2069).
+        bind_peer_on: Option<crate::request_context::Session>,
+        bound_peer: Option<RequestId>,
+        retire_in_ended: Option<crate::request_context::Session>,
+        retire_in_expired: Option<crate::request_context::Session>,
+        fail_in_ended: bool,
+        /// Park a failed call's retry on this Session in its failure callback.
+        park_retry_on: Option<crate::request_context::Session>,
+        retry_parks: Vec<Result<(), Error>>,
+        repark_retry_on: Option<crate::request_context::Session>,
+        wait_ended: Vec<(Context, VenueError)>,
+        wait_expired: Vec<(Context, VenueError)>,
+        /// Whether the Plan was still registered when a pending came back.
+        expired_while_live: Vec<bool>,
+        inherited: bool,
         // A delivered call reports itself as a complete order read.
         #[cfg(feature = "order-locks")]
         reconcile_reads: bool,
@@ -55,7 +84,7 @@ mod planned_calls {
     ) -> Result<RequestId, (Context, Error)> {
         if signed {
             cx.request_signed_managed(
-                context.clone(),
+                context.clone(), None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -64,7 +93,7 @@ mod planned_calls {
             )
         } else {
             cx.request_managed(
-                context.clone(),
+                context.clone(), None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -105,20 +134,43 @@ mod planned_calls {
             let slots = cx.plan_slots(plan).unwrap();
             if let Some(slot) = slots.into_iter().next() {
                 if self.check_intent_refusals {
-                    let ids = cx.io.next_id;
-                    let actions = cx.io.actions.len();
-                    let storage = cx.io.request_contexts.plan_context_storage();
+                    let ids = cx.io.core.next_id;
+                    let actions = cx.io.core.actions.len();
+                    let storage = cx.io.core.request_contexts.plan_context_storage();
                     let available = cx.plan_slots(plan).unwrap().len();
                     for invalid in [crate::classify::Intent::Read, crate::classify::Intent::Amend] {
                         assert_eq!(cx.plan_leg_context_with_intent(plan, &slot, invalid), Err(Error::Invalid));
-                        assert_eq!(cx.io.next_id, ids);
-                        assert_eq!(cx.io.actions.len(), actions);
-                        assert_eq!(cx.io.request_contexts.plan_context_storage(), storage);
+                        assert_eq!(cx.io.core.next_id, ids);
+                        assert_eq!(cx.io.core.actions.len(), actions);
+                        assert_eq!(cx.io.core.request_contexts.plan_context_storage(), storage);
                         assert_eq!(cx.plan_slots(plan).unwrap().len(), available);
                     }
                 }
 
-                let context = if let Some(intent) = self.leg_intent.take() {
+                let context = if std::mem::take(&mut self.protection) {
+                    let ids = cx.io.core.next_id;
+                    if self.amend {
+                        // The generic narrowing never makes an amend's leg a Cancel.
+                        assert_eq!(
+                            cx.plan_leg_context_with_intent(plan, &slot, crate::classify::Intent::Cancel),
+                            Err(Error::Invalid)
+                        );
+                        assert_eq!(cx.io.core.next_id, ids);
+                    }
+                    let result = cx.plan_protection_cancel_leg_context(plan, &slot);
+                    if !self.amend {
+                        // Only an amend's cancel-then-recreate may declare it.
+                        assert_eq!(result, Err(Error::Invalid));
+                        cx.plan_leg_context(plan, &slot).unwrap()
+                    } else {
+                        let context = result.unwrap();
+                        assert_eq!(
+                            cx.http_write_protection_cancel_leg(&context),
+                            Err(Error::Duplicate)
+                        );
+                        context
+                    }
+                } else if let Some(intent) = self.leg_intent.take() {
                     let result = context_with_intent(cx, plan, &slot, intent);
                     assert!(result.is_ok(), "declared Plan intent must precede journal registration: {result:?}");
                     let context = result.unwrap();
@@ -147,6 +199,10 @@ mod planned_calls {
                     },
                 )
                 .unwrap();
+            self.preflight = Some(owner.clone());
+            if self.inherited {
+                cx.inherit_preflight_uncertainty(&owner).unwrap();
+            }
             let timeout = if self.timeout == 0 {
                 20_000
             } else {
@@ -189,6 +245,7 @@ mod planned_calls {
                     &owner,
                     &steps,
                     PlanPolicy {
+                        independent_calls: false,
                         operation: if self.write {
                             Operation::Mutation
                         } else {
@@ -205,7 +262,49 @@ mod planned_calls {
                 )
                 .unwrap(),
             );
-            if !self.idle {
+            if let Some(session) = self.park_on.clone() {
+                let plan = self.plan.clone().unwrap();
+                let slot = cx.plan_slots(&plan).unwrap().remove(0);
+                let token = cx
+                    .http_context(crate::request_context::Scope::Background, wait_token_policy())
+                    .unwrap();
+                self.park_token = Some(token.clone());
+                self.slot = Some(slot.clone());
+                self.park_result = Some(
+                    cx.plan_session_wait(&plan, &slot, None, &session, token)
+                        .map_err(|(_, error)| error),
+                );
+                if let Some(second) = self.park_second.clone() {
+                    let slot = cx.plan_slots(&plan).unwrap().remove(0);
+                    let token = cx
+                        .http_context(crate::request_context::Scope::Background, wait_token_policy())
+                        .unwrap();
+                    cx.plan_session_wait(&plan, &slot, None, &second, token)
+                        .map_err(|(_, error)| error)
+                        .unwrap();
+                }
+                if let Some(session) = self.bind_peer_on.clone() {
+                    let peer = cx.plan_slots(&plan).unwrap().remove(0);
+                    let context = cx.plan_leg_context(&plan, &peer).unwrap();
+                    self.bound_peer = Some(
+                        cx.request_managed(
+                            context.clone(),
+                            Some(&session),
+                            Method::Get,
+                            "https://venue.test/read".into(),
+                            None,
+                            context,
+                        )
+                        .map_err(|(_, error)| error)
+                        .unwrap(),
+                    );
+                }
+            }
+            if self.issue_only {
+                let plan = self.plan.as_ref().unwrap();
+                let slot = cx.plan_slots(plan).unwrap().remove(0);
+                self.unqueued = Some(cx.plan_leg_context(plan, &slot).unwrap());
+            } else if !self.idle {
                 self.queue(cx);
                 if self.parallel {
                     let plan = self.plan.as_ref().unwrap();
@@ -240,6 +339,18 @@ mod planned_calls {
                     Verdict::Satisfied(SatisfiedIntent::Cancel)
                 } else { Verdict::Unknown(None) });
             }
+            if response.body == "reject" {
+                cx.http_write_result(
+                    &context,
+                    crate::request_context::WriteResult::Rejected(
+                        VenueError::new("order refused").outcome(crate::Outcome::Rejected),
+                    ),
+                )
+                .unwrap();
+                cx.finish_plan_call(&plan, &slot, &context).unwrap();
+                cx.fail_plan(&plan, "order refused").unwrap();
+                return;
+            }
             if response.body == "replace" {
                 cx.http_write_result(
                     &context,
@@ -265,26 +376,26 @@ mod planned_calls {
                     Some(grant.expect("first classified effects-free refusal"))
                 } else { None };
                 if self.check_generic_resend {
-                    let ids = cx.io.next_id;
-                    let actions = cx.io.actions.len();
+                    let ids = cx.io.core.next_id;
+                    let actions = cx.io.core.actions.len();
                     assert_eq!(cx.plan_retry_context(&plan, &slot, &context,
                         crate::request_context::RetryEvidence::DefinitiveRefusal), Err(Error::RetryForbidden));
-                    assert_eq!(cx.io.next_id, ids);
-                    assert_eq!(cx.io.actions.len(), actions);
+                    assert_eq!(cx.io.core.next_id, ids);
+                    assert_eq!(cx.io.core.actions.len(), actions);
                     cx.validate_plan_delivery(&plan, &context).unwrap();
                 }
-                let previous_attempt = cx.io.http_delivery.as_ref().unwrap().attempt.request;
+                let previous_attempt = cx.io.core.http_delivery.as_ref().unwrap().attempt.request;
                 if self.check_generic_resend {
-                    let ids = cx.io.next_id;
-                    let actions = cx.io.actions.len();
+                    let ids = cx.io.core.next_id;
+                    let actions = cx.io.core.actions.len();
                     assert_eq!(cx.plan_resend_context(&plan, &slot, &context,
                         crate::request_context::ResendGrant { attempt: RequestId(u64::MAX) }), Err(Error::Revoked));
                     if let Some(foreign) = &self.wrong_resend_slot {
                         assert_eq!(cx.plan_resend_context(&plan, foreign, &context,
                             crate::request_context::ResendGrant { attempt: previous_attempt }), Err(Error::Revoked));
                     }
-                    assert_eq!(cx.io.next_id, ids);
-                    assert_eq!(cx.io.actions.len(), actions);
+                    assert_eq!(cx.io.core.next_id, ids);
+                    assert_eq!(cx.io.core.actions.len(), actions);
                     cx.validate_plan_delivery(&plan, &context).unwrap();
                 }
                 let context = if let Some(grant) = grant {
@@ -296,16 +407,16 @@ mod planned_calls {
                 if self.check_generic_resend {
                     // Replaying the prior opaque grant cannot select another
                     // retry or consume additional reserved attempt identities.
-                    let ids = cx.io.next_id;
-                    let actions = cx.io.actions.len();
+                    let ids = cx.io.core.next_id;
+                    let actions = cx.io.core.actions.len();
                     assert_eq!(cx.plan_resend_context(&plan, &slot, &context,
                         crate::request_context::ResendGrant { attempt: previous_attempt }), Err(Error::Revoked));
-                    assert_eq!(cx.io.next_id, ids);
-                    assert_eq!(cx.io.actions.len(), actions);
+                    assert_eq!(cx.io.core.next_id, ids);
+                    assert_eq!(cx.io.core.actions.len(), actions);
                 }
                 if self.bad_retry {
                     let result = cx.request_signed_managed(
-                        context.clone(),
+                        context.clone(), None,
                         Method::Post,
                         "https://venue.test/write".into(),
                         None,
@@ -321,10 +432,10 @@ mod planned_calls {
             self.responses += 1;
             if self.early_read {
                 if self.early_checks {
-                    let snapshot = (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage());
-                    let delivery = cx.io.http_delivery.take();
+                    let snapshot = (cx.io.core.next_id, cx.io.core.actions.len(), cx.io.core.request_contexts.plan_context_storage());
+                    let delivery = cx.io.core.http_delivery.take();
                     assert_eq!(complete_native_early_read(cx, &plan, &slot, &context), Err(Error::Revoked));
-                    cx.io.http_delivery = delivery;
+                    cx.io.core.http_delivery = delivery;
                     let now = cx.now;
                     for expired in [20_000., plan.deadline()] {
                         cx.now = expired;
@@ -335,14 +446,14 @@ mod planned_calls {
                     assert_eq!(complete_native_early_read(cx, other, &slot, &context), Err(Error::Revoked));
                     let other_slot = self.wrong_resend_slot.as_ref().unwrap();
                     assert_eq!(complete_native_early_read(cx, &plan, other_slot, &context), Err(Error::Revoked));
-                    assert_eq!(snapshot, (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage()));
+                    assert_eq!(snapshot, (cx.io.core.next_id, cx.io.core.actions.len(), cx.io.core.request_contexts.plan_context_storage()));
                     cx.validate_plan_delivery(&plan, &context).unwrap();
                 }
                 if self.settle_before_early { cx.finish_plan_call(&plan, &slot, &context).unwrap(); }
-                let snapshot = (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage());
+                let snapshot = (cx.io.core.next_id, cx.io.core.actions.len(), cx.io.core.request_contexts.plan_context_storage());
                 let result = complete_native_early_read(cx, &plan, &slot, &context);
                 if result.is_err() {
-                    assert_eq!(snapshot, (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage()));
+                    assert_eq!(snapshot, (cx.io.core.next_id, cx.io.core.actions.len(), cx.io.core.request_contexts.plan_context_storage()));
                     if !self.settle_before_early { cx.validate_plan_delivery(&plan, &context).unwrap(); }
                 } else {
                     self.early_replayed = Some(complete_native_early_read(cx, &plan, &slot, &context));
@@ -379,16 +490,79 @@ mod planned_calls {
                 self.queue(cx)
             }
         }
+        fn on_plan_session_wait_ended(
+            &mut self,
+            cx: &mut Cx<'_, Context>,
+            plan: &Plan,
+            pending: Context,
+            error: VenueError,
+        ) {
+            self.wait_ended.push((pending.clone(), error));
+            if std::mem::take(&mut self.fail_in_ended) {
+                cx.fail_plan(plan, "venue gave up after login failed").unwrap();
+                return;
+            }
+            if let Some(session) = self.repark_retry_on.take() {
+                let slot = self.slot.clone().unwrap();
+                cx.plan_retry_session_wait(
+                    plan,
+                    &slot,
+                    &pending,
+                    crate::request_context::RetryEvidence::ReadFailure,
+                    &session,
+                    pending.clone(),
+                )
+                .map_err(|(_, error)| error)
+                .unwrap();
+                return;
+            }
+            if let Some(session) = self.retire_in_ended.take() {
+                assert!(cx.retire_session(&session).unwrap().is_empty());
+            }
+            if let Some(session) = self.repark_on.take() {
+                let slot = cx.plan_slots(plan).unwrap().remove(0);
+                cx.plan_session_wait(plan, &slot, None, &session, pending)
+                    .map_err(|(_, error)| error)
+                    .unwrap();
+            }
+        }
+        fn on_session_wait_expired(&mut self, cx: &mut Cx<'_, Context>, pending: Context, error: VenueError) {
+            let live = self
+                .plan
+                .as_ref()
+                .is_some_and(|plan| cx.io.core.request_contexts.plan_registered(plan));
+            self.expired_while_live.push(live);
+            self.wait_expired.push((pending, error));
+            if let Some(session) = self.retire_in_expired.take() {
+                assert!(cx.retire_session(&session).unwrap().is_empty());
+            }
+        }
         fn on_http_owner_retired(&mut self, _: &crate::request_context::HttpOwnerRetirement) {
             self.retired += 1
         }
         fn on_request_failed(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: &str) {
+            if let Some(session) = self.park_retry_on.clone() {
+                let plan = self.plan.clone().unwrap();
+                let slot = self.slot.clone().unwrap();
+                self.retry_parks.push(
+                    cx.plan_retry_session_wait(
+                        &plan,
+                        &slot,
+                        &context,
+                        crate::request_context::RetryEvidence::ReadFailure,
+                        &session,
+                        context.clone(),
+                    )
+                    .map_err(|(_, error)| error),
+                );
+                return;
+            }
             if self.early_read {
                 let plan = self.plan.as_ref().unwrap();
                 let slot = self.slot.as_ref().unwrap();
-                let before = (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage());
+                let before = (cx.io.core.next_id, cx.io.core.actions.len(), cx.io.core.request_contexts.plan_context_storage());
                 self.early_result = Some(complete_native_early_read(cx, plan, slot, &context));
-                assert_eq!(before, (cx.io.next_id, cx.io.actions.len(), cx.io.request_contexts.plan_context_storage()));
+                assert_eq!(before, (cx.io.core.next_id, cx.io.core.actions.len(), cx.io.core.request_contexts.plan_context_storage()));
             }
             if self.continue_failure {
                 let plan = self.plan.as_ref().unwrap();
@@ -405,8 +579,8 @@ mod planned_calls {
             crate::request_context::ReconciliationData::new("plan-native".into())
         }
         fn on_http_plan_ready(&mut self, cx: &mut Cx<'_, Context>, plan: &Plan) {
-            assert!(cx.io.http_delivery.is_none());
-            assert!(cx.io.request_contexts.plan_scope_clear());
+            assert!(cx.io.core.http_delivery.is_none());
+            assert!(cx.io.core.request_contexts.plan_scope_clear());
             assert!(self.plan.as_ref().unwrap().same_plan(plan));
             self.readiness += 1;
             assert!(!self.panic_ready, "native readiness panic control");
@@ -451,7 +625,7 @@ mod planned_calls {
         });
         start(&mut e, 0.);
         let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
-        let reserved = e.io.next_id;
+        let reserved = e.io.core.next_id;
         release(&mut e, first, 0.);
         response(&mut e, first, 19_000., "current-settings");
         let actions = e.drain_actions().collect::<Vec<_>>();
@@ -459,10 +633,10 @@ mod planned_calls {
         assert_eq!(e.venue.responses, 1);
         assert_eq!(e.venue.early_replayed, Some(Err(Error::Revoked)));
         assert_eq!(e.venue.retired, 1);
-        assert_eq!(e.io.next_id, reserved);
-        assert_eq!(e.io.request_contexts.plan_context_storage().0, 0);
-        assert_eq!(e.io.request_contexts.plan_context_storage().2, 0);
-        assert!(e.io.request_contexts.plan_timer(7).is_none());
+        assert_eq!(e.io.core.next_id, reserved);
+        assert_eq!(e.io.core.request_contexts.plan_context_storage().0, 0);
+        assert_eq!(e.io.core.request_contexts.plan_context_storage().2, 0);
+        assert!(e.io.core.request_contexts.plan_timer(7).is_none());
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result }) if result == "current-settings")).count(), 1);
         assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))));
         response(&mut e, first, 19_001., "late");
@@ -505,7 +679,7 @@ mod planned_calls {
             response(&mut e, first, 19_000., "ok");
             assert_eq!(e.venue.early_result, Some(Err(expected)));
             assert_eq!(e.venue.retired, 0);
-            assert!(e.io.request_contexts.plan_timer(7).is_some());
+            assert!(e.io.core.request_contexts.plan_timer(7).is_some());
             assert!(!e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))));
         }
     }
@@ -522,7 +696,7 @@ mod planned_calls {
         assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))));
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))).count(), 1);
         assert_eq!(e.venue.retired, 1);
-        assert_eq!(e.io.request_contexts.plan_context_storage().2, 0);
+        assert_eq!(e.io.core.request_contexts.plan_context_storage().2, 0);
     }
     #[test]
     fn early_read_after_fresh_read_retry_retains_original_plan_bound() {
@@ -540,7 +714,7 @@ mod planned_calls {
         assert_eq!(e.venue.early_result, Some(Ok(())));
         assert_eq!(e.venue.retired, 1);
         assert_eq!(plan.deadline(), 80_000.);
-        assert_eq!(e.io.request_contexts.plan_context_storage().2, 0);
+        assert_eq!(e.io.core.request_contexts.plan_context_storage().2, 0);
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))).count(), 1);
         assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))));
@@ -550,27 +724,29 @@ mod planned_calls {
         let mut e = crate::test_support::seeded_engine(Plans { idle: true, ..Default::default() });
         start(&mut e, 0.);
         let old = e.venue.plan.clone().unwrap();
-        let timer = e.io.request_contexts.plan_timer(7).unwrap();
-        assert!(e.io.request_contexts.has_plans());
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
+        assert!(e.io.core.request_contexts.has_plans());
         Cx { now: 0., store: &mut e.store, io: &mut e.io }.fail_plan(&old, "cancelled").unwrap();
-        assert!(!e.io.request_contexts.has_plans());
+        assert!(!e.io.core.request_contexts.has_plans());
         e.drain_actions().for_each(drop);
-        let before = e.io.request_contexts.plan_scan_visits();
+        let before = e.io.core.request_contexts.plan_scan_visits();
         e.handle(1., Event::TimerFired { timer });
         e.drain_actions().for_each(drop);
-        assert_eq!(e.io.request_contexts.plan_scan_visits(), before);
+        assert_eq!(e.io.core.request_contexts.plan_scan_visits(), before);
         start(&mut e, 2.);
         let new = e.venue.plan.clone().unwrap();
         assert_ne!(new.owner(), old.owner());
-        assert!(e.io.request_contexts.has_plans());
+        assert!(e.io.core.request_contexts.has_plans());
         e.drain_actions().for_each(drop);
         e.handle(3., Event::TimerFired { timer });
         assert_eq!(e.venue.retired, 1, "stale Plan timer cannot retire the new generation");
-        assert!(e.io.request_contexts.has_plans());
+        assert!(e.io.core.request_contexts.has_plans());
     }
     fn start(engine: &mut Engine<Plans>, now: f64) {
         engine.start(now);
-        let command = if engine.venue.write {
+        let command = if engine.venue.amend {
+            Command::AmendOrder { command: 7, id: "old".into(), price: Some(1.), amount: None }
+        } else if engine.venue.write {
             Command::Venue { command: 7, action: VenueAction::FetchBalanceInfo }
         } else {
             Command::FetchCandles { command: 7, symbol: "BTCUSD".into(),
@@ -671,7 +847,7 @@ mod planned_calls {
         response(&mut e, first, 1_500., "ok");
         e.drain_actions().for_each(drop);
         assert_eq!(e.venue.responses, 1);
-        e.io.order_locks.fence(Some(&["BTCUSD".into()]));
+        e.io.core.order_locks.fence(Some(&["BTCUSD".into()]));
         Cx { now: 1_600., store: &mut e.store, io: &mut e.io }
             .http_context(
                 crate::request_context::Scope::Background,
@@ -690,7 +866,7 @@ mod planned_calls {
         response(&mut e, second, 3_000., "ok");
         assert_eq!(e.venue.responses, 2);
         assert!(
-            e.io.order_locks.uncertain("BTCUSD"),
+            e.io.core.order_locks.uncertain("BTCUSD"),
             "the Plan's first call predates the fence"
         );
     }
@@ -704,7 +880,7 @@ mod planned_calls {
         let mut actions = e.drain_actions().collect::<Vec<_>>();
         let plan = e.venue.plan.clone().unwrap();
         assert_eq!(plan.deadline(), 320_000.);
-        let reserved = e.io.next_id;
+        let reserved = e.io.core.next_id;
         for index in 0..8 {
             let now = f64::from(index) * 38_000.;
             let (first, packet) = prepared(&actions);
@@ -718,7 +894,7 @@ mod planned_calls {
             response(&mut e, second, now + 38_000., "ok");
             actions = e.drain_actions().collect();
             assert_eq!(
-                e.io.next_id, reserved,
+                e.io.core.next_id, reserved,
                 "all IDs were admitted before the first physical call"
             );
         }
@@ -729,7 +905,7 @@ mod planned_calls {
                 .iter()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
         );
-        assert!(e.io.request_contexts.plan_timer(7).is_none());
+        assert!(e.io.core.request_contexts.plan_timer(7).is_none());
     }
     #[test]
     fn plan_root_timer_seals_unissued_calls_without_leaking_a_native_timer() {
@@ -753,7 +929,7 @@ mod planned_calls {
         let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(e.venue.timers, 0, "root timer is engine owned");
         assert_eq!(e.venue.retired, 1);
-        assert!(e.io.request_contexts.plan_timer(7).is_none());
+        assert!(e.io.core.request_contexts.plan_timer(7).is_none());
         assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.kind == Some(ErrorKind::Timeout))));
     }
     #[test]
@@ -793,7 +969,7 @@ mod planned_calls {
             });
             start(&mut e, 0.);
             let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
-            let timer = e.io.managed_http[&first.attempt().request].timer;
+            let timer = e.io.core.managed_http[&first.attempt().request].timer;
             release(&mut e, first, 0.);
             e.handle(20_000., Event::TimerFired { timer });
             let mut actions = e.drain_actions().collect::<Vec<_>>();
@@ -888,14 +1064,14 @@ mod planned_calls {
                 generation: 999,
             },
         };
-        e.io.request_contexts.enter_delivery(&delivery);
+        e.io.core.request_contexts.enter_delivery(&delivery);
         assert!(
-            e.io.http_delivery.is_none(),
+            e.io.core.http_delivery.is_none(),
             "temporary marker removal during deferred work"
         );
         e.flush_http_plans(1_000.);
         assert_eq!(e.venue.readiness, 0);
-        e.io.request_contexts.exit_delivery(&delivery);
+        e.io.core.request_contexts.exit_delivery(&delivery);
         e.flush_http_plans(1_000.);
         assert_eq!(e.venue.readiness, 1);
         prepared(&e.drain_actions().collect::<Vec<_>>());
@@ -949,15 +1125,15 @@ mod planned_calls {
                 )
                 .unwrap();
             if io_short {
-                cx.io.next_id = crate::resource_ids::ResourceIds::starting_at(
+                cx.io.core.next_id = crate::resource_ids::ResourceIds::starting_at(
                     crate::resource_ids::MAX_RESOURCE_ID - 6,
                 );
             } else {
                 cx.io
-                    .signing
+                    .core.signing
                     .set_test_ids(crate::resource_ids::ResourceIds::with_ceiling(1));
             }
-            let before = cx.io.next_id;
+            let before = cx.io.core.next_id;
             let calls = [CallBound {
                 timeout_ms: 20_000,
                 attempts: 2,
@@ -969,6 +1145,7 @@ mod planned_calls {
                 calls: &calls,
             }];
             let policy = PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Mutation,
                 credential: Some(credential()),
                 pacing: None,
@@ -978,10 +1155,10 @@ mod planned_calls {
                 cx.admit_plan(&preflight, &steps, policy.clone()),
                 Err(Error::Capacity)
             ));
-            assert_eq!(cx.io.next_id, before);
-            assert_eq!(cx.io.request_contexts.plan_context_storage().2, 0);
-            assert!(!cx.io.request_contexts.has_plans(), "refused admission cannot enter the index");
-            assert!(cx.io.actions.is_empty());
+            assert_eq!(cx.io.core.next_id, before);
+            assert_eq!(cx.io.core.request_contexts.plan_context_storage().2, 0);
+            assert!(!cx.io.core.request_contexts.has_plans(), "refused admission cannot enter the index");
+            assert!(cx.io.core.actions.is_empty());
             let calls = [CallBound {
                 attempts: 1,
                 ..calls[0]
@@ -994,7 +1171,7 @@ mod planned_calls {
             let slot = cx.plan_slots(&plan).unwrap().remove(0);
             let context = cx.plan_leg_context(&plan, &slot).unwrap();
             queue(&mut cx, context, true).unwrap();
-            assert_eq!(cx.io.request_contexts.plan_context_storage().2, 0);
+            assert_eq!(cx.io.core.request_contexts.plan_context_storage().2, 0);
         }
     }
     #[test]
@@ -1032,6 +1209,7 @@ mod planned_calls {
                 &preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Read,
                     credential: None,
                     pacing: None,
@@ -1053,16 +1231,16 @@ mod planned_calls {
             cx.http_context(Scope::Background, policy.clone()),
             Err(Error::Capacity)
         ));
-        let (_, capacity, credits) = cx.io.request_contexts.plan_context_storage();
+        let (_, capacity, credits) = cx.io.core.request_contexts.plan_context_storage();
         assert_eq!(credits, 80);
-        let ids = cx.io.next_id;
+        let ids = cx.io.core.next_id;
         for slot in cx.plan_slots(&plan).unwrap() {
             cx.plan_leg_context(&plan, &slot).unwrap();
-            assert_eq!(cx.io.request_contexts.plan_context_storage().1, capacity);
+            assert_eq!(cx.io.core.request_contexts.plan_context_storage().1, capacity);
         }
-        assert_eq!(cx.io.next_id, ids);
+        assert_eq!(cx.io.core.next_id, ids);
         assert_eq!(
-            cx.io.request_contexts.plan_context_storage(),
+            cx.io.core.request_contexts.plan_context_storage(),
             (256, capacity, 0)
         );
         cx.fail_plan(&plan, "cancelled").unwrap();
@@ -1111,14 +1289,14 @@ mod planned_calls {
                 },
             )
             .unwrap();
-        let ids = cx.io.next_id;
+        let ids = cx.io.core.next_id;
         cx.done_empty_plan(&preflight, "[]".into()).unwrap();
-        assert_eq!(cx.io.next_id, ids);
-        assert!(cx.io.managed_http.is_empty());
-        assert_eq!(cx.io.request_contexts.plan_context_storage().0, 0);
+        assert_eq!(cx.io.core.next_id, ids);
+        assert!(cx.io.core.managed_http.is_empty());
+        assert_eq!(cx.io.core.request_contexts.plan_context_storage().0, 0);
         assert!(
             !cx.io
-                .actions
+                .core.actions
                 .iter()
                 .any(|a| matches!(a, Action::SetTimer { .. } | Action::ManagedHttp(_)))
         );
@@ -1163,6 +1341,7 @@ mod planned_calls {
                 &owner,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Read,
                     credential: None,
                     pacing: None,
@@ -1170,7 +1349,7 @@ mod planned_calls {
                 },
             )
             .unwrap();
-        cx.io.request_contexts.end_plan_admission();
+        cx.io.core.request_contexts.end_plan_admission();
         let mut cx = Cx {
             now: 1_000.,
             store: &mut e.store,
@@ -1181,15 +1360,15 @@ mod planned_calls {
             matches!(cx.plan_leg_context(&other, &slot), Err(Error::Revoked)),
             "unrelated callback cannot reuse initial None handoff"
         );
-        cx.io.http_plan_ready = Some(e.venue.plan.as_ref().unwrap().clone());
+        cx.io.core.http_plan_ready = Some(e.venue.plan.as_ref().unwrap().clone());
         assert!(
             matches!(cx.plan_leg_context(&other, &slot), Err(Error::Revoked)),
             "different Plan readiness grants no custody"
         );
-        cx.io.http_plan_ready = Some(other.clone());
+        cx.io.core.http_plan_ready = Some(other.clone());
         let context = cx.plan_leg_context(&other, &slot).unwrap();
         queue(&mut cx, context, false).unwrap();
-        cx.io.http_plan_ready = None;
+        cx.io.core.http_plan_ready = None;
     }
     #[test]
     fn caught_readiness_panic_fences_venue_queries_signers_permits_and_drain() {
@@ -1289,6 +1468,34 @@ mod planned_calls {
             Action::Notice(Notice::CommandDone { command: 7, .. }))));
     }
     #[test]
+    fn plan_declares_a_protection_cancel_leg_before_registration_only_for_amends() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            write: true, amend: true, protection: true,
+            expected_intents: [crate::classify::Intent::Cancel, crate::classify::Intent::Amend].into(),
+            ..Default::default()
+        });
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        response(&mut e, first, 1., "ok");
+        let (second, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, second, 1.);
+        response(&mut e, second, 2., "ok");
+        assert!(e.venue.expected_intents.is_empty());
+        assert_eq!(e.venue.responses, 2);
+        // A placement can never declare one; its leg keeps the command intent.
+        let mut place = crate::test_support::seeded_engine(Plans {
+            write: true, protection: true,
+            expected_intents: [crate::classify::Intent::Place].into(),
+            ..Default::default()
+        });
+        start(&mut place, 0.);
+        let (first, _) = prepared(&place.drain_actions().collect::<Vec<_>>());
+        release(&mut place, first, 0.);
+        response(&mut place, first, 1., "ok");
+        assert!(place.venue.expected_intents.is_empty());
+    }
+    #[test]
     fn generic_plan_retry_refuses_a_real_classified_write_grant() {
         let mut e = crate::test_support::seeded_engine(Plans {
             write: true, check_generic_resend: true, ..Default::default()
@@ -1349,15 +1556,15 @@ mod planned_calls {
             store: &mut second.store,
             io: &mut second.io,
         };
-        let before = cx.io.next_id;
+        let before = cx.io.core.next_id;
         assert!(matches!(cx.plan_slots(&a), Err(Error::Revoked)));
-        cx.io.http_plan_ready = Some(b.clone());
+        cx.io.core.http_plan_ready = Some(b.clone());
         assert!(matches!(
             cx.plan_leg_context(&b, &a_slot),
             Err(Error::Revoked)
         ));
-        cx.io.http_plan_ready = None;
-        assert_eq!(cx.io.next_id, before);
+        cx.io.core.http_plan_ready = None;
+        assert_eq!(cx.io.core.next_id, before);
         cx.fail_plan(&b, "aborted").unwrap();
         second.drain_actions().for_each(drop);
         let mut cx = Cx {
@@ -1393,15 +1600,531 @@ mod planned_calls {
             store: &mut e.store,
             io: &mut e.io,
         };
-        let ids = cx.io.next_id;
-        let storage = cx.io.request_contexts.plan_context_storage();
-        let actions = cx.io.actions.len();
+        let ids = cx.io.core.next_id;
+        let storage = cx.io.core.request_contexts.plan_context_storage();
+        let actions = cx.io.core.actions.len();
         assert_eq!(cx.done_plan(&plan, "optimistic".into()), Err(Error::State));
-        assert_eq!(cx.io.next_id, ids);
-        assert_eq!(cx.io.request_contexts.plan_context_storage(), storage);
-        assert_eq!(cx.io.actions.len(), actions);
+        assert_eq!(cx.io.core.next_id, ids);
+        assert_eq!(cx.io.core.request_contexts.plan_context_storage(), storage);
+        assert_eq!(cx.io.core.actions.len(), actions);
         cx.fail_plan(&plan, "explicit failure").unwrap();
         e.drain_actions().for_each(drop);
         assert_eq!(e.venue.retired, 1);
+    }
+
+    fn plan_wait_fixture(issue_only: bool) -> (Engine<Plans>, Plan, crate::request_context::Session) {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            idle: true,
+            issue_only,
+            ..Default::default()
+        });
+        start(&mut e, 0.);
+        let plan = e.venue.plan.clone().unwrap();
+        let session = Cx { now: 0., store: &mut e.store, io: &mut e.io }
+            .open_session(crate::request_context::SessionPolicy {
+                credential: None,
+                repeat_safe: true,
+                private_egress: None,
+            })
+            .unwrap();
+        e.drain_actions().for_each(drop);
+        (e, plan, session)
+    }
+    /// Control (RUST_PLAN_SESSION_WAIT C1): a Plan leg cannot park on a Session.
+    #[test]
+    fn a_plan_leg_cannot_park_on_a_session_today() {
+        let (mut e, _, session) = plan_wait_fixture(true);
+        let leg = e.venue.unqueued.clone().unwrap();
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        let (ids, timers) = (cx.io.core.next_id, cx.io.core.timers.len());
+        let refused = cx.session_wait(&session, &leg, leg.clone());
+        assert_eq!(refused.map_err(|(_, error)| error), Err(Error::State));
+        assert_eq!((cx.io.core.next_id, cx.io.core.timers.len()), (ids, timers));
+        assert!(cx.session_ready(&session).is_empty(), "no wait was held");
+    }
+    /// Control (C3): a session_ready drain outside Plan custody cannot issue
+    /// the eligible Slot itself.
+    #[test]
+    fn a_session_drain_outside_plan_custody_cannot_issue_a_leg() {
+        let (mut e, plan, session) = plan_wait_fixture(false);
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        assert!(cx.session_ready(&session).is_empty());
+        let slot = cx.plan_slots(&plan).unwrap().remove(0);
+        assert_eq!(cx.plan_leg_context(&plan, &slot), Err(Error::Revoked));
+    }
+    /// Control (C4): a leg issued before a login wait longer than its logical
+    /// window cannot be queued after it, so the wait must precede issue.
+    #[test]
+    fn a_plan_leg_issued_before_a_long_wait_has_expired_when_login_returns() {
+        let (e, plan, _) = plan_wait_fixture(true);
+        let leg = e.venue.unqueued.clone().unwrap();
+        let after_login = leg.deadline() + 1.;
+        assert!(after_login < plan.deadline(), "the Plan root outlives the leg window");
+        // The issued leg's own logical window has lapsed; no custody can revive it.
+        assert_eq!(e.io.core.request_contexts.validate(&leg, after_login), Err(Error::TimedOut));
+    }
+    fn wait_token_policy() -> Policy {
+        Policy {
+            operation: Operation::Read,
+            credential: None,
+            timeout_ms: 1_000_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }
+    }
+    fn open(e: &mut Engine<Plans>, now: f64) -> crate::request_context::Session {
+        Cx { now, store: &mut e.store, io: &mut e.io }
+            .open_session(crate::request_context::SessionPolicy {
+                credential: None,
+                repeat_safe: true,
+                private_egress: None,
+            })
+            .unwrap()
+    }
+    fn parked(now: f64) -> (Engine<Plans>, Plan, crate::request_context::Session) {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, ..Default::default() });
+        e.start(0.);
+        let session = open(&mut e, 0.);
+        e.venue.park_on = Some(session.clone());
+        start(&mut e, now);
+        assert_eq!(e.venue.park_result, Some(Ok(())), "the eligible Slot parks in admission custody");
+        let plan = e.venue.plan.clone().unwrap();
+        (e, plan, session)
+    }
+    fn prepares(actions: &[Action]) -> usize {
+        actions.iter().filter(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))).count()
+    }
+    fn flush(e: &mut Engine<Plans>, now: f64) -> Vec<Action> {
+        e.handle(now, Event::TimerFired { timer: TimerId(u64::MAX - 1) });
+        e.drain_actions().collect()
+    }
+
+    /// N1: a parked Slot spends nothing; session_ready issues one fresh leg under
+    /// the same Plan root, queued in the drain, with one HTTP.
+    #[test]
+    fn a_parked_slot_resumes_as_a_fresh_leg_under_its_original_root() {
+        let (mut e, plan, session) = parked(0.);
+        let token = e.venue.park_token.clone().unwrap();
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(prepares(&actions), 0, "nothing is issued while parked");
+        let mut cx = Cx { now: 30_000., store: &mut e.store, io: &mut e.io };
+        assert!(cx.plan_slots(&plan).unwrap().is_empty(), "a parked Slot is reserved");
+        let waiters = cx.session_ready(&session);
+        assert_eq!(waiters.len(), 1);
+        let crate::request_context::Waiter::Ready(leg, pending) = waiters.into_iter().next().unwrap() else {
+            panic!("a live Plan resumes Ready");
+        };
+        assert_eq!(pending, token);
+        assert_eq!(leg.owner(), plan.owner(), "the original Plan root");
+        assert!(leg.deadline() > 30_000. + 20_000. - 1., "the window starts at resume");
+        assert!(leg.deadline() <= plan.deadline());
+        queue(&mut cx, leg, false).unwrap();
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(prepares(&actions), 1, "exactly one HTTP");
+    }
+
+    /// N3: Plan root expiry while parked: one Timeout terminal, the pending comes
+    /// back once through on_session_wait_expired, and nothing is sent.
+    #[test]
+    fn a_parked_slot_expires_with_its_plan_and_returns_its_pending_once() {
+        let (mut e, plan, _) = parked(0.);
+        let token = e.venue.park_token.clone().unwrap();
+        e.drain_actions().for_each(drop);
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
+        e.handle(plan.deadline(), Event::TimerFired { timer });
+        // The Plan timer event alone returns the pending: no follow-up event.
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(prepares(&actions), 0);
+        let failed = actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))).count();
+        assert_eq!(failed, 1, "one Plan terminal");
+        assert_eq!(e.venue.wait_expired.len(), 1, "the pending is returned once");
+        assert_eq!(e.venue.wait_expired[0].0, token);
+        assert_eq!(e.venue.expired_while_live, [false], "the Plan terminal comes first");
+        let error = &e.venue.wait_expired[0].1;
+        assert_eq!((error.kind, error.outcome), (Some(ErrorKind::Timeout), Some(crate::Outcome::NotSent)));
+        assert!(e.venue.wait_ended.is_empty());
+    }
+
+    /// N4b: retire the old Session and open its replacement outside any readiness
+    /// scope; the ended callback re-parks on the new Session in ready custody,
+    /// whose login then resumes the leg.
+    #[test]
+    fn a_retired_session_ends_the_wait_in_ready_custody_for_a_repark() {
+        let (mut e, plan, old) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let replacement = open(&mut e, 1.);
+        e.venue.repark_on = Some(replacement.clone());
+        let returned = Cx { now: 1., store: &mut e.store, io: &mut e.io }
+            .retire_session(&old)
+            .unwrap();
+        assert!(returned.is_empty(), "a parked Slot is not a plain owner waiter");
+        let actions = flush(&mut e, 2.);
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(e.venue.wait_ended.len(), 1, "ended once, in ready custody");
+        assert_eq!(e.venue.wait_ended[0].1.outcome, Some(crate::Outcome::NotSent));
+        assert!(e.venue.wait_expired.is_empty());
+        let mut cx = Cx { now: 3., store: &mut e.store, io: &mut e.io };
+        let waiters = cx.session_ready(&replacement);
+        let Some(crate::request_context::Waiter::Ready(leg, _)) = waiters.into_iter().next() else {
+            panic!("the re-parked Slot resumes on the new Session");
+        };
+        assert_eq!(leg.owner(), plan.owner());
+    }
+
+    /// #1896 readiness owns the callback like Plan readiness does: the flush
+    /// holds an ended wait until that custody exits, then delivers it once.
+    #[test]
+    fn an_ended_wait_waits_out_preflight_readiness_custody() {
+        let (mut e, _, old) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&old).unwrap();
+        e.io.core.http_preflight_ready = e.venue.preflight.clone();
+        assert!(e.io.core.http_preflight_ready.is_some());
+        e.flush_plan_session_waits(2.);
+        assert!(e.venue.wait_ended.is_empty() && e.venue.wait_expired.is_empty());
+        e.io.core.http_preflight_ready = None;
+        e.flush_plan_session_waits(3.);
+        assert_eq!(e.venue.wait_ended.len(), 1);
+    }
+
+    /// N6: parking needs Plan custody, an unparked Slot and a live Session, and
+    /// every refusal spends nothing.
+    #[test]
+    fn plan_session_wait_refusals_spend_nothing() {
+        let (mut e, plan, session) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let token = e.venue.park_token.clone().unwrap();
+        let slot = e.venue.slot.clone().unwrap();
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        let retired = cx.open_session(crate::request_context::SessionPolicy { credential: None, repeat_safe: true, private_egress: None }).unwrap();
+        let _ = cx.retire_session(&retired).unwrap();
+        let before = (cx.io.core.next_id, cx.io.core.timers.len());
+        let again = cx.plan_session_wait(&plan, &slot, None, &session, token.clone());
+        assert_eq!(again.map_err(|(_, error)| error), Err(Error::Revoked), "already parked, and no custody");
+        let stale = cx.plan_session_wait(&plan, &slot, None, &retired, token);
+        assert_eq!(stale.map_err(|(_, error)| error), Err(Error::Revoked));
+        assert!(cx.io.core.next_id == before.0 && cx.io.core.timers.len() == before.1, "refusals spend nothing");
+    }
+
+    /// N8: the venue fails the Plan while a Slot is parked; one terminal, no
+    /// ended callback, and the pending comes back once.
+    #[test]
+    fn a_sealed_plan_returns_its_parked_pending_once_without_custody() {
+        let (mut e, plan, _) = parked(0.);
+        let token = e.venue.park_token.clone().unwrap();
+        e.drain_actions().for_each(drop);
+        Cx { now: 1., store: &mut e.store, io: &mut e.io }
+            .fail_plan(&plan, "venue gave up")
+            .unwrap();
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        actions.extend(flush(&mut e, 2.));
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))).count(), 1);
+        assert!(e.venue.wait_ended.is_empty());
+        assert_eq!(e.venue.wait_expired.len(), 1);
+        assert_eq!(e.venue.wait_expired[0].0, token);
+        let error = &e.venue.wait_expired[0].1;
+        assert_eq!((error.kind, error.outcome), (Some(ErrorKind::InvalidInput), Some(crate::Outcome::NotSent)));
+    }
+
+    /// Storage reserved at park survives a flush: park, retire, flush, re-park,
+    /// retire again, and the ended queue never needs to grow.
+    #[test]
+    fn ended_wait_storage_survives_a_flush() {
+        let (mut e, _, old) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let replacement = open(&mut e, 1.);
+        e.venue.repark_on = Some(replacement.clone());
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&old).unwrap();
+        flush(&mut e, 2.);
+        assert_eq!(e.venue.wait_ended.len(), 1);
+        let reserved = e.io.session_waits.ended_capacity();
+        assert!(reserved >= 1, "the flush kept the reserved buffer");
+        let _ = Cx { now: 3., store: &mut e.store, io: &mut e.io }.retire_session(&replacement).unwrap();
+        assert_eq!(e.io.session_waits.ended_capacity(), reserved, "no growth in the drain path");
+        flush(&mut e, 4.);
+        assert_eq!(e.venue.wait_ended.len(), 2);
+    }
+
+    /// A no-custody callback inside the flush that retires another Session is
+    /// served in the same flush, not stranded until an unrelated event.
+    #[test]
+    fn a_wait_ended_inside_the_flush_is_delivered_in_the_same_flush() {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, parallel: true, ..Default::default() });
+        e.start(0.);
+        let first = open(&mut e, 0.);
+        let second = open(&mut e, 0.);
+        e.venue.park_on = Some(first);
+        e.venue.park_second = Some(second.clone());
+        e.venue.retire_in_expired = Some(second);
+        start(&mut e, 0.);
+        assert_eq!(e.venue.park_result, Some(Ok(())));
+        e.drain_actions().for_each(drop);
+        let plan = e.venue.plan.clone().unwrap();
+        Cx { now: 1., store: &mut e.store, io: &mut e.io }.fail_plan(&plan, "venue gave up").unwrap();
+        flush(&mut e, 2.);
+        assert_eq!(e.venue.wait_expired.len(), 2, "both pendings returned in one flush");
+        assert!(e.venue.wait_ended.is_empty());
+    }
+    #[test]
+    fn a_sealed_plan_is_not_resumed_by_a_later_session_ready() {
+        let (mut e, plan, session) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        cx.fail_plan(&plan, "venue gave up").unwrap();
+        assert!(cx.session_ready(&session).is_empty(), "a sealed Plan issues nothing");
+        let actions = flush(&mut e, 2.);
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(e.venue.wait_expired.len(), 1, "returned once");
+        assert!(e.venue.wait_ended.is_empty(), "no custody callback for a sealed Plan");
+    }
+
+    /// A Slot whose Session ended stays held until its ended disposition, so
+    /// ordinary readiness in the same flush cannot issue it first.
+    #[test]
+    fn ordinary_readiness_cannot_issue_a_slot_held_for_its_ended_hook() {
+        let mut e = crate::test_support::seeded_engine(Plans::default());
+        e.start(0.);
+        let old = open(&mut e, 0.);
+        e.venue.park_on = Some(old.clone());
+        e.venue.idle = false;
+        start(&mut e, 0.);
+        assert_eq!(e.venue.park_result, Some(Ok(())));
+        assert_eq!(prepares(&e.drain_actions().collect::<Vec<_>>()), 0);
+        let replacement = open(&mut e, 1.);
+        e.venue.repark_on = Some(replacement);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&old).unwrap();
+        let actions = flush(&mut e, 2.);
+        assert_eq!(prepares(&actions), 0, "readiness did not issue the held Slot");
+        assert_eq!(e.venue.wait_ended.len(), 1, "the ended hook decided it, and re-parked");
+    }
+
+    /// The ended hook seals the Plan while a sibling Slot is still parked; the
+    /// sibling's pending comes back in the same flush, with no later event.
+    #[test]
+    fn a_sibling_parked_slot_returns_in_the_same_flush_when_the_hook_seals() {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, parallel: true, ..Default::default() });
+        e.start(0.);
+        let session = open(&mut e, 0.);
+        e.venue.park_on = Some(session.clone());
+        e.venue.park_second = Some(session.clone());
+        e.venue.fail_in_ended = true;
+        start(&mut e, 0.);
+        assert_eq!(e.venue.park_result, Some(Ok(())));
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&session).unwrap();
+        let actions = flush(&mut e, 2.);
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(e.venue.wait_ended.len(), 1, "the first ended in ready custody");
+        assert_eq!(e.venue.wait_expired.len(), 1, "the sibling returned in the same flush");
+        assert_eq!(e.venue.expired_while_live, [false]);
+    }
+
+    /// #2069 R10b: one parked Slot and one bound unreleased leg on the same
+    /// Session, which is retired. The bound leg's fence fails the Plan first
+    /// (its one terminal); the seal retires the parked unit, so no ended hook
+    /// runs and its pending comes back once, after the terminal, with no
+    /// custody. Nothing is sent.
+    #[cfg(feature = "session-bearer")]
+    #[test]
+    fn r10b_a_retired_session_fails_a_bound_leg_and_its_parked_sibling_once() {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, parallel: true, ..Default::default() });
+        e.start(0.);
+        let session = open(&mut e, 0.);
+        e.venue.park_on = Some(session.clone());
+        e.venue.bind_peer_on = Some(session.clone());
+        start(&mut e, 0.);
+        assert_eq!(e.venue.park_result, Some(Ok(())));
+        assert!(e.venue.bound_peer.is_some(), "the peer leg is bound and unreleased");
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&session).unwrap();
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        actions.extend(flush(&mut e, 2.));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))), "zero HTTP");
+        assert_eq!(prepares(&actions), 0);
+        let failed: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failed.len(), 1, "exactly one Plan terminal");
+        assert_eq!(failed[0].outcome, Some(crate::Outcome::NotSent));
+        // The bound leg's fence is the terminal (the parked unit never reached
+        // its ended hook).
+        assert_eq!(failed[0].message, "Session retired");
+        assert_eq!(failed[0].kind, Some(ErrorKind::InvalidInput));
+        assert!(e.venue.wait_ended.is_empty(), "no ended hook after the seal");
+        assert_eq!(e.venue.wait_expired.len(), 1, "the parked pending comes back once");
+        assert_eq!(e.venue.expired_while_live, [false], "after the Plan terminal");
+        assert_eq!(e.venue.wait_expired[0].1.outcome, Some(crate::Outcome::NotSent));
+    }
+
+    /// #2069 R10b inverse: only the parked unit exists (no bound leg). The
+    /// retire ends the wait once in ready custody; no expired callback runs.
+    #[test]
+    fn r10b_inverse_a_lone_parked_slot_ends_once_without_an_expired_callback() {
+        let (mut e, _, session) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&session).unwrap();
+        let actions = flush(&mut e, 2.);
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert_eq!(e.venue.wait_ended.len(), 1, "ended once, in ready custody");
+        assert!(e.venue.wait_expired.is_empty(), "no expired callback");
+    }
+
+    /// N2: a failed Read call's retry parks on a login Session in the failure
+    /// callback, keeps the Plan alive with nothing sent, and resumes as exactly
+    /// one more attempt on the same leg; the budget is never exceeded.
+    #[test]
+    fn a_failed_reads_retry_parks_and_resumes_as_one_more_attempt() {
+        let mut e = crate::test_support::seeded_engine(Plans::default());
+        e.start(0.);
+        let session = open(&mut e, 0.);
+        e.venue.park_retry_on = Some(session.clone());
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        e.handle(1., Event::HttpFailed { request: first.attempt().request, error: "login expired" });
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(e.venue.retry_parks, [Ok(())], "the retry parks in the failure callback");
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. }))), "the Plan stays alive");
+        assert_eq!(prepares(&actions), 0, "nothing is selected while parked");
+        let mut cx = Cx { now: 2., store: &mut e.store, io: &mut e.io };
+        let waiters = cx.session_ready(&session);
+        let Some(crate::request_context::Waiter::Ready(leg, pending)) = waiters.into_iter().next() else {
+            panic!("the parked retry resumes");
+        };
+        assert_eq!(leg, pending, "the same leg resumes");
+        queue(&mut cx, leg, false).unwrap();
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(prepares(&actions), 1, "exactly one more attempt");
+        let (second, _) = prepared(&actions);
+        release(&mut e, second, 3.);
+        e.handle(4., Event::HttpFailed { request: second.attempt().request, error: "login expired again" });
+        assert_eq!(e.venue.retry_parks[1], Err(Error::RetryForbidden), "the declared budget is spent");
+    }
+
+    /// The sibling's Session is still live when the ended hook seals the Plan:
+    /// the still-parked entry returns in the same flush through the sealed sweep.
+    #[test]
+    fn a_still_parked_sibling_on_another_session_returns_when_the_hook_seals() {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, parallel: true, ..Default::default() });
+        e.start(0.);
+        let first = open(&mut e, 0.);
+        let second = open(&mut e, 0.);
+        e.venue.park_on = Some(first.clone());
+        e.venue.park_second = Some(second);
+        e.venue.fail_in_ended = true;
+        start(&mut e, 0.);
+        assert_eq!(e.venue.park_result, Some(Ok(())));
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&first).unwrap();
+        let actions = flush(&mut e, 2.);
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(e.venue.wait_ended.len(), 1);
+        assert_eq!(e.venue.wait_expired.len(), 1, "the still-parked sibling returned in the same flush");
+        assert_eq!(e.venue.expired_while_live, [false]);
+    }
+
+    /// A parked retry whose Session retires re-parks from its Plan's ready
+    /// custody on the replacement, then resumes as one attempt.
+    #[test]
+    fn a_parked_retry_reparks_after_its_session_retires() {
+        let mut e = crate::test_support::seeded_engine(Plans::default());
+        e.start(0.);
+        let old = open(&mut e, 0.);
+        e.venue.park_retry_on = Some(old.clone());
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        e.handle(1., Event::HttpFailed { request: first.attempt().request, error: "login expired" });
+        assert_eq!(e.venue.retry_parks, [Ok(())]);
+        e.drain_actions().for_each(drop);
+        let replacement = open(&mut e, 2.);
+        e.venue.repark_retry_on = Some(replacement.clone());
+        let _ = Cx { now: 2., store: &mut e.store, io: &mut e.io }.retire_session(&old).unwrap();
+        let actions = flush(&mut e, 3.);
+        assert_eq!(prepares(&actions), 0);
+        assert_eq!(e.venue.wait_ended.len(), 1, "ended once, re-parked in ready custody");
+        let mut cx = Cx { now: 4., store: &mut e.store, io: &mut e.io };
+        let Some(crate::request_context::Waiter::Ready(leg, _)) = cx.session_ready(&replacement).into_iter().next() else {
+            panic!("the re-parked retry resumes on the replacement");
+        };
+        queue(&mut cx, leg, false).unwrap();
+        assert_eq!(prepares(&e.drain_actions().collect::<Vec<_>>()), 1);
+    }
+
+    /// A no-delivery resume is issue custody for its own event only: a leg
+    /// resumed but not queued is refused in the next engine event.
+    #[test]
+    fn a_resumed_but_unqueued_leg_is_refused_in_the_next_event() {
+        let (mut e, _, session) = parked(0.);
+        e.drain_actions().for_each(drop);
+        assert!(e.io.core.session_resumed.capacity() >= 1, "reserved at park");
+        let mut cx = Cx { now: 30_000., store: &mut e.store, io: &mut e.io };
+        let Some(crate::request_context::Waiter::Ready(leg, _)) = cx.session_ready(&session).into_iter().next() else {
+            panic!("resumes");
+        };
+        e.handle(30_001., Event::TimerFired { timer: TimerId(u64::MAX - 1) });
+        e.drain_actions().for_each(drop);
+        let mut cx = Cx { now: 30_002., store: &mut e.store, io: &mut e.io };
+        let refused = queue(&mut cx, leg, false);
+        assert_eq!(refused.map(|_| ()).map_err(|(_, error)| error), Err(Error::Revoked));
+        assert_eq!(prepares(&e.drain_actions().collect::<Vec<_>>()), 0);
+    }
+
+    fn plan_outcome(actions: &[Action]) -> Option<crate::Outcome> {
+        actions.iter().find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error.outcome),
+            _ => None,
+        }).expect("command failure")
+    }
+    #[test]
+    fn inherited_uncertainty_survives_plan_admission_without_a_released_attempt() {
+        for inherited in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Plans {
+                write: true, idle: true, inherited, ..Default::default()
+            });
+            start(&mut e, 0.);
+            let plan = e.venue.plan.clone().unwrap();
+            let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+            cx.fail_plan(&plan, "re-read left nothing to send").unwrap();
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
+            assert_eq!(plan_outcome(&actions), Some(if inherited {
+                crate::Outcome::Unknown } else { crate::Outcome::NotSent }));
+        }
+    }
+    #[test]
+    fn inherited_uncertainty_is_not_masked_by_an_effects_free_rejection() {
+        for inherited in [false, true] {
+            let mut e = crate::test_support::seeded_engine(Plans {
+                write: true, inherited, ..Default::default()
+            });
+            start(&mut e, 0.);
+            let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, first, 0.);
+            response(&mut e, first, 1., "reject");
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert_eq!(plan_outcome(&actions), Some(if inherited {
+                crate::Outcome::Unknown } else { crate::Outcome::Rejected }));
+        }
+    }
+    #[test]
+    fn inherited_uncertainty_leaves_a_proven_plan_success_successful() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            write: true, inherited: true, ..Default::default()
+        });
+        start(&mut e, 0.);
+        for now in [1., 2.] {
+            let (token, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, token, now);
+            response(&mut e, token, now, "ok");
+        }
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. }))));
     }
 }

@@ -37,6 +37,7 @@ fn plan(cx: &mut Cx<'_, Context>, wait_ms: u32) -> Plan {
             calls: &calls,
         }],
         PlanPolicy {
+            independent_calls: false,
             operation: Operation::Read,
             credential: None,
             pacing: None,
@@ -59,9 +60,9 @@ struct Probe {
 }
 impl Probe {
     fn refuse_group_membership(&mut self, cx: &mut Cx<'_, Context>, leg: &Context) {
-        let roots = cx.io.request_contexts.executions.roots.clone();
-        let observers = cx.io.request_contexts.executions.observers.clone();
-        let actions = cx.io.actions.len();
+        let roots = cx.io.core.request_contexts.executions.roots.clone();
+        let observers = cx.io.core.request_contexts.executions.observers.clone();
+        let actions = cx.io.core.actions.len();
         assert_eq!(
             cx.begin_execution(leg, read_policy(200), Window::UntilTerminal, "same"),
             Err(Error::Revoked)
@@ -70,9 +71,9 @@ impl Probe {
             cx.join_execution(self.execution.as_ref().unwrap(), leg, "same"),
             Err(Error::Revoked)
         );
-        assert_eq!(cx.io.request_contexts.executions.roots, roots);
-        assert_eq!(cx.io.request_contexts.executions.observers, observers);
-        assert_eq!(cx.io.actions.len(), actions);
+        assert_eq!(cx.io.core.request_contexts.executions.roots, roots);
+        assert_eq!(cx.io.core.request_contexts.executions.observers, observers);
+        assert_eq!(cx.io.core.actions.len(), actions);
         self.denials += 2;
     }
 }
@@ -85,6 +86,7 @@ impl Venue for Probe {
         self.background = Some(
             cx.request_managed(
                 context.clone(),
+                None,
                 crate::Method::Get,
                 "https://venue.test/background".into(),
                 None,
@@ -139,9 +141,9 @@ impl Venue for Probe {
         self.ready += 1;
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Context>, context: Context, _: Response<'_>) {
-        let marker = cx.io.http_delivery.clone().unwrap();
+        let marker = cx.io.core.http_delivery.clone().unwrap();
         assert_eq!(marker.context, context);
-        let depth = cx.io.request_contexts.delivery_depth;
+        let depth = cx.io.core.request_contexts.delivery_depth;
         assert_eq!(depth, 1);
         // Neither successful group DATA nor group abort can borrow this
         // unrelated delivery. An observer's explicit detach can still seal
@@ -156,8 +158,8 @@ impl Venue for Probe {
         );
         cx.detach_execution_observer(self.observer.as_ref().unwrap(), "observer detached")
             .unwrap();
-        assert_eq!(cx.io.http_delivery, Some(marker));
-        assert_eq!(cx.io.request_contexts.delivery_depth, depth);
+        assert_eq!(cx.io.core.http_delivery, Some(marker));
+        assert_eq!(cx.io.core.request_contexts.delivery_depth, depth);
         self.preserved_delivery = true;
     }
     fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, _: &str) {}
@@ -212,10 +214,10 @@ fn execution_observer_seals_preserve_an_unrelated_real_delivery_marker() {
         },
     );
     assert!(e.venue.preserved_delivery);
-    assert!(e.io.http_delivery.is_none());
-    assert_eq!(e.io.request_contexts.delivery_depth, 0);
-    assert!(!e.io.request_contexts.is_observer(1));
-    assert!(e.io.request_contexts.command_live(99, 2.));
+    assert!(e.io.core.http_delivery.is_none());
+    assert_eq!(e.io.core.request_contexts.delivery_depth, 0);
+    assert!(!e.io.core.request_contexts.is_observer(1));
+    assert!(e.io.core.request_contexts.command_live(99, 2.));
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error }) if error.message == "observer detached")).count(), 1);
 }
@@ -236,7 +238,7 @@ fn execution_observer_expiry_runs_before_plan_timer_early_return() {
         .unwrap();
     e.handle(100., Event::TimerFired { timer });
     assert_eq!(e.venue.ready, 1);
-    assert!(!e.io.request_contexts.is_observer(1));
+    assert!(!e.io.core.request_contexts.is_observer(1));
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, error }) if error.kind == Some(crate::ErrorKind::Timeout))).count(), 1);
     e.handle(101., Event::TimerFired { timer });
@@ -257,8 +259,8 @@ fn preflight_and_plan_legs_cannot_replace_context_observer_roots() {
     e.handle(2., command(99));
     e.drain_actions().for_each(drop);
     assert_eq!(e.venue.denials, 4);
-    assert!(e.io.request_contexts.is_observer(1));
-    assert_eq!(e.io.request_contexts.executions.observers.len(), 1);
+    assert!(e.io.core.request_contexts.is_observer(1));
+    assert_eq!(e.io.core.request_contexts.executions.observers.len(), 1);
 }
 
 #[test]
@@ -274,14 +276,14 @@ fn execution_member_cannot_seal_directly_while_an_unrelated_plan_is_retained() {
             store: &mut e.store,
             io: &mut e.io,
         };
-        let ids = cx.io.next_id;
+        let ids = cx.io.core.next_id;
         assert_eq!(cx.done_context(&root, "direct".into()), Err(Error::Revoked));
         assert_eq!(cx.fail_context(&root, "direct"), Err(Error::Revoked));
         cx.done(1, "numeric".into());
         cx.fail(1, "numeric");
-        assert_eq!(cx.io.next_id, ids);
-        assert!(cx.io.request_contexts.is_observer(1));
-        assert!(cx.io.request_contexts.command_live(99, 1.));
+        assert_eq!(cx.io.core.next_id, ids);
+        assert!(cx.io.core.request_contexts.is_observer(1));
+        assert!(cx.io.core.request_contexts.command_live(99, 1.));
     }
     assert!(!e.drain_actions().any(|a| matches!(
         a,
@@ -296,7 +298,7 @@ fn execution_member_cannot_seal_directly_while_an_unrelated_plan_is_retained() {
     }
     .abort_execution(&handle, "genuine")
     .unwrap();
-    assert!(e.io.request_contexts.command_live(99, 2.));
+    assert!(e.io.core.request_contexts.command_live(99, 2.));
     assert_eq!(
         e.drain_actions()
             .filter(|a| matches!(a,

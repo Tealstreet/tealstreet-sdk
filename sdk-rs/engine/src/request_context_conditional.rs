@@ -1,12 +1,13 @@
 //! Declared mutation terminals and shared synchronous seal preparation.
 use super::*;
 use crate::request_context::PreparedWriteSeal;
-use crate::request_context::plan::MutationTerminalBound;
+use crate::request_context::plan::{MutationBarrierBound, MutationTerminalBound};
 
 pub(super) struct AdmissionDeclaration<'s, 'd, 't> {
     pub steps: &'s [StepBound<'d>],
     pub policy: PlanPolicy,
     pub terminals: &'t [MutationTerminalBound],
+    pub barriers: &'t [MutationBarrierBound],
 }
 
 pub(super) struct PreparedPlanSeal {
@@ -73,6 +74,7 @@ impl<P> Cx<'_, P> {
                 steps,
                 policy,
                 terminals,
+                barriers: &[],
             },
         )
     }
@@ -86,7 +88,11 @@ impl<P> Cx<'_, P> {
         context: &Context,
         result: String,
     ) -> Result<(), Error> {
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         if body.policy.operation != Operation::Mutation {
             return Err(Error::Invalid);
         }
@@ -106,6 +112,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::State);
         }
         self.io
+            .core
             .request_contexts
             .owner_entry(plan.owner())
             .ok_or(Error::Revoked)?

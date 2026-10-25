@@ -71,6 +71,7 @@ impl Venue for Issue {
         };
         cx.request_signed_managed(
             context,
+            None,
             self.request.method,
             self.route.clone().unwrap_or_else(|| {
                 format!("https://api.backpack.exchange{}{suffix}", self.request.path)
@@ -291,6 +292,9 @@ fn remote_actions(engine: &mut Engine<Issue>) -> Vec<Action> {
                         Ok(Claim::Released(_))
                     ));
                     out.push(Action::Http(request));
+                }
+                HttpAction::BindGroup { .. } => {
+                    panic!("Backpack fixture declares no Mutation barriers")
                 }
                 HttpAction::Cancel { .. } => {}
             },

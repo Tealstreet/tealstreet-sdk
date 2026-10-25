@@ -107,6 +107,7 @@ impl Grvt {
             &preflight,
             &steps,
             PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Read,
                 credential: None,
                 pacing: None,
@@ -163,6 +164,7 @@ impl Grvt {
         let body = Some(pending.body.clone());
         match cx.request_managed_with_headers(
             context,
+            None,
             Method::Post,
             format!("{}/lite/v1/kline", self.mdg()),
             &[("Content-Type", "application/json")],

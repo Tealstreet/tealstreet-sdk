@@ -8,6 +8,7 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+http-mutation-barriers = ["safe-cex-engine/http-mutation-barriers"]
 # Additive provider bootstrap; at least one venue feature is still required.
 dispatch-signing = ["safe-cex-venues/dispatch-signing"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress"]
@@ -64,7 +65,7 @@ default = [
     "orderly",
     "phemex",
 ]
-cryptocom = ["safe-cex-venues/cryptocom", "text-ingress"]
+cryptocom = ["safe-cex-venues/cryptocom", "text-ingress", "dispatch-signing"]
 binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing"]
 kucoin = ["safe-cex-venues/kucoin", "text-ingress"]
 kucoinspot = ["safe-cex-venues/kucoinspot", "text-ingress", "safe-cex-engine/command-kucoinspot"]

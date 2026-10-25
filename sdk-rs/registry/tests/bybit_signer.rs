@@ -8,7 +8,8 @@ impl Visit for Start {
     type Output = Vec<Action>;
     fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
         engine.start(1_700_000_000_000.0);
-        engine.drain_actions().collect()
+        // Startup reads are managed: the fixture driver prepares and signs them.
+        safe_cex_engine::test_support::prepared_actions(&mut engine, 1_700_000_000_000.0)
     }
 }
 

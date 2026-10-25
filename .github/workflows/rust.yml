@@ -12,6 +12,10 @@ on:
         type: choice
         options: [family, combined]
         default: family
+      mutation_barrier_size:
+        description: Compare standalone Bybit barrier capability off/on on this exact checkout
+        type: boolean
+        default: false
   push:
     branches: [master, feat/rust-rewrite]
     paths:
@@ -80,15 +84,25 @@ jobs:
           - check: fmt
             command: cargo fmt --all --check
           - check: clippy
-            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr -- -D warnings
+            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 -- -D warnings
           - check: test
             # Workspace builds unify crypto features; prove disabled and enabled provider arms.
-            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr --lib signer::'
+            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
           # Workspace resolution unifies family features. Exercise each
           # standalone engine closure, including both Plan configurations.
           - check: engine-feature-modes
             timeout: 90
             command: python3 scripts/test-http-plan-feature-modes.py
+          - check: mutation-barriers
+            command: |
+              cargo clippy --locked -p safe-cex-engine --all-targets --no-default-features --features http-mutation-barriers,test-support,order-locks,managed-sockets -- -D warnings
+              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-engine --no-default-features --features http-mutation-barriers,test-support,order-locks,managed-sockets --test plan_mutation_prepare_barrier --test multi_constraint_pacing
+              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-engine --no-default-features --features http-plans,test-support --lib disabled_barrier_refusal
+              cargo clippy --locked -p safe-cex-native --no-default-features --features http-mutation-barriers --all-targets -- -D warnings
+              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-native --no-default-features --features http-mutation-barriers --lib managed_http
+              CARGO_TARGET_DIR=target cargo test --locked --manifest-path hosts/native/tests/barrier-feature-unification/Cargo.toml
+              CARGO_TARGET_DIR=target cargo test --locked --manifest-path hosts/native/tests/barrier-feature-unification/Cargo.toml --features host-barriers
+              node --test hosts/wasm/js/hostmanagedhttp.test.mjs hosts/wasm/js/hostmanagedhttp-group.test.mjs
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -103,7 +117,7 @@ jobs:
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
       - uses: actions/setup-node@v4
-        if: matrix.check == 'engine-feature-modes'
+        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers'
         with:
           node-version: 22
       - name: Run ${{ matrix.check }}
@@ -130,6 +144,94 @@ jobs:
         run: cargo build --locked --workspace --target wasm32-unknown-unknown
       - name: Lint every crate for wasm32
         run: cargo clippy --locked --workspace --target wasm32-unknown-unknown -- -D warnings
+      - name: Lint explicit WASM Mutation-barrier host support
+        run: cargo clippy --locked -p safe-cex-wasm --no-default-features --features bitunix,http-mutation-barriers --target wasm32-unknown-unknown -- -D warnings
+
+  mutation-barrier-size:
+    name: Rust / Bybit Mutation-barrier size comparison
+    if: github.event_name == 'workflow_dispatch' && inputs.mutation_barrier_size
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+            sdk-rs/target
+          key: ${{ runner.os }}-cargo-barrier-size-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-gate-
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
+      - uses: ./.github/actions/prefetch-cargo
+      - name: Install pinned binaryen (wasm-opt)
+        run: bash sdk-rs/harness/install-binaryen.sh
+      - name: Build and measure both capabilities from this checkout
+        run: |
+          for mode in off on; do
+            args=(--venue bybit)
+            if [[ $mode == on ]]; then args+=(--mutation-barriers); fi
+            bash sdk-rs/harness/build.sh "${args[@]}"
+            MODE=$mode node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto';
+          import { createRequire } from 'node:module';
+          import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+          import { wasmBudgetBytes, wasmBudgetError } from './sdk-rs/harness/wasm-budget.mjs';
+          const mode = process.env.MODE;
+          const { WasmEngine } = createRequire(import.meta.url)('./sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm.js');
+          for (const method of ['httpGroupPending', 'httpClaimGroup']) {
+            if ((typeof WasmEngine.prototype[method] === 'function') !== (mode === 'on')) throw new Error(`unexpected ${mode} export: ${method}`);
+          }
+          const out = `sdk-rs/harness/out/barrier-size/${mode}`;
+          mkdirSync(out, { recursive: true });
+          const artifacts = ['web', 'node'].map((target) => {
+            const path = `sdk-rs/hosts/wasm/pkg/${target}/safe_cex_wasm_bg.wasm`;
+            const bytes = readFileSync(path);
+            copyFileSync(path, `${out}/${target}.wasm`);
+            return { target, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), error: wasmBudgetError(bytes.length, 'venue', 'bybit') ?? null };
+          });
+          const report = { revision: process.env.GITHUB_SHA, mode, budgetBytes: wasmBudgetBytes('venue', 'bybit'), artifacts };
+          writeFileSync(`${out}/report.json`, JSON.stringify(report, null, 2) + '\n');
+          console.log(JSON.stringify(report, null, 2));
+          JS
+          done
+      - name: Compare measurements and require ordinary Bybit budget
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          const read = (mode) => JSON.parse(readFileSync(`sdk-rs/harness/out/barrier-size/${mode}/report.json`));
+          const off = read('off');
+          const on = read('on');
+          if (off.revision !== on.revision || off.revision !== process.env.GITHUB_SHA) throw new Error('comparison revision mismatch');
+          for (const artifact of off.artifacts) {
+            const enabled = on.artifacts.find(({ target }) => target === artifact.target);
+            if (!enabled) throw new Error('comparison target missing');
+            console.log(`${artifact.target}: off=${artifact.bytes}, on=${enabled.bytes}, delta=${enabled.bytes - artifact.bytes}`);
+          }
+          if (off.artifacts.some(({ error }) => error)) throw new Error('ordinary Bybit exceeds its venue budget');
+          JS
+      - name: Retain same-head capability measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bybit-mutation-barrier-size
+          path: sdk-rs/harness/out/barrier-size/
+          retention-days: 3
 
   families:
     name: Rust / wasm families
@@ -503,6 +605,9 @@ jobs:
       - name: Breakout compiled account, startup and polling controls
         if: matrix.venue == 'breakoutprop'
         run: corepack yarn rust:test-breakoutprop-parity
+      - name: Backpack selected public-only history contracts
+        if: matrix.venue == 'backpack'
+        run: corepack yarn -s node --test sdk-rs/harness/backpack-history.integration.mjs
       - name: Aster V3 wallet auth, builder, STP and native query contracts
         if: matrix.venue == 'asterdex'
         run: |

@@ -114,6 +114,8 @@ fn ready_snapshot(
     .unwrap();
     let mut e = safe_cex_engine::test_support::seeded_engine(Backpack::new(Options {
         identity: identities.primary.clone(),
+        read_identity: None,
+        read_credentials_status: None,
         read_credentials: None,
         public_data_only: false,
         key: Some("test-public-key".into()),

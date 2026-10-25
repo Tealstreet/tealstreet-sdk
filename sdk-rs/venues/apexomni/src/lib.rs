@@ -5,12 +5,15 @@ mod history_wire;
 mod private_wire;
 mod public;
 mod public_wire;
+mod read;
 pub mod sign;
 mod trading;
 
+use read::Split;
 use safe_cex_engine::book::Book;
-use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::{Command, Cx, Method, RequestId, Response, SocketId, TimerId, Venue};
+use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
+use safe_cex_engine::signing::Identity;
+use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue};
 use std::collections::HashMap;
 
 #[derive(Clone, Default)]
@@ -20,32 +23,31 @@ pub struct Options {
     /// The provider identity for every signed request: opaque refs only. The
     /// venue holds no key material; the zkLink seed is its `zklinkSeed` role.
     pub identity: Option<safe_cex_engine::signing::Identity>,
+    /// Setup dropped a key that has no signing material; public data only.
+    pub credentials_ignored: bool,
     pub tick_interval_ms: Option<f64>,
 }
 safe_cex_crypto::redacted_debug!(Options);
 
 pub enum Pending {
     Candles(public::Candles),
-    Public(public::Request),
-    Account(account::Request),
+    Public(Box<read::Read>, public::Request),
+    Account(Box<read::Read>, account::Request),
     Trade(trading::Request),
-    History(history::Request),
-    SignedAuth {
-        request: sign::Request,
-        pending: Box<Pending>,
-        legacy: bool,
-        retries: u8,
-        at: Option<ArrayAt>,
-    },
+    History(Box<read::Read>, Box<history::Request>),
 }
 
 pub struct ApexOmni {
     options: Options,
+    /// Primary-only: ApeX has no separate read key.
+    slots: Slots<Identity>,
     rest: &'static str,
     contracts: HashMap<String, public::ContractConfig>,
     public: public::Public,
     account: account::Account,
     trading: trading::Trading,
+    /// Successor reads a completing Background read queues after it retires.
+    follow_ups: Vec<read::FollowUp>,
 }
 
 #[derive(serde::Deserialize)]
@@ -124,159 +126,30 @@ impl ApexOmni {
             } else {
                 "https://omni.apex.exchange/api"
             },
+            slots: Slots::new(options.identity.clone(), None, SlotPolicy::default()),
             options,
             contracts: HashMap::new(),
             public: public::Public::default(),
             account: account::Account::new(),
             trading: trading::Trading::default(),
+            follow_ups: Vec::new(),
         }
-    }
-
-    fn signed(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        request: sign::Request,
-        pending: Pending,
-        at: Option<ArrayAt>,
-    ) -> Result<RequestId, String> {
-        self.send_signed(cx, request, pending, at, false, 0)
-            .map_err(|(error, _)| error)
-    }
-
-    fn send_signed(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        request: sign::Request,
-        pending: Pending,
-        at: Option<ArrayAt>,
-        legacy: bool,
-        retries: u8,
-    ) -> Result<RequestId, (String, Box<Pending>)> {
-        // Klines carry no authentication. Symbols is signed, as legacy did, when
-        // the identity has a passphrase ref; otherwise it stays public discovery.
-        let symbols = request.path == "/v3/symbols";
-        let identity = if sign::is_unsigned(&request) {
-            None
-        } else {
-            match self.options.identity.clone() {
-                Some(identity) if symbols && identity.passphrase.is_none() => None,
-                Some(identity) => Some(identity),
-                None if symbols => None,
-                // A signing failure hands the pending request back so its caller can complete it.
-                None => {
-                    return Err((
-                        "ApeX API key, signing key and passphrase are required".into(),
-                        Box::new(pending),
-                    ));
-                }
-            }
-        };
-        let url = format!("{}{}", self.rest, sign::request_path(&request));
-        let stream = at;
-        let method = request.method;
-        let step = identity.map(|identity| sign::Http::new(identity, request.clone(), legacy));
-        let pending = Pending::SignedAuth {
-            request,
-            pending: Box::new(pending),
-            legacy,
-            retries,
-            at,
-        };
-        let id = if let Some(at) = stream {
-            cx.request_streamed_body(method, url, vec![], None, at, pending)
-        } else {
-            cx.request(method, url, vec![], None, pending)
-        };
-        // The provider signs at dispatch; the recipe owns headers and body.
-        if let Some(step) = step {
-            cx.sign_http(id, Box::new(step));
-        }
-        Ok(id)
     }
 
     fn response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        match pending {
-            Pending::SignedAuth {
-                request,
-                mut pending,
-                legacy,
-                retries,
-                at,
-            } => {
-                match api_response(response) {
-                    ApiResponse::SignatureRefusal(_) if !legacy => {
-                        Self::reset_request(&mut pending);
-                        if let Err((error, pending)) =
-                            self.send_signed(cx, request, *pending, at, true, retries)
-                        {
-                            // The venue refused the first signature; the resend never left.
-                            let error = safe_cex_engine::VenueError::new(error)
-                                .outcome(safe_cex_engine::Outcome::Rejected);
-                            self.failed(cx, *pending, error);
-                        }
-                    }
-                    ApiResponse::Failed(error) | ApiResponse::SignatureRefusal(error) => {
-                        self.failed(cx, *pending, error)
-                    }
-                    ApiResponse::Success => self.response(cx, *pending, response),
-                }
-            }
-            Pending::Candles(pending) => self.candle_response(cx, pending, response),
-            Pending::Public(pending) => self.public_response(cx, pending, response),
-            Pending::Account(pending) => self.account_response(cx, pending, response),
-            Pending::Trade(pending) => self.trading_response(cx, pending, response),
-            Pending::History(pending) => self.history_response(cx, pending, response),
-        }
-    }
-
-    fn item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
-        match pending {
-            Pending::Candles(_) => {}
-            Pending::SignedAuth { pending, .. } => self.item(cx, pending, item),
-            Pending::Public(pending) => self.public_item(cx, pending, item),
-            Pending::Account(pending) => self.account_item(cx, pending, item),
-            Pending::Trade(_) => {}
-            Pending::History(pending) => self.history_item(cx, pending, item),
-        }
-    }
-
-    fn reset_request(pending: &mut Pending) {
-        match pending {
-            Pending::Candles(_) => {}
-            Pending::SignedAuth { pending, .. } => Self::reset_request(pending),
-            Pending::Public(request) => request.reset(),
-            Pending::Account(request) => request.reset(),
-            Pending::Trade(_) => {}
-            Pending::History(pending) => pending.reset(),
+        match read::split(pending) {
+            Split::Read(read, native) => self.read_response(cx, *read, native, response),
+            Split::Candles(pending) => self.candle_response(cx, pending, response),
+            Split::Trade(pending) => self.trading_response(cx, pending, response),
         }
     }
 
     fn transport_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        match pending {
-            Pending::Candles(pending) => self.candle_transport_failed(cx, pending, error.into()),
-            Pending::SignedAuth {
-                request,
-                mut pending,
-                legacy,
-                retries,
-                at,
-            } if request.method == Method::Get
-                && retries < 3
-                && !matches!(&*pending, Pending::Public(public::Request::Markets { .. })) =>
-            {
-                Self::reset_request(&mut pending);
-                if let Err((error, pending)) =
-                    self.send_signed(cx, request, *pending, at, legacy, retries + 1)
-                {
-                    let error = safe_cex_engine::VenueError::new(error)
-                        .outcome(safe_cex_engine::Outcome::NotSent);
-                    self.failed(cx, *pending, error);
-                }
-            }
-            pending => {
-                let error = trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
-                self.failed(cx, pending, error)
-            }
+        let network = || trading::unknown(error).kind(safe_cex_engine::ErrorKind::Network);
+        match read::split(pending) {
+            Split::Read(read, native) => self.read_transport_failed(cx, *read, native, network()),
+            Split::Candles(pending) => self.candle_transport_failed(cx, pending, error.into()),
+            Split::Trade(pending) => self.trading_failed(cx, pending, network()),
         }
     }
 
@@ -286,13 +159,10 @@ impl ApexOmni {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
-            Pending::Candles(pending) => Self::candle_failed(cx, pending, error),
-            Pending::SignedAuth { pending, .. } => self.failed(cx, *pending, error),
-            Pending::Public(pending) => self.public_failed(cx, pending, &error.message),
-            Pending::Account(pending) => self.account_failed(cx, pending, &error.message),
-            Pending::Trade(pending) => self.trading_failed(cx, pending, error),
-            Pending::History(pending) => self.history_failed(cx, pending, &error.message),
+        match read::split(pending) {
+            Split::Read(read, native) => self.read_failed(cx, *read, native, error),
+            Split::Candles(pending) => Self::candle_failed(cx, pending, error),
+            Split::Trade(pending) => self.trading_failed(cx, pending, error),
         }
     }
 }
@@ -363,6 +233,13 @@ impl Venue for ApexOmni {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.options.credentials_ignored {
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                safe_cex_engine::log::code::CONFIG_INVALID,
+                "ApeX API key ignored: it has no signing key, so the account shows public data only",
+            );
+        }
         self.start_public(cx);
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -387,7 +264,7 @@ impl Venue for ApexOmni {
         self.response(cx, pending, response);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
-        self.item(cx, pending, item);
+        self.read_item(cx, pending, item);
     }
     fn on_stream_error(
         &mut self,
@@ -419,10 +296,11 @@ impl Venue for ApexOmni {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
-            Pending::Candles(pending) => self.candle_transport_failed(cx, pending, error),
-            Pending::Trade(request) => self.trading_failed(cx, request, error),
-            pending => self.transport_failed(cx, pending, &error.message),
+        // The engine's typed cause is kept; only Network may spend a native retry.
+        match read::split(pending) {
+            Split::Read(read, native) => self.read_transport_failed(cx, *read, native, error),
+            Split::Candles(pending) => self.candle_transport_failed(cx, pending, error),
+            Split::Trade(request) => self.trading_failed(cx, request, error),
         }
     }
     fn on_http_preparation_failed(

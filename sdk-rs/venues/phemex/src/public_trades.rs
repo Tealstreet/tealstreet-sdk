@@ -112,7 +112,14 @@ impl PhemexPerpetuals {
         }
         let root = read.rows.root().clone();
         let url = format!("{}/md/v2/trade?symbol={}", self.rest(), read.native_symbol);
-        match cx.request_managed(root, Method::Get, url, None, Pending::PublicTrades(read)) {
+        match cx.request_managed(
+            root,
+            None,
+            Method::Get,
+            url,
+            None,
+            Pending::PublicTrades(read),
+        ) {
             Ok(request) => cx.stream_response(request, ArrayAt::Path(&["result", "trades_p"])),
             Err((pending, error)) => self.on_sign_error(cx, pending, error.venue_error()),
         }

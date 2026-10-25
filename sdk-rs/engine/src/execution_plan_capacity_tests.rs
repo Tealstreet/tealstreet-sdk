@@ -57,6 +57,7 @@ impl Venue for CreditProbe {
                     &preflight,
                     &steps,
                     PlanPolicy {
+                        independent_calls: false,
                         operation: Operation::Read,
                         credential: None,
                         pacing: None,
@@ -65,16 +66,16 @@ impl Venue for CreditProbe {
                 )
                 .unwrap(),
             );
-            assert_eq!(cx.io.request_contexts.reserved_contexts, 250);
+            assert_eq!(cx.io.core.request_contexts.reserved_contexts, 250);
             return;
         }
         let root = cx.admit_http_command(read_policy()).unwrap();
-        let contexts = cx.io.request_contexts.contexts.clone();
-        let roots = cx.io.request_contexts.executions.roots.clone();
-        let observers = cx.io.request_contexts.executions.observers.clone();
-        let deadline = cx.io.request_contexts.next_execution_deadline();
-        let actions = cx.io.actions.len();
-        let mut refused_ids = cx.io.next_id;
+        let contexts = cx.io.core.request_contexts.contexts.clone();
+        let roots = cx.io.core.request_contexts.executions.roots.clone();
+        let observers = cx.io.core.request_contexts.executions.observers.clone();
+        let deadline = cx.io.core.request_contexts.next_execution_deadline();
+        let actions = cx.io.core.actions.len();
+        let mut refused_ids = cx.io.core.next_id;
         refused_ids.reserve(1).unwrap();
         let result = cx.begin_execution(&root, read_policy(), Window::UntilTerminal, "credit");
         if self.filler == 5 {
@@ -83,31 +84,37 @@ impl Venue for CreditProbe {
                 Err(Error::Capacity),
                 "execution stole promised Plan credit"
             );
-            assert_eq!(cx.io.request_contexts.contexts, contexts);
-            assert_eq!(cx.io.request_contexts.executions.roots, roots);
-            assert_eq!(cx.io.request_contexts.executions.observers, observers);
-            assert_eq!(cx.io.request_contexts.next_execution_deadline(), deadline);
-            assert_eq!(cx.io.actions.len(), actions);
+            assert_eq!(cx.io.core.request_contexts.contexts, contexts);
+            assert_eq!(cx.io.core.request_contexts.executions.roots, roots);
+            assert_eq!(cx.io.core.request_contexts.executions.observers, observers);
+            assert_eq!(
+                cx.io.core.request_contexts.next_execution_deadline(),
+                deadline
+            );
+            assert_eq!(cx.io.core.actions.len(), actions);
             // Existing begin reserves one monotonic identity before registry refusal.
-            assert_eq!(cx.io.next_id, refused_ids);
+            assert_eq!(cx.io.core.next_id, refused_ids);
             assert_eq!(cx.validate_read_root_context(&root), Ok(()));
             self.refused = true;
             cx.fail_context(&root, VenueError::new("execution capacity"))
                 .unwrap();
         } else {
             let execution: ExecutionHandle = result.unwrap();
-            assert_eq!(cx.io.request_contexts.contexts.len(), contexts.len() + 1);
             assert_eq!(
-                cx.io.request_contexts.executions.roots.len(),
+                cx.io.core.request_contexts.contexts.len(),
+                contexts.len() + 1
+            );
+            assert_eq!(
+                cx.io.core.request_contexts.executions.roots.len(),
                 roots.len() + 1
             );
-            assert!(cx.io.request_contexts.is_observer(7));
-            assert_eq!(cx.io.request_contexts.contexts.len() + 250, CAPACITY);
+            assert!(cx.io.core.request_contexts.is_observer(7));
+            assert_eq!(cx.io.core.request_contexts.contexts.len() + 250, CAPACITY);
             self.admitted = true;
             cx.abort_execution(&execution, VenueError::new("control complete"))
                 .unwrap();
         }
-        assert_eq!(cx.io.request_contexts.reserved_contexts, 250);
+        assert_eq!(cx.io.core.request_contexts.reserved_contexts, 250);
     }
     fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
     fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
@@ -144,7 +151,7 @@ fn run(filler: usize) -> Engine<CreditProbe> {
     engine.handle(0., command(99));
     engine.drain_actions().for_each(drop);
     engine.handle(1., command(7));
-    assert_eq!(engine.io.request_contexts.reserved_contexts, 250);
+    assert_eq!(engine.io.core.request_contexts.reserved_contexts, 250);
     assert!(!engine.drain_actions().any(|action| matches!(
         action,
         Action::ManagedHttp(_) | Action::Http(_) | Action::Sign { .. }

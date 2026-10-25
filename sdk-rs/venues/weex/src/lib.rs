@@ -403,6 +403,7 @@ impl WeexFutures {
         };
         match cx.request_managed_with_headers(
             leg,
+            None,
             Method::Get,
             format!("{}{path}?{query}", paths::REST),
             &[],
@@ -419,7 +420,7 @@ impl WeexFutures {
         }
     }
     /// A fresh symbol configuration read, as the TS adapter's leverage query does.
-    fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, symbol: String) {
+    fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
         let Some(market_id) = cx.store.market(&symbol).map(|m| m.id.clone()) else {
             refuse_leverage_query(cx, format!("unknown market {symbol}"));
             return;
@@ -434,10 +435,9 @@ impl WeexFutures {
             return;
         }
         let revision = self.account.settings_revision();
-        if let Err(error) = managed::read(
+        managed::read(
             cx,
             selected,
-            command,
             format!("/capi/v3/account/symbolConfig?symbol={market_id}"),
             self.seed_generation,
             |context| Task::Leverage {
@@ -445,9 +445,7 @@ impl WeexFutures {
                 revision,
                 context,
             },
-        ) {
-            cx.fail(command, error);
-        }
+        );
     }
     fn leverage_response(
         &mut self,
@@ -1532,7 +1530,7 @@ impl Venue for WeexFutures {
                     request,
                 );
             }
-            Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
+            Command::FetchLeverage { symbol, .. } => self.fetch_leverage(cx, symbol),
             _ => cx.notice(
                 safe_cex_engine::Level::Warn,
                 code::COMMAND_UNSUPPORTED,

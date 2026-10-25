@@ -1,7 +1,6 @@
 //! One bounded physical read chain under a retained preflight generation.
 use super::super::owned_call::{Admission, Call, Stage};
 use super::*;
-use crate::TimerId;
 use crate::request_context::{RetryPolicy, plan::CallTerms};
 
 pub(in super::super) struct State {
@@ -11,6 +10,15 @@ pub(in super::super) struct State {
     pub(super) call: Vec<Call>,
     pub(super) handoff: Option<Delivery>,
     pub(super) activation: super::ready::Activation,
+    /// The next read waits on a login Session: nothing may issue, complete or
+    /// re-park it until that Session's drain or ended disposition.
+    pub(super) session_parked: bool,
+    /// Parked by `park_preflight_for`: failable from any callback while it
+    /// holds nothing; `condition` is its engine bound's timer.
+    #[cfg(feature = "condition-waits")]
+    pub(super) condition_park: bool,
+    #[cfg(feature = "condition-waits")]
+    pub(super) condition: Option<crate::TimerId>,
 }
 
 impl State {
@@ -21,6 +29,11 @@ impl State {
             call: Vec::new(),
             handoff: None,
             activation: super::ready::Activation::Initial,
+            session_parked: false,
+            #[cfg(feature = "condition-waits")]
+            condition_park: false,
+            #[cfg(feature = "condition-waits")]
+            condition: None,
         }
     }
 
@@ -60,7 +73,17 @@ impl State {
         Ok(())
     }
 
-    fn admits_handoff(&self, delivery: Option<&Delivery>) -> bool {
+    /// A read parked on or resumed from a Session never outlives the caller's
+    /// original receipt. A read issued in ordinary custody keeps its declared
+    /// window, so a valid handoff past the receipt still delivers.
+    pub(super) fn read_bound(&self, parked: bool) -> f64 {
+        match self.receipt_cap {
+            Some((_, cap)) if parked => cap,
+            _ => f64::MAX,
+        }
+    }
+
+    pub(super) fn admits_handoff(&self, delivery: Option<&Delivery>) -> bool {
         delivery == self.handoff.as_ref()
     }
 }
@@ -94,7 +117,7 @@ impl ContextRegistry {
         Ok(handle)
     }
 
-    fn read_call(&self, handle: &Preflight, context: &Context) -> Result<&Call, Error> {
+    pub(super) fn read_call(&self, handle: &Preflight, context: &Context) -> Result<&Call, Error> {
         self.preflight_state(handle)?
             .call
             .first()
@@ -188,6 +211,11 @@ impl ContextRegistry {
             Some(CommandPhase::Retiring(_)) => Err(Error::Revoked),
             _ => Ok(()),
         }
+    }
+
+    fn inherited_uncertain(&self, handle: &Preflight) -> bool {
+        self.preflight_owner(handle)
+            .is_ok_and(|owner| owner.inherited_uncertain)
     }
 
     pub(super) fn preflight_state(&self, handle: &Preflight) -> Result<&State, Error> {
@@ -292,11 +320,11 @@ impl<P> Cx<'_, P> {
         handle: &Preflight,
     ) -> Result<(PreflightPolicy, Option<Context>), Error> {
         self.validate_preflight_activation(handle)?;
-        let state = self.io.request_contexts.preflight_state(handle)?;
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
         if let Some(call) = state.call.first() {
             self.validate_preflight_delivery(handle, &call.context)?;
             Ok((state.policy.clone(), Some(call.context.clone())))
-        } else if state.admits_handoff(self.io.http_delivery.as_ref()) {
+        } else if state.admits_handoff(self.io.core.http_delivery.as_ref()) {
             Ok((state.policy.clone(), None))
         } else {
             Err(Error::Revoked)
@@ -308,36 +336,107 @@ impl<P> Cx<'_, P> {
         error: impl FnOnce() -> VenueError,
         callback: impl FnOnce(&mut Self),
     ) {
-        let owned =
-            self.io.http_delivery.as_ref().is_some_and(|delivery| {
-                self.io.request_contexts.record_owned_read_failure(delivery)
-            });
+        self.with_read_plan_failure_origin(None, error, callback);
+    }
+
+    pub(in super::super::super) fn with_read_plan_failure_origin(
+        &mut self,
+        origin: Option<super::super::ReleasedReadFailure>,
+        error: impl FnOnce() -> VenueError,
+        callback: impl FnOnce(&mut Self),
+    ) {
+        self.io.core.http_history_failure = None;
+        let owned = self.io.core.http_delivery.as_ref().is_some_and(|delivery| {
+            self.io
+                .core
+                .request_contexts
+                .record_owned_read_failure(delivery)
+        });
         if !owned {
             callback(self);
             return;
         }
+        self.with_recorded_owned_failure(origin, error, callback);
+    }
+
+    fn with_recorded_owned_failure(
+        &mut self,
+        origin: Option<super::super::ReleasedReadFailure>,
+        error: impl FnOnce() -> VenueError,
+        callback: impl FnOnce(&mut Self),
+    ) {
         let delivery = self
             .io
+            .core
             .http_delivery
             .clone()
             .expect("owned failure delivery");
+        if self.io.core.http_plan_expiring.is_none()
+            && self
+                .io
+                .core
+                .managed_http
+                .get(&delivery.attempt.request)
+                .is_some_and(|managed| managed.released_delivery(&delivery))
+            && let Some(origin) = origin
+            && self
+                .io
+                .core
+                .request_contexts
+                .record_read_plan_failure(&delivery, origin)
+        {
+            self.io.core.http_history_failure = Some(delivery.attempt);
+        }
         callback(self);
+        self.io.core.http_history_failure = None;
         if self
             .io
+            .core
             .request_contexts
             .failed_read_owner(&delivery)
             .is_some()
-            || self.io.request_contexts.failed_plan_delivery(&delivery)
+            || self
+                .io
+                .core
+                .request_contexts
+                .failed_plan_delivery(&delivery)
         {
             self.finish_owned_read_failure(&delivery, error());
         }
     }
 
+    pub(in super::super::super) fn with_independent_plan_failure(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        callback: impl FnOnce(&mut Self, VenueError),
+    ) -> Result<(), Error> {
+        let owned = self.io.core.http_delivery.as_ref().is_some_and(|delivery| {
+            self.io
+                .core
+                .request_contexts
+                .plan_from_context(&delivery.context)
+                .is_some_and(|current| current.same_plan(plan))
+                && self
+                    .io
+                    .core
+                    .request_contexts
+                    .record_owned_read_failure(delivery)
+        });
+        if !owned {
+            return self.fail_plan(plan, error);
+        }
+        self.with_recorded_owned_failure(None, || error.clone(), |cx| callback(cx, error.clone()));
+        Ok(())
+    }
+
+    /// `refusal` names a specific issue-time refusal for the Plan's terminal.
     #[inline(never)]
     pub(in super::super::super) fn fail_owned_admission(
         &mut self,
         admission: &Admission,
         reason: Error,
+        refusal: Option<&'static str>,
     ) {
         let Ok(Some(current)) = self.owned_http_admission(&admission.context) else {
             return;
@@ -347,39 +446,48 @@ impl<P> Cx<'_, P> {
         }
         if let Some(plan) = self
             .io
+            .core
             .request_contexts
             .plan_from_context(&admission.context)
         {
-            let error =
-                VenueError::new("HTTP plan admission failed").kind(if reason == Error::TimedOut {
-                    crate::ErrorKind::Timeout
-                } else {
-                    crate::ErrorKind::Internal
-                });
+            let error = match refusal {
+                Some(refusal) => VenueError::new(refusal).kind(crate::ErrorKind::InvalidInput),
+                None => VenueError::new("HTTP plan admission failed").kind(
+                    if reason == Error::TimedOut {
+                        crate::ErrorKind::Timeout
+                    } else {
+                        crate::ErrorKind::Internal
+                    },
+                ),
+            };
             if admission.context.operation() == Operation::Mutation {
                 let delivery = Delivery {
                     context: admission.context.clone(),
                     attempt: admission.attempt,
                 };
                 self.io
+                    .core
                     .request_contexts
                     .result(&delivery, WriteResult::Failed(error.clone()))
                     .expect("pre-enrolled selected write");
             }
-            self.fail_plan(&plan, error)
+            self.fail_plan_owned(&plan, error)
                 .expect("exact selected plan failure");
             return;
         }
         let handle = self
             .io
+            .core
             .request_contexts
             .owner_from_context(&admission.context)
             .expect("owned admission");
         let state = self
             .io
+            .core
             .request_contexts
             .preflight_state(&handle)
             .expect("owned admission");
+        let inherited = self.io.core.request_contexts.inherited_uncertain(&handle);
         let mut error = VenueError::new("HTTP read admission failed")
             .kind(match reason {
                 Error::TimedOut => crate::ErrorKind::Timeout,
@@ -392,6 +500,7 @@ impl<P> Cx<'_, P> {
         let seal = if state.policy.purpose == PreflightPurpose::WriteAfterReads {
             error = CommandWrites::new(CAPACITY)
                 .expect("fixed journal bound")
+                .inheriting(inherited)
                 .fail(error)
                 .expect("empty projection");
             Seal::Failure(error, Vec::new())
@@ -414,11 +523,12 @@ impl<P> Cx<'_, P> {
         if self.finish_failed_plan_call(delivery, &mut error) {
             return;
         }
-        if let Some(handle) = self.io.request_contexts.failed_read_owner(delivery)
+        if let Some(handle) = self.io.core.request_contexts.failed_read_owner(delivery)
             && self.now.is_finite()
         {
             if self
                 .io
+                .core
                 .request_contexts
                 .read_call(&handle, &delivery.context)
                 .is_ok_and(|call| self.now >= call.admission.deadline)
@@ -437,9 +547,9 @@ impl<P> Cx<'_, P> {
         handle: &Preflight,
         context: &Context,
     ) -> Result<(), Error> {
-        self.io.request_contexts.validate(context, self.now)?;
-        let call = self.io.request_contexts.read_call(handle, context)?;
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let call = self.io.core.request_contexts.read_call(handle, context)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         if !call.matches(delivery) || !matches!(call.stage, Stage::Active { failed: false }) {
             return Err(Error::Revoked);
         }
@@ -448,6 +558,7 @@ impl<P> Cx<'_, P> {
         }
         let managed = self
             .io
+            .core
             .managed_http
             .get(&delivery.attempt.request)
             .ok_or(Error::Revoked)?;
@@ -465,11 +576,21 @@ impl<P> Cx<'_, P> {
         context: &Context,
     ) -> Result<(), Error> {
         self.validate_preflight_delivery(handle, context)?;
-        let delivery = self.io.http_delivery.clone().expect("validated delivery");
+        let delivery = self
+            .io
+            .core
+            .http_delivery
+            .clone()
+            .expect("validated delivery");
         self.io.retire_http_leg(context);
-        self.io.request_contexts.contexts.remove(&context.leg());
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
         let state = self
             .io
+            .core
             .request_contexts
             .preflight_state_mut(handle)
             .expect("validated preflight");
@@ -489,9 +610,9 @@ impl<P> Cx<'_, P> {
         if !self.now.is_finite() {
             return Err(Error::Invalid);
         }
-        self.io.request_contexts.validate(context, self.now)?;
-        let call = self.io.request_contexts.read_call(handle, context)?;
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
+        let call = self.io.core.request_contexts.read_call(handle, context)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         if !call.matches(delivery) || !matches!(call.stage, Stage::Active { .. }) {
             return Err(Error::Revoked);
         }
@@ -504,6 +625,7 @@ impl<P> Cx<'_, P> {
         self.io.retire_http_leg(context);
         let call = self
             .io
+            .core
             .request_contexts
             .preflight_state_mut(handle)
             .expect("validated preflight")
@@ -523,10 +645,23 @@ impl<P> Cx<'_, P> {
         terms: CallTerms,
     ) -> Result<Context, Error> {
         self.validate_preflight_activation(handle)?;
-        let state = self.io.request_contexts.preflight_state(handle)?;
-        if !state.call.is_empty() || !state.admits_handoff(self.io.http_delivery.as_ref()) {
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
+        if !state.call.is_empty() || !state.admits_handoff(self.io.core.http_delivery.as_ref()) {
             return Err(Error::Revoked);
         }
+        self.validate_preflight_read(handle, &policy, terms, false)?;
+        self.issue_preflight_read(handle, policy, terms, false)
+    }
+
+    /// The declared read's own terms, checked before any custody is spent.
+    pub(super) fn validate_preflight_read(
+        &self,
+        handle: &Preflight,
+        policy: &Policy,
+        terms: CallTerms,
+        parked: bool,
+    ) -> Result<(), Error> {
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
         if policy.operation != Operation::Read
             || policy.credential != state.policy.read_credential
             || terms.wait_ms != 0
@@ -535,7 +670,7 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Invalid);
         }
-        let window = terms.window(self.now, f64::MAX)?;
+        let window = terms.window(self.now, state.read_bound(parked))?;
         Context::new(
             handle.owner(),
             1,
@@ -546,18 +681,40 @@ impl<P> Cx<'_, P> {
             policy.pacing,
         )?
         .with_retry(policy.retry)?;
-        self.io.request_contexts.prune(self.now);
-        if self.io.request_contexts.contexts.len() + self.io.request_contexts.reserved_contexts
+        Ok(())
+    }
+
+    /// Issue a validated read in the caller's custody, with the current
+    /// delivery (if any) as its predecessor.
+    pub(super) fn issue_preflight_read(
+        &mut self,
+        handle: &Preflight,
+        policy: Policy,
+        terms: CallTerms,
+        parked: bool,
+    ) -> Result<Context, Error> {
+        let bound = self
+            .io
+            .core
+            .request_contexts
+            .preflight_state(handle)?
+            .read_bound(parked);
+        let window = terms.window(self.now, bound)?;
+        self.io.core.request_contexts.prune(self.now);
+        if self.io.core.request_contexts.contexts.len()
+            + self.io.core.request_contexts.reserved_contexts
             >= CAPACITY
         {
             return Err(Error::Capacity);
         }
         self.io
+            .core
             .request_contexts
             .contexts
-            .try_reserve(1 + self.io.request_contexts.reserved_contexts)
+            .try_reserve(1 + self.io.core.request_contexts.reserved_contexts)
             .map_err(|_| Error::Capacity)?;
         self.io
+            .core
             .request_contexts
             .preflight_state_mut(handle)?
             .call
@@ -565,8 +722,8 @@ impl<P> Cx<'_, P> {
             .map_err(|_| Error::Capacity)?;
         let count = u64::from(terms.attempts);
         let signed = policy.credential.is_some();
-        if !self.io.next_id.available(1 + 3 * count)
-            || (signed && !self.io.signing.available_ids(count))
+        if !self.io.core.next_id.available(1 + 3 * count)
+            || (signed && !self.io.core.signing.available_ids(count))
         {
             return Err(Error::Capacity);
         }
@@ -586,44 +743,35 @@ impl<P> Cx<'_, P> {
         .and_then(|context| context.with_retry(policy.retry))
         .expect("validated read policy");
         ids.start += 1;
-        context.bind_issuer(&self.io.request_contexts.issuer);
+        context.bind_issuer(&self.io.core.request_contexts.issuer);
         let signing = signed.then(|| {
             self.io
+                .core
                 .signing
                 .reserve_ids(count)
                 .expect("preflighted signing call")
         });
-        let predecessor = self.io.http_delivery.clone();
-        let mut call = Call {
-            context: context.clone(),
+        let predecessor = self.io.core.http_delivery.clone();
+        let call = Call::open(
+            context.clone(),
             terms,
             window,
             ids,
             signing,
-            selected: 0,
-            admission: Admission {
-                context: context.clone(),
-                attempt: Attempt {
-                    request: RequestId(0),
-                    generation: 0,
-                },
-                timer: TimerId(0),
-                signing: None,
-                deadline: window.deadline(),
-                predecessor: None,
-            },
-            stage: Stage::Ready,
-        };
-        call.select(self.now, predecessor)
-            .expect("validated initial physical window");
+            self.now,
+            predecessor,
+        )
+        .expect("validated initial physical window");
         let state = self
             .io
+            .core
             .request_contexts
             .preflight_state_mut(handle)
             .expect("validated owner");
         state.call.push(call);
         state.handoff = None;
         self.io
+            .core
             .request_contexts
             .contexts
             .insert(context.leg(), context.clone());

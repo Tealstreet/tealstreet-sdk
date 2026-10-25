@@ -174,9 +174,21 @@ impl Venue for Paradex {
     fn on_stream_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Pending,
+        mut pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::Public(request) = &mut pending
+            && request.is_command_candle()
+            && !request.command_candle_delivery(cx)
+        {
+            request.retire_command_candle(cx);
+            return;
+        }
+        if let Pending::Public(request) = &mut pending
+            && self.discard_stale_poll(cx, request)
+        {
+            return;
+        }
         let error = success(response)
             .err()
             .unwrap_or_else(|| format!("Malformed Paradex list (HTTP {})", response.status));
@@ -219,7 +231,30 @@ impl Venue for Paradex {
                 let _ = cx.fail_context(&context, error);
             }
             Pending::PublicTrades(read) => history::public_trades::failed(cx, read, error),
+            Pending::Public(request) if request.is_command_candle() => {
+                request.reject_command_candle(cx, error);
+                self.failures(cx);
+            }
             other => self.on_sign_failed(cx, other, &error.message),
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::Public(request) if request.is_command_candle() => {
+                request.reject_command_candle(cx, error);
+                self.failures(cx);
+            }
+            Pending::Public(request) if request.is_poll_candle() => {
+                self.reject_poll_candle(cx, request, error);
+                self.failures(cx);
+            }
+            other => self.on_sign_error(cx, other, error),
         }
     }
     fn on_http_failed(
@@ -228,10 +263,17 @@ impl Venue for Paradex {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        if let Pending::PublicTrades(read) = pending {
-            history::public_trades::failed(cx, read, error);
-        } else {
-            self.on_request_failed(cx, pending, &error.message);
+        match pending {
+            Pending::PublicTrades(read) => history::public_trades::failed(cx, read, error),
+            Pending::Public(request) if request.is_command_candle() => {
+                self.command_candles_failed(cx, request, error);
+                self.failures(cx);
+            }
+            Pending::Public(request) if request.is_poll_candle() => {
+                self.poll_candles_failed(cx, request, error);
+                self.failures(cx);
+            }
+            other => self.on_request_failed(cx, other, &error.message),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

@@ -185,6 +185,9 @@ fn remote_actions(engine: &mut Driver) -> Vec<Action> {
                     ));
                     out.push(Action::Http(request));
                 }
+                HttpAction::BindGroup { .. } => {
+                    panic!("Backpack fixture declares no Mutation barriers")
+                }
                 HttpAction::Cancel { .. } => {}
             },
             action => out.push(action),

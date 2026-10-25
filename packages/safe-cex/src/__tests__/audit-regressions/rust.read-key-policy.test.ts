@@ -1,5 +1,5 @@
 // Declared read-key policy (docs/plans/RUST_READ_KEY_POLICY.md), JS setup side.
-// No family declares a policy yet, so these drive it through the setup policy.
+// Synthetic setup controls cover both policies; actual declarations are pinned below.
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { SignerSetupPolicy } from '../../exchanges/rust/construction';
@@ -88,6 +88,16 @@ describe('ValidateOnly read keys', () => {
 });
 
 describe('PublicRead read keys', () => {
+  it('Backpack declares PublicRead in the bridge and real signer setup capsule', () => {
+    const policy = deriveSignerSetupPolicy('backpack');
+    expect(policy.readCredentials).toBe('publicRead');
+    expect(deriveBridgeConstruction('backpack', base).readCredentials).toBe('publicRead');
+    const { capsule } = construct({ ...base, publicDataOnly: true, secondary_key: 'read', secondary_secret: SENTINEL }, policy);
+    expect(JSON.parse(capsule).primary).toBeUndefined();
+    expect(capsule).not.toContain('primary-material');
+    expect(JSON.parse(capsule).secondary).toEqual({ key: 'read', secret: SENTINEL });
+  });
+
   const publicRead = { readCredentials: 'publicRead' as const };
   const read = { secondary_key: 'read', secondary_secret: SENTINEL };
 
@@ -116,10 +126,16 @@ describe('the unchanged default', () => {
       .toThrow('Rust engine secondary signing keys require a nonempty key and secret');
   });
 
-  it('declares no family yet, so every bridge record and setup policy is unchanged', () => {
+  it('keeps bridge records and setup policy unchanged for undeclared families', () => {
     for (const name of Object.keys(rules.venues) as ExchangeName[]) {
+      if (name === 'cryptocom' || name === 'backpack') continue;
       expect(deriveBridgeConstruction(name, base)).not.toHaveProperty('readCredentials');
       expect(deriveSignerSetupPolicy(name)).not.toHaveProperty('readCredentials');
     }
   });
+});
+
+it('declares Crypto.com ValidateOnly in both the bridge and trusted setup', () => {
+  expect(deriveBridgeConstruction('cryptocom', base)).toHaveProperty('readCredentials', 'validateOnly');
+  expect(deriveSignerSetupPolicy('cryptocom')).toHaveProperty('readCredentials', 'validateOnly');
 });

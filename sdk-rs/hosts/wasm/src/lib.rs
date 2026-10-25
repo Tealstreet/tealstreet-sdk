@@ -94,6 +94,19 @@ trait AnyEngine {
         _: safe_cex_engine::VenueError,
     ) {
     }
+    #[cfg(feature = "http-mutation-barriers")]
+    fn http_group_pending(&self, _: &safe_cex_engine::request_context::GroupPermit) -> bool {
+        false
+    }
+    #[cfg(feature = "http-mutation-barriers")]
+    fn claim_http_group(
+        &mut self,
+        _: f64,
+        _: safe_cex_engine::request_context::GroupPermit,
+    ) -> Result<safe_cex_engine::request_context::GroupClaim, safe_cex_engine::request_context::Error>
+    {
+        Err(safe_cex_engine::request_context::Error::Invalid)
+    }
     fn claim_http(
         &mut self,
         _: f64,
@@ -189,6 +202,19 @@ impl<V: Venue> AnyEngine for Engine<V> {
         error: safe_cex_engine::VenueError,
     ) {
         Engine::http_preparation_failed(self, now, token, reason, error);
+    }
+    #[cfg(feature = "http-mutation-barriers")]
+    fn http_group_pending(&self, permit: &safe_cex_engine::request_context::GroupPermit) -> bool {
+        Engine::http_group_pending(self, permit)
+    }
+    #[cfg(feature = "http-mutation-barriers")]
+    fn claim_http_group(
+        &mut self,
+        now: f64,
+        permit: safe_cex_engine::request_context::GroupPermit,
+    ) -> Result<safe_cex_engine::request_context::GroupClaim, safe_cex_engine::request_context::Error>
+    {
+        Engine::claim_http_group(self, now, permit)
     }
     fn claim_http(
         &mut self,
@@ -1432,6 +1458,50 @@ mod tests {
             })
         }
 
+        /// Drive managed reads through the host's prepare, bind and claim
+        /// handoff; a released packet joins the output as its `http` action.
+        fn managed(engine: &mut WasmEngine, actions: Vec<Value>) -> Vec<Value> {
+            let mut queue: std::collections::VecDeque<Value> = actions.into();
+            let mut out = Vec::new();
+            let mut resource = 0;
+            while let Some(action) = queue.pop_front() {
+                if action["op"] != "managedHttp" {
+                    out.push(action);
+                    continue;
+                }
+                let next = match action["phase"].as_str() {
+                    Some("prepare") => {
+                        resource += 1;
+                        engine
+                            .http_prepared(
+                                action["preparation"].as_str().unwrap(),
+                                &resource.to_string(),
+                                None,
+                                NOW,
+                            )
+                            .unwrap()
+                    }
+                    Some("bind") => {
+                        let claim: Value = serde_json::from_str(
+                            &engine.http_claim(action["permit"].as_str().unwrap(), NOW),
+                        )
+                        .unwrap();
+                        if claim["status"] == "released" {
+                            let mut packet = action["packet"].clone();
+                            packet["op"] = "http".into();
+                            out.push(packet);
+                        }
+                        engine.prepare_dispatch(NOW)
+                    }
+                    _ => continue,
+                };
+                if !next.is_empty() {
+                    queue.extend(serde_json::from_str::<Vec<Value>>(&next).unwrap());
+                }
+            }
+            out
+        }
+
         #[test]
         fn all_aliases_construct_with_setup_and_ordinary_startup_gets_are_signed() {
             for venue in ALIASES {
@@ -1448,7 +1518,8 @@ mod tests {
                 assert!(!engine.requires_external_signer(), "{venue}");
                 let construction: Value = serde_json::from_str(&engine.construction()).unwrap();
                 assert_eq!(construction["bridge"]["dispatchSigning"], true, "{venue}");
-                let actions: Vec<Value> = serde_json::from_str(&engine.start(NOW)).unwrap();
+                let started = serde_json::from_str(&engine.start(NOW)).unwrap();
+                let actions = managed(&mut engine, started);
                 assert!(
                     !actions.iter().any(|action| action["op"] == "sign"),
                     "{venue}"
@@ -1500,7 +1571,8 @@ mod tests {
                 // Declared and undeclared capability both admit ordinary signing.
                 let declared = (venue != ALIASES[0]).then(|| r#"["hmacSha256"]"#.to_owned());
                 assert!(engine.use_external_signer(declared).is_ok(), "{venue}");
-                let actions: Vec<Value> = serde_json::from_str(&engine.start(NOW)).unwrap();
+                let started = serde_json::from_str(&engine.start(NOW)).unwrap();
+                let actions = managed(&mut engine, started);
                 assert!(
                     !actions
                         .iter()
@@ -1532,7 +1604,7 @@ mod tests {
                     })
                     .collect();
                 let completion = json!({"values": values, "receipt": sign["work"]["receipt"]});
-                let released: Vec<Value> = serde_json::from_str(
+                let completed = serde_json::from_str(
                     &engine
                         .signed(
                             sign["attempt"].as_f64().unwrap(),
@@ -1542,6 +1614,7 @@ mod tests {
                         .unwrap(),
                 )
                 .unwrap();
+                let released = managed(&mut engine, completed);
                 assert!(released.iter().any(|action| {
                     action["op"] == "http"
                         && header(action, "X-BAPI-API-KEY") == Some("external-secondary")

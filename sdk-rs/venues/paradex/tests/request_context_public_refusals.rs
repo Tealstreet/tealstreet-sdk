@@ -364,28 +364,45 @@ fn book_success_keeps_native_managed_get_and_schema() {
     }
 }
 #[test]
-fn saturated_remote_candles_keep_native_legacy_bytes_without_unused_root() {
+fn saturated_remote_candles_require_capacity_and_preserve_recovered_wire() {
     for testnet in [false, true] {
         let mut e = engine(testnet);
         for id in 1..=256 {
             peer(&mut e, id);
         }
-        e.handle(
-            NOW,
-            Event::Command(Command::FetchCandles {
-                command: 800,
-                symbol: "BTC-USD-PERP".into(),
-                interval: Interval::M1,
-                from_ms: Some(0.),
-                to_ms: Some(NOW),
-                limit: Some(3),
-            }),
-        );
+        let fetch = || Command::FetchCandles {
+            command: 800,
+            symbol: "BTC-USD-PERP".into(),
+            interval: Interval::M1,
+            from_ms: Some(0.),
+            to_ms: Some(NOW),
+            limit: Some(3),
+        };
+        e.handle(NOW, Event::Command(fetch()));
         let actions: Vec<_> = e.drain_actions().collect();
         assert_eq!(actions.len(), 1);
-        let Action::Http(r) = &actions[0] else {
-            panic!("remote candles remain legacy")
-        };
+        let error = one(&actions, 800).unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::Internal));
+        assert_eq!(error.outcome, None);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+        );
+        for _ in 0..2 {
+            retire(&mut e, NOW);
+        }
+        e.handle(NOW, Event::Command(fetch()));
+        let actions = prepared_actions(&mut e, NOW);
+        let requests: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(requests.len(), 1);
+        let r = requests[0];
         let host = if testnet {
             "https://api.testnet.paradex.trade/v1"
         } else {

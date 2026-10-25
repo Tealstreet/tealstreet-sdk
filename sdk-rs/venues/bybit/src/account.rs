@@ -26,6 +26,8 @@ const FILL_REPAIR_GRACE_MS: f64 = 8_000.0;
 /// A failed order snapshot is retried this often until one succeeds.
 const ORDERS_RETRY_MS: f64 = 15_000.0;
 const ORDERS_PAGE_LIMIT: u32 = 50;
+/// The window for a whole paged account read; each page keeps its own 20 s.
+const ACCOUNT_READ_WINDOW_MS: u32 = 60_000;
 const POSITIONS_PAGE_LIMIT: u32 = 200;
 const EXECUTION_CACHE_LIMIT: usize = 4096;
 const TERMINAL_ORDER_CACHE_LIMIT: usize = 4096;
@@ -149,6 +151,8 @@ pub struct MappedPosition {
 }
 
 struct PositionsJoin {
+    /// One Background owner for every page and settle coin of this read.
+    root: Option<safe_cex_engine::request_context::Context>,
     generation: u32,
     /// Position-event count when the reads were issued; a newer stream event
     /// makes the snapshot stale.
@@ -161,6 +165,8 @@ struct PositionsJoin {
 }
 
 struct OrdersJoin {
+    /// One Background owner for every page and settle coin of this read.
+    root: Option<safe_cex_engine::request_context::Context>,
     generation: u32,
     revision: u32,
     issued_at: f64,
@@ -204,6 +210,9 @@ pub struct AccountState {
     /// A Hyro reconciliation read failed in transport or at the venue, not on content.
     hyro_transient: bool,
     hyro_transient_streak: u8,
+    /// This snapshot had a read refused locally (engine admission or queue);
+    /// it never reached Hyro, so it is no evidence against the session.
+    hyro_local_refusal: bool,
     /// Bumped to orphan an in-flight wallet read without ending the session.
     wallet_epoch: u32,
     /// Per-coin holdings; `None` until a wallet read or push is accepted.
@@ -1129,8 +1138,7 @@ impl BybitLinear {
             self.account.session_version += 1;
             self.account.orders_generation += 1;
             self.account.positions_generation += 1;
-            self.account.orders = None;
-            self.account.positions = None;
+            self.drop_account_reads(cx);
             self.account.orders_follow_up = false;
             self.account.positions_follow_up = false;
             self.account.orders_stale = true;
@@ -1142,8 +1150,7 @@ impl BybitLinear {
         self.account.ready = false;
         self.account.handshake = None;
         self.account.snapshot = None;
-        self.account.orders = None;
-        self.account.positions = None;
+        self.drop_account_reads(cx);
         self.account.wallet_in_flight = false;
         if let Some(timer) = self.account.tick_timer.take() {
             cx.clear_timer(timer);
@@ -1158,11 +1165,16 @@ impl BybitLinear {
     /// A periodic read that failed in transport keeps the healthy stream and the
     /// last good state; the next tick retries. Bad content still reconnects.
     fn hyro_read_failed(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
-        if std::mem::take(&mut self.account.hyro_transient)
-            && self.account.ready
-            && self.account.hyro_transient_streak < 3
-        {
-            self.account.hyro_transient_streak += 1;
+        let disposition = hyro_failure(
+            self.account.ready,
+            std::mem::take(&mut self.account.hyro_transient),
+            self.account.hyro_local_refusal,
+            self.account.hyro_transient_streak,
+        );
+        if let HyroFailure::Retry { counts } = disposition {
+            if counts {
+                self.account.hyro_transient_streak += 1;
+            }
             cx.notice(
                 Level::Warn,
                 code::REQUEST_FAILED,
@@ -1171,8 +1183,7 @@ impl BybitLinear {
             // Orphan this snapshot's other reads so they cannot fill the next one.
             self.account.snapshot = None;
             self.account.snapshot_guard = Default::default();
-            self.account.orders = None;
-            self.account.positions = None;
+            self.drop_account_reads(cx);
             self.account.orders_generation += 1;
             self.account.positions_generation += 1;
             self.account.wallet_in_flight = false;
@@ -1180,6 +1191,13 @@ impl BybitLinear {
             return;
         }
         self.fail_hyro(cx, message);
+    }
+
+    /// A read the engine refused before any I/O (admission or queue).
+    pub(crate) fn note_local_read_refusal(&mut self) {
+        if self.variant.is_hyro() {
+            self.account.hyro_local_refusal = true;
+        }
     }
 
     fn fail_hyro(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
@@ -1229,7 +1247,21 @@ impl BybitLinear {
         }
     }
 
+    /// Reconcile an uncertain Hyro write with a fresh atomic snapshot; reads
+    /// already out predate the write, so they are abandoned, not joined.
+    pub(crate) fn reconcile_hyro_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Before the subscribe ack, its own snapshot follows and reconciles.
+        if !self.account.authed || self.account.handshake.is_some() {
+            return;
+        }
+        self.drop_account_reads(cx);
+        self.account.wallet_in_flight = false;
+        self.account.wallet_epoch = self.account.wallet_epoch.wrapping_add(1);
+        self.start_hyro_snapshot(cx);
+    }
+
     fn start_hyro_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.hyro_local_refusal = false;
         self.account.snapshot = Some(HyroSnapshot {
             revision: self.account.revision,
             orders: None,
@@ -1341,6 +1373,8 @@ impl BybitLinear {
         self.commit_balance(cx);
         self.account.orders_snapshot_version += 1;
         self.account.ready = true;
+        // A complete committed snapshot is the fresh order read for the fence.
+        cx.orders_reconciled(None);
     }
 
     fn settle_coins(&self) -> &'static [&'static str] {
@@ -1363,7 +1397,7 @@ impl BybitLinear {
             self.startup.account_info = true;
             return;
         }
-        self.send(
+        self.send_read(
             cx,
             Rest::get("/v5/account/info", Query::new()).signed(),
             Then::Account(Request::AccountInfo),
@@ -1400,7 +1434,7 @@ impl BybitLinear {
     }
 
     fn request_orders_page(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         generation: u32,
         coin: &'static str,
@@ -1416,15 +1450,12 @@ impl BybitLinear {
             invalid: false,
             rejected: RowAdmission::default(),
         };
-        self.send(
-            cx,
-            Rest::get("/v5/order/realtime", query).streamed().signed(),
-            Then::Account(request),
-        );
+        let rest = Rest::get("/v5/order/realtime", query).streamed().signed();
+        self.send_page(cx, generation, rest, Then::Account(request));
     }
 
     fn request_positions_page(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         generation: u32,
         coin: &'static str,
@@ -1444,11 +1475,76 @@ impl BybitLinear {
             invalid: false,
             rejected: RowAdmission::default(),
         };
-        self.send(
-            cx,
-            Rest::get("/v5/position/list", query).streamed().signed(),
-            Then::Account(request),
-        );
+        let rest = Rest::get("/v5/position/list", query).streamed().signed();
+        self.send_page(cx, generation, rest, Then::Account(request));
+    }
+
+    /// A Background root for one paged read: its legs share one owner, so the
+    /// engine counts the read only from its earliest released page.
+    fn account_read_root(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+    ) -> Option<safe_cex_engine::request_context::Context> {
+        let policy = self.read_policy(true, ACCOUNT_READ_WINDOW_MS)?;
+        cx.http_context(safe_cex_engine::request_context::Scope::Background, policy)
+            .ok()
+    }
+
+    /// One page as a leg of its join's root; a refused leg fails the page.
+    fn send_page(&mut self, cx: &mut Cx<'_, Pending>, generation: u32, rest: Rest, then: Then) {
+        let root = match &then {
+            Then::Account(Request::Orders { .. }) => self
+                .account
+                .orders
+                .as_ref()
+                .filter(|join| join.generation == generation)
+                .and_then(|join| join.root.clone()),
+            _ => self
+                .account
+                .positions
+                .as_ref()
+                .filter(|join| join.generation == generation)
+                .and_then(|join| join.root.clone()),
+        };
+        let leg = root
+            .zip(self.read_policy(true, crate::policy::read_policy().timeout_ms))
+            .and_then(|(root, policy)| cx.http_leg_context(&root, policy).ok());
+        match leg {
+            Some(leg) => self.queue_read(cx, leg, rest, then),
+            None => {
+                self.note_local_read_refusal();
+                self.on_public_response(cx, then, Err("Bybit account read was not admitted"));
+            }
+        }
+    }
+
+    /// Drop the in-flight snapshots, releasing their read authority.
+    fn drop_account_reads(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(join) = self.account.orders.take() {
+            Self::finish_read_root(cx, join.root);
+        }
+        if let Some(join) = self.account.positions.take() {
+            Self::finish_read_root(cx, join.root);
+        }
+    }
+
+    fn finish_read_root(
+        cx: &mut Cx<'_, Pending>,
+        root: Option<safe_cex_engine::request_context::Context>,
+    ) {
+        if let Some(root) = root {
+            let _ = cx.finish_http_context(&root);
+        }
+    }
+
+    /// Reconcile an uncertain write with a fresh order read: an older read
+    /// still out predates the write, so it is abandoned rather than joined.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(old) = self.account.orders.take() {
+            Self::finish_read_root(cx, old.root);
+        }
+        self.account.orders_follow_up = false;
+        self.fetch_orders(cx);
     }
 
     pub(crate) fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1458,7 +1554,9 @@ impl BybitLinear {
         self.account.orders_generation += 1;
         let generation = self.account.orders_generation;
         let coins = self.settle_coins();
+        let root = self.account_read_root(cx);
         self.account.orders = Some(OrdersJoin {
+            root,
             generation,
             revision: self.account.revision,
             issued_at: cx.now,
@@ -1485,7 +1583,9 @@ impl BybitLinear {
         self.account.positions_generation += 1;
         let generation = self.account.positions_generation;
         let coins = self.settle_coins();
+        let root = self.account_read_root(cx);
         self.account.positions = Some(PositionsJoin {
+            root,
             generation,
             version: self.account.position_version,
             pending: coins.len(),
@@ -1512,7 +1612,7 @@ impl BybitLinear {
             "UNIFIED"
         };
         let query = Query::new().str("accountType", account_type);
-        self.send(
+        self.send_read(
             cx,
             Rest::get("/v5/account/wallet-balance", query).signed(),
             Then::Account(Request::Wallet {
@@ -1571,7 +1671,7 @@ impl BybitLinear {
             .str("orderId", &id)
             .num("limit", 100.0)
             .opt_str("cursor", cursor.as_deref());
-        self.send(
+        self.send_read(
             cx,
             Rest::get("/v5/execution/list", query).signed(),
             Then::Account(Request::FillRepair {
@@ -2579,7 +2679,8 @@ impl BybitLinear {
         if !join.failed && join.pending > 0 {
             return;
         }
-        let join = self.account.orders.take().expect("checked above");
+        let mut join = self.account.orders.take().expect("checked above");
+        Self::finish_read_root(cx, join.root.take());
         if std::mem::take(&mut self.account.orders_follow_up) {
             self.fetch_orders(cx);
         }
@@ -2709,6 +2810,18 @@ impl BybitLinear {
         {
             cx.store.set_orders(cx.store.orders().to_vec());
         }
+        // A committed, wholly admitted fresh read clears the engine's
+        // uncertain-write fence once no product's order read is still out.
+        if !join.rejected.any()
+            && !self.account.orders_stale
+            && self.account.orders.is_none()
+            && self
+                .products
+                .iter()
+                .all(|state| state.account.orders.is_none() && !state.account.orders_stale)
+        {
+            cx.orders_reconciled(None);
+        }
     }
 
     /// A read issued before an acknowledged setting cannot publish old rails.
@@ -2744,7 +2857,8 @@ impl BybitLinear {
         if !join.failed && join.pending > 0 {
             return;
         }
-        let join = self.account.positions.take().expect("checked above");
+        let mut join = self.account.positions.take().expect("checked above");
+        Self::finish_read_root(cx, join.root.take());
         if std::mem::take(&mut self.account.positions_follow_up) {
             self.fetch_positions(cx);
         }
@@ -2920,9 +3034,61 @@ fn on_execution(cx: &mut Cx<'_, Pending>, row: &ExecutionRow<'_>, account: &mut 
     });
 }
 
+/// What one failed Hyro reconciliation read does to the private session.
+#[derive(Debug, PartialEq, Eq)]
+enum HyroFailure {
+    /// Keep the stream; the next tick re-reads. `counts` spends the streak.
+    Retry {
+        counts: bool,
+    },
+    Reconnect,
+}
+
+/// `transient`: this failure was transport or venue, not content (a local
+/// refusal's own failure is transient). `local`: this snapshot had a read the
+/// engine refused before any I/O; it waives the streak, never content.
+fn hyro_failure(ready: bool, transient: bool, local: bool, streak: u8) -> HyroFailure {
+    if ready && transient && (local || streak < 3) {
+        HyroFailure::Retry { counts: !local }
+    } else {
+        HyroFailure::Reconnect
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hyro_failure_retries_transients_until_the_streak_and_never_counts_local_refusals() {
+        use HyroFailure::{Reconnect, Retry};
+        // (ready, transient, local, streak)
+        assert_eq!(hyro_failure(true, true, false, 0), Retry { counts: true });
+        assert_eq!(hyro_failure(true, true, false, 3), Reconnect);
+        assert_eq!(hyro_failure(true, true, true, 3), Retry { counts: false });
+        assert_eq!(
+            hyro_failure(true, false, false, 0),
+            Reconnect,
+            "content reconnects"
+        );
+        assert_eq!(
+            hyro_failure(false, true, false, 0),
+            Reconnect,
+            "not ready yet"
+        );
+        assert_eq!(
+            hyro_failure(false, true, true, 0),
+            Reconnect,
+            "not ready yet"
+        );
+    }
+
+    /// dazzy3 on #2106: a local refusal earlier in the snapshot never turns
+    /// this read's content failure into a retry; bad content reconnects now.
+    #[test]
+    fn hyro_content_failure_reconnects_even_after_a_local_refusal() {
+        assert_eq!(hyro_failure(true, false, true, 0), HyroFailure::Reconnect);
+    }
 
     #[test]
     fn recognizes_inverse_symbols() {

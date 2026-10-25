@@ -299,7 +299,97 @@ const ASTERDEX_MAIN_WALLET_REQUIRED: &str = "Aster API Wallet/vault keys require
 /// Backpack's provider copy of the configured key and Ed25519 seed (option B).
 /// A probe signature refuses a malformed or non-32-byte seed before startup.
 #[cfg(feature = "backpack")]
-fn backpack_provider(
+struct BackpackSignerSetup {
+    provider: Option<safe_cex_engine::signing::Provider>,
+    identities: safe_cex_engine::signing::Identities,
+    read_status: Option<Result<(), safe_cex_venue_backpack::sign::ReadCredentialsError>>,
+}
+
+#[cfg(feature = "backpack")]
+fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, VenueError> {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{Algorithm, Identities, KeyEncoding, Operation, PayloadPart};
+    let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
+    // Validation metadata survives public-only setup; no signing material does.
+    let read_status = options.read_credentials.as_ref().map(|read| {
+        safe_cex_venue_backpack::sign::validate_read_credentials(read.validate(), &read.secret)
+    });
+    // Declared PublicRead keeps a valid read key signing in public-only mode,
+    // with no primary ever built or probed (docs/plans/RUST_BACKPACK_PUBLIC_READ_PROVIDER.md).
+    // Backpack's own provider (dual custody) applies the one shared rule.
+    let read_policy = construction::read_credentials_policy("backpack");
+    let primary_allowed = !public_read_excludes_primary(read_policy, options.public_data_only);
+    if options.public_data_only && read_policy != construction::ReadCredentialsPolicy::PublicRead {
+        return Ok(BackpackSignerSetup {
+            provider: None,
+            identities: Identities::default(),
+            read_status,
+        });
+    }
+    let undecodable = || invalid("Invalid Backpack base64 seed");
+    let wrong_width = || invalid("Backpack Ed25519 seed must be 32 bytes");
+    let primary =
+        (primary_allowed && present(&options.key) && present(&options.secret)).then(|| {
+            LocalIdentity {
+                key: Secret::new(options.key.clone().unwrap_or_default()),
+                secret: Secret::new(options.secret.clone().unwrap_or_default()),
+                secret_encoding: KeyEncoding::Base64,
+                ..Default::default()
+            }
+        });
+    let secondary = options
+        .read_credentials
+        .as_ref()
+        .filter(|_| matches!(read_status, Some(Ok(()))))
+        .map(|read| LocalIdentity {
+            key: Secret::new(read.key.clone()),
+            secret: Secret::new(read.secret.clone()),
+            secret_encoding: KeyEncoding::Base64,
+            ..Default::default()
+        });
+    if primary.is_none() && secondary.is_none() {
+        return Ok(BackpackSignerSetup {
+            provider: None,
+            identities: Identities::default(),
+            read_status,
+        });
+    }
+    // Both seeds are Ed25519 keys, declared so the provider signs only Ed25519.
+    let ed25519 = Some(safe_cex_engine::signing::IdentitySetupPolicy {
+        signing_algorithm: Some(Algorithm::Ed25519),
+        ..Default::default()
+    });
+    let policy = safe_cex_engine::signing::CredentialSetupPolicy {
+        primary: ed25519,
+        secondary: ed25519,
+    };
+    let (signer, identities) =
+        LocalSigner::from_setup_with_policy(LocalSetup { primary, secondary }, policy)
+            .map_err(|_| undecodable())?;
+    if let Some(primary) = identities.primary.as_ref() {
+        let probe = safe_cex_engine::signing::SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::Ed25519,
+                key: primary.signing.clone(),
+                payload: vec![PayloadPart::Bytes { bytes: Vec::new() }],
+            }],
+        };
+        signer.sign_now(&probe).map_err(|_| wrong_width())?;
+    }
+    Ok(BackpackSignerSetup {
+        provider: Some(std::sync::Arc::new(signer)),
+        identities,
+        read_status,
+    })
+}
+
+/// BloFin's one provider setup from the configured strings. The adopted
+/// FetchLeverage Read signs through it; unadopted paths keep the raw fields
+/// until the family cutover. Passphrase refs mirror native `headers` exactly.
+#[cfg(feature = "blofin")]
+fn blofin_signer(
     options: &EngineOptions,
 ) -> Result<
     (
@@ -309,43 +399,37 @@ fn backpack_provider(
     VenueError,
 > {
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-    use safe_cex_engine::signing::{Algorithm, Identities, KeyEncoding, Operation, PayloadPart};
     let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
     if options.public_data_only || !present(&options.key) || !present(&options.secret) {
-        return Ok((None, Identities::default()));
+        return Ok((None, Default::default()));
     }
-    let undecodable = || invalid("Invalid Backpack base64 seed");
-    let wrong_width = || invalid("Backpack Ed25519 seed must be 32 bytes");
+    // Native: no Primary passphrase refuses any slot; an absent Secondary
+    // passphrase inherits Primary's; an empty effective one (including an
+    // explicit empty Secondary, which never falls back) is refused.
+    let passphrase = |read: Option<&String>| {
+        options
+            .passphrase
+            .as_ref()
+            .map(|primary| read.unwrap_or(primary).clone())
+            .filter(|value| !value.is_empty())
+            .map(Secret::new)
+    };
     let setup = LocalSetup {
         primary: Some(LocalIdentity {
             key: Secret::new(options.key.clone().unwrap_or_default()),
             secret: Secret::new(options.secret.clone().unwrap_or_default()),
-            secret_encoding: KeyEncoding::Base64,
+            passphrase: passphrase(None),
             ..Default::default()
         }),
-        secondary: None,
-    };
-    // The seed is an Ed25519 key, declared so the provider signs only Ed25519.
-    let policy = safe_cex_engine::signing::CredentialSetupPolicy {
-        primary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
-            signing_algorithm: Some(Algorithm::Ed25519),
+        secondary: options.read_credentials.as_ref().map(|read| LocalIdentity {
+            key: Secret::new(read.key.clone()),
+            secret: Secret::new(read.secret.clone()),
+            passphrase: passphrase(read.passphrase.as_ref()),
             ..Default::default()
         }),
-        secondary: None,
     };
     let (signer, identities) =
-        LocalSigner::from_setup_with_policy(setup, policy).map_err(|_| undecodable())?;
-    let primary = identities.primary.as_ref().ok_or_else(undecodable)?;
-    let probe = safe_cex_engine::signing::SignRequest {
-        receipt: Default::default(),
-        context: Default::default(),
-        operations: vec![Operation::Sign {
-            algorithm: Algorithm::Ed25519,
-            key: primary.signing.clone(),
-            payload: vec![PayloadPart::Bytes { bytes: Vec::new() }],
-        }],
-    };
-    signer.sign_now(&probe).map_err(|_| wrong_width())?;
+        LocalSigner::from_setup(setup).map_err(|_| invalid("Invalid BloFin signer setup"))?;
     Ok((Some(std::sync::Arc::new(signer)), identities))
 }
 
@@ -611,6 +695,31 @@ fn signer_setup_policy_for(
 #[cfg(feature = "apexomni")]
 const APEXOMNI_NO_SECONDARY: &str =
     "ApeX has no read credentials; a secondary key is not supported";
+/// Every ApeX private request is signed, so a private account whose key has
+/// no secret is refused rather than retried as an unsignable account.
+#[cfg(feature = "apexomni")]
+const APEXOMNI_SECRET_REQUIRED: &str = "ApeX requires the API secret with the API key";
+
+/// A primary with no signing material can never sign. Public data still works,
+/// so a public account drops it (the venue says so); a private one is refused.
+#[cfg(feature = "apexomni")]
+fn apexomni_unsignable(
+    identities: &mut safe_cex_engine::signing::Identities,
+    public_data_only: bool,
+) -> Result<bool, VenueError> {
+    if !identities
+        .primary
+        .as_ref()
+        .is_some_and(|identity| identity.signing.0.is_empty())
+    {
+        return Ok(false);
+    }
+    if !public_data_only {
+        return Err(invalid(APEXOMNI_SECRET_REQUIRED));
+    }
+    identities.primary = None;
+    Ok(true)
+}
 /// The legacy start refusal, now at trusted setup before any order exists.
 #[cfg(feature = "apexomni")]
 const APEXOMNI_SEED_INVALID: &str = "Invalid OmniKey seed: expected 65-byte Ethereum signature";
@@ -717,8 +826,7 @@ fn prepare_local_signer_with_policy(
         };
     use construction::ReadCredentialsPolicy;
     // A public-only PublicRead provider holds no primary, so only Read roles select.
-    let primary =
-        primary.filter(|_| !(public_data_only && read_policy == ReadCredentialsPolicy::PublicRead));
+    let primary = primary.filter(|_| !public_read_excludes_primary(read_policy, public_data_only));
     // Trusted setup computes the result; a caller-supplied one is refused, with
     // any read material wiped first.
     if read_policy == ReadCredentialsPolicy::ValidateOnly
@@ -973,6 +1081,16 @@ pub fn build<T: Visit>(
 
 /// The validation result travels only for a ValidateOnly family, never with
 /// the material, and a false result keeps the native construction refusal.
+/// The one PublicRead rule for every provider builder: a public-only provider
+/// for such a family never holds, builds or probes a primary.
+#[cfg(any(feature = "dispatch-signing", feature = "backpack"))]
+fn public_read_excludes_primary(
+    policy: construction::ReadCredentialsPolicy,
+    public_data_only: bool,
+) -> bool {
+    public_data_only && policy == construction::ReadCredentialsPolicy::PublicRead
+}
+
 /// Host-side setup (the WASM constructor's JSON provider setup) runs this before
 /// building a provider, so a false read-key result keeps native precedence over
 /// any primary decode failure.
@@ -1268,11 +1386,15 @@ pub fn build_with_signer<T: Visit>(
                 }
                 None => (signer, Default::default()),
             };
+            let mut identities = identities;
+            let credentials_ignored =
+                apexomni_unsignable(&mut identities, options.public_data_only)?;
             let mut engine = Engine::new(
                 ApexOmni::new(ApexOmniOptions {
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
                     identity: identities.primary.clone(),
+                    credentials_ignored,
                     tick_interval_ms: None,
                 }),
                 entropy,
@@ -1496,10 +1618,12 @@ pub fn build_with_signer<T: Visit>(
             // Transitional dual custody (RUST_BACKPACK_SIGNER_ADMISSION.md, option
             // B): managed trading signs through this provider, while unadopted
             // account reads and private WS auth keep the raw fields. Remove before master.
-            let (provider, identities) = backpack_provider(&options)?;
+            let setup = backpack_provider(&options)?;
             let mut engine = Engine::new(
                 Backpack::new(BackpackOptions {
-                    identity: identities.primary.clone(),
+                    identity: setup.identities.primary.clone(),
+                    read_identity: setup.identities.secondary.clone(),
+                    read_credentials_status: setup.read_status,
                     read_credentials: options.read_credentials.take(),
                     public_data_only: options.public_data_only,
                     key: options.key.take(),
@@ -1508,16 +1632,14 @@ pub fn build_with_signer<T: Visit>(
                 }),
                 entropy,
             )?;
-            engine.set_signer(provider)?;
-            engine.set_identities(identities)?;
+            engine.set_signer(setup.provider)?;
+            engine.set_identities(setup.identities)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "blofin")]
-        "blofin" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "blofin" => {
+            let (provider, identities) = blofin_signer(&options)?;
+            let mut engine = Engine::new(
                 Blofin::new(BlofinOptions {
                     broker_attribution: options.broker_attribution,
                     read_credentials: options.read_credentials.take(),
@@ -1526,10 +1648,14 @@ pub fn build_with_signer<T: Visit>(
                     key: options.key.take(),
                     secret: options.secret.take(),
                     passphrase: options.passphrase.take(),
+                    identities: identities.clone(),
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(provider)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "mexc")]
         "mexc" => finish(
             visitor,
@@ -1823,21 +1949,37 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "cryptocom")]
-        "cryptocom" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "cryptocom" => {
+            if options.key.as_ref().is_some_and(|value| !value.is_empty())
+                || options
+                    .secret
+                    .as_ref()
+                    .is_some_and(|value| !value.is_empty())
+            {
+                return Err(invalid(
+                    "Crypto.com credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.primary.is_some() && signer.is_none() {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let registered = identities.clone();
+            let mut engine = Engine::new(
                 Cryptocom::new(CryptocomOptions {
-                    read_credentials: options.read_credentials.take(),
+                    credentials: identities.primary,
+                    secondary_validation: options
+                        .read_credentials_valid
+                        .map(safe_cex_engine::ReadCredentials::status),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => {
             let config = HyperliquidOptions {
@@ -2403,3 +2545,7 @@ mod tests {
 #[cfg(test)]
 #[path = "read_key_policy_tests.rs"]
 mod read_key_policy_tests;
+
+#[cfg(all(test, feature = "backpack"))]
+#[path = "backpack_public_read_tests.rs"]
+mod backpack_public_read_tests;

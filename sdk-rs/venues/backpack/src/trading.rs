@@ -681,6 +681,7 @@ impl Backpack {
             preflight,
             &bounds,
             PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Mutation,
                 credential: self.options.identity.as_ref().map(|identity| Credential {
                     slot: safe_cex_engine::CredentialSlot::Primary,
@@ -928,6 +929,7 @@ impl Backpack {
         );
         if let Err((Pending::Trade(delivery), error)) = cx.request_signed_managed(
             delivery.managed.as_ref().unwrap().context.clone(),
+            None,
             method,
             format!("{REST}{path}"),
             Some(body),
