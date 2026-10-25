@@ -13,7 +13,8 @@ use safe_cex_engine::execution::{
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::selected_read::{
-    AdmittedRead, LocalRefusal, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+    AdmittedRead, BackgroundReadError, LocalRefusal, ReadPolicy, ReadRequest, ReadRole,
+    SelectedRead,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::rate_limit_pause_ms;
@@ -262,7 +263,10 @@ impl Blofin {
             Some(_) => Err(CredentialUnavailable::Missing),
             None => SelectedRead::select(&slots, ReadRole::Read { scope: None }),
         };
-        (selected, refusal.unwrap_or("BloFin requires API credentials"))
+        (
+            selected,
+            refusal.unwrap_or("BloFin requires API credentials"),
+        )
     }
     pub(crate) fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
         let Some(market) = cx.store.market(&symbol) else {
@@ -514,6 +518,9 @@ impl Blofin {
             ("Content-Type", "application/json".into()),
         ])
     }
+    /// One Background read per account leg, signed by the #2084 recipe; the
+    /// native revision checks stay the join. A refused selection, admission or
+    /// queue settles the leg through `account_failed` before any send.
     fn private_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -521,34 +528,48 @@ impl Blofin {
         request: Request,
         stream: bool,
     ) {
-        match self.headers(
-            |bytes| cx.fill_signing_entropy(bytes),
-            path,
-            Method::Get,
-            cx.now,
-            "",
+        let (selected, message) = self.read_selection();
+        let read = match SelectedRead::background(
+            cx,
+            selected,
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
         ) {
-            Ok(headers) => {
-                let pending = Pending::Account(request);
-                if stream {
-                    cx.request_streamed(
-                        Method::Get,
-                        format!("{}{path}", self.host()),
-                        headers,
-                        ArrayAt::EnvelopeField("data"),
-                        pending,
-                    );
-                } else {
-                    cx.request(
-                        Method::Get,
-                        format!("{}{path}", self.host()),
-                        headers,
-                        None,
-                        pending,
-                    );
-                }
+            Ok(read) => read,
+            Err(BackgroundReadError::Selection(_)) => {
+                return self.account_failed(cx, request, message);
             }
-            Err(e) => self.account_failed(cx, request, &e),
+            Err(BackgroundReadError::Admission(error)) => {
+                let error = error.read_venue_error().message;
+                return self.account_failed(cx, request, &error);
+            }
+        };
+        let testnet = self.options.testnet;
+        let path = path.to_owned();
+        if let Err((Pending::Account(_, request), error)) = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{}{path}", self.host()),
+                body: None,
+                stream: stream.then_some(ArrayAt::EnvelopeField("data")),
+            },
+            |identity| {
+                Box::new(crate::dispatch_signing::Http::new(
+                    identity.clone(),
+                    testnet,
+                    Method::Get,
+                    path,
+                    None,
+                ))
+            },
+            |read| Pending::Account(read, request),
+        ) {
+            let error = error.read_venue_error().message;
+            self.account_failed(cx, request, &error);
         }
     }
     pub(crate) fn private_start(&mut self, cx: &mut Cx<'_, Pending>) {

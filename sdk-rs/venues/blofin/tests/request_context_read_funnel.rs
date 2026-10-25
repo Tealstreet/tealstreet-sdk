@@ -42,7 +42,7 @@ fn managed(actions: &[Action], path: &str) -> HttpRequest {
 }
 
 fn query(h: &mut Harness, query: Query) -> Vec<Action> {
-    h.e.handle(NOW, Event::Command(Command::Query { command: 41, query }));
+    h.handle(NOW, Event::Command(Command::Query { command: 41, query }));
     h.e.drain_actions().collect()
 }
 
@@ -107,7 +107,7 @@ fn an_income_page_is_a_managed_read() {
 fn a_closed_positions_page_is_a_managed_read() {
     let mut h = Harness::new();
     h.seed();
-    h.e.handle(
+    h.handle(
         NOW,
         Event::Command(Command::Venue {
             command: 9,
@@ -126,15 +126,40 @@ fn a_closed_positions_page_is_a_managed_read() {
 }
 
 #[test]
-fn the_account_refresh_tick_reads_positions_balances_and_orders_as_managed_reads() {
+fn the_account_refresh_tick_reads_positions_and_orders_as_managed_reads() {
     let mut h = Harness::new();
     h.seed();
     let tick = h.tick;
-    h.e.handle(10_000.0, Event::TimerFired { timer: tick });
+    h.handle(10_000.0, Event::TimerFired { timer: tick });
     let actions: Vec<_> = h.e.drain_actions().collect();
-    for path in ["account/positions", "balances", "orders-pending"] {
+    for path in ["account/positions", "orders-pending"] {
         managed(&actions, path);
     }
+}
+
+#[test]
+fn the_balance_read_that_follows_positions_is_a_managed_read() {
+    let mut h = Harness::new();
+    h.seed();
+    let tick = h.tick;
+    h.handle(10_000.0, Event::TimerFired { timer: tick });
+    h.collect();
+    // Balance follows the positions answer in the native join.
+    let positions = h.take("account/positions");
+    let body = format!("{{\"code\":\"0\",\"data\":[{POSITION}]}}");
+    h.handle(
+        10_001.0,
+        Event::HttpResponse {
+            request: positions.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: &body,
+            },
+        },
+    );
+    let actions: Vec<_> = h.e.drain_actions().collect();
+    managed(&actions, "balances");
 }
 
 #[test]
@@ -156,7 +181,7 @@ fn a_retried_startup_setting_read_is_a_managed_read() {
             _ => None,
         })
         .expect("startup setting retry timer");
-    h.e.handle(retry.1, Event::TimerFired { timer: retry.0 });
+    h.handle(retry.1, Event::TimerFired { timer: retry.0 });
     let actions: Vec<_> = h.e.drain_actions().collect();
     managed(&actions, "margin-mode");
 }
@@ -165,7 +190,7 @@ fn a_retried_startup_setting_read_is_a_managed_read() {
 fn capacity_refusals(h: &mut Harness, now: f64) -> usize {
     let mut refused = 0;
     for command in 3_000..3_300 {
-        h.e.handle(
+        h.handle(
             now,
             Event::Command(Command::FetchCandles {
                 command,
@@ -196,7 +221,7 @@ fn a_superseded_account_leg_publishes_nothing_and_holds_no_capacity() {
         let mut h = Harness::new();
         h.seed();
         let tick = h.tick;
-        h.e.handle(10_000.0, Event::TimerFired { timer: tick });
+        h.handle(10_000.0, Event::TimerFired { timer: tick });
         h.collect_at(10_000.0);
         let positions = h.take("account/positions");
         if supersede {

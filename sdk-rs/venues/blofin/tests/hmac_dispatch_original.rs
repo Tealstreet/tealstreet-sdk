@@ -42,6 +42,8 @@ struct Rig {
     actions: Vec<Action>,
     draws: Draws,
     fail_entropy: Arc<AtomicBool>,
+    /// Parks every later signature once the account's own signed reads loaded.
+    park: Arc<AtomicBool>,
 }
 
 impl Rig {
@@ -64,11 +66,21 @@ impl Rig {
             options.identities = identities.clone();
         }
         let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(options));
+        let park = Arc::new(AtomicBool::new(false));
         if let Some((provider, identities)) = local {
-            engine.set_signer(Some(Arc::new(provider))).unwrap();
+            if parked {
+                // The account's startup reads sign too; only later work parks.
+                engine
+                    .set_signer(Some(Arc::new(Gate {
+                        inner: Arc::new(provider),
+                        park: park.clone(),
+                    })))
+                    .unwrap();
+            } else {
+                engine.set_signer(Some(Arc::new(provider))).unwrap();
+            }
             engine.set_identities(identities).unwrap();
-        }
-        if parked {
+        } else if parked {
             engine.set_signer(Some(Arc::new(Parked))).unwrap();
         }
         let draws = Draws::default();
@@ -103,6 +115,7 @@ impl Rig {
             actions: vec![],
             draws,
             fail_entropy,
+            park,
         };
         rig.collect(NOW - 10.);
         rig
@@ -123,6 +136,7 @@ impl Rig {
         assert!(rig.engine.store().market("BTCUSDT").is_some());
         rig.actions.clear();
         rig.draws.lock().unwrap().clear();
+        rig.park.store(true, Ordering::SeqCst);
         rig
     }
 
@@ -252,6 +266,32 @@ struct Parked;
 impl Signer for Parked {
     fn sign(&self, _: SignRequest) -> SignFuture {
         Box::pin(std::future::pending())
+    }
+}
+
+/// The genuine local provider until `park`, then a provider that never answers.
+struct Gate {
+    inner: Arc<LocalSigner>,
+    park: Arc<AtomicBool>,
+}
+impl Signer for Gate {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        if self.park.load(Ordering::SeqCst) {
+            Box::pin(std::future::pending())
+        } else {
+            self.inner.sign(request)
+        }
+    }
+    fn immediate(&self) -> bool {
+        !self.park.load(Ordering::SeqCst) && self.inner.immediate()
+    }
+    fn sign_ready(
+        &self,
+        request: &SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, SignError>> {
+        (!self.park.load(Ordering::SeqCst))
+            .then(|| self.inner.sign_ready(request))
+            .flatten()
     }
 }
 

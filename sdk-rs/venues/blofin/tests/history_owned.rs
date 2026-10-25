@@ -3,7 +3,7 @@ use safe_cex_engine::{Action, Command, ErrorKind, Event, Level, Notice, Query, R
 use support::*;
 fn query(h: &mut Harness, command: u32, query: Query) {
     h.ws("pong");
-    h.e.handle(1.0, Event::Command(Command::Query { command, query }));
+    h.handle(1.0, Event::Command(Command::Query { command, query }));
     h.collect_at(1.0);
 }
 fn income() -> Query {
@@ -110,7 +110,7 @@ fn fail(h: &mut Harness, request: safe_cex_engine::HttpRequest, kind: u8) {
     match kind {
         0 => h.respond(request, r#"{"code":"152401","msg":"denied","data":[]}"#),
         1 => {
-            h.e.handle(
+            h.handle(
                 1.0,
                 Event::HttpResponse {
                     request: request.id,
@@ -124,7 +124,7 @@ fn fail(h: &mut Harness, request: safe_cex_engine::HttpRequest, kind: u8) {
             h.collect();
         }
         2 => {
-            h.e.handle(
+            h.handle(
                 1.0,
                 Event::HttpFailed {
                     request: request.id,

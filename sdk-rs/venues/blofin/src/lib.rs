@@ -55,7 +55,10 @@ pub enum Pending {
     History(history::Request),
     Closed(closed::Request),
     Trade(trading::Request),
-    Account(account::Request),
+    Account(
+        safe_cex_engine::selected_read::AdmittedRead,
+        account::Request,
+    ),
     Leverage(account::Leverage),
     Markets {
         rows: Vec<Market>,
@@ -754,7 +757,14 @@ impl Venue for Blofin {
             Pending::PublicTrades(request) => self.public_trades_item(cx, request, item),
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Closed(request) => Self::closed_item(cx, request, item),
-            Pending::Account(request) => self.account_item(cx, request, item),
+            Pending::Account(read, request) => {
+                if cx
+                    .validate_background_read_http_delivery(read.context())
+                    .is_ok()
+                {
+                    self.account_item(cx, request, item);
+                }
+            }
             Pending::Leverage(_) => {}
             Pending::Markets { rows, malformed } => {
                 match serde_json::from_str::<Instrument<'_>>(item) {
@@ -892,7 +902,15 @@ impl Venue for Blofin {
             Pending::Closed(request) => {
                 self.closed_response(cx, request, response);
             }
-            Pending::Account(request) => {
+            Pending::Account(read, request) => {
+                if cx
+                    .validate_background_read_http_delivery(read.context())
+                    .is_err()
+                {
+                    return;
+                }
+                // Every terminal finishes the leg, including an answer the revision drops.
+                let _ = cx.finish_http_context(read.context());
                 self.account_response(cx, request, response);
             }
             Pending::Leverage(leverage) => self.leverage_response(cx, leverage, response),
@@ -1009,7 +1027,8 @@ impl Venue for Blofin {
             }
             other => other,
         };
-        if let Pending::Account(request) = pending {
+        if let Pending::Account(read, request) = pending {
+            let _ = cx.finish_http_context(read.context());
             self.account_failed(cx, request, error);
             return;
         }

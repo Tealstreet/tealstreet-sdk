@@ -24,7 +24,7 @@ fn startup_authenticates_and_loads_account_atomically() {
     ] {
         assert!(headers.iter().any(|(k, _)| *k == name));
     }
-    h.e.handle(0.0, Event::WsOpened { socket: h.private });
+    h.handle(0.0, Event::WsOpened { socket: h.private });
     h.collect();
     assert!(
         h.actions
@@ -96,7 +96,7 @@ fn failed_later_page_preserves_last_known_orders() {
     let mut h = Harness::new();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"original","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}]}"#);
-    h.e.handle(10_000.0, Event::TimerFired { timer: h.tick });
+    h.handle(10_000.0, Event::TimerFired { timer: h.tick });
     h.collect();
     h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"other","orderType":"limit","side":"buy","size":"1","state":"live"}]}"#);
     h.reply(
@@ -277,7 +277,7 @@ fn terminal_memory_survives_empty_reconciliation_and_filters_stale_snapshots() {
     h.seed();
     h.ws(&order_event("123", "4", "partially_filled"));
     h.ws(&order_event("123", "10", "filled"));
-    h.e.handle(10_000.0, Event::TimerFired { timer: h.tick });
+    h.handle(10_000.0, Event::TimerFired { timer: h.tick });
     h.collect();
     for path in [
         "orders-pending",
@@ -321,7 +321,7 @@ fn regressive_reconciliation_preserves_filled_and_native_remaining() {
     let mut h = Harness::new();
     h.seed();
     h.ws(&order_event("123", "4", "partially_filled"));
-    h.e.handle(10_000.0, Event::TimerFired { timer: h.tick });
+    h.handle(10_000.0, Event::TimerFired { timer: h.tick });
     h.collect();
     h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","filledSize":"2","state":"partially_filled"}]}"#);
     for path in [
@@ -342,7 +342,7 @@ fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
     let mut h = Harness::new();
     h.seed();
     h.ws(&order_event("123", "4", "partially_filled"));
-    h.e.handle(10_000.0, Event::TimerFired { timer: h.tick });
+    h.handle(10_000.0, Event::TimerFired { timer: h.tick });
     h.collect();
     for path in [
         "orders-pending",
@@ -385,7 +385,7 @@ fn owned_position_on_malformed_market_rejects_scope_but_other_missing_rows_are_s
         h.seed();
         let previous = h.e.store().positions().to_vec();
         let balance = h.e.store().balance().clone();
-        h.e.handle(10_000., Event::TimerFired { timer: h.tick });
+        h.handle(10_000., Event::TimerFired { timer: h.tick });
         h.collect();
         let known = POSITION.replace("\"positions\":\"4\"", "\"positions\":\"2\"");
         h.reply("account/positions", &format!(r#"{{"code":"0","data":[{known},{{"instId":"{inst}","instType":"{kind}","positions":"{quantity}"}}]}}"#));
@@ -465,7 +465,7 @@ fn working_order_on_malformed_market_rejects_authoritative_order_scope() {
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"original","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}]}"#);
     let previous = h.e.store().orders().to_vec();
-    h.e.handle(10_000., Event::TimerFired { timer: h.tick });
+    h.handle(10_000., Event::TimerFired { timer: h.tick });
     h.collect();
     h.reply("orders-pending", r#"{"code":"0","data":[{"instId":"BAD-USDT","instType":"SWAP","orderId":"external","size":"1","state":"live"}]}"#);
     assert_eq!(h.e.store().orders(), previous);
@@ -485,7 +485,7 @@ fn partial_catalogue_commits_then_rereads_without_a_second_private_start() {
         .expect("partial catalogue retry");
     h.seed();
     h.actions.clear();
-    h.e.handle(1000., Event::TimerFired { timer: retry });
+    h.handle(1000., Event::TimerFired { timer: retry });
     h.collect_at(1000.);
     h.reply(
         "instruments",
@@ -531,7 +531,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         .drain_actions()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
-            Action::Http(_) => panic!("policy updates must not issue account reads"),
+            Action::Http(_) | Action::ManagedHttp(_) => {
+                panic!("policy updates must not issue account reads")
+            }
             _ => None,
         })
         .collect();
@@ -566,7 +568,11 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
     engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
-    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+    );
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
@@ -588,8 +594,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -699,7 +705,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         })
         .expect("fast account poll");
     engine.handle(now + 1_500.0, Event::TimerFired { timer });
-    let output: Vec<_> = engine.drain_actions().collect();
+    let output = safe_cex_engine::test_support::prepared_actions(engine, now + 1_500.0);
     let reads: Vec<_> = output
         .iter()
         .filter_map(|a| match a {
@@ -810,7 +816,7 @@ fn startup_rest_partial_seeds_history_but_later_rest_cannot_consume_stream_fills
         )
     };
     let first = event(6, 120, START + 1.0);
-    h.e.handle(
+    h.handle(
         START + 2.0,
         Event::WsMessage {
             socket: h.private,
@@ -823,7 +829,7 @@ fn startup_rest_partial_seeds_history_but_later_rest_cannot_consume_stream_fills
         [(160.0, 0.002)]
     );
 
-    h.e.handle(START + 10_000.0, Event::TimerFired { timer: h.tick });
+    h.handle(START + 10_000.0, Event::TimerFired { timer: h.tick });
     h.collect();
     h.reply("orders-pending", &snapshot(8, 130));
     h.reply("orders-pending", r#"{"code":"0","data":[]}"#);
@@ -832,7 +838,7 @@ fn startup_rest_partial_seeds_history_but_later_rest_cannot_consume_stream_fills
     assert_eq!(h.e.store().order("123").unwrap().filled, 0.008);
     let late = event(8, 130, START + 11_000.0);
     for _ in 0..2 {
-        h.e.handle(
+        h.handle(
             START + 12_000.0,
             Event::WsMessage {
                 socket: h.private,
@@ -851,7 +857,7 @@ fn startup_rest_partial_seeds_history_but_later_rest_cannot_consume_stream_fills
 // revisions may reject that snapshot without invalidating its cumulative proof.
 fn startup_reply_at(h: &mut Harness, path: &str, body: &str, now: f64) {
     let request = h.take(path);
-    h.e.handle(
+    h.handle(
         now,
         Event::HttpResponse {
             request: request.id,
@@ -908,7 +914,7 @@ fn startup_ws_before_rest_emits_only_the_proven_suffix_at_its_execution_price() 
                 "partially_filled"
             },
         );
-        h.e.handle(
+        h.handle(
             START + 2.0,
             Event::WsMessage {
                 socket: h.private,
@@ -928,7 +934,7 @@ fn startup_ws_before_rest_emits_only_the_proven_suffix_at_its_execution_price() 
             executions(h.e.take_frame(START + 4.0).unwrap()),
             [(160.0, 0.002)]
         );
-        h.e.handle(
+        h.handle(
             START + 5.0,
             Event::WsMessage {
                 socket: h.private,
@@ -955,7 +961,7 @@ fn startup_rest_already_covering_live_progress_establishes_a_quiet_reporting_bas
         START + 1.0,
         "partially_filled",
     );
-    h.e.handle(
+    h.handle(
         START + 2.0,
         Event::WsMessage {
             socket: h.private,
@@ -983,7 +989,7 @@ fn startup_rest_already_covering_live_progress_establishes_a_quiet_reporting_bas
         START + 5.0,
         "partially_filled",
     );
-    h.e.handle(
+    h.handle(
         START + 6.0,
         Event::WsMessage {
             socket: h.private,
@@ -1002,7 +1008,7 @@ fn startup_unknown_terminal_prefix_is_quiet_but_proven_new_filled_order_is_live(
     let mut h = Harness::new_at(START);
     h.modes();
     let old = startup_execution("old", 6, 120, START - 100.0, START + 1.0, "filled");
-    h.e.handle(
+    h.handle(
         START + 2.0,
         Event::WsMessage {
             socket: h.private,
@@ -1012,7 +1018,7 @@ fn startup_unknown_terminal_prefix_is_quiet_but_proven_new_filled_order_is_live(
     h.collect();
     assert!(executions(h.e.take_frame(START + 2.0).unwrap()).is_empty());
     let new = startup_execution("new", 2, 160, START + 1.0, START + 2.0, "filled");
-    h.e.handle(
+    h.handle(
         START + 3.0,
         Event::WsMessage {
             socket: h.private,
@@ -1030,7 +1036,7 @@ fn startup_unknown_terminal_prefix_is_quiet_but_proven_new_filled_order_is_live(
             .is_none_or(|f| executions(f).is_empty())
     );
     for text in [&old, &new] {
-        h.e.handle(
+        h.handle(
             START + 5.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1058,7 +1064,7 @@ fn failed_startup_page_cannot_release_early_executions_or_seed_a_partial_census(
         START + 1.0,
         "partially_filled",
     );
-    h.e.handle(
+    h.handle(
         START + 2.0,
         Event::WsMessage {
             socket: h.private,
@@ -1091,7 +1097,7 @@ fn failed_startup_page_cannot_release_early_executions_or_seed_a_partial_census(
             _ => None,
         })
         .unwrap();
-    h.e.handle(START + 1004.0, Event::TimerFired { timer });
+    h.handle(START + 1004.0, Event::TimerFired { timer });
     h.collect();
     startup_reply_at(
         &mut h,
@@ -1118,7 +1124,7 @@ fn startup_missing_quote_basis_does_not_invent_a_suffix_price() {
         START + 1.0,
         "partially_filled",
     );
-    h.e.handle(
+    h.handle(
         START + 2.0,
         Event::WsMessage {
             socket: h.private,
@@ -1141,7 +1147,7 @@ fn startup_missing_quote_basis_does_not_invent_a_suffix_price() {
         START + 5.0,
         "partially_filled",
     );
-    h.e.handle(
+    h.handle(
         START + 6.0,
         Event::WsMessage {
             socket: h.private,
@@ -1161,7 +1167,7 @@ fn startup_multiple_buffered_executions_keep_their_individual_suffix_prices() {
     h.modes();
     for (qty, avg, time) in [(6, 120, START + 1.0), (8, 130, START + 2.0)] {
         let event = startup_execution("123", qty, avg, START - 100.0, time, "partially_filled");
-        h.e.handle(
+        h.handle(
             time,
             Event::WsMessage {
                 socket: h.private,
@@ -1197,7 +1203,7 @@ fn startup_bounded_tracker_never_replays_an_evicted_unknown_prefix() {
             START + 1.0,
             "filled",
         );
-        h.e.handle(
+        h.handle(
             START + 2.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1229,7 +1235,7 @@ fn delayed_unknown_startup_terminal_seeds_once_then_post_ready_suffix_is_live() 
         START + 1.0,
         "partially_filled",
     );
-    h.e.handle(
+    h.handle(
         START + 11.0,
         Event::WsMessage {
             socket: h.private,
@@ -1249,7 +1255,7 @@ fn delayed_unknown_startup_terminal_seeds_once_then_post_ready_suffix_is_live() 
         START + 12.0,
         "partially_filled",
     );
-    h.e.handle(
+    h.handle(
         START + 13.0,
         Event::WsMessage {
             socket: h.private,
@@ -1268,7 +1274,7 @@ fn proven_new_order_reporting_survives_rest_ahead_during_startup() {
     let mut h = Harness::new_at(START);
     h.modes();
     let first = startup_execution("123", 2, 100, START + 1.0, START + 2.0, "partially_filled");
-    h.e.handle(
+    h.handle(
         START + 3.0,
         Event::WsMessage {
             socket: h.private,
@@ -1292,7 +1298,7 @@ fn proven_new_order_reporting_survives_rest_ahead_during_startup() {
             .is_none_or(|f| executions(f).is_empty())
     );
     let live = startup_execution("123", 4, 110, START + 1.0, START + 6.0, "partially_filled");
-    h.e.handle(
+    h.handle(
         START + 7.0,
         Event::WsMessage {
             socket: h.private,
@@ -1315,7 +1321,7 @@ fn first_old_order_after_empty_startup_census_never_assumes_a_zero_prefix() {
         finish_startup_orders(&mut h, START + 10.0);
         h.e.take_frame(START + 10.0);
         let late = startup_execution("123", 6, 120, START - 100.0, START + 12.0, state);
-        h.e.handle(
+        h.handle(
             START + 13.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1328,7 +1334,7 @@ fn first_old_order_after_empty_startup_census_never_assumes_a_zero_prefix() {
                 .is_none_or(|f| executions(f).is_empty())
         );
         assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution prefix unavailable"))));
-        h.e.handle(
+        h.handle(
             START + 14.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1342,7 +1348,7 @@ fn first_old_order_after_empty_startup_census_never_assumes_a_zero_prefix() {
         );
         if state == "partially_filled" {
             let live = startup_execution("123", 8, 130, START - 100.0, START + 15.0, state);
-            h.e.handle(
+            h.handle(
                 START + 16.0,
                 Event::WsMessage {
                     socket: h.private,
@@ -1374,7 +1380,7 @@ fn post_ready_missing_quote_gap_is_visible_and_later_proven_suffix_continues_onc
         START + 3.0,
         "partially_filled",
     );
-    h.e.handle(
+    h.handle(
         START + 4.0,
         Event::WsMessage {
             socket: h.private,
@@ -1387,7 +1393,7 @@ fn post_ready_missing_quote_gap_is_visible_and_later_proven_suffix_continues_onc
             .is_none_or(|f| executions(f).is_empty())
     );
     assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("execution price unavailable for order 123")&& event.message.contains("missing cumulative quote baseline"))));
-    h.e.handle(
+    h.handle(
         START + 5.0,
         Event::WsMessage {
             socket: h.private,
@@ -1408,7 +1414,7 @@ fn post_ready_missing_quote_gap_is_visible_and_later_proven_suffix_continues_onc
         "partially_filled",
     );
     for now in [START + 7.0, START + 8.0] {
-        h.e.handle(
+        h.handle(
             now,
             Event::WsMessage {
                 socket: h.private,
@@ -1435,7 +1441,7 @@ fn missing_or_zero_creation_time_does_not_prove_an_unknown_order_is_new() {
         if omitted {
             event = event.replace("\"createTime\":\"0\",", "");
         }
-        h.e.handle(
+        h.handle(
             START + 3.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1458,7 +1464,7 @@ fn explicit_unfilled_socket_order_proves_zero_prefix_without_creation_time() {
     finish_startup_orders(&mut h, START + 1.0);
     h.e.take_frame(START + 1.0);
     let unfilled = startup_execution("123", 0, 0, 0.0, START + 2.0, "live");
-    h.e.handle(
+    h.handle(
         START + 3.0,
         Event::WsMessage {
             socket: h.private,
@@ -1467,7 +1473,7 @@ fn explicit_unfilled_socket_order_proves_zero_prefix_without_creation_time() {
     );
     h.collect();
     let live = startup_execution("123", 2, 160, 0.0, START + 4.0, "filled");
-    h.e.handle(
+    h.handle(
         START + 5.0,
         Event::WsMessage {
             socket: h.private,
@@ -1504,7 +1510,7 @@ fn unpriceable_live_quote_preserves_the_proven_basis_visibly_and_next_quote_reco
             START + 3.0,
             "partially_filled",
         );
-        h.e.handle(
+        h.handle(
             START + 4.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1525,7 +1531,7 @@ fn unpriceable_live_quote_preserves_the_proven_basis_visibly_and_next_quote_reco
             START + 5.0,
             "partially_filled",
         );
-        h.e.handle(
+        h.handle(
             START + 6.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1540,7 +1546,7 @@ fn unpriceable_live_quote_preserves_the_proven_basis_visibly_and_next_quote_reco
         );
         let suffix = startup_execution("123", 10, 140, START - 100.0, START + 7.0, "filled");
         for now in [START + 8.0, START + 9.0] {
-            h.e.handle(
+            h.handle(
                 now,
                 Event::WsMessage {
                     socket: h.private,
@@ -1578,7 +1584,7 @@ fn decreasing_quote_cannot_price_the_next_execution_from_the_rejected_value() {
             START + offset,
             "partially_filled",
         );
-        h.e.handle(
+        h.handle(
             START + offset + 1.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1606,7 +1612,7 @@ fn unknown_startup_quote_recovery(evict: bool) {
         for (qty, average, offset) in [(4, known_average, 1.0), (6, invalid_average, 2.0)] {
             let event =
                 startup_execution("123", qty, average, START - 100.0, START + offset, "filled");
-            h.e.handle(
+            h.handle(
                 START + offset + 1.0,
                 Event::WsMessage {
                     socket: h.private,
@@ -1620,7 +1626,7 @@ fn unknown_startup_quote_recovery(evict: bool) {
             // expiring the target from the independent 500-order tracker.
             let noise = startup_execution("noise", 1, 1, START - 100.0, START + 3.0, "filled");
             for index in 0..501 {
-                h.e.handle(
+                h.handle(
                     START + 4.0 + f64::from(index),
                     Event::WsMessage {
                         socket: h.private,
@@ -1637,7 +1643,7 @@ fn unknown_startup_quote_recovery(evict: bool) {
         );
         let live = startup_execution("123", 8, 130, START - 100.0, START + 1001.0, "filled");
         for now in [START + 1002.0, START + 1003.0] {
-            h.e.handle(
+            h.handle(
                 now,
                 Event::WsMessage {
                     socket: h.private,
@@ -1690,7 +1696,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
             START - 1.0,
             "partially_filled",
         );
-        h.e.handle(
+        h.handle(
             START + 3.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1714,7 +1720,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
             START + 4.0,
             "partially_filled",
         );
-        h.e.handle(
+        h.handle(
             START + 5.0,
             Event::WsMessage {
                 socket: h.private,
@@ -1730,7 +1736,7 @@ fn unpriceable_pre_session_quote_advances_only_the_quiet_historical_quantity_flo
         assert!(h.actions.iter().any(|action| matches!(action, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.level == safe_cex_engine::Level::Error && event.message.contains("missing cumulative quote baseline"))));
         let suffix = startup_execution("123", 10, 140, START - 100.0, START + 6.0, "filled");
         for now in [START + 7.0, START + 8.0] {
-            h.e.handle(
+            h.handle(
                 now,
                 Event::WsMessage {
                     socket: h.private,
@@ -1751,7 +1757,7 @@ fn websocket_login_timestamp_is_an_integer_matching_signed_bytes() {
     use base64::Engine as _;
     use safe_cex_crypto::{Encoding, hmac_sha256};
     let mut h = Harness::new();
-    h.e.handle(1_700_000_000_123.875, Event::WsOpened { socket: h.private });
+    h.handle(1_700_000_000_123.875, Event::WsOpened { socket: h.private });
     h.collect();
     let login = h
         .actions
@@ -1817,7 +1823,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     ));
     assert!(h.e.store().order("working").is_some());
     let listed = h.e.store().market_by_id("BTC-USDT").cloned().unwrap();
-    h.e.handle(at, Event::TimerFired { timer: retry });
+    h.handle(at, Event::TimerFired { timer: retry });
     h.collect_at(at);
     // BTC-USDT drops out of the list while BAD-USDT stays malformed.
     h.reply(
@@ -1826,7 +1832,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
     );
     assert_eq!(h.e.store().market_by_id("BTC-USDT"), Some(&listed));
     assert!(h.e.store().market_by_id("SOL-USDT").is_some());
-    h.e.handle(10_000., Event::TimerFired { timer: h.tick });
+    h.handle(10_000., Event::TimerFired { timer: h.tick });
     h.collect();
     h.reply(
         "account/positions",
@@ -1854,7 +1860,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let mut retry = new_timer(&h.actions).filter(|(_, at)| jittered(*at, 1000.0));
     let mut rereads = 0;
     while let Some((timer, at)) = retry.take() {
-        h.e.handle(at, Event::TimerFired { timer });
+        h.handle(at, Event::TimerFired { timer });
         h.collect_at(at);
         h.actions.clear();
         h.reply("instruments", PARTIAL_INSTRUMENTS);
@@ -1879,10 +1885,12 @@ fn auth_failure_ticks_are_jittered_while_healthy_ticks_keep_their_cadence() {
     let mut tick = h.tick;
     let fire = |h: &mut Harness, timer, now: f64| {
         h.actions.clear();
-        h.e.handle(now, Event::TimerFired { timer });
+        h.handle(now, Event::TimerFired { timer });
         h.collect();
+        // The next tick is armed after its reads, whose own 20s windows come first.
         h.actions
             .iter()
+            .rev()
             .find_map(|a| match a {
                 Action::SetTimer { timer, at_ms } if *at_ms - now >= 7_500.0 => {
                     Some((*timer, *at_ms - now))
@@ -1916,7 +1924,7 @@ fn poll(h: &mut Harness, at: f64, positions: &str, orders: &str) -> Vec<String> 
 /// `poll`, with `tpsl` as the first TP/SL list page.
 fn poll_lists(h: &mut Harness, at: f64, positions: &str, orders: &str, tpsl: &str) -> Vec<String> {
     h.actions.clear();
-    h.e.handle(at, Event::TimerFired { timer: h.tick });
+    h.handle(at, Event::TimerFired { timer: h.tick });
     h.collect();
     h.tick = h
         .actions

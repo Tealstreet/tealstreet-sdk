@@ -99,6 +99,12 @@ fn encode_result(query: &Query, rows: Vec<Mapped>) -> Result<String, VenueError>
     };
     result.map_err(|error| VenueError::new(error.to_string()))
 }
+fn is_fills(query: &Query) -> bool {
+    matches!(query, Query::Fills { .. })
+}
+fn is_order_history(query: &Query) -> bool {
+    matches!(query, Query::OrderHistory { .. })
+}
 impl Request {
     pub(crate) fn valid_delivery(&self, cx: &Cx<'_, Pending>) -> bool {
         self.leg.as_ref().is_some_and(|leg| {
@@ -552,7 +558,7 @@ impl Blofin {
             }
         };
         request.received += 1;
-        if matches!(request.query, Query::OrderHistory { .. }) {
+        if is_order_history(&request.query) {
             request.last_cursor = row.order_id.to_string();
         } else if !row.trade_id.is_empty()
             && row.trade_id.bytes().all(|b| b.is_ascii_digit())
@@ -574,7 +580,7 @@ impl Blofin {
         {
             return;
         }
-        let raw_time = if matches!(request.query, Query::Fills { .. }) {
+        let raw_time = if is_fills(&request.query) {
             [
                 row.fill_time.0,
                 row.exec_time.0,
@@ -595,7 +601,7 @@ impl Blofin {
         if raw_time <= 0.0 || row.inst_id.is_empty() {
             return;
         }
-        let time = if matches!(request.query, Query::Fills { .. }) && raw_time < 1e12 {
+        let time = if is_fills(&request.query) && raw_time < 1e12 {
             raw_time * 1000.0
         } else {
             raw_time
@@ -613,14 +619,12 @@ impl Blofin {
         if to.is_some_and(|to| time > to) {
             return;
         }
-        let id = if matches!(request.query, Query::OrderHistory { .. }) {
+        let id = if is_order_history(&request.query) {
             row.order_id.to_string()
         } else {
             row.trade_id.to_string()
         };
-        if id.is_empty()
-            || (!matches!(request.query, Query::Fills { .. }) && !page.fresh(id.clone()))
-        {
+        if id.is_empty() || (!is_fills(&request.query) && !page.fresh(id.clone())) {
             return;
         }
         match &request.query {

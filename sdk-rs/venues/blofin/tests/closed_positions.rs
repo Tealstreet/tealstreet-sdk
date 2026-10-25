@@ -5,7 +5,7 @@ use safe_cex_engine::{Action, Command, Event, Notice, VenueAction};
 use support::*;
 
 fn fetch(h: &mut Harness, symbol: Option<&str>, from: Option<f64>, to: Option<f64>) {
-    h.e.handle(
+    h.handle(
         1.0,
         Event::Command(Command::Venue {
             command: 9,

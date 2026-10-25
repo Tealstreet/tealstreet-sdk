@@ -290,7 +290,11 @@ impl Blofin {
 
     /// A failed page keeps accepted rows with one INCOMPLETE (shared owner contract);
     /// the native text and any typed kind (Network, Timeout) are kept.
-    pub(crate) fn closed_failed(cx: &mut Cx<'_, Pending>, mut request: Request, mut error: VenueError) {
+    pub(crate) fn closed_failed(
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        mut error: VenueError,
+    ) {
         if let Some(leg) = request.leg.take() {
             let _ = cx.finish_http_context(leg.context());
         }

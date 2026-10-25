@@ -131,19 +131,6 @@
     "c75a7e2cea8f3da1f10de9b8aa940fb4fcd3c57ddbccaf72faa83ab9c6e6fcdb": 1,
     "03c9a7632009d78b3353fb0a558c46b45901784ec35f68bf18794743ec39c8fc": 1
   },
-  "venues/blofin/src/account.rs": {
-    "4f2afd7cb212a9914e8dece3dbb3733c167148c003035b2f7628bb8aab8876c8": 1,
-    "1a8e09311f93f0d7d9c69519e6d325d16f9366b33946b861ab28ffaa45d927f5": 1
-  },
-  "venues/blofin/src/closed.rs": {
-    "bb5ed84ac1882574929599a10507277895dbe7521e20ef78b3f641d2ff116b38": 1
-  },
-  "venues/blofin/src/history.rs": {
-    "d7f5d65d34ca3d770c22743829f9f73e57682c52d8b63bb54030b167abb8fa43": 1,
-    "4f41451eb1e1a039f8b647eaee00abfdc9027246d230dff2fad9129e9919c3e7": 1,
-    "f33c5fe4590c54205bbed83f2a6cf21ba3ccfd0cbdab18d6832e43ae0c4d36a0": 2,
-    "60ad9d1f92b48483572276a3a75cf6e7c6579a0c8d0118a9f9f51688b851c9aa": 3
-  },
   "venues/blofin/src/trading.rs": {
     "349d1b39839519801db71f4348af20496c0443cb14880093d11ecbbe7cc68843": 2,
     "af0b7f916c07c8f53f3b2731f1c70b01fa5b0253ae68ebc878782fdf2ef51817": 1,
