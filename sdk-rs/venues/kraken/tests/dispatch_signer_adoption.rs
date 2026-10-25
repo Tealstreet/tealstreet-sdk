@@ -739,13 +739,37 @@ fn private_boundary<V: Venue>(engine: &mut Engine<V>) -> Vec<(HttpRequest, bool)
                     request
                 }
                 Action::ManagedHttp(action) => match *action {
-                    HttpAction::Prepare { request, .. } => {
-                        assert!(is_private_http(&request), "unexpected public preparation");
-                        observed.push((request, true));
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => {
+                        if is_private_http(&request) {
+                            observed.push((request, true));
+                        } else {
+                            engine.http_prepared(
+                                NOW,
+                                preparation,
+                                safe_cex_engine::request_context::Prepared {
+                                    id: request.id.0,
+                                    expires_at: None,
+                                },
+                            );
+                        }
                         continue;
                     }
-                    HttpAction::Bind { .. } | HttpAction::BindGroup { .. } => {
-                        panic!("a held preparation cannot bind without a host response")
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => {
+                        assert!(!is_private_http(&request), "held private preparation bound");
+                        assert!(matches!(
+                            engine.claim_http(NOW, permit),
+                            Ok(safe_cex_engine::request_context::Claim::Released(_))
+                        ));
+                        request
+                    }
+                    HttpAction::BindGroup { .. } => {
+                        panic!("public bootstrap declares no mutation barrier")
                     }
                     HttpAction::Cancel { .. } => continue,
                 },
