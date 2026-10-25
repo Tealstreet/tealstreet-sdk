@@ -35,6 +35,7 @@ fn assert_owned_identity(
     );
     let request = SignRequest {
         receipt: SignReceipt {
+            nonce: None,
             stamp_ms: Some(1234.),
             expiry_ms: None,
         },
@@ -648,6 +649,8 @@ fn explicit_setup_mode_precedence_bypasses_only_primary_private_requirement() {
             (r#""publicDataOnly":true,"publicMode":{}"#, false),
             (r#""publicDataOnly":false"#, false),
         ] {
+            let intent_options: EngineOptions =
+                serde_json::from_str(&format!("{{{intent}}}")).unwrap();
             let raw_json = format!(r#"{{{intent},"key":"key","secret":"secret","passphrase":""}}"#);
             let mut raw: EngineOptions = serde_json::from_str(&raw_json).unwrap();
             assert_eq!(safe_cex_venues::signer_setup_public_data_only(&raw), public);
@@ -655,15 +658,19 @@ fn explicit_setup_mode_precedence_bypasses_only_primary_private_requirement() {
             assert_eq!(result.is_ok(), public, "{venue}: {intent}");
             let missing = r#"{"primary":{"key":"key","secret":"secret","passphrase":""}}"#;
             assert_eq!(
-                local_signer_from_json_for_mode(venue, missing.into(), public).is_ok(),
+                local_signer_from_json_for_mode(venue, missing.into(), &intent_options).is_ok(),
                 public
             );
             // Even explicit public mode cannot admit incomplete required secondary material.
             let secondary = r#"{"primary":{"key":"key","secret":"secret"},"secondary":{"key":"read","secret":"secret"}}"#;
             assert_sanitized_setup_error(
-                local_signer_from_json_for_mode(venue, secondary.into(), true)
-                    .err()
-                    .unwrap(),
+                local_signer_from_json_for_mode(
+                    venue,
+                    secondary.into(),
+                    &serde_json::from_str(r#"{"publicDataOnly":true}"#).unwrap(),
+                )
+                .err()
+                .unwrap(),
             );
         }
     }

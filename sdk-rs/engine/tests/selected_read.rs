@@ -54,6 +54,7 @@ impl SignStep for Recipe {
             Vec::new(),
             Default::default(),
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: None,
             },
@@ -87,6 +88,8 @@ struct Observed {
     response_markers: Vec<u8>,
 }
 struct Config {
+    #[cfg(not(feature = "dispatch-nonce"))]
+    reject_nonce: bool,
     primary: bool,
     secondary: bool,
     force_primary: bool,
@@ -106,6 +109,8 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            #[cfg(not(feature = "dispatch-nonce"))]
+            reject_nonce: false,
             primary: true,
             secondary: true,
             force_primary: false,
@@ -205,6 +210,31 @@ impl Probe {
         }
     }
     fn queue(&mut self, cx: &mut Cx<'_, Pending>, read: AdmittedRead, marker: u8) {
+        #[cfg(not(feature = "dispatch-nonce"))]
+        if self.config.reject_nonce {
+            self.config.reject_nonce = false;
+            let Err((pending, error)) = read.queue_with_nonce(
+                cx,
+                ReadRequest {
+                    method: Method::Get,
+                    url: "https://fixture/refused-nonce".into(),
+                    body: None,
+                    stream: None,
+                },
+                &safe_cex_engine::nonce::KRAKEN,
+                |_, _| panic!("disabled nonce cannot build a recipe"),
+                |read| Pending { read, marker },
+            ) else {
+                panic!("disabled nonce cannot queue");
+            };
+            self.observed.lock().unwrap().queue.push((
+                error,
+                pending.marker,
+                pending.read.context().clone(),
+            ));
+            self.reject(cx, pending, error.venue_error());
+            return;
+        }
         let observed = self.observed.clone();
         let invalid = self.config.invalid_headers;
         let result = read.queue(
@@ -930,4 +960,74 @@ fn scoped_read_refusals_issue_nothing_and_settle_nothing() {
             assert!(matches!(refusal, BackgroundReadError::Selection(_)));
         }
     }
+}
+
+#[cfg(not(feature = "dispatch-nonce"))]
+#[test]
+fn disabled_nonce_refuses_before_recipe_and_ids_then_stamp_only_signing_still_releases() {
+    use safe_cex_engine::credential_selection::CredentialRole;
+    use safe_cex_engine::nonce::{KRAKEN, NonceSelectionError};
+    let slots = Slots::new(Some(identity("primary")), None, SlotPolicy::default());
+    assert_eq!(
+        slots
+            .select_with_nonce(CredentialRole::Read { scope: None }, &KRAKEN)
+            .err(),
+        Some(NonceSelectionError::InvalidSubject)
+    );
+    let (mut e, observed) = engine(Config {
+        reject_nonce: true,
+        ..Default::default()
+    });
+    let out = ask(&mut e, 900);
+    assert!(!out.iter().any(|a| matches!(
+        a,
+        Action::ManagedHttp(_) | Action::Sign { .. } | Action::Http(_)
+    )));
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert!(observed.lock().unwrap().identities.is_empty());
+    assert_eq!(observed.lock().unwrap().queue[0].0, Error::Invalid);
+    let ordinary = ask(&mut e, 901);
+    let (mut control, _) = engine(Config::default());
+    let clean = ask(&mut control, 901);
+    let clean_id = prepare(clean).0.attempt().request;
+    let after_refusal_id = release(&mut e, ordinary);
+    assert_eq!(
+        after_refusal_id.0,
+        clean_id.0 + 1,
+        "only the already admitted root used an ID; nonce queue spent none"
+    );
+    let receipt = SignReceipt {
+        stamp_ms: Some(1000.),
+        expiry_ms: None,
+        nonce: None,
+    };
+    assert_eq!(
+        serde_json::to_string(&receipt).unwrap(),
+        r#"{"stampMs":1000.0}"#
+    );
+    for wire in [
+        r#"{"nonce":"1"}"#,
+        r#"{"nonce":null}"#,
+        r#"{"nonce":1}"#,
+        r#"{"nonce":"01"}"#,
+    ] {
+        assert!(serde_json::from_str::<SignReceipt>(wire).is_err());
+    }
+    assert_eq!(
+        SignReceipt {
+            nonce: Some(1),
+            ..receipt
+        }
+        .validate(),
+        Err(SignError::InvalidRequest)
+    );
 }

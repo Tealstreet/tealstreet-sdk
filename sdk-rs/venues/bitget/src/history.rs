@@ -415,14 +415,7 @@ impl BitgetFutures {
             ArrayAt::Envelope(ARRAYS)
         };
         let pending = Pending::History(Box::new(r));
-        self.send(
-            cx,
-            Method::Get,
-            &path,
-            crate::Payload::Stream(at),
-            !public,
-            pending,
-        );
+        self.send(cx, Method::Get, &path, at, !public, pending);
     }
     pub(crate) fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
         if r.uta && matches!(r.query, Query::Income { .. }) {

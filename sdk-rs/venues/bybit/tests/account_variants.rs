@@ -950,3 +950,60 @@ fn hyro_local_admission_refusals_never_spend_the_transient_streak() {
         );
     }
 }
+
+/// Candle reads refused for owner capacity after parking 300 more.
+fn capacity_refusals(h: &mut Harness) -> usize {
+    for command in 3_000..3_300 {
+        h.command(Command::FetchCandles {
+            command,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: Some(2),
+            from_ms: None,
+            to_ms: None,
+        });
+    }
+    h.done
+        .iter()
+        .filter(|(command, result)| {
+            (3_000..3_300).contains(command)
+                && result
+                    .as_ref()
+                    .is_err_and(|error| error.contains("capacity"))
+        })
+        .count()
+}
+
+/// dazzy3 on #1971: dropping a snapshot finishes its roots, and must retire
+/// their in-flight page legs too. A lingering leg holds an owner-capacity slot
+/// until its own window expires.
+#[test]
+fn a_dropped_snapshot_releases_its_in_flight_page_legs() {
+    let dropped_mid_page = {
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        hyro_snapshot(&mut h);
+        h.advance(5000.0);
+        // The orders read fails in transport; the positions page is still out.
+        h.respond("/v5/order/realtime", 502, "upstream timeout");
+        assert!(
+            h.has_request("/v5/position/list"),
+            "a positions page is in flight"
+        );
+        capacity_refusals(&mut h)
+    };
+    let dropped_after_page = {
+        let mut h = startup(Variant::Hyrotrader);
+        handshake(&mut h);
+        hyro_snapshot(&mut h);
+        h.advance(5000.0);
+        h.respond("/v5/position/list", 200, POSITIONS);
+        h.respond("/v5/order/realtime", 502, "upstream timeout");
+        capacity_refusals(&mut h)
+    };
+    assert!(dropped_after_page > 0, "the probe reaches owner capacity");
+    assert_eq!(
+        dropped_mid_page, dropped_after_page,
+        "the dropped positions page leg must not hold capacity"
+    );
+}

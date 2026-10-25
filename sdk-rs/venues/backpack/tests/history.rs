@@ -1,6 +1,28 @@
 mod support;
 use safe_cex_engine::{Action, Command, Event, Notice, Query};
 use support::*;
+fn requests(e: &mut Driver) -> Vec<safe_cex_engine::HttpRequest> {
+    safe_cex_engine::test_support::prepared_actions(e, 2000.)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect()
+}
+fn reply(e: &mut Driver, request: &safe_cex_engine::HttpRequest, status: u16, body: &str) {
+    e.handle(
+        2000.,
+        Event::HttpResponse {
+            request: request.id,
+            response: safe_cex_engine::Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
 fn ask(e: &mut Driver, query: Query) {
     e.handle(2000.0, Event::Command(Command::Query { command: 1, query }));
 }

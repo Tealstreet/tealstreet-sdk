@@ -650,15 +650,19 @@ impl BybitLinear {
     }
 
     /// One Background Read with a 20 s window: public, or signed with the read
-    /// key for GETs (else the primary). A refused admission or queue fails the
-    /// read like transport loss, so it takes the caller's own retry path.
+    /// key for GETs (else the primary). A read that cannot be admitted (invalid
+    /// options, no key, refused admission or queue) fails into the caller's path.
     fn send_read(&mut self, cx: &mut Cx<'_, Pending>, rest: Rest, then: Then) {
         use safe_cex_engine::request_context::Scope;
         if self.config_error.is_some() {
-            return;
+            return self.on_public_response(cx, then, Err("Bybit options are invalid"));
         }
         let Some(policy) = self.read_policy(rest.signed, policy::read_policy().timeout_ms) else {
-            return;
+            return self.on_public_response(
+                cx,
+                then,
+                Err("Bybit has no API key for a signed read"),
+            );
         };
         let context = match cx.http_context(Scope::Background, policy) {
             Ok(context) => context,

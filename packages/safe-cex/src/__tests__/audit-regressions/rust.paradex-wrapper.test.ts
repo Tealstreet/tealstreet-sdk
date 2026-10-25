@@ -40,7 +40,7 @@ describe('Rust Paradex account boundary', () => {
       takeFrame: () => new Uint8Array(consumerFrame({
         loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
       })), snapshotFrame: () => new Uint8Array(),
-      wsOpen: noActions, wsMessage: noActions, wsClose: noActions,
+      wsOpen: noActions, wsMessage: noActions, wsClose: noActions, wsRouteExhausted: noActions,
       httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
     };
     const construct = vi.fn(function (_venue: string, _options: string) { return engine; });

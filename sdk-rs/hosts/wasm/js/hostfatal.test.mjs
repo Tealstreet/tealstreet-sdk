@@ -5,7 +5,7 @@ import { EngineDeadError, EngineHost } from './host.mjs';
 const settle = () => new Promise(setImmediate);
 const socketAction = { op: 'wsConnect', socket: 7, url: 'wss://example.test' };
 const methods = ['start', 'command', 'takeFrame', 'snapshotFrame', 'capabilities', 'wsOpen', 'wsMessage',
-  'wsMessageActions', 'wsMessageBytes', 'wsBinary', 'wsClose', 'timer', 'httpStart', 'httpChunk',
+  'wsMessageActions', 'wsMessageBytes', 'wsBinary', 'wsClose', 'wsRouteExhausted', 'timer', 'httpStart', 'httpChunk',
   'httpEnd', 'httpFailed', 'payloadSigned', 'payloadSignFailed'];
 
 function rig(overrides = {}, transportOverrides = {}, handlers = {}) {
@@ -58,6 +58,7 @@ for (const method of methods) {
     else if (method.startsWith('wsMessage')) callbacks.onMessage('payload');
     else if (method === 'wsBinary') callbacks.onBinary(new Uint8Array([1]));
     else if (method === 'wsClose') callbacks.onClose(1006);
+    else if (method === 'wsRouteExhausted') callbacks.onRouteExhausted();
     else if (method === 'timer') timer();
     else if (method === 'httpFailed') await r.host.request({ request: 1, headers: [], url: 'https://example.test',
       get method() { throw new Error('request setup failed'); } });
@@ -77,6 +78,7 @@ for (const method of methods) {
     assert.equal(r.host.wsScratchBusy, false);
     const count = r.calls.length;
     callbacks.onOpen(); callbacks.onMessage('late'); callbacks.onBinary(new Uint8Array([2])); callbacks.onClose();
+    callbacks.onRouteExhausted();
     timer(); r.host.start(); r.host.flush(); r.host.dispose();
     await r.host.receive(2, { status: 200, body: new Uint8Array([2]) });
     await assert.rejects(r.host.command({ op: 'placeOrders', orders: [] }), EngineDeadError);

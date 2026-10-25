@@ -605,6 +605,9 @@ jobs:
       - name: Breakout compiled account, startup and polling controls
         if: matrix.venue == 'breakoutprop'
         run: corepack yarn rust:test-breakoutprop-parity
+      - name: Backpack selected public-only history contracts
+        if: matrix.venue == 'backpack'
+        run: corepack yarn -s node --test sdk-rs/harness/backpack-history.integration.mjs
       - name: Aster V3 wallet auth, builder, STP and native query contracts
         if: matrix.venue == 'asterdex'
         run: |

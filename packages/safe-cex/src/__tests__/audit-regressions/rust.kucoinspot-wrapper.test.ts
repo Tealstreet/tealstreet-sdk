@@ -46,7 +46,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
         loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true },
         ...(rails ? { fetchedLeverage: rails } : {}),
       })), snapshotFrame: () => new Uint8Array(),
-      wsOpen: noActions, wsMessage: noActions, wsClose: noActions,
+      wsOpen: noActions, wsMessage: noActions, wsClose: noActions, wsRouteExhausted: noActions,
       httpStart: noActions, httpChunk: noActions, httpEnd: noActions, httpFailed: noActions, timer: noActions,
     };
     const construct = vi.fn(function (_venue: string, _options: string) { return engine; });

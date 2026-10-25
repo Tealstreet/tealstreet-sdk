@@ -36,7 +36,7 @@ const fixture = (name: ExchangeName, options: Partial<ExchangeOptions> = {}) => 
     snapshotFrame: () => new Uint8Array(),
     wsOpen: empty,
     wsMessage: empty,
-    wsClose: empty,
+    wsClose: empty, wsRouteExhausted: empty,
     httpStart: empty,
     httpChunk: empty,
     httpEnd: empty,

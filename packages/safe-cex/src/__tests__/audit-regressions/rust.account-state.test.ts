@@ -119,7 +119,7 @@ function fixture(name: ExchangeName = 'bybit', nativeLoaded = loaded, publicData
     start: vi.fn(idle),
     wsOpen: idle,
     wsMessage: idle,
-    wsClose: idle,
+    wsClose: idle, wsRouteExhausted: idle,
     httpStart: idle,
     httpChunk: idle,
     httpEnd: idle,

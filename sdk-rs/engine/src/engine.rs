@@ -16,6 +16,8 @@ use std::collections::HashMap;
 /// Bounds on a host-scaled poll cadence, beyond a venue's own native cadence.
 pub const POLL_POLICY_FLOOR_MS: f64 = 1_000.0;
 pub const POLL_POLICY_CAP_MS: f64 = 120_000.0;
+/// Close code the default `on_route_exhausted` reports: abnormal closure, no peer frame.
+pub const ROUTE_EXHAUSTED_CLOSE: u16 = 1006;
 
 /// Bound a configured absolute cadence; positive infinity explicitly pauses polling.
 pub fn bounded_tick_interval(interval_ms: f64) -> f64 {
@@ -388,6 +390,10 @@ pub enum SocketChannel {
 pub struct SocketContext {
     pub feed: String,
     pub recover: bool,
+    /// The venue refused the last route's egress: advance exactly one route
+    /// candidate for this connect, or report `WsRouteExhausted` without dialling.
+    #[serde(rename = "rejectRoute", skip_serializing_if = "std::ops::Not::not")]
+    pub reject_route: bool,
 }
 
 /// Everything a host needs to open one socket; `Cx::connect` takes it or a bare URL.
@@ -419,7 +425,16 @@ impl SocketSpec {
         self.context = Some(SocketContext {
             feed: feed.into(),
             recover,
+            reject_route: false,
         });
+        self
+    }
+
+    /// Ask the host to leave the current route; needs a `feed` context.
+    pub fn reject_route(mut self) -> Self {
+        if let Some(context) = self.context.as_mut() {
+            context.reject_route = true;
+        }
         self
     }
 
@@ -791,6 +806,11 @@ pub enum Event<'a> {
     WsClosed {
         socket: SocketId,
         code: u16,
+    },
+    /// Host-only: a `reject_route` connect had no route left, so nothing was
+    /// dialled. It is that socket's only terminal; no open or close follows.
+    WsRouteExhausted {
+        socket: SocketId,
     },
     /// A complete response.
     HttpResponse {
@@ -1514,6 +1534,9 @@ where
 /// Every Io field that does not name the venue's pending type, so engine
 /// code that only touches these can be shared across venues.
 struct IoCore {
+    nonce_unscheduled: bool,
+    #[cfg(feature = "dispatch-nonce")]
+    nonce_enabled: bool,
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     #[cfg(feature = "http-plans")]
@@ -1648,6 +1671,9 @@ impl Default for IoCore {
     #[inline]
     fn default() -> Self {
         Self {
+            nonce_unscheduled: false,
+            #[cfg(feature = "dispatch-nonce")]
+            nonce_enabled: false,
             request_contexts: Default::default(),
             http_delivery: None,
             #[cfg(feature = "http-plans")]
@@ -2672,6 +2698,13 @@ impl crate::engine::CoreCx<'_> {
     }
 
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        if step.nonce_claim().is_some() {
+            self.io
+                .core
+                .signing_admission
+                .push((outbound, crate::signing::SignError::InvalidRequest));
+            return;
+        }
         self.io.opaque_entry_activity();
         self.io.assert_action_safe(&outbound);
         let attempt = self.io.core.signing.next_id();
@@ -2922,6 +2955,32 @@ pub enum SigningTarget<'a, P> {
     },
 }
 
+/// Exactly one final HTTP admission mode, fixed at engine construction.
+/// Mutable scheduler admission cannot participate in an atomic nonce release.
+pub enum HttpRelease<V: Venue> {
+    Mutable(
+        fn(
+            &mut V,
+            &mut V::Pending,
+            &crate::request_context::HttpRelease,
+        ) -> Result<crate::request_context::Admission, crate::request_context::Error>,
+    ),
+    NonceUnscheduled(
+        fn(
+            &V,
+            &V::Pending,
+            &crate::request_context::HttpRelease,
+        ) -> Result<(), crate::request_context::Error>,
+    ),
+}
+
+impl<V: Venue> Copy for HttpRelease<V> {}
+impl<V: Venue> Clone for HttpRelease<V> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
     /// Read-only native evidence from an unproven managed mutation envelope.
@@ -3041,14 +3100,22 @@ pub trait Venue {
         &[]
     }
 
-    /// Final synchronous admission. This callback cannot queue more work or
-    /// alter the engine's clocks, preparation/signing state or original bound.
-    fn on_http_release(
-        &mut self,
-        _pending: &mut Self::Pending,
-        _release: &crate::request_context::HttpRelease,
-    ) -> Result<crate::request_context::Admission, crate::request_context::Error> {
-        Ok(crate::request_context::Admission::Unscheduled)
+    /// Immutable nonce capability; the engine captures its permission at construction.
+    /// This selector grants no claim or release authority.
+    #[inline]
+    fn dispatch_nonce() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+
+    /// Captured once at engine construction; the two admission modes are exclusive.
+    fn http_release() -> HttpRelease<Self>
+    where
+        Self: Sized,
+    {
+        HttpRelease::Mutable(|_, _, _| Ok(crate::request_context::Admission::Unscheduled))
     }
 
     /// Explicit pure group admission; the default refuses group support.
@@ -3254,6 +3321,17 @@ pub trait Venue {
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
     fn on_message(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, text: &str);
     fn on_close(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId, code: u16);
+    /// Opts in to `on_route_exhausted`; every other venue sees today's close.
+    #[inline]
+    fn route_exhaustion() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+    /// Every route was refused, so the host dialled nothing. Called only when
+    /// `route_exhaustion` returns true.
+    fn on_route_exhausted(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId) {}
     fn on_response(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -3379,6 +3457,7 @@ fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
 
 pub struct Engine<V: Venue> {
     venue: V,
+    http_release: HttpRelease<V>,
     store: Store,
     io: Io<V::Pending>,
     started: bool,
@@ -3424,13 +3503,18 @@ impl<V: Venue> Engine<V> {
             venue.http_pacing_sets(),
         )
         .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
+        let http_release = V::http_release();
         Ok(Self {
             venue,
+            http_release,
             store,
             io: Io {
                 core: IoCore {
                     entropy: Some(entropy),
                     http_pacing,
+                    nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
+                    #[cfg(feature = "dispatch-nonce")]
+                    nonce_enabled: V::dispatch_nonce(),
                     ..IoCore::default()
                 },
                 ..Io::default()
@@ -3896,7 +3980,6 @@ impl<V: Venue> Engine<V> {
         };
         if let Event::Signed { attempt, result } = event {
             if !self.io.core.signing.is_managed(attempt) || self.signing_pending(attempt) {
-                self.provider_refused(attempt, &result);
                 self.sign_completed(now, attempt, result);
             }
             if self.venue.cancel_needs_stored_order() {
@@ -4121,7 +4204,8 @@ impl<V: Venue> Engine<V> {
         }
         if self.public_feed_policy() != PublicFeedPolicy::Direct
             && matches!(&event, Event::WsOpened { socket } | Event::WsBinary { socket, .. }
-            | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. } if socket.0 == 0)
+            | Event::WsMessage { socket, .. } | Event::WsClosed { socket, .. }
+            | Event::WsRouteExhausted { socket } if socket.0 == 0)
         {
             return;
         }
@@ -4227,15 +4311,26 @@ impl<V: Venue> Engine<V> {
                 #[cfg(not(feature = "managed-sockets"))]
                 self.venue.on_message(&mut cx, socket, text);
             }
-            Event::WsClosed { socket, code } => {
+            // One terminal body for both: exhaustion is a close unless the venue opts in.
+            Event::WsClosed { socket, .. } | Event::WsRouteExhausted { socket } => {
+                let (code, exhausted) = match event {
+                    Event::WsClosed { code, .. } => (code, false),
+                    _ => (ROUTE_EXHAUSTED_CLOSE, true),
+                };
                 for timer in cx.io.core.signing.close_socket(socket) {
                     if timer.0 != 0 {
                         cx.io.core.actions.push(Action::ClearTimer { timer });
                     }
                 }
                 cx.io.core.sockets.closed(socket, true);
-                cx.io.core.health.count(log_code::WS_CLOSED);
-                self.venue.on_close(&mut cx, socket, code)
+                if !exhausted {
+                    cx.io.core.health.count(log_code::WS_CLOSED);
+                }
+                if exhausted && V::route_exhaustion() {
+                    self.venue.on_route_exhausted(&mut cx, socket)
+                } else {
+                    self.venue.on_close(&mut cx, socket, code)
+                }
             }
             Event::HttpResponse { request, response } => {
                 self.http_start(now, request, response.status, response.headers);
@@ -4783,16 +4878,18 @@ impl<V: Venue> Engine<V> {
         }
     }
 
-    /// A missing key on primary material latches signing (`SigningLatch`).
+    /// The local signer's missing key on primary material latches signing
+    /// (`SigningLatch`). An asynchronous result fails only its own request:
+    /// no host reports `MissingKey`, and none may stop the account if one did.
     fn provider_refused(
         &mut self,
-        attempt: RequestId,
+        work: &crate::signing::SignRequest,
         result: &Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
         if let Err(crate::signing::SignError::MissingKey) = result {
             let startup = self.startup_watch_at.is_some();
             let io = &mut self.io;
-            let primary = io.core.signing.prepared_primary(attempt);
+            let primary = io.core.identities.primary_owns(work);
             SigningLatch::missing_key(
                 &mut io.core.signing,
                 primary,
@@ -4873,6 +4970,7 @@ impl<V: Venue> Engine<V> {
         if match &completion {
             Completion::Ready(pending, _)
             | Completion::Stale(pending)
+            | Completion::NonceStale(pending)
             | Completion::Failed(pending, _) => pending.managed,
         } {
             self.managed_sign_completed(now, completion);
@@ -4891,7 +4989,7 @@ impl<V: Venue> Engine<V> {
                     outbound: Box::new(outbound),
                 });
             }
-            Completion::Stale(mut pending) => {
+            Completion::Stale(mut pending) | Completion::NonceStale(mut pending) => {
                 if pending.timer.0 != 0 {
                     self.io.core.actions.push(Action::ClearTimer {
                         timer: pending.timer,
@@ -5263,7 +5361,10 @@ impl<V: Venue> Engine<V> {
                                 }
                                 self.io.core.actions.push(outbound);
                             }
-                            Some(Completion::Stale(mut pending)) => {
+                            Some(
+                                Completion::Stale(mut pending)
+                                | Completion::NonceStale(mut pending),
+                            ) => {
                                 pending.timer = TimerId(0);
                                 let next = self.io.core.signing.next_id();
                                 self.io.core.signing.retry(next, pending);
@@ -5332,7 +5433,7 @@ impl<V: Venue> Engine<V> {
                             .and_then(|s| s.sign_ready(&work))
                         {
                             let emitted = self.io.core.actions.len();
-                            self.provider_refused(attempt, &result);
+                            self.provider_refused(&work, &result);
                             self.sign_completed(now, attempt, result);
                             // Inline local completion retains original mixed action order.
                             self.queue_dispatch_callback_actions(&mut queued, emitted);
@@ -5760,6 +5861,10 @@ fn apply_signature(
 /// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
 pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
 
+/// The latch notice, `SignError::MissingKey`'s text after a fixed prefix.
+const MISSING_KEY_NOTICE: &str =
+    "Signing cannot succeed with the installed credentials: Signing key is not installed";
+
 /// Credential-level signing refusal. Non-generic, so the combined build holds
 /// one copy rather than one per venue engine.
 #[derive(Default)]
@@ -5813,7 +5918,7 @@ impl SigningLatch {
             LogEvent {
                 level: Level::Error,
                 code: log_code::CONFIG_INVALID,
-                message: format!("Signing cannot succeed with the installed credentials: {error}"),
+                message: MISSING_KEY_NOTICE.into(),
                 fields: Vec::new(),
             },
         );
