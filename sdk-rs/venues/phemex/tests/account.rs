@@ -135,7 +135,7 @@ fn timer(actions: &[Action], at: f64) -> TimerId {
         .iter()
         .filter_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
-                (*at_ms == at).then_some(*timer)
+                (*at_ms == at && !actions.iter().any(|action| matches!(action, Action::ClearTimer { timer:cleared } if cleared==timer))).then_some(*timer)
             } else {
                 None
             }
