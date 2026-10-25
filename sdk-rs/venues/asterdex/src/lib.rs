@@ -5,6 +5,7 @@ mod account;
 mod fixture;
 mod history;
 mod request;
+pub(crate) use request::command_read_root;
 pub mod sign;
 mod trading;
 mod wire;

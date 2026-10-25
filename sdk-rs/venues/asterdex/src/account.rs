@@ -358,7 +358,7 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
 
 impl AsterDex {
     pub(crate) fn fetch_account_info(&mut self, cx: &mut Cx<'_, Pending>) {
-        let Some(root) = crate::request::command_read_root(cx) else {
+        let Some(root) = crate::command_read_root(cx) else {
             return;
         };
         let path = if self.version == crate::sign::Version::V1 {

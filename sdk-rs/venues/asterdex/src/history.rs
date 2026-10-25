@@ -381,7 +381,7 @@ impl AsterDex {
     }
 
     pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, read: Read) {
-        let Some(root) = crate::request::command_read_root(cx) else {
+        let Some(root) = crate::command_read_root(cx) else {
             return;
         };
         let (endpoint, query, pending, private) = match read {
