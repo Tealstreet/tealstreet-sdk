@@ -672,7 +672,8 @@ impl AsterDex {
                 if let Some(error) = error {
                     let _ = cx.fail_context(&root, error);
                 } else if range.single_millisecond && rows.len() >= range.limit as usize {
-                    let _ = cx.fail_context(&root,
+                    let _ = cx.fail_context(
+                        &root,
                         "Aster fills timestamp saturated; no partial result returned",
                     );
                 } else if invalid
@@ -839,7 +840,8 @@ impl AsterDex {
         match range.walk.step() {
             Step::Fetch { from, to } => {
                 if range.walk.requests > 1000 {
-                    let _ = cx.fail_context(&root,
+                    let _ = cx.fail_context(
+                        &root,
                         "Aster fills range exceeded request budget; no partial result returned",
                     );
                     return;
@@ -873,7 +875,8 @@ impl AsterDex {
             }
             Step::Finished => {
                 if range.walk.truncated {
-                    let _ = cx.fail_context(&root,
+                    let _ = cx.fail_context(
+                        &root,
                         "Aster fills range could not be exhausted; no partial result returned",
                     );
                     return;
@@ -883,12 +886,7 @@ impl AsterDex {
         }
     }
 
-    fn finish_fill_range(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        root: Context,
-        mut range: FillWalk,
-    ) {
+    fn finish_fill_range(&mut self, cx: &mut Cx<'_, Pending>, root: Context, mut range: FillWalk) {
         normalize(&mut range.collected);
         range.collected.retain(|row| {
             row.price.is_finite()

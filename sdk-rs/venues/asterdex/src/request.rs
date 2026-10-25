@@ -34,7 +34,9 @@ fn root_of(pending: &Pending) -> Option<Context> {
 /// The caller's original Read root for a command that reads remotely.
 pub(crate) fn command_read_root(cx: &mut Cx<'_, Pending>) -> Option<Context> {
     match cx.command_wait() {
-        Some(safe_cex_engine::CommandWait::Remaining(_)) => cx.admit_caller_read_root(None, None).ok(),
+        Some(safe_cex_engine::CommandWait::Remaining(_)) => {
+            cx.admit_caller_read_root(None, None).ok()
+        }
         Some(safe_cex_engine::CommandWait::Expired) => {
             let _ = cx.reject_expired_command(Operation::Read);
             None
@@ -187,7 +189,9 @@ impl SignedRequest {
         }
         let granted = cx.http_retry_context(&read, RetryEvidence::ReadFailure);
         self.read = Some(granted.as_ref().map_or(read, Clone::clone));
-        granted.map(|_| ()).map_err(|error| error.read_venue_error())
+        granted
+            .map(|_| ())
+            .map_err(|error| error.read_venue_error())
     }
 
     fn retryable_status(&self, status: u16) -> bool {
@@ -306,7 +310,11 @@ impl AsterDex {
         }
     }
 
-    fn dispatch_signed(&mut self, cx: &mut Cx<'_, Pending>, mut request: Box<SignedRequest>) -> bool {
+    fn dispatch_signed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Box<SignedRequest>,
+    ) -> bool {
         if request.public {
             let url = format!("{}{}", self.urls.rest, request.path);
             return self.release_read(cx, request, url, public_read_policy(), None);
@@ -391,9 +399,15 @@ impl AsterDex {
         let method = unsent.method;
         let stream = unsent.stream;
         let queued = match recipe {
-            Some(recipe) => {
-                cx.request_signed_managed(read, None, method, url, None, recipe, Pending::Signed(unsent))
-            }
+            Some(recipe) => cx.request_signed_managed(
+                read,
+                None,
+                method,
+                url,
+                None,
+                recipe,
+                Pending::Signed(unsent),
+            ),
             None => cx.request_managed(read, None, method, url, None, Pending::Signed(unsent)),
         };
         match queued {
@@ -1118,7 +1132,9 @@ mod tests {
             };
             assert_eq!(request.headers, vec![("X-MBX-APIKEY", expected.into())]);
             assert!(request.body.is_none());
-            assert_eq!(request.timeout_ms, None);
+            // Reads carry their managed bound; writes keep the host default.
+            let bound = (method == Method::Get).then_some(READ_TIMEOUT_MS);
+            assert_eq!(request.timeout_ms, bound);
         }
     }
 
@@ -1138,6 +1154,7 @@ mod tests {
             public: false,
             role: CredentialRole::Mutation,
             context: None,
+            root: None,
             read: None,
         };
         let klines = || Pending::MarketBrackets {
