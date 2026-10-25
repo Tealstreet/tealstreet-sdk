@@ -175,3 +175,22 @@ fn hyro_filter_and_dedup_survive_managed_discovery() {
         0.01
     );
 }
+
+/// C8: a reply that lands after the deadline but before its
+/// expiry timer fires must still leave discovery retrying.
+#[test]
+fn a_reply_past_its_deadline_before_the_timer_still_retries() {
+    for body in [INSTRUMENTS, "{\"retCode\":0,\"result\":{}}"] {
+        let mut h = Harness::started(public(Variant::Linear, ""));
+        h.respond("status=PreLaunch", 200, PRELAUNCH);
+        let read = h.take("/v5/market/instruments-info");
+        h.now += 20_001.;
+        h.reply(read.id, 200, body);
+        assert!(h.engine.store().markets().is_empty(), "no rows published");
+        h.advance(120_000.);
+        assert!(
+            h.has_request("/v5/market/instruments-info"),
+            "discovery stalled after a past-deadline reply ({body})"
+        );
+    }
+}
