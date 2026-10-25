@@ -5930,6 +5930,14 @@ No other venue inventory, shared checker, allowance or signer source changes.
 | Invalid options during a refresh walk | Every joined caller fails `NotSent` `invalidInput` at once (was silent until the 30 s deadline; not reachable through startup today) | None. |
 
 
+### Lighter local trading refusals on genuine Mutation entry
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| The ten synchronous `trade_command` refusals (caller client order ID, placement/cancel/amend plan errors, non-numeric or unknown cancel, amend pending/unknown/not open, hedged position mode) settle through one genuine Mutation admission | With free capacity, unchanged: the exact native message and kind, `NotSent`, no I/O | None. |
+| The same refusals at full owner capacity or with an invalid clock | The engine's one typed admission refusal (`NotSent`), not the native text, as for every adopted venue | None. |
+| SetPositionMode one-way success, valid jobs, the nonce queue and async terminals | Unchanged (still legacy) | None. |
+
 ### Bybit Hyro non-placement commands on the ordinary Plan (Hyro H1)
 
 | Change | Command outcome | NX handling |
