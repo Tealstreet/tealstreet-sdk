@@ -356,9 +356,22 @@ mod wiring {
     #[test]
     fn the_json_setup_refuses_a_read_identity_for_a_validate_only_family() {
         let setup = r#"{"primary":{"key":"k","secret":"s","passphrase":"p"},"secondary":{"key":"r","secret":"t"}}"#;
-        assert!(local_signer_from_json_for_mode("weex", setup.into(), false).is_ok());
+        let private: crate::EngineOptions =
+            serde_json::from_str(r#"{"publicDataOnly":false}"#).unwrap();
+        assert!(local_signer_from_json_for_mode("weex", setup.into(), &private).is_ok());
         let _declared = test_policy::declare("weex", ValidateOnly);
-        let Err(error) = local_signer_from_json_for_mode("weex", setup.into(), false) else {
+        let Err(error) = local_signer_from_json_for_mode("weex", setup.into(), &private) else {
+            panic!("a read identity was installed for a ValidateOnly family");
+        };
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    }
+
+    #[test]
+    fn the_no_options_json_setup_also_refuses_a_read_identity_for_a_validate_only_family() {
+        let setup = r#"{"primary":{"key":"k","secret":"s","passphrase":"p"},"secondary":{"key":"r","secret":"t"}}"#;
+        assert!(crate::local_signer_from_json_for("weex", setup.into()).is_ok());
+        let _declared = test_policy::declare("weex", ValidateOnly);
+        let Err(error) = crate::local_signer_from_json_for("weex", setup.into()) else {
             panic!("a read identity was installed for a ValidateOnly family");
         };
         assert_eq!(error.kind, Some(ErrorKind::InvalidInput));

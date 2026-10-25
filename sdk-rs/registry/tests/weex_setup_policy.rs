@@ -7,12 +7,17 @@ use safe_cex_engine::signing::{
 use safe_cex_engine::{Engine, ErrorKind, Venue};
 use safe_cex_venues::{EngineOptions, Visit, build_with_signer, local_signer_from_json_for_mode};
 
+/// Account options carrying only the public/private setup intent.
+fn mode(public: bool) -> EngineOptions {
+    serde_json::from_value(serde_json::json!({"publicDataOnly": public})).unwrap()
+}
+
 #[test]
 fn complete_private_primary_requires_passphrase_in_trusted_setup() {
     let result = local_signer_from_json_for_mode(
         "weex",
         r#"{"primary":{"key":"k","secret":"s"}}"#.into(),
-        false,
+        &mode(false),
     );
     assert!(
         result.is_err(),
@@ -28,7 +33,7 @@ fn secondary_absent_or_null_passphrase_inherits_only_the_primary_ref() {
         let setup = format!(
             r#"{{"primary":{{"key":"k","secret":"s","passphrase":"p","stableId":"account-primary"}},"secondary":{secondary}}}"#
         );
-        let (_, identities) = local_signer_from_json_for_mode("weex", setup, false).unwrap();
+        let (_, identities) = local_signer_from_json_for_mode("weex", setup, &mode(false)).unwrap();
         let primary = identities.primary.unwrap();
         let secondary = identities.secondary.unwrap();
         assert!(primary.passphrase.is_some());
@@ -40,9 +45,7 @@ fn explicit_empty_secondary_never_falls_back_even_in_public_mode() {
     for public in [false, true] {
         let result = local_signer_from_json_for_mode(
             "weex",
-            r#"{"primary":{"key":"k","secret":"s","passphrase":"p"},"secondary":{"key":"r","secret":"t","passphrase":""}}"#.into(),
-            public,
-        );
+            r#"{"primary":{"key":"k","secret":"s","passphrase":"p"},"secondary":{"key":"r","secret":"t","passphrase":""}}"#.into(), &mode(public));
         assert!(
             result.is_err(),
             "explicit empty cannot become primary fallback"
@@ -55,7 +58,7 @@ fn public_bypasses_only_primary_passphrase_requirement() {
         local_signer_from_json_for_mode(
             "weex",
             r#"{"primary":{"key":"k","secret":"s"}}"#.into(),
-            true,
+            &mode(true)
         )
         .is_ok()
     );
@@ -63,7 +66,7 @@ fn public_bypasses_only_primary_passphrase_requirement() {
         local_signer_from_json_for_mode(
             "weex",
             r#"{"primary":{"key":"k","secret":"s"},"secondary":{"key":"r","secret":"t"}}"#.into(),
-            true,
+            &mode(true)
         )
         .is_err()
     );
@@ -72,9 +75,7 @@ fn public_bypasses_only_primary_passphrase_requirement() {
 fn passphrase_only_primary_can_supply_a_complete_secondary() {
     let (provider, identities) = local_signer_from_json_for_mode(
         "weex",
-        r#"{"primary":{"passphrase":" p "},"secondary":{"key":"r","secret":"4142","stableId":"account-read"}}"#.into(),
-        true,
-    ).unwrap();
+        r#"{"primary":{"passphrase":" p "},"secondary":{"key":"r","secret":"4142","stableId":"account-read"}}"#.into(), &mode(true)).unwrap();
     let primary = identities.primary.unwrap();
     let secondary = identities.secondary.unwrap();
     assert_eq!(secondary.passphrase, primary.passphrase);
@@ -107,9 +108,7 @@ fn passphrase_only_primary_can_supply_a_complete_secondary() {
 fn credential_passphrase_and_stable_ids_remain_exact_independent_metadata() {
     let (provider, identities) = local_signer_from_json_for_mode(
         "weex",
-        r#"{"primary":{"key":" k ","secret":"s","passphrase":" p ","stableId":"account-primary"},"secondary":{"key":" r ","secret":"t","passphrase":" q ","stableId":"account-read"}}"#.into(),
-        false,
-    ).unwrap();
+        r#"{"primary":{"key":" k ","secret":"s","passphrase":" p ","stableId":"account-primary"},"secondary":{"key":" r ","secret":"t","passphrase":" q ","stableId":"account-read"}}"#.into(), &mode(false)).unwrap();
     for (identity, stable, key, passphrase) in [
         (
             identities.primary.unwrap(),
@@ -152,7 +151,7 @@ fn trusted_setup_constructs_weex_with_the_injected_provider() {
         "weex",
         r#"{"primary":{"key":"k","secret":"s","passphrase":"p","stableId":"account-primary"}}"#
             .into(),
-        false,
+        &mode(false),
     )
     .unwrap();
     let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
@@ -176,7 +175,7 @@ fn raw_credentials_beside_injected_identities_are_refused() {
     let (provider, identities) = local_signer_from_json_for_mode(
         "weex",
         r#"{"primary":{"key":"k","secret":"s","passphrase":"p"}}"#.into(),
-        false,
+        &mode(false),
     )
     .unwrap();
     let mut options: EngineOptions = serde_json::from_str(r#"{"key":"k"}"#).unwrap();
