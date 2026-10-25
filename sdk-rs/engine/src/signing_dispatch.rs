@@ -123,9 +123,14 @@ pub(crate) struct Dispatch {
     /// Metadata only: materialised values live exclusively in the outbound action.
     outbound: crate::IdMap<RequestId, Pending>,
     next: crate::resource_ids::ResourceIds,
-    /// The refs of a preparation that named an invalid credential ref, or of
-    /// a socket step that could not prepare at all (none known); taken once.
-    credential_refused: Option<Vec<crate::signing::KeyRef>>,
+    /// A preparation that named a missing credential ref; taken once.
+    credential_refused: Option<CredentialRefusal>,
+}
+/// The refs a refused preparation named, when it got far enough to name any.
+pub(crate) struct CredentialRefusal {
+    pub refs: Vec<crate::signing::KeyRef>,
+    /// A socket login refused before naming refs; logins use the primary.
+    pub socket_login: bool,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
@@ -138,7 +143,7 @@ impl Dispatch {
         self.pending.is_empty() && self.outbound.is_empty()
     }
 
-    pub fn take_credential_refusal(&mut self) -> Option<Vec<crate::signing::KeyRef>> {
+    pub fn take_credential_refusal(&mut self) -> Option<CredentialRefusal> {
         self.credential_refused.take()
     }
     /// The refs the attempt's prepared request names.
@@ -425,11 +430,14 @@ impl Dispatch {
         let work = match p.step.prepare(&mut p.outbound, context) {
             Ok(work) => work,
             Err(error) => {
-                // A login that cannot even prepare fails identically every time.
-                if error == SignError::InvalidRequest
-                    && matches!(p.outbound, Action::WsSend { .. } | Action::WsConnect { .. })
-                {
-                    self.credential_refused = Some(Vec::new());
+                if error == SignError::MissingKey {
+                    self.credential_refused = Some(CredentialRefusal {
+                        refs: Vec::new(),
+                        socket_login: matches!(
+                            p.outbound,
+                            Action::WsSend { .. } | Action::WsConnect { .. }
+                        ),
+                    });
                 }
                 return Err(error);
             }
@@ -450,10 +458,14 @@ impl Dispatch {
             return Err(SignError::InvalidRequest);
         }
         if let Err(error) = work.validate() {
-            if work.has_invalid_key_ref() {
-                self.credential_refused = Some(work.key_refs().cloned().collect());
+            if !work.has_invalid_key_ref() {
+                return Err(error);
             }
-            return Err(error);
+            self.credential_refused = Some(CredentialRefusal {
+                refs: work.key_refs().cloned().collect(),
+                socket_login: false,
+            });
+            return Err(SignError::MissingKey);
         }
         p.refs = work.key_refs().cloned().collect();
         // Refuse a non-progressing recipe before an immediate provider can enter

@@ -625,23 +625,16 @@ pub enum SignError {
     InvalidRequest,
     InvalidResult,
     TimedOut,
+    /// The request names a ref the credentials do not have. No retry with the
+    /// same credentials can sign, so this alone ends signing for the account.
+    MissingKey,
 }
 impl SignError {
-    /// Whether no retry of the same credentials can succeed. A remote
-    /// provider's malformed result may be transient; a local one is not.
-    pub fn permanent(self, local: bool) -> bool {
-        match self {
-            Self::InvalidRequest => true,
-            Self::InvalidResult => local,
-            // An algorithm not compiled in fails one request kind, not the account.
-            Self::Unsupported | Self::Unavailable | Self::Refused | Self::TimedOut => false,
-        }
-    }
     pub fn venue_error(self) -> crate::VenueError {
         use crate::{ErrorKind, Outcome, VenueError};
         let kind = match self {
             Self::TimedOut => ErrorKind::Timeout,
-            Self::Refused | Self::InvalidRequest => ErrorKind::InvalidInput,
+            Self::Refused | Self::InvalidRequest | Self::MissingKey => ErrorKind::InvalidInput,
             Self::Unsupported => ErrorKind::Unsupported,
             _ => ErrorKind::Internal,
         };
@@ -659,6 +652,7 @@ impl std::fmt::Display for SignError {
             Self::InvalidRequest => "Invalid signing request",
             Self::InvalidResult => "Invalid signing result",
             Self::TimedOut => "Signing timed out before dispatch",
+            Self::MissingKey => "Signing key is not installed",
         })
     }
 }

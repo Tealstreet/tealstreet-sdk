@@ -629,6 +629,24 @@ impl crate::SignStep for InvalidStep {
     }
 }
 
+/// A recipe whose identity lacks the ref it needs (`signing_ref()` failing).
+struct MissingKeyStep;
+impl crate::SignStep for MissingKeyStep {
+    fn prepare(
+        &mut self,
+        _: &mut Action,
+        _: &crate::DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        Err(SignError::MissingKey)
+    }
+    fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
+        unreachable!("a missing key never completes")
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
 fn complete_callback_retry(engine: &mut Engine<TestVenue>, now: f64) {
     let actions: Vec<_> = engine.drain_actions().collect();
     let attempts: Vec<_> = actions
@@ -2074,7 +2092,7 @@ fn only_a_primary_ref_refusal_latches_while_a_secondary_exists() {
             1001.,
             Event::Signed {
                 attempt,
-                result: Err(SignError::InvalidRequest),
+                result: Err(SignError::MissingKey),
             },
         );
         assert_eq!(
@@ -2093,10 +2111,11 @@ fn only_a_primary_ref_refusal_latches_while_a_secondary_exists() {
     assert!(refused("account/primary"), "a primary refusal latches");
 }
 
-/// A socket login that cannot even prepare fails identically on every
-/// reconnect, so it latches and the private role is never reconnected.
+/// A socket login whose key is missing fails identically on every reconnect,
+/// so it latches and the private role is never reconnected. Any other
+/// preparation refusal stays a per-request failure.
 #[test]
-fn a_socket_login_that_cannot_prepare_latches_and_blocks_its_role() {
+fn a_socket_login_missing_its_key_latches_and_blocks_its_role() {
     let mut engine = crate::test_support::seeded_engine(TestVenue::default());
     let private =
         || crate::SocketSpec::new("wss://venue.test/private").channel(SocketChannel::Private);
@@ -2106,7 +2125,7 @@ fn a_socket_login_that_cannot_prepare_latches_and_blocks_its_role() {
         io: &mut engine.io,
     };
     let socket = cx.connect(private());
-    cx.send_signed(socket, "auth".into(), Box::new(InvalidStep));
+    cx.send_signed(socket, "auth".into(), Box::new(MissingKeyStep));
     engine.prepare_dispatch(1000.);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|action| {
@@ -2132,5 +2151,72 @@ fn a_socket_login_that_cannot_prepare_latches_and_blocks_its_role() {
         !engine
             .drain_actions()
             .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+}
+
+/// A signed upgrade missing its key latches before the socket ever opens, and
+/// its role is still never reconnected.
+#[test]
+fn a_signed_connect_missing_its_key_blocks_its_role() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    let private =
+        || crate::SocketSpec::new("wss://venue.test/private").channel(SocketChannel::Private);
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.connect_signed(private(), Box::new(MissingKeyStep));
+    engine.prepare_dispatch(1000.);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(actions.iter().any(|action| {
+        matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
+            if *code == log_code::CONFIG_INVALID)
+    }));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    let mut cx = Cx {
+        now: 1001.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    assert_eq!(cx.connect_signed(private(), Box::new(Step)), SocketId(0));
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. } | Action::Sign { .. }))
+    );
+}
+
+/// An invalid request shape fails that request only, on a socket login too.
+#[test]
+fn a_socket_login_with_an_invalid_shape_never_latches() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    let private =
+        || crate::SocketSpec::new("wss://venue.test/private").channel(SocketChannel::Private);
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let socket = cx.connect(private());
+    cx.send_signed(socket, "auth".into(), Box::new(InvalidStep));
+    engine.prepare_dispatch(1000.);
+    assert!(!engine.drain_actions().any(|action| {
+        matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
+            if code == log_code::CONFIG_INVALID)
+    }));
+    let mut cx = Cx {
+        now: 1001.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    assert_ne!(
+        cx.connect(private()),
+        SocketId(0),
+        "the role reconnects as before"
     );
 }

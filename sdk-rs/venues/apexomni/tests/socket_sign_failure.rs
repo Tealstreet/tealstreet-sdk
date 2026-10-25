@@ -235,7 +235,7 @@ fn refusing_socket_logins(error: SignError) -> TestEngine {
 
 #[test]
 fn a_socket_login_that_cannot_sign_fails_once_and_never_reconnects() {
-    let mut e = refusing_socket_logins(SignError::InvalidRequest);
+    let mut e = refusing_socket_logins(SignError::MissingKey);
     let seen = run(&mut e, &[SignError::Unavailable], true, false);
     assert_eq!(
         seen.private_connects, 1,
@@ -258,5 +258,70 @@ fn an_unsupported_login_fails_alone_and_signed_reads_keep_working() {
         "signed reads continue: {} signed, {} connects",
         seen.signed_sent,
         seen.private_connects
+    );
+}
+
+/// The real local signer, but the first REST request carries an expanded
+/// payload over its 1 MiB bound.
+struct OversizedOnce {
+    inner: Arc<dyn Signer>,
+    refused: std::sync::Mutex<Option<SignError>>,
+}
+impl Signer for OversizedOnce {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        let result = self.sign_ready(&request).expect("immediate");
+        Box::pin(std::future::ready(result))
+    }
+    fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        let mut refused = self.refused.lock().unwrap();
+        if refused.is_some() || request.context.method == "WS" {
+            return self.inner.sign_ready(request);
+        }
+        let mut oversized = request.clone();
+        if let Some(safe_cex_engine::signing::Operation::Sign { payload, .. }) =
+            oversized.operations.last_mut()
+        {
+            payload.push(safe_cex_engine::signing::PayloadPart::Bytes {
+                bytes: vec![0; 1024 * 1024 + 1],
+            });
+        }
+        let result = self.inner.sign_ready(&oversized)?;
+        *refused = result.as_ref().err().copied();
+        Some(result)
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+}
+
+#[test]
+fn an_oversized_request_fails_alone_and_the_account_keeps_signing() {
+    let (provider, identities) = fixture_provider(&Material::default());
+    let signer = Arc::new(OversizedOnce {
+        inner: provider,
+        refused: Default::default(),
+    });
+    let mut e = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
+        identity: identities.primary.clone(),
+        ..Options::default()
+    }));
+    e.set_identities(identities).unwrap();
+    e.set_signer(Some(signer.clone())).unwrap();
+    e.start(0.0);
+    let seen = run(&mut e, &[SignError::Unavailable], true, false);
+    assert_eq!(
+        *signer.refused.lock().unwrap(),
+        Some(SignError::InvalidRequest),
+        "the local signer refused the oversized request"
+    );
+    assert_eq!(seen.config_invalid, 0);
+    assert_eq!(seen.startup_failed, 0);
+    assert!(seen.signed_sent > 0, "later signed requests are sent");
+    assert!(
+        seen.private_connects >= 1,
+        "startup continues to the socket"
     );
 }

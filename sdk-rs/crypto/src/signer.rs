@@ -409,12 +409,12 @@ impl LocalSigner {
             None => self.key(reference),
         }
     }
-    /// A local signer's missing ref never appears later, so it is permanent.
+    /// A local signer's missing ref never appears later.
     fn raw_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
         self.keys
             .get(reference)
             .map(|key| key.as_slice())
-            .ok_or(SignError::InvalidRequest)
+            .ok_or(SignError::MissingKey)
     }
     fn expand(
         &self,
@@ -869,7 +869,7 @@ mod tests {
         signer.remove(&reference);
         assert!(matches!(
             signer.sign_now(&request),
-            Err(SignError::InvalidRequest)
+            Err(SignError::MissingKey)
         ));
         let own = serde_json::json!({"primary":{"passphrase":"primary"},"secondary":{"key":"read","secret":"secret","passphrase":"own"}}).to_string();
         let (signer, ids) =
@@ -1410,7 +1410,7 @@ mod tests {
         );
         assert!(!format!("{request:?}{result:?}").contains("public-identifier"));
         signer.remove(&key);
-        assert_eq!(signer.sign_now(&request), Err(SignError::InvalidRequest));
+        assert_eq!(signer.sign_now(&request), Err(SignError::MissingKey));
     }
     #[test]
     fn composite_digest_and_secret_suffix_stay_inside_one_batch() {

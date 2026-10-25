@@ -4520,8 +4520,8 @@ impl<V: Venue> Engine<V> {
         }
     }
 
-    /// A provider's permanent refusal, or an invalid credential ref, means these
-    /// credentials can never sign; other preparation errors stay per request.
+    /// A missing credential ref, from the provider or from preparation, means
+    /// these credentials can never sign; every other error stays per request.
     /// It fails once, visibly, and later signed actions and reconnects stop.
     fn provider_refused(
         &mut self,
@@ -4529,15 +4529,10 @@ impl<V: Venue> Engine<V> {
         attempt: RequestId,
         result: &Result<crate::signing::SignResult, crate::signing::SignError>,
     ) {
-        let local = self.io.signer.as_ref().is_some_and(|s| s.immediate());
-        if let Some(error) = result
-            .as_ref()
-            .err()
-            .copied()
-            .filter(|e| e.permanent(local))
+        if let Err(error @ crate::signing::SignError::MissingKey) = result
             && self.primary_refs(self.io.signing.prepared_refs(attempt))
         {
-            self.refuse_signing(now, error);
+            self.refuse_signing(now, *error);
         }
     }
 
@@ -5061,8 +5056,8 @@ impl<V: Venue> Engine<V> {
                             Ok(work) => work,
                             Err(error) => {
                                 let emitted = self.io.actions.len();
-                                if let Some(refs) = self.io.signing.take_credential_refusal()
-                                    && self.primary_refs(&refs)
+                                if let Some(refusal) = self.io.signing.take_credential_refusal()
+                                    && (refusal.socket_login || self.primary_refs(&refusal.refs))
                                 {
                                     self.refuse_signing(now, error);
                                 }
