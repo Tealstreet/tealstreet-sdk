@@ -202,3 +202,51 @@ continuation behavior in CALLERS. Recompose the actual tip before the intended
 freeze push, with docs incoming plus own suffix once. One PR-triggered Rust run;
 no explicit duplicate dispatch or WIP push. No READY until qualifying CI/source
 reviews and the auditor's composed-tree gates are satisfied.
+
+## Reviewed scope and nonfinite-clock contract
+
+The overseer approved this scope and its behavior changes after plan
+`b34798899c2`: fresh unsigned BackgroundReads, native fallback/last-row/revision
+publication and timers; revision change remains cleanup, with no new coalescing
+or unsubscribe-cancellation promise. The new admission bound and stale-generation
+suppression must appear in CALLERS. hcmq3f gave bounded native/caller/API direction
+CLEAR on that exact plan, independently confirming the two singleton sites and
+39 -> 37 family projection. Originals and exact source remain separate gates.
+
+A real NaN or infinite Event clock must refuse Background admission without
+HTTP, Prepare, Bind, a poll timer or trade-recovery scheduling. Do not call native
+`finish_candles` blindly on an invalid-time admission error: `set_timer` adds its
+delay to the invalid clock. At finite current-generation admission refusal,
+retain exactly one native completion + 3s timer. This is a guard on the new shared
+admission failure path; it does not change native finite-time cleanup.
+
+## Original-control checkpoint
+
+The local target executes 30 tests: **17 intended assertion REDs, 13 GREENs,
+0 ignored** against unchanged production. Native positives cover both origins,
+all declared nonsecond intervals, exact 3-interval bounds and time units,
+last-row financial values, one fallback on status/envelope/row/transport/broken
+stream failures, empty/malformed TradingView cleanup, reference counting and
+stale success, pre-market subscriptions, live revision cleanup, and strict 20s /
+inclusive 30s recovery thresholds. Revision-plus-recovery uses two physical
+routes, each inside its own bound, with a trade after the original capture.
+
+The REDs expose initial/fallback raw HTTP before Prepare, held Prepare/unclaimed
+Bind, unclaimed DATA publication, missing first/second physical deadlines,
+strict first/later preparation refusal, genuine 256-root capacity, real NaN and
+Infinity entry, stale failure/broken-stream fallback, and staged publication at
+20s equality. The streamed equality control observes two actual item callbacks;
+the stale malformed control observes one before removing its generation.
+
+Preparation/deadline cases fail first at raw-HTTP exclusion. Their later Bind,
+Claim, typed metadata, timer, no-late-Bind and no-third-call suffixes are gated and
+are not counted as executed evidence. Capacity fails at its initial no-HTTP
+assertion: exactly one peer retirement plus validation of all 255 peers before
+and after recovered success is a disclosed gated suffix. Native positives use a
+raw-compatible collector which performs actual Prepare/Bind/Claim after source;
+the unclaimed DATA control deliberately extracts the packet without that helper.
+
+A preliminary fixture counter included eight startup items; it was corrected to
+measure the per-request delta before this checkpoint. That fixture failure is
+not a custody RED. No source, Cargo, existing fixture or inventory change is part
+of these originals. The target is reviewed independently before source.
