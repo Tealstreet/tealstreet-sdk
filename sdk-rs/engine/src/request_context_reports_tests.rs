@@ -180,3 +180,75 @@ fn accepted_facts_cannot_publish_rejection_reports_and_recovered_attempts_are_si
         "historical allocation still counts until retirement"
     );
 }
+
+#[cfg(feature = "serial-plans")]
+#[test]
+fn streamed_and_live_reports_preserve_order_silence_and_sealed_reads() {
+    let mut writes = CommandWrites::new(3).unwrap().streamed_with(true);
+    writes.register(RequestId(1), 1).unwrap();
+    writes.released(RequestId(1)).unwrap();
+    writes
+        .result_with_reports(
+            RequestId(1),
+            refused("streamed"),
+            reports(&["stream-α", "", "stream-tail"]),
+        )
+        .unwrap();
+    writes.compact_serial(1);
+    writes.register(RequestId(2), 30).unwrap();
+    writes.register(RequestId(3), 20).unwrap();
+    writes.released(RequestId(2)).unwrap();
+    writes.released(RequestId(3)).unwrap();
+    writes
+        .result_with_reports(RequestId(2), refused("B"), reports(&["B1", "B2"]))
+        .unwrap();
+    writes
+        .result_with_reports(
+            RequestId(3),
+            refused("old A"),
+            reports(&["recovered retry"]),
+        )
+        .unwrap();
+    let _ = writes.grant_resend(RequestId(3));
+    writes.retry(RequestId(3), RequestId(4)).unwrap();
+    writes.released(RequestId(4)).unwrap();
+    writes
+        .result_with_reports(
+            RequestId(4),
+            WriteResult::KnownPartial(VenueError::new("mixed A").partial_ids(&["kept".into()])),
+            reports(&["A1", "A2"]),
+        )
+        .unwrap();
+    let before = (
+        writes.evidence,
+        writes.attempts.len(),
+        writes.legs.len(),
+        writes.report_bytes,
+        writes.report_messages,
+    );
+    let expected = ["stream-α", "", "stream-tail", "A1", "A2", "B1", "B2"];
+    for _ in 0..2 {
+        assert_eq!(writes.reports().collect::<Vec<_>>(), expected);
+        assert_eq!(
+            writes.rejections().map(|(id, _)| id).collect::<Vec<_>>(),
+            [RequestId(1), RequestId(4), RequestId(2)]
+        );
+        assert_eq!(writes.refusal_count(), 3);
+        assert_eq!(
+            (
+                writes.evidence,
+                writes.attempts.len(),
+                writes.legs.len(),
+                writes.report_bytes,
+                writes.report_messages
+            ),
+            before
+        );
+    }
+    let error = writes.fail(VenueError::new("fallback")).unwrap();
+    assert_eq!(error.message, "streamed");
+    assert_eq!(error.outcome, None);
+    assert_eq!(error.partial.unwrap().order_ids, ["kept"]);
+    assert_eq!(writes.reports().collect::<Vec<_>>(), expected);
+    assert_eq!(writes.refusal_count(), 3);
+}
