@@ -37,6 +37,8 @@ pub struct Store {
     orders: Vec<Order>,
     orders_revision: u64,
     order_snapshot_epoch: Epoch,
+    #[cfg(feature = "repair-mutations")]
+    snapshot_begins: u64,
     positions: Vec<Position>,
     position_ids: bool,
     balance: Balance,
@@ -62,7 +64,12 @@ pub struct Store {
 /// Linear admission authority for one logical order read, including all pages.
 /// It cannot be cloned or serialized; only its issuing Store can consume it.
 #[derive(Debug)]
-pub struct OrderSnapshotToken(Stamp);
+pub struct OrderSnapshotToken(
+    Stamp,
+    /// Order of `begin_orders_snapshot` calls, for repair retirement proofs.
+    #[cfg(feature = "repair-mutations")]
+    pub(crate) u64,
+);
 
 /// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
 /// `packages/safe-cex/src/store/store.base.ts`.
@@ -471,7 +478,20 @@ impl Store {
 
     /// Capture once before issuing a logical order read. Exhaustion is permanent.
     pub fn begin_orders_snapshot(&mut self) -> Option<OrderSnapshotToken> {
+        #[cfg(feature = "repair-mutations")]
+        {
+            let stamp = self.order_snapshot_epoch.stamp()?;
+            self.snapshot_begins += 1;
+            Some(OrderSnapshotToken(stamp, self.snapshot_begins))
+        }
+        #[cfg(not(feature = "repair-mutations"))]
         self.order_snapshot_epoch.stamp().map(OrderSnapshotToken)
+    }
+
+    /// How many order snapshots have begun; a later token's begin is larger.
+    #[cfg(feature = "repair-mutations")]
+    pub(crate) fn snapshot_begins(&self) -> u64 {
+        self.snapshot_begins
     }
 
     /// Read-only checks do not consume authority (for page joins and auth evidence).
