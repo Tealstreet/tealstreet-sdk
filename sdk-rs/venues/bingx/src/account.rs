@@ -1804,13 +1804,10 @@ mod sign_failure_owners {
     fn fail(kind: u8, active: u64) -> safe_cex_engine::Engine<Probe> {
         let credentials = Credentials {
             read: None,
-            primary: safe_cex_engine::signing::Identity {
-                extra: Default::default(),
-                credential: safe_cex_engine::signing::KeyRef("ref:owned-credential".into()),
-                signing: safe_cex_engine::signing::KeyRef("ref:owned-signing".into()),
-                passphrase: None,
-                stable_id: None,
-            },
+            primary: safe_cex_engine::signing::Identity::new(
+                safe_cex_engine::signing::KeyRef("ref:owned-credential".into()),
+                Some(safe_cex_engine::signing::KeyRef("ref:owned-signing".into())),
+            ),
         };
         let mut native = crate::Bingx::new(crate::Options {
             credentials: Some(credentials.primary),
@@ -1943,15 +1940,12 @@ mod tests {
                 text,
                 &Credentials {
                     read: None,
-                    primary: safe_cex_engine::signing::Identity {
-                        extra: Default::default(),
-                        credential: safe_cex_engine::signing::KeyRef(
-                            "ref:fixture-credential".into(),
-                        ),
-                        signing: safe_cex_engine::signing::KeyRef("ref:fixture-signing".into()),
-                        passphrase: None,
-                        stable_id: None,
-                    },
+                    primary: safe_cex_engine::signing::Identity::new(
+                        safe_cex_engine::signing::KeyRef("ref:fixture-credential".into()),
+                        Some(safe_cex_engine::signing::KeyRef(
+                            "ref:fixture-signing".into(),
+                        )),
+                    ),
                 },
             );
         }

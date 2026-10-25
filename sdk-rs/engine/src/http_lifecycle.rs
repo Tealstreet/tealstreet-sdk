@@ -6689,13 +6689,10 @@ mod tests {
         let (attempt, input) = work(&route(&mut engine, tokens[0], 1.));
         let permit = bound(&signed(&mut engine, 2., attempt, input));
         let slots = Slots::new(
-            Some(Identity {
-                credential: KeyRef("fixture".into()),
-                signing: KeyRef("fixture".into()),
-                passphrase: None,
-                stable_id: Some("nonce-capability/injected-capture".into()),
-                extra: Default::default(),
-            }),
+            Some(
+                Identity::new(KeyRef("fixture".into()), Some(KeyRef("fixture".into())))
+                    .with_stable_id(Some("nonce-capability/injected-capture".into())),
+            ),
             None,
             SlotPolicy::default(),
         );

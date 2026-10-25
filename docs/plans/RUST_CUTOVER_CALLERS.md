@@ -8839,3 +8839,16 @@ Backpack cancel-then-place. claude-fe7lgm owns engine implementation;
 codex-ih35js reviews and separately adopts Phemex after the actual core landing.
 No general Background Mutation, Session-auth substitute, fabricated command or
 new legacy sender is permitted.
+
+## OKX ordered writes on a streamed serial Plan (#2117)
+
+PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder, SetLeverage and SetPositionMode for OKX now run as one command-owned streamed serial Plan behind a WriteAfterReads Preflight. These are unchanged: entry precedence, planning, batching, endpoints, bodies, the demo header, client-ID progress receipts, accepted-ID order and per-command concurrency.
+
+TS-visible changes:
+
+- **Per-call bound.** Each write ends at 20 s as Unknown and reconciles. Native had no request deadline.
+- **Unlisted codes are Unknown** (dazzy3, Option B). A batch row whose `sCode` is neither 51xxx nor a listed pre-processing refusal now projects Unknown, with no refusal kind, and stops the chain. Natively it had outcome none. The same applies to an envelope-level code the table does not list, which was natively Rejected.
+  - Still Refused: 51xxx (51000 is InvalidInput), 50014 and 50016 (InvalidInput), 50011 and 50061 (RateLimited), 50111, 50113, 50114 and 50119 (AuthInvalid), and 50030, 50110 and 50120 (AuthPermission).
+  - Unknown: 50001, 50004, 50013 and 50026 keep their Unknown outcome, but now with no refusal kind.
+- **Unproven acknowledgements.** A malformed body, a missing order ID, a row-count mismatch or a row-level 50004 projects as the engine's fixed Internal / Unknown.
+- **Uncertain writes reconcile through the engine.** The uncertain-write account refresh now runs from the engine's `reconcile_uncertain`, once per uncertain seal. Cancel-all stays fenced until that fresh order snapshot is accepted.
