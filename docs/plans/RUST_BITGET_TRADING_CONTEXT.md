@@ -341,3 +341,26 @@ pass (`CARGO_BUILD_JOBS=4`).
 - **Rulings.** The TS-visible changes are recorded in `RUST_CUTOVER_CALLERS.md`.
 - **Open.** `dispatch_signer` `rollback_provider_refusal_preserves_original_native_rejection_details` keeps the native expectation (outcome none). It waits on fe7lgm's #2092 fix: an accepted write with no IDs counts as an effect.
 
+## Size checkpoint (held for Sam's ruling)
+
+- **Exact CI number.** Bitget family at engine s with slice 3 (`52b5ad62067`) is **1,471,661** bytes (scratch run 40153785129). Bare engine s on `9b05c9ac452` is 1,339,263, so the delta is +132,398. The CI delta matches the local raw delta: the raw-to-optimized factor is about 1.0, not 0.88.
+- **Split** (local raw, function names excluded):
+  - features linked with no use: +49,992
+  - Bitget venue functions net of the removed native handler: about +36.9K
+  - engine non-generic paths now reached: about +24.7K
+  - engine Cx/Io generics: about +12.9K gross, +7.8K net
+  - rodata and other: about +4K
+- **Venue trims**, each measured as local raw over features-only:
+
+| Step | Effect | Raw over features-only |
+| --- | --- | ---: |
+| Slice 3 as written | | 82,016 |
+| `inline(never)` on terminal and issue paths | -1,600 | 80,416 |
+| One fact path; one `String` classifier instantiation | -1,173 | 79,243 |
+| Bounded reconciliation data (endpoint, no serde) | -1,568 | 77,675 |
+| One Store closure per settings table | -1,593 | 76,082 |
+
+- **Engine estimates** (dazzy3 and fe7lgm):
+  - Type erasure saves about 0-2K per family; it pays off in the combined bundle once a second family adopts.
+  - About 2-8K of Bitget's engine share is recoverable without a redesign.
+
