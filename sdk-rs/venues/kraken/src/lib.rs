@@ -3,6 +3,8 @@ mod account;
 mod spot;
 pub use spot::KrakenSpot;
 mod history;
+mod public_context;
+mod public_trades;
 pub mod sign;
 mod trading;
 mod wire;
@@ -11,6 +13,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::request_context::{CommandEntryError, Context, Operation, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
@@ -41,17 +44,21 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     History(Box<history::Request>),
+    PublicTrades(Box<public_trades::Request>, Context),
     Markets {
+        context: Context,
         rows: Vec<Market>,
         failed: bool,
     },
     Tickers {
+        context: Context,
         rows: Vec<Ticker>,
         failed: bool,
         revision: u64,
     },
     Candles {
-        command: Option<CommandId>,
+        root: Option<Context>,
+        context: Option<Context>,
         symbol: String,
         interval: Interval,
         generation: Option<u64>,
@@ -185,36 +192,62 @@ impl Kraken {
         if self.markets_in_flight {
             return;
         }
+        let context =
+            match cx.http_context(Scope::Background, public_context::policy(Operation::Read)) {
+                Ok(context) => context,
+                Err(reason) => {
+                    self.discovery.failed(cx, false);
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
+                    return;
+                }
+            };
         self.markets_in_flight = true;
         self.skipping_markets.clear();
-        cx.request_streamed(
+        match cx.request_managed(
+            context.clone(),
             Method::Get,
             format!("{}/derivatives/api/v3/instruments", self.host()),
-            vec![],
-            ArrayAt::Field("instruments"),
+            None,
             Pending::Markets {
+                context,
                 rows: vec![],
                 failed: false,
             },
-        );
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Field("instruments")),
+            Err((pending, reason)) => self.public_failed(cx, pending, &reason.to_string()),
+        }
     }
     fn tickers_request(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.ticker_in_flight {
             return;
         }
+        let context =
+            match cx.http_context(Scope::Background, public_context::policy(Operation::Read)) {
+                Ok(context) => context,
+                Err(reason) => {
+                    self.discovery.failed(cx, true);
+                    cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
+                    return;
+                }
+            };
         self.ticker_in_flight = true;
         self.live_tickers.begin();
-        cx.request_streamed(
+        match cx.request_managed(
+            context.clone(),
             Method::Get,
             format!("{}/derivatives/api/v3/tickers", self.host()),
-            vec![],
-            ArrayAt::Field("tickers"),
+            None,
             Pending::Tickers {
+                context,
                 rows: vec![],
                 failed: false,
                 revision: self.ticker_revision,
             },
-        );
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Field("tickers")),
+            Err((pending, reason)) => self.public_failed(cx, pending, &reason.to_string()),
+        }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         // Suppressed public feeds never open; supervising them would only churn retries.
@@ -361,14 +394,18 @@ impl Kraken {
         to_ms: Option<f64>,
     ) {
         if cx.store.market(&symbol).is_none() {
-            if let Some(c) = command {
-                cx.fail(c, "Unknown Kraken market");
+            if command.is_some() {
+                public_context::local(cx, Operation::Read, Err("Unknown Kraken market".into()));
             }
             return;
         }
         if resolution(interval).is_none() {
-            if let Some(c) = command {
-                cx.fail(c, interval.unsupported("Kraken"));
+            if command.is_some() {
+                public_context::local(
+                    cx,
+                    Operation::Read,
+                    Err(interval.unsupported("Kraken").into()),
+                );
             }
             return;
         }
@@ -376,11 +413,27 @@ impl Kraken {
         let to = to_ms.unwrap_or(cx.now);
         let from = from_ms.unwrap_or(to - step * f64::from(limit.unwrap_or(500).clamp(1, 5000)));
         if !from.is_finite() || !to.is_finite() || from < 0.0 || from > to {
-            if let Some(c) = command {
-                cx.fail(c, "Invalid Kraken candle range");
+            if command.is_some() {
+                public_context::local(
+                    cx,
+                    Operation::Read,
+                    Err("Invalid Kraken candle range".into()),
+                );
             }
             return;
         }
+        let root = if command.is_some() {
+            match cx.admit_caller_read_root(None, None) {
+                Ok(root) => Some(root),
+                Err(CommandEntryError::Revoked) => {
+                    let _ = cx.reject_expired_command(Operation::Read);
+                    return;
+                }
+                Err(CommandEntryError::Rejected(_)) => return,
+            }
+        } else {
+            None
+        };
         let generation = if command.is_none() {
             let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) else {
                 return;
@@ -402,7 +455,8 @@ impl Kraken {
         self.candles_page(
             cx,
             Pending::Candles {
-                command,
+                root,
+                context: None,
                 symbol,
                 interval,
                 generation,
@@ -412,57 +466,113 @@ impl Kraken {
             },
         );
     }
-    fn candles_page(&self, cx: &mut Cx<'_, Pending>, pending: Pending) {
+    fn candles_page(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending) {
         let Pending::Candles {
+            root,
+            context,
             symbol,
             interval,
             page,
             ..
-        } = &pending
+        } = &mut pending
         else {
             return;
         };
-        let resolution = interval.as_str();
-        cx.request_streamed(
-            Method::Get,
-            format!(
-                "{}/api/charts/v1/trade/{symbol}/{resolution}?from={:.0}&to={:.0}",
-                self.host(),
-                (page.from / 1000.0).floor(),
-                (page.to / 1000.0).floor()
-            ),
-            vec![],
-            ArrayAt::Field("candles"),
-            pending,
+        let policy = public_context::policy(Operation::Read);
+        let issued = match root {
+            Some(root) => cx.http_leg_context(root, policy),
+            None => cx.http_context(Scope::Background, policy),
+        };
+        let leg = match issued {
+            Ok(leg) => leg,
+            Err(reason) => {
+                self.candles_failed(cx, pending, reason.venue_error());
+                return;
+            }
+        };
+        let url = format!(
+            "{}/api/charts/v1/trade/{symbol}/{}?from={:.0}&to={:.0}",
+            self.host(),
+            interval.as_str(),
+            (page.from / 1000.0).floor(),
+            (page.to / 1000.0).floor()
         );
+        *context = Some(leg.clone());
+        match cx.request_managed(leg, Method::Get, url, None, pending) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Field("candles")),
+            Err((pending, reason)) => self.candles_failed(cx, pending, reason.venue_error()),
+        }
+    }
+    fn candles_delivery(&self, cx: &Cx<'_, Pending>, pending: &Pending) -> bool {
+        let Pending::Candles {
+            root,
+            context: Some(context),
+            symbol,
+            interval,
+            generation,
+            ..
+        } = pending
+        else {
+            return false;
+        };
+        match root {
+            Some(root) => cx.validate_read_http_delivery(root, context).is_ok(),
+            None => {
+                cx.validate_background_read_http_delivery(context).is_ok()
+                    && self
+                        .candles
+                        .get(&(symbol.clone(), *interval))
+                        .is_some_and(|state| Some(state.generation) == *generation)
+            }
+        }
+    }
+    fn candles_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let Pending::Candles {
+            root,
+            context,
+            symbol,
+            interval,
+            generation,
+            ..
+        } = pending
+        else {
+            return;
+        };
+        if let Some(context) = context {
+            let _ = cx.finish_http_context(&context);
+        }
+        if let Some(root) = root {
+            let _ = cx.fail_context(&root, error.clone());
+        } else if let Some(state) = self
+            .candles
+            .get_mut(&(symbol, interval))
+            .filter(|state| Some(state.generation) == generation)
+        {
+            state.in_flight = false;
+            state.next_poll = cx.now + 5_000.0;
+        }
+        cx.notice(Level::Warn, code::REQUEST_FAILED, error.message);
     }
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Markets { .. } => {
+            Pending::Markets { context, .. } => {
+                let _ = cx.finish_http_context(&context);
                 self.markets_in_flight = false;
                 self.discovery.failed(cx, false);
             }
-            Pending::Tickers { .. } => {
+            Pending::Tickers { context, .. } => {
+                let _ = cx.finish_http_context(&context);
                 self.ticker_in_flight = false;
                 self.discovery.failed(cx, true);
             }
-            Pending::Candles {
-                command,
-                symbol,
-                interval,
-                generation,
-                ..
-            } => {
-                if let Some(c) = command {
-                    cx.fail(c, error);
-                } else if let Some(s) = self
-                    .candles
-                    .get_mut(&(symbol, interval))
-                    .filter(|s| Some(s.generation) == generation)
-                {
-                    s.in_flight = false;
-                    s.next_poll = cx.now + 5_000.0;
-                }
+            pending @ Pending::Candles { .. } => {
+                self.candles_failed(cx, pending, error.into());
+                return;
             }
             _ => {}
         }
@@ -656,81 +766,86 @@ impl Venue for Kraken {
         self.public.supervisor.retry(cx);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if matches!(pending, Pending::Candles { .. }) && !self.candles_delivery(cx, pending) {
+            return;
+        }
+        if let Pending::Markets { context, .. } | Pending::Tickers { context, .. } = &*pending
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         match pending {
             Pending::Account(r) => self.account_item(cx, r, item),
             Pending::History(r) => self.history_item(cx, r, item),
+            Pending::PublicTrades(r, child) => self.public_trades_item(cx, r, child, item),
             Pending::Trade(_) => {}
-            Pending::Markets { rows, failed: _ } => {
-                match serde_json::from_str::<Instrument<'_>>(item) {
-                    Ok(m) => {
-                        if !m.symbol.starts_with("PF_") || m.tradeable == Some(false) {
-                            return;
-                        }
-                        let decimals = m.contract_value_trade_precision.unwrap_or(0.0);
-                        if !(-18.0..=18.0).contains(&decimals) || decimals.fract() != 0.0 {
-                            safe_cex_engine::startup::skipped_row(cx);
-                            self.skipping_markets.insert(m.symbol.into_owned());
-                            return;
-                        }
-                        rows.push(Market {
-                            id: format!(
-                                "{}/{}",
-                                m.base,
-                                if m.quote.is_empty() { "USD" } else { &m.quote }
-                            ),
-                            symbol: m.symbol.to_string(),
-                            pretty_symbol: Some(m.symbol[3..].into()),
-                            base: m.base.to_string(),
-                            quote: if m.quote.is_empty() {
-                                "USD".into()
-                            } else {
-                                m.quote.to_string()
-                            },
-                            active: m.status != "cancel_only",
-                            precision: Precision {
-                                amount: 10f64.powi(-(decimals as i32)),
-                                price: m.tick_size.filter(|n| *n > 0.0).unwrap_or(0.01),
-                            },
-                            limits: Limits {
-                                amount: MinMax {
-                                    min: 0.0,
-                                    max: 9_007_199_254_740_991.0,
-                                },
-                                leverage: MinMax {
-                                    min: 1.0,
-                                    max: m
-                                        .margin_levels
-                                        .first()
-                                        .filter(|m| m.initial_margin > 0.0)
-                                        .map_or(100.0, |m| (1.0 / m.initial_margin).floor()),
-                                },
-                                price: None,
-                            },
-                            contract_size: Some(
-                                m.contract_size.filter(|n| *n > 0.0).unwrap_or(1.0),
-                            ),
-                            is_expiring: Some(m.last_trading_time.is_some()),
-                            is_inverse: Some(m.contract_type == "inverse"),
-                            is_spot: Some(false),
-                            is_perpetual: None,
-                            is_read_only: None,
-                            taker_fee: None,
-                            maker_fee: None,
-                        });
+            Pending::Markets { rows, .. } => match serde_json::from_str::<Instrument<'_>>(item) {
+                Ok(m) => {
+                    if !m.symbol.starts_with("PF_") || m.tradeable == Some(false) {
+                        return;
                     }
-                    Err(error) => {
+                    let decimals = m.contract_value_trade_precision.unwrap_or(0.0);
+                    if !(-18.0..=18.0).contains(&decimals) || decimals.fract() != 0.0 {
                         safe_cex_engine::startup::skipped_row(cx);
-                        cx.notice(
-                            Level::Warn,
-                            code::ROW_SKIPPED,
-                            format!("Kraken invalid public row: {error}"),
-                        );
-                        if let Some(symbol) = malformed_perpetual(item) {
-                            self.skipping_markets.insert(symbol);
-                        }
+                        self.skipping_markets.insert(m.symbol.into_owned());
+                        return;
+                    }
+                    rows.push(Market {
+                        id: format!(
+                            "{}/{}",
+                            m.base,
+                            if m.quote.is_empty() { "USD" } else { &m.quote }
+                        ),
+                        symbol: m.symbol.to_string(),
+                        pretty_symbol: Some(m.symbol[3..].into()),
+                        base: m.base.to_string(),
+                        quote: if m.quote.is_empty() {
+                            "USD".into()
+                        } else {
+                            m.quote.to_string()
+                        },
+                        active: m.status != "cancel_only",
+                        precision: Precision {
+                            amount: 10f64.powi(-(decimals as i32)),
+                            price: m.tick_size.filter(|n| *n > 0.0).unwrap_or(0.01),
+                        },
+                        limits: Limits {
+                            amount: MinMax {
+                                min: 0.0,
+                                max: 9_007_199_254_740_991.0,
+                            },
+                            leverage: MinMax {
+                                min: 1.0,
+                                max: m
+                                    .margin_levels
+                                    .first()
+                                    .filter(|m| m.initial_margin > 0.0)
+                                    .map_or(100.0, |m| (1.0 / m.initial_margin).floor()),
+                            },
+                            price: None,
+                        },
+                        contract_size: Some(m.contract_size.filter(|n| *n > 0.0).unwrap_or(1.0)),
+                        is_expiring: Some(m.last_trading_time.is_some()),
+                        is_inverse: Some(m.contract_type == "inverse"),
+                        is_spot: Some(false),
+                        is_perpetual: None,
+                        is_read_only: None,
+                        taker_fee: None,
+                        maker_fee: None,
+                    });
+                }
+                Err(error) => {
+                    safe_cex_engine::startup::skipped_row(cx);
+                    cx.notice(
+                        Level::Warn,
+                        code::ROW_SKIPPED,
+                        format!("Kraken invalid public row: {error}"),
+                    );
+                    if let Some(symbol) = malformed_perpetual(item) {
+                        self.skipping_markets.insert(symbol);
                     }
                 }
-            }
+            },
             Pending::Tickers { rows, .. } => match serde_json::from_str::<RestTicker<'_>>(item) {
                 Ok(row) => {
                     if let Some(m) = cx.store.market(&row.symbol) {
@@ -803,8 +918,27 @@ impl Venue for Kraken {
                 self.history_http(cx, *r, response);
                 return;
             }
+            Pending::PublicTrades(r, child) => {
+                self.public_trades_http(cx, *r, child, response);
+                return;
+            }
             p => p,
         };
+        if matches!(pending, Pending::Candles { .. }) && !self.candles_delivery(cx, &pending) {
+            if let Pending::Candles {
+                context: Some(context),
+                ..
+            } = pending
+            {
+                let _ = cx.finish_http_context(&context);
+            }
+            return;
+        }
+        if let Pending::Markets { context, .. } | Pending::Tickers { context, .. } = &pending
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         if !(200..300).contains(&response.status)
             || (!matches!(pending, Pending::Candles { .. }) && !success(response))
         {
@@ -812,7 +946,12 @@ impl Venue for Kraken {
             return;
         }
         match pending {
-            Pending::Markets { rows, failed } => {
+            Pending::Markets {
+                context,
+                rows,
+                failed,
+            } => {
+                let _ = cx.finish_http_context(&context);
                 self.markets_in_flight = false;
                 if failed || rows.is_empty() {
                     self.discovery.failed(cx, false);
@@ -856,10 +995,12 @@ impl Venue for Kraken {
                 self.tickers_request(cx);
             }
             Pending::Tickers {
+                context,
                 mut rows,
                 failed,
                 revision,
             } => {
+                let _ = cx.finish_http_context(&context);
                 self.ticker_in_flight = false;
                 if failed || rows.is_empty() {
                     self.discovery.failed(cx, true);
@@ -884,7 +1025,8 @@ impl Venue for Kraken {
                 }
             }
             Pending::Candles {
-                command,
+                root,
+                context,
                 symbol,
                 interval,
                 generation,
@@ -901,7 +1043,8 @@ impl Venue for Kraken {
                     self.public_failed(
                         cx,
                         Pending::Candles {
-                            command,
+                            root,
+                            context,
                             symbol,
                             interval,
                             generation,
@@ -913,7 +1056,7 @@ impl Venue for Kraken {
                     );
                     return;
                 }
-                if command.is_none()
+                if root.is_none()
                     && !self
                         .candles
                         .get(&(symbol.clone(), interval))
@@ -925,7 +1068,8 @@ impl Venue for Kraken {
                     self.public_failed(
                         cx,
                         Pending::Candles {
-                            command,
+                            root,
+                            context,
                             symbol,
                             interval,
                             generation,
@@ -946,7 +1090,8 @@ impl Venue for Kraken {
                         self.public_failed(
                             cx,
                             Pending::Candles {
-                                command,
+                                root,
+                                context,
                                 symbol,
                                 interval,
                                 generation,
@@ -958,10 +1103,14 @@ impl Venue for Kraken {
                         );
                         return;
                     };
+                    if let Some(context) = &context {
+                        let _ = cx.finish_http_context(context);
+                    }
                     self.candles_page(
                         cx,
                         Pending::Candles {
-                            command,
+                            root,
+                            context: None,
                             symbol,
                             interval,
                             generation,
@@ -978,13 +1127,20 @@ impl Venue for Kraken {
                 }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
-                if let Some(c) = command {
+                if let Some(root) = &root {
+                    if let Some(context) = &context {
+                        let _ = cx.finish_http_context(context);
+                    }
                     {
                         let result: Result<String, String> =
                             serde_json::to_string(&rows).map_err(|e| e.to_string());
                         match result {
-                            Ok(data) => cx.done(c, data),
-                            Err(error) => cx.fail(c, error),
+                            Ok(data) => {
+                                let _ = cx.done_context(root, data);
+                            }
+                            Err(error) => {
+                                let _ = cx.fail_context(root, error);
+                            }
                         }
                     };
                 } else if let Some(s) = self.candles.get_mut(&(symbol.clone(), interval)) {
@@ -998,8 +1154,61 @@ impl Venue for Kraken {
                         s.last = Some(latest);
                     }
                 }
+                if root.is_none()
+                    && let Some(context) = context
+                {
+                    let _ = cx.finish_http_context(&context);
+                }
             }
             _ => unreachable!(),
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if matches!(pending, Pending::Candles { .. }) {
+            self.candles_failed(cx, pending, error);
+        } else {
+            match pending {
+                Pending::PublicTrades(r, child) => {
+                    self.public_trades_preparation_failed(cx, *r, Some(child), error)
+                }
+                pending => self.on_sign_error(cx, pending, error),
+            }
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if matches!(pending, Pending::Candles { .. }) {
+            self.candles_failed(cx, pending, error);
+        } else {
+            match pending {
+                Pending::PublicTrades(r, child) => {
+                    if !matches!(
+                        error.kind,
+                        Some(
+                            safe_cex_engine::ErrorKind::Network
+                                | safe_cex_engine::ErrorKind::Timeout
+                        )
+                    ) && !r.delivery(cx, &child)
+                    {
+                        let _ = cx.finish_http_context(&child);
+                        return;
+                    }
+                    let mut error = error;
+                    error.message = format!("Kraken history failed: {}", error.message);
+                    self.public_trades_failed(cx, *r, child, error)
+                }
+                pending => self.on_request_failed(cx, pending, &error.message),
+            }
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1007,6 +1216,18 @@ impl Venue for Kraken {
             Pending::Account(r) => self.account_failed(cx, r, error),
             Pending::Trade(r) => self.trading_failed(cx, r, error),
             Pending::History(r) => self.history_failed(cx, *r, error),
+            Pending::PublicTrades(r, child) => {
+                if r.delivery(cx, &child) {
+                    self.public_trades_failed(
+                        cx,
+                        *r,
+                        child,
+                        safe_cex_engine::VenueError::new(format!("Kraken history failed: {error}")),
+                    );
+                } else {
+                    let _ = cx.finish_http_context(&child);
+                }
+            }
             p => self.public_failed(cx, p, error),
         }
     }
@@ -1071,7 +1292,10 @@ impl Venue for Kraken {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if self.trading_command(cx, &command) || self.history_command(cx, &command) {
+        if self.trading_command(cx, &command)
+            || self.public_trades_command(cx, &command)
+            || self.history_command(cx, &command)
+        {
             return;
         }
         match command {

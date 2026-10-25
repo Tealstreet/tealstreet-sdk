@@ -7,9 +7,13 @@ publish.workspace = true
 [features]
 # Whole-plan HTTP admission is linked only by adopting venue families.
 http-plans = []
+# Adopters explicitly include parallel Mutation prepare/sign/release custody.
+http-mutation-barriers = ["http-plans"]
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
 order-locks = []
+# Per-symbol settings publication and write fences for adopting venue families.
+metadata-freshness = []
 # Prediction venues opt in; other standalone builds omit metadata storage and frames.
 prediction = []
 # Polling venues and native hosts opt into the polling configuration decoder.

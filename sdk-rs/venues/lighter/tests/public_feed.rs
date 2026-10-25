@@ -195,7 +195,16 @@ fn shared_feed_does_not_mark_private_state_loaded_before_native_snapshot() {
         .set_public_feed_policy(PublicFeedPolicy::Shared)
         .unwrap();
     engine.start(NOW);
-    let request = requests(&mut engine).pop().unwrap();
+    let request = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+        .into_iter()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
     reply(&mut engine, &request, 200, META);
     engine
         .apply_public_feed(

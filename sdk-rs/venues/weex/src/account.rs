@@ -9,6 +9,10 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderStatus, Position, PositionMode, PositionSide,
 };
+use safe_cex_engine::request_context::{Context, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    BackgroundReadError, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
 use safe_cex_engine::socket::{Supervisor, Tick};
 use safe_cex_engine::store::{MarketSetting, Store};
 use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, SocketId, TimerId};
@@ -29,9 +33,12 @@ pub enum Kind {
     Metadata,
 }
 pub struct Request {
+    pub(crate) context: Option<Context>,
     cycle: u64,
     kind: Kind,
     revision: u64,
+    settings_stamp: safe_cex_engine::metadata::Observation,
+    settings_revision: safe_cex_engine::metadata::Observation,
     page: u32,
     page_rows: usize,
     orders: Vec<Order>,
@@ -195,7 +202,8 @@ impl State {
     pub fn order_revision(&self) -> u64 {
         self.orders_revision
     }
-    /// Fences a settings read against writes and newer reads.
+    /// Settings writes also supersede position snapshots; keep this financial
+    /// fence separate from engine-owned settings publication authority.
     pub fn settings_revision(&self) -> u64 {
         self.settings_revision
     }
@@ -363,13 +371,16 @@ impl WeexFutures {
             }
             let revision = match kind {
                 Kind::Normal | Kind::Algo => self.account.orders_revision,
-                Kind::Config | Kind::Metadata => self.account.settings_revision,
+                Kind::Config | Kind::Metadata => 0,
                 _ => self.account.revision,
             };
             let request = Request {
+                context: None,
                 cycle: self.account.cycle,
                 kind,
                 revision,
+                settings_stamp: cx.store.metadata_observation(),
+                settings_revision: cx.store.metadata_revision(),
                 page: if matches!(kind, Kind::Algo) { 1 } else { 0 },
                 page_rows: 0,
                 orders: vec![],
@@ -382,7 +393,7 @@ impl WeexFutures {
             self.send_account(cx, request);
         }
     }
-    fn send_account(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+    fn send_account(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         if request.cycle != self.account.cycle {
             return;
         }
@@ -426,23 +437,102 @@ impl WeexFutures {
             String::new()
         };
         let stream = (!matches!(request.kind, Kind::Metadata)).then_some(ArrayAt::Root);
-        self.signed_request(
-            cx,
-            Method::Get,
-            path,
-            &query,
-            None,
-            Task::Account(request),
-            stream,
+        let selected = SelectedRead::select(
+            &self.slots,
+            ReadRole::Read {
+                scope: Some(request.kind.auth_scope()),
+            },
         );
+        let read = match SelectedRead::background(
+            cx,
+            selected,
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(read) => read,
+            Err(error) => {
+                let message = match error {
+                    BackgroundReadError::Selection(_) => {
+                        "WEEX account read requires credentials".into()
+                    }
+                    BackgroundReadError::Admission(error) => error.read_venue_error().message,
+                };
+                self.account_failed(cx, request, &message);
+                return;
+            }
+        };
+        let context = read.context().clone();
+        let path_query = if query.is_empty() {
+            path.to_owned()
+        } else {
+            format!("{path}?{query}")
+        };
+        request.context = Some(context.clone());
+        match read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{}{path_query}", crate::paths::REST),
+                body: None,
+                stream,
+            },
+            |identity| {
+                Box::new(crate::dispatch_signing::Http::new(
+                    identity.clone(),
+                    Method::Get,
+                    path_query,
+                    None,
+                ))
+            },
+            |_| Pending {
+                task: Task::Account(request),
+                invalid: false,
+                skipped: vec![],
+                seed_generation: self.seed_generation,
+            },
+        ) {
+            Ok(_) => {}
+            Err((pending, error)) => {
+                let _ = cx.finish_http_context(&context);
+                let Task::Account(request) = pending.task else {
+                    unreachable!()
+                };
+                self.account_failed(cx, request, &error.read_venue_error().message);
+            }
+        }
     }
+    pub(crate) fn account_delivery_current(&self, cx: &Cx<'_, Pending>, request: &Request) -> bool {
+        request.cycle == self.account.cycle
+            && request
+                .context
+                .as_ref()
+                .is_some_and(|context| cx.validate_background_read_http_delivery(context).is_ok())
+    }
+    pub(crate) fn account_request_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        seed: u32,
+        error: &str,
+    ) {
+        if let Some(context) = request.context.take() {
+            let _ = cx.finish_http_context(&context);
+        }
+        if seed == self.seed_generation {
+            self.account_failed(cx, request, error);
+        }
+    }
+
     pub(crate) fn account_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) -> bool {
-        if request.cycle != self.account.cycle {
+        if !self.account_delivery_current(cx, request) {
             return true;
         }
         request.page_rows += 1;
@@ -523,6 +613,9 @@ impl WeexFutures {
             }
             request.page += 1;
             request.page_rows = 0;
+            if let Some(context) = request.context.take() {
+                let _ = cx.finish_http_context(&context);
+            }
             self.send_account(cx, request);
             return;
         }
@@ -562,14 +655,27 @@ impl WeexFutures {
                 self.account.position_stage =
                     Some((request.revision, request.positions, request.skipped));
             }
-            Kind::Config if request.revision == self.account.settings_revision => {
-                for (symbol, config) in request.configs {
-                    cx.store
-                        .update_setting(&symbol, |setting| *setting = config.setting);
-                    self.account.configs.insert(symbol, config);
+            Kind::Config => {
+                // The native response selects the last valid row for a symbol.
+                // Consolidate before the one observed commit: a repeated stamp
+                // is deliberately ineligible after that commit.
+                let configs: HashMap<_, _> = request.configs.into_iter().collect();
+                for (symbol, config) in configs {
+                    if let Ok(setting) =
+                        safe_cex_engine::metadata::ObservedSetting::new(config.setting)
+                        && cx
+                            .store
+                            .observe_setting(&symbol, &request.settings_stamp, setting)
+                    {
+                        self.account.configs.insert(symbol, config);
+                    }
                 }
             }
-            Kind::Metadata if request.revision == self.account.settings_revision => {
+            Kind::Metadata
+                if cx
+                    .store
+                    .metadata_revision_current(&request.settings_revision) =>
+            {
                 let Ok(row) = serde_json::from_str::<AccountConfig>(response.body) else {
                     self.account_failed(cx, request, "malformed account configuration");
                     return;
@@ -1010,17 +1116,16 @@ impl WeexFutures {
     }
 }
 
-pub(crate) fn auth_scope(task: &Task) -> Option<safe_cex_engine::AccountReadScope> {
-    use safe_cex_engine::AccountReadScope::*;
-    let Task::Account(r) = task else {
-        return None;
-    };
-    Some(match r.kind {
-        Kind::Balance => Balance,
-        Kind::Positions => Positions,
-        Kind::Normal | Kind::Algo => Orders,
-        Kind::Config | Kind::Metadata => Settings,
-    })
+impl Kind {
+    fn auth_scope(self) -> safe_cex_engine::AccountReadScope {
+        use safe_cex_engine::AccountReadScope::*;
+        match self {
+            Self::Balance => Balance,
+            Self::Positions => Positions,
+            Self::Normal | Self::Algo => Orders,
+            Self::Config | Self::Metadata => Settings,
+        }
+    }
 }
 impl WeexFutures {
     /// One endpoint's rejection holds back its scope siblings' acceptance.
@@ -1029,6 +1134,11 @@ impl WeexFutures {
         pending: &Pending,
         response: &Response<'_>,
     ) -> Option<safe_cex_engine::AuthOutcome> {
+        if matches!(pending.task, Task::Account(_))
+            && pending.seed_generation != self.seed_generation
+        {
+            return None;
+        }
         let outcome = self.account_auth_evidence(pending, response);
         let Task::Account(r) = &pending.task else {
             return outcome;
@@ -1121,9 +1231,12 @@ mod auth_envelopes {
     fn pending(venue: &WeexFutures, kind: Kind) -> Pending {
         Pending {
             task: Task::Account(Request {
+                context: None,
                 cycle: venue.account.cycle,
                 kind,
                 revision: 0,
+                settings_stamp: Default::default(),
+                settings_revision: Default::default(),
                 page: 0,
                 page_rows: 0,
                 orders: vec![],
@@ -1145,6 +1258,78 @@ mod auth_envelopes {
             headers: "",
             body,
         }
+    }
+
+    #[test]
+    fn unavailable_account_selection_keeps_the_credential_refusal_text() {
+        let venue = WeexFutures::new(crate::Options::default());
+        let probe = safe_cex_engine::test_support::ProbeVenue::new(venue, |venue, cx| {
+            // Exercise the defensive branch; production account admission
+            // requires an immutable configured primary before send_account.
+            let Task::Account(request) = pending(venue, Kind::Balance).task else {
+                unreachable!()
+            };
+            venue.account.pending = 1;
+            venue.send_account(cx, request);
+        });
+        let mut engine = safe_cex_engine::test_support::seeded_engine(probe);
+        engine.start(1000.);
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            safe_cex_engine::Action::Http(_)
+                | safe_cex_engine::Action::ManagedHttp(_)
+                | safe_cex_engine::Action::Sign { .. }
+                | safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Deactivate)
+        )));
+        let messages: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(event)) => {
+                    Some(event.message.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                "WEEX private read: WEEX account read requires credentials; retaining last-known-good state"
+            ]
+        );
+    }
+
+    #[test]
+    fn stale_seed_account_auth_evidence_is_inert() {
+        let mut venue = WeexFutures::new(crate::Options::default());
+        let old = pending(&venue, Kind::Balance);
+        venue.seed_generation += 1;
+        let mut current = pending(&venue, Kind::Balance);
+        current.seed_generation = venue.seed_generation;
+        assert_eq!(
+            venue.account_auth(&current, &response("[]")),
+            Some(Accepted)
+        );
+        let outcomes: Vec<_> = [
+            (
+                200,
+                r#"[{"asset":"USDT","balance":"100","availableBalance":"90"}]"#,
+            ),
+            (401, r#"{"code":40014}"#),
+        ]
+        .into_iter()
+        .map(|(status, body)| {
+            venue.account_auth(
+                &old,
+                &Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            )
+        })
+        .collect();
+        assert_eq!(outcomes, [None, None]);
     }
 
     #[test]

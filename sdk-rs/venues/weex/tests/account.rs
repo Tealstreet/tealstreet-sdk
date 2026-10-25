@@ -6,6 +6,7 @@ use safe_cex_engine::{
 };
 mod support;
 use safe_cex_venue_weex::WeexFutures;
+use support::PreparedActions;
 use support::setup::Options;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 2_000.0;
@@ -56,9 +57,9 @@ fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
         ..Options::default()
     });
     e.start(NOW);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW).collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
-    let mut actions: Vec<_> = e.drain_actions().collect();
+    let mut actions: Vec<_> = e.prepared_actions(NOW).collect();
     response(
         &mut e,
         request(&actions, "24hr"),
@@ -71,7 +72,7 @@ fn started(ws: bool) -> (Engine<WeexFutures>, Vec<Action>) {
         200,
         r#"[{"symbol":"BTCUSDT","bidPrice":"89999","askPrice":"90001"}]"#,
     );
-    actions.extend(e.drain_actions());
+    actions.extend(e.prepared_actions(NOW));
     actions.retain(|action| !matches!(action, Action::Http(r) if r.url.contains("24hr") || r.url.contains("bookTicker")));
     (e, actions)
 }
@@ -100,14 +101,14 @@ fn complete(e: &mut Engine<WeexFutures>, actions: &[Action], normal: &str, algo:
 }
 fn next_cycle(e: &mut Engine<WeexFutures>) -> Vec<Action> {
     let timer = e
-        .drain_actions()
+        .prepared_actions(NOW)
         .find_map(|action| match action {
             Action::SetTimer { timer, at_ms } if at_ms == NOW + 2000.0 => Some(timer),
             _ => None,
         })
         .unwrap();
     e.handle(NOW + 2000.0, Event::TimerFired { timer });
-    e.drain_actions().collect()
+    e.prepared_actions(NOW + 2000.0).collect()
 }
 fn private_socket(actions: &[Action]) -> SocketId {
     actions
@@ -167,6 +168,45 @@ fn account_and_position_events_during_a_read_cannot_starve_the_balance() {
     assert!(e.store().loaded().balance);
 }
 #[test]
+fn duplicate_config_rows_keep_the_last_valid_native_configuration() {
+    let (mut e, actions) = started(false);
+    response(
+        &mut e,
+        request(&actions, "symbolConfig"),
+        200,
+        r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","separatedType":"COMBINED","crossLeverage":"20","isolatedLongLeverage":"10","isolatedShortLeverage":"15"},{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedType":"SEPARATED","crossLeverage":"30","isolatedLongLeverage":"7","isolatedShortLeverage":"9"}]"#,
+    );
+    let setting = e.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(7.0));
+    assert_eq!(setting.sell_leverage, Some(9.0));
+    assert_eq!(
+        setting.margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+    response(
+        &mut e,
+        request(&actions, "accountConfig"),
+        200,
+        r#"{"dualSidePosition":false,"canTrade":true}"#,
+    );
+    for path in ["/balance", "/openOrders", "/openAlgoOrders"] {
+        response(&mut e, request(&actions, path), 200, "[]");
+    }
+    let position = POSITIONS
+        .replace("\"marginType\":\"CROSSED\",", "")
+        .replace("\"separatedMode\":\"COMBINED\",", "")
+        .replace("\"leverage\":\"100\",", "");
+    response(&mut e, request(&actions, "allPosition"), 200, &position);
+    // The native configuration used by position resolution must agree with
+    // Store, including hedge mode and the side-specific isolated leverage.
+    assert_eq!(e.store().positions()[0].leverage, 7.0);
+    assert_eq!(
+        e.store().positions()[0].side,
+        safe_cex_engine::model::PositionSide::Long
+    );
+}
+
+#[test]
 fn failed_or_malformed_half_never_replaces_order_snapshot() {
     let (mut e, actions) = started(false);
     complete(&mut e, &actions, NORMAL, ALGO);
@@ -194,7 +234,7 @@ fn complete_paging_required_before_order_commit() {
     let row = &NORMAL[1..NORMAL.len() - 1];
     let page = format!("[{}]", vec![row; 100].join(","));
     response(&mut e, request(&actions, "/openOrders"), 200, &page);
-    let pages: Vec<_> = e.drain_actions().collect();
+    let pages: Vec<_> = e.prepared_actions(NOW).collect();
     let follow = requests(&pages)
         .into_iter()
         .find(|r| r.url.contains("/openOrders"))
@@ -306,7 +346,7 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
         })
         .expect("private socket watchdog");
     e.handle(NOW + 31_000.0, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW + 31_000.0).collect();
     assert!(
         actions
             .iter()
@@ -320,7 +360,7 @@ fn private_watchdog_reconnect_regenerates_header_timestamp() {
         })
         .unwrap();
     e.handle(NOW + 32_000.0, Event::TimerFired { timer });
-    assert!(e.drain_actions().any(|action|matches!(action,Action::WsConnect {headers,..} if headers.iter().any(|(key,value)|*key=="ACCESS-TIMESTAMP" && value=="1773295732000"))));
+    assert!(e.prepared_actions(NOW + 32_000.0).any(|action|matches!(action,Action::WsConnect {headers,..} if headers.iter().any(|(key,value)|*key=="ACCESS-TIMESTAMP" && value=="1773295732000"))));
 }
 
 #[test]
@@ -374,7 +414,7 @@ fn paginated_account_read_waits_for_global_ban_and_is_resigned_afterward() {
     let row = &NORMAL[1..NORMAL.len() - 1];
     let page = format!("[{}]", vec![row; 100].join(","));
     response(&mut e, request(&actions, "/openOrders"), 200, &page);
-    let deferred: Vec<_> = e.drain_actions().collect();
+    let deferred: Vec<_> = e.prepared_actions(NOW).collect();
     assert!(requests(&deferred).is_empty());
     assert!(
         deferred
@@ -402,7 +442,7 @@ fn paginated_account_read_waits_for_global_ban_and_is_resigned_afterward() {
         })
         .unwrap();
     e.handle(NOW + 60_000.0, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW + 60_000.0).collect();
     let requests = requests(&actions);
     assert_eq!(requests.len(), 1);
     assert!(requests[0].url.ends_with("limit=100&page=1"));
@@ -537,9 +577,9 @@ fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
         .expect("20-second reconciliation deadline");
     // One complete half cannot replace the existing complete order snapshot.
     response(&mut e, request(&stale, "/openOrders"), 200, "[]");
-    e.drain_actions().for_each(drop);
+    e.prepared_actions(NOW).for_each(drop);
     e.handle(NOW + 22_000.0, Event::TimerFired { timer: deadline });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW + 22_000.0).collect();
     assert_eq!(e.store().orders(), expected);
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
     let retry = actions
@@ -555,7 +595,7 @@ fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
         })
         .expect("read-only retry after deadline");
     e.handle(NOW + 26_000.0, Event::TimerFired { timer: retry });
-    let fresh: Vec<_> = e.drain_actions().collect();
+    let fresh: Vec<_> = e.prepared_actions(NOW + 26_000.0).collect();
     assert_eq!(requests(&fresh).len(), 6);
     // Old settings and empty order responses arrive while the new cycle owns
     // pending. Neither may mutate state nor consume the new pending counter.
@@ -588,7 +628,7 @@ fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
     );
     response(&mut e, request(&fresh, "allPosition"), 200, POSITIONS);
     response(&mut e, request(&fresh, "/openOrders"), 200, NORMAL);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW).collect();
     assert!(
         !actions
             .iter()
@@ -597,7 +637,7 @@ fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
     );
     response(&mut e, request(&fresh, "/openAlgoOrders"), 200, ALGO);
     assert!(
-        e.drain_actions()
+        e.prepared_actions(NOW)
             .any(|a| matches!(a,Action::SetTimer {at_ms,..} if at_ms == NOW + 2_000.0))
     );
 }
@@ -631,7 +671,7 @@ fn reconciliation_deadline_starts_after_scheduled_rate_limit_pause() {
         };
         response(&mut e, request(&actions, path), 200, body);
     }
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW).collect();
     let refresh = actions
         .iter()
         .find_map(|a| match a {
@@ -642,7 +682,7 @@ fn reconciliation_deadline_starts_after_scheduled_rate_limit_pause() {
     // A refresh firing early after its timer was delayed is still queued
     // behind the ban; the cycle deadline includes that legitimate wait.
     e.handle(NOW + 30_000.0, Event::TimerFired { timer: refresh });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW + 30_000.0).collect();
     assert!(requests(&actions).is_empty());
     assert!(
         actions
@@ -665,7 +705,7 @@ fn documented_trailing_market_algo_order_is_read_and_canceled_as_algo() {
         order.kind,
         safe_cex_engine::model::OrderType::TrailingStopLoss
     );
-    e.drain_actions().for_each(drop);
+    e.prepared_actions(NOW + 30_000.0).for_each(drop);
     e.handle(
         NOW,
         Event::Command(safe_cex_engine::Command::CancelOrders {
@@ -689,7 +729,7 @@ fn failed_cancel_cannot_restore_status_over_newer_authoritative_snapshot() {
     let (mut e, actions) = started(false);
     complete(&mut e, &actions, NORMAL, "[]");
     let periodic = e
-        .drain_actions()
+        .prepared_actions(NOW)
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms == NOW + 2000.0 => Some(timer),
             _ => None,
@@ -705,7 +745,7 @@ fn failed_cancel_cannot_restore_status_over_newer_authoritative_snapshot() {
     let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     let cancel = request(&actions, "/batchOrders");
     e.handle(NOW + 2000.0, Event::TimerFired { timer: periodic });
-    let fresh: Vec<_> = e.drain_actions().collect();
+    let fresh: Vec<_> = e.prepared_actions(NOW + 2000.0).collect();
     let canceling = NORMAL
         .replace("\"NEW\"", "\"CANCELING\"")
         .replace("1773295700000", "1773295705000");
@@ -758,7 +798,7 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
         }
         response(&mut e, request(&actions, "allPosition"), 200, "[]");
         response(&mut e, request(&actions, "/openAlgoOrders"), 200, "[]");
-        e.drain_actions().for_each(drop);
+        e.prepared_actions(NOW).for_each(drop);
         let row = &NORMAL[1..NORMAL.len() - 1];
         let full = format!("[{}]", vec![row; 100].join(","));
         e.handle(
@@ -772,7 +812,7 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
                 },
             },
         );
-        let continuation: Vec<_> = e.drain_actions().collect();
+        let continuation: Vec<_> = e.prepared_actions(NOW + 12_000.0).collect();
         assert!(
             continuation
                 .iter()
@@ -792,7 +832,7 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
                 timer: original_deadline,
             },
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(e.prepared_actions(NOW + 20_000.0).next().is_none());
         assert!(!e.store().loaded().orders);
         e.handle(
             NOW + 24_000.0,
@@ -805,7 +845,7 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
                 },
             },
         );
-        let complete: Vec<_> = e.drain_actions().collect();
+        let complete: Vec<_> = e.prepared_actions(NOW + 24_000.0).collect();
         assert!(e.store().loaded().orders);
         if hold_balance {
             assert!(
@@ -814,7 +854,7 @@ fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires()
                     .any(|a| matches!(a,Action::ClearTimer {timer} if *timer == extended))
             );
             e.handle(NOW + 32_000.0, Event::TimerFired { timer: extended });
-            assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
+            assert!(e.prepared_actions(NOW + 32_000.0).any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("timed out"))));
         } else {
             assert!(e.store().loaded().positions);
             assert!(
@@ -834,7 +874,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     endpoint: &str,
 ) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
     use safe_cex_engine::{Action, Event};
-    engine.drain_actions().for_each(drop);
+    engine.prepared_actions(NOW + 32_000.0).for_each(drop);
     engine.handle(
         now,
         Event::PollScaleChanged {
@@ -842,7 +882,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         },
     );
     let slow: Vec<_> = engine
-        .drain_actions()
+        .prepared_actions(now)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             Action::Http(_) => panic!("policy updates must not issue account reads"),
@@ -858,7 +898,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         },
     );
     let fast: Vec<_> = engine
-        .drain_actions()
+        .prepared_actions(now + 1.0)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -872,7 +912,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             scale: f64::INFINITY,
         },
     );
-    let paused: Vec<_> = engine.drain_actions().collect();
+    let paused: Vec<_> = engine.prepared_actions(now + 2.0).collect();
     assert!(
         paused
             .iter()
@@ -880,7 +920,11 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
     engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
-    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        !engine
+            .prepared_actions(now + 1_501.0)
+            .any(|a| matches!(a, Action::Http(_)))
+    );
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
@@ -888,7 +932,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         },
     );
     let resumed: Vec<_> = engine
-        .drain_actions()
+        .prepared_actions(now + 90_000.0)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -903,7 +947,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
         },
     );
     let reads: Vec<_> = engine
-        .drain_actions()
+        .prepared_actions(now + 91_500.0)
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -922,7 +966,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     );
     assert!(
         !engine
-            .drain_actions()
+            .prepared_actions(completed_at)
             .any(|a| matches!(a, Action::SetTimer { .. }))
     );
     (completed_at, reads)
@@ -935,7 +979,7 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
     use safe_cex_engine::{Action, Event};
     // A response may schedule an ordinary repair/deadline, but the parked poll
     // itself must still be registered and adopt this newest policy.
-    engine.drain_actions().for_each(drop);
+    engine.prepared_actions(now).for_each(drop);
     engine.handle(
         now,
         Event::PollScaleChanged {
@@ -943,7 +987,7 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
         },
     );
     let times: Vec<_> = engine
-        .drain_actions()
+        .prepared_actions(now)
         .filter_map(|a| match a {
             Action::SetTimer { at_ms, .. } => Some(at_ms),
             _ => None,
@@ -985,7 +1029,7 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
             );
         }
         reads = engine
-            .drain_actions()
+            .prepared_actions(now)
             .filter_map(|a| match a {
                 safe_cex_engine::Action::Http(r) => Some(r),
                 _ => None,
@@ -1002,7 +1046,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
     complete(&mut e, &initial, NORMAL, ALGO);
     let engine = &mut e;
     let now = NOW;
-    engine.drain_actions().for_each(drop);
+    engine.prepared_actions(now).for_each(drop);
     engine.handle(
         now,
         Event::PollScaleChanged {
@@ -1010,14 +1054,14 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
         },
     );
     let timer = engine
-        .drain_actions()
+        .prepared_actions(now)
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms == now + 1_500.0 => Some(timer),
             _ => None,
         })
         .expect("fast account poll");
     engine.handle(now + 1_500.0, Event::TimerFired { timer });
-    let output: Vec<_> = engine.drain_actions().collect();
+    let output: Vec<_> = engine.prepared_actions(now + 1_500.0).collect();
     let reads: Vec<_> = output
         .iter()
         .filter_map(|a| match a {
@@ -1036,7 +1080,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
             },
         );
     }
-    engine.drain_actions().for_each(drop);
+    engine.prepared_actions(now + 1_500.0).for_each(drop);
     // The jittered failure floor is fixed once and must survive every policy change.
     let mut floor = None;
     for (offset, interval_ms) in [(1.0, 1_000.0), (2.0, f64::INFINITY), (3.0, 1_200.0)] {
@@ -1047,7 +1091,7 @@ fn failure_poll_floor_survives_fast_policy_and_pause_resume() {
             },
         );
         let times: Vec<_> = engine
-            .drain_actions()
+            .prepared_actions(now + 1_500.0 + offset)
             .filter_map(|a| match a {
                 Action::SetTimer { at_ms, .. } => Some(at_ms),
                 _ => None,
@@ -1144,7 +1188,7 @@ fn malformed_order_rows_are_skipped_and_their_known_copies_retained() {
         assert!(ids.contains(&id), "{id} missing from {ids:?}");
     }
     assert_eq!(ids.len(), 5);
-    let warnings = logs(&e.drain_actions().collect::<Vec<_>>(), Level::Warn);
+    let warnings = logs(&e.prepared_actions(NOW).collect::<Vec<_>>(), Level::Warn);
     assert!(
         warnings
             .iter()
@@ -1270,10 +1314,10 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
             ..Default::default()
         }));
     e.start(NOW);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW).collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
     // Private startup begins at markets, so its failure may surface before tickers.
-    let mut actions: Vec<_> = e.drain_actions().collect();
+    let mut actions: Vec<_> = e.prepared_actions(NOW).collect();
     response(
         &mut e,
         request(&actions, "24hr"),
@@ -1286,7 +1330,7 @@ fn missing_passphrase_fails_visibly_instead_of_an_empty_account() {
         200,
         r#"[{"symbol":"BTCUSDT","bidPrice":"89999","askPrice":"90001"}]"#,
     );
-    actions.extend(e.drain_actions());
+    actions.extend(e.prepared_actions(NOW));
     assert!(
         actions
             .iter()
@@ -1305,9 +1349,9 @@ fn ticker_seed_failure_does_not_block_private_start() {
         ..Options::default()
     });
     e.start(NOW);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW).collect();
     response(&mut e, request(&actions, "exchangeInfo"), 200, INFO);
-    let seed: Vec<_> = e.drain_actions().collect();
+    let seed: Vec<_> = e.prepared_actions(NOW).collect();
     let is_private = |r: &HttpRequest| !r.url.contains("24hr") && !r.url.contains("bookTicker");
     // A successful seed is awaited so account rows map against seeded prices.
     assert!(
@@ -1317,11 +1361,11 @@ fn ticker_seed_failure_does_not_block_private_start() {
     );
     // The first seed failure starts the account; a still-failing seed never gates it.
     response(&mut e, request(&seed, "24hr"), 503, "unavailable");
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(NOW).collect();
     let private: Vec<_> = requests(&actions).into_iter().filter(is_private).collect();
     assert_eq!(private.len(), 6, "{private:?}");
     response(&mut e, request(&seed, "bookTicker"), 503, "unavailable");
-    let retry: Vec<_> = e.drain_actions().collect();
+    let retry: Vec<_> = e.prepared_actions(NOW).collect();
     assert!(
         !requests(&retry).iter().any(is_private),
         "account started once"
@@ -1378,7 +1422,7 @@ fn malformed_row_cannot_resurrect_a_terminal_order() {
 }
 /// Takes this cycle's warnings, then starts the next account cycle.
 fn warnings_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<String>, Vec<Action>) {
-    let drained: Vec<_> = e.drain_actions().collect();
+    let drained: Vec<_> = e.prepared_actions(NOW).collect();
     let timer = drained
         .iter()
         .find_map(|action| match action {
@@ -1387,7 +1431,10 @@ fn warnings_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<String>, Vec<Ac
         })
         .unwrap();
     e.handle(NOW + 2000.0, Event::TimerFired { timer });
-    (logs(&drained, Level::Warn), e.drain_actions().collect())
+    (
+        logs(&drained, Level::Warn),
+        e.prepared_actions(NOW + 2000.0).collect(),
+    )
 }
 #[test]
 fn order_row_without_identity_keeps_stored_orders_while_valid_peers_commit() {
@@ -1482,7 +1529,7 @@ fn protective_algo_row_typed_market_keeps_its_working_type() {
 }
 /// Takes this cycle's actions, then starts the next account cycle.
 fn drain_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<Action>, Vec<Action>) {
-    let drained: Vec<_> = e.drain_actions().collect();
+    let drained: Vec<_> = e.prepared_actions(NOW).collect();
     let timer = drained
         .iter()
         .find_map(|action| match action {
@@ -1491,7 +1538,7 @@ fn drain_then_next_cycle(e: &mut Engine<WeexFutures>) -> (Vec<Action>, Vec<Actio
         })
         .unwrap();
     e.handle(NOW + 2000.0, Event::TimerFired { timer });
-    (drained, e.drain_actions().collect())
+    (drained, e.prepared_actions(NOW + 2000.0).collect())
 }
 #[test]
 fn startup_position_row_without_identity_is_an_error_logged_once_until_a_clean_snapshot() {

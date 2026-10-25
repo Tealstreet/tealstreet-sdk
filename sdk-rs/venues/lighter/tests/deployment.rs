@@ -45,7 +45,7 @@ fn every_deployment_uses_its_rest_websocket_and_quote_profile() {
         let mut sockets = 0;
         let mut request_paths = Vec::new();
         for _ in 0..30 {
-            let actions = engine.drain_actions().collect::<Vec<_>>();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
             if actions.is_empty() {
                 break;
             }
