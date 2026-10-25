@@ -122,9 +122,28 @@ fn an_unanswered_history_page_ends_at_its_bound_as_a_typed_timeout() {
     );
 }
 
-/// Ranged income crossing two 7-day chunks under a 1.5 s caller wait: the root
-/// expires inside the 2 s chunk gap.
-fn income_in_the_gap(h: &mut Harness) {
+/// Fires, in time order, every armed timer due by `until`.
+fn fire_until(h: &mut Harness, until: f64) {
+    loop {
+        let Some((timer, at)) = h
+            .timers
+            .iter()
+            .copied()
+            .filter(|(_, at)| *at <= until)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            h.now = h.now.max(until);
+            return;
+        };
+        h.timers.retain(|(t, _)| *t != timer);
+        h.now = h.now.max(at);
+        h.event(Event::TimerFired { timer });
+    }
+}
+
+/// Ranged income crossing two 7-day chunks: the first chunk answers, and the
+/// next waits on the 2 s chunk timer. Returns the time the first chunk answered.
+fn income_two_chunks(h: &mut Harness, wait_ms: u32) -> f64 {
     h.engine
         .handle_command(
             h.now,
@@ -138,25 +157,42 @@ fn income_in_the_gap(h: &mut Harness) {
                     limit: Some(1000),
                 },
             },
-            Some(1_500),
+            Some(wait_ms),
         )
         .unwrap();
     h.collect();
     let first = h.take("/income");
     h.reply(first.id, 200, "", &format!("[{INCOME}]"));
+    // The same chunk pages on from the last row until a page comes back empty.
+    while h.has_request("/income") {
+        let page = h.take("/income");
+        h.reply(page.id, 200, "", "[]");
+    }
+    assert!(
+        !h.has_request("/income"),
+        "the second chunk waits for the chunk timer"
+    );
+    h.now
+}
+
+#[test]
+fn a_generous_wait_sends_the_second_chunk_after_the_chunk_delay() {
+    let mut h = harness();
+    let start = income_two_chunks(&mut h, 120_000);
+    fire_until(&mut h, start + 1_999.0);
+    assert!(!h.has_request("/income"), "not before the 2 s chunk delay");
+    fire_until(&mut h, start + 2_000.0);
+    assert!(h.has_request("/income"), "chunk 2 at +2 s: {:?}", h.paths());
 }
 
 #[test]
 fn root_expiry_mid_walk_is_a_strict_timeout_without_rows() {
     let mut h = harness();
-    income_in_the_gap(&mut h);
-    let start = h.now;
-    h.now = start + 2_000.0;
-    for (timer, at) in h.timers.clone() {
-        if at <= h.now {
-            h.event(Event::TimerFired { timer });
-        }
-    }
+    let start = income_two_chunks(&mut h, 1_500);
+    // Step 1: the root's wait expires inside the chunk gap.
+    fire_until(&mut h, start + 1_500.0);
+    // Step 2: the chunk timer fires after the expiry.
+    fire_until(&mut h, start + 2_000.0);
     let terminals: Vec<_> = h
         .done
         .iter()
@@ -179,14 +215,9 @@ fn root_expiry_mid_walk_is_a_strict_timeout_without_rows() {
 #[test]
 fn a_chunk_timer_firing_after_expiry_sends_nothing() {
     let mut h = harness();
-    income_in_the_gap(&mut h);
-    let start = h.now;
-    h.now = start + 2_000.0;
-    for (timer, at) in h.timers.clone() {
-        if at <= h.now {
-            h.event(Event::TimerFired { timer });
-        }
-    }
+    let start = income_two_chunks(&mut h, 1_500);
+    fire_until(&mut h, start + 1_500.0);
+    fire_until(&mut h, start + 2_000.0);
     assert!(
         !h.has_request("/income"),
         "no next chunk after the root expired: {:?}",

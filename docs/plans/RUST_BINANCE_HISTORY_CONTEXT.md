@@ -97,7 +97,7 @@ The engine-path estimate is the uncertain part. Binance is a single-`Pending` fa
 
 A new target, `venues/binance/tests/history_context.rs`, run against the unchanged base with zero ignored:
 
-1. **Managed fills page.** A fills page is a managed Read preparation with exact URL, query and read-key headers. Today it is a legacy signed request.
+1. **Managed fills page.** A fills page is a managed preparation for `/fapi/v1/userTrades`, with no legacy signed request. Today it is a legacy signed request. The exact URL, query, routing intent and read-key headers are pinned at source, when the managed prepare exists to inspect.
 2. **Lookup.** The lookup is a managed Primary(`ClientOrderLookup`) preparation.
 3. **Unanswered page.** An unanswered page ends at 20 s as a typed Timeout. A late reply publishes nothing.
 4. **Root expiry.** Root expiry mid-walk is a strict Timeout with no rows and no marker.
@@ -119,7 +119,7 @@ Scoped Binance tests and strict checks only, with `CARGO_BUILD_JOBS=4`.
 
 ## Executed original checkpoint
 
-`venues/binance/tests/history_context.rs`, run against the unchanged base: **5 assertion REDs, 0 ignored**. Each fails for its intended reason:
+`venues/binance/tests/history_context.rs`, run against the unchanged base: **5 assertion REDs plus 1 GREEN control, 0 ignored**. Each RED fails for its intended reason. Folded fe7lgm's tightenings: timers fire in time order (`fire_until`), expiry and the late chunk timer are driven as two steps, and same-chunk follow-up pages are drained so the guard sees only the chunk timer.
 
 | Test | Why it fails on the base |
 | --- | --- |
@@ -128,6 +128,7 @@ Scoped Binance tests and strict checks only, with `CARGO_BUILD_JOBS=4`.
 | `an_unanswered_history_page_ends_at_its_bound_as_a_typed_timeout` | no page bound |
 | `root_expiry_mid_walk_is_a_strict_timeout_without_rows` | native keeps walking: no terminal at root expiry |
 | `a_chunk_timer_firing_after_expiry_sends_nothing` | native sends the next `/income` chunk after the wait |
+| `a_generous_wait_sends_the_second_chunk_after_the_chunk_delay` | GREEN control: nothing at +1,999 ms, chunk 2 at +2 s |
 
 The existing native controls in `history_owned.rs`, `lookup.rs` and `queries_variants.rs` are unchanged and stay GREEN.
 
