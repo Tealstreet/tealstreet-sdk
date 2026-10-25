@@ -1,0 +1,87 @@
+# Orderly immediate candle and identity completion custody
+
+## Scope and source checkpoint
+
+Owner codex-5c57jl. Base actual 76f1f7fc842738f83e2f48e7a0a35725eed5f0f3;
+branch feat/rust-orderly-local-read-completions. The prior public seed slice
+#2097 is landed. This checkpoint contains plan/index/new original tests only.
+No engine, signer, credential selection, nonce, physical sender, callback,
+account/history/trading reducer or socket change is planned.
+
+Replace six immediate numeric completion occurrences in lib.rs::on_command:
+
+| Native entry branch | Fingerprint | Count |
+| --- | --- | --- |
+| Candle unknown symbol | b60a1032f327 | 1 |
+| Candle unsupported interval | 7d4810ffde4e | 1 |
+| Candle invalid parameters | 136ab46ef947 | 1 |
+| Candle future lower bound with omitted upper bound: empty result | 2b6c87682e5a | 1 |
+| FetchAccount local identity success | c5a021da6919 | 1 |
+| FetchAccount local identity failure | c873db6fc77d | 1 |
+
+Current Orderly inventory is 23 fingerprints / 24 occurrences. Later production
+removes six / six, leaving 17 / 18, and removes the now-empty lib.rs entry.
+Counts describe lexical completions, not physical lifecycle adoption. All maps
+and current production stay unchanged in the plan/original checkpoint.
+
+## Native behavior retained
+
+Candles validate symbol before interval before parameters. Parameters reject
+zero limit, nonfinite/out-of-domain bounds, and an explicit reversed range.
+For a valid lower bound beyond receipt time with no explicit upper bound, native
+returns the exact string [] locally. All branches stay before read admission of
+accepted candle transport. Preserve clamping, floor-to-seconds, native streamed
+current candles versus non-streamed historical candles and both endpoint wires.
+
+FetchAccount returns the exact broker application ID as both userId and
+affiliateId when application_id is nonempty and public_data_only is false.
+It requires neither a secret nor an HTTP request; public-only, absent and empty
+IDs retain Orderly private account ID is required. Do not introduce credential
+requirements or a new selection policy. Native JSON escaping remains serde's.
+
+## Command-entry authority contract
+
+Use the existing genuine command receipt, Operation::Read, keyless admission,
+Never and no pacing. A bounded local Read policy may use 20 seconds capped by
+the original caller receipt, following the actual local-history precedent.
+Check the complete CommandWait disposition: None uses shared unstamped
+rejection; Expired uses shared expired rejection; Remaining permits admission.
+An admission refusal owns its own terminal and receives no numeric fallback.
+No copied issuer/ID test, forged root, callback entry or duplicate terminal.
+
+Finish the admitted Context using done_context/fail_context and the unchanged
+native result/error. A local Read has no mutation outcome. An unstamped or
+expired receipt must refuse even a locally successful identity/empty result;
+this is an explicit authority correction, not a change to finite native values.
+The helper is callable only in these six immediate on_command branches, never
+in physical response, stream, timer, queue, continuation or delayed entry.
+A successful native result must not bypass the receipt check. Existing accepted
+candle command roots/legs and all response handlers remain byte-exact.
+
+Local Read finalization can emit shared managed timer arm/clear bookkeeping.
+Tests permit only matched same-command timer cleanup, never HTTP, managed HTTP,
+Sign or socket actions, outstanding timers or Store mutation. Finite native
+errors keep their original kind/text/outcome; native success keeps exact JSON.
+
+## Original controls and source gates
+
+A new dedicated local_read_completions target uses genuine Engine command
+entry and complete action-batch inspection. Independent unstamped controls
+cover the three candle failures and both identity result arms. Native working
+controls pin validation precedence, invalid bound variants, exact empty result,
+identity metadata/escaping/public/missing/empty IDs and accepted current/history
+wire. Bootstrapping completes genuine managed Markets and Tickers first.
+Do not describe these legacy originals as capacity or duplicate-owner proof.
+
+Before source freeze add real admission-pressure/recovery, retained-owner
+rejection, explicit expired receipt and fixed-clock ID/credit reuse controls for
+local failure AND success. In particular pin empty result and identity success
+under pressure so done_context cannot be bypassed. Preserve every original
+assertion and financial value. Any necessary collector adaptation must use
+actual Prepare/Bind/Claim and be disclosed. No production before bounded
+plan/original review CLEAR; then standing approval permits production and draft
+CI in parallel with source reviews. Auditor exact-tree GO remains mandatory.
+
+Only scoped local builds, CARGO_BUILD_JOBS=4, one at a time. Original compile
+failures are not RED evidence. Record assertion failures separately from working
+controls and keep logs outside Git. No threshold or generic engine change.
