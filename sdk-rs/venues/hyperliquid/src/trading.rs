@@ -7,7 +7,7 @@ use crate::{
     sign,
 };
 use safe_cex_engine::model::*;
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::Operation;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -159,16 +159,7 @@ impl Hyperliquid {
                         let _ = cx.done_local_setting("[]".into(), |_| {});
                     } else {
                         let error = not_sent("Hyperliquid spot supports 1x leverage only");
-                        let Ok(context) = cx.admit_http_command(Policy {
-                            operation: Operation::Mutation,
-                            credential: None,
-                            timeout_ms: 20_000,
-                            pacing: None,
-                            retry: RetryPolicy::Never,
-                        }) else {
-                            return;
-                        };
-                        let _ = cx.fail_context(&context, error.kind(ErrorKind::Unsupported));
+                        cx.refuse_command(Operation::Mutation, error.kind(ErrorKind::Unsupported));
                     }
                     return;
                 }
@@ -177,16 +168,7 @@ impl Hyperliquid {
                         let _ = cx.done_local_setting("[]".into(), |_| {});
                     } else {
                         let error = not_sent("Hyperliquid spot supports cross margin only");
-                        let Ok(context) = cx.admit_http_command(Policy {
-                            operation: Operation::Mutation,
-                            credential: None,
-                            timeout_ms: 20_000,
-                            pacing: None,
-                            retry: RetryPolicy::Never,
-                        }) else {
-                            return;
-                        };
-                        let _ = cx.fail_context(&context, error.kind(ErrorKind::Unsupported));
+                        cx.refuse_command(Operation::Mutation, error.kind(ErrorKind::Unsupported));
                     }
                     return;
                 }
@@ -359,17 +341,8 @@ impl Hyperliquid {
             ),
             Command::SetPositionMode { hedged, .. } => {
                 if hedged {
-                    let Ok(context) = cx.admit_http_command(Policy {
-                        operation: Operation::Mutation,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    }) else {
-                        return;
-                    };
-                    let _ = cx.fail_context(
-                        &context,
+                    cx.refuse_command(
+                        Operation::Mutation,
                         not_sent("Hyperliquid supports one-way positions only")
                             .kind(ErrorKind::Unsupported),
                     );

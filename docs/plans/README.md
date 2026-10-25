@@ -446,5 +446,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Dispatch nonce reservation and release ordering | Source/review/local gates CLEAR; refreshed exact-head CI pending | Before reserving a selected-key nonce in SignStep preparation or changing nonce receipt and release-floor custody. | [RUST_DISPATCH_NONCE_RESERVATION.md](RUST_DISPATCH_NONCE_RESERVATION.md) |
 
 | Backpack account GET Read custody | Plan CLEAR; originals reproduced, review pending | Before managing Info, Positions, Balance and Orders observations; preserve native snapshots and continuation order. | [RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md](RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md) |
+| Kraken Futures and Spot dispatch recipes | Draft recipes on nonce prerequisite; native caller adoption held | Before adding HMAC-SHA512 programs, trusted Base64 setup or nonce-bound selection. | [RUST_KRAKEN_DISPATCH_SIGNER.md](RUST_KRAKEN_DISPATCH_SIGNER.md) |
+
+| Serial single-call schedule construction | Local cut; paired measurements and exact-patch review pending | Before changing serial topology construction or declared-admission error precedence. | [RUST_SERIAL_SINGLE_CALL_SCHEDULE.md](RUST_SERIAL_SINGLE_CALL_SCHEDULE.md) |
 
 | Journal report iterator simplification | [RUST_JOURNAL_REPORT_ITERATORS.md](RUST_JOURNAL_REPORT_ITERATORS.md) | codex-ih35js | Local measured cut after Bitget slice 3; exact review required. |

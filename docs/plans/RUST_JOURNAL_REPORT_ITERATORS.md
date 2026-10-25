@@ -95,3 +95,8 @@ run 40211928021 are green on `231cd805454`. The subsequent README-only fix
 keeps incoming bytes plus one own row. Plain-merging `094a1fb836f` adds only
 the landed AsterDEX and repair-plan changes; the two own SDK blobs remain
 byte-exact to that green head. The measured Bitget/Bybit inputs are unchanged.
+
+Cut 1 landed as `35ae6c6b254`. This independent cut now plain-merges that
+actual landing, retaining its schedule change and the incoming README rows.
+Only the report iterator production delta and its unchanged control remain
+own SDK changes; no independent savings are summed into a combined claim.
