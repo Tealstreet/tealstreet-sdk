@@ -11,6 +11,8 @@ http-plans = []
 http-mutation-barriers = ["http-plans"]
 # Streamed serial Plans are linked only by adopting families.
 serial-plans = ["http-plans"]
+# Venue-condition waits for Preflights and serial Plans, linked only by adopters.
+condition-waits = ["serial-plans"]
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
 order-locks = []

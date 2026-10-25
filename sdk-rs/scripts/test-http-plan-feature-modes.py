@@ -34,6 +34,9 @@ def modes():
     grouped[('http-plans', 'order-locks', 'test-support')] = ['serial plans OFF control']
     # No family enables serial Plans before adoption; keep them compiled and tested.
     grouped[('http-plans', 'order-locks', 'serial-plans', 'test-support')] = ['serial Plan control']
+    # Condition waits imply serial-plans; no family enables them before adoption.
+    grouped[('condition-waits', 'http-plans', 'order-locks', 'serial-plans', 'test-support')] = [
+        'condition wait control']
     for family in families:
         tree = subprocess.check_output([
             'cargo', 'tree', '--locked', '--target', 'wasm32-unknown-unknown',
