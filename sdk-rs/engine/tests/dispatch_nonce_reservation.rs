@@ -1191,7 +1191,10 @@ fn a_changed_nonce_selector_refuses_before_release_without_advancing_the_floor()
 
 #[cfg(feature = "session-bearer")]
 #[test]
-fn bearer_revision_fence_precedes_nonce_floor_and_preserves_nonce_repair_credits() {
+fn bearer_revision_repairs_preserve_nonce_repair_credits() {
+    const NONCE_REPAIR_BUDGET: u64 = 8;
+    let revisions = 2..=NONCE_REPAIR_BUDGET + 2;
+    assert!(revisions.clone().count() > NONCE_REPAIR_BUDGET as usize);
     let mut engine = unstarted_fixture::<0>("nonce-bearer/revision-floor", 2, None);
     engine.venue().trace.lock().unwrap().bearer_revision = Some(1);
     engine.start(START);
@@ -1205,7 +1208,7 @@ fn bearer_revision_fence_precedes_nonce_floor_and_preserves_nonce_repair_credits
     assert_eq!(send(&mut engine, &b, 1_005.), b.nonce());
     let mut stale = a;
     let mut stale_preparation = routes[0].token;
-    for revision in 2..=10 {
+    for revision in revisions {
         let now = 1_006. + (revision - 2) as f64 * 3.;
         engine.venue().trace.lock().unwrap().bearer_revision = Some(revision);
         assert_eq!(engine.claim_http(now, stale.permit), Err(Error::Stale));
