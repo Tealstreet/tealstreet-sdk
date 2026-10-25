@@ -2348,7 +2348,9 @@ impl BybitLinear {
 
 impl Venue for BybitLinear {
     // Bybit never hands work to a subscription release; its continuation paths compile out.
-    const SOCKET_CAPABILITIES: SocketCapabilities = SocketCapabilities { handoff: false };
+    fn socket_capabilities() -> SocketCapabilities {
+        SocketCapabilities { handoff: false }
+    }
     fn on_http_preflight_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,
