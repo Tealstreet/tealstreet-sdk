@@ -5398,6 +5398,42 @@ The cost occurs per Store, not per message, and grows with symbol count/string
 length and hash-table capacity steps. These are native index-only measurements;
 actual process/browser/WASM costs include allocator and memory-page effects.
 
+
+### Ordinary Bybit trading on the Plan core
+
+Ordinary `bybit`, `bybitinverse`, `bybitspot` and `bybitdemo` writes (not
+`hyrotrader`, and no command on an option symbol) run as one genuine preflight
+plus one admitted native plan. Caller-visible effects:
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Absent-order cancel answers (`110001`, `170213`) are satisfied, not a local Cancelled transition (D2) | Success (`[]`); the row stays until one fresh order read, which the engine requests | Do not expect the row to disappear on the ACK; it goes when the reconcile read lands. |
+| A `PlaceOrders` batch where some orders are refused (D4) | Failure (`KnownPartial`) with `partialOrderIds` for the placed orders, instead of success with those IDs | Show partial success from `partialOrderIds`. **NX confirmation required before merge.** |
+| Any ordinary write that ends `Unknown` | Unchanged outcome; the engine now issues exactly one fresh order read to reconcile | No caller action; never resend the write. |
+| Independent orders of one `PlaceOrders` (`continue_on_error`) | A provider refusal, a native refusal or transport loss fails only that order; later orders still go, and the batch ends with the journal projection. A delivered unproven 408/5xx still seals the whole plan `Unknown` and retires the unsent orders (engine response-proof guard) until the Plan core can settle one independent call | Read the projected error, not the first failure; after an `Unknown` batch, reconcile before resending any unsent order. |
+| Failure text and kind | The journal reports the earliest order that reached the venue; a provider refusal after a sent attempt is `Unknown` with the provider's kind | Branch on `outcome`/`kind`, not text. |
+| Write resend | Only a native `10002`/`10004` refusal, once, re-signed with the same bytes; never on text or transport loss | None. |
+| Strict acknowledgements | A malformed, positional, count-mismatched or echo-mismatched ACK is `Unknown`; any IDs are evidence only and no Demo local row is published | Reconcile through reads. |
+| Margin mode `retCode 0` with any reason row | `Unknown` (was a refusal built from the text); native `3400045` stays a refusal | None. |
+| Position-mode read with positional or malformed rows | `NotSent` failure; nothing is cached | Retry the command. |
+| TP/SL `34040` not-modified | Success on any `/v5/position/trading-stop` write (placements, attached TP/SL amends, trailing and full-position stop moves, partial stops with or without a mark) (D1); a plain `/v5/order/amend` answered `34040` stays a refusal | None. |
+| Timing | Each native call and its one resend has its own 20 s window; the plan deadline is their declared sum, with no 120 s product cap; mode-read redos are unbounded (see AUDITS) | None. |
+
+Cancel-all keeps its narrow housekeeping: after a validated `retCode 0`, only
+captured rows that were already Closed/Canceled are removed. Omitted live
+orders make the command `Unknown`; this proves nothing about them.
+
+### Bybit candles and no-I/O answers on managed authority (slice 1a)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `fetchOHLCV` refusals before any request (option symbol, disabled product, unsupported interval) | Typed `NotSent`: kind `unsupported` for the option symbol and the interval; `invalidInput` for a product the account has not enabled, as for every non-trade command refused that way (was untyped text) | Branch on `kind`/`outcome`; text unchanged. Enable the product rather than treating the command as unavailable. |
+| A kline read has its own 20 s native window | `timeout` when it expires; a late answer is ignored | None. |
+| A kline stream that breaks mid-list | `internal`; nothing is published | None. |
+| `fetchBalanceInfo` and a disabled-product refusal go through command admission | A full command table refuses them once with the shared `internal` capacity error; otherwise unchanged | None. |
+| Kline failure text | Native refusals keep `Bybit klines: <retMsg>` with the classified kind and `venueCode`; transport loss and expiry now carry the engine's typed error text (`network` / `timeout`) without that prefix; a success with no list is `internal` | Branch on `kind`, not text. |
+| Invalid Bybit options (`config_error`) | `fetchOHLCV` now fails `NotSent` / `invalidInput` instead of never answering | None. |
+
 ## Engine socket lifecycle: OKX
 
 OKX authentication state, socket epochs, reconnect permission, subscription
@@ -5725,6 +5761,37 @@ native decision order and introduces no request, signer, timer, Store mutation
 or incomplete marker. PublicTrades retains its existing managed public path;
 other private history, signing, settings and REST fallthrough remain unchanged.
 
+
+### Bybit option trading on the ordinary Plan path (slice 4a)
+
+Option `placeOrders`, `updateOrder`, `cancelOrders`, `cancelSymbolOrders`,
+leverage and margin settings now follow the ordinary Bybit contract above.
+Request bodies are unchanged.
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| A batch of option orders where some are refused | Failure `KnownPartial` with `partialOrderIds` for the placed ones (was success with those IDs) | Same as ordinary D4; rides the same NX confirmation. |
+| An option amend whose acknowledgement names another order | `Unknown` (was success) | Reconcile through reads; never resend. |
+| An option cancel answered "order not exists" (`110001`) | Success; the row stays until the one fresh order read the engine requests (was a local Cancelled) | Do not expect the row to vanish on the ACK. |
+| Option writes after a lost or uncertain reply | Resend only on a classified `10002`/`10004` refusal, never on text or transport loss | None. |
+| Option leverage or margin setting | `NotSent` `unsupported`, now worded for options (was the spot wording). `setPositionMode` is account-wide and unchanged: it applies to the primary (linear) category whatever symbol it names | Do not offer leverage or margin settings for options. |
+| A trade command on a disabled option product | `NotSent` `invalidInput` (was untyped), as for reads and other disabled products | Enable the product. |
+| An option amend refused with "not modified" text | `Rejected` (was success) | Same as ordinary: only `34040` on a trading-stop write is a satisfied no-op. |
+| An option cancel refused with "order not exists" / "too late to cancel" text under a code other than `110001`/`170213` | `Rejected` (was a local Cancelled) | Branch on the native code, not text. |
+| An option cancel-all answered `success:"0"` | `Unknown` (was a known refusal) | Reconcile through reads. |
+| An option create whose `orderLinkId` echo differs from the sent one | `Unknown` (was success) | Reconcile; the caller's ID is the lookup key. |
+
+### Bybit option queries and seeds on managed reads (slice 4b)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `fetchOptionChain` / `fetchAccountGreeks` have a 20 s native window | `timeout` when it expires; a late answer is ignored | None. |
+| Refusals before any request | Typed `NotSent`: `invalidInput` for "Options are not enabled" and an invalid chain query; `authInvalid` for Greeks without an API key (was untyped text) | Branch on `kind`; text unchanged. |
+| A native refusal of the option read | The classified kind and `venueCode`, with the message prefixed `Bybit options:` | Branch on `kind`. |
+| Greeks after a signature/timestamp refusal | Re-read once, re-signed, only on a native `10002`/`10004`; a text-only match never re-reads | None. |
+| `fetchOptionExpiries` | Needs command admission; a full command table refuses it once with the shared `internal` capacity error; otherwise unchanged | None. |
+| Option ticker seeds at startup | Managed discovery reads with the same retry, pause and degradation rules | None. |
+
 ## Exact background read delivery
 
 Adapters publishing a one-leg Background Read use
@@ -5831,6 +5898,54 @@ trading.rs 5 ->0: two numeric completions plus three conservative macro matches.
 No other venue inventory, shared checker, allowance or signer source changes.
 
 
+### Bybit fee, account info and wallet reads on managed authority (slice 1d-i)
+
+| Change | Outcome | NX handling |
+| --- | --- | --- |
+| The startup fee read, account info and the wallet are signed Background reads with a 20 s window | An expired fee read keeps its contract (a warning, empty fees, markets still publish); an expired account-info or wallet read takes its existing failure path | None. |
+| Re-reads after a signature/timestamp refusal | Once, re-signed, only on a native `10002`/`10004`; a message that merely mentions `recv_window` under another code is a plain failure (was a text-matched resend). Bybit's server clock is still observed from the refusal | None. |
+| Hyro | Unchanged: no account-info read and an empty fee map; its wallet read takes the same managed path | None. |
+
+### Bybit order and position snapshots on managed authority (slice 1d-ii)
+
+| Change | Outcome | NX handling |
+| --- | --- | --- |
+| Each order or position snapshot is one Background owner: every page, settle coin and cursor is a leg with a 20 s window, inside a 60 s window for the whole read | A snapshot that cannot finish in time fails like any other read and is retried by the existing cadence; rows and staleness rules are unchanged | None. |
+| The reconcile read after an uncertain or absent-order write | Always a fresh read; an older snapshot still in flight is abandoned (its late pages are ignored) instead of joined, so the fence clears only on rows read after the write | An order row may stay until that fresh read lands. |
+| Signed snapshot reads after a signature/timestamp refusal | Re-read once, only on a native `10002`/`10004` (no text match) | None. |
+
+### Bybit account identity on managed authority (slice 3)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `fetchAccount` is a signed command read with a 20 s window, signed with the read key when configured | `timeout` when it expires; a late answer is ignored | None. |
+| Refusals before any request (invalid options, invalid read key, no primary key) | Typed `NotSent`: `invalidInput`, `invalidInput`, `authInvalid`; texts unchanged (was untyped) | Branch on `kind`. |
+| A signature/timestamp refusal | Re-read once only on a native `10002`/`10004`; text never re-reads | None. |
+
+### Bybit market refresh refusals (slice 2)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| `refreshMarkets` on a shared public-feed consumer | Typed `NotSent` `unsupported` under the command's admitted authority (was the same kind with no outcome); text unchanged | Refresh the shared source instead. |
+| Invalid options during a refresh walk | Every joined caller fails `NotSent` `invalidInput` at once (was silent until the 30 s deadline; not reachable through startup today) | None. |
+
+
+### Bybit Hyro non-placement commands on the ordinary Plan (Hyro H1)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Hyro `amendOrder`, `cancelOrders`, `cancelSymbolOrders`, `setLeverage`, `setMarginType`, `setPositionMode` run as managed Plan calls (placements stay legacy until H2) | Unchanged shapes; each write leg has its own managed window | None. |
+| Any of them while Hyro private state is reconnecting | Typed `NotSent` before any I/O; a later leg that finds it recovering fails `NotSent` with the legacy recovering text | None. |
+| Hyro "not modified" / "already gone" answers | Classified by native code only (`34040` Satisfied; `110001`/`170213` cancel Satisfied and fenced); text no longer decides | None. |
+| A Hyro write resend | Only on a native `10002`/`10004`; host-error text never resends | None. |
+| An unknown or absent-order Hyro write | One fresh full Hyro snapshot reconciles it and clears the order fence (Hyro never cleared it before) | None. |
+
+Unverified wire assumption (ruling D): no HyroTrader cancel/amend reply has
+been captured. A reply without `result.orderId`, or an "already gone" answer
+without native `110001`/`170213`, seals Unknown and reconciles via a fresh
+snapshot; it is never reported gone. Follow-up: capture real Hyro cancel,
+amend and already-gone replies when a Hyro account is available, then pin
+them as fixtures.
 ## Bitunix public REST Read authority
 
 Markets, tickers and FetchCandles use shared managed unsigned HTTP with a20s
@@ -6330,6 +6445,10 @@ distinguish the following:
 | Host `COMMAND_TIMEOUT` | Caller abandonment. Engine work may continue. |
 | Engine Timeout terminal | The root expired. No further work is issued. |
 
+
+
+
+
 ## Selected caller-wait roots and physical history pages
 
 Signed plain command reads can retain one selected identity, slot, route and
@@ -6697,6 +6816,10 @@ Valid signed account/trading/history, separate Spot/Futures nonce domains,
 private sessions, paged Futures candle reads and existing Spot OHLC remain open
 or unchanged. This prune is 17 fingerprints / 19 occurrences; no new signing or
 whole-family custody claim is made.
+
+
+
+
 
 ## GRVT replay protocol coverage at final capture
 
@@ -7231,6 +7354,8 @@ Capacity refusal produces one shared failure, with no numeric fallback or
 physical action. The local helper must never be called from a delayed funding
 callback, accepted page delivery or queued trading work. Inventory: Orderly
 28F/29O to 25F/26O, solely the three documented initial failure fingerprints.
+
+
 
 ### BreakoutProp login transport (session core): OPEN obligations
 
@@ -7920,6 +8045,30 @@ still projects the one shared journal, including accepted IDs and uncertainty.
 BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
 The core declaration alone does not migrate either venue or remove legacy sites.
 
+### Bybit duplicate-link create refusals (R2)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| A create answered `10014` or `110072` (duplicate `orderLinkId`), every Bybit variant | `Unknown`: the order may already exist, so the engine reconciles it (was `Rejected`) | Treat as uncertain; reconcile before resubmitting the same link. |
+| The same codes on cancel or amend | Unchanged: `Rejected` | None. |
+
+### Bybit history and closed positions on caller Read roots (slice 5)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Fills, order history, income, public trades and closed positions are bounded by the caller's wait | At the deadline: strict `timeout`, no rows and no incomplete marker (was unbounded; a long multi-window walk eventually returned) | Pass a wait that covers the range, or narrow it. |
+| Each page has its own window inside the caller's (20 s, or less when the caller's wait ends first) | An unanswered page fails typed `timeout`; transport loss is typed `network` (was never, or text) | None. |
+| A page failure after accepted rows | Unchanged: accepted rows plus the incomplete marker; typed failure when none | None. |
+| A native refusal | Classified: keeps its `kind` and the native `venueCode` (was `internal` and no code) | Branch on `kind`. |
+| A signature/timestamp refusal (`10002`/`10004`) | Re-read once as a managed retry with Bybit's clock; host text never re-sends | None. |
+| Credentials | Unchanged: the read key when configured, else the primary; keyless account history is `[]` with no request | None. |
+
+### Bybit legacy executor removed (D-bybit)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Every trading command runs on the managed ordinary path; the legacy job executor, text resend and unmanaged `send()` are gone | Unchanged shapes; no host text ever re-sends a request | None. |
+| Fill repair (`/v5/execution/list` for a lost fill) is a managed Background read | Re-reads once on a native `10002`/`10004`; text never re-sends | None. |
 ## Parallel Mutation preparation barrier
 
 A caller explicitly declares each all-Mutation parallel step and implements the

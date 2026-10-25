@@ -15,6 +15,9 @@ mod planned_calls {
         long: bool,
         write: bool,
         leg_intent: Option<crate::classify::Intent>,
+        // Issue the first leg as a declared protection cancel (amend commands).
+        protection: bool,
+        amend: bool,
         check_intent_refusals: bool,
         expected_intents: std::collections::VecDeque<crate::classify::Intent>,
         continue_failure: bool,
@@ -146,7 +149,30 @@ mod planned_calls {
                     }
                 }
 
-                let context = if let Some(intent) = self.leg_intent.take() {
+                let context = if std::mem::take(&mut self.protection) {
+                    let ids = cx.io.next_id;
+                    if self.amend {
+                        // The generic narrowing never makes an amend's leg a Cancel.
+                        assert_eq!(
+                            cx.plan_leg_context_with_intent(plan, &slot, crate::classify::Intent::Cancel),
+                            Err(Error::Invalid)
+                        );
+                        assert_eq!(cx.io.next_id, ids);
+                    }
+                    let result = cx.plan_protection_cancel_leg_context(plan, &slot);
+                    if !self.amend {
+                        // Only an amend's cancel-then-recreate may declare it.
+                        assert_eq!(result, Err(Error::Invalid));
+                        cx.plan_leg_context(plan, &slot).unwrap()
+                    } else {
+                        let context = result.unwrap();
+                        assert_eq!(
+                            cx.http_write_protection_cancel_leg(&context),
+                            Err(Error::Duplicate)
+                        );
+                        context
+                    }
+                } else if let Some(intent) = self.leg_intent.take() {
                     let result = context_with_intent(cx, plan, &slot, intent);
                     assert!(result.is_ok(), "declared Plan intent must precede journal registration: {result:?}");
                     let context = result.unwrap();
@@ -723,7 +749,9 @@ mod planned_calls {
     }
     fn start(engine: &mut Engine<Plans>, now: f64) {
         engine.start(now);
-        let command = if engine.venue.write {
+        let command = if engine.venue.amend {
+            Command::AmendOrder { command: 7, id: "old".into(), price: Some(1.), amount: None }
+        } else if engine.venue.write {
             Command::Venue { command: 7, action: VenueAction::FetchBalanceInfo }
         } else {
             Command::FetchCandles { command: 7, symbol: "BTCUSD".into(),
@@ -1443,6 +1471,34 @@ mod planned_calls {
         assert_eq!(e.venue.retired, 1);
         assert!(e.drain_actions().any(|action| matches!(action,
             Action::Notice(Notice::CommandDone { command: 7, .. }))));
+    }
+    #[test]
+    fn plan_declares_a_protection_cancel_leg_before_registration_only_for_amends() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            write: true, amend: true, protection: true,
+            expected_intents: [crate::classify::Intent::Cancel, crate::classify::Intent::Amend].into(),
+            ..Default::default()
+        });
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        response(&mut e, first, 1., "ok");
+        let (second, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, second, 1.);
+        response(&mut e, second, 2., "ok");
+        assert!(e.venue.expected_intents.is_empty());
+        assert_eq!(e.venue.responses, 2);
+        // A placement can never declare one; its leg keeps the command intent.
+        let mut place = crate::test_support::seeded_engine(Plans {
+            write: true, protection: true,
+            expected_intents: [crate::classify::Intent::Place].into(),
+            ..Default::default()
+        });
+        start(&mut place, 0.);
+        let (first, _) = prepared(&place.drain_actions().collect::<Vec<_>>());
+        release(&mut place, first, 0.);
+        response(&mut place, first, 1., "ok");
+        assert!(place.venue.expected_intents.is_empty());
     }
     #[test]
     fn generic_plan_retry_refuses_a_real_classified_write_grant() {

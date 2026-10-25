@@ -1122,3 +1122,299 @@ fn unsupported_order_memory_is_separate_and_persistent_across_product_swaps() {
     }
     assert_eq!(h.logs.iter().filter(|m| m.as_str() == expected).count(), 2);
 }
+
+// Slice 4a original REDs: option commands run on the ordinary Plan path.
+
+const EXISTING_OPTION: &str = r#"{"topic":"order","data":[{"category":"option","symbol":"BTC-25DEC26-100000-C-USDT","orderId":"existing-option","orderType":"Limit","orderStatus":"New","qty":"0.2","price":"1000","side":"Buy"}]}"#;
+
+fn failed(h: &Harness, command: u32) -> safe_cex_engine::VenueError {
+    h.notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: id, error } if *id == command => {
+                Some(error.clone())
+            }
+            _ => None,
+        })
+        .expect("one typed failure")
+}
+
+/// O1: an option create is one admitted Plan call with its native window.
+#[test]
+fn option_orders_run_on_the_ordinary_plan_with_a_native_window() {
+    let mut h = ready(true);
+    let mut opts = order(OPTION, 0.12);
+    opts.implied_volatility = Some(0.6);
+    opts.client_order_id = Some("option-plan".into());
+    h.command(Command::PlaceOrders {
+        command: 81,
+        orders: vec![opts],
+    });
+    let create = h.take("/v5/order/create");
+    assert_eq!(create.timeout_ms, Some(20_000), "a managed Plan call");
+    assert!(create.body.unwrap().contains("\"category\":\"option\""));
+}
+
+/// O2 (D4): independent option creates keep the accepted one's ID when a
+/// later one is refused, as ordinary batches do.
+#[test]
+fn a_partially_refused_option_batch_fails_known_partial() {
+    let mut h = ready(true);
+    let mut put = order("ETH-25DEC26-3000-P-USDT", 0.1);
+    put.client_order_id = Some("option-put".into());
+    let mut call = order(OPTION, 0.12);
+    call.client_order_id = Some("option-call".into());
+    h.command(Command::PlaceOrders {
+        command: 82,
+        orders: vec![call, put],
+    });
+    let first = h.take("/v5/order/create");
+    h.reply(
+        first.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"option-accepted","orderLinkId":"option-call"},"retExtInfo":{},"time":1}"#,
+    );
+    let second = h.take("/v5/order/create");
+    h.reply(
+        second.id,
+        200,
+        r#"{"retCode":110007,"retMsg":"Insufficient available balance","result":{},"retExtInfo":{},"time":1}"#,
+    );
+    let error = failed(&h, 82);
+    assert_eq!(
+        error.partial.as_ref().map(|p| p.order_ids.clone()),
+        Some(vec!["option-accepted".to_owned()])
+    );
+    assert_ne!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+
+/// O3: an option amend acknowledgement must name the order it amended.
+#[test]
+fn an_option_amend_acknowledging_another_order_is_unknown() {
+    let mut h = ready(true);
+    h.message("/private", EXISTING_OPTION);
+    h.command(Command::AmendOrder {
+        command: 83,
+        id: "existing-option".into(),
+        price: Some(1005.0),
+        amount: None,
+    });
+    let amend = h.take("/v5/order/amend");
+    assert!(amend.body.unwrap().contains("\"category\":\"option\""));
+    h.reply(
+        amend.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"some-other-order","orderLinkId":""},"retExtInfo":{},"time":1}"#,
+    );
+    assert_eq!(
+        failed(&h, 83).outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+}
+
+/// O4 (D2): an absent option cancels nothing locally; one fresh read decides.
+#[test]
+fn an_absent_option_cancel_fences_and_reads_instead_of_cancelling_locally() {
+    let mut h = ready(true);
+    h.message("/private", EXISTING_OPTION);
+    h.command(Command::CancelOrders {
+        command: 84,
+        ids: vec!["existing-option".into()],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"category":"option","symbol":"BTC-25DEC26-100000-C-USDT","orderId":"","orderLinkId":""}]},"retExtInfo":{"list":[{"code":110001,"msg":"order not exists or too late to cancel"}]},"time":1}"#,
+    );
+    assert_eq!(
+        h.engine.store().order("existing-option").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open,
+        "no local Cancelled transition"
+    );
+    assert!(h.has_request("/v5/order/realtime"), "one reconcile read");
+}
+
+/// O5: an option has no leverage setting, and the refusal says so.
+#[test]
+fn option_leverage_is_refused_as_an_option_setting() {
+    let mut h = ready(true);
+    h.command(Command::SetLeverage {
+        command: 85,
+        symbol: OPTION.into(),
+        leverage: 2.0,
+        side: None,
+    });
+    let error = failed(&h, 85);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert!(error.message.contains("option"), "{}", error.message);
+    assert!(!error.message.contains("spot"), "{}", error.message);
+}
+
+/// A disabled option product refuses a trade command as the account's
+/// configuration, as it does for reads.
+#[test]
+fn a_disabled_option_product_refuses_trading_as_invalid_input() {
+    let mut h = Harness::started(Options {
+        variant: Variant::Linear,
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    });
+    h.command(Command::SetLeverage {
+        command: 86,
+        symbol: OPTION.into(),
+        leverage: 2.0,
+        side: None,
+    });
+    let error = failed(&h, 86);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+    assert!(h.requests.iter().all(|r| !r.url.contains("/v5/position")));
+}
+
+// Slice 4b original REDs: option queries and seeds on managed reads.
+
+/// Q1: the option chain and account Greeks are managed command reads; Greeks
+/// are signed.
+#[test]
+fn option_queries_are_managed_command_reads() {
+    let mut h = ready(true);
+    h.command(Command::FetchOptionChain {
+        command: 91,
+        query: OptionChainQuery {
+            underlying: "BTC".into(),
+            expiry: None,
+            right: None,
+            strike_min: None,
+            strike_max: None,
+        },
+    });
+    let chain = h.take("/v5/market/tickers");
+    assert!(chain.url.contains("category=option"));
+    assert_eq!(chain.timeout_ms, Some(20_000), "the chain is managed");
+    h.command(Command::FetchAccountGreeks { command: 92 });
+    let greeks = h.take("/v5/asset/coin-greeks");
+    assert_eq!(greeks.timeout_ms, Some(20_000), "Greeks are managed");
+    assert!(Harness::header(&greeks, "X-BAPI-SIGN").is_some());
+}
+
+/// Q2: option expiries are answered from the catalogue only under the
+/// command's own admitted authority.
+#[test]
+fn option_expiries_need_command_authority() {
+    let mut h = ready(true);
+    support::park_owners(&mut h);
+    h.command(Command::FetchOptionExpiries {
+        command: 93,
+        underlying: "BTC".into(),
+    });
+    let error = failed(&h, 93);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 93).count(), 1);
+}
+
+/// Q3: option ticker seeds are managed Background discovery reads.
+#[test]
+fn option_seeds_are_managed_background_reads() {
+    let mut h = Harness::started(options(false));
+    for category in ["linear", "inverse"] {
+        respond(
+            &mut h,
+            "instruments-info",
+            category,
+            Some("status=PreLaunch"),
+            EMPTY,
+        );
+    }
+    respond(&mut h, "instruments-info", "option", None, OPTIONS);
+    respond(
+        &mut h,
+        "instruments-info",
+        "inverse",
+        None,
+        &inverse_instruments(),
+    );
+    respond(
+        &mut h,
+        "instruments-info",
+        "linear",
+        None,
+        support::INSTRUMENTS,
+    );
+    let seeds: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/market/tickers") && r.url.contains("category=option"))
+        .collect();
+    assert!(!seeds.is_empty(), "option seeds requested");
+    for seed in seeds {
+        assert_eq!(seed.timeout_ms, Some(20_000), "{} is managed", seed.url);
+    }
+}
+
+/// Q4: an option chain read that outlives its window fails as a timeout.
+#[test]
+fn an_option_chain_read_expires_as_a_timeout() {
+    let mut h = ready(true);
+    h.command(Command::FetchOptionChain {
+        command: 94,
+        query: OptionChainQuery {
+            underlying: "BTC".into(),
+            expiry: None,
+            right: None,
+            strike_min: None,
+            strike_max: None,
+        },
+    });
+    let _chain = h.take("/v5/market/tickers");
+    h.advance(20_001.);
+    let error = failed(&h, 94);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
+}
+
+const TIMESTAMP_REFUSAL: &str = r#"{"retCode":10002,"retMsg":"invalid request, please check your server timestamp or recv_window param. req_timestamp[1],server_timestamp[2],recv_window[5000]","result":{}}"#;
+const GREEKS: &str = r#"{"retCode":0,"result":{"list":[{"baseCoin":"BTC","totalDelta":"1","totalGamma":"2","totalVega":"3","totalTheta":"-4"}]}}"#;
+
+/// Greeks re-read once, re-signed, on a native timestamp refusal; a second
+/// refusal is the command's typed failure.
+#[test]
+fn greeks_re_read_once_on_a_native_timestamp_refusal() {
+    for second in [GREEKS, TIMESTAMP_REFUSAL] {
+        let mut h = ready(true);
+        h.command(Command::FetchAccountGreeks { command: 95 });
+        let first = h.take("/v5/asset/coin-greeks");
+        h.reply(first.id, 200, TIMESTAMP_REFUSAL);
+        let retry = h.take("/v5/asset/coin-greeks");
+        assert!(
+            Harness::header(&retry, "X-BAPI-SIGN").is_some(),
+            "re-signed"
+        );
+        h.reply(retry.id, 200, second);
+        assert!(!h.has_request("/v5/asset/coin-greeks"), "no third read");
+        if second == GREEKS {
+            assert!(
+                h.result(95)
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .contains("\"theta\":-4.0")
+            );
+        } else {
+            let error = failed(&h, 95);
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 95).count(), 1);
+        }
+    }
+}
+
+/// Text that merely resembles a signature refusal never re-reads.
+#[test]
+fn greeks_never_re_read_on_text_alone() {
+    let mut h = ready(true);
+    h.command(Command::FetchAccountGreeks { command: 96 });
+    let first = h.take("/v5/asset/coin-greeks");
+    h.reply(first.id, 401, "error sign: recv_window");
+    assert!(!h.has_request("/v5/asset/coin-greeks"));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 96).count(), 1);
+}

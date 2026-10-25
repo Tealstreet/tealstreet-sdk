@@ -2177,7 +2177,8 @@ impl<P> Cx<'_, P> {
     /// The one declared exception for an amend's cancel leg: the old order of a
     /// cancel-then-recreate whose replacement is position-bound protection
     /// (reduce-only / close-on-trigger), so an absent old order is safe to
-    /// replace. Never declare it for any other replacement.
+    /// replace. Never declare it for any other replacement. Plan legs use it on
+    /// the leg Context before its first request.
     pub fn http_write_protection_cancel_leg(&mut self, context: &Context) -> Result<(), Error> {
         self.narrow_leg(context, crate::classify::Intent::Cancel, true)
     }

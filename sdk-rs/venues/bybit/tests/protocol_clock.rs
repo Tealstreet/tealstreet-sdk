@@ -71,8 +71,9 @@ fn started() -> (Engine<Probe>, HttpRequest) {
     });
     engine.set_signer(Some(signer)).unwrap();
     engine.start(1_000.0);
-    let request = engine
-        .drain_actions()
+    // The fee read is managed: the fixture driver completes its preparation.
+    let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/v5/account/fee-rate") => Some(request),
             _ => None,
@@ -96,8 +97,8 @@ fn reject(engine: &mut Engine<Probe>, request: HttpRequest, server: &str) -> Htt
             },
         },
     );
-    engine
-        .drain_actions()
+    safe_cex_engine::test_support::prepared_actions(engine, 6_000.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/v5/account/fee-rate") => Some(request),
             _ => None,
@@ -131,7 +132,7 @@ fn correction_updates_shared_protocol_time_and_resends_in_the_same_callback() {
             },
         },
     );
-    assert!(!first.drain_actions().any(|action| matches!(action, Action::Http(request) if request.url.contains("/v5/account/fee-rate"))));
+    assert!(!safe_cex_engine::test_support::prepared_actions(&mut first, 6_000.0).into_iter().any(|action| matches!(action, Action::Http(request) if request.url.contains("/v5/account/fee-rate"))));
     assert_eq!(first.venue().samples.last(), Some(&(6_000.0, 8_000.0)));
 }
 
