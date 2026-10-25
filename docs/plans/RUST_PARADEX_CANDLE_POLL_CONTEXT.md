@@ -1,6 +1,6 @@
 # Paradex subscription candle poll Read custody
 
-Status: managed source local; original controls pass, source/size/CI gates pending.
+Status: source reviewed CLEAR and local size/check gates pass; qualifying CI pending.
 Owner: codex-9czdjh. Proposed native reviewer: codex-hcmq3f.
 Base: actual `9b05c9ac4528212b3c681f0f45f5980192b4342e` (#2102 landed).
 
@@ -295,3 +295,30 @@ and diff checks pass with CARGO_BUILD_JOBS=4. Source contains only the poll
 Background custody plus narrow typed/error guards; default malformed-stream
 forwarding remains engine-released failure handling, rather than demanding a
 DATA grant on a timed-out physical context.
+
+Bounded native/API/caller/source/preservation review is CLEAR at exact
+`12990258f74129dc194a319bee914617dda14d0f` (hcmq3f, read-only/no build). The
+review independently checked exact original-prefix preservation, protected native
+methods/wire builder, outer account.start delegation, slot-release controls,
+5900 unowned incoming entries and the two-line manifest prune. Its sole
+nonblocking wording correction is folded: a fallback owns an independent
+Background Context, rather than a caller-root child.
+
+## Paired optimized size gate
+
+Same-path locked builds compare actual #2102 base `9b05c9ac452` with reviewed
+source `12990258f74`, serial CARGO_BUILD_JOBS=4, Rust 1.99, wasm-bindgen 0.2.129
+and Binaryen 132. Node and web bytes/hashes match within every row. Profiles,
+features, Cargo.lock and fixed budgets are unchanged.
+
+| Artifact | Before | After | Delta | Fixed budget | Remaining |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Paradex | 1,264,195 | 1,265,786 | +1,591 | 1,343,488 | 77,702 |
+| Combined | 13,837,708 | 13,839,428 | +1,720 | 14,155,776 | 316,348 |
+
+A preliminary candidate replay reused baseline venue artifacts because archive
+extraction preserved old file timestamps. Those candidate measurements are
+discarded. Both corrected candidate builds explicitly recompiled the changed
+Paradex source after refreshing its timestamps; source content hashes still
+match the reviewed commit. The retained baseline builds had compiled the venue.
+Size evidence does not certify CPU, replay or qualifying CI.

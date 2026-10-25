@@ -8247,8 +8247,9 @@ financial outcome is created by this Background Read adoption.
 Each native poll route now owns a fresh unsigned Background Read with Never
 retry. **NEW:** its 20s admission-to-expiry bound includes Prepare, Bind, route
 waits and transport; native packets had no explicit timeout. A released klines
-failure can still use the single TradingView fallback under a fresh 20s child,
-with original captured bounds/revision. There is no 20s cap across both routes.
+failure can still use the single TradingView fallback under an independent
+Background Context with its own fresh 20s bound and original captured
+bounds/revision. There is no 20s cap across both routes.
 Unreleased admission/queue/preparation refusal is strict for that cycle: no
 recursive fallback, one finite current-generation completion + 3s timer. New
 refusal warnings use REQUEST_FAILED and the typed engine error's message;

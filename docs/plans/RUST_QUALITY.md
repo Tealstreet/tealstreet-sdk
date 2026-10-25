@@ -2005,3 +2005,11 @@ reflecting retirement of the managed HTTP deadline; its native no-publication /
 no-next-poll behavior remains. Scoped execution/strict checks and paired
 Paradex/combined sizes are recorded in the poll plan before freeze. No budget or
 profile change, CPU/CI or native-family private adoption inference follows.
+
+Post-#2102 same-path optimized Node/web pairs fit both fixed budgets:
+Paradex 1,264,195 -> 1,265,786 (+1,591; 77,702 remaining), combined
+13,837,708 -> 13,839,428 (+1,720; 316,348 remaining). Both corrected candidate
+builds recompile the changed venue; a preliminary archive-timestamp cache reuse
+was discarded. Scoped crate 313 PASS / 0 ignored, strict all-target Clippy,
+formatting and full bans/ratchets/selection pass. Source review is CLEAR at
+12990258f74; qualifying CI remains pending.
