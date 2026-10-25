@@ -8824,3 +8824,25 @@ TS-visible changes:
   - Unknown: 50001, 50004, 50013 and 50026 keep their Unknown outcome, but now with no refusal kind.
 - **Unproven acknowledgements.** A malformed body, a missing order ID, a row-count mismatch or a row-level 50004 projects as the engine's fixed Internal / Unknown.
 - **Uncertain writes reconcile through the engine.** The uncertain-write account refresh now runs from the engine's `reconcile_uncertain`, once per uncertain seal. Cancel-all stays fenced until that fresh order snapshot is accepted.
+
+
+### Seeded serial Session resend (engine API; GRVT adoption still separate)
+
+With serial-plans and session-bearer, a serial call may reserve two attempts.
+serial_plan_session_resend selects the same call's one remaining attempt from
+its exact DATA custody: a Mutation needs its classifier-created RefusedResend
+grant, and a Read keeps generic RetryPolicy Never. The selected attempt is seeded
+with the refused packet's bound Session revision and parks until a newer bundle
+is ready. It spends no additional logical call or refresh attempt. Existing
+write resend and Session resend share that one second credit. Engine-proven
+released Read transport failures may immediately continue as a new Read call;
+codec/integrity and unreleased failures cannot use that immediate path.
+
+The default-false status_exempt_refusal hook is venue-declared. Only a complete
+Unproven-status delivery (408 or 5xx) may consult it; a trusted full-envelope
+refusal then reaches DATA and the ordinary classified grant. Other and malformed
+bodies preserve Unknown, reconciliation and the fence. GRVT's parsed-code-1000
+override remains a separate adoption, with no status-wide grant or raw fallback.
+A parked operation expires Timeout/NotSent, while the command still follows its
+journal: released refusal plus an unreleased resend is Unknown with a fence and
+reconciliation; earlier IDs remain. No existing journal projection is changed.
