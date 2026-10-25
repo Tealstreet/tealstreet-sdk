@@ -245,32 +245,39 @@ native control.
 
 ## Original execution checkpoint
 
-The new request_context_trading target executes the actual Venue and startup,
-account and managed-socket callbacks. Each independent fixture has a distinct
-real scalar/address, leaving native sharing controls unchanged. It uses genuine
-Command Read owners for capacity and raw ingress only for native wire/reply
-probes. No future provider result, nonce subject or owner is fabricated.
+The frozen target runs on actual #2146 landing f895d0d7018. Exactly three owned
+paths differ: this plan, its README row and the new integration target. Runtime,
+Cargo, maps and every existing fixture remain byte-exact to incoming.
 
-On the unchanged b0ee native source, 26 controls execute: ten intended behavior
-assertion REDs and sixteen GREENs, zero ignored. Four capacity writes fail at
-no exchange before admission; empty-cancel capacity sees native [] instead of
-a shared refusal. NaN fails at native kind None versus InvalidInput. Unclaimed
-DATA reaches a native completion. The three Prepare probes fail at raw exchange
-before Prepare. All are real predicates, not compile/setup failures.
+request_context_trading executes29 controls: thirteen intended behavior
+assertion REDs and sixteen GREENs, zero ignored. Four capacity writes reach raw
+exchange before shared admission; empty-cancel capacity returns native []
+instead of a shared refusal. NaN yields native kind None versus InvalidInput.
+Unclaimed DATA completes the native command. Six Prepare controls fail at raw
+exchange before Prepare. These are runtime predicates, not compile/setup
+failures. The unchanged separate native trading target passes32/32. Strict
+clippy with warnings denied, formatting, full bans/ratchets and diff checks pass.
+The review build target is removed; logs and hashes are retained outside Git.
 
-The exact-peer retirement, native recovery and 255-survivor validation suffixes
-are gated behind each capacity RED. Preparation failure/duplicate and twenty-
-second expiry/late preparation suffixes are gated behind Prepare. Managed
-signed Bind/Claim positives require the actual installed provider fixture at
-source; no raw compatibility is permitted past the custody assertions. Plan,
-Preflight and condition-ready delegation must be added with their feature opt-
-ins during adoption, since those hooks are feature-gated today.
+Exact first-peer retirement, recovered native completion and validation of all
+255 survivors are gated behind each capacity RED. Preparation refusal/duplicate,
+twenty-second expiry, late preparation, released physical timeout, delayed
+Claim and stale-reply/live-FIFO suffixes are gated behind Prepare. They are
+present but unexecuted on native. Signed Bind/Claim needs the actual installed
+provider fixture at source; no raw compatibility is allowed past custody
+assertions, and no provider result, nonce subject or owner is fabricated.
 
-The sixteen GREENs pin startup, zero-wait, duplicate ownership, native wire and
-no-OID status, five HTTP refusal classes, no transport resend, native FIFO334ms,
-full mixed bracket correlation, uncertain cancel stopping replacement,
-scheduleCancel control proof and builder reply/eight-second expiry. The separate
-unchanged native trading target passes32/32. Initial strict clippy found one
-redundant header-name conversion; it is removed. A composed rerun after the
-#2146 landing must finish before the originals review pin is sent. Full bans,
-ratchets, formatting and diff checks pass; no source or size claim is made.
+The sixteen GREENs pin real startup/account/socket delegation, zero-wait,
+duplicate ownership, native wire and no-OID status, five HTTP refusal classes,
+no network resend, native FIFO334ms, full mixed bracket correlation, uncertain
+cancel stopping replacement, scheduleCancel proof and builder reply/8s expiry.
+Independent fixtures use distinct real scalars/addresses. Existing native
+same-agent/vault/TxFlow sharing controls stay unchanged.
+
+Installed scalar-only setup, attested actual-agent nonce controls, asynchronous
+provider/Stale signing and delayed release pacing remain named source gates.
+Preflight/Plan/condition-ready delegation is added with the relevant feature
+opt-ins during adoption, since those hooks are feature-gated today. The native
+receipt proves no installed constructor, new nonce API, shared release pacing,
+size, feature activation or production cutover. Both shared prerequisite source
+holds remain, despite the approved numeric policy and plan direction.

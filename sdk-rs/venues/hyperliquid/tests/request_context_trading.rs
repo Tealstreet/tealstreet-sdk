@@ -847,3 +847,97 @@ fn native_builder_reply_releases_the_same_job() {
 fn native_builder_expiry_proceeds_without_the_builder() {
     builder_hold(false);
 }
+
+#[test]
+fn released_timeout_is_unknown_with_no_write_replay() {
+    let (mut e, _) = boot();
+    let a = command(&mut e, NOW, place(OWNER));
+    let _ = prep(&a);
+    let timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+            _ => None,
+        })
+        .expect("physical call bound");
+    let r = native_release(&mut e, &a);
+    e.handle(NOW + 20_000., Event::TimerFired { timer });
+    let a: Vec<_> = e.drain_actions().collect();
+    one_error(&a, ErrorKind::Timeout, Outcome::Unknown);
+    no_trade(&a);
+    respond(&mut e, NOW + 20_001., &r, 200, ACCEPT);
+    let late: Vec<_> = e.drain_actions().collect();
+    assert!(results(&late, OWNER).is_empty());
+    no_trade(&late);
+}
+
+#[test]
+fn delayed_claim_cannot_release_an_expired_packet() {
+    let (mut e, _) = boot();
+    let a = command(&mut e, NOW, place(OWNER));
+    let (p, _) = prep(&a);
+    e.http_prepared(
+        NOW + 19_999.,
+        p,
+        Prepared {
+            id: p.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let permit = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Bind { permit, .. } => Some(permit),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("real signed Bind requires the installed provider fixture at source");
+    assert!(!matches!(
+        e.claim_http(NOW + 20_001., permit),
+        Ok(Claim::Released(_))
+    ));
+    let a: Vec<_> = e.drain_actions().collect();
+    one_error(&a, ErrorKind::Timeout, Outcome::NotSent);
+    no_trade(&a);
+}
+
+#[test]
+fn stale_old_reply_cannot_settle_the_next_fifo_owner() {
+    let (mut e, _) = boot();
+    let first = command(&mut e, NOW, place(OWNER));
+    let _ = prep(&first);
+    let r = native_release(&mut e, &first);
+    let queued = command(&mut e, NOW + 1., leverage(OWNER + 1));
+    no_trade(&queued);
+    assert!(results(&queued, OWNER + 1).is_empty());
+    respond(&mut e, NOW + 2., &r, 200, ACCEPT);
+    let a: Vec<_> = e.drain_actions().collect();
+    assert_eq!(results(&a, OWNER).len(), 1);
+    let timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 334. => Some(*timer),
+            _ => None,
+        })
+        .expect("next FIFO owner waits for release pacing");
+    e.handle(NOW + 334., Event::TimerFired { timer });
+    let a: Vec<_> = e.drain_actions().collect();
+    let second = native_release_at(&mut e, NOW + 334., &a);
+    assert_ne!(r.id, second.id);
+    respond(&mut e, NOW + 335., &r, 200, ACCEPT);
+    let stale: Vec<_> = e.drain_actions().collect();
+    assert!(results(&stale, OWNER).is_empty());
+    assert!(results(&stale, OWNER + 1).is_empty());
+    no_trade(&stale);
+    respond(
+        &mut e,
+        NOW + 336.,
+        &second,
+        200,
+        r#"{"status":"ok","response":{"type":"default"}}"#,
+    );
+    let done: Vec<_> = e.drain_actions().collect();
+    assert_eq!(results(&done, OWNER + 1), vec![Ok("[]".into())]);
+}
