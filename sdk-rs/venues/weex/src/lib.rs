@@ -403,6 +403,7 @@ impl WeexFutures {
         };
         match cx.request_managed_with_headers(
             leg,
+            None,
             Method::Get,
             format!("{}{path}?{query}", paths::REST),
             &[],
