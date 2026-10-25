@@ -153,7 +153,7 @@ fn side_flip_zero_and_old_event_cannot_resurrect_a_closed_position() {
 fn late_and_failed_snapshots_preserve_stream_state() {
     let (mut e, socket) = ready();
     e.handle(1000.0, Event::WsOpened { socket });
-    let reads = requests(&mut e);
+    let reads = seed_requests(&mut e, 1000.0);
     let positions = reads.iter().find(|r| r.url.ends_with("/position")).unwrap();
     ws(&mut e, socket, "account.positionUpdate", SHORT);
     reply(&mut e, positions, 200, POSITIONS);
@@ -232,7 +232,7 @@ fn entry_price_uses_b_uppercase_from_the_documented_position_event() {
 fn newer_rest_snapshot_wins_even_without_an_intervening_stream_event() {
     let (mut e, socket) = ready();
     e.handle(1000.0, Event::WsOpened { socket });
-    let first = requests(&mut e);
+    let first = seed_requests(&mut e, 1000.0);
     e.handle(1001.0, Event::WsClosed { socket, code: 1006 });
     let reconnect = e
         .drain_actions()
@@ -256,7 +256,7 @@ fn newer_rest_snapshot_wins_even_without_an_intervening_stream_event() {
         })
         .unwrap();
     e.handle(2001.0, Event::WsOpened { socket });
-    let second = requests(&mut e);
+    let second = seed_requests(&mut e, 2001.0);
     let newer = POSITIONS.replace("\"netQuantity\":\"5\"", "\"netQuantity\":\"7\"");
     reply(
         &mut e,
@@ -280,7 +280,7 @@ fn newer_rest_snapshot_wins_even_without_an_intervening_stream_event() {
 fn a_failed_position_refresh_keeps_positions_and_does_not_block_other_reads() {
     let (mut e, socket) = ready();
     e.handle(1000.0, Event::WsOpened { socket });
-    let reads = requests(&mut e);
+    let reads = seed_requests(&mut e, 1000.0);
     let positions = reads.iter().find(|r| r.url.ends_with("/position")).unwrap();
     reply(&mut e, positions, 503, "unavailable");
     let balance = reads
@@ -296,7 +296,7 @@ fn a_failed_position_refresh_keeps_positions_and_does_not_block_other_reads() {
 fn dns_not_found_never_becomes_an_empty_position_snapshot() {
     let (mut e, socket) = ready();
     e.handle(1000.0, Event::WsOpened { socket });
-    let r = requests(&mut e)
+    let r = seed_requests(&mut e, 1000.0)
         .into_iter()
         .find(|r| r.url.ends_with("/position"))
         .unwrap();
@@ -447,8 +447,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -528,8 +528,8 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
                 },
             );
         }
-        reads = engine
-            .drain_actions()
+        reads = safe_cex_engine::test_support::prepared_actions(engine, now)
+            .into_iter()
             .filter_map(|a| match a {
                 safe_cex_engine::Action::Http(r) => Some(r),
                 _ => None,
@@ -603,7 +603,7 @@ fn every_positions_404_preserves_the_last_successful_snapshot() {
     ] {
         let (mut e, socket) = ready();
         e.handle(1000.0, Event::WsOpened { socket });
-        let read = requests(&mut e)
+        let read = seed_requests(&mut e, 1000.0)
             .into_iter()
             .find(|r| r.url.ends_with("/position"))
             .unwrap();
@@ -715,7 +715,7 @@ fn fills_faster_than_the_collateral_read_cannot_starve_the_balance() {
             _ => None,
         })
     };
-    let mut read = requests(&mut e)
+    let mut read = seed_requests(&mut e, 2000.0)
         .into_iter()
         .find(|r| r.url.ends_with("/collateral"))
         .unwrap();
@@ -732,7 +732,10 @@ fn fills_faster_than_the_collateral_read_cannot_starve_the_balance() {
                 text: &fill,
             },
         );
-        let next = collateral(&e.drain_actions().collect::<Vec<_>>()).unwrap();
+        let next = collateral(&safe_cex_engine::test_support::prepared_actions(
+            &mut e, now,
+        ))
+        .unwrap();
         let body = BALANCE.replace("1005", &(2000 + step).to_string());
         e.handle(
             now + 1.0,
@@ -745,7 +748,10 @@ fn fills_faster_than_the_collateral_read_cannot_starve_the_balance() {
                 },
             },
         );
-        let reread = collateral(&e.drain_actions().collect::<Vec<_>>());
+        let reread = collateral(&safe_cex_engine::test_support::prepared_actions(
+            &mut e,
+            now + 1.0,
+        ));
         if step <= 2 {
             assert_eq!(e.store().balance().total, 1005.0, "step {step}");
             assert!(reread.is_none(), "step {step}");
@@ -762,18 +768,16 @@ fn fills_faster_than_the_collateral_read_cannot_starve_the_balance() {
 #[test]
 fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    let mut e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_backpack::Backpack::new(safe_cex_venue_backpack::Options {
-            identity: None,
-            read_identity: None,
-            read_credentials_status: None,
-            read_credentials: None,
-            public_data_only: false,
-            key: Some("test-public-key".into()),
-            secret: Some(STANDARD.encode([7u8; 32])),
-            recv_window: None,
-        }),
-    );
+    let mut e = configured_account(safe_cex_venue_backpack::Options {
+        identity: None,
+        read_identity: None,
+        read_credentials_status: None,
+        read_credentials: None,
+        public_data_only: false,
+        key: Some("test-public-key".into()),
+        secret: Some(STANDARD.encode([7u8; 32])),
+        recv_window: None,
+    });
     e.start(1000.0);
     let r = seed_requests(&mut e, 1000.0).pop().unwrap();
     reply(&mut e, &r, 200, MARKETS);
@@ -820,7 +824,7 @@ fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
 /// Answers one position and order re-read and returns its logs.
 fn reread(e: &mut Driver, socket: SocketId, positions: &str, orders: &str) -> Vec<String> {
     e.handle(1000.0, Event::WsOpened { socket });
-    for r in requests(e) {
+    for r in seed_requests(e, 1000.0) {
         if r.url.ends_with("/position") {
             reply(e, &r, 200, positions);
         } else if r.url.ends_with("/orders") {
@@ -980,7 +984,7 @@ fn unproven_missing_quantities_keep_prior_orders_and_never_start_repair() {
         let (mut e, socket) = ready_orders(&format!("[{ORDER}]"));
         let before = e.store().orders().to_vec();
         e.handle(1000.0, Event::WsOpened { socket });
-        let read = requests(&mut e)
+        let read = seed_requests(&mut e, 1000.0)
             .into_iter()
             .find(|r| r.url.ends_with("/orders"))
             .unwrap();
@@ -1029,7 +1033,7 @@ fn unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without
     for (round, price) in ["141", "142"].into_iter().enumerate() {
         let good = peer.replace("\"price\":\"140\"", &format!("\"price\":\"{price}\""));
         e.handle(1000.0, Event::WsOpened { socket });
-        for request in requests(&mut e) {
+        for request in seed_requests(&mut e, 1000.0) {
             if request.url.ends_with("/position") {
                 reply(&mut e, &request, 200, POSITIONS);
             } else if request.url.ends_with("/orders") {
@@ -1062,18 +1066,16 @@ fn unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without
 /// Keep the actual startup ticker replies parked while the private account chain completes.
 fn snapshot_unpriced_trigger() -> (Driver, SocketId, Vec<safe_cex_engine::HttpRequest>) {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    let mut e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_backpack::Backpack::new(safe_cex_venue_backpack::Options {
-            identity: None,
-            read_identity: None,
-            read_credentials_status: None,
-            read_credentials: None,
-            public_data_only: false,
-            key: Some("test-public-key".into()),
-            secret: Some(STANDARD.encode([7u8; 32])),
-            recv_window: None,
-        }),
-    );
+    let mut e = configured_account(safe_cex_venue_backpack::Options {
+        identity: None,
+        read_identity: None,
+        read_credentials_status: None,
+        read_credentials: None,
+        public_data_only: false,
+        key: Some("test-public-key".into()),
+        secret: Some(STANDARD.encode([7u8; 32])),
+        recv_window: None,
+    });
     e.start(1000.0);
     let markets = seed_requests(&mut e, 1000.0).pop().unwrap();
     reply(&mut e, &markets, 200, MARKETS);
@@ -1146,7 +1148,7 @@ fn snapshot_failed_streamed_orders_cannot_erase_accepted_trigger_relabeling() {
 fn snapshot_rejected_stream_keeps_trigger_relabeling(failed: bool) {
     let (mut e, socket, seeds) = snapshot_unpriced_trigger();
     e.handle(1000.0, Event::WsOpened { socket });
-    let read = requests(&mut e)
+    let read = seed_requests(&mut e, 1000.0)
         .into_iter()
         .find(|r| r.url.ends_with("/orders"))
         .unwrap();
@@ -1205,7 +1207,7 @@ fn snapshot_rejected_stream_keeps_trigger_relabeling(failed: bool) {
 fn snapshot_explicit_store_invalidation_discards_native_rows_and_repairs() {
     let (mut e, socket) = ready_orders(&format!("[{ORDER}]"));
     e.handle(1000.0, Event::WsOpened { socket });
-    let read = requests(&mut e)
+    let read = seed_requests(&mut e, 1000.0)
         .into_iter()
         .find(|r| r.url.ends_with("/orders"))
         .unwrap();
@@ -1246,7 +1248,7 @@ fn snapshot_exhaustion_keeps_writes_and_recurring_account_continuation() {
         let mut discarded = 0;
         let mut domains = 0;
         for _ in 0..6 {
-            let actions = e.drain_actions().collect::<Vec<_>>();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, at);
             for action in actions {
                 match action {
                     Action::Http(r) => {

@@ -7,7 +7,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Step};
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::Operation;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError, num};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -514,16 +514,7 @@ fn requested_symbol(raw: &str) -> String {
 
 impl Woo {
     fn fail_local_history(cx: &mut Cx<'_, Pending>, message: &str) {
-        let Ok(context) = cx.admit_http_command(Policy {
-            operation: Operation::Read,
-            credential: None,
-            timeout_ms: 20_000,
-            pacing: None,
-            retry: RetryPolicy::Never,
-        }) else {
-            return;
-        };
-        let _ = cx.fail_context(&context, message);
+        cx.refuse_command(Operation::Read, message);
     }
     pub(crate) fn history_command(
         &mut self,

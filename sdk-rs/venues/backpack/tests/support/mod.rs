@@ -197,3 +197,47 @@ fn ready_snapshot(
     }
     (e, private.expect("private socket"), logs, timers)
 }
+
+/// Install the actual deterministic credentials used by direct account fixtures.
+pub fn configured_account(mut options: Options) -> Driver {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{
+        Algorithm, CredentialSetupPolicy, IdentitySetupPolicy, KeyEncoding,
+    };
+    let identity = |key: &str, seed: &str| LocalIdentity {
+        key: Secret::new(key.into()),
+        secret: Secret::new(seed.into()),
+        secret_encoding: KeyEncoding::Base64,
+        ..Default::default()
+    };
+    let slot = IdentitySetupPolicy {
+        signing_algorithm: Some(Algorithm::Ed25519),
+        ..Default::default()
+    };
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: options
+                .key
+                .as_deref()
+                .zip(options.secret.as_deref())
+                .map(|(key, seed)| identity(key, seed)),
+            secondary: options
+                .read_credentials
+                .as_ref()
+                .map(|read| identity(&read.key, &read.secret)),
+        },
+        CredentialSetupPolicy {
+            primary: Some(slot),
+            secondary: Some(slot),
+        },
+    )
+    .unwrap();
+    options.identity = identities.primary.clone();
+    options.read_identity = identities.secondary.clone();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Backpack::new(options));
+    engine
+        .set_signer(Some(std::sync::Arc::new(provider)))
+        .unwrap();
+    engine.set_identities(identities).unwrap();
+    engine
+}
