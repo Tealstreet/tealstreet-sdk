@@ -1,6 +1,8 @@
 //! Venue-reported closed positions: raw `/api/v5/account/positions-history`
 //! rows, which the host maps with the TS mappers. `begin`/`end` are ignored by
-//! this endpoint; `before`/`after` are close-time bounds, paged by oldest `uTime`.
+//! this endpoint; `before`/`after` are exclusive close-time bounds. Each next
+//! page asks `after = oldest + 1`, so rows sharing the oldest millisecond that
+//! did not fit the page are fetched again; re-sent boundary rows are dropped.
 use crate::{Okx, Pending, sign};
 use safe_cex_engine::credential_selection::SlotPolicy;
 use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
@@ -14,6 +16,7 @@ use safe_cex_engine::selected_read::{
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, TimerId, VenueError, num};
 use serde::Deserialize;
+use std::collections::HashMap;
 
 const PAGE: usize = 100;
 const MAX_PAGES: u32 = 100;
@@ -31,7 +34,13 @@ pub struct Request {
     instrument: Option<String>,
     before: Option<f64>,
     count: usize,
+    fresh: usize,
     oldest: Option<i64>,
+    /// Raw rows at `oldest` this page, and every accepted row at the boundary
+    /// millisecond `seen` (counted, so byte-identical rows keep multiplicity).
+    at_oldest: Vec<String>,
+    seen: Option<(i64, HashMap<String, usize>)>,
+    resend: HashMap<String, usize>,
 }
 
 impl Request {
@@ -110,8 +119,7 @@ impl Okx {
         let walk = match to_ms {
             Some(to) => CursorWalk::starting_at(MAX_PAGES, num::format(to)),
             None => CursorWalk::new(MAX_PAGES),
-        }
-        .end_on_unchanged_cursor();
+        };
         self.request_closed_page(
             cx,
             Request {
@@ -124,7 +132,11 @@ impl Okx {
                 instrument,
                 before: from_ms,
                 count: 0,
+                fresh: 0,
                 oldest: None,
+                at_oldest: Vec::new(),
+                seen: None,
+                resend: HashMap::new(),
             },
         );
     }
@@ -144,7 +156,14 @@ impl Okx {
             }
         };
         request.count = 0;
+        request.fresh = 0;
         request.oldest = None;
+        request.at_oldest.clear();
+        request.resend = request
+            .seen
+            .as_ref()
+            .map(|(_, rows)| rows.clone())
+            .unwrap_or_default();
         let mut path = String::from("/api/v5/account/positions-history?instType=SWAP");
         if let Some(id) = &request.instrument {
             path.push_str(&format!("&instId={}", encode(id)));
@@ -189,14 +208,39 @@ impl Okx {
             .ok()
             .and_then(|row| row.u_time?.parse::<i64>().ok())
             .filter(|time| *time > 0);
-        if let Some(time) = time {
-            request.oldest = Some(request.oldest.map_or(time, |oldest| oldest.min(time)));
+        if let Some(time) = time
+            && request.oldest.is_none_or(|oldest| time < oldest)
+        {
+            request.oldest = Some(time);
+            request.at_oldest.clear();
         }
+        let boundary = request.seen.as_ref().map(|(at, _)| *at);
+        if time.is_some()
+            && time == boundary
+            && let Some(left) = request.resend.get_mut(item).filter(|left| **left > 0)
+        {
+            *left -= 1;
+            return;
+        }
+        if time.is_some() && time == request.oldest {
+            request.at_oldest.push(item.to_owned());
+        }
+        request.fresh += 1;
         page.stage(item.to_owned());
     }
 
     pub(crate) fn closed_response(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
-        let next = request.oldest.map(|oldest| (oldest - 1).to_string());
+        // A page the exclusive cursor did not bound (rows not older than it),
+        // full or short, cannot advance: repeating the cursor stops it as incomplete.
+        let cursor = request.history.cursor().and_then(|c| c.parse::<i64>().ok());
+        let unbounded = request
+            .oldest
+            .zip(cursor)
+            .is_some_and(|(oldest, cursor)| oldest >= cursor);
+        let next = request.oldest.map(|oldest| match cursor {
+            Some(cursor) if unbounded => cursor.to_string(),
+            _ => (oldest + 1).to_string(),
+        });
         let Some(leg) = &request.leg else { return };
         let step = {
             let Ok(mut page) = request.history.admit(cx, leg.context()) else {
@@ -205,8 +249,8 @@ impl Okx {
             page.advance(CursorPage {
                 next,
                 rows: request.count,
-                fresh: request.count,
-                want_more: request.count >= PAGE,
+                fresh: request.fresh,
+                want_more: request.count >= PAGE || unbounded,
             })
         };
         if let Some(leg) = request.leg.take() {
@@ -215,6 +259,20 @@ impl Okx {
         match step {
             CursorStep::Done | CursorStep::Stalled(_) => return Self::finish_closed(cx, request),
             CursorStep::More(_) => {}
+        }
+        if let Some(oldest) = request.oldest {
+            let at_oldest = std::mem::take(&mut request.at_oldest);
+            let rows = match request.seen.take() {
+                // Still inside the same millisecond: re-sent rows were skipped, so
+                // this page's new rows join the ones already accepted there.
+                Some((at, rows)) if at == oldest => rows,
+                _ => HashMap::new(),
+            };
+            let mut rows = rows;
+            for row in at_oldest {
+                *rows.entry(row).or_default() += 1;
+            }
+            request.seen = Some((oldest, rows));
         }
         let timer = cx.set_timer(PAGE_DELAY_MS);
         self.closed.delayed.push((timer, request));
