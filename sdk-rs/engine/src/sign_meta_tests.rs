@@ -429,4 +429,329 @@ mod sign_meta {
         assert_eq!(e.venue.queued, Some(Err(Error::Invalid)));
         assert_eq!(e.venue.actions_before, e.venue.actions_after, "nothing queued");
     }
+
+    // Originals 11 and 12 (selected path): role/Context consistency, expiry.
+
+    fn refused(mut e: Engine<Signer>) {
+        place(&mut e);
+        assert_eq!(e.venue.queued, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.actions_before, e.venue.actions_after, "nothing queued");
+    }
+    #[test]
+    fn a_read_role_cannot_sign_a_mutation_context() {
+        refused(engine(Signer {
+            role: Some(CredentialRole::Read { scope: None }),
+            ..Default::default()
+        }));
+    }
+    #[test]
+    fn a_secondary_slot_cannot_sign_a_mutation() {
+        refused(engine(Signer {
+            role: Some(CredentialRole::Read { scope: None }),
+            secondary: true,
+            ..Default::default()
+        }));
+    }
+    #[test]
+    fn session_auth_cannot_sign_a_command_context() {
+        refused(engine(Signer {
+            role: Some(CredentialRole::SessionAuth),
+            ..Default::default()
+        }));
+    }
+    #[test]
+    fn a_mutation_role_cannot_sign_a_read_context() {
+        let e = engine(Signer {
+            mode: Mode::Read,
+            role: Some(CredentialRole::Mutation),
+            ..Default::default()
+        });
+        assert_eq!(e.venue.queued, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.actions_before, e.venue.actions_after);
+    }
+    #[test]
+    fn a_session_context_takes_only_session_auth() {
+        let e = engine(Signer {
+            mode: Mode::Session,
+            role: Some(CredentialRole::Mutation),
+            ..Default::default()
+        });
+        assert_eq!(e.venue.queued, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.actions_before, e.venue.actions_after);
+    }
+    #[test]
+    fn an_expired_task_has_no_metadata() {
+        let mut e = engine(Signer::default());
+        drain(&mut e);
+        place(&mut e);
+        let mut actions = drain(&mut e);
+        let token = preparation(&actions);
+        e.http_prepared(
+            1.5,
+            token,
+            Prepared {
+                id: token.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        actions.extend(drain(&mut e));
+        let task = sign_action(&actions).expect("host-visible Action::Sign");
+        assert!(e.sign_meta(task).is_some(), "live task metadata");
+        let deadline = e.venue.context.as_ref().unwrap().deadline();
+        let timer = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms <= deadline => Some(*timer),
+                _ => None,
+            })
+            .expect("the request's deadline timer");
+        e.handle(deadline, Event::TimerFired { timer });
+        assert_eq!(e.sign_meta(task), None, "expired metadata grants nothing");
+    }
+
+    // Originals 9 and 10: a nonce claim is the only role source.
+    #[cfg(feature = "dispatch-nonce")]
+    mod nonce {
+        use super::*;
+        use crate::nonce::{KRAKEN, NonceClaim};
+
+        fn account() -> Identity {
+            identity("primary").with_stable_id(Some("sign-meta/account".into()))
+        }
+
+        struct Recipe(NonceClaim);
+        impl crate::SignStep for Recipe {
+            fn nonce_claim(&self) -> Option<&NonceClaim> {
+                Some(&self.0)
+            }
+            fn prepare(
+                &mut self,
+                outbound: &mut Action,
+                dispatch: &crate::DispatchContext<'_>,
+            ) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+                let nonce = dispatch
+                    .reserve_nonce(&self.0)
+                    .map_err(|_| crate::signing::SignError::Unavailable)?;
+                let Action::Http(_) = outbound else {
+                    return Err(crate::signing::SignError::InvalidRequest);
+                };
+                Ok(crate::signing::SignRequest {
+                    receipt: crate::signing::SignReceipt {
+                        nonce: Some(nonce),
+                        stamp_ms: Some(dispatch.stamp_ms()),
+                        expiry_ms: None,
+                    },
+                    context: Default::default(),
+                    operations: vec![crate::signing::Operation::Present {
+                        key: KeyRef("primary-key".into()),
+                    }],
+                })
+            }
+            fn apply(
+                &mut self,
+                _: &mut Action,
+                _: &crate::signing::SignResult,
+            ) -> Result<(), crate::signing::SignError> {
+                Ok(())
+            }
+            fn freshness_ms(&self) -> f64 {
+                3_000.
+            }
+        }
+
+        #[derive(Clone, Copy, Default, PartialEq)]
+        enum Path {
+            #[default]
+            Plain,
+            Selected,
+            /// A Mutation claim offered for a Read Context.
+            PlainOnRead,
+        }
+
+        #[derive(Default)]
+        struct Nonced {
+            path: Path,
+            context: Option<Context>,
+            queued: Option<Result<(), Error>>,
+            unchanged: bool,
+        }
+        impl Nonced {
+            fn queue(&mut self, cx: &mut Cx<'_, Option<Context>>, operation: Operation) {
+                let slots = Slots::new(Some(account()), None, SlotPolicy::default());
+                let (selection, chosen, claim) = slots
+                    .select_with_nonce(CredentialRole::Mutation, &KRAKEN)
+                    .unwrap();
+                let credential = selection.credential(chosen.credential.clone());
+                let policy = Signer::policy(operation, credential);
+                let context = if operation == Operation::Read {
+                    cx.http_context(Scope::Background, policy).unwrap()
+                } else {
+                    cx.admit_http_command(policy).unwrap()
+                };
+                self.context = Some(context.clone());
+                let before = (cx.io.core.next_id, cx.io.core.actions.len());
+                let step = Box::new(Recipe(claim));
+                let result = if self.path == Path::Selected {
+                    cx.request_selected_managed(
+                        context.clone(),
+                        &selection,
+                        None,
+                        Method::Post,
+                        "https://venue.test/nonce".into(),
+                        Some("body".into()),
+                        step,
+                        Some(context),
+                    )
+                } else {
+                    cx.request_signed_managed(
+                        context.clone(),
+                        None,
+                        Method::Post,
+                        "https://venue.test/nonce".into(),
+                        Some("body".into()),
+                        step,
+                        Some(context),
+                    )
+                };
+                self.queued = Some(result.map(drop).map_err(|(_, error)| error));
+                self.unchanged = (cx.io.core.next_id, cx.io.core.actions.len()) == before;
+            }
+        }
+        impl Venue for Nonced {
+            type Pending = Option<Context>;
+            fn dispatch_nonce() -> bool {
+                true
+            }
+            fn http_release() -> crate::HttpRelease<Self> {
+                crate::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+            }
+            fn start(&mut self, cx: &mut Cx<'_, Option<Context>>) {
+                if self.path == Path::PlainOnRead {
+                    self.queue(cx, Operation::Read);
+                }
+            }
+            fn on_command(&mut self, cx: &mut Cx<'_, Option<Context>>, _: Command) {
+                self.queue(cx, Operation::Mutation);
+            }
+            fn on_response(&mut self, _: &mut Cx<'_, Option<Context>>, _: Option<Context>, _: Response<'_>) {}
+            fn on_request_failed(&mut self, _: &mut Cx<'_, Option<Context>>, _: Option<Context>, _: &str) {}
+            fn on_timer(&mut self, _: &mut Cx<'_, Option<Context>>, _: TimerId) {}
+            fn guard_pending_placements(&self) -> bool {
+                true
+            }
+            fn guard_order_mutations(&self) -> bool {
+                true
+            }
+            fn capture_http_reconciliation(
+                &self,
+                _: &Option<Context>,
+            ) -> Result<crate::request_context::ReconciliationData, Error> {
+                crate::request_context::ReconciliationData::new("sign-meta-nonce".into())
+            }
+            fn on_open(&mut self, _: &mut Cx<'_, Option<Context>>, _: SocketId) {}
+            fn on_close(&mut self, _: &mut Cx<'_, Option<Context>>, _: SocketId, _: u16) {}
+            fn on_message(&mut self, _: &mut Cx<'_, Option<Context>>, _: SocketId, _: &str) {}
+            fn book(&self, _: &str) -> Option<&Book> {
+                None
+            }
+            fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+                Box::new(std::iter::empty())
+            }
+        }
+
+        fn nonced(path: Path) -> Engine<Nonced> {
+            let mut e = crate::test_support::seeded_engine(Nonced {
+                path,
+                ..Default::default()
+            });
+            e.set_identities(Identities {
+                primary: Some(account()),
+                secondary: None,
+            })
+            .unwrap();
+            e.start(0.);
+            e.handle_command(
+                1.,
+                Command::PlaceOrders {
+                    command: 7,
+                    orders: vec![
+                        serde_json::from_str(
+                            r#"{"symbol":"BTCUSD","type":"limit","side":"buy","amount":1,"price":1}"#,
+                        )
+                        .unwrap(),
+                    ],
+                },
+                None,
+            )
+            .unwrap();
+            e
+        }
+        fn task(e: &mut Engine<Nonced>, token: Preparation, now: f64) -> RequestId {
+            e.http_prepared(
+                now,
+                token,
+                Prepared {
+                    id: token.attempt().request.0,
+                    expires_at: None,
+                },
+            );
+            sign_action(&e.drain_actions().collect::<Vec<_>>()).expect("host-visible Action::Sign")
+        }
+
+        #[test]
+        fn the_selected_wrapper_refuses_a_nonce_recipe_before_any_work() {
+            let e = nonced(Path::Selected);
+            assert_eq!(e.venue.queued, Some(Err(Error::Invalid)));
+            assert!(e.venue.unchanged, "no ID, Bind, provider work or reservation");
+        }
+        #[test]
+        fn a_nonce_recipe_reports_its_claims_role_and_keeps_it_across_stale_repair() {
+            let mut e = nonced(Path::Plain);
+            let token = preparation(&e.drain_actions().collect::<Vec<_>>());
+            let first = task(&mut e, token, 1.5);
+            let before = e.sign_meta(first);
+            assert!(before.is_some(), "claim role recorded automatically");
+            let before = before.unwrap();
+            assert_eq!(before.role, CredentialRole::Mutation);
+            assert_eq!(
+                before.owner,
+                SignOwner::Managed {
+                    request: token.attempt().request,
+                    generation: token.attempt().generation,
+                }
+            );
+            // Past freshness: the repair reserves a new nonce under a new task.
+            e.handle(
+                5.,
+                Event::Signed {
+                    attempt: first,
+                    result: Ok(crate::signing::SignResult::new(
+                        vec![b"value".to_vec()],
+                        crate::signing::SignReceipt {
+                            nonce: e.sign_meta(first).map(|_| 0),
+                            stamp_ms: Some(5.),
+                            expiry_ms: None,
+                        },
+                    )),
+                },
+            );
+            let token = preparation(&e.drain_actions().collect::<Vec<_>>());
+            let second = task(&mut e, token, 5.5);
+            assert_ne!(first, second);
+            assert_eq!(e.sign_meta(first), None);
+            let after = e.sign_meta(second);
+            assert!(after.is_some(), "the repaired task keeps its metadata");
+            let after = after.unwrap();
+            assert_eq!(
+                (after.owner, after.deadline_ms, after.role),
+                (before.owner, before.deadline_ms, before.role)
+            );
+        }
+        #[test]
+        fn a_mutation_claim_cannot_sign_a_read_context() {
+            let e = nonced(Path::PlainOnRead);
+            assert_eq!(e.venue.queued, Some(Err(Error::Invalid)));
+            assert!(e.venue.unchanged);
+        }
+    }
 }
