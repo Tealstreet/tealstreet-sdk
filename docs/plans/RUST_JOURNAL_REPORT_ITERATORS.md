@@ -69,3 +69,23 @@ formatting passes. The new report-control name originally contained the token
 for a forbidden JSON feature, despite testing unrelated report ordering. Only
 its name is corrected; its body and production source remain unchanged. The
 renamed control and formatting pass again, followed by full bans/ratchets.
+
+
+## Resumed landing-tip verification
+
+The plain merge of actual `34999f973f9` gives source `86b14d8fd2c`; README is
+incoming plus this plan row once, with no source conflicts. The own production
+and control bodies are unchanged. The incoming engine change is the separately
+landed socket repair helper, outside this cut's report code.
+
+A fresh same-tip pair again measures Bitget 1,475,547 -> 1,475,379 (-168) and
+Bybit 1,397,889 -> 1,397,793 (-96), with Web/Node agreement and unchanged
+Rust 1.99.0/Binaryen 132 profiles. All four shipped artifacts are byte-identical
+to their earlier same-source measurements; credit remains the measured result.
+The completed measurement target is removed, retaining artifacts and receipts.
+
+Focused report controls pass 7/7 with serial/condition/barrier/nonce features
+and 6/6 with declared/nonce features. Strict all-target Clippy passes both
+compositions; scoped formatting and full bans/ratchets pass. The earlier full
+feature-matrix evidence remains recorded above. This integration enables the
+PR-triggered Rust workflow previously blocked by the README conflict.
