@@ -25,6 +25,15 @@ preimage. New read-only metadata must come from the actual owning task/Selection
 not from callback options or advisory SignRequest.context. The exact export and
 original session-login task mapping are shared-owner source gates.
 
+Proposed engine seam, requiring m26ps4, fe7lgm and uufub4 review before source:
+Action::Sign gains typed engine-filled meta {attempt, deadline_ms, slot, role}.
+Slot comes from the owning Context Credential; role is retained from Selection
+at admission (SessionAuth for socket/REST login send_signed/connect_signed).
+The deadline comes from the already-computed absolute task window. EngineHost
+exports this read-only; it cannot reconstruct authority from received payloads,
+receive time or timeoutMs. Session-login mapping must use the genuine task.
+This is an API proposal, not a claim that the seam exists or is approved.
+
 Current remoteSignerProvider accepts HmacSha256, UTF-8 sign payloads and
 stamp/expiry receipts; it refuses nonce, result parts and remote Secondary.
 Registry hosted capture selects Primary, has no nonce/descriptor and formats a
@@ -62,11 +71,11 @@ sign-res.d = {
   request cannot acquire one in transport. Results echo exactly the original
   receipt; omitted, changed, extra or malformed facts refuse.
 - slot and role are typed metadata from the immutable engine Selection; role
-  preserves the declared Read/PrimaryRead reason/Mutation/SessionAuth intent,
-  never authority inferred from HTTP method. Peer family rules double-check
-  role/path/method/slot agreement. Exact metadata export is reviewed with m26ps4
-  and uufub4 before source. No
-  KeyRef, extra-role reference or caller-selected peer key crosses the channel.
+  preserves the exact Read{scope}, PrimaryRead{reason,scope}, Mutation or
+  SessionAuth intent, never authority inferred from HTTP method. Peer family rules double-check
+  role/path/method/slot agreement. Exact metadata export is reviewed with m26ps4,
+  fe7lgm and uufub4 before source. No KeyRef, extra-role reference or
+  caller-selected peer key crosses the channel.
   accountName routes only within the authenticated account binding; never
   broadcast to other accounts. Envelope claims alone confer no authority.
 - Existing serde SignRequest remains the LOCAL provider work type. The wire
@@ -75,9 +84,15 @@ sign-res.d = {
   with its OWN installed refs. SignResult uses existing raw byte-array values,
   receipt and existing strict parsing; do not invent a second signature format.
 - Family metadata fixes the complete operation graph and widths. The origin
-  checks the recomputed work against the original graph/preimage and maps the
-  result back to that pending task only. Unknown/duplicate fields, tags,
-  versions, mixed result/error or illegal graph dependencies refuse. Preserve
+  checks its OWN original work against the outgoing descriptor before sending;
+  the peer alone rebuilds work with its own refs. On return the origin checks
+  count, widths, encoding and exact receipt echo, then maps the result only to
+  that pending task. Stark additionally verifies r/s against the bound public
+  subkey. A secretless HMAC origin cannot verify the MAC or inspect the peer
+  graph; venue rejection remains the cryptographic backstop. No HMAC-origin
+  verification claim or test substitutes for that boundary. Unknown/duplicate
+  fields, tags, versions, mixed result/error or illegal graph dependencies refuse.
+  Preserve
   existing 1 MiB work, 32 operation and 256-part limits. Proposed new op-wire
   bound is 1 MiB UTF-8 encoded JSON, checked before parsing and after encoding;
   review this additional bound before source. It does not alter legacy v1.
@@ -194,9 +209,14 @@ Preserve that 300s relationship; it does not extend the <=5s signing window.
 Order timestamps are native milliseconds and remain frozen across any separately
 authorized same-command re-sign. No new automatic resend. Expired command or
 signed validity refuses; reconstruction applies only to future commands. Before
-source, m26/security review must pin the peer's accepted timestamp-skew policy
-and 300s future-validity checks against its own clock, without relaxing execution
-deadlines or silently changing native auth expiry.
+source, security must approve this proposed peer policy: auth expiration must
+equal timestamp + 300 seconds exactly; auth timestamp seconds must be within
+[peer_now - 30s, peer_now + 30s]. Order signature timestamp milliseconds uses
+the same 30-second skew bound. These checks use the peer's own clock and never
+widen the <=5s execution bound (minimum of the original deadline and capture
+cap). Preserve native units and exact 300s validity; malformed or out-of-skew
+fields refuse before signing. These numbers are proposed security pins, not
+source authorization.
 
 JWT uses the landed Session-bearer revision fence: /auth is Session login;
 refresh moves the Bearer revision, session_ready follows refresh, NotReady parks
@@ -241,6 +261,8 @@ Originals precede source and retain existing hosted HmacSha256 wire controls:
    invoke no signing callback and do not enter the server fatal-error streak.
    Cross-account routing, slot fallback, unknown op disguised as http/ws-auth,
    bare digest under an allowed tag and added arbitrary graph/KeyRef all refuse.
+   The 1 MiB op-wire originals exercise pre-parse receive refusal and
+   post-encode send refusal, including UTF-8 byte length rather than JS length.
 2. Complete receipt presence/equality, exact nonce/descriptor/header/form,
    malformed u64 and 32/64-byte graph/result controls; literal vectors plus
    independent Node/Python HMAC and independent Stark verification.
