@@ -387,35 +387,39 @@ fn a_short_refusal_after_long_accepted_reports_the_refusal() {
     refusal_beside_accepted(false);
 }
 
+/// Ruling (a): the terminal text is the earliest logical failing leg's (long),
+/// in either callback order; kind, outcome and evidence are the journal's.
 #[test]
-fn both_refused_reports_the_last_refusal_as_native_does() {
+fn both_refused_report_the_long_legs_refusal_in_either_order() {
     for long_first in [true, false] {
         let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
         set_leverage(&mut h);
         let (long, short) = legs(&h);
         let (long, short) = (long.expect("long"), short.expect("short"));
-        let (first, second, last) = if long_first {
-            (
-                (&long, REFUSED),
-                (&short, REFUSED_SHORT),
-                "Margin mode cannot be adjusted",
-            )
+        let positions = count(&h, "account/positions");
+        if long_first {
+            answer(&mut h, &long, 200, REFUSED);
+            answer(&mut h, &short, 200, REFUSED_SHORT);
         } else {
-            (
-                (&short, REFUSED_SHORT),
-                (&long, REFUSED),
-                "Leverage cannot be adjusted",
-            )
-        };
-        answer(&mut h, first.0, 200, first.1);
-        answer(&mut h, second.0, 200, second.1);
+            answer(&mut h, &short, 200, REFUSED_SHORT);
+            answer(&mut h, &long, 200, REFUSED);
+        }
         let error = failure(&h, 7);
-        assert_eq!(error.outcome, Some(Outcome::Rejected));
-        // The native oracle: the last failing arrival's exact text. The journal
-        // selects the earliest logical leg; the divergence awaits a ruling.
         assert_eq!(
-            error.message,
-            format!("BloFin setting rejected: {last}"),
+            error.message, "BloFin setting rejected: Leverage cannot be adjusted",
+            "{long_first}"
+        );
+        assert_eq!(error.outcome, Some(Outcome::Rejected), "{long_first}");
+        assert_eq!(
+            error.kind,
+            Some(safe_cex_engine::ErrorKind::Rejected),
+            "{long_first}"
+        );
+        assert_eq!(error.venue_code.as_deref(), Some("110006"), "{long_first}");
+        assert_ne!(leverage(&h), 30.0);
+        assert_eq!(
+            count(&h, "account/positions"),
+            positions + 1,
             "{long_first}"
         );
     }

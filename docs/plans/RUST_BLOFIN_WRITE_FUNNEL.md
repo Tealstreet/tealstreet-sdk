@@ -218,27 +218,18 @@ after_refusal: []}`.
 - Pre-commit group abort (a preparation, signing or deadline failure before the
   barrier opens) goes through the shared NotSent owner-retirement path and never
   waits for a second callback that cannot come.
-- **Which error is reported: OPEN, routed for a ruling (hcmq3f).** Native
-  (`9977ccf1aa6` trading.rs:1603-1635) overwrites `joined.error` on every
-  failing callback, keeping Unknown sticky, so it reports the LAST failing
-  callback by arrival. fe7lgm, 4yjlw0 and hcmq3f confirm that reading. The
-  journal cannot express it: `failure_projection` (request_context.rs,
-  "terminal physical attempt of the earliest logical leg … Callback order is
-  irrelevant") selects the earliest logical failing leg's error, and
-  `fail_plan` → `prepare_seal` reaches that projection. The engine test
-  `partial_unknown_survives_earlier_error_selection_and_keeps_explicit_reports`
-  pins it. With both legs refused, native reports the later arrival, while the
-  journal reports long's (slot 0) in either order. The venue will not force
-  native-last by editing outcome or kind, forging or omitting facts,
-  reordering logical legs or appending text. Options for the classifier, core
-  and overseer ruling:
-  (a) a documented diagnostic divergence: the terminal text is the earliest
-      logical failing leg (long), while kind, outcome, IDs and reports are
-      unchanged. Recommended: both texts refuse the same setting, and the
-      difference is diagnostic only.
-  (b) a separately authorized shared message-selection seam that preserves the
-      journal's kind, outcome, IDs and reports.
-  The both-refused RED uses full message equality against the ruled oracle.
+- **Which error is reported: RULED (a), ddi2il 2026-10-26.** With dazzy3
+  (classification) and uufub4 (core) independently supporting it, the terminal
+  text is the journal's: the earliest logical failing leg, which is long (slot
+  0), in either callback order. That's `failure_projection`, pinned by
+  `partial_unknown_survives_earlier_error_selection_and_keeps_explicit_reports`.
+  Native's `finish_join` reported the last failing arrival, which depends on
+  network timing and carries nothing callers can rely on. CALLERS records this
+  as a canonical diagnostic divergence. Kind, outcome, IDs and reports are
+  unchanged. The ruling covers this message only, not kind or outcome. The
+  venue injects no native-last text through `fail_plan` and forges, omits or
+  reorders no facts. Mixed acceptance, refusal and Unknown cases stay
+  journal-owned.
 - **Outcome of one refusal plus one Accepted (fe7lgm P2).** This must be the
   journal's projection through `fail_plan`. The engine's `failure_projection`
   gives None when a leg was released, none is uncertain and not all were
@@ -345,9 +336,10 @@ W2 (each fails on W1's serial interim):
 - a duplicate response or a duplicate failure for a settled leg changes
   nothing, and root expiry retires the job once and the FIFO proceeds;
 - reported error: a short refusal before long's Accepted, and after it, gives
-  outcome None and the refusal's text and kind. Both refused, in both orders,
-  is asserted by full message equality against the native oracle (the last
-  failing arrival) until the ruling above says otherwise;
+  outcome None and the refusal's text and kind. Both refused, in both callback
+  orders, asserts the same exact earliest-leg diagnostic (long's refusal text)
+  and the full evidence (kind and outcome Rejected, no commit, the refresh),
+  per uufub4's condition on ruling (a);
 - a short transport loss after long's Accepted gives Unknown, no commit, and the
   refresh (a failure counts as settled);
 - both legs released and neither answering until the call bound gives one
