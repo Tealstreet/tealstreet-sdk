@@ -760,6 +760,11 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
         failed(&output, OWNER)[0].outcome,
         Some(safe_cex_engine::Outcome::Unknown)
     );
+    // Order reads issued after the loss; the reconcile read is one of them.
+    let mut after: Vec<_> = output
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders-pending")))
+        .collect();
     let cancel_all = |engine: &mut Engine<Okx>, command, now| {
         engine.handle(
             now,
@@ -776,12 +781,13 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
         Some("Placement outcome is uncertain; reconcile before cancel-all")
     );
     // The venue answers the engine's uncertain reconcile with a fresh order read.
-    let (mut reads, _) = release(&mut engine, 8.);
-    let read = reads
-        .iter()
-        .position(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders-pending")))
-        .map(|i| reads.remove(i))
-        .expect("a fresh reconcile read");
+    let (later, _) = release(&mut engine, 8.);
+    after.extend(
+        later
+            .into_iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders-pending"))),
+    );
+    let read = after.pop().expect("a fresh reconcile read");
     reply(&mut engine, &read, &support::envelope(""), 9.);
     let _ = release(&mut engine, 9.);
     assert_ne!(

@@ -228,6 +228,6 @@ To confirm the behaviour each one pins, the same three were run once with that a
 
 - `a_managed_code_one_cancel_fails_the_plan_without_continuing` passes natively. The code-1 stop and restore are native parity.
 - `a_dependent_replacement_never_runs_after_its_cancel_is_refused` passes natively. A refused prerequisite cancel issues no replacement.
-- `a_lost_create_fences_cancel_all_until_the_reconcile_snapshot` fails natively, at 'a fresh reconcile read'. A lost create does fence cancel-all, but OKX never issues the reconcile read, because it has no `reconcile_uncertain` hook. That is gap 3, so the fence never clears.
+- `a_lost_create_fences_cancel_all_until_the_reconcile_snapshot` fails natively at 'the fresh snapshot clears the fence'. A lost create fences cancel-all. OKX's native refresh (`account_after_uncertain_write`) issues an order read while it handles the loss, and that read is answered, but cancel-all stays fenced: no engine-requested reconcile reports through `orders_reconciled` after the seal. That is gap 3; the fix wires `reconcile_uncertain`. The test takes the reconcile read from every output after the loss, not from one later release.
 
 The target now runs 16 controls: 5 REDs, 11 GREEN, 0 ignored.
