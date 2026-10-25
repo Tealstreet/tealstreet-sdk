@@ -53,8 +53,10 @@ Reviewer for the shared socket API: claude-dazzy3.
   - Wins over `recover`.
 - **Evidence.** `AuthEvidence::RouteRefused(VenueError)` is a new pre-login control result. The driver retires the epoch with a new `RetireReason::RouteRefused`.
   - The next connect carries `reject_route`.
-  - **Backoff bound (dazzy3 A, option i).** Only the first refusal of a streak skips backoff. Every later refusal in the same streak reconnects at ordinary backoff pace, so a host that ignores `reject_route` can never hot-loop on a deterministic 40018/40024. A conforming host still walks every candidate, paying the backoff per extra route. A successful login ends the streak. The producer owns this bound: the managed driver on the managed path, the venue supervisor on the legacy path.
-- **Composition with `recover` (dazzy3 C).** `reject_route` and `recover` are orthogonal and are both carried. `reject_route` decides the candidate for that one connect: advance exactly one, and do not apply `recover`'s jump-to-last in the same connect. `recover` keeps its meaning for venue state: classic Bitget's `needs_recovery` resubscribe is still carried and honoured, so a route switch never drops recovery.
+  - **Backoff bound (dazzy3 A, option i).** Only the first refusal of a streak skips backoff. Every later refusal in the same streak reconnects at ordinary backoff pace, so a host that ignores `reject_route` can never hot-loop on a deterministic 40018/40024. A conforming host still walks every candidate, paying the backoff per extra route. A successful login ends the streak. The producer owns this bound: the managed driver on the managed path, the venue supervisor on the legacy path. The TS counters (2 unauthenticated closes, 6 failed connects) and exhaustion also cap the total redials before the socket stops.
+  - RED: a host that ignores `rejectRoute` sees one immediate redial, then backoff-paced attempts, then a stop. It never sees a tight loop.
+- **Composition with `recover` (dazzy3 C).** `reject_route` and `recover` are orthogonal and are both carried. `reject_route` decides the candidate for that one connect: advance exactly one, and do not apply `recover`'s jump-to-last in the same connect. `recover` keeps its meaning for venue state: classic Bitget's `needs_recovery` resubscribe is still carried and honoured, so a route switch never drops recovery. In short, the host advances the route even when `recover` is set, and nothing else about `recover` changes.
+  - RED: a classic route switch with `needs_recovery` set advances one candidate and still carries `recover`. The reconnect runs the classic recovery resubscribe.
 - **Exhaustion.**
   - When a `reject_route` connect has no candidate left, the host does not dial. It emits `Event::WsRouteExhausted { socket }`.
   - That event is host-only, enqueued after `connect` returns, and dropped for a stale socket.
@@ -71,7 +73,10 @@ Reviewer for the shared socket API: claude-dazzy3.
 
 - **Pre-login refusal.** A 40018 (IP-bound key) or 40024 (restricted location) refusal before login maps to `RouteRefused`. It logs TS's "trying the next route" warning and reports no error.
 - **Exhaustion (ruling 3, matches TS).** On route exhaustion, report the native egress refusal once as an `AUTH_REJECTED` notice, never a startup failure or deactivation, and stop reconnecting the private socket. There is no silent retry loop; a test pins zero reconnects after exhaustion. Recovery is a new start, as in TS.
-  - **The stop releases startup cleanly.** REST startup and public feeds are unaffected, and nothing waits on the stopped private socket. A RED pins that startup resolves with no hang.
+  - **Startup settles (dazzy3 D).** Bitget's private startup readiness is the REST loads (`startup_ready` = balance && positions && orders, `account.rs:995`), not private-socket auth. Public readiness is markets && tickers. If exhaustion happens before the private socket ever authenticates, nothing waits on it.
+    - `start()` resolves normally, with REST-loaded private state plus the one `AUTH_REJECTED` notice. It is never `StartupFailed` and never a deactivation.
+    - The venue marks the account degraded, so the account poll refreshes balance and orders every tick in place of the stopped stream.
+    - The zero-reconnects RED pins all of this: exhaustion before first auth gives no `StartupFailed`, loaded startup state, one notice, and zero further private connects.
   - dazzy3 proposed instead retrying the last route under a long capped backoff (60 s or more). That is recorded as the alternative; ruling 3 stands unless the overseer reopens it.
 - **TS counters.** Carried over as data: `MAX_UNAUTHENTICATED_TUNNEL_CLOSES = 2` and `MAX_FAILED_TUNNEL_CONNECTS = 6`. Each sends `reject_route` once its threshold is met.
 - **REST is unchanged.** REST 40018 keeps `AuthPermission`.
