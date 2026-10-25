@@ -2,7 +2,8 @@
 
 Owner: codex-ih35js. Engine reviewer: claude-fe7lgm or claude-dazzy3.
 Original source base: 7ada358c4460ec1e0965f776f5494c628efb3cbd.
-Status: plan first; production is unchanged. Original controls follow separately.
+Status: plan plus executed originals; production is unchanged. Scope excludes
+commandless late repair under the overseer ruling.
 
 ## Scope and preservation
 
@@ -41,7 +42,9 @@ planned in the consumer. No new legacy fingerprints or signing primitives.
   They go unsigned only when native did. Existing private read_slots requires a
   Primary; do not silently transplant that policy to public reads. Use shared
   Slots with explicit native per-caller policy and pass selected Identity into
-  the existing Http recipe. Preserve read-key validation/startup precedence.
+  the existing Http recipe. Build both public/private Slots together in the
+  existing read_slots setup from the same validated identities; no new read-key
+  extraction path. Preserve read-key validation/startup precedence.
 
 ## Discovery, depth and candles
 
@@ -68,7 +71,8 @@ and expiry policy before moving guards; retain the existing PublicTrades stale
 
 ## Command-owned writes
 
-Admit begin_preflight(WriteAfterReads, Primary write) at the genuine entry;
+Admit begin_preflight(WriteAfterReads, read credential None, Primary write) at
+the genuine entry;
 validate the complete deterministic native job before any optimistic Store,
 progress, account revision or dispatch effect. Preserve native precedence:
 planning is computed first but duplicate/jobs32/credentials/settings gates win
@@ -86,8 +90,14 @@ Each DATA callback validates_plan_delivery before decoding or Store/progress.
 Classify from native envelope/row evidence, record http_write_fact or
 http_write_batch including ordered accepted IDs, then continue_serial_plan
 only from exact proven DATA. No write resend: attempts1 and Never. Native
-rejection stops; mixed cancel rows retain confirmed effects and IDs, while
-ambiguous/malformed/HTTP/transport failures stop and reconcile without retry.
+placement rejection stops. Cancel row errors, including mixed accepted/refused
+rows, currently stop as Unknown: retain confirmed Store effects, restore only
+unchanged refused rows, preserve native IDs and reconcile without resend. Pin
+that native policy; do not transplant KnownPartial continuation from another
+venue. Record PartialUnknown for such a native unproven failure. If a genuinely
+definitive mixed fact is later supported, record KnownPartial, finish_plan_call
+and fail_plan to stop with IDs preserved, never continue by accident. Other
+ambiguous/malformed/HTTP/transport failures also stop and reconcile without retry.
 Preserve client-ID progress after admission but before physical release.
 Terminal projection uses the shared journal via done_plan/fail_plan; do not
 bypass it with numeric done/fail or fabricate accepted IDs.
@@ -104,7 +114,7 @@ Native cancel_late/late_next sends cancel-by-order-ID with Request.command=None
 from a later private stream or reconciliation read, after original commands
 have finished. It sequences one repair write at a time, emits diagnostics and
 refreshes/reconciles; it never sends a command terminal. This behavior is pinned
-by existing late_landing and two-group cancel controls and new native controls.
+by the unchanged native late_landing and two-group cancel controls.
 
 At this base there is no reviewed constructor for this commandless Mutation,
 confirmed by fe7lgm. Background+Mutation is refused by design. Read executions
@@ -112,11 +122,25 @@ cannot become writes; planned executions require a genuine founder Preflight.
 Session authority is for authentication, not order repair. Do not fabricate a
 command, reuse retired authority, copy a venue issuer or relabel this as Read.
 
-A scope ruling is pending: either the whole28-site cutover waits for a shared
-repair primitive, or supported paths migrate while the exact existing repair
-fingerprints remain an explicitly owned exclusion. No source decision or new
-staging row is assumed here. A JSON inventory cannot hold comments: name the
-core prerequisite here and in CALLERS, while its map retains only live sites.
+The overseer ruled: migrate supported paths now and keep cancel_late/late_next
+as a named, unchanged exclusion. Preserve the existing legacy repair dispatcher
+and its common request helper; no new legacy site or alternative managed bypass.
+The intended retained live fingerprints are listed below; re-dump before freeze
+and retain only the exact still-live entries, with no count growth. JSON cannot
+hold comments: this plan and CALLERS name the prerequisite, while the ratchet
+records the holdouts. The initial consumer is not a 28-to-zero claim.
+
+| Repair holdout file | Existing fingerprint | Count |
+| --- | --- | ---: |
+| venues/phemex/src/lib.rs | fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6 | 1 |
+| venues/phemex/src/lib.rs | 34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc | 1 |
+| venues/phemex/src/lib.rs | 6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219 | 1 |
+| venues/phemex/src/trading.rs | e6f9b79a027f31adbd5a2b4c25669770848c36a0b761835a87f5783a961f4790 | 1 |
+
+The named prerequisite is **Constrained known-order cancel repair**. After this
+consumer's source is up, codex-ih35js writes its separate core plan, fe7lgm
+reviews it, and a second real venue consumer must be named before approval.
+Phemex's remaining repair fingerprints go to zero on that actual core landing.
 The shared primitive requires its own core plan/review: constrained cancel of
 an already-known order, no place/amend or command terminal, uncertain-write
 fence/order-lock composition, Never, managed signing/expiry/pacing, and a second
@@ -147,6 +171,10 @@ readd, native retry/resync timing, max1000 split+brackets and multi-input order,
 mixed/refused/unknown writes, prior accepted IDs and id-less effects, released
 signing-expiry reconciliation, concurrent settings/duplicate IDs and late repair.
 Retain every existing assertion; fixture glue may drive genuine host handshake.
+The unchanged trading::late_landing_seen_on_the_private_stream_is_canceled_immediately
+control was independently executed GREEN. A duplicate setup in the new target
+was discarded because it did not reproduce that fixture; no runtime diagnosis
+or clearance is inferred from that discarded attempt.
 
 ## Inventory, measurement and freeze
 
@@ -193,3 +221,16 @@ requires 8x5tm1's exact-tree GO. Bitget size cuts remain separate after #2122.
 | `venues/phemex/src/trading.rs` | `db4da6f92276f049047ceb4f85c06083f4c683531dd3d76b0a5ba44d9e2d5cb7` | 1 |
 | `venues/phemex/src/trading.rs` | `e6f9b79a027f31adbd5a2b4c25669770848c36a0b761835a87f5783a961f4790` | 1 |
 | `venues/phemex/src/trading.rs` | `06d49adf719c2e5ba5712d013a8bd485f49a8559eab9fbd74b8265789e9e3c9c` | 1 |
+
+## Original checkpoint execution
+
+On unchanged runtime at7ada358c446, the dedicated target executes22 controls:
+13 intended assertion REDs (actual eager release, early DATA publication,
+caller deadline omission and optimistic Store under genuine capacity pressure),
+9 native GREENs, zero ignored. Native positives pin optional Secondary-only
+public signing, read-vs-lookup selection, deduplicated fill values, exact order
+bytes/progress, actual signing-expiry reconciliation, empty-job credential
+precedence, 1000 split calls with ordered IDs, depth buffering and mixed cancel
+Unknown/row restoration. The separately executed unchanged native late-repair
+control passes. Target source contains no fake managed constructor or numeric
+fallback. Strict test-target Clippy (-D warnings) and scoped formatting pass.
