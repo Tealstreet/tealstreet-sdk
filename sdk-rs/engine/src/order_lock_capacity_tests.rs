@@ -124,8 +124,8 @@ fn original_a_new_placement_at_the_scope_cap_is_not_sent_with_a_capacity_message
         e.venue.entries, 64,
         "the venue never sees the refused placement"
     );
-    assert!((1..=64).all(|id| e.io.order_locks.contains(id)));
-    assert!(!e.io.order_locks.contains(65));
+    assert!((1..=64).all(|id| e.io.core.order_locks.contains(id)));
+    assert!(!e.io.core.order_locks.contains(65));
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn control_capacity_frees_when_a_held_placement_finishes() {
         }),
     );
     e.drain_actions().for_each(drop);
-    assert!(!e.io.order_locks.contains(1));
+    assert!(!e.io.core.order_locks.contains(1));
     e.handle(3., Event::Command(place(65, "S65")));
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(failures(&actions, 65).is_empty(), "{actions:?}");
@@ -213,7 +213,7 @@ fn amend_and_cancel_refused_only_by_the_cap_are_not_sent_with_the_capacity_messa
         assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
         assert_eq!(errors[0].outcome, Some(crate::Outcome::NotSent));
         assert!(nothing_sent(&actions));
-        assert!(!e.io.order_locks.contains(65));
+        assert!(!e.io.core.order_locks.contains(65));
     }
 }
 
@@ -255,5 +255,5 @@ fn control_placements_take_no_scope_without_guard_pending_placements() {
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(failures(&actions, 65).is_empty(), "{actions:?}");
     assert_eq!(e.venue.entries, 65);
-    assert!(!(1..=65).any(|id| e.io.order_locks.contains(id)));
+    assert!(!(1..=65).any(|id| e.io.core.order_locks.contains(id)));
 }

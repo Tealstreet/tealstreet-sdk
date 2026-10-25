@@ -43,13 +43,13 @@ mod plan_expiry_cleanup {
                 .is_err(),
                 "expired cleanup cannot send again"
             );
-            let previous = cx.io.http_delivery.clone().unwrap();
+            let previous = cx.io.core.http_delivery.clone().unwrap();
             let mut foreign_delivery = previous.clone();
             foreign_delivery.attempt.request =
                 RequestId(foreign_delivery.attempt.request.0 + 1_000_000);
-            cx.io.http_delivery = Some(foreign_delivery);
+            cx.io.core.http_delivery = Some(foreign_delivery);
             assert_eq!(cx.fail_plan(plan, "wrong attempt"), Err(Error::Revoked));
-            cx.io.http_delivery = Some(previous);
+            cx.io.core.http_delivery = Some(previous);
             let Owner::Command { id, generation } = plan.owner() else {
                 unreachable!()
             };
@@ -303,7 +303,7 @@ mod plan_expiry_cleanup {
         assert!(!actions.iter().any(
             |a| matches!(a,Action::ManagedHttp(a) if matches!(a.as_ref(),HttpAction::Prepare{..}))
         ));
-        assert!(e.io.managed_http.is_empty());
+        assert!(e.io.core.managed_http.is_empty());
     }
     #[test]
     fn plan_timer_cleans_every_outstanding_phase_before_retirement() {
@@ -314,7 +314,7 @@ mod plan_expiry_cleanup {
             Phase::Released,
         ] {
             let (mut e, tokens) = setup(3, phase);
-            let timer = e.io.request_contexts.plan_timer(7).unwrap();
+            let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
             e.handle(20_000., Event::TimerFired { timer });
             assert_cleaned(&mut e, matches!(phase, Phase::Released));
             for token in tokens {
@@ -345,7 +345,7 @@ mod plan_expiry_cleanup {
     #[test]
     fn http_timer_first_at_root_cleans_parallel_peers_before_retirement() {
         let (mut e, tokens) = setup(3, Phase::Released);
-        let timer = e.io.managed_http[&tokens[0].attempt().request].timer;
+        let timer = e.io.core.managed_http[&tokens[0].attempt().request].timer;
         e.handle(20_000., Event::TimerFired { timer });
         assert_cleaned(&mut e, true);
     }
@@ -398,7 +398,7 @@ mod plan_expiry_cleanup {
         let permit = bound(&e.drain_actions().collect::<Vec<_>>());
         e.claim_http(0., permit).unwrap();
         e.drain_actions().for_each(drop);
-        let timer = e.io.request_contexts.plan_timer(7).unwrap();
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
         e.handle(20_000., Event::TimerFired { timer });
         assert_cleaned(&mut e, true);
     }
@@ -417,7 +417,7 @@ mod plan_expiry_cleanup {
             },
         );
         e.drain_actions().for_each(drop);
-        let timer = e.io.request_contexts.plan_timer(7).unwrap();
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
         e.handle(20_000., Event::TimerFired { timer });
         assert_eq!(e.venue.cleaned, vec![1, 2]);
         assert_eq!(e.venue.retired_after, vec![2]);
@@ -440,7 +440,7 @@ mod plan_expiry_cleanup {
     fn cleanup_panic_poisons_the_engine_instead_of_leaving_a_deferred_seal() {
         let (mut e, _) = setup(1, Phase::Preparation);
         e.venue.panic_cleanup = true;
-        let timer = e.io.request_contexts.plan_timer(7).unwrap();
+        let timer = e.io.core.request_contexts.plan_timer(7).unwrap();
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(
                 || e.handle(20_000., Event::TimerFired { timer })

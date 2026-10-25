@@ -38,7 +38,7 @@ fn handle_with(engine: &mut Engine<Probe>, now: f64, command: Command, wait: Opt
 
 /// The command's live caller deadline, keyed by its receipt.
 fn deadline(engine: &Engine<Probe>, command: CommandId) -> Option<f64> {
-    engine.io.command_waits.deadline(command)
+    engine.io.core.command_waits.deadline(command)
 }
 
 #[derive(Default)]
@@ -440,7 +440,7 @@ fn an_expired_deferred_wait_survives_many_live_waits() {
 #[test]
 fn an_exhausted_receipt_sequence_never_wraps() {
     let mut e = engine(Probe::default());
-    e.io.command_waits.exhaust_receipts();
+    e.io.core.command_waits.exhaust_receipts();
     deliver(&mut e, 0., &cancel(5, "x", Some(1_000)));
     assert_eq!(observed(&e, 5), [None], "no receipt left: unstamped");
     assert_eq!(deadline(&e, 5), None);
@@ -543,7 +543,7 @@ fn waits_a_venue_never_answers_stay_bounded() {
     }
     deliver(&mut e, 2_000., &cancel(7_000, "x", Some(1_000)));
     assert_eq!(
-        e.io.command_waits.len(),
+        e.io.core.command_waits.len(),
         1,
         "expired waits no command still carries are dropped"
     );

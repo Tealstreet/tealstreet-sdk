@@ -108,6 +108,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<(Plan, Slot), Error> {
         if self
             .io
+            .core
             .request_contexts
             .owner_entry(preflight.owner())
             .is_some_and(|owner| matches!(owner.phase, CommandPhase::Planned(_)))
@@ -130,7 +131,7 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Invalid);
         }
-        self.io.http_pacing.validate_zero(policy.pacing)?;
+        self.io.core.http_pacing.validate_zero(policy.pacing)?;
         let calls = [CallBound {
             timeout_ms: first.timeout_ms,
             attempts: first.attempts.into(),
@@ -168,6 +169,7 @@ impl<P> Cx<'_, P> {
         )?;
         let slot = self
             .io
+            .core
             .request_contexts
             .plan_body(&plan)
             .expect("admitted serial Plan")
@@ -220,7 +222,11 @@ impl<P> Cx<'_, P> {
         wake: Next,
     ) -> Result<Slot, Error> {
         validate_call(next)?;
-        let body = self.io.request_contexts.validate_plan(plan, self.now)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
         if body.serial.is_none() {
             return Err(Error::Invalid);
         }
@@ -230,7 +236,7 @@ impl<P> Cx<'_, P> {
             .as_ref()
             .filter(|call| call.context == *context)
             .ok_or(Error::Revoked)?;
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         if !call.matches(delivery) {
             return Err(Error::Revoked);
         }
@@ -243,6 +249,7 @@ impl<P> Cx<'_, P> {
             {
                 if !self
                     .io
+                    .core
                     .managed_http
                     .get(&delivery.attempt.request)
                     .is_some_and(|managed| managed.released_delivery(delivery))
@@ -257,6 +264,7 @@ impl<P> Cx<'_, P> {
         }
         let leg = (context.operation() == Operation::Mutation).then(|| context.leg());
         self.io
+            .core
             .request_contexts
             .owner_entry(plan.owner())
             .and_then(|owner| owner.writes.as_ref())
@@ -268,8 +276,8 @@ impl<P> Cx<'_, P> {
             .as_ref()
             .expect("checked serial Plan")
             .signs(next, &body.policy.credential);
-        if !self.io.next_id.available(1 + 3 * attempts)
-            || (signed && !self.io.signing.available_ids(attempts))
+        if !self.io.core.next_id.available(1 + 3 * attempts)
+            || (signed && !self.io.core.signing.available_ids(attempts))
         {
             return Err(Error::Capacity);
         }
@@ -302,10 +310,15 @@ impl<P> Cx<'_, P> {
         wake: Next,
     ) -> Result<Slot, Error> {
         self.io.retire_http_leg(context);
-        self.io.request_contexts.contexts.remove(&context.leg());
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
         if let Some(leg) = leg {
             let owner = self
                 .io
+                .core
                 .request_contexts
                 .owner_entry_mut(plan.owner())
                 .expect("validated serial owner");
@@ -327,6 +340,7 @@ impl<P> Cx<'_, P> {
         let call_ids = take(&mut ids, 3 * attempts);
         let body = self
             .io
+            .core
             .request_contexts
             .plan_body(plan)
             .expect("validated serial Plan");
@@ -337,6 +351,7 @@ impl<P> Cx<'_, P> {
             .signs(next, &body.policy.credential);
         let signing = signed.then(|| {
             self.io
+                .core
                 .signing
                 .reserve_ids(attempts)
                 .expect("checked serial signing identities")
@@ -345,9 +360,9 @@ impl<P> Cx<'_, P> {
             .declarations()
             .next()
             .expect("one declared serial call");
-        let handoff = self.io.http_delivery.clone();
+        let handoff = self.io.core.http_delivery.clone();
         let now = self.now;
-        let body = self.io.request_contexts.plan_body_mut(plan)?;
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
         body.schedule = schedule;
         body.entries[0] = Entry {
             terms,
@@ -370,7 +385,7 @@ impl<P> Cx<'_, P> {
         body.handoff = handoff;
         body.serial.as_mut().expect("validated serial Plan").call = next;
         let slot = body.schedule.available().next().expect("next serial call");
-        self.io.request_contexts.reserved_contexts += 1;
+        self.io.core.request_contexts.reserved_contexts += 1;
         self.rearm_plan(plan);
         Ok(slot)
     }
