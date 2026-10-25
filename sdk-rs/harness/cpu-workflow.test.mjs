@@ -54,6 +54,8 @@ function verifyWorkflow(text) {
     assert.match(coordinator, /cache-key: \$\{\{ steps\.yarn\.outputs\.cache-key \}\}/);
     assert.match(coordinator, /cache-hit: \$\{\{ steps\.yarn\.outputs\.cache-hit \}\}/);
   }
+  for (const authorityConsumer of [plan, second, certify])
+    assert.match(authorityConsumer, /uses: actions\/checkout@v7\n        with:\n          fetch-depth: 0/, 'independent composition proof needs complete Git history');
   for (const installFree of [second, final])
     assert.doesNotMatch(installFree, /uses: \.\/\.github\/actions\/(?:prepare-yarn|install-yarn)/);
   assert.doesNotMatch(first, /continue-on-error/);
@@ -78,6 +80,8 @@ test('Bitget paired producer is mandatory, bounded, source-selected and independ
 
 test('workflow controls reject skipped final checks, unconditional second jobs and suite/local bypasses', () => {
   const changes = [
+    ...['cpu-plan', 'cpu-second', 'cpu-certify'].map(name => text =>
+      text.replace(job(text, name), job(text, name).replace('fetch-depth: 0', 'fetch-depth: 1'))),
     text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('uses: ./.github/actions/install-yarn', 'uses: actions/checkout@v7')),
     text => text.replace(job(text, 'cpu-certify'), job(text, 'cpu-certify').replace('uses: ./.github/actions/prepare-yarn', 'uses: actions/checkout@v7')),
     text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('cache-key: ${{ steps.yarn.outputs.cache-key }}', 'cache-key: unbound')),
