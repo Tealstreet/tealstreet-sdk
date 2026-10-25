@@ -8803,3 +8803,43 @@ read and the listenKey session keep their current paths until slice 3.
   kind (`network`, `timeout`, `internal`). Native messages are unchanged.
 - **Completion.** FetchAccount and history commands complete once, through the
   caller's read root. A late page or duplicate response completes nothing.
+
+## AsterDEX managed trade plans
+
+AsterDEX trading commands now run as engine serial plans (remaining-funnel
+slice 3, [RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md)).
+This covers placement, cancellation (by ID, by symbol, with symbols),
+amendment, and the leverage, margin, position-mode and STP settings. AsterDEX
+has no legacy request path left.
+
+Unchanged:
+- Native validation, refusal text and order (CommandError, then the failure).
+- Acknowledged-order routing, batch continuation after a failed step.
+- Result bytes, idempotent unknown-order cancels.
+- The single V1 -1022 resend.
+
+Each write is signed at release, after any clock wait.
+
+- **Timestamp rejection (-1021).** The rejected call is recorded as a refusal.
+  The plan waits on the clock resync (bounded at 25 s), then sends the same
+  request again as the next call with a fresh timestamp and signature. A
+  second -1021 is final. If the resync does not finish within its bound, the
+  write is not resent and fails as not sent.
+- **Clock at entry.** A trade command whose clock is stale waits for the
+  sync before its plan is admitted. Nothing signs earlier.
+- **Full engine capacity.** A valid trade command at full managed capacity
+  now fails at once with a typed "Engine request capacity reached"
+  (`internal`, not sent), before any diagnostic or I/O. Before, it was sent
+  outside engine custody.
+- **Error kinds.** The engine's shared classifier now picks kinds for
+  released writes. A 503/504 reply is `venueUnavailable` (outcome unknown)
+  whatever its body; before, it took the body's code or no kind. A success
+  reply without an order ID is `internal` (outcome unknown). Rejection codes
+  keep their native kinds.
+- **FetchStpMode** is a command read with a 20 s bound; read failures carry
+  no outcome.
+
+Follow-up (engine owner, fe7lgm): a granted plan resend can only be
+released from plan custody. A venue whose resend must wait on a venue
+condition therefore needs a serial-plan condition wait, as AsterDEX does here.
+A custody-preserving parked resend would remove that need.

@@ -471,3 +471,25 @@ Open questions for review:
 
 Budget: measured on the composed tip and on dazzy3's S1, per the overseer's
 ruling, with the exact numbers taken to the overseer.
+
+### Slice 3 as built
+
+- One serial plan per trade job (`admit_serial_plan` from a WriteAfterReads
+  preflight, with the `condition-waits` engine feature). Each native step is a
+  serial call: 20 s bound, 2 attempts, released in plan custody.
+- Entry: a stale clock parks the preflight (`park_preflight`). The clock
+  settle requests readiness, and the plan is admitted in
+  `on_http_preflight_ready`.
+- Facts: Accepted, classified with the `ASTER` table, or unproven. Then
+  `continue_serial_plan` into the next step, or `finish_plan_call` plus
+  `done_plan`/`fail_plan`. Jobs with no steps end with `done_empty_plan`.
+- V1 -1022: one in-custody resend (`ASTER_RESEND` grant, `plan_resend_context`).
+- -1021: a refused fact, then `serial_plan_condition_wait` (25 s bound). The
+  clock settle releases it, and the frozen request is reissued as the next
+  call in `on_http_plan_ready`.
+- Local refusals keep slice 2's command-Context path. FetchStpMode is a
+  command read under the caller root.
+- Budget: per the overseer's ruling, AsterDEX's per-venue budget is 1,458,176.
+  Local, on S1 tip 9977ccf1aa6: 1,340,777 to 1,443,796; enabling the engine
+  features alone accounts for about 55K of that.
+
