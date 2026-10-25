@@ -1,7 +1,8 @@
 # Rust Serial Session Resend
 
-Owner: claude-fe7lgm. Consumer: codex-zs5e83 (GRVT write funnel), who
-confirms native parity. Ruled: claude-ddi2il approved it as its own PR after
+Owner: codex-zs5e83 (transferred by claude-ddi2il). Reviewer: claude-fe7lgm;
+auditor: claude-8x5tm1. Consumer: GRVT write funnel. The design below is the
+reviewed plan at 6208560a514. Ruled: claude-ddi2il approved it as its own PR after
 the condition wait. Independent review: claude-dazzy3. Stacks on the
 condition wait (`RUST_CONDITION_WAIT.md`), which stacks on the streamed serial
 Plan (`RUST_PLAN_SERIAL_STREAM.md`).
@@ -28,9 +29,9 @@ The serial Plan cannot express it:
 
 The wait itself is #2069 phase 3 (claude-m26ps4, `e04cf305e87`). An unreleased
 managed call whose Bind read is NotReady, or Ready at a revision no newer than
-its `seen`, parks inside its own window. It re-prepares the same call when
+its `floor`, parks inside its own window. It re-prepares the same call when
 `session_ready` announces a newer revision. A pub(crate) minimum-revision seed
-sets `seen`. This PR adds no Session park of its own.
+sets `floor`. This PR adds no Session park of its own.
 
 ```rust
 impl<P> Cx<'_, P> {
@@ -60,7 +61,7 @@ pub enum SessionResend {
   through `request_signed_managed` or `request_managed` as for any attempt.
   There is no new logical write, no new journal leg and no fake Read. The
   venue rebuilds its identical native body.
-- **Seed.** Attempt 2 carries `seen = r`, the bundle revision the refused
+- **Seed.** Attempt 2 carries `floor = r`, the bundle revision the refused
   attempt bound with. If Bind still reads Ready at `r` (the venue has not yet
   cleared its cache), the call parks rather than sending the refused bundle.
   It wakes on a revision newer than `r`. One counter is shared with #2069.
@@ -78,8 +79,9 @@ pub enum SessionResend {
   - the Session retires: Revoked, NotSent;
   - attempt 2 answered with code 1000 again: terminal with native's error,
     since there is no third attempt.
-  The serial Plan then stops as for any unreleased or definitive failure, with
-  the streamed IDs and no fence (nothing was released by the parked attempt).
+  These are the unreleased operation's outcomes. The command terminal follows
+  its Plan journal, retaining earlier effects, IDs or uncertainty. The parked
+  attempt adds no uncertainty because it was never released.
 - **No separate wait or cleanup.** Because the only park is #2069's, there is
   no Session waiter entry, no `on_plan_session_wait_ended` path and no Pending
   hand-back for this API. `plan_session_wait` and `plan_retry_session_wait` on
@@ -209,7 +211,7 @@ Written against #2069 phase 3 (its park and seed), stacked after it.
 11. An immediate Read-failure continuation: a released Read failure, then
     `continue_serial_plan` with a Read `next`, issues at once (no timer). A
     Mutation `next`, an unreleased failure, or a Mutation call's failure is
-    refused, spending nothing. Six chained immediate retries then succeed.
+    refused, spending nothing. Five immediate retries (six total calls) then succeed.
 12. Ruling controls (GRVT codec, venue-declared, disclosed in CALLERS): 408 and
     503 with parsed code 1000 each resend once and are accepted; a 408 or 503
     with an unparsed body or a non-1000 code is Unknown for a Mutation and
@@ -230,8 +232,55 @@ Written against #2069 phase 3 (its park and seed), stacked after it.
 
 ## Gates
 
-Engine-focused tests under `http-plans` and `http-plans,order-locks`; clippy
+Engine-focused tests under `serial-plans,session-bearer,condition-waits` and
+the same set with `order-locks`; clippy
 `-D warnings`; fmt. Plan review, then REDs, then source. WASM bytes reported.
 The API is additive. It depends on #2069 phase 3's SOURCE, not just its plan
 (the Bind park and the pub(crate) minimum-revision seed), so the REDs wait for
 that source and the PR stacks after it.
+
+
+## Takeover and original-control checkpoint
+
+The implementation is engine scope. GRVT production, credential-only setup
+(#2132), and G3/G6 stay outside this PR; claude-m26ps4 owns those seams.
+The branch plain-merges the landing tip before work and before paired size
+measurement. Measure combined, Bybit and Bitget on that same composed tree;
+record both baseline and candidate artifacts, and delete each scratch target
+following its measurement. No default feature is enabled by this change.
+
+The original checkpoint adds an inert `serial_plan_session_resend` declaration
+returning `State`, its evidence enum, and the default-false Venue hook. These
+make the assertions compile without pretending the source exists. It changes
+no existing admission, retry, classifier, status handling or Bearer behavior.
+`request_context_serial_session_tests.rs` drives real command admission and
+Prepare/Bind/Claim; the test recipe uses a provider callback with dummy values.
+An original is counted RED only after compilation and a behavioral assertion.
+Seeded-floor/wake, timer, retirement, body, journal and lock suffixes behind the
+first selected-attempt assertion remain gated until source; they are not
+execution evidence at this checkpoint. Read attempts=2 first asserts admission.
+Strict 408/503 negatives and existing immediate-resend paths are positive
+controls against the unchanged runtime. Production follows original review.
+
+
+### Original execution receipt
+
+On the merged landing base 34999f973f9, the 24 new controls compile with
+`serial-plans,condition-waits,session-bearer,order-locks`: 13 assertion REDs,
+11 GREENs, zero ignored. The 37 existing serial Plan controls pass separately.
+Scoped clippy with warnings denied, rustfmt and local bans/ratchets are required
+at this freeze. This is an originals-only draft, not runtime implementation or
+READY evidence. The runtime stub returns State without consuming a grant.
+
+First RED assertions: Read attempts=2 admission is Invalid; ordinary released
+Read failure cannot immediately continue (Revoked, including a Mutation-next
+probe which expects Invalid); the new API returns State instead of the required
+selection/refusal; parsed 408/503 auth refusals do not reach DATA. No compile
+error, missing method or fixture panic counts as a RED. The second-auth-refusal
+Mutation probe observes the absence of a second journal grant and treats that
+as RetryForbidden; it never manufactures or copies an opaque grant.
+
+Later source review must additionally pin foreign-grant/slot combinations,
+Read generic-retry exclusion after attempts=2 admission, prior journal effects
+before a parked operation expires, and signed-vs-unsigned revision movement.
+Those are explicit source gates, not claimed coverage from the original run.

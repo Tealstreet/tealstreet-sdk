@@ -390,3 +390,17 @@ impl<P> Cx<'_, P> {
         Ok(slot)
     }
 }
+
+// Inert declaration for the original controls; source follows reviewed REDs.
+#[cfg(feature = "session-bearer")]
+impl<P> Cx<'_, P> {
+    pub fn serial_plan_session_resend(
+        &mut self,
+        _plan: &Plan,
+        _slot: &Slot,
+        _context: &Context,
+        _evidence: crate::request_context::SessionResend,
+    ) -> Result<Context, Error> {
+        Err(Error::State)
+    }
+}

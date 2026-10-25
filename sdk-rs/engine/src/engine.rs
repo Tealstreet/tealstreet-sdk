@@ -2797,6 +2797,12 @@ impl<V: Venue> Clone for HttpRelease<V> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
+    /// A fully parsed native refusal may exempt this delivery from unproven
+    /// HTTP status handling. The default keeps the strict shared policy.
+    fn status_exempt_refusal(&self, _pending: &Self::Pending, _response: Response<'_>) -> bool {
+        false
+    }
+
     /// Read-only native evidence from an unproven managed mutation envelope.
     /// Exact SDK identity namespaces must be validated by the native codec.
     fn unproven_http_evidence(
