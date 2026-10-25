@@ -1,0 +1,830 @@
+//! Original custody gaps and native controls for Phemex late cancel repair.
+mod support;
+use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Claim, HttpAction, Prepared, RoutingIntent};
+use safe_cex_engine::{
+    Action, Command, Event, HttpRequest, Level, Method, Notice, Response, SocketId, TimerId,
+};
+use safe_cex_venue_phemex::PhemexPerpetuals;
+use serde_json::{Value, json};
+use std::collections::VecDeque;
+use support::{Options, PreparedEngine};
+
+type TestEngine = PreparedEngine<PhemexPerpetuals>;
+const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"1","maxLeverage":"100"}]}}"#;
+const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"69000","askRp":"69001","lastRp":"69000","markRp":"69000","indexRp":"69000","openRp":"69000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
+
+fn requests(actions: &[Action]) -> Vec<HttpRequest> {
+    actions
+        .iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+fn deletes(actions: &[Action]) -> Vec<HttpRequest> {
+    requests(actions)
+        .into_iter()
+        .filter(|r| r.method == Method::Delete)
+        .collect()
+}
+fn terminals(actions: &[Action], id: u32) -> Vec<Result<String, String>> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandDone { command, result }) if *command == id => {
+                Some(Ok(result.clone()))
+            }
+            Action::Notice(Notice::CommandFailed { command, error }) if *command == id => {
+                Some(Err(error.legacy_text()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+fn command_terminals(actions: &[Action]) -> usize {
+    actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+            )
+        })
+        .count()
+}
+fn messages(actions: &[Action], level: Level) -> Vec<&str> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event)) if event.level == level => {
+                Some(event.message.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+fn capture_delete(actions: &[Action]) -> HttpRequest {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.method == Method::Delete => Some(r.clone()),
+            Action::ManagedHttp(a) => match a.as_ref() {
+                HttpAction::Prepare { request, .. } if request.method == Method::Delete => {
+                    Some(request.clone())
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("native late DELETE or its genuine preparation")
+}
+fn accept(id: &str) -> String {
+    json!({"code":0,"data":{"orderID":id,"ordStatus":"Canceled","cumQtyRq":"0"}}).to_string()
+}
+fn release(e: &mut TestEngine, now: f64, actions: Vec<Action>) -> Vec<Action> {
+    let mut queue = VecDeque::from(actions);
+    let mut out = Vec::new();
+    while let Some(action) = queue.pop_front() {
+        match action {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Prepare { preparation, .. } => e.http_prepared(
+                    now,
+                    preparation,
+                    Prepared {
+                        id: preparation.attempt().request.0,
+                        expires_at: None,
+                    },
+                ),
+                HttpAction::Bind {
+                    permit, request, ..
+                } => {
+                    if matches!(e.claim_http(now, permit), Ok(Claim::Released(_))) {
+                        out.push(Action::Http(request));
+                    }
+                }
+                HttpAction::Cancel { .. } => {}
+                HttpAction::BindGroup { .. } => {
+                    panic!("late cancel original has one physical call per group")
+                }
+            },
+            a => out.push(a),
+        }
+        queue.extend(e.drain_raw_actions());
+    }
+    out
+}
+struct Harness {
+    e: TestEngine,
+    socket: SocketId,
+    now: f64,
+    command: u32,
+    timers: Vec<(TimerId, f64)>,
+}
+impl Harness {
+    fn record(&mut self, actions: &[Action]) {
+        self.timers.extend(actions.iter().filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        }));
+    }
+    fn at(&mut self, now: f64, event: Event<'_>, raw: bool) -> Vec<Action> {
+        assert!(now >= self.now, "fixture time is monotonic");
+        self.now = now;
+        self.e.handle(now, event);
+        let actions = if raw {
+            self.e.drain_raw_actions()
+        } else {
+            self.e.drain_actions().collect()
+        };
+        self.record(&actions);
+        actions
+    }
+    fn event(&mut self, event: Event<'_>) -> Vec<Action> {
+        self.at(self.now + 1., event, false)
+    }
+    fn raw_event(&mut self, event: Event<'_>) -> Vec<Action> {
+        self.at(self.now + 1., event, true)
+    }
+    fn reply(&mut self, r: &HttpRequest, status: u16, body: &str) -> Vec<Action> {
+        self.event(Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status,
+                headers: "",
+                body,
+            },
+        })
+    }
+    fn raw_reply(&mut self, r: &HttpRequest, body: &str) -> Vec<Action> {
+        self.raw_event(Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        })
+    }
+    fn query_command(&mut self, command: impl FnOnce(u32) -> Command) -> (u32, Vec<Action>) {
+        self.command += 1;
+        let id = self.command;
+        (id, self.event(Event::Command(command(id))))
+    }
+    fn lose(&mut self, client: &str, side: OrderSide) -> (u32, HttpRequest) {
+        let mut order = opts(client);
+        order.side = side;
+        let (id, a) = self.query_command(|command| Command::PlaceOrders {
+            command,
+            orders: vec![order],
+        });
+        let r = requests(&a)
+            .into_iter()
+            .find(|r| r.url.contains("/g-orders/create"))
+            .expect("genuine released placement");
+        let a = self.event(Event::HttpFailed {
+            request: r.id,
+            error: "native network loss",
+        });
+        assert_eq!(terminals(&a, id).len(), 1, "lost placement ends once");
+        assert!(terminals(&a, id)[0].is_err());
+        (id, r)
+    }
+    fn cancel_all(&mut self) -> (u32, Vec<Action>) {
+        self.query_command(|command| Command::CancelSymbolOrders {
+            command,
+            symbol: "BTCUSDT".into(),
+        })
+    }
+    fn owe(&mut self, client: &str, side: OrderSide) -> (u32, HttpRequest) {
+        let (_, r) = self.lose(client, side);
+        let (id, a) = self.cancel_all();
+        assert_eq!(
+            terminals(&a, id),
+            vec![Ok("[]".into())],
+            "empty immediate cancel completes natively"
+        );
+        (id, r)
+    }
+    fn stream(&mut self, mut rows: Vec<Value>, raw: bool) -> Vec<Action> {
+        let stamp = ((self.now + 1.) * 1e6) as u64;
+        for row in &mut rows {
+            row["transactTimeNs"] = json!(stamp);
+        }
+        let text = json!({"type":"incremental","timestamp":stamp,"orders_p":rows}).to_string();
+        self.at(
+            self.now + 1.,
+            Event::WsMessage {
+                socket: self.socket,
+                text: &text,
+            },
+            raw,
+        )
+    }
+    fn discover(&mut self, create: &HttpRequest, body: &str, raw: bool) -> Vec<Action> {
+        let expiry: f64 = create
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("x-phemex-request-expiry"))
+            .expect("native signing expiry")
+            .1
+            .parse::<u64>()
+            .unwrap() as f64
+            * 1000.;
+        let at = expiry + 5000.;
+        let timer = self
+            .timers
+            .iter()
+            .rev()
+            .find(|(_, when)| *when == at)
+            .expect("native post-expiry reconcile timer")
+            .0;
+        let a = self.at(at, Event::TimerFired { timer }, false);
+        let read = requests(&a)
+            .into_iter()
+            .find(|r| r.url.contains("/g-orders/activeList?"))
+            .expect("genuine primary reconciliation read");
+        self.at(
+            self.now + 1.,
+            Event::HttpResponse {
+                request: read.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+            raw,
+        )
+    }
+}
+fn boot(mode: &str, snapshot: bool, secondary: bool) -> Harness {
+    let mut e = support::prepared_engine(Options {
+        key: Some("fixture-primary".into()),
+        secret: Some("fixture-material".into()),
+        read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
+            key: "fixture-secondary".into(),
+            secret: "fixture-secondary-material".into(),
+            passphrase: None,
+        }),
+        ..Default::default()
+    });
+    let mut now = 1000.;
+    e.start(now);
+    let a: Vec<_> = e.drain_actions().collect();
+    let products = requests(&a)
+        .into_iter()
+        .find(|r| r.url.contains("products"))
+        .unwrap();
+    now += 1.;
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: products.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: PRODUCTS,
+            },
+        },
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    let socket = a
+        .iter()
+        .find_map(|a| {
+            if let Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } = a
+            {
+                Some(*socket)
+            } else {
+                None
+            }
+        })
+        .expect("private socket");
+    for r in requests(&a)
+        .into_iter()
+        .filter(|r| r.url.contains("/g-accounts/"))
+    {
+        let currency = if r.url.contains("USDC") {
+            "USDC"
+        } else {
+            "USDT"
+        };
+        let positions = if currency == "USDT" {
+            json!([{"symbol":"BTCUSDT","currency":"USDT","posMode":mode,"posSide":if mode=="OneWay" {"Merged"} else {"Long"},"size":"0","leverageRr":"-10","crossMargin":true}])
+        } else {
+            json!([])
+        };
+        let body=json!({"code":0,"data":{"account":{"currency":currency,"accountBalanceRv":"1000","totalUsedBalanceRv":"0"},"positions":positions}}).to_string();
+        now += 1.;
+        e.handle(
+            now,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        e.drain_actions().for_each(drop);
+    }
+    let ticker = requests(&a)
+        .into_iter()
+        .find(|r| r.url.contains("24hr/all"))
+        .unwrap();
+    now += 1.;
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: ticker.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: DAILY,
+            },
+        },
+    );
+    e.drain_actions().for_each(drop);
+    let mut h = Harness {
+        e,
+        socket,
+        now,
+        command: 100,
+        timers: Vec::new(),
+    };
+    h.event(Event::WsOpened { socket });
+    h.event(Event::WsMessage {
+        socket,
+        text: r#"{"id":999,"result":{"status":"success"}}"#,
+    });
+    assert!(
+        !h.e.store().loaded().orders,
+        "cold account has no full Orders snapshot"
+    );
+    if snapshot {
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"type":"snapshot","orders_p":[]}"#,
+        });
+        assert!(h.e.store().loaded().orders);
+    }
+    h
+}
+fn opts(id: &str) -> PlaceOrderOpts {
+    PlaceOrderOpts {
+        symbol: "BTCUSDT".into(),
+        kind: OrderType::Limit,
+        side: OrderSide::Buy,
+        amount: 0.01,
+        price: Some(69000.),
+        trigger_price: None,
+        max_slippage_pct: None,
+        stop_loss: None,
+        take_profit: None,
+        reduce_only: None,
+        time_in_force: None,
+        trigger_type: None,
+        tp_trigger_type: None,
+        sl_trigger_type: None,
+        client_order_id: (!id.is_empty()).then(|| id.into()),
+        close: None,
+        stp_mode: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
+        implied_volatility: None,
+    }
+}
+
+fn params(r: &HttpRequest) -> Vec<(String, String)> {
+    r.url
+        .split_once('?')
+        .unwrap()
+        .1
+        .split('&')
+        .map(|p| {
+            let (k, v) = p.split_once('=').unwrap();
+            (k.into(), v.replace("%2C", ","))
+        })
+        .collect()
+}
+
+fn p(r: &HttpRequest, key: &str) -> Option<String> {
+    params(r)
+        .into_iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v)
+}
+
+fn live_row(id: &str) -> Value {
+    json!({"orderID":id,"symbol":"BTCUSDT","side":"Buy","posSide":"Merged","ordType":"Limit","ordStatus":"New","orderQty":"0.1","cumQty":"0","leavesQty":"0.1","priceRp":"69000"})
+}
+
+fn rest_row(id: &str, client: &str) -> Value {
+    json!({"orderID":id,"clOrdID":client,"symbol":"BTCUSDT","side":"Buy","posSide":"Merged","orderType":"Limit","ordStatus":"New","orderQtyRq":"0.01","cumQtyRq":"0","leavesQtyRq":"0.01","priceRp":"69000","transactTimeNs":3_000_000_000_u64})
+}
+
+fn rows(rows: Vec<Value>) -> String {
+    json!({"code":0,"data":{"rows":rows}}).to_string()
+}
+
+#[test]
+fn late_repair_waits_for_a_real_primary_preparation() {
+    let mut h = boot("OneWay", true, true);
+    h.owe("owed-a", OrderSide::Buy);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let a = h.stream(vec![row], true);
+    assert!(
+        !a.iter().any(|a| matches!(a, Action::Http(_))),
+        "late repair must not release unmanaged HTTP"
+    );
+    assert_eq!(a.iter().filter(|a|matches!(a,Action::ManagedHttp(a) if matches!(a.as_ref(),HttpAction::Prepare{intent:RoutingIntent::Primary,request,..} if request.method==Method::Delete))).count(),1,"one genuine Primary repair preparation");
+    let a = release(&mut h.e, h.now, a);
+    let r = deletes(&a).remove(0);
+    assert_eq!(
+        r.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("x-phemex-access-token"))
+            .unwrap()
+            .1,
+        "fixture-primary"
+    );
+    assert_eq!(p(&r, "orderID").as_deref(), Some("native-a"));
+}
+#[test]
+fn unclaimed_repair_ack_cannot_publish_or_finish_a_root() {
+    let mut h = boot("OneWay", true, false);
+    let (old, _) = h.owe("owed-a", OrderSide::Buy);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let held = h.stream(vec![row], true);
+    let r = capture_delete(&held);
+    let a = h.raw_reply(&r, &accept("native-a"));
+    assert_eq!(
+        h.e.store().order("native-a").unwrap().status,
+        OrderStatus::Canceling,
+        "unclaimed ACK has no Store authority"
+    );
+    assert!(
+        messages(&a, Level::Warn)
+            .iter()
+            .all(|m| !m.contains("canceled late-landing"))
+    );
+    assert_eq!(command_terminals(&a), 0);
+    assert!(terminals(&a, old).is_empty());
+    let a = release(&mut h.e, h.now, held);
+    let r = deletes(&a).remove(0);
+    let a = h.reply(&r, 200, &accept("native-a"));
+    assert_eq!(
+        h.e.store().order("native-a").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(command_terminals(&a), 0);
+}
+#[test]
+fn held_repair_preparation_has_its_own_twenty_second_bound() {
+    let mut h = boot("OneWay", true, false);
+    h.owe("owed-a", OrderSide::Buy);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let a = h.stream(vec![row], true);
+    let deadline = h.now + 20_000.;
+    let timer = a
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == deadline => Some(*timer),
+            _ => None,
+        })
+        .expect("repair preparation has its own 20s deadline");
+    let a = h.at(deadline, Event::TimerFired { timer }, true);
+    assert_eq!(
+        messages(&a, Level::Error)
+            .iter()
+            .filter(|m| m.contains("could not cancel late-landing"))
+            .count(),
+        1
+    );
+    assert_eq!(command_terminals(&a), 0);
+    assert_eq!(
+        h.e.store().order("native-a").unwrap().status,
+        OrderStatus::Open
+    );
+}
+#[test]
+fn native_empty_cancel_all_completes_once_before_late_repair() {
+    let mut h = boot("OneWay", true, false);
+    let (old, _) = h.owe("owed-a", OrderSide::Buy);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let a = h.stream(vec![row], false);
+    let r = deletes(&a).remove(0);
+    let a = h.reply(&r, 200, &accept("native-a"));
+    assert!(terminals(&a, old).is_empty());
+    assert_eq!(command_terminals(&a), 0);
+    assert_eq!(
+        messages(&a, Level::Warn)
+            .iter()
+            .filter(|m| m.contains("canceled late-landing order native-a"))
+            .count(),
+        1
+    );
+}
+#[test]
+fn native_nonempty_cancel_all_retains_its_result_then_repairs_only_the_owed_order() {
+    let mut h = boot("OneWay", true, false);
+    h.stream(vec![live_row("known")], false);
+    h.lose("owed-a", OrderSide::Buy);
+    let (old, a) = h.cancel_all();
+    let r = deletes(&a).remove(0);
+    assert_eq!(p(&r, "orderID").as_deref(), Some("known"));
+    let a = h.reply(&r, 200, &accept("known"));
+    assert_eq!(terminals(&a, old), vec![Ok("[]".into())]);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let a = h.stream(vec![row], false);
+    assert_eq!(p(&deletes(&a)[0], "orderID").as_deref(), Some("native-a"));
+}
+#[test]
+fn native_duplicate_stream_observation_never_resends_a_late_cancel() {
+    let mut h = boot("OneWay", true, false);
+    h.owe("owed-a", OrderSide::Buy);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let a = h.stream(vec![row.clone()], false);
+    assert_eq!(deletes(&a).len(), 1);
+    assert!(deletes(&h.stream(vec![row.clone()], false)).is_empty());
+    let r = deletes(&a).remove(0);
+    h.reply(&r, 200, &accept("native-a"));
+    assert!(deletes(&h.stream(vec![row], false)).is_empty());
+}
+#[test]
+fn native_cross_origin_same_side_late_orders_share_one_bulk_request() {
+    let mut h = boot("Hedged", true, false);
+    h.owe("owed-a", OrderSide::Buy);
+    h.owe("owed-b", OrderSide::Buy);
+    let mut a = live_row("native-a");
+    a["clOrdID"] = json!("owed-a");
+    a["posSide"] = json!("Long");
+    let mut b = live_row("native-b");
+    b["clOrdID"] = json!("owed-b");
+    b["posSide"] = json!("Long");
+    let out = h.stream(vec![a, b], false);
+    let sent = deletes(&out);
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].url.contains("/g-orders?"));
+    assert_eq!(p(&sent[0], "orderID").as_deref(), Some("native-a,native-b"));
+    assert_eq!(p(&sent[0], "posSide").as_deref(), Some("Long"));
+}
+#[test]
+fn native_multi_order_group_keeps_bulk_path_for_its_singleton_tail() {
+    let mut h = boot("OneWay", true, false);
+    let mut observed = Vec::new();
+    for i in 0..11 {
+        let client = format!("owed-{i}");
+        h.owe(&client, OrderSide::Buy);
+        let mut row = live_row(&format!("native-{i}"));
+        row["clOrdID"] = json!(client);
+        observed.push(row);
+    }
+    let a = h.stream(observed, false);
+    let r = deletes(&a).remove(0);
+    assert!(r.url.contains("/g-orders?"));
+    let ids = p(&r, "orderID").unwrap();
+    assert_eq!(ids.split(',').count(), 10);
+    let a = h.reply(&r, 200, &accept(ids.split(',').next().unwrap()));
+    let next = deletes(&a).remove(0);
+    assert!(next.url.contains("/g-orders?"));
+    assert_eq!(p(&next, "orderID").as_deref(), Some("native-10"));
+}
+#[test]
+fn native_independent_groups_continue_after_a_network_failure_without_resend() {
+    let mut h = boot("Hedged", true, false);
+    h.owe("owed-long", OrderSide::Buy);
+    h.owe("owed-short", OrderSide::Sell);
+    let mut long = live_row("native-long");
+    long["clOrdID"] = json!("owed-long");
+    long["posSide"] = json!("Long");
+    let mut short = live_row("native-short");
+    short["clOrdID"] = json!("owed-short");
+    short["posSide"] = json!("Short");
+    short["side"] = json!("Sell");
+    let a = h.stream(vec![long, short], false);
+    let first = deletes(&a).remove(0);
+    let a = h.event(Event::HttpFailed {
+        request: first.id,
+        error: "released network loss",
+    });
+    assert_eq!(
+        messages(&a, Level::Error)
+            .iter()
+            .filter(|m| m.contains("could not cancel late-landing"))
+            .count(),
+        1
+    );
+    assert_eq!(command_terminals(&a), 0);
+    let next = deletes(&a);
+    assert_eq!(next.len(), 1);
+    assert_ne!(p(&first, "posSide"), p(&next[0], "posSide"));
+    assert_ne!(p(&first, "orderID"), p(&next[0], "orderID"));
+}
+#[test]
+fn native_mixed_cancel_ack_keeps_accepted_effect_and_restores_only_the_other_row() {
+    let mut h = boot("OneWay", true, false);
+    h.owe("owed-a", OrderSide::Buy);
+    h.owe("owed-b", OrderSide::Buy);
+    let mut a = live_row("native-a");
+    a["clOrdID"] = json!("owed-a");
+    let mut b = live_row("native-b");
+    b["clOrdID"] = json!("owed-b");
+    let out = h.stream(vec![a, b], false);
+    let r = deletes(&out).remove(0);
+    let a=h.reply(&r,200,r#"{"code":0,"data":[{"orderID":"native-a","ordStatus":"Canceled"},{"orderID":"native-b","code":11011,"ordStatus":"Rejected"}]}"#);
+    assert_eq!(
+        h.e.store().order("native-a").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        h.e.store().order("native-b").unwrap().status,
+        OrderStatus::Open
+    );
+    assert_eq!(command_terminals(&a), 0);
+    assert_eq!(
+        messages(&a, Level::Error)
+            .iter()
+            .filter(|m| m.contains("could not cancel late-landing"))
+            .count(),
+        1
+    );
+}
+#[test]
+fn native_filled_late_order_keeps_the_manual_position_diagnostic() {
+    let mut h = boot("OneWay", true, false);
+    h.owe("owed-a", OrderSide::Buy);
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    row["cumQty"] = json!("0.01");
+    row["leavesQty"] = json!("0.09");
+    let a = h.stream(vec![row], false);
+    assert_eq!(deletes(&a).len(), 1);
+    assert!(
+        messages(&a, Level::Error)
+            .iter()
+            .any(|m| m.contains("check the position") && m.contains("native-a"))
+    );
+}
+#[test]
+fn native_reconciliation_waits_for_actual_signing_expiry_then_uses_primary() {
+    let mut h = boot("OneWay", true, true);
+    let (_, create) = h.owe("owed-a", OrderSide::Buy);
+    let a = h.discover(
+        &create,
+        &rows(vec![
+            rest_row("native-a", "owed-a"),
+            rest_row("unrelated", "other"),
+        ]),
+        false,
+    );
+    let r = deletes(&a).remove(0);
+    assert_eq!(p(&r, "orderID").as_deref(), Some("native-a"));
+    assert_eq!(
+        h.e.store().order("unrelated").unwrap().status,
+        OrderStatus::Open
+    );
+    assert_eq!(
+        r.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("x-phemex-access-token"))
+            .unwrap()
+            .1,
+        "fixture-primary"
+    );
+}
+#[test]
+fn native_complete_absence_releases_the_exact_lost_client_generation() {
+    let mut h = boot("OneWay", true, false);
+    let (_, create) = h.owe("owed-a", OrderSide::Buy);
+    let a = h.discover(&create, &rows(vec![]), false);
+    assert!(deletes(&a).is_empty());
+    let (_, a) = h.query_command(|command| Command::PlaceOrders {
+        command,
+        orders: vec![opts("owed-a")],
+    });
+    assert!(
+        requests(&a)
+            .iter()
+            .any(|r| r.url.contains("/g-orders/create"))
+    );
+}
+#[test]
+fn native_incomplete_read_preserves_the_unresolved_generation() {
+    let mut h = boot("OneWay", true, false);
+    let (_, create) = h.owe("owed-a", OrderSide::Buy);
+    h.discover(&create, &rows(vec![json!({"orderID":"unreadable"})]), false);
+    let (id, a) = h.query_command(|command| Command::PlaceOrders {
+        command,
+        orders: vec![opts("owed-a")],
+    });
+    assert!(
+        requests(&a)
+            .iter()
+            .all(|r| !r.url.contains("/g-orders/create"))
+    );
+    assert!(
+        terminals(&a, id)[0]
+            .as_ref()
+            .unwrap_err()
+            .contains("unknown outcome")
+    );
+}
+#[test]
+fn native_early_reconciliation_does_not_mark_orders_loaded() {
+    let mut h = boot("OneWay", false, false);
+    assert!(!h.e.store().loaded().orders);
+    let (_, create) = h.lose("unlatched-a", OrderSide::Buy);
+    h.discover(&create, &rows(vec![]), false);
+    assert!(!h.e.store().loaded().orders);
+    let (id, a) = h.cancel_all();
+    assert!(
+        terminals(&a, id)[0]
+            .as_ref()
+            .unwrap_err()
+            .contains("snapshot is not loaded")
+    );
+}
+#[test]
+fn native_empty_one_and_many_row_reads_keep_the_loaded_snapshot_and_stream_rows() {
+    for count in 0..=2 {
+        let mut h = boot("OneWay", true, false);
+        let (_, create) = h.owe("owed-a", OrderSide::Buy);
+        let mut live = live_row("stream-kept");
+        live["clOrdID"] = json!("unrelated-client");
+        h.stream(vec![live], false);
+        let body = rows(
+            (0..count)
+                .map(|i| rest_row(&format!("read-{i}"), "other"))
+                .collect(),
+        );
+        let a = h.discover(&create, &body, false);
+        assert!(h.e.store().loaded().orders);
+        assert!(deletes(&a).is_empty());
+        assert_eq!(
+            h.e.store().order("stream-kept").unwrap().status,
+            OrderStatus::Open
+        );
+        assert_eq!(h.e.store().orders().len(), count + 1);
+    }
+}
+
+#[test]
+fn repair_admission_refusal_has_no_optimistic_cancel_or_io_and_preserves_peers() {
+    let mut h = boot("OneWay", true, false);
+    h.owe("owed-a", OrderSide::Buy);
+    let mut peers = Vec::new();
+    for command in 1000..1256 {
+        let actions = h.raw_event(Event::Command(Command::FetchAccount { command }));
+        let before = peers.len();
+        for action in actions {
+            if let Action::ManagedHttp(action) = action
+                && let HttpAction::Prepare { preparation, .. } = *action
+            {
+                peers.push(preparation);
+            }
+        }
+        if peers.len() == before {
+            break;
+        }
+    }
+    assert!(
+        !peers.is_empty(),
+        "real account commands retain preparation custody"
+    );
+    assert!(peers.iter().all(|p| h.e.http_preparation_pending(*p)));
+    let mut row = live_row("native-a");
+    row["clOrdID"] = json!("owed-a");
+    let actions = h.stream(vec![row], true);
+    assert_eq!(
+        h.e.store().order("native-a").unwrap().status,
+        OrderStatus::Open,
+        "refused repair admission must not publish optimistic Canceling"
+    );
+    assert!(!actions.iter().any(|action| matches!(action, Action::Http(_)) || matches!(action, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare{request,..} if request.method==Method::Delete))),
+        "refused repair admission must spend no physical call");
+    assert!(
+        peers.iter().all(|p| h.e.http_preparation_pending(*p)),
+        "all independent peers survive"
+    );
+    assert_eq!(
+        command_terminals(&actions),
+        0,
+        "repair refuses without a caller terminal"
+    );
+}
