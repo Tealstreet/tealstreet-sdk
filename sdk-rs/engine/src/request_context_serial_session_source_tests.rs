@@ -125,4 +125,63 @@ mod source_controls {
             Some(crate::Outcome::NotSent)
         );
     }
+    #[test]
+    fn foreign_slot_refuses_without_selecting_or_spending() {
+        let foreign = start(false, 2);
+        let mut e = start(false, 2);
+        e.venue.slot_override = foreign.venue.slot.clone();
+        let (_, _, actions) = auth(&mut e, 200);
+        assert!(e.venue.selected[0].is_err());
+        assert!(e.venue.unchanged[0]);
+        no_http(&actions);
+    }
+
+    #[test]
+    fn a_real_grant_from_another_command_cannot_select_a_resend() {
+        let mut e = start(false, 2);
+        e.venue.capture_grant = true;
+        auth(&mut e, 200);
+        assert!(e.venue.grant_override.is_some());
+        e.handle_command(
+            2.,
+            Command::PlaceOrders {
+                command: 8,
+                orders: vec![
+                    serde_json::from_str(
+                        r#"{"symbol":"BTCUSD","type":"limit","side":"buy","amount":1,"price":1}"#,
+                    )
+                    .unwrap(),
+                ],
+            },
+            None,
+        )
+        .unwrap();
+        let second = prep(&drain(&mut e));
+        release(&mut e, second, 2.);
+        reply(&mut e, second, 3., 200, r#"{"code":1000}"#);
+        let actions = drain(&mut e);
+        assert_eq!(e.venue.selected, vec![Err(Error::Revoked)]);
+        assert!(e.venue.unchanged[0]);
+        no_http(&actions);
+    }
+
+    #[test]
+    fn a_read_failure_continuation_is_a_new_call_not_auth_attempt_two() {
+        let mut e = start(true, 2);
+        e.venue.immediate = true;
+        let old = e.venue.context.clone().unwrap();
+        let first = prep(&drain(&mut e));
+        release(&mut e, first, 0.);
+        e.handle(
+            1.,
+            Event::HttpFailed {
+                request: first.attempt().request,
+                error: "network",
+            },
+        );
+        let actions = drain(&mut e);
+        assert_eq!(e.venue.selected, vec![Ok(())]);
+        assert_ne!(e.venue.context.as_ref().unwrap().leg(), old.leg());
+        assert_ne!(prep(&actions).attempt().request, first.attempt().request);
+    }
 }

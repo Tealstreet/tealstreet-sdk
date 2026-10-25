@@ -74,8 +74,12 @@ mod serial_session {
         preparation_errors: Vec<VenueError>,
         reconciliations: usize,
         continue_after_success: bool,
+        capture_grant: bool,
+        grant_override: Option<crate::request_context::ResendGrant>,
+        slot_override: Option<Slot>,
         read_fact_absent: bool,
         rejections: Option<usize>,
+        #[cfg(feature = "order-locks")]
         lock: bool,
         double_continue: Option<Result<(), Error>>,
     }
@@ -267,7 +271,17 @@ mod serial_session {
                             None,
                         )
                         .unwrap();
-                    grant.map(SessionResend::Write)
+                    if self.capture_grant {
+                        self.capture_grant = false;
+                        self.grant_override = grant;
+                        cx.fail_plan(&plan, "captured authentication refusal")
+                            .unwrap();
+                        return;
+                    }
+                    self.grant_override
+                        .take()
+                        .or(grant)
+                        .map(SessionResend::Write)
                 };
                 let before = Self::snapshot(cx);
                 let ordinary = if self.selected.is_empty() {
@@ -284,7 +298,12 @@ mod serial_session {
                             SessionResend::Read => unreachable!(),
                         }
                     } else {
-                        cx.serial_plan_session_resend(&plan, &slot, &context, evidence)
+                        cx.serial_plan_session_resend(
+                            &plan,
+                            self.slot_override.as_ref().unwrap_or(&slot),
+                            &context,
+                            evidence,
+                        )
                     }
                 });
                 self.record(cx, result, before);

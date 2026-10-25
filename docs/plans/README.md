@@ -448,4 +448,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Backpack account GET Read custody | Plan CLEAR; originals reproduced, review pending | Before managing Info, Positions, Balance and Orders observations; preserve native snapshots and continuation order. | [RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md](RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md) |
 | Kraken Futures and Spot dispatch recipes | Draft recipes on nonce prerequisite; native caller adoption held | Before adding HMAC-SHA512 programs, trusted Base64 setup or nonce-bound selection. | [RUST_KRAKEN_DISPATCH_SIGNER.md](RUST_KRAKEN_DISPATCH_SIGNER.md) |
 
-| Serial Session resend | Plan; ruling and review before REDs | Before a serial call's one authentication resend waits for a login round trip (GRVT code 1000). | [RUST_SERIAL_SESSION_RESEND.md](RUST_SERIAL_SESSION_RESEND.md) |
+| Serial Session resend | Originals CLEAR; source review and paired size gates pending | Before a serial call's one authentication resend waits for a login round trip (GRVT code 1000). | [RUST_SERIAL_SESSION_RESEND.md](RUST_SERIAL_SESSION_RESEND.md) |

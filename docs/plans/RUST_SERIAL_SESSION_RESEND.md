@@ -330,3 +330,13 @@ journal suffix correction, plus six source controls); the serial_ filter passes
 77 tests. Scoped clippy with warnings denied passes. Composed workspace checks,
 other feature modes, local bans, paired size measures, source review and final
 CI remain freeze gates, not results claimed by this local checkpoint.
+
+
+Local composed freeze on actual 094a1fb836f: 34 new controls pass, including real
+foreign-grant and foreign-Slot refusals without spend, plus a failed Read2
+continuation proving that the next Read is a new logical call. The serial_
+filter is 80 PASS with order locks and 75 PASS without. Workspace all-targets
+check, default/serial-only clippy, scoped strict clippy and local bans pass.
+The feature-off fixture lock observation is cfg-gated; this fixes only its
+compilation, with no runtime or assertion change. Paired size measures and
+source review are pending; source runtime blobs are exact c0ad5639ecd.
