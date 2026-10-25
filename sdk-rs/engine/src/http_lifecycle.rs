@@ -514,6 +514,7 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn queue_managed(
         &mut self,
         context: Context,
