@@ -726,6 +726,7 @@ impl BybitLinear {
         let context = match cx.http_context(Scope::Background, policy) {
             Ok(context) => context,
             Err(error) => {
+                self.note_local_read_refusal();
                 return self.on_public_response(cx, then, Err(&error.venue_error().message));
             }
         };
@@ -872,7 +873,10 @@ impl BybitLinear {
                         .outcome(safe_cex_engine::Outcome::NotSent);
                     self.on_closed_failed(cx, *request, error);
                 }
-                then => self.on_public_response(cx, then, Err(&error.venue_error().message)),
+                then => {
+                    self.note_local_read_refusal();
+                    self.on_public_response(cx, then, Err(&error.venue_error().message));
+                }
             },
         }
     }
@@ -2367,6 +2371,14 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.hyro_waiter_ready(cx, preflight);
+    }
+
     fn on_http_plan_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,
