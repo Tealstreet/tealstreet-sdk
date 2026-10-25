@@ -128,9 +128,9 @@ impl<const NONCE: bool> Venue for Consumer<NONCE> {
         }; 2];
         let barriers = &declarations[..if self.0 == 1 { 2 } else { 1 }];
         let before = (
-            cx.io.next_id,
-            cx.io.actions.len(),
-            cx.io.request_contexts.plan_context_storage(),
+            cx.io.core.next_id,
+            cx.io.core.actions.len(),
+            cx.io.core.request_contexts.plan_context_storage(),
         );
         let result = match self.0 {
             9 => cx
@@ -170,9 +170,9 @@ impl<const NONCE: bool> Venue for Consumer<NONCE> {
             assert_eq!(
                 before,
                 (
-                    cx.io.next_id,
-                    cx.io.actions.len(),
-                    cx.io.request_contexts.plan_context_storage()
+                    cx.io.core.next_id,
+                    cx.io.core.actions.len(),
+                    cx.io.core.request_contexts.plan_context_storage()
                 )
             );
             if self.0 == 16 {
@@ -183,7 +183,7 @@ impl<const NONCE: bool> Venue for Consumer<NONCE> {
             }
         } else {
             let plan = result.unwrap();
-            let body = cx.io.request_contexts.plan_body(&plan).unwrap();
+            let body = cx.io.core.request_contexts.plan_body(&plan).unwrap();
             if self.0 == 10 {
                 assert_eq!(body.barriers, vec![1..3]);
                 assert_eq!(body.entries[1].terms.timeout_ms, 31);
@@ -308,12 +308,13 @@ fn custody(cx: &mut Cx<'_, Context>) {
     let first = cx.plan_leg_context(&plan, &slots[0]).unwrap();
     let second = cx.plan_leg_context(&plan, &slots[1]).unwrap();
     let before = (
-        cx.io.next_id,
-        cx.io.actions.len(),
-        cx.io.request_contexts.plan_context_storage(),
+        cx.io.core.next_id,
+        cx.io.core.actions.len(),
+        cx.io.core.request_contexts.plan_context_storage(),
     );
     let first_key = cx
         .io
+        .core
         .request_contexts
         .validate_mutation_group_submission(&first)
         .unwrap()
@@ -322,6 +323,7 @@ fn custody(cx: &mut Cx<'_, Context>) {
     assert_eq!(first_key.count, 2);
     assert!(matches!(
         cx.io
+            .core
             .request_contexts
             .validate_mutation_group_submission(&second),
         Err(Error::State)
@@ -329,21 +331,25 @@ fn custody(cx: &mut Cx<'_, Context>) {
     let mut foreign = first.clone();
     foreign.bind_issuer(&std::sync::Arc::new(()));
     assert!(matches!(
-        cx.io.request_contexts.mutation_group_key(&foreign),
+        cx.io.core.request_contexts.mutation_group_key(&foreign),
         Err(Error::Revoked)
     ));
     assert_eq!(
         before,
         (
-            cx.io.next_id,
-            cx.io.actions.len(),
-            cx.io.request_contexts.plan_context_storage()
+            cx.io.core.next_id,
+            cx.io.core.actions.len(),
+            cx.io.core.request_contexts.plan_context_storage()
         )
     );
     let admission = cx.owned_http_admission(&first).unwrap().unwrap();
-    cx.io.request_contexts.commit_owned_admission(&admission);
+    cx.io
+        .core
+        .request_contexts
+        .commit_owned_admission(&admission);
     let second_key = cx
         .io
+        .core
         .request_contexts
         .validate_mutation_group_submission(&second)
         .unwrap()
@@ -352,7 +358,7 @@ fn custody(cx: &mut Cx<'_, Context>) {
     assert!(first_key.same_group(second_key));
     cx.fail_plan(&plan, "fixture complete").unwrap();
     assert!(matches!(
-        cx.io.request_contexts.mutation_group_key(&first),
+        cx.io.core.request_contexts.mutation_group_key(&first),
         Err(Error::Revoked)
     ));
 }

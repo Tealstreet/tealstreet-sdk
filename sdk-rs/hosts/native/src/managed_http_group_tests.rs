@@ -120,6 +120,7 @@ impl Venue for Probe {
             self.slots.insert(context.leg(), slot);
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/group".into(),
                 None,

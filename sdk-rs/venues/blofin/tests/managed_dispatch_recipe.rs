@@ -118,6 +118,7 @@ impl Venue for Probe {
         let (url, _, body) = recipe.unsigned();
         cx.request_signed_managed(
             context.clone(),
+            None,
             self.method,
             url,
             body,

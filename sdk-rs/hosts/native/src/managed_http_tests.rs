@@ -52,6 +52,7 @@ impl Venue for Probe {
             if self.signed {
                 cx.request_signed_managed(
                     context.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/read".into(),
                     Some("{}".into()),
@@ -61,6 +62,7 @@ impl Venue for Probe {
             } else {
                 cx.request_managed(
                     context.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/read".into(),
                     Some("{}".into()),

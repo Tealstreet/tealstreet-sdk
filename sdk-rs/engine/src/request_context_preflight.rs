@@ -226,6 +226,7 @@ impl<P> Cx<'_, P> {
         self.with_command_entry(Operation::Read, |cx, command| {
             let preflight = cx.issue_preflight(command, policy)?;
             cx.io
+                .core
                 .request_contexts
                 .bind_preflight_receipt(&preflight, cap)
                 .expect("newly issued preflight");
@@ -240,27 +241,30 @@ impl<P> Cx<'_, P> {
         command: CommandId,
         policy: PreflightPolicy,
     ) -> Result<Preflight, Error> {
-        if self.io.http_delivery.is_some() {
+        if self.io.core.http_delivery.is_some() {
             return Err(Error::Revoked);
         }
         #[cfg(feature = "order-locks")]
-        if (policy.purpose == PreflightPurpose::ReadOnly && self.io.order_locks.contains(command))
-            || !self.io.order_locks.can_manage_unsent(command)
+        if (policy.purpose == PreflightPurpose::ReadOnly
+            && self.io.core.order_locks.contains(command))
+            || !self.io.core.order_locks.can_manage_unsent(command)
         {
             return Err(Error::State);
         }
         self.io
+            .core
             .request_contexts
             .prepare_preflight(command, &policy, self.now)?;
         let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let writes = policy.purpose == PreflightPurpose::WriteAfterReads;
         let preflight = self
             .io
+            .core
             .request_contexts
             .begin_preflight(command, generation, policy, self.now);
         #[cfg(feature = "order-locks")]
         if writes {
-            self.io.order_locks.manage(command);
+            self.io.core.order_locks.manage(command);
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = writes;
@@ -271,10 +275,10 @@ impl<P> Cx<'_, P> {
     /// completion use their own authority operations; they cannot bypass this.
     pub fn done_preflight(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
         self.validate_preflight_activation(preflight)?;
-        let seal = self.io.request_contexts.seal_preflight(
+        let seal = self.io.core.request_contexts.seal_preflight(
             preflight,
             self.now,
-            self.io.http_delivery.as_ref(),
+            self.io.core.http_delivery.as_ref(),
             None,
         )?;
         let Owner::Command { id, .. } = preflight.owner() else {
@@ -289,6 +293,7 @@ impl<P> Cx<'_, P> {
     /// resulting Unknown follows the existing Unknown reconciliation.
     pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
         self.io
+            .core
             .request_contexts
             .inherit_preflight_uncertainty(preflight)
     }
@@ -301,11 +306,15 @@ impl<P> Cx<'_, P> {
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        #[cfg(feature = "condition-waits")]
+        let seal = self.seal_condition_preflight(preflight, error.into())?;
+        #[cfg(not(feature = "condition-waits"))]
         self.validate_preflight_failure_custody(preflight)?;
-        let seal = self.io.request_contexts.seal_preflight(
+        #[cfg(not(feature = "condition-waits"))]
+        let seal = self.io.core.request_contexts.seal_preflight(
             preflight,
             self.now,
-            self.io.http_delivery.as_ref(),
+            self.io.core.http_delivery.as_ref(),
             Some(error.into()),
         )?;
         let Owner::Command { id, .. } = preflight.owner() else {

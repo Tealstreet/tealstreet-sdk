@@ -1,8 +1,11 @@
 //! Managed HTTP preparation and the engine's synchronous final claim.
 use super::*;
+#[cfg(feature = "session-bearer")]
+use crate::request_context::SessionBearer;
 use crate::request_context::{
     Attempt, Claim, Context, Error, HttpAction, HttpRelease, Lifecycle, Operation, Owner, Permit,
-    Preparation, Prepared, ReleaseTime, ResponseProof,
+    Preparation, Prepared, ReleaseTime, ResponseProof, RoutingIntent, Session, SessionHeaders,
+    SessionPlacement,
 };
 
 #[cfg(test)]
@@ -36,9 +39,200 @@ pub(super) struct Managed {
     response_started: bool,
     signing_attempt: Option<RequestId>,
     recipe: Option<crate::signing_dispatch::Pending>,
+    /// Decided at issue from the binding; reprepare never re-derives it.
+    intent: RoutingIntent,
+    bearer: Option<Bearer>,
     #[cfg(feature = "http-mutation-barriers")]
     group: Option<Box<mutation_group::Member>>,
     waiting_route: Option<Prepared>,
+}
+
+/// A Session-bound packet's generation and the revision its header carries.
+/// The engine keeps no token: only the Bind packet holds a copy. `floor` is the
+/// highest revision this call must not bind again: raised only when the claim
+/// fence finds the bundle moved or cleared (or by an owner's seed), so an
+/// ordinary Stale reprepare re-binds at the unchanged revision.
+#[cfg(feature = "session-bearer")]
+#[derive(Clone, Copy)]
+struct Bearer {
+    generation: u64,
+    revision: Option<u64>,
+    floor: Option<u64>,
+}
+
+#[cfg(feature = "session-bearer")]
+impl Bearer {
+    fn new(generation: u64) -> Option<Self> {
+        Some(Self {
+            generation,
+            revision: None,
+            floor: None,
+        })
+    }
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+    fn bound_revision(&self) -> Option<u64> {
+        self.revision
+    }
+    /// The claim fence found the bound bundle moved or cleared: never bind
+    /// its revision again.
+    fn fence(&mut self) {
+        self.floor = self.floor.max(self.revision);
+    }
+    fn forget_revision(&mut self) {
+        self.revision = None;
+    }
+    /// Claim-time fence: no token copy, clone or allocation.
+    fn current<V: Venue>(
+        &self,
+        venue: &V,
+        registry: &request_context_registry::ContextRegistry,
+    ) -> Result<Option<u64>, Error> {
+        if !registry.session_generation_live(self.generation) {
+            return Err(Error::Revoked);
+        }
+        Ok(venue.session_bearer_revision(self.generation))
+    }
+
+    /// The Bind-site read: the one copy of the token, recorded by revision.
+    /// `None` parks the call until a newer revision is announced.
+    fn read<V: Venue>(
+        &mut self,
+        venue: &V,
+        registry: &request_context_registry::ContextRegistry,
+    ) -> Result<Option<SessionHeaders>, Error> {
+        if !registry.session_generation_live(self.generation) {
+            return Err(Error::Revoked);
+        }
+        Ok(
+            admit(self.floor, venue.session_bearer(self.generation)).map(|(headers, revision)| {
+                self.revision = Some(revision);
+                headers
+            }),
+        )
+    }
+
+    /// Whether a revision the venue reports would bind rather than park.
+    fn wakes(&self, revision: Option<u64>) -> bool {
+        revision.is_some_and(|revision| self.floor.is_none_or(|floor| revision > floor))
+    }
+}
+
+/// Without `session-bearer` no managed call is ever bound: an uninhabited
+/// Bearer makes every binding branch unreachable, so it compiles out.
+#[cfg(not(feature = "session-bearer"))]
+#[derive(Clone, Copy)]
+enum Bearer {}
+
+#[cfg(not(feature = "session-bearer"))]
+impl Bearer {
+    fn new(_: u64) -> Option<Self> {
+        None
+    }
+    fn bound_revision(&self) -> Option<u64> {
+        match *self {}
+    }
+    fn fence(&mut self) {
+        match *self {}
+    }
+    fn forget_revision(&mut self) {
+        match *self {}
+    }
+    fn current<V: Venue>(
+        &self,
+        _: &V,
+        _: &request_context_registry::ContextRegistry,
+    ) -> Result<Option<u64>, Error> {
+        match *self {}
+    }
+    fn read<V: Venue>(
+        &mut self,
+        _: &V,
+        _: &request_context_registry::ContextRegistry,
+    ) -> Result<Option<SessionHeaders>, Error> {
+        match *self {}
+    }
+    fn wakes(&self, _: Option<u64>) -> bool {
+        match *self {}
+    }
+}
+
+/// The Bind-time decision for one hook answer: bind these headers at this
+/// revision, or park (None) until a revision above `floor` is announced.
+/// Refused headers drop here and wipe themselves.
+#[cfg(feature = "session-bearer")]
+fn admit(floor: Option<u64>, answer: SessionBearer) -> Option<(SessionHeaders, u64)> {
+    match answer {
+        SessionBearer::Ready { headers, revision }
+            if floor.is_none_or(|floor| revision > floor) =>
+        {
+            Some((headers, revision))
+        }
+        _ => None,
+    }
+}
+
+/// The issue-time refusal of a Session-bound request in a build without the
+/// `session-bearer` engine feature.
+#[cfg(not(feature = "session-bearer"))]
+const SESSION_BEARER_DISABLED: &str = "Session-bound requests require the session-bearer feature";
+
+/// The issue-time refusal of a Session-bound Mutation group member.
+#[cfg(all(feature = "session-bearer", feature = "http-mutation-barriers"))]
+const SESSION_GROUP_REFUSAL: &str = "Session-bound requests cannot join a Mutation group";
+
+fn bearer_refused(reason: Error) -> VenueError {
+    VenueError::new(match reason {
+        Error::Revoked => "Session retired",
+        Error::State => "Session bearer is not ready",
+        _ => "Session bearer header is refused",
+    })
+}
+
+/// Insert the Bind packet's one copy of each session header at the venue's
+/// declared placement, then re-check the limits over the whole packet (recipe,
+/// signer and session headers). A name the packet already carries or an
+/// overflow is refused, inserted copies wiped.
+fn attach_session_headers(
+    headers: &mut Vec<(&'static str, String)>,
+    signer_headers: &[(String, String)],
+    session: &SessionHeaders,
+) -> Result<(), Error> {
+    let taken = |name: &str| {
+        headers
+            .iter()
+            .any(|(owned, _)| owned.eq_ignore_ascii_case(name))
+            || signer_headers
+                .iter()
+                .any(|(owned, _)| owned.eq_ignore_ascii_case(name))
+    };
+    if session.entries().iter().any(|(name, _)| taken(name)) {
+        return Err(Error::Invalid);
+    }
+    let inserted = session.entries().len();
+    let at = match session.placement() {
+        SessionPlacement::First => 0,
+        SessionPlacement::After(anchor) => headers
+            .iter()
+            .position(|(owned, _)| owned.eq_ignore_ascii_case(anchor))
+            .map_or(0, |index| index + 1),
+    };
+    for (offset, (name, value)) in session.entries().iter().enumerate() {
+        headers.insert(at + offset, (*name, value.expose().to_owned()));
+    }
+    if crate::signing_headers::validate_packet(headers, signer_headers).is_err() {
+        for (_, mut value) in headers.drain(at..at + inserted) {
+            zeroize::Zeroize::zeroize(&mut value);
+        }
+        return Err(Error::Invalid);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "session-bearer")]
+fn is_authorization(name: &str) -> bool {
+    name.eq_ignore_ascii_case("Authorization")
 }
 
 impl Managed {
@@ -207,10 +401,13 @@ fn validate_nonce_recipe(
 impl<P> Cx<'_, P> {
     /// Queue semantic, unsigned HTTP work. Private recipes use the signed
     /// entry point; a missing signing recipe must never send an unsigned account
-    /// request. Failure preserves the caller's continuation.
+    /// request. Failure preserves the caller's continuation. With `bearer`, a
+    /// request that would join a Mutation group is refused `Invalid` and its
+    /// Plan fails "Session-bound requests cannot join a Mutation group".
     pub fn request_managed(
         &mut self,
         context: Context,
+        bearer: Option<&Session>,
         method: Method,
         url: String,
         body: Option<String>,
@@ -218,6 +415,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<RequestId, (P, Error)> {
         self.queue_managed(
             context,
+            bearer,
             method,
             url,
             body,
@@ -229,9 +427,11 @@ impl<P> Cx<'_, P> {
     /// Queue unsigned HTTP with static public codec headers. The existing
     /// managed boundary validates and snapshots them before allocating IDs.
     /// Credential-bearing contexts still require the signed entry point.
+    #[allow(clippy::too_many_arguments)]
     pub fn request_managed_with_headers(
         &mut self,
         context: Context,
+        bearer: Option<&Session>,
         method: Method,
         url: String,
         headers: &'static [(&'static str, &'static str)],
@@ -240,6 +440,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<RequestId, (P, Error)> {
         self.queue_managed(
             context,
+            bearer,
             method,
             url,
             body,
@@ -250,10 +451,13 @@ impl<P> Cx<'_, P> {
 
     /// Retain an unsigned recipe at creation; canonicalisation waits for route
     /// readiness. Mutations require command authority and a reconciliation codec
-    /// before physical release; the engine owns their write evidence.
+    /// before physical release; the engine owns their write evidence. A
+    /// Session-bound group member is refused as in `request_managed`.
+    #[allow(clippy::too_many_arguments)]
     pub fn request_signed_managed(
         &mut self,
         context: Context,
+        bearer: Option<&Session>,
         method: Method,
         url: String,
         body: Option<String>,
@@ -262,6 +466,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<RequestId, (P, Error)> {
         self.queue_managed(
             context,
+            bearer,
             method,
             url,
             body,
@@ -274,6 +479,7 @@ impl<P> Cx<'_, P> {
     pub(crate) fn request_selected_read_managed(
         &mut self,
         context: Context,
+        bearer: Option<&Session>,
         method: Method,
         url: String,
         body: Option<String>,
@@ -288,6 +494,7 @@ impl<P> Cx<'_, P> {
             }
             self.queue_managed(
                 context,
+                bearer,
                 method,
                 url,
                 body,
@@ -298,6 +505,7 @@ impl<P> Cx<'_, P> {
         #[cfg(feature = "dispatch-nonce")]
         self.queue_managed(
             context,
+            bearer,
             method,
             url,
             body,
@@ -309,32 +517,112 @@ impl<P> Cx<'_, P> {
     fn queue_managed(
         &mut self,
         context: Context,
+        bearer: Option<&Session>,
         method: Method,
         url: String,
         body: Option<String>,
         recipe: ManagedRecipe,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
+        let leg = context.leg();
         #[cfg(feature = "http-plans")]
         let admission = match self.owned_http_admission(&context) {
             Ok(admission) => admission,
             Err(error) => return Err((pending, error)),
         };
-        let result = self.queue_managed_admitted(
-            context,
-            method,
-            url,
-            body,
-            recipe,
-            pending,
-            #[cfg(feature = "http-plans")]
-            admission.as_ref(),
-        );
+        // After admission, so a refused binding fails an owning Plan like any
+        // other issue refusal.
+        let resolved = self.resolve_bearer(&context, bearer);
+        let generation = resolved.as_ref().ok().copied().flatten();
+        // A group claims its members together, and that claim checks no
+        // member's Bearer (R11, deferred to its first consumer), so a
+        // Session-bound request cannot join a Mutation group. Decided first,
+        // so it wins over a later expiry or capacity refusal; all are NotSent.
+        #[cfg(all(feature = "session-bearer", feature = "http-mutation-barriers"))]
+        let refusal = (generation.is_some()
+            && self
+                .io
+                .core
+                .request_contexts
+                .validate_mutation_group_submission(&context)
+                .is_ok_and(|group| group.is_some()))
+        .then_some(SESSION_GROUP_REFUSAL);
+        #[cfg(all(feature = "session-bearer", not(feature = "http-mutation-barriers")))]
+        let refusal: Option<&'static str> = None;
+        #[cfg(not(feature = "session-bearer"))]
+        let refusal = bearer.is_some().then_some(SESSION_BEARER_DISABLED);
+        let result = match resolved {
+            Ok(_) if refusal.is_some() => Err((pending, Error::Invalid)),
+            Ok(bearer) => self.queue_managed_admitted(
+                context,
+                bearer,
+                method,
+                url,
+                body,
+                recipe,
+                pending,
+                #[cfg(feature = "http-plans")]
+                admission.as_ref(),
+            ),
+            Err(error) => Err((pending, error)),
+        };
         #[cfg(feature = "http-plans")]
         if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
-            self.fail_owned_admission(admission, *error);
+            self.fail_owned_admission(admission, *error, refusal);
         }
+        #[cfg(feature = "session-bearer")]
+        match (generation, &result) {
+            (Some(generation), Ok(_)) => self
+                .io
+                .core
+                .request_contexts
+                .bind_leg_bearer(leg, generation),
+            (Some(generation), Err(_)) => self.io.drop_empty_bearer_bound(generation),
+            _ => {}
+        }
+        #[cfg(not(feature = "session-bearer"))]
+        let _ = (leg, generation);
         result
+    }
+
+    /// Binding grants nothing: issuer and liveness only, never session scope.
+    /// A same-leg retry or resend inherits the leg's binding. Index storage is
+    /// reserved here, before any effect.
+    #[cfg(feature = "session-bearer")]
+    fn resolve_bearer(
+        &mut self,
+        context: &Context,
+        bearer: Option<&Session>,
+    ) -> Result<Option<u64>, Error> {
+        let registry = &self.io.core.request_contexts;
+        let generation = match bearer {
+            Some(session) => Some(registry.validate_session(session)?),
+            None => match registry.leg_bearer(context) {
+                Some(generation) if !registry.session_generation_live(generation) => {
+                    return Err(Error::Revoked);
+                }
+                generation => generation,
+            },
+        };
+        if let Some(generation) = generation {
+            self.io.core.request_contexts.reserve_leg_bearer()?;
+            self.io.reserve_bearer_bound(generation)?;
+        }
+        Ok(generation)
+    }
+
+    /// Without `session-bearer`, any Session binding is refused before any
+    /// effect; an owning Plan names the reason.
+    #[cfg(not(feature = "session-bearer"))]
+    fn resolve_bearer(
+        &mut self,
+        _: &Context,
+        bearer: Option<&Session>,
+    ) -> Result<Option<u64>, Error> {
+        match bearer {
+            Some(_) => Err(Error::Invalid),
+            None => Ok(None),
+        }
     }
 
     #[cfg_attr(feature = "dispatch-nonce", inline(never))]
@@ -342,6 +630,7 @@ impl<P> Cx<'_, P> {
     fn queue_managed_admitted(
         &mut self,
         context: Context,
+        bearer: Option<u64>,
         method: Method,
         url: String,
         body: Option<String>,
@@ -359,27 +648,33 @@ impl<P> Cx<'_, P> {
             #[cfg(feature = "dispatch-nonce")]
             ManagedRecipe::SelectedRead(step, claim) => (Some(step), &[][..], Some(claim)),
         };
-        if let Err(error) = self.io.request_contexts.validate_send(&context, self.now) {
+        if let Err(error) = self
+            .io
+            .core
+            .request_contexts
+            .validate_send(&context, self.now)
+        {
             return Err((pending, error));
         }
         #[cfg(feature = "http-mutation-barriers")]
         let group = match self
             .io
+            .core
             .request_contexts
             .validate_mutation_group_submission(&context)
         {
             Ok(key) => key.map(|key| Box::new(mutation_group::Member::new(key))),
             Err(error) => return Err((pending, error)),
         };
-        if let Err(error) = self.io.http_pacing.check(context.pacing(), self.now) {
+        if let Err(error) = self.io.core.http_pacing.check(context.pacing(), self.now) {
             return Err((pending, error));
         }
         #[cfg(feature = "dispatch-nonce")]
         let nonce_claim = match validate_nonce_recipe(
             step.as_deref(),
             &selected_claim,
-            self.io.nonce_unscheduled && self.io.nonce_enabled,
-            &self.io.identities,
+            self.io.core.nonce_unscheduled && self.io.core.nonce_enabled,
+            &self.io.core.identities,
             &context,
         ) {
             Ok(claim) => claim,
@@ -391,7 +686,7 @@ impl<P> Cx<'_, P> {
                 .as_ref()
                 .and_then(|step| step.nonce_claim())
                 .map(|claim| claim.authority());
-            if nonce_claim.is_some() && !self.io.nonce_unscheduled {
+            if nonce_claim.is_some() && !self.io.core.nonce_unscheduled {
                 return Err((pending, Error::Invalid));
             }
             if let Some(expected) = selected_claim {
@@ -412,7 +707,7 @@ impl<P> Cx<'_, P> {
         if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
         }
-        if self.io.managed_http.len() >= 256 {
+        if self.io.core.managed_http.len() >= 256 {
             return Err((pending, Error::Capacity));
         }
         // Public codec declarations are captured exactly once. Validate borrowed
@@ -420,7 +715,15 @@ impl<P> Cx<'_, P> {
         let headers = step
             .as_ref()
             .map_or(public_headers, |step| step.unsigned_http_headers());
+        // On a bound request the engine alone sets `Authorization`, and it is
+        // never routed to explicit public egress. Unbound requests are unchanged.
         if crate::signing_headers::validate_unsigned(headers).is_err() {
+            return Err((pending, Error::Invalid));
+        }
+        #[cfg(feature = "session-bearer")]
+        if bearer.is_some()
+            && (headers.iter().any(|(name, _)| is_authorization(name)) || context.route().is_some())
+        {
             return Err((pending, Error::Invalid));
         }
         let headers = headers
@@ -434,8 +737,8 @@ impl<P> Cx<'_, P> {
         #[cfg(not(feature = "http-plans"))]
         let needs_ids = true;
         if needs_ids
-            && (!self.io.next_id.available(3)
-                || (step.is_some() && !self.io.signing.available_id()))
+            && (!self.io.core.next_id.available(3)
+                || (step.is_some() && !self.io.core.signing.available_id()))
         {
             return Err((pending, Error::Capacity));
         }
@@ -489,10 +792,10 @@ impl<P> Cx<'_, P> {
             #[cfg(feature = "http-plans")]
             let attempt = admission
                 .and_then(|admission| admission.signing)
-                .unwrap_or_else(|| self.io.signing.next_id());
+                .unwrap_or_else(|| self.io.core.signing.next_id());
             #[cfg(not(feature = "http-plans"))]
-            let attempt = self.io.signing.next_id();
-            if let Err(error) = self.io.signing.stage_managed(
+            let attempt = self.io.core.signing.next_id();
+            if let Err(error) = self.io.core.signing.stage_managed(
                 attempt,
                 Action::Http(http.clone()),
                 step,
@@ -502,7 +805,11 @@ impl<P> Cx<'_, P> {
             ) {
                 return Err((
                     pending,
-                    if error == crate::signing::SignError::InvalidRequest {
+                    if matches!(
+                        error,
+                        crate::signing::SignError::InvalidRequest
+                            | crate::signing::SignError::MissingKey
+                    ) {
                         Error::Invalid
                     } else {
                         Error::Capacity
@@ -515,18 +822,28 @@ impl<P> Cx<'_, P> {
         };
         if let Err(error) = self
             .io
+            .core
             .request_contexts
             .register_attempt(&context, request, self.now)
         {
             if signing_attempt.is_some() {
-                self.io.signing.remove_request(request);
+                self.io.core.signing.remove_request(request);
             }
             return Err((pending, error));
         }
         #[cfg(feature = "http-plans")]
         if let Some(admission) = admission {
-            self.io.request_contexts.commit_owned_admission(admission);
+            self.io
+                .core
+                .request_contexts
+                .commit_owned_admission(admission);
         }
+        #[cfg(feature = "session-bearer")]
+        let intent = match (bearer, context.routing_intent()) {
+            (Some(_), RoutingIntent::Public) => RoutingIntent::Primary,
+            (_, intent) => intent,
+        };
+        #[cfg(not(feature = "session-bearer"))]
         let intent = context.routing_intent();
         let lifecycle = Lifecycle::with_deadline(
             context,
@@ -539,7 +856,7 @@ impl<P> Cx<'_, P> {
         )
         .expect("validated physical HTTP window");
         let preparation = lifecycle.preparation();
-        self.io.managed_http.insert(
+        self.io.core.managed_http.insert(
             request,
             Managed {
                 lifecycle,
@@ -548,11 +865,19 @@ impl<P> Cx<'_, P> {
                 response_started: false,
                 signing_attempt,
                 recipe: None,
+                intent,
+                bearer: bearer.and_then(Bearer::new),
                 #[cfg(feature = "http-mutation-barriers")]
                 group,
                 waiting_route: None,
             },
         );
+        #[cfg(feature = "session-bearer")]
+        if let Some(generation) = bearer
+            && let Some(bound) = self.io.bearer_bound_mut(generation)
+        {
+            bound.push(request);
+        }
         self.io.pending.insert(
             request,
             PendingHttp {
@@ -560,14 +885,15 @@ impl<P> Cx<'_, P> {
                 auth: None,
             },
         );
-        self.io.timers.insert(timer, ());
-        self.io.actions.push(Action::SetTimer {
+        self.io.core.timers.insert(timer, ());
+        self.io.core.actions.push(Action::SetTimer {
             timer,
             at_ms: deadline,
         });
         // A leg in flight owns the execution deadline through its own timer.
         self.io.rearm_execution_timer();
         self.io
+            .core
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
                 preparation,
@@ -585,15 +911,16 @@ impl<P> Io<P> {
         token: Preparation,
         now: f64,
     ) -> bool {
-        self.managed_http.get(&request).is_some_and(|managed| {
+        self.core.managed_http.get(&request).is_some_and(|managed| {
             managed.lifecycle.preparation() == token
                 && managed.lifecycle.accepts_response()
-                && managed.validate(&self.request_contexts, now).is_ok()
+                && managed.validate(&self.core.request_contexts, now).is_ok()
         })
     }
 
     pub(super) fn retire_http_leg(&mut self, context: &Context) {
         let requests = self
+            .core
             .managed_http
             .iter()
             .filter_map(|(request, managed)| {
@@ -608,17 +935,23 @@ impl<P> Io<P> {
     }
 
     pub(super) fn managed_preparation(&self, request: RequestId) -> Option<Preparation> {
-        Some(self.managed_http.get(&request)?.lifecycle.preparation())
+        Some(
+            self.core
+                .managed_http
+                .get(&request)?
+                .lifecycle
+                .preparation(),
+        )
     }
 
     pub(super) fn retire_http_command(&mut self, command: CommandId) {
         #[cfg(feature = "http-plans")]
-        if let Some(timer) = self.request_contexts.plan_timer(command) {
-            self.timers.remove(&timer);
-            self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-            self.actions.push(Action::ClearTimer { timer });
+        if let Some(timer) = self.core.request_contexts.plan_timer(command) {
+            self.core.timers.remove(&timer);
+            self.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            self.core.actions.push(Action::ClearTimer { timer });
         }
-        let requests = self.managed_http.iter().filter_map(|(request, managed)| {
+        let requests = self.core.managed_http.iter().filter_map(|(request, managed)| {
             matches!(managed.lifecycle.context().owner(), Owner::Command {id, ..} if id == command)
                 .then_some(*request)
         }).collect::<Vec<_>>();
@@ -639,6 +972,7 @@ impl<P> Io<P> {
     ) -> Result<Vec<RequestId>, crate::request_context::Error> {
         let capacity = crate::request_context::Error::Capacity;
         let count = self
+            .core
             .managed_http
             .values()
             .filter(|managed| managed.lifecycle.context().owner() == owner)
@@ -646,7 +980,8 @@ impl<P> Io<P> {
         let mut requests = Vec::new();
         requests.try_reserve_exact(count).map_err(|_| capacity)?;
         requests.extend(
-            self.managed_http
+            self.core
+                .managed_http
                 .iter()
                 .filter(|(_, managed)| managed.lifecycle.context().owner() == owner)
                 .map(|(request, _)| *request),
@@ -656,7 +991,10 @@ impl<P> Io<P> {
             .and_then(|n| n.checked_add(1))
             .and_then(|n| n.checked_add(notices))
             .ok_or(capacity)?;
-        self.actions.try_reserve(actions).map_err(|_| capacity)?;
+        self.core
+            .actions
+            .try_reserve(actions)
+            .map_err(|_| capacity)?;
         Ok(requests)
     }
 
@@ -664,10 +1002,10 @@ impl<P> Io<P> {
     /// A sealed physical Plan owner: clear its timer and the requests listed
     /// before the seal (one already settled since then is simply skipped).
     pub(super) fn retire_physical_owner(&mut self, owner: Owner, requests: Vec<RequestId>) {
-        if let Some(timer) = self.request_contexts.physical_plan_timer(owner) {
-            self.timers.remove(&timer);
-            self.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
-            self.actions.push(Action::ClearTimer { timer });
+        if let Some(timer) = self.core.request_contexts.physical_plan_timer(owner) {
+            self.core.timers.remove(&timer);
+            self.core.actions.retain(|action| !matches!(action, Action::SetTimer { timer: previous, .. } if *previous == timer));
+            self.core.actions.push(Action::ClearTimer { timer });
         }
         for request in requests {
             self.discard_managed(request);
@@ -676,6 +1014,7 @@ impl<P> Io<P> {
 
     pub(super) fn retire_http_owner(&mut self, owner: Owner) {
         let requests = self
+            .core
             .managed_http
             .iter()
             .filter_map(|(request, managed)| {
@@ -690,6 +1029,7 @@ impl<P> Io<P> {
     /// Unsent legs of an execution with no live owner get no send right.
     pub(super) fn revoke_unsent_execution_legs(&mut self) {
         let revoked = self
+            .core
             .managed_http
             .iter()
             .filter(|(_, managed)| {
@@ -698,6 +1038,7 @@ impl<P> Io<P> {
                     crate::request_context::Owner::Execution { .. }
                 ) && managed.lifecycle.release().is_none()
                     && !self
+                        .core
                         .request_contexts
                         .execution_live(managed.lifecycle.context())
             })
@@ -708,27 +1049,102 @@ impl<P> Io<P> {
         }
     }
 
+    #[cfg(feature = "session-bearer")]
+    fn bearer_bound_mut(&mut self, generation: u64) -> Option<&mut Vec<RequestId>> {
+        self.core
+            .bearer_bound
+            .iter_mut()
+            .find(|(bound, _)| *bound == generation)
+            .map(|(_, requests)| requests)
+    }
+
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn bearer_bound_len(&self, generation: u64) -> usize {
+        self.core
+            .bearer_bound
+            .iter()
+            .find(|(bound, _)| *bound == generation)
+            .map_or(0, |(_, requests)| requests.len())
+    }
+
+    #[cfg(feature = "session-bearer")]
+    fn reserve_bearer_bound(&mut self, generation: u64) -> Result<(), Error> {
+        if self.bearer_bound_mut(generation).is_none() {
+            self.core
+                .bearer_bound
+                .try_reserve(1)
+                .map_err(|_| Error::Capacity)?;
+            self.core.bearer_bound.push((generation, Vec::new()));
+        }
+        self.bearer_bound_mut(generation)
+            .expect("reserved above")
+            .try_reserve(1)
+            .map_err(|_| Error::Capacity)
+    }
+
+    #[cfg(feature = "session-bearer")]
+    fn drop_empty_bearer_bound(&mut self, generation: u64) {
+        self.core
+            .bearer_bound
+            .retain(|(bound, requests)| *bound != generation || !requests.is_empty());
+    }
+
+    /// Queue every unreleased packet bound to a retired generation for a typed
+    /// failure after the current callback; released packets still deliver.
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn fence_bearer_generation(&mut self, generation: u64) {
+        let Some(index) = self
+            .core
+            .bearer_bound
+            .iter()
+            .position(|(bound, _)| *bound == generation)
+        else {
+            return;
+        };
+        for request in self.core.bearer_bound.swap_remove(index).1 {
+            if let Some(managed) = self.core.managed_http.get(&request)
+                && managed.lifecycle.release().is_none()
+            {
+                self.core
+                    .bearer_fenced
+                    .push(managed.lifecycle.preparation());
+            }
+        }
+    }
+
     fn take_managed_with_cancel(
         &mut self,
         request: RequestId,
         cancel: Option<Action>,
     ) -> Option<Managed> {
-        let managed = self.managed_http.remove(&request)?;
+        let managed = self.core.managed_http.remove(&request)?;
+        #[cfg(feature = "session-bearer")]
+        self.core
+            .bearer_parked
+            .retain(|(_, parked)| *parked != request);
+        #[cfg(feature = "session-bearer")]
+        if let Some(bearer) = managed.bearer
+            && let Some(bound) = self.bearer_bound_mut(bearer.generation())
+        {
+            bound.retain(|id| *id != request);
+            self.drop_empty_bearer_bound(bearer.generation());
+        }
         #[cfg(feature = "http-mutation-barriers")]
         if managed.group.is_some() {
-            self.actions.retain(|action| !matches!(action,
+            self.core.actions.retain(|action| !matches!(action,
                 Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::BindGroup { members, .. }
                     if members.iter().any(|member| member.preparation.attempt().request == request))));
         }
-        self.request_contexts
+        self.core
+            .request_contexts
             .retire_attempt(managed.lifecycle.context(), request);
         self.rearm_execution_timer();
-        self.signing.remove_request(request);
-        self.timers.remove(&managed.timer);
-        self.actions.push(Action::ClearTimer {
+        self.core.signing.remove_request(request);
+        self.core.timers.remove(&managed.timer);
+        self.core.actions.push(Action::ClearTimer {
             timer: managed.timer,
         });
-        self.actions.push(cancel.unwrap_or_else(|| {
+        self.core.actions.push(cancel.unwrap_or_else(|| {
             Action::ManagedHttp(Box::new(HttpAction::Cancel {
                 preparation: managed.lifecycle.preparation(),
                 signing: managed.signing_attempt,
@@ -750,14 +1166,14 @@ impl<P> Io<P> {
         if managed.lifecycle.context().operation() == Operation::Mutation
             && managed.lifecycle.release().is_some()
         {
-            self.http_responses.retire(request);
+            self.core.http_responses.retire(request);
         } else {
-            self.http_responses.remove(request);
+            self.core.http_responses.remove(request);
         }
-        self.streams.remove(&request);
-        self.incoming.remove(&request);
+        self.core.streams.remove(&request);
+        self.core.incoming.remove(&request);
         #[cfg(feature = "order-locks")]
-        self.order_read_tokens.remove(&request);
+        self.core.order_read_tokens.remove(&request);
         self.pending.remove(&request)
     }
 }
@@ -784,6 +1200,7 @@ impl<V: Venue> Engine<V> {
             return false;
         }
         self.io
+            .core
             .managed_http
             .get(&token.attempt().request)
             .is_some_and(|managed| managed.lifecycle.expects_preparation(token))
@@ -792,17 +1209,17 @@ impl<V: Venue> Engine<V> {
     /// Preparation is a host resource, never evidence of transport dispatch.
     pub fn http_prepared(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         self.assert_live();
-        self.io.dispatch_now = now;
+        self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
-        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
             return;
         };
         if managed.lifecycle.preparation() != token {
             return;
         }
         let prepared_result = managed
-            .validate_send(&self.io.request_contexts, now)
+            .validate_send(&self.io.core.request_contexts, now)
             .and_then(|()| {
                 if prepared.expires_at.is_some_and(|at| at <= now) {
                     return Err(Error::TimedOut);
@@ -835,7 +1252,34 @@ impl<V: Venue> Engine<V> {
                 let mut request = managed.original.clone();
                 request.timeout_ms =
                     Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
+                if let Some(bearer) = managed.bearer.as_mut() {
+                    match bearer
+                        .read(&self.venue, &self.io.core.request_contexts)
+                        .and_then(|session| {
+                            session
+                                .map(|session| {
+                                    attach_session_headers(&mut request.headers, &[], &session)
+                                })
+                                .transpose()
+                        }) {
+                        Ok(Some(())) => {}
+                        Ok(None) => {
+                            self.park_bearer(now, token, request.id);
+                            return;
+                        }
+                        Err(reason) => {
+                            self.http_preparation_failed(
+                                now,
+                                token,
+                                reason,
+                                bearer_refused(reason),
+                            );
+                            return;
+                        }
+                    }
+                }
                 self.io
+                    .core
                     .actions
                     .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
                         preparation: token,
@@ -855,13 +1299,13 @@ impl<V: Venue> Engine<V> {
 
     fn resume_prepared_signing(&mut self, now: f64, token: Preparation, prepared: Prepared) {
         let request = token.attempt().request;
-        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
             return;
         };
         if managed.lifecycle.preparation() != token {
             return;
         }
-        if let Err(error) = managed.validate(&self.io.request_contexts, now) {
+        if let Err(error) = managed.validate(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,
                 token,
@@ -876,6 +1320,7 @@ impl<V: Venue> Engine<V> {
         }
         match self
             .io
+            .core
             .http_pacing
             .check(managed.lifecycle.context().pacing(), now)
         {
@@ -890,7 +1335,7 @@ impl<V: Venue> Engine<V> {
             }
             Ok(Some(at)) => {
                 managed.waiting_route = Some(prepared);
-                self.io.actions.push(Action::SetTimer {
+                self.io.core.actions.push(Action::SetTimer {
                     timer: managed.timer,
                     at_ms: at
                         .min(managed.lifecycle.deadline())
@@ -904,8 +1349,23 @@ impl<V: Venue> Engine<V> {
         let Some(attempt) = managed.signing_attempt else {
             return;
         };
+        // The token is read at the signed Bind; refuse before provider work.
+        if let Some(bearer) = managed.bearer {
+            match bearer.current(&self.venue, &self.io.core.request_contexts) {
+                Ok(revision) if bearer.wakes(revision) => {}
+                Ok(_) => {
+                    self.park_bearer(now, token, request);
+                    return;
+                }
+                Err(reason) => {
+                    self.http_preparation_failed(now, token, reason, bearer_refused(reason));
+                    return;
+                }
+            }
+        }
         let ready = managed.lifecycle.begin_signing().and_then(|_| {
             self.io
+                .core
                 .signing
                 .activate_managed(attempt, managed.lifecycle.deadline())
                 .map_err(|_| Error::State)
@@ -918,7 +1378,7 @@ impl<V: Venue> Engine<V> {
                 VenueError::new("HTTP signing preparation failed"),
             );
         } else if was_waiting {
-            self.io.actions.push(Action::SetTimer {
+            self.io.core.actions.push(Action::SetTimer {
                 timer: managed.timer,
                 at_ms: managed.lifecycle.deadline(),
             });
@@ -945,14 +1405,14 @@ impl<V: Venue> Engine<V> {
         let Some(request) = pending.request_id() else {
             return;
         };
-        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
             if let Some(action) = outbound.as_mut() {
                 crate::signing_dispatch::wipe(action);
             }
             return;
         };
         let token = managed.lifecycle.preparation();
-        if let Err(reason) = managed.validate_send(&self.io.request_contexts, now) {
+        if let Err(reason) = managed.validate_send(&self.io.core.request_contexts, now) {
             if let Some(action) = outbound.as_mut() {
                 crate::signing_dispatch::wipe(action);
             }
@@ -1007,6 +1467,42 @@ impl<V: Venue> Engine<V> {
             .and_then(|()| managed.lifecycle.permit());
         match (prepared, outbound) {
             (Ok(permit), Some(Action::Http(mut packet))) if packet.id == request => {
+                // Added after signing, so the venue signature never covers it.
+                if let Some(bearer) = managed.bearer.as_mut() {
+                    let read = bearer
+                        .read(&self.venue, &self.io.core.request_contexts)
+                        .and_then(|session| {
+                            session
+                                .map(|session| {
+                                    attach_session_headers(
+                                        &mut packet.headers,
+                                        &packet.signer_headers,
+                                        &session,
+                                    )
+                                })
+                                .transpose()
+                        });
+                    match read {
+                        Ok(Some(())) => {}
+                        Ok(None) => {
+                            // Re-signed on wake, exactly as a Stale reprepare.
+                            crate::signing_dispatch::wipe(&mut Action::Http(packet));
+                            managed.recipe = Some(pending);
+                            self.park_bearer(now, token, request);
+                            return;
+                        }
+                        Err(reason) => {
+                            crate::signing_dispatch::wipe(&mut Action::Http(packet));
+                            self.http_preparation_failed(
+                                now,
+                                token,
+                                reason,
+                                bearer_refused(reason),
+                            );
+                            return;
+                        }
+                    }
+                }
                 packet.timeout_ms = Some(
                     (managed.lifecycle.deadline().min(pending.deadline) - now)
                         .ceil()
@@ -1021,6 +1517,7 @@ impl<V: Venue> Engine<V> {
                     return;
                 }
                 self.io
+                    .core
                     .actions
                     .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
                         preparation: token,
@@ -1052,12 +1549,13 @@ impl<V: Venue> Engine<V> {
         mut error: VenueError,
     ) {
         self.assert_live();
-        self.io.dispatch_now = now;
+        self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = token.attempt().request;
         #[cfg(feature = "http-plans")]
         if self
             .io
+            .core
             .managed_http
             .get(&request)
             .is_some_and(|managed| managed.lifecycle.preparation() == token)
@@ -1065,7 +1563,7 @@ impl<V: Venue> Engine<V> {
         {
             return;
         }
-        let Some(managed) = self.io.managed_http.get(&request) else {
+        let Some(managed) = self.io.core.managed_http.get(&request) else {
             return;
         };
         if managed.lifecycle.preparation() != token || managed.lifecycle.release().is_some() {
@@ -1081,22 +1579,23 @@ impl<V: Venue> Engine<V> {
             error.kind = Some(reason.kind());
         }
         if delivery.context.operation() == Operation::Mutation {
-            let _ = self.io.request_contexts.result(
+            let _ = self.io.core.request_contexts.result(
                 &delivery,
                 crate::request_context::WriteResult::Failed(error.clone()),
             );
         }
         self.io
+            .core
             .request_contexts
             .record_owned_read_failure(&delivery);
-        self.io.request_contexts.enter_delivery(&delivery);
+        self.io.core.request_contexts.enter_delivery(&delivery);
         if let Some(pending) = self.io.discard_managed(request) {
             self.begin_event_scope();
             #[cfg(feature = "http-plans")]
             {
-                self.io.http_history_failure = None;
+                self.io.core.http_history_failure = None;
             }
-            let previous = self.io.http_delivery.replace(delivery.clone());
+            let previous = self.io.core.http_delivery.replace(delivery.clone());
             self.venue.on_http_preparation_failed(
                 &mut Cx {
                     now,
@@ -1113,14 +1612,128 @@ impl<V: Venue> Engine<V> {
                 io: &mut self.io,
             }
             .finish_owned_read_failure(&delivery, error);
-            self.io.http_delivery = previous;
+            self.io.core.http_delivery = previous;
         }
-        self.io.request_contexts.exit_delivery(&delivery);
+        self.io.core.request_contexts.exit_delivery(&delivery);
         self.finish_event_scope(now);
         self.sweep_executions(now);
         self.flush_preflight_readiness(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
+        }
+    }
+
+    /// Fail the attempts a Session retire fenced, each through the common
+    /// preparation-failure path after the retiring callback has returned.
+    /// Runs until the queue is empty, in place to keep the storage reserved at
+    /// retire: a failure callback that retires another Session is drained here.
+    /// Then re-prepare the parked calls each announce woke.
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn flush_bearer_fences(&mut self, now: f64) {
+        loop {
+            if !self.io.core.bearer_fenced.is_empty() {
+                let token = self.io.core.bearer_fenced.remove(0);
+                self.http_preparation_failed(
+                    now,
+                    token,
+                    Error::Revoked,
+                    bearer_refused(Error::Revoked),
+                );
+            } else if !self.io.core.bearer_woken.is_empty() {
+                let generation = self.io.core.bearer_woken.remove(0);
+                self.wake_bearer_parks(now, generation);
+            } else {
+                return;
+            }
+        }
+    }
+
+    /// No Session binding exists without `session-bearer`.
+    #[cfg(not(feature = "session-bearer"))]
+    pub(super) fn flush_bearer_fences(&mut self, _: f64) {}
+
+    /// Hold an unreleased call whose bundle is NotReady (or not above its
+    /// `floor`) inside its own window. Its timer stays at the call deadline.
+    /// A park that cannot reserve its entry fails the call NotSent.
+    /// Unreachable without `session-bearer`: no call is ever bound.
+    #[cfg(not(feature = "session-bearer"))]
+    fn park_bearer(&mut self, _: f64, _: Preparation, _: RequestId) {}
+
+    #[cfg(feature = "session-bearer")]
+    fn park_bearer(&mut self, now: f64, token: Preparation, request: RequestId) {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
+            return;
+        };
+        let Some(bearer) = managed.bearer else {
+            return;
+        };
+        managed.waiting_route = None;
+        let timer = managed.timer;
+        let deadline = managed.lifecycle.deadline();
+        if self
+            .io
+            .core
+            .bearer_parked
+            .iter()
+            .any(|(_, parked)| *parked == request)
+        {
+            return;
+        }
+        if self.io.core.bearer_parked.try_reserve(1).is_err() {
+            self.http_preparation_failed(
+                now,
+                token,
+                Error::Capacity,
+                VenueError::new("Session bearer park capacity exhausted"),
+            );
+            return;
+        }
+        self.io.core.actions.push(Action::SetTimer {
+            timer,
+            at_ms: deadline,
+        });
+        self.io
+            .core
+            .bearer_parked
+            .push((bearer.generation(), request));
+    }
+
+    /// In park order, re-prepare the first parked call of `generation` whose
+    /// current revision is above its `floor`, one at a time: each re-prepare
+    /// may run venue callbacks that change the list or the revision.
+    #[cfg(feature = "session-bearer")]
+    fn wake_bearer_parks(&mut self, now: f64, generation: u64) {
+        loop {
+            let revision = self.venue.session_bearer_revision(generation);
+            let next = self
+                .io
+                .core
+                .bearer_parked
+                .iter()
+                .position(|(parked, request)| {
+                    *parked == generation
+                        && self
+                            .io
+                            .core
+                            .managed_http
+                            .get(request)
+                            .and_then(|managed| managed.bearer)
+                            .is_some_and(|bearer| bearer.wakes(revision))
+                });
+            let Some(index) = next else {
+                return;
+            };
+            let (_, request) = self.io.core.bearer_parked.remove(index);
+            let Some(token) = self
+                .io
+                .core
+                .managed_http
+                .get(&request)
+                .map(|managed| managed.lifecycle.preparation())
+            else {
+                continue;
+            };
+            self.reprepare_http(now, token);
         }
     }
 
@@ -1131,17 +1744,19 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "http-mutation-barriers")]
         if self
             .io
+            .core
             .managed_http
             .get(&permit.attempt().request)
             .is_some_and(|managed| managed.group.is_some())
         {
             return Err(Error::Revoked);
         }
-        self.io.dispatch_now = now;
+        self.io.core.dispatch_now = now;
         self.expire_read_roots(now);
         let request = permit.attempt().request;
         let managed = self
             .io
+            .core
             .managed_http
             .get_mut(&request)
             .ok_or(Error::Revoked)?;
@@ -1149,7 +1764,7 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
-        if let Err(error) = managed.validate_send(&self.io.request_contexts, now) {
+        if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,
                 preparation,
@@ -1158,8 +1773,37 @@ impl<V: Venue> Engine<V> {
             );
             return Err(error);
         }
+        if let Some(bearer) = managed.bearer {
+            match bearer.current(&self.venue, &self.io.core.request_contexts) {
+                Err(reason) => {
+                    self.http_preparation_failed(now, preparation, reason, bearer_refused(reason));
+                    return Err(reason);
+                }
+                Ok(revision) if revision.is_none() || revision != bearer.bound_revision() => {
+                    // The bound bundle is gone: never bind its revision again.
+                    if let Some(fenced) = self
+                        .io
+                        .core
+                        .managed_http
+                        .get_mut(&request)
+                        .and_then(|managed| managed.bearer.as_mut())
+                    {
+                        fenced.fence();
+                    }
+                    self.http_preparation_failed(
+                        now,
+                        preparation,
+                        Error::Stale,
+                        VenueError::new("Session bearer revision moved"),
+                    );
+                    return Err(Error::Stale);
+                }
+                Ok(_) => {}
+            }
+        }
         let release_flag = self
             .io
+            .core
             .request_contexts
             .release_flag(managed.lifecycle.context(), request)?;
         let pending = self.io.pending.get_mut(&request).ok_or(Error::Revoked)?;
@@ -1168,13 +1812,13 @@ impl<V: Venue> Engine<V> {
         let journal = managed.lifecycle.context().operation() == Operation::Mutation
             && !matches!(managed.lifecycle.context().owner(), Owner::Session { .. });
         if journal {
-            let capture = if self.io.streams.contains_key(&request) {
+            let capture = if self.io.core.streams.contains_key(&request) {
                 Err(Error::Invalid)
             } else {
                 self.venue.capture_http_reconciliation(&pending.value)
             }
             .and_then(|data| {
-                self.io.http_responses.insert(
+                self.io.core.http_responses.insert(
                     crate::request_context::ReconciliationRecord::new(
                         managed.lifecycle.context().owner(),
                         managed.lifecycle.context().leg(),
@@ -1197,8 +1841,8 @@ impl<V: Venue> Engine<V> {
         }
         let time = ReleaseTime {
             raw_ms: now,
-            protocol_ms: self.io.protocol_clock.at(now),
-            revision: self.io.protocol_clock.revision(),
+            protocol_ms: self.io.core.protocol_clock.at(now),
+            revision: self.io.core.protocol_clock.revision(),
         };
         let mut signing_release = None;
         #[cfg(feature = "dispatch-nonce")]
@@ -1206,12 +1850,12 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "dispatch-nonce")]
         let mut nonce_capability_failure = false;
         #[cfg(feature = "dispatch-nonce")]
-        let result = if V::dispatch_nonce() && self.io.nonce_enabled {
+        let result = if V::dispatch_nonce() && self.io.core.nonce_enabled {
             match self.http_release {
                 super::HttpRelease::Mutable(admit) => managed.claim(
                     permit,
                     time,
-                    &mut self.io.http_pacing,
+                    &mut self.io.core.http_pacing,
                     ClaimAdmission::Mutable(&mut |release| {
                         admit(&mut self.venue, &mut pending.value, release)
                     }),
@@ -1221,7 +1865,7 @@ impl<V: Venue> Engine<V> {
                 super::HttpRelease::NonceUnscheduled(admit) => managed.claim(
                     permit,
                     time,
-                    &mut self.io.http_pacing,
+                    &mut self.io.core.http_pacing,
                     ClaimAdmission::NonceUnscheduled(&mut |release| {
                         admit(&self.venue, &pending.value, release)
                     }),
@@ -1233,9 +1877,11 @@ impl<V: Venue> Engine<V> {
             nonce_capability_failure = true;
             Err(Error::State)
         } else {
-            managed
-                .lifecycle
-                .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
+            managed.lifecycle.claim(
+                permit,
+                time,
+                &mut self.io.core.http_pacing,
+                &mut |release| {
                     signing_release =
                         Some(crate::SigningRelease::new(release.signature, release.time)?);
                     match self.http_release {
@@ -1247,13 +1893,16 @@ impl<V: Venue> Engine<V> {
                             Ok(crate::request_context::Admission::Unscheduled)
                         }
                     }
-                })
+                },
+            )
         };
         #[cfg(not(feature = "dispatch-nonce"))]
         let result = {
-            managed
-                .lifecycle
-                .claim(permit, time, &mut self.io.http_pacing, &mut |release| {
+            managed.lifecycle.claim(
+                permit,
+                time,
+                &mut self.io.core.http_pacing,
+                &mut |release| {
                     signing_release =
                         Some(crate::SigningRelease::new(release.signature, release.time)?);
                     match self.http_release {
@@ -1265,7 +1914,8 @@ impl<V: Venue> Engine<V> {
                             Ok(crate::request_context::Admission::Unscheduled)
                         }
                     }
-                })
+                },
+            )
         };
         if let Ok(Claim::Released(release)) = result {
             if let Some(released) = release_flag {
@@ -1273,37 +1923,44 @@ impl<V: Venue> Engine<V> {
             }
             #[cfg(feature = "http-plans")]
             self.io
+                .core
                 .request_contexts
                 .record_read_plan_release(&managed.delivery());
             self.io
+                .core
                 .request_contexts
                 .execution_leg_released(managed.lifecycle.context());
             managed.recipe = None;
             managed.signing_attempt = None;
             self.io
+                .core
                 .request_contexts
                 .session_released(managed.lifecycle.context(), request);
             if journal {
-                self.io.http_write_revision = self.io.http_write_revision.saturating_add(1);
+                self.io.core.http_write_revision =
+                    self.io.core.http_write_revision.saturating_add(1);
                 let record = self
                     .io
+                    .core
                     .http_responses
                     .get_mut(request)
                     .expect("reconciliation reserved before admission");
                 record.release = Some(release);
                 record.order_revision = self.store.orders_revision();
-                record.write_revision = self.io.http_write_revision;
+                record.write_revision = self.io.core.http_write_revision;
             }
             #[cfg(feature = "order-locks")]
             {
                 if managed.lifecycle.context().operation() == Operation::Mutation {
                     match managed.lifecycle.context().owner() {
-                        Owner::Command { id, .. } => self.io.order_locks.note_command_write(id),
+                        Owner::Command { id, .. } => {
+                            self.io.core.order_locks.note_command_write(id)
+                        }
                         // A physical Plan write is sent for every observer.
                         #[cfg(feature = "http-plans")]
                         owner @ Owner::Execution { .. } => {
-                            for id in self.io.request_contexts.physical_observers(owner) {
-                                self.io.order_locks.note_command_write(id);
+                            for id in self.io.core.request_contexts.physical_observers(owner) {
+                                self.io.core.order_locks.note_command_write(id);
                             }
                         }
                         _ => {}
@@ -1313,9 +1970,10 @@ impl<V: Venue> Engine<V> {
                     let owner = managed.lifecycle.context().owner();
                     let token = self
                         .io
+                        .core
                         .request_contexts
-                        .read_mark(owner, self.io.order_locks.token());
-                    self.io.order_read_tokens.insert(request, token);
+                        .read_mark(owner, self.io.core.order_locks.token());
+                    self.io.core.order_read_tokens.insert(request, token);
                 }
             }
             self.venue.on_signing_release(
@@ -1327,12 +1985,13 @@ impl<V: Venue> Engine<V> {
             );
         }
         if journal && !matches!(result, Ok(Claim::Released(_))) {
-            self.io.http_responses.remove(request);
+            self.io.core.http_responses.remove(request);
         }
         #[cfg(feature = "dispatch-nonce")]
         if nonce_stale {
             let recipe = self
                 .io
+                .core
                 .managed_http
                 .get_mut(&request)
                 .and_then(|managed| managed.recipe.as_mut())
@@ -1365,13 +2024,19 @@ impl<V: Venue> Engine<V> {
 
     fn reprepare_http(&mut self, now: f64, token: Preparation) {
         let request = token.attempt().request;
-        let Some(managed) = self.io.managed_http.get_mut(&request) else {
+        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
             return;
         };
         if managed.lifecycle.preparation() != token || managed.lifecycle.release().is_some() {
             return;
         }
-        if let Err(error) = managed.validate_send(&self.io.request_contexts, now) {
+        // However it leaves, a re-prepared call is no longer parked.
+        #[cfg(feature = "session-bearer")]
+        self.io
+            .core
+            .bearer_parked
+            .retain(|(_, parked)| *parked != request);
+        if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,
                 token,
@@ -1395,14 +2060,14 @@ impl<V: Venue> Engine<V> {
             return;
         }
         if managed.waiting_route.take().is_some() {
-            self.io.actions.push(Action::SetTimer {
+            self.io.core.actions.push(Action::SetTimer {
                 timer: managed.timer,
                 at_ms: managed.lifecycle.deadline(),
             });
         }
         // Do not advance a lifecycle generation or take its retained recipe
         // unless a fresh signing attempt can also be allocated.
-        if managed.signing_attempt.is_some() && !self.io.signing.available_id() {
+        if managed.signing_attempt.is_some() && !self.io.core.signing.available_id() {
             self.http_preparation_failed(
                 now,
                 token,
@@ -1429,25 +2094,30 @@ impl<V: Venue> Engine<V> {
         if let Some(recipe) = managed
             .recipe
             .take()
-            .or_else(|| self.io.signing.remove_request(request))
+            .or_else(|| self.io.core.signing.remove_request(request))
         {
-            let next = self.io.signing.next_id();
-            self.io.signing.retry(next, recipe);
+            let next = self.io.core.signing.next_id();
+            self.io.core.signing.retry(next, recipe);
             managed.signing_attempt = Some(next);
         }
         self.io
+            .core
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Cancel {
                 preparation: token,
                 signing: old_signing,
             })));
+        if let Some(bearer) = managed.bearer.as_mut() {
+            bearer.forget_revision();
+        }
         let mut http = managed.original.clone();
         http.timeout_ms = Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
         self.io
+            .core
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
                 preparation: managed.lifecycle.preparation(),
-                intent: managed.lifecycle.context().routing_intent(),
+                intent: managed.intent,
                 request: http,
             })));
     }
@@ -1458,7 +2128,7 @@ impl<V: Venue> Engine<V> {
         if self.failed() {
             return None;
         }
-        self.io.managed_http.get(&request)?.lifecycle.release()
+        self.io.core.managed_http.get(&request)?.lifecycle.release()
     }
 
     pub(super) fn expire_http_timer(&mut self, now: f64, event: &Event<'_>) -> bool {
@@ -1467,6 +2137,7 @@ impl<V: Venue> Engine<V> {
         };
         let Some((request, managed)) = self
             .io
+            .core
             .managed_http
             .iter()
             .find(|(_, managed)| managed.timer == *timer)
@@ -1484,6 +2155,7 @@ impl<V: Venue> Engine<V> {
                 let timer = managed.timer;
                 let deadline = managed.lifecycle.deadline();
                 self.io
+                    .core
                     .managed_http
                     .get_mut(&request)
                     .unwrap()
@@ -1491,7 +2163,7 @@ impl<V: Venue> Engine<V> {
                     .as_mut()
                     .unwrap()
                     .pacing_wait = false;
-                self.io.actions.push(Action::SetTimer {
+                self.io.core.actions.push(Action::SetTimer {
                     timer,
                     at_ms: deadline,
                 });
@@ -1503,7 +2175,7 @@ impl<V: Venue> Engine<V> {
                 self.resume_prepared_signing(now, token, prepared);
                 return true;
             }
-            self.io.actions.push(Action::SetTimer {
+            self.io.core.actions.push(Action::SetTimer {
                 timer: *timer,
                 at_ms: managed.lifecycle.deadline(),
             });
@@ -1513,9 +2185,9 @@ impl<V: Venue> Engine<V> {
         if self.expire_plan_before_http_failure(now, request) {
             return true;
         }
-        let managed = &self.io.managed_http[&request];
+        let managed = &self.io.core.managed_http[&request];
         if managed.lifecycle.release().is_some() {
-            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Timeout);
+            let kind = std::mem::replace(&mut self.io.core.http_failure_kind, ErrorKind::Timeout);
             self.handle_event_with_read_timeout(
                 now,
                 Event::HttpFailed {
@@ -1524,7 +2196,7 @@ impl<V: Venue> Engine<V> {
                 },
                 true,
             );
-            self.io.http_failure_kind = kind;
+            self.io.core.http_failure_kind = kind;
             self.io.discard_managed(request);
         } else {
             self.http_preparation_failed(
@@ -1546,7 +2218,7 @@ impl<V: Venue> Engine<V> {
             | Event::HttpFailed { request, .. } => *request,
             _ => return true,
         };
-        let Some(managed) = self.io.managed_http.get(&request) else {
+        let Some(managed) = self.io.core.managed_http.get(&request) else {
             return true;
         };
         if !now.is_finite() || now >= managed.lifecycle.deadline() {
@@ -1563,6 +2235,7 @@ impl<V: Venue> Engine<V> {
             Event::HttpChunk { .. } | Event::HttpEnd { .. } if !started => false,
             Event::HttpStart { .. } => {
                 self.io
+                    .core
                     .managed_http
                     .get_mut(&request)
                     .expect("managed request exists")
@@ -1593,7 +2266,7 @@ impl<V: Venue> Engine<V> {
             | Event::HttpFailed { request, .. } => *request,
             _ => return false,
         };
-        if !self.io.http_responses.contains(request) {
+        if !self.io.core.http_responses.contains(request) {
             return false;
         }
         if !now.is_finite() {
@@ -1603,29 +2276,31 @@ impl<V: Venue> Engine<V> {
         // Invalid duplicate/order events for an active request are ignored by
         // the ordinary admission state machine. Only retirement during timeout
         // may turn a denied current event into a valid late response.
-        if !admitted && self.io.managed_http.contains_key(&request) {
+        if !admitted && self.io.core.managed_http.contains_key(&request) {
             return true;
         }
         let collected = match event {
             Event::HttpResponse { response, .. } => self
                 .io
+                .core
                 .http_responses
                 .start(request, response.status, response.headers)
                 .and_then(|()| {
                     self.io
+                        .core
                         .http_responses
                         .chunk(request, response.body.as_bytes())
                 }),
             Event::HttpStart {
                 status, headers, ..
-            } => self.io.http_responses.start(request, *status, headers),
-            Event::HttpChunk { data, .. } => self.io.http_responses.chunk(request, data),
+            } => self.io.core.http_responses.start(request, *status, headers),
+            Event::HttpChunk { data, .. } => self.io.core.http_responses.chunk(request, data),
             Event::HttpEnd { .. } => Ok(()),
             Event::HttpFailed { .. } => {
                 // A live request still needs the ordinary failure callback;
                 // a retired failure only consumes its late-response custody.
-                self.io.http_responses.remove(request);
-                return !self.io.managed_http.contains_key(&request);
+                self.io.core.http_responses.remove(request);
+                return !self.io.core.managed_http.contains_key(&request);
             }
             _ => unreachable!(),
         };
@@ -1636,7 +2311,7 @@ impl<V: Venue> Engine<V> {
         if !matches!(event, Event::HttpResponse { .. } | Event::HttpEnd { .. }) {
             return true;
         }
-        let record = match self.io.http_responses.complete(request) {
+        let record = match self.io.core.http_responses.complete(request) {
             Ok(record) => record,
             Err(error) => {
                 self.fail_write_collection(now, request, error);
@@ -1656,7 +2331,7 @@ impl<V: Venue> Engine<V> {
                     &mut crate::request_context::Reconciliation::new(
                         &record,
                         &mut self.store,
-                        self.io.http_write_revision,
+                        self.io.core.http_write_revision,
                     ),
                     &record.data,
                     response,
@@ -1667,23 +2342,24 @@ impl<V: Venue> Engine<V> {
             self.count_http_status(response.status);
             #[cfg(feature = "order-locks")]
             {
-                self.io.order_read_tokens.remove(&request);
+                self.io.core.order_read_tokens.remove(&request);
             }
             let delivery = self
                 .io
+                .core
                 .managed_http
                 .get(&request)
                 .expect("active capture has a managed request")
                 .delivery();
-            self.io.request_contexts.enter_delivery(&delivery);
+            self.io.core.request_contexts.enter_delivery(&delivery);
             #[cfg(feature = "http-plans")]
             {
-                self.io.http_history_failure = None;
+                self.io.core.http_history_failure = None;
             }
-            let previous = self.io.http_delivery.replace(delivery.clone());
+            let previous = self.io.core.http_delivery.replace(delivery.clone());
             if let Some(error) = proof.error() {
                 let venue = &self.venue;
-                let recorded = self.io.request_contexts.unproven_result(
+                let recorded = self.io.core.request_contexts.unproven_result(
                     &delivery,
                     response.status,
                     |evidence| venue.unproven_http_evidence(&pending.value, response, evidence),
@@ -1692,6 +2368,7 @@ impl<V: Venue> Engine<V> {
                     #[cfg(feature = "http-plans")]
                     let plan = self
                         .io
+                        .core
                         .request_contexts
                         .plan_from_context(&delivery.context);
                     let mut cx = Cx {
@@ -1702,6 +2379,7 @@ impl<V: Venue> Engine<V> {
                     #[cfg(feature = "http-plans")]
                     let sealed = if let Some(failure) = cx
                         .io
+                        .core
                         .request_contexts
                         .independent_plan_failure(&delivery, error.clone())
                     {
@@ -1733,9 +2411,10 @@ impl<V: Venue> Engine<V> {
                     true,
                     now,
                     &self.store,
-                    &mut self.io.actions,
+                    &mut self.io.core.actions,
                 );
-                self.io.http_write_reply = Some((response.status, response.headers.to_owned()));
+                self.io.core.http_write_reply =
+                    Some((response.status, response.headers.to_owned()));
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -1745,14 +2424,14 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
-                self.io.http_write_reply = None;
+                self.io.core.http_write_reply = None;
             }
-            self.io.http_delivery = previous;
-            self.io.request_contexts.exit_delivery(&delivery);
+            self.io.core.http_delivery = previous;
+            self.io.core.request_contexts.exit_delivery(&delivery);
             self.io.discard_managed(request);
         }
         drop(record);
-        self.io.http_responses.remove(request);
+        self.io.core.http_responses.remove(request);
         // Only active ordinary delivery owns event bookkeeping. Late codecs
         // never drive auth/retry/deferred commands or tickers.
         if ordinary {
@@ -1765,10 +2444,10 @@ impl<V: Venue> Engine<V> {
     }
 
     fn fail_write_collection(&mut self, now: f64, request: RequestId, _reason: Error) {
-        self.io.http_responses.remove(request);
-        if self.io.managed_http.contains_key(&request) {
+        self.io.core.http_responses.remove(request);
+        if self.io.core.managed_http.contains_key(&request) {
             // The venue answered (non-UTF-8 or oversize reply): never transport loss.
-            let kind = std::mem::replace(&mut self.io.http_failure_kind, ErrorKind::Internal);
+            let kind = std::mem::replace(&mut self.io.core.http_failure_kind, ErrorKind::Internal);
             self.handle_event(
                 now,
                 Event::HttpFailed {
@@ -1776,7 +2455,7 @@ impl<V: Venue> Engine<V> {
                     error: "HTTP mutation response failed integrity bounds",
                 },
             );
-            self.io.http_failure_kind = kind;
+            self.io.core.http_failure_kind = kind;
             self.io.discard_managed(request);
             if self.venue.cancel_needs_stored_order() {
                 self.release_held(now);
@@ -1805,6 +2484,7 @@ impl<P> Io<P> {
                 && leg.is_none_or(|leg| managed.lifecycle.context().leg() == leg)
         };
         let count = self
+            .core
             .managed_http
             .values()
             .filter(|managed| matches(managed))
@@ -1815,7 +2495,8 @@ impl<P> Io<P> {
             .map_err(|_| Error::Capacity)?;
         // Four per request cover Cancel, its timer clear, and execution-timer clear/rearm.
         // Additional notices cover Plan timer actions, the terminal and optional marker.
-        self.actions
+        self.core
+            .actions
             .try_reserve(
                 count
                     .checked_mul(4)
@@ -1823,7 +2504,7 @@ impl<P> Io<P> {
                     .ok_or(Error::Capacity)?,
             )
             .map_err(|_| Error::Capacity)?;
-        for (request, managed) in &self.managed_http {
+        for (request, managed) in &self.core.managed_http {
             if matches(managed) {
                 cleanup.push(PreparedReadCleanup {
                     request: *request,
@@ -1840,7 +2521,8 @@ impl<P> Io<P> {
     pub(super) fn commit_read_history_cleanup(&mut self, cleanup: Vec<PreparedReadCleanup>) {
         for item in cleanup {
             assert!(
-                self.managed_http
+                self.core
+                    .managed_http
                     .get(&item.request)
                     .is_some_and(|managed| managed.lifecycle.preparation() == item.preparation)
             );
@@ -1865,6 +2547,123 @@ mod tests {
     include!("request_context_plan_expiry_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_independence_tests.rs");
+    #[cfg(feature = "serial-plans")]
+    include!("request_context_serial_plan_tests.rs");
+    #[cfg(feature = "condition-waits")]
+    include!("request_context_condition_wait_tests.rs");
+
+    /// Bearer bundle attach and Bind-admission units (`session-bearer` only).
+    #[cfg(feature = "session-bearer")]
+    mod bearer {
+        use super::*;
+        use crate::request_context::SecretHeaderValue;
+        use crate::request_context::SessionBearer;
+        use crate::signing_headers::{MAX_HEADERS, MAX_VALUE_BYTES};
+
+        fn session(names: &[&'static str], value: &str) -> SessionHeaders {
+            SessionHeaders::new(
+                names
+                    .iter()
+                    .map(|name| (*name, SecretHeaderValue::new(value.into()).unwrap()))
+                    .collect(),
+            )
+            .unwrap()
+        }
+        fn signer(count: usize, value: &str) -> Vec<(String, String)> {
+            (0..count)
+                .map(|index| (format!("x-s{index}"), value.to_owned()))
+                .collect()
+        }
+        const RECIPE_NAMES: [&str; 29] = [
+            "x-r0", "x-r1", "x-r2", "x-r3", "x-r4", "x-r5", "x-r6", "x-r7", "x-r8", "x-r9",
+            "x-r10", "x-r11", "x-r12", "x-r13", "x-r14", "x-r15", "x-r16", "x-r17", "x-r18",
+            "x-r19", "x-r20", "x-r21", "x-r22", "x-r23", "x-r24", "x-r25", "x-r26", "x-r27",
+            "x-r28",
+        ];
+        fn recipe(count: usize, value: &str) -> Vec<(&'static str, String)> {
+            RECIPE_NAMES[..count]
+                .iter()
+                .map(|name| (*name, value.to_owned()))
+                .collect()
+        }
+
+        /// The final packet is recipe + signer + session headers; its count limit
+        /// spans all three and a refusal leaves both vectors exactly as they were.
+        #[test]
+        fn session_headers_count_against_the_whole_packet_including_signer_headers() {
+            let signer_headers = signer(3, "v");
+            let mut headers = recipe(28, "v");
+            attach_session_headers(&mut headers, &signer_headers, &session(&["Cookie"], "c"))
+                .expect("exactly 32 headers");
+            assert_eq!(headers.len() + signer_headers.len(), MAX_HEADERS);
+
+            let original = recipe(29, "v");
+            let mut headers = original.clone();
+            assert_eq!(
+                attach_session_headers(&mut headers, &signer_headers, &session(&["Cookie"], "c")),
+                Err(Error::Invalid)
+            );
+            assert_eq!(headers, original);
+            assert_eq!(signer_headers, signer(3, "v"));
+        }
+
+        /// Bytes likewise: each vector fits the budget alone; together they don't.
+        #[test]
+        fn session_headers_byte_budget_spans_recipe_and_signer_headers() {
+            let big = "x".repeat(MAX_VALUE_BYTES);
+            let original = recipe(1, &big);
+            let signer_headers = signer(1, &big);
+            let mut headers = original.clone();
+            assert_eq!(
+                attach_session_headers(
+                    &mut headers,
+                    &signer_headers,
+                    &session(&["Cookie", "X-Id"], &big)
+                ),
+                Err(Error::Invalid)
+            );
+            assert_eq!(headers, original);
+
+            let fits = "x".repeat(MAX_VALUE_BYTES - 64);
+            let mut headers = recipe(1, &fits);
+            attach_session_headers(
+                &mut headers,
+                &signer(1, &fits),
+                &session(&["Cookie", "X-Id"], &fits),
+            )
+            .expect("four values under the shared budget");
+        }
+
+        fn ready(revision: u64, cookie: &str) -> SessionBearer {
+            SessionBearer::Ready {
+                headers: session(&["Cookie"], cookie),
+                revision,
+            }
+        }
+
+        /// P11 (fe7lgm seed): a call seeded with `floor` = r parks on a Ready read
+        /// at or below r, and binds at r+1, even when the re-login returned an
+        /// identical cookie (dazzy3: the revision moves on every refresh).
+        #[test]
+        fn a_seeded_call_parks_until_a_revision_above_its_seed() {
+            assert!(
+                admit(Some(5), ready(5, "same")).is_none(),
+                "Ready at the seed"
+            );
+            assert!(
+                admit(Some(5), ready(4, "same")).is_none(),
+                "Ready below the seed"
+            );
+            assert!(admit(Some(5), SessionBearer::NotReady).is_none());
+            let (headers, revision) = admit(Some(5), ready(6, "same")).expect("newer revision");
+            assert_eq!(revision, 6);
+            assert_eq!(headers.entries()[0].1.expose(), "same");
+            assert!(
+                admit(None, ready(1, "first")).is_some(),
+                "an unseeded call binds"
+            );
+        }
+    }
 
     #[derive(Debug)]
     struct Pending(Context);
@@ -2015,6 +2814,7 @@ mod tests {
                 let request = if self.signed {
                     cx.request_signed_managed(
                         context.clone(),
+                        None,
                         Method::Post,
                         "https://venue.test/read".into(),
                         Some("{}".into()),
@@ -2024,6 +2824,7 @@ mod tests {
                 } else {
                     cx.request_managed(
                         context.clone(),
+                        None,
                         Method::Post,
                         "https://venue.test/read".into(),
                         Some("{}".into()),
@@ -2126,7 +2927,7 @@ mod tests {
             if pending.0.operation() == Operation::Mutation {
                 #[cfg(feature = "order-locks")]
                 assert!(
-                    cx.io.order_response_token.is_none(),
+                    cx.io.core.order_response_token.is_none(),
                     "write cannot inherit a prior read fence"
                 );
                 if self.retry_refusal && self.responses == 1 {
@@ -2157,6 +2958,7 @@ mod tests {
                     let context = cx.http_resend_context(&pending.0, grant.unwrap()).unwrap();
                     cx.request_signed_managed(
                         context.clone(),
+                        None,
                         Method::Post,
                         "https://venue.test/write".into(),
                         Some("{}".into()),
@@ -2416,6 +3218,7 @@ mod tests {
                 .unwrap();
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/candles".into(),
                 None,
@@ -2482,6 +3285,7 @@ mod tests {
                 .unwrap();
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/read".into(),
                 None,
@@ -2555,6 +3359,7 @@ mod tests {
         // Ready B keeps only its original unsigned recipe, never presented bytes.
         let b = engine
             .io
+            .core
             .managed_http
             .get(&tokens[1].attempt().request)
             .unwrap();
@@ -2592,9 +3397,10 @@ mod tests {
             let mut engine = crate::test_support::seeded_engine(Probe::default());
             if full {
                 for n in 0..256 {
-                    let id = engine.io.signing.next_id();
+                    let id = engine.io.core.signing.next_id();
                     engine
                         .io
+                        .core
                         .signing
                         .stage(
                             id,
@@ -2642,6 +3448,7 @@ mod tests {
             };
             let result = cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -2657,9 +3464,9 @@ mod tests {
                 matches!(result, Err((Pending(returned), error)) if error == expected && returned == context)
             );
             assert!(cx.io.pending.is_empty());
-            assert!(cx.io.managed_http.is_empty());
-            assert!(cx.io.timers.is_empty());
-            assert!(cx.io.actions.is_empty());
+            assert!(cx.io.core.managed_http.is_empty());
+            assert!(cx.io.core.timers.is_empty());
+            assert!(cx.io.core.actions.is_empty());
         }
     }
 
@@ -2668,6 +3475,7 @@ mod tests {
     fn narrow_physical_window(engine: &mut Engine<Probe>, token: Preparation, deadline: f64) {
         let managed = engine
             .io
+            .core
             .managed_http
             .get_mut(&token.attempt().request)
             .unwrap();
@@ -2692,6 +3500,39 @@ mod tests {
         narrow_physical_window(&mut engine, token, 50.);
         let actions = route(&mut engine, token, 10.);
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { request, .. } if request.timeout_ms == Some(40) && request.url == "https://venue.test/read" && request.body.as_deref() == Some("{}")))));
+    }
+
+    /// The Bind packet's Bearer copy is wiped with the packet: on a signed
+    /// refusal, and for any action the host never drained when the engine drops.
+    #[cfg(feature = "session-bearer")]
+    #[test]
+    fn bind_wipe_zeroizes_the_bearer_copy() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            ..Probe::default()
+        });
+        let mut bind = route(&mut engine, tokens[0], 10.)
+            .into_iter()
+            .find(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. })))
+            .expect("bind");
+        let Action::ManagedHttp(managed) = &mut bind else {
+            unreachable!()
+        };
+        let HttpAction::Bind { request, .. } = managed.as_mut() else {
+            unreachable!()
+        };
+        request
+            .headers
+            .insert(0, ("Authorization", "Bearer jwt-secret".into()));
+        crate::signing_dispatch::wipe(&mut bind);
+        let Action::ManagedHttp(managed) = &bind else {
+            unreachable!()
+        };
+        let HttpAction::Bind { request, .. } = managed.as_ref() else {
+            unreachable!()
+        };
+        assert!(request.headers.iter().all(|(_, value)| value.is_empty()));
+        assert!(request.url.is_empty());
     }
 
     #[test]
@@ -2861,7 +3702,7 @@ mod tests {
             engine.venue.failures,
             [(Error::TimedOut, Some(crate::Outcome::NotSent))]
         );
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
     }
 
     #[test]
@@ -2876,7 +3717,7 @@ mod tests {
             narrow_physical_window(&mut engine, token, 50.);
             let (attempt, _) = work(&route(&mut engine, token, 10.));
             if stale {
-                assert!(engine.io.protocol_clock.observe(20., 520.));
+                assert!(engine.io.core.protocol_clock.observe(20., 520.));
             }
             engine.handle(
                 50.,
@@ -2912,11 +3753,12 @@ mod tests {
         bound(&signed(&mut engine, 11., attempt, input));
         engine
             .io
+            .core
             .signing
             .set_test_ids(crate::resource_ids::ResourceIds::starting_at(
                 crate::resource_ids::MAX_RESOURCE_ID + 1,
             ));
-        assert!(!engine.io.signing.available_id());
+        assert!(!engine.io.core.signing.available_id());
         assert!(!engine.failed());
         engine.reprepare_http(50., token);
         let actions = engine.drain_actions().collect::<Vec<_>>();
@@ -2937,10 +3779,10 @@ mod tests {
         });
         let old = tokens[0];
         narrow_physical_window(&mut engine, old, 500.);
-        let timer = engine.io.managed_http[&old.attempt().request].timer;
+        let timer = engine.io.core.managed_http[&old.attempt().request].timer;
         let (attempt, input) = work(&route(&mut engine, old, 10.));
         let permit = bound(&signed(&mut engine, 11., attempt, input));
-        assert!(engine.io.protocol_clock.observe(12., 512.));
+        assert!(engine.io.core.protocol_clock.observe(12., 512.));
         assert_eq!(engine.claim_http(12., permit), Err(Error::Stale));
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { request, preparation, .. } if request.timeout_ms == Some(488) && *preparation != old))));
@@ -3039,7 +3881,7 @@ mod tests {
             signed: true,
             ..Probe::default()
         });
-        assert!(engine.io.signing.next_work().is_none());
+        assert!(engine.io.core.signing.next_work().is_none());
         // Later route/provider can complete first; neither consumes admission.
         let (second, second_work) = work(&route(&mut engine, tokens[1], 100.));
         let (first, first_work) = work(&route(&mut engine, tokens[0], 101.));
@@ -3074,7 +3916,7 @@ mod tests {
         let old = tokens[0];
         let (attempt, input) = work(&route(&mut engine, old, 100.));
         let permit = bound(&signed(&mut engine, 101., attempt, input.clone()));
-        assert!(engine.io.protocol_clock.observe(102., 602.));
+        assert!(engine.io.core.protocol_clock.observe(102., 602.));
         assert_eq!(engine.claim_http(102., permit), Err(Error::Stale));
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { preparation, signing: Some(id) } if *preparation == old && *id == attempt))));
@@ -3120,6 +3962,7 @@ mod tests {
         });
         let attempt = engine
             .io
+            .core
             .managed_http
             .get(&tokens[0].attempt().request)
             .unwrap()
@@ -3159,6 +4002,7 @@ mod tests {
         // wire command borrowing its numeric ID.
         let context = engine
             .io
+            .core
             .managed_http
             .get(&tokens[0].attempt().request)
             .unwrap()
@@ -3173,8 +4017,8 @@ mod tests {
         .unwrap();
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { signing: Some(id), .. } if *id == attempt))));
-        assert!(engine.io.managed_http.is_empty());
-        assert!(engine.io.signing.next_work().is_none());
+        assert!(engine.io.core.managed_http.is_empty());
+        assert!(engine.io.core.signing.next_work().is_none());
         let late = signed(&mut engine, 12., attempt, input);
         assert!(
             late.iter()
@@ -3245,7 +4089,7 @@ mod tests {
             .venue
             .mutation_intent
             .unwrap_or(crate::classify::Intent::Place);
-        engine.io.request_contexts.dispatch = Some((command, intent));
+        engine.io.core.request_contexts.dispatch = Some((command, intent));
         let mut cx = Cx {
             now: at,
             store: &mut engine.store,
@@ -3266,10 +4110,11 @@ mod tests {
                 },
             )
             .unwrap();
-        cx.io.request_contexts.dispatch = None;
+        cx.io.core.request_contexts.dispatch = None;
         let request = if signed {
             cx.request_signed_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 Some("{}".into()),
@@ -3279,6 +4124,7 @@ mod tests {
         } else {
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 Some("{}".into()),
@@ -3286,7 +4132,7 @@ mod tests {
             )
         }
         .expect("public managed mutation must queue");
-        let managed = cx.io.managed_http.get(&request).unwrap();
+        let managed = cx.io.core.managed_http.get(&request).unwrap();
         (context, managed.lifecycle.preparation(), managed.timer)
     }
 
@@ -3356,8 +4202,8 @@ mod tests {
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
-        assert!(engine.io.incoming.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
+        assert!(engine.io.core.incoming.is_empty());
         engine.handle(
             6.,
             Event::HttpChunk {
@@ -3392,7 +4238,13 @@ mod tests {
             a,
             Action::Http(_) | Action::Notice(_) | Action::SetTimer { .. }
         )));
-        assert!(!engine.io.http_responses.contains(token.attempt().request));
+        assert!(
+            !engine
+                .io
+                .core
+                .http_responses
+                .contains(token.attempt().request)
+        );
     }
 
     #[test]
@@ -3516,7 +4368,7 @@ mod tests {
                     done,
                 ));
                 assert!(engine.io.pending.is_empty());
-                assert!(engine.io.managed_http.is_empty());
+                assert!(engine.io.core.managed_http.is_empty());
             }
         }
         let mut expected = Vec::new();
@@ -3582,7 +4434,7 @@ mod tests {
             assert!(engine.venue.discarded_owners.is_empty());
             assert!(engine.drain_actions().next().is_none());
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
         }
         let mut expected = [408, 500, 503, 600, u16::MAX]
             .map(|status| {
@@ -3694,9 +4546,9 @@ mod tests {
                 assert_eq!(partial.total, None);
                 assert_eq!(partial.failed_index, None);
             }
-            assert!(engine.io.http_delivery.is_none());
+            assert!(engine.io.core.http_delivery.is_none());
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
         }
     }
 
@@ -3765,7 +4617,7 @@ mod tests {
                     HttpAction::Cancel { preparation, .. } if *preparation == token))));
             }
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             assert_eq!(engine.venue.releases.len(), 3);
             // Reusing the numeric command gives a new owner generation. Old
             // responses and provider completions cannot discard or seal it.
@@ -3786,10 +4638,11 @@ mod tests {
             assert_eq!(*engine.venue.evidence_owners.borrow(), [original.owner()]);
             assert_eq!(engine.venue.discarded_owners, [original.owner()]);
             assert!(engine.venue.reconciliations.borrow().is_empty());
-            assert_eq!(engine.io.managed_http.len(), 1);
+            assert_eq!(engine.io.core.managed_http.len(), 1);
             assert!(
                 engine
                     .io
+                    .core
                     .managed_http
                     .contains_key(&fresh.attempt().request)
             );
@@ -3807,6 +4660,7 @@ mod tests {
         let (mut engine, _) = start(Probe::default());
         engine
             .io
+            .core
             .order_locks
             .acquire(
                 &Command::PlaceOrders {
@@ -3817,7 +4671,7 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(
+        assert!(engine.io.core.order_locks.defer(
             &Command::CancelSymbolOrders {
                 command: 8,
                 symbol: String::new(),
@@ -3842,7 +4696,7 @@ mod tests {
         }
         assert!(engine.venue.command_calls.is_empty());
         assert_eq!(engine.venue.responses, 0);
-        assert!(engine.io.http_delivery.is_none());
+        assert!(engine.io.core.http_delivery.is_none());
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert_eq!(
             actions
@@ -3903,7 +4757,7 @@ mod tests {
                 usize::from(timer_first)
             );
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
         }
     }
 
@@ -3917,14 +4771,20 @@ mod tests {
             let (_, token, _) = mutation(&mut engine, 7, 0.);
             let permit = bind(&mut engine, token, 1.);
             if !refuse_capture {
-                engine.io.streams.insert(
+                engine.io.core.streams.insert(
                     token.attempt().request,
                     (ArrayAt::Root, ItemCheck::Splitter),
                 );
             }
             assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
             assert!(engine.venue.releases.is_empty());
-            assert!(!engine.io.http_responses.contains(token.attempt().request));
+            assert!(
+                !engine
+                    .io
+                    .core
+                    .http_responses
+                    .contains(token.attempt().request)
+            );
             assert!(engine.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(crate::Outcome::NotSent))));
         }
     }
@@ -3941,10 +4801,10 @@ mod tests {
             let (attempt, input) = work(&route(&mut engine, token, 1.));
             let permit = bound(&signed(&mut engine, 1., attempt, input));
             engine.claim_http(2., permit).unwrap();
-            engine.io.auth_failure_counted = true;
+            engine.io.core.auth_failure_counted = true;
             #[cfg(feature = "order-locks")]
             {
-                engine.io.order_response_token = Some(123);
+                engine.io.core.order_response_token = Some(123);
             }
             engine.handle(
                 3.,
@@ -3959,7 +4819,7 @@ mod tests {
             );
             assert_eq!(engine.health().auth_failures, 1);
             if status == 503 {
-                assert!(!engine.io.auth_failure_counted);
+                assert!(!engine.io.core.auth_failure_counted);
                 let actions = engine.drain_actions().collect::<Vec<_>>();
                 assert!(actions.iter().any(|action| matches!(action,
                     Action::Notice(Notice::CommandFailed { command: 8, error })
@@ -4003,10 +4863,11 @@ mod tests {
         };
         engine
             .io
+            .core
             .order_locks
             .acquire(&placing, &engine.store, true)
             .unwrap();
-        assert!(engine.io.order_locks.defer(
+        assert!(engine.io.core.order_locks.defer(
             &Command::CancelSymbolOrders {
                 command: 8,
                 symbol: String::new()
@@ -4040,6 +4901,7 @@ mod tests {
         });
         engine
             .io
+            .core
             .order_locks
             .acquire(
                 &Command::PlaceOrders {
@@ -4050,15 +4912,15 @@ mod tests {
                 true,
             )
             .unwrap();
-        engine.io.order_locks.note_write();
-        assert!(engine.io.order_locks.defer(
+        engine.io.core.order_locks.note_write();
+        assert!(engine.io.core.order_locks.defer(
             &Command::CancelSymbolOrders {
                 command: 8,
                 symbol: String::new()
             },
             None
         ));
-        engine.io.order_locks.finish(7, true);
+        engine.io.core.order_locks.finish(7, true);
         let permit = bind(&mut engine, tokens[0], 1.);
         engine.claim_http(2., permit).unwrap();
         engine.handle(
@@ -4080,7 +4942,7 @@ mod tests {
             1
         );
         assert_eq!(engine.venue.responses, 1);
-        assert!(engine.io.http_delivery.is_none());
+        assert!(engine.io.core.http_delivery.is_none());
     }
 
     #[cfg(feature = "order-locks")]
@@ -4092,6 +4954,7 @@ mod tests {
         });
         engine
             .io
+            .core
             .order_locks
             .acquire(
                 &Command::PlaceOrders {
@@ -4102,7 +4965,7 @@ mod tests {
                 true,
             )
             .unwrap();
-        assert!(engine.io.order_locks.defer(
+        assert!(engine.io.core.order_locks.defer(
             &Command::CancelSymbolOrders {
                 command: 8,
                 symbol: String::new()
@@ -4124,6 +4987,7 @@ mod tests {
             let (mut engine, _) = start(Probe::default());
             engine
                 .io
+                .core
                 .order_locks
                 .acquire(
                     &Command::PlaceOrders {
@@ -4142,12 +5006,14 @@ mod tests {
             if state == 1 || state == 2 {
                 let delivery = engine
                     .io
+                    .core
                     .managed_http
                     .get(&first_token.attempt().request)
                     .unwrap()
                     .delivery();
                 engine
                     .io
+                    .core
                     .request_contexts
                     .result(
                         &delivery,
@@ -4167,12 +5033,14 @@ mod tests {
                 engine.claim_http(5., permit).unwrap();
                 let delivery = engine
                     .io
+                    .core
                     .managed_http
                     .get(&second.attempt().request)
                     .unwrap()
                     .delivery();
                 engine
                     .io
+                    .core
                     .request_contexts
                     .result(
                         &delivery,
@@ -4189,7 +5057,7 @@ mod tests {
             }
             .placement_resolved(7);
             fail_mutation(&mut engine, &first, 6.);
-            assert_eq!(engine.io.order_locks.uncertain(""), state == 3);
+            assert_eq!(engine.io.core.order_locks.uncertain(""), state == 3);
             let error = engine
                 .drain_actions()
                 .find_map(|a| match a {
@@ -4211,9 +5079,9 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     fn _cx_has_custody(cx: &Cx<'_, Pending>) -> bool {
-        cx.io.http_delivery.is_some()
-            || cx.io.order_response_token.is_some()
-            || cx.io.command_entry.is_some()
+        cx.io.core.http_delivery.is_some()
+            || cx.io.core.order_response_token.is_some()
+            || cx.io.core.command_entry.is_some()
     }
 
     /// Seal `command` (held under `lock`) as an uncertain write at `at`.
@@ -4222,6 +5090,7 @@ mod tests {
         let id = lock.completion_id().unwrap();
         engine
             .io
+            .core
             .order_locks
             .acquire(lock, &engine.store, false)
             .unwrap();
@@ -4311,12 +5180,13 @@ mod tests {
             engine.claim_http(1., permit).unwrap();
             let delivery = engine
                 .io
+                .core
                 .managed_http
                 .get(&token.attempt().request)
                 .unwrap()
                 .delivery();
-            engine.io.http_delivery = Some(delivery);
-            engine.io.http_write_reply = Some((200, String::new()));
+            engine.io.core.http_delivery = Some(delivery);
+            engine.io.core.http_write_reply = Some((200, String::new()));
             let (verdict, _) = Cx {
                 now: 2.,
                 store: &mut engine.store,
@@ -4324,34 +5194,34 @@ mod tests {
             }
             .http_write_failure(&context, &GONE, Some(&native), "order not exists", None)
             .unwrap();
-            engine.io.http_write_reply = None;
-            engine.io.http_delivery = None;
+            engine.io.core.http_write_reply = None;
+            engine.io.core.http_delivery = None;
             engine.finish_event_scope(2.);
             if intent != Intent::Cancel {
                 // Outside a cancel the absent-order row never applies.
                 assert_eq!(verdict, Verdict::Refused(crate::ErrorKind::Rejected));
                 assert!(engine.venue.reconciles.is_empty());
-                assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+                assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
                 continue;
             }
             assert_eq!(verdict, Verdict::Satisfied(SatisfiedIntent::Cancel));
             assert_eq!(engine.venue.reconciles, vec![None], "exactly one read");
             assert!(
-                engine.io.order_locks.uncertain("BTCUSDT"),
+                engine.io.core.order_locks.uncertain("BTCUSDT"),
                 "fenced, not cancelled"
             );
             engine.finish_event_scope(3.);
             assert_eq!(engine.venue.reconciles.len(), 1, "never asked twice");
             // Only a fresh order read clears the fence.
-            engine.io.order_response_token = Some(engine.io.order_locks.token());
+            engine.io.core.order_response_token = Some(engine.io.core.order_locks.token());
             Cx {
                 now: 4.,
                 store: &mut engine.store,
                 io: &mut engine.io,
             }
             .orders_reconciled(None);
-            engine.io.order_response_token = None;
-            assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+            engine.io.core.order_response_token = None;
+            assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
         }
     }
 
@@ -4388,6 +5258,7 @@ mod tests {
         };
         engine
             .io
+            .core
             .order_locks
             .acquire(&place, &engine.store, false)
             .unwrap();
@@ -4396,12 +5267,13 @@ mod tests {
         engine.claim_http(1., permit).unwrap();
         let delivery = engine
             .io
+            .core
             .managed_http
             .get(&token.attempt().request)
             .unwrap()
             .delivery();
-        engine.io.http_delivery = Some(delivery);
-        engine.io.http_write_reply = Some((200, String::new()));
+        engine.io.core.http_delivery = Some(delivery);
+        engine.io.core.http_write_reply = Some((200, String::new()));
         let native = Native {
             code: NativeCode::Int(110001),
             message: "order not exists",
@@ -4413,10 +5285,13 @@ mod tests {
         }
         .http_write_failure(&context, &GONE, Some(&native), "order not exists", None)
         .unwrap();
-        engine.io.http_write_reply = None;
-        engine.io.http_delivery = None;
+        engine.io.core.http_write_reply = None;
+        engine.io.core.http_delivery = None;
         engine.finish_event_scope(2.);
-        assert!(engine.io.order_locks.uncertain("BTCUSDT"), "fenced at once");
+        assert!(
+            engine.io.core.order_locks.uncertain("BTCUSDT"),
+            "fenced at once"
+        );
         assert!(
             engine.venue.reconciles.is_empty(),
             "a read now could not clear the held placement's fence"
@@ -4434,16 +5309,16 @@ mod tests {
             vec![Some(vec!["BTCUSDT".to_owned()])],
             "exactly one read once the placement finished"
         );
-        engine.io.order_response_token = Some(engine.io.order_locks.token());
+        engine.io.core.order_response_token = Some(engine.io.core.order_locks.token());
         Cx {
             now: 4.,
             store: &mut engine.store,
             io: &mut engine.io,
         }
         .orders_reconciled(Some("BTCUSDT"));
-        engine.io.order_response_token = None;
+        engine.io.core.order_response_token = None;
         assert!(
-            !engine.io.order_locks.uncertain("BTCUSDT"),
+            !engine.io.core.order_locks.uncertain("BTCUSDT"),
             "the read clears it"
         );
     }
@@ -4623,7 +5498,7 @@ mod tests {
         assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown) && error.kind == Some(ErrorKind::Internal))).count(), 1);
         assert_eq!(engine.venue.responses, 0);
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
         engine.handle(
             5.,
             Event::HttpResponse {
@@ -4672,13 +5547,13 @@ mod tests {
         response(&mut engine, token, 3.);
         assert_eq!(engine.venue().responses, 0);
         #[cfg(feature = "order-locks")]
-        let before = engine.io.order_locks.token();
+        let before = engine.io.core.order_locks.token();
         assert!(matches!(
             engine.claim_http(4., permit),
             Ok(Claim::Released(_))
         ));
         #[cfg(feature = "order-locks")]
-        assert_eq!(engine.io.order_locks.token(), before);
+        assert_eq!(engine.io.core.order_locks.token(), before);
         assert_eq!(engine.venue().receipts, 1);
         response(&mut engine, token, 5.);
         assert_eq!(engine.venue().responses, 1);
@@ -4686,7 +5561,7 @@ mod tests {
         response(&mut engine, token, 6.);
         assert_eq!(engine.venue().responses, 1);
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
     }
 
     #[test]
@@ -4755,6 +5630,7 @@ mod tests {
             };
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/read".into(),
                 None,
@@ -4773,10 +5649,10 @@ mod tests {
             cx.fail_http_attempt(&context, old, "old timer"),
             Err(Error::Revoked)
         );
-        assert!(cx.io.actions.is_empty());
-        assert!(cx.io.managed_http.contains_key(&replacement));
-        assert!(cx.io.request_contexts.validate(&context, 2.).is_ok());
-        assert!(cx.io.http_delivery.is_none());
+        assert!(cx.io.core.actions.is_empty());
+        assert!(cx.io.core.managed_http.contains_key(&replacement));
+        assert!(cx.io.core.request_contexts.validate(&context, 2.).is_ok());
+        assert!(cx.io.core.http_delivery.is_none());
     }
 
     #[test]
@@ -4867,6 +5743,7 @@ mod tests {
             }
             let timer = engine
                 .io
+                .core
                 .managed_http
                 .get(&token.attempt().request)
                 .unwrap()
@@ -4889,7 +5766,7 @@ mod tests {
             assert_eq!(engine.venue().failures.len(), 1);
             assert_eq!(engine.venue().responses, 0);
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
         }
     }
 
@@ -4930,6 +5807,7 @@ mod tests {
         // wire command borrowing its numeric ID.
         let context = engine
             .io
+            .core
             .managed_http
             .get(&tokens[0].attempt().request)
             .unwrap()
@@ -4945,7 +5823,7 @@ mod tests {
         assert_eq!(engine.claim_http(3., permit), Err(Error::Revoked));
         assert!(!engine.http_preparation_pending(tokens[1]));
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
         assert!(engine.venue().failures.is_empty());
         let results = engine
             .drain_actions()
@@ -4987,8 +5865,8 @@ mod tests {
             assert_eq!(engine.venue().items, 1);
             assert_eq!(engine.venue().responses, 0);
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.incoming.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.incoming.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             response(&mut engine, tokens[0], 4.);
             assert_eq!(engine.venue().items, 1);
             assert_eq!(engine.venue().responses, 0);
@@ -5026,7 +5904,7 @@ mod tests {
             engine.io.pending.contains_key(&request),
             "early end must not consume continuation"
         );
-        assert!(engine.io.managed_http.contains_key(&request));
+        assert!(engine.io.core.managed_http.contains_key(&request));
         engine.handle(
             4.,
             Event::HttpChunk {
@@ -5072,7 +5950,7 @@ mod tests {
         engine.handle(10., Event::HttpEnd { request });
         assert_eq!(engine.venue().responses, 1);
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
     }
 
     #[test]
@@ -5103,6 +5981,7 @@ mod tests {
             let result = if credential {
                 cx.request_managed(
                     context.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/write".into(),
                     None,
@@ -5111,6 +5990,7 @@ mod tests {
             } else {
                 cx.request_signed_managed(
                     context.clone(),
+                    None,
                     Method::Post,
                     "https://venue.test/write".into(),
                     None,
@@ -5122,13 +6002,13 @@ mod tests {
                 matches!(result, Err((Pending(returned), Error::Invalid)) if returned == context)
             );
             assert!(cx.io.pending.is_empty());
-            assert!(cx.io.managed_http.is_empty());
-            assert!(cx.io.actions.is_empty());
-            assert!(cx.io.timers.is_empty());
-            assert!(cx.io.signing.next_work().is_none());
+            assert!(cx.io.core.managed_http.is_empty());
+            assert!(cx.io.core.actions.is_empty());
+            assert!(cx.io.core.timers.is_empty());
+            assert!(cx.io.core.signing.next_work().is_none());
             cx.fail_context(&context, "recipe mismatch").unwrap();
             assert!(
-                matches!(cx.io.actions.last(), Some(Action::Notice(Notice::CommandFailed { error, .. })) if error.outcome == Some(crate::Outcome::NotSent))
+                matches!(cx.io.core.actions.last(), Some(Action::Notice(Notice::CommandFailed { error, .. })) if error.outcome == Some(crate::Outcome::NotSent))
             );
         }
     }
@@ -5288,6 +6168,7 @@ mod tests {
                 .unwrap();
             cx.request_managed(
                 context.clone(),
+                None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -5327,10 +6208,11 @@ mod tests {
             .unwrap();
         assert_eq!(engine.claim_http(2., permit), Err(Error::Invalid));
         assert!(engine.io.pending.is_empty());
-        assert!(engine.io.managed_http.is_empty());
+        assert!(engine.io.core.managed_http.is_empty());
         assert!(
             !engine
                 .io
+                .core
                 .http_responses
                 .contains(preparation.attempt().request)
         );
@@ -5531,7 +6413,7 @@ mod tests {
             let actions = engine.drain_actions().collect::<Vec<_>>();
             assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown))).count(), 1);
             assert_eq!(engine.venue.releases.len(), 1);
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             assert!(engine.io.pending.is_empty());
         }
     }
@@ -5559,7 +6441,7 @@ mod tests {
             assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::NotSent))).count(), 1);
             assert!(actions.iter().all(|a| !matches!(a, Action::Http(_)) && !matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. }))));
             assert!(engine.io.pending.is_empty());
-            assert!(engine.io.managed_http.is_empty());
+            assert!(engine.io.core.managed_http.is_empty());
             assert!(!engine.signing_pending(attempt));
             assert!(engine.venue.releases.is_empty());
             assert_eq!(engine.venue.receipts, 0);
@@ -5583,7 +6465,7 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     fn fenced(engine: &mut Engine<Probe>) {
-        engine.io.order_locks.fence(Some(&["BTCUSDT".into()]));
+        engine.io.core.order_locks.fence(Some(&["BTCUSDT".into()]));
     }
 
     /// One logical order read spans several physical attempts (pages, coins);
@@ -5604,7 +6486,7 @@ mod tests {
         response(&mut engine, tokens[1], 501.);
         assert_eq!(engine.venue.responses, 1);
         assert!(
-            engine.io.order_locks.uncertain("BTCUSDT"),
+            engine.io.core.order_locks.uncertain("BTCUSDT"),
             "the first page predates the fence"
         );
     }
@@ -5624,7 +6506,7 @@ mod tests {
         release(&mut engine, tokens[1], 500.);
         response(&mut engine, tokens[1], 501.);
         assert_eq!(engine.venue.responses, 1);
-        assert!(engine.io.order_locks.uncertain("BTCUSDT"));
+        assert!(engine.io.core.order_locks.uncertain("BTCUSDT"));
     }
 
     #[cfg(feature = "order-locks")]
@@ -5640,7 +6522,7 @@ mod tests {
         release(&mut engine, tokens[0], 1.);
         release(&mut engine, tokens[1], 500.);
         response(&mut engine, tokens[1], 501.);
-        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+        assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
     }
 
     /// Separate owners are separate logical reads: a stale owner, retired or
@@ -5659,7 +6541,7 @@ mod tests {
         release(&mut engine, tokens[1], 500.);
         response(&mut engine, tokens[1], 501.);
         assert_eq!(engine.venue.responses, 2);
-        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+        assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
     }
 
     /// A write released under the reading command takes no read mark.
@@ -5677,7 +6559,7 @@ mod tests {
         fenced(&mut engine);
         release(&mut engine, tokens[0], 500.);
         response(&mut engine, tokens[0], 501.);
-        assert!(!engine.io.order_locks.uncertain("BTCUSDT"));
+        assert!(!engine.io.core.order_locks.uncertain("BTCUSDT"));
     }
 
     /// Marks live only as long as their owner's contexts; the registry's own
@@ -5691,7 +6573,7 @@ mod tests {
         });
         release(&mut engine, tokens[0], 1.);
         response(&mut engine, tokens[0], 2.);
-        assert_eq!(engine.io.request_contexts.read_mark_count(), 1);
+        assert_eq!(engine.io.core.request_contexts.read_mark_count(), 1);
         Cx {
             now: 5_000.,
             store: &mut engine.store,
@@ -5708,7 +6590,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(engine.io.request_contexts.read_mark_count(), 0);
+        assert_eq!(engine.io.core.request_contexts.read_mark_count(), 0);
     }
     #[cfg(feature = "dispatch-nonce")]
     #[test]
@@ -5741,6 +6623,7 @@ mod tests {
         let later = authority.reserve(2., 2.).unwrap();
         let recipe = engine
             .io
+            .core
             .managed_http
             .get_mut(&permit.attempt().request)
             .unwrap()
@@ -5749,7 +6632,7 @@ mod tests {
             .unwrap();
         recipe.install_test_nonce_claim(authority);
         recipe.nonce = Some(later);
-        engine.io.nonce_enabled = false;
+        engine.io.core.nonce_enabled = false;
         engine.http_release = crate::HttpRelease::NonceUnscheduled(|probe, _, _| {
             probe
                 .auth_observations

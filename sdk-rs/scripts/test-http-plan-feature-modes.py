@@ -26,11 +26,23 @@ def modes():
         # metadata-freshness OFF control: standalone Bitget with test support.
         ('order-locks', 'polling-control', 'test-support'): ['metadata freshness OFF control'],
         # dispatch-nonce OFF control keeps ordinary Plan/read signing enabled.
-        ('http-plans', 'order-locks', 'test-support'): ['dispatch nonce OFF control'],
+        ('http-plans', 'order-locks', 'test-support'): ['dispatch nonce OFF control', 'serial plans OFF control'],
     }
     grouped[('metadata-freshness', 'test-support')] = ['metadata-only CI control']
     grouped[('http-plans', 'metadata-freshness', 'order-locks', 'test-support')] = [
         'metadata Plan CI control']
+    # Seeded serial-plans OFF control: never add serial-plans here. Once a family
+    # adopts, workspace tests unify it on, so this row alone proves the off build.
+    # No family enables serial Plans before adoption; keep them compiled and tested.
+    grouped[('http-plans', 'order-locks', 'serial-plans', 'test-support')] = ['serial Plan control']
+    # Condition waits imply serial-plans; no family enables them before adoption.
+    grouped[('condition-waits', 'http-plans', 'order-locks', 'serial-plans', 'test-support')] = [
+        'condition wait control']
+    # No family links session-bearer yet; its tests run only here.
+    grouped[('http-mutation-barriers', 'http-plans', 'session-bearer', 'test-support')] = [
+        'session-bearer control']
+    # session-bearer OFF control: Session bindings are refused (session_bearer_off.rs).
+    grouped.setdefault(('http-plans', 'test-support'), []).append('session-bearer OFF control')
     grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'order-locks', 'test-support')] = ['explicit nonce control']
     for family in families:
         tree = subprocess.check_output([

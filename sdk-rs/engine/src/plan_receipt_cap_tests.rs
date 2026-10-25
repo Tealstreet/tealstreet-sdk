@@ -27,12 +27,12 @@ struct Counts {
 }
 fn counts(cx: &Cx<'_, ()>) -> Counts {
     Counts {
-        ids: cx.io.next_id,
-        contexts: cx.io.request_contexts.contexts.len(),
-        commands: cx.io.request_contexts.commands.len(),
-        credits: cx.io.request_contexts.reserved_contexts,
-        plans: cx.io.request_contexts.plan_index.len(),
-        timers: cx.io.timers.len(),
+        ids: cx.io.core.next_id,
+        contexts: cx.io.core.request_contexts.contexts.len(),
+        commands: cx.io.core.request_contexts.commands.len(),
+        credits: cx.io.core.request_contexts.reserved_contexts,
+        plans: cx.io.core.request_contexts.plan_index.len(),
+        timers: cx.io.core.timers.len(),
         pending: cx.io.pending.len(),
     }
 }
@@ -124,6 +124,7 @@ impl Venue for Probe {
                     .unwrap();
                 let cap = cx
                     .io
+                    .core
                     .request_contexts
                     .preflight_receipt_cap(&owner)
                     .unwrap()
@@ -132,7 +133,7 @@ impl Venue for Probe {
                 if let Some(old) = &self.old {
                     let before = counts(cx);
                     assert_eq!(
-                        cx.io.request_contexts.preflight_receipt_cap(old),
+                        cx.io.core.request_contexts.preflight_receipt_cap(old),
                         Err(Error::Revoked)
                     );
                     assert_eq!(counts(cx), before);
@@ -218,7 +219,7 @@ fn borrowed_timer_cannot_capture_or_emit_a_terminal() {
 fn exhausted_sequence_uses_one_read_capacity_refusal_without_allocating() {
     let mut e = engine(Mode::Exhausted);
     e.drain_actions().for_each(drop);
-    e.io.command_waits.exhaust_receipts();
+    e.io.core.command_waits.exhaust_receipts();
     e.handle_command(0., query(), Some(100)).unwrap();
     assert_eq!(e.venue.checked, 1);
     assert_eq!(failures(&mut e), vec![Error::Capacity.read_venue_error()]);
@@ -238,9 +239,9 @@ fn duplicate_legacy_receipt_cannot_retire_original_stamp_or_http_owner() {
             }
         })
         .unwrap();
-    e.io.command_waits.exhaust_receipts();
+    e.io.core.command_waits.exhaust_receipts();
     e.handle_command(5., query(), Some(1_000)).unwrap();
-    assert_eq!(e.io.command_waits.deadline(7), Some(100.));
+    assert_eq!(e.io.core.command_waits.deadline(7), Some(100.));
     assert_eq!(e.io.pending.len(), 1);
     assert_eq!(failures(&mut e), vec![Error::Revoked.read_venue_error()]);
     e.handle(
@@ -255,7 +256,7 @@ fn duplicate_legacy_receipt_cannot_retire_original_stamp_or_http_owner() {
         },
     );
     assert_eq!(e.venue.checked, 2);
-    assert_eq!(e.io.command_waits.deadline(7), None);
+    assert_eq!(e.io.core.command_waits.deadline(7), None);
     let done: Vec<_> = e.drain_actions().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result }) if result == "original legacy owner")).collect();
     assert_eq!(done.len(), 1);
 }

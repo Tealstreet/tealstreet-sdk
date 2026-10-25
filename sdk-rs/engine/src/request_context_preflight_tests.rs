@@ -30,7 +30,7 @@ impl Probe {
             .unwrap();
         self.callback_owner = Some(owner.clone());
         if self.corrupt_queue {
-            cx.io.request_contexts.retirements = VecDeque::new();
+            cx.io.core.request_contexts.retirements = VecDeque::new();
             self.caught_bookkeeping = catch_unwind(AssertUnwindSafe(|| {
                 cx.done_preflight(&owner, "cached".into())
             }))
@@ -146,7 +146,7 @@ fn childless_generation_survives_unrelated_pruning_and_generic_completion() {
         cx.http_context(Scope::Background, read_policy())
     })
     .unwrap();
-    assert!(engine.io.request_contexts.command_live(7, 1_000_000.));
+    assert!(engine.io.core.request_contexts.command_live(7, 1_000_000.));
     cx(&mut engine, 1_000_000., |cx| {
         assert!(matches!(
             cx.http_context(Scope::Command(7), read_policy()),
@@ -165,7 +165,7 @@ fn childless_generation_survives_unrelated_pruning_and_generic_completion() {
             Err(Error::State)
         ));
     });
-    assert!(engine.io.request_contexts.command_live(7, 2_000_000.));
+    assert!(engine.io.core.request_contexts.command_live(7, 2_000_000.));
     assert!(engine.venue.retired.is_empty());
     let actions = engine.drain_actions().collect::<Vec<_>>();
     assert_eq!(actions.iter().filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, result }) if result == "cached")).count(), 1);
@@ -176,7 +176,7 @@ fn childless_generation_survives_unrelated_pruning_and_generic_completion() {
     );
     assert_eq!(engine.venue.retired.len(), 1);
     assert!(engine.venue.retired[0].matches_preflight(&owner));
-    assert!(!engine.io.request_contexts.command_live(7, 2_000_000.));
+    assert!(!engine.io.core.request_contexts.command_live(7, 2_000_000.));
 }
 
 #[test]
@@ -214,8 +214,8 @@ fn wrong_issuer_old_generation_and_foreign_delivery_cannot_finish_owner() {
             generation: 91,
         },
     };
-    engine.io.http_delivery = Some(delivery.clone());
-    let ids = engine.io.next_id;
+    engine.io.core.http_delivery = Some(delivery.clone());
+    let ids = engine.io.core.next_id;
     cx(&mut engine, 2., |cx| {
         assert_eq!(
             cx.done_preflight(&owner, "borrowed".into()),
@@ -227,12 +227,12 @@ fn wrong_issuer_old_generation_and_foreign_delivery_cannot_finish_owner() {
             Err(Error::Revoked)
         ));
     });
-    assert_eq!(engine.io.next_id, ids);
+    assert_eq!(engine.io.core.next_id, ids);
     assert_eq!(
-        engine.io.http_delivery.as_ref().unwrap().context,
+        engine.io.core.http_delivery.as_ref().unwrap().context,
         delivery.context
     );
-    engine.io.http_delivery = None;
+    engine.io.core.http_delivery = None;
     cx(&mut engine, 3., |cx| cx.done_preflight(&owner, "ok".into())).unwrap();
     engine.prepare_dispatch(3.);
     let next = begin(&mut engine, 7, PreflightPurpose::ReadOnly);
@@ -264,22 +264,22 @@ fn preflight_policy_clock_and_safe_capacity_refuse_before_identity_or_owner_muta
             }
             _ => None,
         };
-        let ids = engine.io.next_id;
+        let ids = engine.io.core.next_id;
         assert!(matches!(
             cx(&mut engine, 0., |cx| cx.issue_preflight(7, invalid)),
             Err(Error::Invalid)
         ));
-        assert_eq!(engine.io.next_id, ids);
-        assert!(engine.io.request_contexts.commands.is_empty());
+        assert_eq!(engine.io.core.next_id, ids);
+        assert!(engine.io.core.request_contexts.commands.is_empty());
     }
     for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let ids = engine.io.next_id;
+        let ids = engine.io.core.next_id;
         assert!(matches!(
             cx(&mut engine, now, |cx| cx
                 .issue_preflight(7, policy(PreflightPurpose::ReadOnly))),
             Err(Error::Invalid)
         ));
-        assert_eq!(engine.io.next_id, ids);
+        assert_eq!(engine.io.core.next_id, ids);
     }
     let mut invalid = policy(PreflightPurpose::ReadOnly);
     invalid.read_credential = Some(crate::request_context::Credential {
@@ -290,17 +290,17 @@ fn preflight_policy_clock_and_safe_capacity_refuse_before_identity_or_owner_muta
         cx(&mut engine, 0., |cx| cx.issue_preflight(7, invalid)),
         Err(Error::Invalid)
     ));
-    engine.io.next_id =
+    engine.io.core.next_id =
         crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
-    let ids = engine.io.next_id;
+    let ids = engine.io.core.next_id;
     assert!(matches!(
         cx(&mut engine, 0., |cx| cx
             .issue_preflight(7, policy(PreflightPurpose::ReadOnly))),
         Err(Error::Capacity)
     ));
-    assert_eq!(engine.io.next_id, ids);
-    assert!(engine.io.request_contexts.commands.is_empty());
-    assert!(engine.io.actions.is_empty());
+    assert_eq!(engine.io.core.next_id, ids);
+    assert!(engine.io.core.request_contexts.commands.is_empty());
+    assert!(engine.io.core.actions.is_empty());
     assert!(!engine.failed());
 }
 
@@ -310,26 +310,29 @@ fn reserved_retirement_backing_covers_all_active_owners_without_post_seal_alloca
     let owners = (1..=CAPACITY as u32)
         .map(|id| begin(&mut engine, id, PreflightPurpose::ReadOnly))
         .collect::<Vec<_>>();
-    let capacity = engine.io.request_contexts.retirements.capacity();
+    let capacity = engine.io.core.request_contexts.retirements.capacity();
     assert!(capacity >= CAPACITY);
-    let ids = engine.io.next_id;
+    let ids = engine.io.core.next_id;
     assert!(matches!(
         cx(&mut engine, 0., |cx| cx
             .issue_preflight(999, policy(PreflightPurpose::ReadOnly))),
         Err(Error::Capacity)
     ));
-    assert_eq!(engine.io.next_id, ids);
+    assert_eq!(engine.io.core.next_id, ids);
     for owner in &owners {
         cx(&mut engine, 1., |cx| {
             cx.done_preflight(owner, "cached".into())
         })
         .unwrap();
     }
-    assert_eq!(engine.io.request_contexts.retirements.len(), CAPACITY);
-    assert_eq!(engine.io.request_contexts.retirements.capacity(), capacity);
+    assert_eq!(engine.io.core.request_contexts.retirements.len(), CAPACITY);
+    assert_eq!(
+        engine.io.core.request_contexts.retirements.capacity(),
+        capacity
+    );
     engine.drain_actions().for_each(drop);
     assert_eq!(engine.venue.retired.len(), CAPACITY);
-    assert!(engine.io.request_contexts.commands.is_empty());
+    assert!(engine.io.core.request_contexts.commands.is_empty());
     assert!(!engine.failed());
 }
 
@@ -367,6 +370,7 @@ fn hook_panic_fences_queued_actions_claims_callbacks_and_native_queries_forever(
         let context = cx.http_context(Scope::Background, read_policy()).unwrap();
         cx.request_managed(
             context,
+            None,
             Method::Get,
             "https://venue.test/read".into(),
             None,
@@ -374,7 +378,7 @@ fn hook_panic_fences_queued_actions_claims_callbacks_and_native_queries_forever(
         )
         .unwrap()
     });
-    let token = engine.io.managed_http[&request].delivery().attempt;
+    let token = engine.io.core.managed_http[&request].delivery().attempt;
     let preparation = engine.io.managed_preparation(request).unwrap();
     engine.http_prepared(
         1.,
@@ -419,8 +423,8 @@ fn hook_panic_fences_queued_actions_claims_callbacks_and_native_queries_forever(
     assert_eq!(exposed, 0);
     assert_eq!(engine.venue.retired.len(), 1);
     assert!(engine.failed());
-    assert!(!engine.io.next_id.failed());
-    assert!(!engine.io.signing.failed());
+    assert!(!engine.io.core.next_id.failed());
+    assert!(!engine.io.core.signing.failed());
     let queries = engine.venue.queries.get();
     assert!(catch_unwind(AssertUnwindSafe(|| engine.venue())).is_err());
     assert!(catch_unwind(AssertUnwindSafe(|| engine.capabilities())).is_err());
@@ -468,18 +472,18 @@ fn invalid_retirement_token_poisoning_precedes_native_hook_and_allocator_failure
     .unwrap();
     let mut other = self::engine();
     let foreign = begin(&mut other, 7, PreflightPurpose::ReadOnly);
-    engine.io.request_contexts.retirements[0] = HttpOwnerRetirement::new(foreign);
+    engine.io.core.request_contexts.retirements[0] = HttpOwnerRetirement::new(foreign);
     assert!(catch_unwind(AssertUnwindSafe(|| engine.prepare_dispatch(2.))).is_err());
     assert!(engine.failed());
     assert!(engine.venue.retired.is_empty());
-    assert!(!engine.io.next_id.failed());
+    assert!(!engine.io.core.next_id.failed());
     let mut engine = self::engine();
     let owner = begin(&mut engine, 7, PreflightPurpose::ReadOnly);
     cx(&mut engine, 1., |cx| {
         cx.done_preflight(&owner, "cached".into())
     })
     .unwrap();
-    assert!(catch_unwind(AssertUnwindSafe(|| engine.io.next_id.invalidate())).is_err());
+    assert!(catch_unwind(AssertUnwindSafe(|| engine.io.core.next_id.invalidate())).is_err());
     assert!(catch_unwind(AssertUnwindSafe(|| engine.prepare_dispatch(2.))).is_err());
     assert!(engine.venue.retired.is_empty());
 }
@@ -494,6 +498,7 @@ fn lock_admission_never_relabels_prior_send_or_acquires_read_mutation_intent() {
         let mut engine = engine();
         engine
             .io
+            .core
             .order_locks
             .acquire(
                 &Command::PlaceOrders {
@@ -504,20 +509,21 @@ fn lock_admission_never_relabels_prior_send_or_acquires_read_mutation_intent() {
                 true,
             )
             .unwrap();
-        engine.io.order_locks.note_write();
-        let ids = engine.io.next_id;
+        engine.io.core.order_locks.note_write();
+        let ids = engine.io.core.next_id;
         assert!(matches!(
             cx(&mut engine, 0., |cx| cx.issue_preflight(7, policy(purpose))),
             Err(Error::State)
         ));
-        assert_eq!(engine.io.next_id, ids);
-        assert!(engine.io.request_contexts.commands.is_empty());
-        engine.io.order_locks.finish(7, true);
-        assert!(engine.io.order_locks.uncertain(""));
+        assert_eq!(engine.io.core.next_id, ids);
+        assert!(engine.io.core.request_contexts.commands.is_empty());
+        engine.io.core.order_locks.finish(7, true);
+        assert!(engine.io.core.order_locks.uncertain(""));
     }
     let mut engine = engine();
     engine
         .io
+        .core
         .order_locks
         .acquire(
             &Command::PlaceOrders {
@@ -533,24 +539,25 @@ fn lock_admission_never_relabels_prior_send_or_acquires_read_mutation_intent() {
             .issue_preflight(7, policy(PreflightPurpose::ReadOnly))),
         Err(Error::State)
     ));
-    let ids = engine.io.next_id;
+    let ids = engine.io.core.next_id;
     let mut invalid = policy(PreflightPurpose::WriteAfterReads);
     invalid.write_credential = None;
     assert!(matches!(
         cx(&mut engine, 0., |cx| cx.issue_preflight(7, invalid)),
         Err(Error::Invalid)
     ));
-    assert_eq!(engine.io.next_id, ids);
-    assert!(engine.io.request_contexts.commands.is_empty());
+    assert_eq!(engine.io.core.next_id, ids);
+    assert!(engine.io.core.request_contexts.commands.is_empty());
     // Refusal did not mark the lock managed: a subsequent legacy write is
     // still uncertain, rather than being silently relabelled unsent.
-    engine.io.order_locks.note_write();
-    assert!(!engine.io.order_locks.can_manage_unsent(7));
-    engine.io.order_locks.finish(7, true);
-    assert!(engine.io.order_locks.uncertain(""));
+    engine.io.core.order_locks.note_write();
+    assert!(!engine.io.core.order_locks.can_manage_unsent(7));
+    engine.io.core.order_locks.finish(7, true);
+    assert!(engine.io.core.order_locks.uncertain(""));
     let mut engine = self::engine();
     engine
         .io
+        .core
         .order_locks
         .acquire(
             &Command::PlaceOrders {
@@ -562,15 +569,15 @@ fn lock_admission_never_relabels_prior_send_or_acquires_read_mutation_intent() {
         )
         .unwrap();
     let owner = begin(&mut engine, 7, PreflightPurpose::WriteAfterReads);
-    engine.io.order_locks.note_write();
-    assert!(engine.io.order_locks.can_manage_unsent(7));
+    engine.io.core.order_locks.note_write();
+    assert!(engine.io.core.order_locks.can_manage_unsent(7));
     cx(&mut engine, 1., |cx| {
         cx.fail_preflight(&owner, "prerequisite refused")
     })
     .unwrap();
     engine.drain_actions().for_each(drop);
-    assert!(!engine.io.order_locks.uncertain(""));
-    assert!(!engine.io.order_locks.contains(7));
+    assert!(!engine.io.core.order_locks.uncertain(""));
+    assert!(!engine.io.core.order_locks.contains(7));
 }
 
 #[test]
@@ -587,8 +594,12 @@ fn write_preflight_fallback_uses_the_shared_bounded_evidence_projection() {
         .partial_ids(&ids)
         .outcome(crate::Outcome::Unknown);
     cx(&mut engine, 1., |cx| cx.fail_preflight(&owner, fallback)).unwrap();
-    assert!(engine.io.request_contexts.commands[&7].writes.is_none());
-    assert!(engine.io.managed_http.is_empty());
+    assert!(
+        engine.io.core.request_contexts.commands[&7]
+            .writes
+            .is_none()
+    );
+    assert!(engine.io.core.managed_http.is_empty());
     let error = engine
         .drain_actions()
         .find_map(|a| match a {
@@ -645,7 +656,7 @@ fn real_native_callback_boundaries_flush_exact_owner_before_later_reuse() {
         let next = begin(&mut engine, 7, PreflightPurpose::ReadOnly);
         assert_ne!(next.owner(), owner.owner());
         assert!(!engine.venue.retired[0].matches_preflight(&next));
-        assert!(engine.io.request_contexts.command_live(7, 1.));
+        assert!(engine.io.core.request_contexts.command_live(7, 1.));
     }
 }
 
@@ -667,8 +678,8 @@ fn caught_post_seal_bookkeeping_failure_is_terminal_before_any_hook_or_drain() {
     assert!(engine.venue.caught_bookkeeping);
     assert!(engine.failed());
     assert!(engine.venue.retired.is_empty());
-    assert!(!engine.io.next_id.failed());
-    assert!(!engine.io.signing.failed());
+    assert!(!engine.io.core.next_id.failed());
+    assert!(!engine.io.core.signing.failed());
     assert!(catch_unwind(AssertUnwindSafe(|| engine.drain_actions().for_each(drop))).is_err());
 }
 #[test]
@@ -698,6 +709,7 @@ fn delivery_scope_outlives_temporary_marker_removal_owner_retirement_and_reuse()
     let request = cx(&mut e, 0., |cx| {
         cx.request_managed(
             context,
+            None,
             Method::Get,
             "https://venue.test/read".into(),
             None,
@@ -705,26 +717,26 @@ fn delivery_scope_outlives_temporary_marker_removal_owner_retirement_and_reuse()
         )
     })
     .unwrap();
-    let delivery = e.io.managed_http[&request].delivery();
-    e.io.request_contexts.enter_delivery(&delivery);
-    e.io.http_delivery = Some(delivery.clone());
-    assert_eq!(e.io.request_contexts.delivery_depth, 1);
-    let marker = e.io.http_delivery.take();
-    assert_eq!(e.io.request_contexts.delivery_depth, 1);
-    e.io.http_delivery = marker;
+    let delivery = e.io.core.managed_http[&request].delivery();
+    e.io.core.request_contexts.enter_delivery(&delivery);
+    e.io.core.http_delivery = Some(delivery.clone());
+    assert_eq!(e.io.core.request_contexts.delivery_depth, 1);
+    let marker = e.io.core.http_delivery.take();
+    assert_eq!(e.io.core.request_contexts.delivery_depth, 1);
+    e.io.core.http_delivery = marker;
     cx(&mut e, 1., |cx| {
         cx.fail_preflight(&owner, "preparation refused")
     })
     .unwrap();
     e.flush_http_owner_retirements();
-    assert!(!e.io.request_contexts.commands.contains_key(&7));
-    assert_eq!(e.io.request_contexts.delivery_depth, 1);
-    e.io.http_delivery = None;
+    assert!(!e.io.core.request_contexts.commands.contains_key(&7));
+    assert_eq!(e.io.core.request_contexts.delivery_depth, 1);
+    e.io.core.http_delivery = None;
     let next = begin(&mut e, 7, PreflightPurpose::ReadOnly);
     assert_ne!(owner.owner(), next.owner());
-    e.io.request_contexts.exit_delivery(&delivery);
-    assert_eq!(e.io.request_contexts.delivery_depth, 0);
-    assert_eq!(e.io.request_contexts.commands[&7].deliveries, 0);
+    e.io.core.request_contexts.exit_delivery(&delivery);
+    assert_eq!(e.io.core.request_contexts.delivery_depth, 0);
+    assert_eq!(e.io.core.request_contexts.commands[&7].deliveries, 0);
 
     let background = cx(&mut e, 2., |cx| {
         cx.http_context(
@@ -742,6 +754,7 @@ fn delivery_scope_outlives_temporary_marker_removal_owner_retirement_and_reuse()
     let request = cx(&mut e, 2., |cx| {
         cx.request_managed(
             background,
+            None,
             Method::Get,
             "https://venue.test/background".into(),
             None,
@@ -749,12 +762,12 @@ fn delivery_scope_outlives_temporary_marker_removal_owner_retirement_and_reuse()
         )
     })
     .unwrap();
-    let delivery = e.io.managed_http[&request].delivery();
-    e.io.request_contexts.enter_delivery(&delivery);
-    e.io.request_contexts.prune(30.);
-    assert_eq!(e.io.request_contexts.delivery_depth, 1);
-    e.io.request_contexts.exit_delivery(&delivery);
-    assert_eq!(e.io.request_contexts.delivery_depth, 0);
+    let delivery = e.io.core.managed_http[&request].delivery();
+    e.io.core.request_contexts.enter_delivery(&delivery);
+    e.io.core.request_contexts.prune(30.);
+    assert_eq!(e.io.core.request_contexts.delivery_depth, 1);
+    e.io.core.request_contexts.exit_delivery(&delivery);
+    assert_eq!(e.io.core.request_contexts.delivery_depth, 0);
 }
 
 /// Control (RUST_PLAN_SESSION_WAIT C2): a retained Preflight read cannot park
@@ -784,10 +797,10 @@ fn a_preflight_read_cannot_park_on_a_session_today() {
                 },
             )
             .unwrap();
-        let (ids, timers) = (cx.io.next_id, cx.io.timers.len());
+        let (ids, timers) = (cx.io.core.next_id, cx.io.core.timers.len());
         let refused = cx.session_wait(&session, &read, ());
         assert_eq!(refused.map_err(|(_, error)| error), Err(Error::State));
-        assert_eq!((cx.io.next_id, cx.io.timers.len()), (ids, timers));
+        assert_eq!((cx.io.core.next_id, cx.io.core.timers.len()), (ids, timers));
         assert!(cx.session_ready(&session).is_empty());
     });
 }
@@ -830,12 +843,15 @@ fn inherited_uncertainty_seals_a_sendless_write_preflight_unknown() {
 fn inherited_uncertainty_requires_live_write_preflight_custody_and_mutates_nothing() {
     let mut engine = engine();
     let read = begin(&mut engine, 7, PreflightPurpose::ReadOnly);
-    let ids = engine.io.next_id;
-    let actions = engine.io.actions.len();
+    let ids = engine.io.core.next_id;
+    let actions = engine.io.core.actions.len();
     cx(&mut engine, 1., |cx| {
         assert_eq!(cx.inherit_preflight_uncertainty(&read), Err(Error::Invalid));
     });
-    assert_eq!((engine.io.next_id, engine.io.actions.len()), (ids, actions));
+    assert_eq!(
+        (engine.io.core.next_id, engine.io.core.actions.len()),
+        (ids, actions)
+    );
     cx(&mut engine, 1., |cx| cx.fail_preflight(&read, "read only")).unwrap();
     engine.drain_actions().for_each(drop);
 
