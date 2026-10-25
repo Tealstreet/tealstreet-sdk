@@ -225,6 +225,7 @@ impl BitgetFutures {
         };
         match cx.request_managed_with_headers(
             context,
+            None,
             Method::Get,
             url,
             DISCOVERY_HEADERS,
@@ -1181,6 +1182,7 @@ impl Venue for BitgetFutures {
                 };
                 match cx.request_managed_with_headers(
                     root,
+                    None,
                     Method::Get,
                     format!("{}{path}", paths::REST),
                     CHANNEL,

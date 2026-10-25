@@ -30,6 +30,23 @@ pub(crate) fn validate_unsigned(headers: &[(&str, &str)]) -> Result<(), SignErro
     validate_pairs(headers.iter().copied())
 }
 
+/// The whole outbound header list: native/recipe headers plus signer headers.
+pub(crate) fn validate_packet(
+    headers: &[(&str, String)],
+    signer_headers: &[(String, String)],
+) -> Result<(), SignError> {
+    let pairs: Vec<(&str, &str)> = headers
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .chain(
+            signer_headers
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        )
+        .collect();
+    validate_pairs(pairs.into_iter())
+}
+
 fn validate_pairs<'a>(
     headers: impl ExactSizeIterator<Item = (&'a str, &'a str)>,
 ) -> Result<(), SignError> {

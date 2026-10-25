@@ -86,6 +86,7 @@ impl Venue for Probe {
         self.background = Some(
             cx.request_managed(
                 context.clone(),
+                None,
                 crate::Method::Get,
                 "https://venue.test/background".into(),
                 None,

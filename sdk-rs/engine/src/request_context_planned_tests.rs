@@ -49,6 +49,9 @@ mod planned_calls {
         repark_on: Option<crate::request_context::Session>,
         /// Park the second parallel Slot on this Session too.
         park_second: Option<crate::request_context::Session>,
+        /// Issue the second parallel Slot as a leg bound to this Session (#2069).
+        bind_peer_on: Option<crate::request_context::Session>,
+        bound_peer: Option<RequestId>,
         retire_in_ended: Option<crate::request_context::Session>,
         retire_in_expired: Option<crate::request_context::Session>,
         fail_in_ended: bool,
@@ -78,7 +81,7 @@ mod planned_calls {
     ) -> Result<RequestId, (Context, Error)> {
         if signed {
             cx.request_signed_managed(
-                context.clone(),
+                context.clone(), None,
                 Method::Post,
                 "https://venue.test/write".into(),
                 None,
@@ -87,7 +90,7 @@ mod planned_calls {
             )
         } else {
             cx.request_managed(
-                context.clone(),
+                context.clone(), None,
                 Method::Get,
                 "https://venue.test/read".into(),
                 None,
@@ -254,6 +257,22 @@ mod planned_calls {
                         .map_err(|(_, error)| error)
                         .unwrap();
                 }
+                if let Some(session) = self.bind_peer_on.clone() {
+                    let peer = cx.plan_slots(&plan).unwrap().remove(0);
+                    let context = cx.plan_leg_context(&plan, &peer).unwrap();
+                    self.bound_peer = Some(
+                        cx.request_managed(
+                            context.clone(),
+                            Some(&session),
+                            Method::Get,
+                            "https://venue.test/read".into(),
+                            None,
+                            context,
+                        )
+                        .map_err(|(_, error)| error)
+                        .unwrap(),
+                    );
+                }
             }
             if self.issue_only {
                 let plan = self.plan.as_ref().unwrap();
@@ -371,7 +390,7 @@ mod planned_calls {
                 }
                 if self.bad_retry {
                     let result = cx.request_signed_managed(
-                        context.clone(),
+                        context.clone(), None,
                         Method::Post,
                         "https://venue.test/write".into(),
                         None,
@@ -1843,6 +1862,60 @@ mod planned_calls {
         assert_eq!(e.venue.wait_ended.len(), 1, "the first ended in ready custody");
         assert_eq!(e.venue.wait_expired.len(), 1, "the sibling returned in the same flush");
         assert_eq!(e.venue.expired_while_live, [false]);
+    }
+
+    /// #2069 R10b: one parked Slot and one bound unreleased leg on the same
+    /// Session, which is retired. The bound leg's fence fails the Plan first
+    /// (its one terminal); the seal retires the parked unit, so no ended hook
+    /// runs and its pending comes back once, after the terminal, with no
+    /// custody. Nothing is sent.
+    #[cfg(feature = "session-bearer")]
+    #[test]
+    fn r10b_a_retired_session_fails_a_bound_leg_and_its_parked_sibling_once() {
+        let mut e = crate::test_support::seeded_engine(Plans { idle: true, parallel: true, ..Default::default() });
+        e.start(0.);
+        let session = open(&mut e, 0.);
+        e.venue.park_on = Some(session.clone());
+        e.venue.bind_peer_on = Some(session.clone());
+        start(&mut e, 0.);
+        assert_eq!(e.venue.park_result, Some(Ok(())));
+        assert!(e.venue.bound_peer.is_some(), "the peer leg is bound and unreleased");
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&session).unwrap();
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        actions.extend(flush(&mut e, 2.));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))), "zero HTTP");
+        assert_eq!(prepares(&actions), 0);
+        let failed: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failed.len(), 1, "exactly one Plan terminal");
+        assert_eq!(failed[0].outcome, Some(crate::Outcome::NotSent));
+        // The bound leg's fence is the terminal (the parked unit never reached
+        // its ended hook).
+        assert_eq!(failed[0].message, "Session retired");
+        assert_eq!(failed[0].kind, Some(ErrorKind::InvalidInput));
+        assert!(e.venue.wait_ended.is_empty(), "no ended hook after the seal");
+        assert_eq!(e.venue.wait_expired.len(), 1, "the parked pending comes back once");
+        assert_eq!(e.venue.expired_while_live, [false], "after the Plan terminal");
+        assert_eq!(e.venue.wait_expired[0].1.outcome, Some(crate::Outcome::NotSent));
+    }
+
+    /// #2069 R10b inverse: only the parked unit exists (no bound leg). The
+    /// retire ends the wait once in ready custody; no expired callback runs.
+    #[test]
+    fn r10b_inverse_a_lone_parked_slot_ends_once_without_an_expired_callback() {
+        let (mut e, _, session) = parked(0.);
+        e.drain_actions().for_each(drop);
+        let _ = Cx { now: 1., store: &mut e.store, io: &mut e.io }.retire_session(&session).unwrap();
+        let actions = flush(&mut e, 2.);
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert_eq!(e.venue.wait_ended.len(), 1, "ended once, in ready custody");
+        assert!(e.venue.wait_expired.is_empty(), "no expired callback");
     }
 
     /// N2: a failed Read call's retry parks on a login Session in the failure

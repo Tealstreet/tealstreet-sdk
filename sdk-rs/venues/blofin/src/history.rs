@@ -832,6 +832,7 @@ impl Blofin {
         };
         match cx.request_managed(
             request.history.root().clone(),
+            None,
             Method::Get,
             format!("{}{path}", self.host()),
             None,

@@ -70,6 +70,7 @@ impl Probe {
         walk.leg = Some(leg.clone());
         let _ = cx.request_managed(
             leg,
+            None,
             Method::Get,
             format!("https://root.test/page/{}", walk.pages),
             None,

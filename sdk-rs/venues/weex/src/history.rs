@@ -578,6 +578,7 @@ impl WeexFutures {
                 };
                 cx.request_managed_with_headers(
                     context,
+                    None,
                     wire.method,
                     wire.url,
                     &[],
