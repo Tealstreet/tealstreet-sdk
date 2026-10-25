@@ -238,3 +238,31 @@ their event clocks. No account reducer, deadline, key policy or assertion change
 The scoped custody/account/startup/unit pass is103 controls,0 failed/ignored.
 The local lexical scanner confirms exactly the planned streamed singleton
 removal with no new lexical site; complete provenance/bans still gate freeze.
+
+The native reviewer approved the precise admission-clock supersession: only the
+six catalogue start/admission sites using the original response() epoch move
+to1773295700000. Every response/event timestamp, payload and financial assertion
+stays unchanged; truncated streaming stays0->1->2. Real Prepare/Bind/Claim drains
+run at each actual event clock. Dedicated custody controls retain the genuine
+delayed/equality expiry checks. The exact-owned timer selection and one dead
+Depth deferred initializer are also bounded direction APPROVED. Full immutable
+source review and current-tip measurements remain separate gates.
+
+## First-source paired size evidence
+
+Bare actual34999 versus first source7b9, using unchanged checked-in build scripts,
+Rust1.99.0 b940084d7, wasm-bindgen0.2.129, Binaryen132 and CORES4/jobs4:
+WEEX1209159->1210645 (+1486), combined14033845->14035345 (+1500).
+Every Node/Web pair is byte-identical. Headroom is132843 and120431 bytes
+respectively; budgets/profiles/Cargo/build inputs are unchanged. Every scratch
+measurement target was deleted. The approved subsequent fixture/docs correction
+has no production/build input delta from first source7b9. Full repository
+TypeScript typecheck, lint and tests pass; native freeze qualification follows.
+
+The first freeze native pass completed391PASS/1FAIL/0ignored: the remaining
+failure was the malformed-row public fixture's second raw ticker collector,
+not its parser/financial assertions. That collector now performs the same real
+Prepare/Bind/Claim at the already-existing epoch event clock. The own native
+target was deleted after this failed review-build phase. Final qualification is
+rerun after integrating the newly landed tip; no green freeze claim is made
+from that failed pass.

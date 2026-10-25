@@ -8709,3 +8709,21 @@ host nonce controls require its explicit `dispatch-nonce` forwarding feature.
 ### Backpack account GET observations
 
 Info, Positions, Balance and Orders each select one genuine installed Read identity from native-ready primary plus GET secondary, then hold a Background Read with a NEW 20s per-observation bound, no pacing and RetryPolicy::Never. Positions/Orders retain Root streaming; Info/Balance remain nonstreamed. Native revision/token fences govern publication independently of physical custody. DATA precedes rows, diagnostics and Store publication; exact retirement precedes corrective Balance, accepted repairs and original Next. Local configuration/selection refusals stay silent. Finite Capacity/TimedOut admission, the reviewed transient precommit kinds and owned expiry coalesce the existing 10s account poll only when absent; later polling creates a distinct observation. No immediate retry/Next or timer at nonfinite clocks. Native released transport/status/parse presentation and continuation remain intact. GET signing preserves native fractional receive-window truncation to zero; every non-GET still rejects zero. Direct constructors must install the valid read identity/provider alongside valid saved read status; registry construction supplies that atomic tuple. Raw nonstream writes and private WebSocket signing remain outside this adoption.
+
+## WEEX public discovery and ticker seed custody
+
+Markets, Daily and BookTickers admit independent keyless Background Reads only
+when eligible after the native pause. Each physical observation has a NEW20s
+bound, Never retry, no pacing, explicit Primary intent and unchanged route None.
+Exact DATA plus ticker generation precede row/status/rate/diagnostic effects.
+Publication stays inside live custody; exact retirement precedes both catalogue
+successors, socket/private startup and native retry hooks. Finite owned Timeout
+retires then follows the existing native backoff/startup once. Nonfinite clocks
+allow exact issued cleanup only, without new work or Store/readiness effects.
+Old seed generations cannot publish or affect the current pause/seed. Native
+backoff creates a fresh bounded observation; no aggregate retry cap is implied.
+The orphan streamed legacy sender is removed; nonstream subscription Depth is
+unchanged. Fixture-only admission-clock supersession aligns six catalogue starts
+to their already-existing epoch response time, with all response/event clocks,
+payloads and financial assertions retained and truncated-stream0->1->2 unchanged.
+Standalone custody controls retain genuine delayed/equality expiry coverage.

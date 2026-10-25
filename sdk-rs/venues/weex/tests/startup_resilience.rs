@@ -36,7 +36,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
                 error: "scripted network failure",
             },
         );
-        let actions = engine.prepared_actions(now).collect::<Vec<_>>();
+        let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(
             !actions
                 .iter()
@@ -73,7 +73,7 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     );
     assert!(engine.store().loaded().markets, "valid peers must commit");
     assert!(!engine.store().markets().is_empty());
-    assert!(engine.prepared_actions(0.0).any(|action| matches!(action,
+    assert!(engine.drain_actions().any(|action| matches!(action,
         Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }
 
@@ -260,7 +260,7 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
         },
     );
     let timer = engine
-        .prepared_actions(0.0)
+        .drain_actions()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
             _ => None,
@@ -336,7 +336,7 @@ fn entirely_unusable_daily_and_book_sources_retry_without_replacing_prior_quotes
         assert_eq!(engine.store().tickers(), before);
         assert_eq!(engine.store().loaded().tickers, cached);
         let timer = engine
-            .prepared_actions(0.0)
+            .drain_actions()
             .find_map(|a| match a {
                 Action::SetTimer { timer, at_ms } if jittered(at_ms, 1000.0) => Some(timer),
                 _ => None,
