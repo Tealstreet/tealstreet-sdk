@@ -123,3 +123,25 @@ ignored. The first fixture run omitted capabilities/on_item forwarding and
 failed before intended custody checks; it is excluded from RED evidence. The
 first eleven-test target remains byte-exact to its original commit. Production,
 old fixtures and maps are unchanged. No source cutover or CI claim follows.
+
+## Refreshed actual-tip original receipt
+
+Plain-merged actual 9d4beba669377ba41908ebb43431a05d10ac8949 into the
+checkpoint at 29d0d3f537b. The sole conflict was the index: the result retains
+the entire incoming file followed by the exact own row once. All production,
+old fixtures, Cargo and inventories are incoming-exact. Orderly source is also
+unchanged from the original actual76f checkpoint; the count remains 23F/24O.
+Both original targets are byte-exact to 4573999b6dd.
+
+Fresh execution: local_read_admission 6 assertion RED / 2 GREEN, followed by
+local_read_completions 5 assertion RED / 6 GREEN; 19 executed, zero ignored,
+no compile/setup failure. Cargo stops after the first failing target, so the
+second target was executed separately. The RED boundaries are unchanged.
+Scoped strict Clippy for both targets and package formatting pass, sequential
+CARGO_BUILD_JOBS=4. Logs/proof remain outside Git under
+/tmp/codex-orderly-local-read-refresh. Explicit expired-entry and all deeper
+recovery suffixes remain source-stage gates, not new original proof.
+
+Renewed native/caller and shared custody review is required before production.
+The approved Bitget opt-s follow-up takes priority immediately after actual
+#2122 lands; this local checkpoint can be resumed without rewriting history.
