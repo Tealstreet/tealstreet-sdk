@@ -693,3 +693,227 @@ fn public_only_with_installed_primary_and_saved_read_identity_never_starts_priva
         assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
     }
 }
+
+fn command(h: &mut Harness, command: safe_cex_engine::Command) {
+    h.event(Event::Command(command));
+}
+
+fn wake_current_interests(h: &mut Harness) -> Vec<TimerId> {
+    let timers: Vec<_> = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at == h.now)
+        .map(|(timer, _)| *timer)
+        .collect();
+    for timer in &timers {
+        h.event(Event::TimerFired { timer: *timer });
+    }
+    timers
+}
+
+#[test]
+fn two_book_handoff_keeps_survivor_when_sibling_is_removed_before_wake() {
+    use safe_cex_engine::Command;
+    for reconnect in [false, true] {
+        let mut h = Harness::new(PublicFeedPolicy::Direct);
+        for symbol in [SYMBOL, "B"] {
+            command(
+                &mut h,
+                Command::SubscribeOrderBook {
+                    symbol: symbol.into(),
+                },
+            );
+        }
+        let old = h.open(SocketChannel::Public);
+        if reconnect {
+            assert_eq!(wake_current_interests(&mut h).len(), 2);
+            assert_eq!(h.http.len(), 2);
+            for request in std::mem::take(&mut h.http) {
+                h.event(Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: r#"{"lastUpdateId":1,"bids":[],"asks":[]}"#,
+                    },
+                });
+            }
+            h.now = 1001.;
+            h.event(Event::WsClosed {
+                socket: old,
+                code: 1006,
+            });
+            h.advance(2000.);
+            assert_ne!(h.open(SocketChannel::Public), old);
+        }
+        assert!(
+            h.http.is_empty(),
+            "snapshot waits for genuine post-handoff ingress"
+        );
+        let original_wakes: Vec<_> = h
+            .timers
+            .iter()
+            .filter(|(_, at)| *at == h.now)
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(original_wakes.len(), 2);
+        command(
+            &mut h,
+            Command::UnsubscribeOrderBook {
+                symbol: SYMBOL.into(),
+            },
+        );
+        for timer in &original_wakes {
+            h.event(Event::TimerFired { timer: *timer });
+        }
+        assert_eq!(h.http.len(), 1);
+        assert!(h.http[0].url.ends_with("symbol=B"));
+        h.clear_observations();
+        for timer in &original_wakes {
+            h.event(Event::TimerFired { timer: *timer });
+        }
+        assert!(h.http.is_empty(), "old wakes are inert");
+        command(
+            &mut h,
+            Command::SubscribeOrderBook {
+                symbol: SYMBOL.into(),
+            },
+        );
+        assert!(h.http.is_empty());
+        let new: Vec<_> = h
+            .timers
+            .iter()
+            .filter(|(_, at)| *at == h.now)
+            .map(|(id, _)| *id)
+            .filter(|id| !original_wakes.contains(id))
+            .collect();
+        assert_eq!(new.len(), 1);
+        h.event(Event::TimerFired { timer: new[0] });
+        assert_eq!(h.http.len(), 1);
+        assert!(h.http[0].url.ends_with(&format!("symbol={SYMBOL}")));
+    }
+}
+
+#[test]
+fn pending_handoff_credit_refusal_rolls_back_addition_and_retry_has_no_phantom_refcount() {
+    use safe_cex_engine::Command;
+    let mut h = Harness::new(PublicFeedPolicy::Direct);
+    for n in 0..512 {
+        command(
+            &mut h,
+            Command::SubscribeOrderBook {
+                symbol: format!("B{n}"),
+            },
+        );
+    }
+    let public = h.open(SocketChannel::Public);
+    assert!(h.http.is_empty());
+    let wakes: Vec<_> = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at == h.now)
+        .map(|(id, _)| *id)
+        .collect();
+    assert_eq!(
+        wakes.len(),
+        512,
+        "actual engine-issued pending handoff credits"
+    );
+    h.clear_observations();
+    command(
+        &mut h,
+        Command::SubscribeOrderBook {
+            symbol: "NEW".into(),
+        },
+    );
+    assert_eq!(h.notices, 1);
+    assert!(h.sent.is_empty() && h.http.is_empty() && h.closed.is_empty());
+    h.event(Event::TimerFired { timer: wakes[0] });
+    assert_eq!(
+        h.http.len(),
+        1,
+        "existing peer still receives its exact snapshot"
+    );
+    h.clear_observations();
+    command(
+        &mut h,
+        Command::SubscribeOrderBook {
+            symbol: "NEW".into(),
+        },
+    );
+    assert_eq!(h.sent.len(), 1);
+    assert!(h.sent[0].1.contains("depth.NEW"));
+    assert!(h.http.is_empty());
+    let new: Vec<_> = h
+        .timers
+        .iter()
+        .filter(|(_, at)| *at == h.now)
+        .map(|(id, _)| *id)
+        .filter(|id| !wakes.contains(id))
+        .collect();
+    assert_eq!(new.len(), 1);
+    h.event(Event::TimerFired { timer: new[0] });
+    assert_eq!(h.http.len(), 1);
+    assert!(h.http[0].url.ends_with("symbol=NEW"));
+    h.clear_observations();
+    command(
+        &mut h,
+        Command::UnsubscribeOrderBook {
+            symbol: "NEW".into(),
+        },
+    );
+    assert_eq!(
+        h.sent,
+        [(
+            public,
+            r#"{"method":"UNSUBSCRIBE","params":["depth.NEW"]}"#.into()
+        )]
+    );
+    h.message(public, TICKER);
+    assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
+    assert!(h.closed.is_empty());
+}
+
+#[test]
+fn real_synchronous_byte_and_async_frame_refusal_preserve_peers_and_rollback_demand() {
+    use safe_cex_engine::Command;
+    for len in [4 * 1024 * 1024, 65_536] {
+        let mut h = Harness::new(PublicFeedPolicy::Direct);
+        let public = h.open(SocketChannel::Public);
+        h.clear_observations();
+        let oversized = "X".repeat(len);
+        command(
+            &mut h,
+            Command::SubscribeOrderBook {
+                symbol: oversized.clone(),
+            },
+        );
+        assert_eq!(
+            h.notices, 1,
+            "real proposal-byte or encoded-frame capacity refusal"
+        );
+        assert!(h.sent.is_empty() && h.http.is_empty() && h.closed.is_empty());
+        h.clear_observations();
+        command(&mut h, Command::UnsubscribeOrderBook { symbol: oversized });
+        assert!(
+            h.sent.is_empty() && h.http.is_empty() && h.notices == 0,
+            "refused addition left no local subscriber"
+        );
+        command(
+            &mut h,
+            Command::SubscribeOrderBook {
+                symbol: SYMBOL.into(),
+            },
+        );
+        assert_eq!(h.sent.len(), 1);
+        assert!(h.sent[0].1.contains(&format!("depth.{SYMBOL}")));
+        assert_eq!(wake_current_interests(&mut h).len(), 1);
+        assert_eq!(h.http.len(), 1);
+        h.message(public, TICKER);
+        assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
+        assert!(
+            h.closed.is_empty(),
+            "encoder refusal did not stop healthy public feed"
+        );
+    }
+}

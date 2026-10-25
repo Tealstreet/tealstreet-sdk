@@ -233,3 +233,11 @@ refusal/whole-feed stop. Corrected source must use independently required depth
 keys and commit/rollback native demand with actual interest transactions.
 Additive real two-book wake and capacity/refusal/recovery controls remain gates.
 No runtime, size, CI or READY claim accompanies these additive controls.
+
+The three P2 regression originals also compile/run on unchanged runtime: target30
+finishes12GREEN/18intendedassertRED/0ignored. They cover two independent book
+wakes with removal before handoff (first-open and reconnect), real512 pending
+handoff-credit refusal/release without phantom refcounts, and real proposal-byte
+versus encoded-frame capacity refusal. Their deeper source-only suffixes remain
+gated on legacy; no capacity/recovery execution proof is inferred from the RED.
+Corrected immutable runtime7d43d006 remains UNAPPLIED pending hcm review.
