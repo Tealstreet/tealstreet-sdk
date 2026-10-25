@@ -8,8 +8,8 @@ fn public_catalogue_preserves_factory_broker_attribution_without_credentials() {
         ..Options::default()
     }));
     engine.start(0.0);
-    let requests: Vec<_> = engine
-        .drain_actions()
+    let requests: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
