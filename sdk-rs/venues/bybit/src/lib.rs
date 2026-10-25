@@ -691,6 +691,7 @@ impl BybitLinear {
         let context = match cx.http_context(Scope::Background, policy) {
             Ok(context) => context,
             Err(error) => {
+                self.note_local_read_refusal();
                 return self.on_public_response(cx, then, Err(&error.venue_error().message));
             }
         };
@@ -788,7 +789,10 @@ impl BybitLinear {
                         .outcome(safe_cex_engine::Outcome::NotSent);
                     self.identity_response(cx, context, Err(error));
                 }
-                then => self.on_public_response(cx, then, Err(&error.venue_error().message)),
+                then => {
+                    self.note_local_read_refusal();
+                    self.on_public_response(cx, then, Err(&error.venue_error().message));
+                }
             },
         }
     }
