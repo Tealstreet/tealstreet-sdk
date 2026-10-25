@@ -128,18 +128,21 @@ for arm, ref in refs.items():
     phase.mkdir()
     try:
         logged(['bash', 'sdk-rs/harness/build.sh', '--venue', 'bitget'], phase / 'build.log')
+        logged(['node', 'sdk-rs/harness/wasm-budget.mjs', '--venue', 'bitget'], phase / 'budget.log')
+        budget = json.loads(Path('sdk-rs/harness/out/wasm-budget-venue.json').read_text())
+        write_json(phase / 'budget.json', budget)
         logged(['node', 'sdk-rs/harness/ci-wasm.mjs', '--venue', 'bitget',
                 '--archive', str(phase / 'node')], phase / 'archive.log')
         shutil.copy2('sdk-rs/target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm',
                      phase / 'raw.wasm')
         shutil.copy2('sdk-rs/hosts/wasm/pkg/web/safe_cex_wasm_bg.wasm', phase / 'web.wasm')
         shipped = phase / 'node/safe_cex_wasm_bg.wasm'
-        size_records[arm] = {'source': ref, 'nodeBytes': shipped.stat().st_size,
+        size_records[arm] = {'source': ref, 'budgetBytes': budget['budgetBytes'], 'nodeBytes': shipped.stat().st_size,
                              'webBytes': (phase / 'web.wasm').stat().st_size,
                              'nodeSha256': sha(shipped), 'webSha256': sha(phase / 'web.wasm'),
                              'rawSha256': sha(phase / 'raw.wasm')}
-        insist(all(size_records[arm][k] <= 1478656 for k in ('nodeBytes', 'webBytes')),
-               f'{arm} exceeds unchanged 1478656 budget')
+        insist(all(size_records[arm][k] <= budget['budgetBytes'] for k in ('nodeBytes', 'webBytes')),
+               f'{arm} exceeds its checked-in family budget')
         write_json(phase / 'size.json', size_records[arm])
     finally:
         logged(['cargo', 'clean', '--manifest-path', 'sdk-rs/Cargo.toml'], phase / 'clean.log')
