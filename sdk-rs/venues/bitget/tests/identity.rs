@@ -1,11 +1,13 @@
 //! Actual native identity requests: exact routes/signers, failure ownership, no Store commits.
+use crate::support::FixtureOptions as Options;
+mod support;
 use safe_cex_crypto::{Encoding, hmac_sha256};
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
-use safe_cex_venue_bitget::{BitgetFutures, Options, Product};
+use safe_cex_venue_bitget::{BitgetFutures, Product};
 const NOW: f64 = 1000.;
 type TestEngine = Engine<BitgetFutures>;
 fn seeded(options: Options) -> TestEngine {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(BitgetFutures::new(options));
+    let mut engine = crate::support::engine(options);
     engine
         .store_mut()
         .set_balance(safe_cex_engine::model::Balance {
@@ -21,10 +23,14 @@ fn seeded(options: Options) -> TestEngine {
 }
 fn ask(engine: &mut TestEngine) -> Vec<Action> {
     engine.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    engine.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(engine, NOW)
 }
 fn identity_request(engine: &mut TestEngine) -> HttpRequest {
-    let actions = ask(engine);
+    // The managed read also arms its shared deadline timer.
+    let actions: Vec<_> = ask(engine)
+        .into_iter()
+        .filter(|action| !matches!(action, Action::SetTimer { .. }))
+        .collect();
     assert_eq!(
         actions.len(),
         1,
@@ -96,7 +102,7 @@ fn respond(engine: &mut TestEngine, request: &HttpRequest, status: u16, body: &s
             },
         },
     );
-    engine.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(engine, NOW)
 }
 fn options(read: bool, product: Product) -> Options {
     Options {
@@ -221,7 +227,7 @@ fn failures_reject_once_preserve_state_and_do_not_start_account_detection() {
                     error: "connection lost",
                 },
             );
-            engine.drain_actions().collect()
+            safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
         } else {
             respond(&mut engine, &request, 503, "unavailable")
         };
@@ -231,7 +237,7 @@ fn failures_reject_once_preserve_state_and_do_not_start_account_detection() {
 }
 #[test]
 fn private_only_requirements_fail_before_network() {
-    for opts in [
+    for (index, opts) in [
         Options::default(),
         Options {
             public_data_only: true,
@@ -257,7 +263,17 @@ fn private_only_requirements_fail_before_network() {
             }),
             ..options(false, Product::Usdt)
         },
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if matches!(index, 2 | 3) {
+            assert!(matches!(
+                crate::support::try_engine(opts),
+                Err(safe_cex_engine::signing::SignError::InvalidRequest)
+            ));
+            continue;
+        }
         let mut engine = seeded(opts);
         result(ask(&mut engine), true).unwrap_err();
     }

@@ -1,11 +1,13 @@
 //! Genuine initial callbacks for local Bitrue history refusals; private fills stay separate.
+mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Context, Error, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Method, Notice, Outcome, Query,
     Response, SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_bitrue::{Bitrue, Options, Pending};
+use safe_cex_venue_bitrue::{Bitrue, Pending};
+use support::Options;
 
 fn policy() -> Policy {
     Policy {
@@ -81,14 +83,18 @@ impl Venue for Probe {
     }
 }
 fn seeded(keyed: bool) -> Engine<Probe> {
+    let (venue, provider, identities) = (Options {
+        key: keyed.then(|| "fixture-key".into()),
+        secret: keyed.then(|| "fixture-secret".into()),
+        ..Options::default()
+    })
+    .build();
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
-        inner: Bitrue::new(Options {
-            key: keyed.then(|| "fixture-key".into()),
-            secret: keyed.then(|| "fixture-secret".into()),
-            ..Options::default()
-        }),
+        inner: venue,
         held: vec![],
     });
+    e.set_signer(Some(provider)).unwrap();
+    e.set_identities(identities).unwrap();
     // Exercise the real query callback without starting unrelated feeds.
     e.store_mut().set_markets(vec![Market {
         id: "E-BTC-USDT".into(),

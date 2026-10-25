@@ -78,6 +78,7 @@ pub enum Pending {
     Identity(identity::Request),
     Trade(trading::Request),
     Markets {
+        context: Context,
         fallback: bool,
         rows: Vec<Market>,
         metadata: HashMap<String, MarketMeta>,
@@ -240,24 +241,46 @@ impl Lighter {
     fn symbol_for_id(&self, id: &str) -> Option<&str> {
         self.symbols.get(id).map(String::as_str)
     }
-    fn markets(&self, cx: &mut Cx<'_, Pending>, fallback: bool) {
+    fn markets(&mut self, cx: &mut Cx<'_, Pending>, fallback: bool) {
+        let Ok(context) = cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) else {
+            self.startup.failed(cx, true);
+            return;
+        };
         let path = if fallback {
             "orderBooks"
         } else {
             "orderBookDetails"
         };
-        cx.request_streamed(
+        match cx.request_managed(
+            context.clone(),
             Method::Get,
             format!("{}/api/v1/{path}", self.host()),
-            vec![],
-            ArrayAt::Envelope(&[&["order_book_details"], &["order_books"]]),
+            None,
             Pending::Markets {
+                context,
                 fallback,
                 rows: vec![],
                 metadata: HashMap::new(),
                 failed: false,
             },
-        );
+        ) {
+            Ok(request) => cx.stream_response(
+                request,
+                ArrayAt::Envelope(&[&["order_book_details"], &["order_books"]]),
+            ),
+            Err((pending, _)) => {
+                self.public_failed(cx, pending, "Lighter catalog preparation failed")
+            }
+        }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         // Suppressed public feeds never open; supervising them would only churn retries.
@@ -685,9 +708,15 @@ impl Lighter {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets {
-                fallback: false, ..
-            } => self.markets(cx, true),
-            Pending::Markets { fallback: true, .. } => self.startup.failed(cx, true),
+                context, fallback, ..
+            } => {
+                let _ = cx.finish_http_context(&context);
+                if fallback {
+                    self.startup.failed(cx, true);
+                } else {
+                    self.markets(cx, true);
+                }
+            }
             Pending::Tickers { context, .. } => {
                 let _ = cx.finish_http_context(&context);
                 self.ticker_in_flight = false;
@@ -937,7 +966,15 @@ impl Venue for Lighter {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Trade(_) | Pending::Identity(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
-            Pending::Markets { rows, metadata, .. } => {
+            Pending::Markets {
+                context,
+                rows,
+                metadata,
+                ..
+            } => {
+                if cx.validate_background_read_http_delivery(context).is_err() {
+                    return;
+                }
                 match serde_json::from_str::<Instrument<'_>>(item) {
                     Ok(m) => {
                         if m.market_type.eq_ignore_ascii_case("spot") {
@@ -1121,6 +1158,11 @@ impl Venue for Lighter {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Markets { context, .. } = &pending
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         let pending = match pending {
             Pending::Identity(request) => {
                 self.identity_response(cx, request, response);
@@ -1155,6 +1197,7 @@ impl Venue for Lighter {
             | Pending::History(_)
             | Pending::Identity(_) => unreachable!(),
             Pending::Markets {
+                context,
                 fallback,
                 rows,
                 metadata,
@@ -1164,6 +1207,7 @@ impl Venue for Lighter {
                     self.public_failed(
                         cx,
                         Pending::Markets {
+                            context,
                             fallback,
                             rows,
                             metadata,
@@ -1189,6 +1233,7 @@ impl Venue for Lighter {
                         .collect(),
                 );
                 cx.store.set_markets(rows);
+                let _ = cx.finish_http_context(&context);
                 self.account_start(cx);
                 self.connect(cx);
                 self.poll = Some(cx.set_timer(2_000.0));
@@ -1333,6 +1378,11 @@ impl Venue for Lighter {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::Markets { context, .. } = &pending
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         if let Pending::Account(request) = pending {
             self.account_stream_error(cx, request, response);
             return;
@@ -1346,8 +1396,27 @@ impl Venue for Lighter {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         self.public_failed(cx, pending, error);
     }
+    fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
+            other => self.on_request_failed(cx, other, &error.message),
+        }
+    }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _reason: safe_cex_engine::request_context::Error,
+        error: VenueError,
+    ) {
+        match pending {
+            Pending::Identity(request) => self.identity_rejected(cx, request, error),
+            other => self.on_sign_error(cx, other, error),
+        }
+    }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
+            Pending::Identity(request) => self.identity_rejected(cx, request, error),
             Pending::Candles {
                 context,
                 command,
@@ -1469,7 +1538,7 @@ impl Venue for Lighter {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
-            Command::FetchAccount { command } => self.fetch_identity(cx, command),
+            Command::FetchAccount { .. } => self.fetch_identity(cx),
             Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {

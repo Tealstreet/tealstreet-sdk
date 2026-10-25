@@ -1,21 +1,22 @@
 //! Scripted discovery regressions; no network or account credentials.
 mod support;
 use safe_cex_engine::{Action, Engine, Event, Response};
-use safe_cex_venue_cryptocom::{Cryptocom, Options};
+use safe_cex_venue_cryptocom::Cryptocom;
+use support::fixture::Options;
 use support::jittered;
 const CATALOGUE: &str = r###"{"code":0,"result":{"data":[{"symbol":"BROKENUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true},{"symbol":"BTCUSD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"BTC","quote_ccy":"USD","price_tick_size":"0.1","qty_tick_size":"0.001","quote_decimals":1,"quantity_decimals":3,"max_leverage":"50","underlying_symbol":"BTCUSD-INDEX"}]}}"###;
 fn public_engine() -> Engine<Cryptocom> {
-    safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    support::fixture::engine(Options {
         public_data_only: true,
         ..Default::default()
-    }))
+    })
 }
 #[test]
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("get-instruments") => Some(request),
             _ => None,
@@ -46,8 +47,8 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
             .expect("shared exponential retry timer");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+            .into_iter()
             .find_map(|action| match action {
                 Action::Http(request) if request.url.contains("get-instruments") => Some(request),
                 _ => None,
@@ -73,14 +74,14 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(Options {
+    let mut engine = support::fixture::engine(Options {
         key: Some("scripted-key".into()),
         secret: Some("scripted-secret".into()),
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("get-instruments") => Some(request),
             _ => None,
@@ -99,8 +100,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
     );
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
-    let reads = engine
-        .drain_actions()
+    let reads = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -129,8 +130,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
 fn ticker_http_failure_retries_without_reloading_the_catalogue() {
     let mut engine = public_engine();
     engine.start(0.0);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -147,8 +148,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
             },
         },
     );
-    let ticker = engine
-        .drain_actions()
+    let ticker = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -174,8 +175,8 @@ fn ticker_http_failure_retries_without_reloading_the_catalogue() {
         .expect("failed public ticker read uses shared retry backoff");
     assert!(engine.store().loaded().markets);
     engine.handle(1000.0, Event::TimerFired { timer });
-    let retry = engine
-        .drain_actions()
+    let retry = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url == ticker.url => Some(r),
             _ => None,
@@ -193,8 +194,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
         for cached in [false, true] {
             let mut engine = public_engine();
             engine.start(0.0);
-            let catalogue = engine
-                .drain_actions()
+            let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) => Some(request),
                     _ => None,
@@ -211,8 +212,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
                     },
                 },
             );
-            let ticker = engine
-                .drain_actions()
+            let ticker = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url.contains("/public/get-tickers") => {
                         Some(request)
@@ -253,8 +254,8 @@ fn unusable_ticker_lists_preserve_existing_quotes_retry_and_recover_valid_peers(
                 })
                 .expect("unusable successful HTTP body must back off");
             engine.handle(1000.0, Event::TimerFired { timer });
-            let retry = engine
-                .drain_actions()
+            let retry = safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.0)
+                .into_iter()
                 .find_map(|action| match action {
                     Action::Http(request) if request.url == ticker.url => Some(request),
                     _ => None,
