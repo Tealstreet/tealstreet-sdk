@@ -470,6 +470,38 @@ fn capacity(case: Case) {
         },
     );
     assert_eq!(e.venue().validated, 255);
+    e.handle_command(
+        NOW + 500.,
+        Command::FetchCandles {
+            command: 1256,
+            symbol: "__peer".into(),
+            interval: Interval::M1,
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        },
+        Some(60_000),
+    )
+    .unwrap();
+    let admitted: Vec<_> = e.drain_actions().collect();
+    no_trade(&admitted);
+    assert!(
+        results(&admitted, 1256).is_empty(),
+        "fresh 256th peer is retained after the recovered owner completed"
+    );
+    assert_eq!(e.venue().peers.len(), 256);
+    command(
+        &mut e,
+        NOW + 500.,
+        Command::SetTickerSymbols {
+            symbols: vec!["validate_peers".into()],
+        },
+    );
+    assert_eq!(
+        e.venue().validated,
+        256,
+        "recovered owner released its last registry credit"
+    );
 }
 #[test]
 fn capacity_place() {

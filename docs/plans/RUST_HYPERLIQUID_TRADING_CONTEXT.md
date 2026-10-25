@@ -281,3 +281,15 @@ opt-ins during adoption, since those hooks are feature-gated today. The native
 receipt proves no installed constructor, new nonce API, shared release pacing,
 size, feature activation or production cutover. Both shared prerequisite source
 holds remain, despite the approved numeric policy and plan direction.
+
+Native/original review at5126b80ab56 accepts the boundaries and receipt, with
+one gated capacity strengthening before checkpoint CLEAR: after each recovered
+operation's terminal (including EmptyCancel), preserve validation of255 peers,
+admit a fresh real command1256 as the256th retained Read, then validate all256.
+This proves the recovered operation released its last registry credit. It is an
+unexecuted source suffix on native, not a replacement for earlier assertions.
+
+The fresh256 suffix passes strict clippy. Removing only that appended block
+reconstructs the entire5126 target byte-for-byte, so every earlier assertion and
+native GREEN body is unchanged. The13RED/16GREEN runtime receipt remains bound
+to5126; the new suffix is typed but unexecuted. Its own target is removed.
