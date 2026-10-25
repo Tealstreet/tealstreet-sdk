@@ -644,3 +644,40 @@ with identical scheduler admission and assertions. Workspace all-target and
 WASM32 checks, all seven seeded strict feature modes, scoped native/JS controls,
 and the refreshed four-control real-WASM engine-plus-recipe proof pass. Existing
 ignored Plan tests remain unchanged. Native-family adoption remains separate.
+
+## Resumed composition and dyn compatibility
+
+The resumed branch plain-merges the landed S0, serial/condition Plan, Bearer,
+signing-latch and socket-route changes. Nonce registration and captured
+permission live in IoCore; pending-aware poll calls remain on Io. The Bearer
+revision fence remains ahead of nonce repair, and the shared seeded OFF mode
+keeps both serial-plan and nonce labels under one key. Nine Bearer repairs
+assert the exact cancelled preparation, a new preparation under the same Attempt,
+and no consumption of the eight nonce-repair credits.
+
+The landed socket-route associated const made Venue dyn-incompatible. The
+separate approved repair c7e2d98897a replaces it with the defaulted inline
+route_exhaustion method bounded by Self: Sized, with the same default false,
+Bitget/test true overrides and static caller. Both source owners cleared the
+repair; the dyn control and all existing route assertions remain intact.
+
+On the resumed production source, workspace all-targets and WASM32 checks,
+formatting, bans/ratchets and all eleven seeded strict feature modes pass.
+Scoped nonce/read/registration/pacing/Bearer controls pass 153 tests, with one
+hidden-state and one real native-host stale-Claim control, 43 JS controls,
+10 route/dyn engine controls and five Bitget egress controls. Existing ignored
+Plan tests remain unchanged. The refreshed engine-plus-actual-Kraken-recipe
+WASM proof passes four controls; u64::MAX remains codec/private-builder/MAC
+coverage only, with no reservation or native-family adoption claim.
+
+The refreshed same-path combined pair on bare c6a5c4bb0a4 and composed
+ae4f268d114 measures 13,907,484 and 13,940,762 bytes: +33,278 bytes,
+215,014 below the unchanged combined budget. Node and Web match.
+Standalone paired sizes are Bybit 1,396,154 to 1,396,721, Bitget/USDC
+1,360,487 to 1,361,298, Aster 1,322,746 to 1,323,070 and Kraken/Spot
+1,154,656 to 1,174,456 bytes; all fit. These family pairs were measured
+on 6d13105b9b4 and 6ed99281f86. The newer Backpack landing changes no
+production input, Cargo graph or build profile for those standalone families;
+only the combined pair required refreshing. The isolated proof harness and
+lock overlay remain outside this branch. This documentation freeze changes no
+measured source or build input and takes one fresh PR-triggered run.
