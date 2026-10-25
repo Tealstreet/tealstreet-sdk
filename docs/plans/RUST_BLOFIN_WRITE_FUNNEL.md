@@ -62,7 +62,10 @@ Primary})` before validation. A local validation refusal is `fail_preflight`
 - **Native pauses.** The 350 ms (placement and normal or algo cancel) and
   1000 ms (TP/SL cancel) pauses become `continue_serial_plan_after(delay)`
   after the step's DATA. This is the first use after Mutation DATA (Bitget uses
-  it only for read retries), so it is pinned by a RED.
+  it only for read retries), so it is pinned by a RED. The step's write fact
+  (`http_write_batch`, `http_write_fact` or `http_write_unproven`) is recorded
+  before `continue_serial_plan_after`; `validate_serial_continuation` refuses
+  otherwise.
 - **Unchanged native facts:** exact paths, bodies and batch sizes (20 normal
   place or cancel, 10 TP/SL cancel, 1 algo); lot splitting up to 1000 with
   freshly minted client IDs; broker attribution; caller client-ID rules; and
@@ -134,6 +137,11 @@ successful terminal.
     cancel-all for that symbol would stay fenced for good (#2117's gap 3). A
     RED drives a "gone" cancel, then the reconcile snapshot across its pages,
     and shows the fence cleared.
+  - This is a behaviour change, accepted as the shared absent-order rule:
+    BloFin links order-locks, so `Satisfied(Cancel)` runs `fence_absent_orders`,
+    which fences the symbol and queues a reconcile read (deferred while a
+    placing scope is held). Today's plain-cancel "gone" does neither. The D-c
+    RED and the CALLERS entry pin both effects.
 - **D-d, progress abort.** A target that filled or closed between steps (Store
   observation) ends the job with `finish_plan_call` + `fail_plan` before the
   next delayed continuation. Pinned by a RED.
@@ -183,8 +191,12 @@ W1 (each fails on the base):
   NotSent on a dequeue re-plan refusal;
 - each place, cancel, amend and setting call is a managed Prepare (Primary)
   with exact native bytes, and the Verify GET is a managed Read;
-- a 350 ms and a 1000 ms pause are `continue_serial_plan_after` continuations
-  with no early send;
+- a 350 ms and a 1000 ms pause are `continue_serial_plan_after` continuations:
+  the step's write fact is recorded before the continuation, nothing is sent
+  before the delay, and exactly one send follows it;
+- a maximum lot split (1000 lots, 50 place calls at 20 per batch) streams
+  through one Plan, and the journal, receipts and IDs carry the whole split;
+  a refusal mid-split keeps the IDs accepted before it (with D-e);
 - a pause is admitted only after a released Accepted, Rejected or KnownPartial
   fact. A PartialUnknown batch ends the job rather than waiting out the pause.
 - retirement or a released 503 during a pause sends nothing later, clears the
@@ -194,8 +206,10 @@ W1 (each fails on the base):
 - D-a: a documented row refusal is Rejected, an unlisted code is Unknown, a
   shape mismatch is Unknown, and exact-row versus range precedence holds;
 - D-b: a Verify failure after an Accepted cancel is never NotSent;
-- D-c: plain-cancel "gone" is satisfied; replacement-cancel "gone" stops with
-  no replacement Prepare; the reconcile snapshot clears the absent-order fence;
+- D-c: plain-cancel "gone" is satisfied, fences the symbol and queues one
+  reconcile read (deferred under a held placing scope); replacement-cancel
+  "gone" stops with no replacement Prepare; the reconcile snapshot clears the
+  absent-order fence;
 - D-d: a progress abort settles before the next continuation;
 - D-e: a failure after accepted rows keeps their IDs;
 - a released 503 seals Unknown, retirement restores Creating and Canceling
