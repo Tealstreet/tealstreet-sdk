@@ -2,7 +2,8 @@
 
 Status: PLAN. No source before S0 (#2103) and #2114 land, and before the
 overseer has seen the size numbers below. Owner claude-fe7lgm; reviewer
-dazzy3. Queued from the #2114 review.
+kuhwxi. Queued from the #2114 review. Approved in shape by the overseer
+(2026-10-25): measure a prototype first, then source in phases.
 
 ## Problem
 
@@ -104,8 +105,8 @@ pub fn refuse_command(&mut self, operation: Operation, error: impl Into<VenueErr
 - **Combined:** the helper instantiates once per family, so the saving is
   roughly the sum of the family savings: about −2.5 to −4.5 KB.
 - **Gate:** every migration commit reports its family's exact before/after
-  bytes and the combined. A family whose measured delta exceeds +50 bytes goes
-  to the overseer before it lands, rather than being made to fit.
+  bytes and the combined. If any family grows, work stops and the numbers go
+  to the overseer, rather than being made to fit.
 
 ## Tests
 
@@ -125,8 +126,12 @@ pub fn refuse_command(&mut self, operation: Operation, error: impl Into<VenueErr
 1. S0 (#2103) lands. The helper sits in engine code that S0 rewrites, and S1's
    `CoreCx` later makes it non-generic for free.
 2. #2114 lands, so Lighter's `refuse` exists to migrate.
-3. This plan gets a CLEAR, and the overseer reviews the size estimate.
-4. P1: the helper plus its engine REDs and controls.
-5. P2: the queued set (Aster, Backpack, Lighter), with measured sizes.
-6. P3: the remaining literal-shape families, one commit each, each
+3. This plan gets a CLEAR from kuhwxi.
+4. Prototype, local and unpushed: the helper plus Lighter (8 sites), GRVT
+   (12) and one single-site family (Coinbase). Measure each family and the
+   combined against the bare tip and report. Phases 5–7 go ahead only if the
+   numbers hold; if any family grows, stop and report.
+5. P1: the helper plus its engine REDs and controls.
+6. P2: the queued set (Aster, Backpack, Lighter), with measured sizes.
+7. P3: the remaining literal-shape families, one commit each, each
    shrink-only or neutral.
