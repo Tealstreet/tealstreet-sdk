@@ -1,6 +1,6 @@
 # Credential-only trusted setup
 
-Status: PLAN, revision 3. It folds in kuhwxi's reviews (B1-B5, M1-M2, then R1,
+Status: PLAN, revision 3, CLEAR (kuhwxi, at `8d5914ee117`). It folds in kuhwxi's reviews (B1-B5, M1-M2, then R1,
 X1, X2), fe7lgm's review (points 1-5) and ddi2il's ruling on G1 and G3. No source before CLEAR.
 Owner: shared credential core (m26ps4). First consumer: GRVT, whose recipe is
 zs5e83's (plan `c13acb15e56` on `feat/rust-grvt-write-funnel-plan`). This plan
