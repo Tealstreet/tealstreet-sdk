@@ -93,7 +93,7 @@ fn rows_page_backwards_by_the_oldest_close_time_and_pass_through_verbatim() {
     e.handle(NOW + 100.0, Event::TimerFired { timer });
     let second = request_at(&mut e, NOW + 100.0);
     assert!(
-        url(&second).contains("&after=1709499999999&limit=100"),
+        url(&second).contains("&after=1709500000001&limit=100"),
         "{}",
         url(&second)
     );
@@ -288,7 +288,7 @@ fn failed_later_page_returns_only_validated_rows_with_owned_completeness() {
 }
 
 #[test]
-fn seeded_cursor_preserves_immediate_unchanged_endpoint_termination() {
+fn rows_not_older_than_the_cursor_stop_at_once_as_incomplete() {
     let mut e = trading_engine();
     let to = 1_710_000_000_000.0;
     fetch(&mut e, None, None, Some(to));
@@ -299,9 +299,121 @@ fn seeded_cursor_preserves_immediate_unchanged_endpoint_termination() {
     let out = actions(&mut e);
     assert!(matches!(done(&out), Some(Ok(_))));
     assert!(!out.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    assert!(
+        out.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+        )),
+        "a page the cursor did not bound proves nothing older was walked"
+    );
+}
+
+fn next_request(e: &mut Engine<Okx>, at: f64) -> Action {
+    let timer = actions(e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .expect("a continuing page");
+    e.handle(at + 100.0, Event::TimerFired { timer });
+    request_at(e, at + 100.0)
+}
+
+fn result_rows(out: &[Action]) -> Vec<serde_json::Value> {
+    serde_json::from_str(&done(out).expect("a terminal").expect("rows")).unwrap()
+}
+
+#[test]
+fn rows_sharing_the_oldest_millisecond_across_a_page_break_are_all_kept_once() {
+    let mut e = trading_engine();
+    fetch(&mut e, None, None, None);
+    let oldest = 1_709_500_000_000u64;
+    let first_rows: Vec<String> = (0..98)
+        .map(|i| row(i, oldest + 1_000 - i as u64))
+        .chain([row(98, oldest), row(99, oldest)])
+        .collect();
+    let first = request(&mut e);
+    reply(&mut e, &first, &page(&first_rows), NOW);
+    let second = next_request(&mut e, NOW);
+    assert!(
+        url(&second).contains(&format!("&after={}&", oldest + 1)),
+        "the oldest millisecond is fetched again: {}",
+        url(&second)
+    );
+    // The venue re-sends the boundary rows, then the one that did not fit page 1.
+    let second_rows = [
+        row(98, oldest),
+        row(99, oldest),
+        row(100, oldest),
+        row(101, oldest - 5),
+    ];
+    reply(&mut e, &second, &page(&second_rows), NOW + 100.0);
+    let out = actions(&mut e);
+    let got = result_rows(&out);
+    let expected: Vec<serde_json::Value> = first_rows
+        .iter()
+        .chain(&second_rows[2..].to_vec())
+        .map(|row| serde_json::from_str(row).unwrap())
+        .collect();
+    assert_eq!(
+        got, expected,
+        "every row once, none dropped at the shared millisecond"
+    );
     assert!(!out.iter().any(|a| matches!(a,
         Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
     )));
+}
+
+#[test]
+fn byte_identical_rows_at_the_boundary_keep_their_multiplicity() {
+    let mut e = trading_engine();
+    fetch(&mut e, None, None, None);
+    let oldest = 1_709_500_000_000u64;
+    let twin = row(7, oldest);
+    let first_rows: Vec<String> = (0..99)
+        .map(|i| row(i + 10, oldest + 1_000 - i as u64))
+        .chain([twin.clone()])
+        .collect();
+    let first = request(&mut e);
+    reply(&mut e, &first, &page(&first_rows), NOW);
+    let second = next_request(&mut e, NOW);
+    // Two identical rows at the boundary: one was already accepted, one is new.
+    let second_rows = [twin.clone(), twin.clone()];
+    reply(&mut e, &second, &page(&second_rows), NOW + 100.0);
+    let got = result_rows(&actions(&mut e));
+    assert_eq!(got.len(), 101);
+    let twins = got
+        .iter()
+        .filter(|row| **row == serde_json::from_str::<serde_json::Value>(&twin).unwrap())
+        .count();
+    assert_eq!(twins, 2);
+}
+
+#[test]
+fn a_full_page_inside_one_millisecond_stops_as_incomplete_without_duplicates() {
+    let mut e = trading_engine();
+    fetch(&mut e, None, None, None);
+    let at = 1_709_500_000_000u64;
+    let rows: Vec<String> = (0..100).map(|i| row(i, at)).collect();
+    let first = request(&mut e);
+    reply(&mut e, &first, &page(&rows), NOW);
+    let second = next_request(&mut e, NOW);
+    assert!(url(&second).contains(&format!("&after={}&", at + 1)));
+    reply(&mut e, &second, &page(&rows), NOW + 100.0);
+    let out = actions(&mut e);
+    assert!(!out.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+    assert_eq!(
+        result_rows(&out).len(),
+        100,
+        "re-sent rows are not duplicated"
+    );
+    assert!(
+        out.iter().any(|a| matches!(a,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+                && event.fields == vec![("command", safe_cex_engine::Value::Num(77.0))]
+        )),
+        "rows of that millisecond past one page cannot be walked"
+    );
 }
 
 #[test]
