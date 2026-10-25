@@ -60,6 +60,8 @@ struct Probe {
     locks: bool,
     /// Cancel 2's entry fails this other command, outside that one's entry.
     fail_from_2: Option<CommandId>,
+    /// An expired entry refuses locally through refuse_command instead.
+    refuse_expired: bool,
 }
 
 impl Venue for Probe {
@@ -127,6 +129,10 @@ impl Venue for Probe {
             } else {
                 Operation::Mutation
             };
+            if self.refuse_expired {
+                cx.refuse_command(operation, "venue local refusal");
+                return;
+            }
             assert_eq!(cx.reject_expired_command(operation), Ok(()));
             return;
         }
@@ -608,4 +614,54 @@ fn a_released_batch_keeps_each_later_receipt_until_its_entry() {
         },
     );
     assert_eq!(observed(&e, 3), [Some(Wait::Remaining(295_000))]);
+}
+
+/// A local refusal in an entry whose caller wait already expired: admission of
+/// an expired Fresh entry succeeds, so refuse_command settles it exactly once
+/// with the venue's own refusal, the same as the per-site blocks it replaced.
+/// No I/O, and no Revoked assertion.
+#[test]
+fn a_local_refusal_in_an_expired_entry_settles_once_without_io() {
+    for read in [false, true] {
+        let mut e = engine(Probe {
+            expire_as_read: read,
+            refuse_expired: true,
+            ..Default::default()
+        });
+        deliver(
+            &mut e,
+            0.,
+            r#"{"op":"placeOrders","command":1,"orders":[]}"#,
+        );
+        deliver(&mut e, 0., &cancel(2, "7", Some(1_000)));
+        e.drain_actions().for_each(drop);
+        e.handle(
+            1_000.,
+            Event::WsMessage {
+                socket: SocketId(1),
+                text: "7",
+            },
+        );
+        assert_eq!(observed(&e, 2), [Some(Wait::Expired)]);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
+        )));
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 2, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1, "exactly one terminal (read: {read})");
+        assert_eq!(failures[0].message, "venue local refusal");
+        let outcome = if read {
+            None
+        } else {
+            Some(crate::Outcome::NotSent)
+        };
+        assert_eq!(failures[0].outcome, outcome, "read: {read}");
+    }
 }

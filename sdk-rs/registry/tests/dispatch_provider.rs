@@ -35,6 +35,7 @@ fn assert_owned_identity(
     );
     let request = SignRequest {
         receipt: SignReceipt {
+            nonce: None,
             stamp_ms: Some(1234.),
             expiry_ms: None,
         },

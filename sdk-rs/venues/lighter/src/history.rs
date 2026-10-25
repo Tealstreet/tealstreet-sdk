@@ -245,17 +245,10 @@ impl Lighter {
     ) {
         let (read, stage, symbol, order, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                let Ok(context) = cx.admit_http_command(Policy {
-                    operation: Operation::Read,
-                    credential: None,
-                    timeout_ms: 20_000,
-                    pacing: None,
-                    retry: RetryPolicy::Never,
-                }) else {
-                    return;
-                };
-                let _ =
-                    cx.fail_context(&context, "Lighter does not support caller client order IDs");
+                cx.refuse_command(
+                    Operation::Read,
+                    "Lighter does not support caller client order IDs",
+                );
                 return;
             }
             Query::Fills {
@@ -310,17 +303,8 @@ impl Lighter {
                     Some("COMMISSION_REBATE") => IncomeKind::Rebate,
                     Some("REALIZED_PNL") => IncomeKind::Realized,
                     _ => {
-                        let Ok(context) = cx.admit_http_command(Policy {
-                            operation: Operation::Read,
-                            credential: None,
-                            timeout_ms: 20_000,
-                            pacing: None,
-                            retry: RetryPolicy::Never,
-                        }) else {
-                            return;
-                        };
-                        let _ = cx.fail_context(
-                            &context,
+                        cx.refuse_command(
+                            Operation::Read,
                             "Lighter income supports funding, commission and realized PnL",
                         );
                         return;
@@ -347,45 +331,18 @@ impl Lighter {
             .any(|n| !n.is_finite() || n < 0.0)
             || from.zip(to).is_some_and(|(a, b)| a > b)
         {
-            let Ok(context) = cx.admit_http_command(Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            }) else {
-                return;
-            };
-            let _ = cx.fail_context(&context, "Invalid Lighter history time range");
+            cx.refuse_command(Operation::Read, "Invalid Lighter history time range");
             return;
         }
         if order.as_ref().is_some_and(|s| s.parse::<u64>().is_err()) {
-            let Ok(context) = cx.admit_http_command(Policy {
-                operation: Operation::Read,
-                credential: None,
-                timeout_ms: 20_000,
-                pacing: None,
-                retry: RetryPolicy::Never,
-            }) else {
-                return;
-            };
-            let _ = cx.fail_context(&context, "Invalid Lighter native order index");
+            cx.refuse_command(Operation::Read, "Invalid Lighter native order index");
             return;
         }
         let market = match symbol.as_ref() {
             Some(symbol) => match cx.store.market(symbol) {
                 Some(m) => Some(m.id.clone()),
                 None => {
-                    let Ok(context) = cx.admit_http_command(Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    }) else {
-                        return;
-                    };
-                    let _ = cx.fail_context(&context, "Lighter market not found");
+                    cx.refuse_command(Operation::Read, "Lighter market not found");
                     return;
                 }
             },
@@ -417,17 +374,8 @@ impl Lighter {
                         };
                         let _ = cx.done_context(&context, "[]".into());
                     } else {
-                        let Ok(context) = cx.admit_http_command(Policy {
-                            operation: Operation::Read,
-                            credential: None,
-                            timeout_ms: 20_000,
-                            pacing: None,
-                            retry: RetryPolicy::Never,
-                        }) else {
-                            return;
-                        };
-                        let _ = cx.fail_context(
-                            &context,
+                        cx.refuse_command(
+                            Operation::Read,
                             "Lighter private account identity is unavailable",
                         );
                     }

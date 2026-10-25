@@ -741,7 +741,10 @@ impl Venue for BitgetFutures {
             self.public_message(cx, text);
         }
     }
-    const ROUTE_EXHAUSTION: bool = true;
+    #[inline]
+    fn route_exhaustion() -> bool {
+        true
+    }
     fn on_route_exhausted(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.sockets[3].socket == Some(socket) {
             self.private_route_exhausted(cx);

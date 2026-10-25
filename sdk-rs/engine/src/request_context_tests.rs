@@ -247,6 +247,7 @@ fn physical_window_caps_signature_projection_and_scheduler_response_lease() {
     life.signed(
         life.preparation(),
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(10_000.),
             expiry_ms: Some(100_000.),
         },
@@ -347,6 +348,7 @@ fn route_and_signing_readiness_are_not_release_or_response_permission() {
     life.signed(
         life.preparation(),
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(10_000.),
             expiry_ms: None,
         },
@@ -426,6 +428,7 @@ fn protocol_expiry_projects_onto_raw_time_for_both_offset_signs() {
         life.signed(
             life.preparation(),
             SignReceipt {
+                nonce: None,
                 stamp_ms: Some(protocol_ms),
                 expiry_ms: Some(protocol_ms + 300.),
             },
@@ -467,6 +470,7 @@ fn lifecycle_and_response_lease_cap_signature_expiry_projection() {
     life.signed(
         life.preparation(),
         SignReceipt {
+            nonce: None,
             stamp_ms: Some(10_000.),
             expiry_ms: Some(100_000.),
         },
@@ -512,6 +516,7 @@ fn protocol_expiry_at_release_is_stale_and_raw_timeout_wins() {
         life.signed(
             life.preparation(),
             SignReceipt {
+                nonce: None,
                 stamp_ms: None,
                 expiry_ms: Some(10_100.),
             },
