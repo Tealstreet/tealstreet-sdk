@@ -450,4 +450,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Serial single-call schedule construction | Local cut; paired measurements and exact-patch review pending | Before changing serial topology construction or declared-admission error precedence. | [RUST_SERIAL_SINGLE_CALL_SCHEDULE.md](RUST_SERIAL_SINGLE_CALL_SCHEDULE.md) |
 
+| Journal report iterator simplification | [RUST_JOURNAL_REPORT_ITERATORS.md](RUST_JOURNAL_REPORT_ITERATORS.md) | codex-ih35js | Local measured cut after Bitget slice 3; exact review required. |
+
 | OKX ordered write ownership | Source GO (dazzy3); exact-head CI green | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |
