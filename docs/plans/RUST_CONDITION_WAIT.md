@@ -36,29 +36,45 @@ It holds no I/O, no live call and no venue timer.
 
 ```rust
 impl<P> Cx<'_, P> {
-    /// Before admission, in genuine entry or Preflight-ready custody.
-    pub fn preflight_condition_wait(
+    /// Park a WriteAfterReads Preflight in genuine entry or Preflight-ready
+    /// custody. `None` is unbounded; `Some(ms)` expires into
+    /// `on_condition_wait_expired`. Release with `request_preflight_ready`.
+    pub fn park_preflight_for(
         &mut self,
         preflight: &Preflight,
         bound_ms: Option<u32>,
-    ) -> Result<ConditionWait, Error>;
+    ) -> Result<(), Error>;
 
     /// Between serial calls, from the current call's exact custody under the
     /// same checks as `continue_serial_plan` (definitive fact, no
     /// uncertainty). Settles the call and parks the Plan with no live call.
+    /// `next` is issued after release, so a replan picks its re-read here.
     pub fn serial_plan_condition_wait(
         &mut self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
+        next: SerialCall,
         bound_ms: Option<u32>,
     ) -> Result<ConditionWait, Error>;
 
     /// From any callback, borrowed included. Grants nothing directly: it
-    /// schedules the owner's ready callback in its own custody, in this flush.
+    /// schedules the Plan's `on_http_plan_ready`, in this flush.
     pub fn release_condition_wait(&mut self, wait: &ConditionWait) -> Result<(), Error>;
 }
+
+pub struct ConditionWait { /* Plan, wait generation */ }
+pub enum ConditionOwner { Preflight(Preflight), Plan(Plan) }
+
+trait Venue {
+    /// Failure custody; a hook that returns without a terminal is sealed once
+    /// as NotSent.
+    fn on_condition_wait_expired(&mut self, cx, owner: &ConditionOwner, error: VenueError) {}
+}
 ```
+
+The existing `park_preflight` keeps its signature (Initial custody,
+unbounded); every addition is a new item, with a default Venue hook.
 
 - **Release.** `release_condition_wait` checks only the handle's generation.
   The engine then delivers the existing ready hook in proper custody:
@@ -85,6 +101,10 @@ impl<P> Cx<'_, P> {
   same owner is State. A stale handle (expired, released, or a reused command
   generation) is Revoked and spends nothing. Release after expiry, and expiry
   after release, are no-ops for the loser.
+- **Socket release unexercised.** RED19 releases from a timer and refuses a
+  foreign-engine handle. The release path does not depend on the callback
+  kind, and Bitget detection is HTTP. The first consumer that releases from a
+  socket `on_message` adds that control.
 - **Stops without an engine entry.** Shutdown and caller cancel have no
   engine entry point today (serial Plan RED19 covers revoke, provider refusal
   and Session only). Whoever adds those entry points owns their controls for
@@ -176,6 +196,15 @@ native never had. Ruled (claude-ddi2il): accept and disclose. The refusal is
 Capacity, NotSent, before any send, with no exemption. Bitget's CALLERS notes
 the limit.
 
+For Bitget placements the binding limit is lower: 64 active order-lock scopes
+(`order_locks.rs`, `acquire`). The 65th queued placement is refused at entry,
+before any send, with the order-lock capacity refusal from #2095
+(Internal, NotSent) (RED23). Bitget already sets
+`guard_order_mutations` at `49f7d1857b6`, so this is existing entry
+behaviour, not new with the migration. It is still disclosed in Bitget's
+CALLERS against native's unbounded queue. The 256 owner limit binds
+non-placement commands.
+
 ## REDs (before source)
 
 1. A Preflight parks with no I/O. A release from a foreign Background read's
@@ -236,6 +265,44 @@ the limit.
 10. A mid-Plan expiry after an earlier released and accepted call: `fail_plan`
     projects the accepted IDs and a failure that is not NotSent (native
     `trade_fail` keeps the IDs once anything was effective).
+
+## Source notes
+
+- **Preflight form.** `park_preflight_for` parks from Initial or
+  Preflight-ready custody, setting a condition-park flag. A bound arms one
+  engine timer, tracked per Preflight. Ready delivery clears the timer and
+  the flag. A re-park counts as progress. A condition-parked Preflight that
+  holds nothing may be failed from any callback, so a stop racing a queued
+  release gives one terminal and no ready. A declined expiry seals once:
+  "Condition wait expired", Timeout, NotSent.
+- **Serial form.** It is `continue_serial` with `Next::Parked`, which runs
+  every continuation check and parks the named `next` call. The wait lives in
+  `Serial.condition` (generation, deadline) and folds into the Plan's one
+  timer. Release checks issuer and generation, then unparks and makes the
+  call eligible now, so delivery is the normal flush into
+  `on_http_plan_ready`. A declined expiry seals through `fail_plan`: the
+  streamed IDs are projected, with no fence.
+- **WASM bytes** (release, against the frozen serial Plan `d4efb3f6b15`):
+  Bybit 1,336,171 to 1,338,378 (+2,207); WOO 1,240,977 (+0); Bitget 1,331,269
+  (+0). Bybit pays for the Preflight-ready paths it already links.
+- **Changes from the frozen REDs.** `serial_plan_condition_wait` gains `next`
+  (Bitget's 40085 replan re-reads after release), and the tests pass
+  `mutation()`. RED24 is a new control: a parked Plan issues the Read it named.
+  RED23 pins the existing entry refusal; it had expected NotSent, which that
+  shared refusal never carried, so changing it would alter every venue that
+  guards order mutations. The fixture fixes are RED11 (answer every prepared
+  call in a batch) and RED14 (entry refusals counted apart from parks).
+
+## Feature gate (overseer ruling)
+
+The condition wait is linked only by adopting families, behind the
+non-default engine feature `condition-waits` (it implies `serial-plans`).
+With it off, `fail_preflight`, the readiness flush, Plan wakes and the timer
+expiry path compile exactly as before, so non-adopting families keep their
+pre-#2092 WASM sizes. `Venue::on_condition_wait_expired` exists only with the
+feature, because its `ConditionOwner` argument does. The adopter (Bitget)
+enables the feature in its own slice, with its own budget review. CI covers
+it through the explicit control mode in `scripts/test-http-plan-feature-modes.py`.
 
 ## Gates
 
