@@ -1,5 +1,39 @@
 # OKX ordered write ownership
 
+## Status (2026-10-25, claude-4yjlw0 takes over from codex-ih35js)
+
+- **Base and REDs.** The branch is `feat/rust-okx-ordered-write` from landing `b0008964fbb`, with ih35js's plan and originals merged unchanged. On that tip, `request_context_ordered_writes` still runs 13 controls: **two assertion REDs, eleven GREEN, zero ignored**.
+- **Engine prerequisites landed.**
+  - The streamed serial Plan landed as #2092 (`ff219538b30`): no step cap, no root clock, incremental full IDs, and `SerialPolicy.refusals_complete`.
+  - Condition waits (#2094) also landed, but OKX does not need them: it has no detection or mode wait and no in-job read.
+  - `fail_plan_noted` (#2110) is not needed either, since OKX has no protection-rollback suffix.
+- **Gates 1, 2 and 4 below are closed by #2092.** Gate 2's independent cancellation is not needed on the serial path:
+  - Each call settles before the next.
+  - `continue_serial_plan` accepts a definitive Rejected or KnownPartial fact, so a code-`2` cancel with refused rows continues to its sibling batches.
+  - An all-refused code-`2` edge finishes `done []` through `refusals_complete`.
+  - Source stage pins all three with GREENs.
+- **New source-stage gaps,** found against the landed managed API:
+  1. OKX implements no `capture_http_reconciliation`, and the engine refuses managed mutations without it (`engine.rs` default returns Invalid). It must return bounded correlation data, as Bitget's does.
+  2. `request_signed_managed` takes no headers. Legacy writes add `Content-Type: application/json`, so the OKX recipe's `apply` must add it, as Bitget's recipe does. The demo header already rides `unsigned_http_headers`.
+- **`STAGING_BOOTSTRAPS` no longer exists in code,** so that requirement below is void.
+- **No queue.** OKX starts each command's job at once and runs jobs concurrently, ordered only within a job. That stays native: one Preflight and one serial Plan per command, with no `park_preflight` FIFO.
+
+### Size (measured, features only; local raw, function names excluded; CI factor about 1.0)
+
+The base is tip `b0008964fbb`. The OKX family is 1,118,920 bytes in CI, against the 1,343,488 venue budget (224,568 of room).
+
+| Change | Bytes |
+| --- | ---: |
+| OKX family: `serial-plans` (implies `http-plans`) linked, no use | **+50,393** |
+| Combined, OKX lands first (first `serial-plans` adopter) | **+11,939** |
+| Combined, OKX lands after Bitget slice 3's `condition-waits` | **0** |
+| Combined, Bitget slice 3's features alone, for reference | +60,650 |
+
+- **Estimated use cost.** Use adds about +30K to +60K on the OKX family. That is Bitget's analogue (+76K at engine s) minus the reads, the queue and the condition waits OKX lacks.
+- **Expected family total.** About +80K to +110K, so OKX lands around 1.20M to 1.23M, inside its budget.
+- **Expected combined total.** About +12K plus OKX venue code if OKX goes first, or about 0 plus OKX venue code after Bitget slice 3.
+- **No budget, profile or CPU-policy change** is part of this slice.
+
 ## Scope and base
 
 Plan-first base: actual `a77b8c37c4208c085ce0b0f2f9ad63079566c507`,
@@ -19,11 +53,9 @@ The checker inventory is six fingerprints / ten occurrences:
 | `venues/okx/src/lib.rs` | final `sign_request` funnel, `2e921890` | 1 |
 
 Expected request inventory: OKX 6F/10O -> 0F/0O, with removal-only changes.
-The credential and signing inventories must not grow. Audit every caller of
-`sign_request` before deleting it. Shrink the OKX `STAGING_BOOTSTRAPS` new map
-and its approved unit-test row in the same implementation; do not retain a
-bound permitting the deleted funnel to return. Its current approved new map
-contains `2e921890` and the already-retired `b1761cde`.
+The credential and signing inventories must not grow. `sign_request` has one
+caller (`trading.rs:820`); deleting it also removes one lib.rs `read_credentials`
+credential entry. (The former `STAGING_BOOTSTRAPS` map no longer exists.)
 
 ## Admission and authority
 
@@ -172,12 +204,12 @@ The following remain source-stage gates, not executed claims for this target:
   cleanup, and an unrelated live peer. These are source-stage gates, not claims
   that all can be demonstrated on the legacy source.
 
-Reviewers: claude-4yjlw0 for native signer/write-consumer behavior and
-claude-fe7lgm for Plan admission, continuation and journal projection. Obtain
+Owner: claude-4yjlw0. Reviewer: claude-dazzy3 or claude-fe7lgm (whichever is
+free) for Plan admission, continuation and journal projection. Obtain
 bounded plan/original review, then source review after the gates close.
 Run only scoped OKX tests and strict checks locally with CARGO_BUILD_JOBS=4.
 CI supplies the full matrix and the exact OKX family WASM bytes. No budget,
-profile or CPU-policy change is part of this slice; size delta is unmeasured.
+profile or CPU-policy change is part of this slice; see the measured size above.
 
 ## Executed original checkpoint
 
