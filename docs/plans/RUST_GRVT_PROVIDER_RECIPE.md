@@ -257,15 +257,15 @@ or R11 group-claim revision check. #2069's issue-time group refusal is compatibl
 
 ## Feature opt-in and adoption gates
 
-serial-plans (#2092) and condition-waits (#2094) exist as non-default features
-at 201e169d286. **session-bearer is still a proposed non-default feature**:
-m26ps4 owns the OPEN #2069 phase-5 plan at 6945dbbb73c; no Cargo declaration
-exists at that plan pin. Its off-mode contract refuses Some(session) with
-Invalid at issue, so GRVT cannot adopt a bound call before that source lands.
-When the funnel adopts, its engine dependency will explicitly enable all three
-features after their exact source/refreeze checks. No global or unrelated-family
-opt-in. The GRVT registry family also opts into shared dispatch-signing; local
-crypto uses the existing secp256k1 feature.
+At the resumed actual tip 76f1f7fc842, all three non-default engine features
+exist: serial-plans (#2092, ff219538b302), condition-waits (#2094,
+ba6fb1912399) and session-bearer (#2069, ad0b74afdf84). This supersedes the
+earlier proposal-only status at review. Their presence is not GRVT adoption:
+its dependency will explicitly enable them after exact consumer composition
+checks. No global or unrelated-family opt-in. The GRVT registry family also
+opts into shared dispatch-signing; local crypto uses existing secp256k1.
+Seeded serial auth resend and the parsed-status exemption are not present in
+this actual tree and remain separate fe7lgm source gates.
 
 condition-waits is required specifically for a woken front command that must
 re-park from on_http_preflight_ready when the native builder/prerequisite is
@@ -279,8 +279,8 @@ drop condition-waits rather than paying for an unused feature.
 
 | Gate | Owner / review needed |
 | --- | --- |
-| Serial calls, condition waits, immediate Read continuation and seeded auth resend | fe7lgm; #2092/#2094 and the actual resend source, including status-exempt parsed 1000 |
-| Bundle placement, floor-preserving park/reprepare and wake after refresh | m26ps4; #2069 feature PLAN 6945dbbb73c is OPEN, then actual session-bearer source and revised floor tests |
+| Serial calls, condition waits, immediate Read continuation and seeded auth resend | fe7lgm; #2092/#2094 landed, exact composition and remaining resend source/status-exempt parsed 1000 still required |
+| Bundle placement, floor-preserving park/reprepare and wake after refresh | m26ps4; #2069 landed ad0b74afdf84; GRVT ingress/floor/resend composition proof still required |
 | EIP712/Create and login recipes, trusted setup, installed registry/native/WASM path | zs5e83; 9czdjh native/construction review and fe7lgm resend fit |
 | Existing login lifecycle and callback composition | zs5e83 with 55ao7t's login contract; exact real login preparation-failure control retained |
 | API-key-only and identity eligibility without raw key retention | m26ps4 confirmed shared gap; proposed credential-only setup plan, consumer zs5e83. Explicit absent signing plus trusted presence facts; preserve unsigned Mutation eligibility and define empty-key login before source. |
@@ -346,3 +346,68 @@ specified above; CALLERS records the approved future contract. m26ps4 owns the
 shared credential-only plan and accepted the two consumer corrections. Its
 actual setup API/source and all recipe/provider controls remain unimplemented
 gates. No receipt here is installed-constructor or production/source clearance.
+
+## Resumed credential-only consumer answers: G2-G6
+
+Plain-merged actual 76f1f7fc842 into c13acb15e56, without history rewriting.
+Only README and CALLERS conflicted; both retain entire incoming files followed
+by the unchanged own suffix. No runtime, feature, Cargo or test change was
+introduced. The landed #2108 plan at 9f1d6bbb3275 lists G2-G5; its owner branch
+addition aa1f5437a18 supplies G6. The following answers were sent to m26ps4
+before GRVT source, and he accepted them as plan fit, not source clearance.
+
+- **G2, placement admission:** require the selected signing ref and declared
+  Secp256k1Digest capability in genuine command/Preflight admission before
+  queue, builder work or provisional effects. Replacement must prove signing
+  availability before its preceding cancellation. Keep native validation order
+  explicit; any changed diagnostic precedence is disclosed. Only operations
+  needing a signature have this requirement; key-only cancels/cancel-symbol/
+  leverage remain available. Later prepare checks remain necessary, and G2
+  alone cannot establish the latch behavior in G6.
+- **G3, Empty login:** a trusted SetupFacts-derived primary login intent can
+  be selected with SessionAuth using generic Slots over non-secret material.
+  Empty yields that intent, no Identity/KeyRef/Present, native api_key "",
+  credential=None and Primary private egress on the real login Session.
+  Absent yields no login intent. Blank/Nonblank use the actual installed
+  credential-only primary and Present its exact value. m26ps4 owns the named
+  shared fact-to-intent seam; D3 must not make a credential-absent Identity
+  valid. This is proposed shared source, not an installed constructor API.
+  Pin exact wire and final Bind/Claim egress for Empty with/without scalar;
+  no guessed refs, invented provider work or caller-supplied facts.
+- **G4, Blank keys:** public-only returns before login. Existing pending,
+  authentication-failed and retry gates precede the key Option check. Absent
+  emits config.invalid with "GRVT private account requires an API key" and
+  no login; Empty/Blank serialize their exact value and do issue login on
+  Primary. Identity independently refuses public-only/Absent/Empty/Blank
+  before request with "GRVT account identity requires credentials" through
+  its native command_error/fail chain. Classify with Rust str::trim before
+  setup policy, including NEL-versus-BOM cases; no scalar manufactures key
+  eligibility and no key trim changes login bytes.
+- **G5, callback boundary:** no existing GRVT legacy remoteSigner,
+  payloadSigner or delegated callback needs credential-only support. GRVT is
+  outside registry DELEGATED; retain private payloadSigner refusal and the
+  existing complete-setup boundary for remote callbacks. Hosted LocalSetup
+  with a key but no scalar is the intended credential-only native/JSON path;
+  distinguish that trusted setup from external Identities JSON. Future
+  complete-ref external order providers remain governed by the recipe's
+  reviewed signature criterion, not a key-only callback bypass.
+- **G6, Optional-family latch:** an intentionally absent Optional signing ref
+  is a per-operation limitation, not an account-wide missing credential.
+  m26ps4 will propose an operation-scoped distinction: that owner gets the
+  typed unreleased failure without poisoning later login Present/refresh,
+  unsigned Session work, secondary operations or startup. Admission normally
+  refuses placement earlier, but a late absence must also be safe. Required
+  families and an actual MissingKey for a ref declared installed keep #2109's
+  latch, even for an Optional family. Do not suppress all MissingKey under
+  Optional, hide it as a generic error, add a GRVT exception or restore socket
+  reconnect loops. A failing socket signing operation still stops.
+
+G6 controls deliberately reach absent-ref prepare past G2, then prove real
+login Present and unsigned cancel/leverage still succeed, with no account
+latch/StartupFailed caused by intentional Optional absence. Keep Required-
+family and declared-installed-ref missing-key latch controls as positives.
+m26ps4 owns revision 4 of RUST_CREDENTIAL_ONLY_SETUP.md after phase-2/D1 lands;
+kuhwxi reviews source and ddi2il disposes of G6 before GRVT adoption. G2-G6
+answers do not bypass those shared gates. Any generic engine PR measures
+Bybit and Bitget on its composed tree. No build, source authorization or push
+is inferred from resuming this plan.

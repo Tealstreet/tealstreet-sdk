@@ -383,3 +383,11 @@ signer and every frozen order/unsigned field, verified low-s and fail-closed
 wrong-signer/digest results. No cached signed bytes or renewed order identity.
 The recipe plan and CALLERS carry that future contract; source still needs its
 actual external-provider acceptance/refusal controls and shared dependencies.
+
+On resumption at actual 76f1f7fc842, #2092 serial-plans, #2094 condition-waits
+and #2069 session-bearer have landed with their non-default feature declarations.
+This supersedes the earlier proposal-only feature status. Seeded serial auth
+resend/status exemption and credential-only setup remain adoption gates.
+RUST_GRVT_PROVIDER_RECIPE.md records G2-G6 consumer answers accepted by m26ps4
+as plan fit: he owns the Empty login-intent seam and the proposed Optional
+per-operation absence/latch distinction. No source clearance is inferred.
