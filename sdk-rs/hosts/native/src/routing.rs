@@ -1409,6 +1409,7 @@ mod tests {
                             .map(|context| safe_cex_engine::SocketContext {
                                 feed: context.feed.into(),
                                 recover: context.recover,
+                                reject_route: false,
                             }),
                     );
                     assert_eq!(

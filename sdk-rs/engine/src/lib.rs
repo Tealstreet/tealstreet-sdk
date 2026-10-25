@@ -64,8 +64,8 @@ pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CommandWait, CredentialSlot, Cx,
     DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpRequest, MAX_COMMAND_WAIT_MS,
     MergedScopeAuth, Method, Notice, PayloadSignRequest, PollTimerBounds, Query, RequestId,
-    RequestRoute, Response, SignatureTarget, SigningTarget, SocketChannel, SocketContext, SocketId,
-    SocketSpec, TimerId, Venue, VenueAction, unsupported_venue_action,
+    ROUTE_EXHAUSTED_CLOSE, RequestRoute, Response, SignatureTarget, SigningTarget, SocketChannel,
+    SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction, unsupported_venue_action,
 };
 pub use error::{
     BuilderAuthorization, BuilderAuthorizationReason, ErrorKind, Outcome, Partial, VenueError,

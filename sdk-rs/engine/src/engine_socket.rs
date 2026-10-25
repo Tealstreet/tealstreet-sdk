@@ -647,7 +647,9 @@ impl<V: Venue> Engine<V> {
             Event::WsMessage { socket, .. } | Event::WsBinary { socket, .. } => {
                 (*socket, Ingress::Message)
             }
-            Event::WsClosed { socket, .. } => (*socket, Ingress::Close),
+            Event::WsClosed { socket, .. } | Event::WsRouteExhausted { socket } => {
+                (*socket, Ingress::Close)
+            }
             _ => return false,
         };
         let admission = if kind == Ingress::Message {
