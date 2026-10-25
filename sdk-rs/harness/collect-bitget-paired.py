@@ -44,6 +44,7 @@ parser.add_argument('--candidate', required=True)
 parser.add_argument('--out', required=True)
 parser.add_argument('--check-only', action='store_true')
 parser.add_argument('--authority', required=True)
+parser.add_argument('--module-path', required=True)
 args = parser.parse_args()
 root = Path.cwd()
 refs = {'baseline': args.baseline, 'candidate': args.candidate}
@@ -51,12 +52,13 @@ for arm, ref in refs.items():
     insist(len(ref) == 40 and all(c in '0123456789abcdef' for c in ref), f'invalid {arm} ref')
     insist(output('git', 'rev-parse', ref) == ref, f'missing exact {arm} source')
 authority = json.loads(Path(args.authority).read_text())
+insist(authority['witness'] in ('tip', 'anchor'), 'unknown comparison witness')
 insist(authority['baseline'] == args.baseline and authority['candidate'] == args.candidate,
        'collector source differs from premeasurement API authority')
 insist(authority['attempt'] == 1 and authority['candidateTree'] == output('git', 'rev-parse', args.candidate + '^{tree}'),
        'collector composition/attempt differs')
 insist(output('git', 'rev-parse', 'HEAD') == args.candidate, 'collector requires the actual tested checkout')
-plan = {'refs': refs,
+plan = {'refs': refs, 'witness': authority['witness'],
         'order': ['baseline', 'candidate', 'candidate', 'baseline',
                   'candidate', 'baseline', 'baseline', 'candidate'],
         'blockOrders': ['ABBA', 'BAAB'], 'pairsPerCohort': 9,
@@ -70,7 +72,7 @@ plan = {'refs': refs,
         'primaryStatistic': 'ratio of pooled Rust medians to pooled TS medians by label',
         'reportAlso': ['all cohort ratios', 'block contrasts', 'like-position contrasts'],
         'acceptanceRule': 'separate authenticated verifier required; collection grants no authority',
-        'baselineMustBeExactLanding': True, 'notR0Initialization': True,
+        'baselineAuthority': authority['witness'], 'notR0Initialization': True,
         'canonicalModulePath': 'one fixed active-module directory for every cohort',
         'noAdaptiveWaitsFiltersOrRetries': True}
 for position in range(4):
@@ -154,7 +156,8 @@ insist(archive_names == sorted(p.name for p in (result_root / 'candidate/node').
 plan['archiveMetadata'] = {arm: json.loads((result_root / arm / 'node/build.json').read_text())
                            for arm in refs}
 write_json(result_root / 'plan.json', plan)
-active_module = result_root / 'active-module'
+active_module = Path(args.module_path).resolve()
+insist(active_module == result_root.parent.parent / 'active-module', 'unexpected canonical module path')
 cohorts = []
 semantics = {}
 for number, arm in enumerate(plan['order'], 1):
@@ -182,7 +185,7 @@ for number, arm in enumerate(plan['order'], 1):
               'position': (number - 1) % 4 + 1,
               'source': refs[arm], 'modulePath': str(active_module),
               'hashes': module_seals, 'startedAt': datetime.now(timezone.utc).isoformat()}
-    before['measurementKey'] = hashlib.sha256(('bitget-paired:' + str(number)).encode()).hexdigest()
+    before['measurementKey'] = hashlib.sha256(('bitget-paired:' + authority['witness'] + ':' + str(number)).encode()).hexdigest()
     write_json(phase / 'before.json', before)
     print('\nCPU_CASE_BEGIN ' + before['measurementKey'] + ' ' + before['startedAt'], flush=True)
     report_path = phase / 'gate.json'

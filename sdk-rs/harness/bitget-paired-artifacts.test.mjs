@@ -47,7 +47,7 @@ test('reader derives seals from independent package bytes and retains all 160 or
 });
 
 test('duplicate raw files, symlink escape, truncated inventories and protocol edits fail closed', async t => {
-  for (const mutation of ['duplicate', 'symlink', 'truncated', 'protocol', 'tolerance', 'ambiguous-json', 'invalid-utf8']) await t.test(mutation, t => {
+  for (const mutation of ['duplicate', 'symlink', 'truncated', 'protocol', 'tolerance', 'anchorOverride', 'ambiguous-json', 'invalid-utf8']) await t.test(mutation, t => {
     const x = fixture(t);
     if (mutation === 'duplicate') {
       const report = x.json('01-baseline/gate.json'); report.artifacts[1].path = report.artifacts[0].path;
@@ -61,6 +61,8 @@ test('duplicate raw files, symlink escape, truncated inventories and protocol ed
       const plan = x.json('plan.json'); plan.protocolSha256 = sha('different'); x.write('plan.json', plan);
     } else if (mutation === 'tolerance') {
       const plan = x.json('plan.json'); plan.T = 2; x.write('plan.json', plan);
+    } else if (mutation === 'anchorOverride') {
+      const plan = x.json('plan.json'); plan.A0 = 'b'.repeat(40); x.write('plan.json', plan);
     } else if (mutation === 'ambiguous-json') x.write('01-baseline/slot-0.json', '{"metrics":{},"metrics":{}}');
     else x.write('01-baseline/slot-0.json', Buffer.from([123, 34, 120, 34, 58, 34, 255, 34, 125]));
     assert.throws(() => readBitgetPairedEvidence(x.root));

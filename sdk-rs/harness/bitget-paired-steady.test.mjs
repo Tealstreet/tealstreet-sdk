@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_TOLERANCE, BITGET_PAIRED_PROTOCOL_SHA256,
-  assessBitgetPairedSteady, bitgetPairedAuthority } from './bitget-paired-steady.mjs';
+  assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
+  BITGET_CUMULATIVE_ANCHOR, combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
 import { performanceFailures, performanceOrder } from './performance-policy.mjs';
 import { assessEligibility, decideRemeasurement } from './cpu-remeasure.mjs';
 import { classifyInitialCase, pairedCertificateForRuntime } from './cpu-ci.mjs';
@@ -22,11 +23,11 @@ const metrics = (mode, steady, rust) => ({ baselineKind: 'idle-loaded', measured
   heapBeforeBytes: 100, heapUsedBytes: rust ? 180 : 200, heapRetainedBytes: rust ? 80 : 100,
   buffersBefore: 0, buffersAfter: 0, bufferRetainedBytes: 0, wasmBeforeBytes: 0, wasmBytes: 0,
   wasmRetainedBytes: 0, retainedBytes: rust ? 80 : 100 });
-function fixture(q = 1, rA = .85) {
-  const authority = bitgetPairedAuthority(inputs());
+function fixture(q = 1, rA = .85, candidate = B) {
+  const authority = bitgetPairedAuthority({ ...inputs(), checkoutSha: candidate });
   const archives = Object.fromEntries(['baseline', 'candidate'].map(arm => {
-    const source = arm === 'baseline' ? A : B;
-    const files = { 'safe_cex_wasm_bg.wasm': sha(arm), 'safe_cex_wasm.js': sha('js'), 'package.json': sha('{}') };
+    const source = arm === 'baseline' ? A : candidate;
+    const files = { 'safe_cex_wasm_bg.wasm': sha(source), 'safe_cex_wasm.js': sha('js'), 'package.json': sha('{}') };
     const metadata = { schema: 1, sourceHead: source, runId: '10', hashes: { ...files } };
     const metadataBytes = JSON.stringify(metadata) + '\n';
     return [arm, { source, metadata, metadataBytes, files: { ...files, 'build.json': sha(metadataBytes) } }];
@@ -50,16 +51,46 @@ function fixture(q = 1, rA = .85) {
       requiredImprovement: .1, status: failures.length ? 'FAIL' : 'PASS', failures, samples, fixers: [],
       ciWasm: archives[arm].metadata,
       artifacts: raw.map(({ impl, mode, run }) => ({ impl, mode, run, path: `/out/${index}/${impl}-${mode}-${run}` })) };
-    return { before: { number: index + 1, arm, source: arm === 'baseline' ? A : B,
+    return { before: { number: index + 1, arm, source: arm === 'baseline' ? A : candidate,
       hashes: structuredClone(archives[arm].files), modulePath: '/runner/active-module',
       startedAt: new Date(Date.UTC(2026, 9, 26, 0, index * 2)).toISOString() },
     finishedAt: new Date(Date.UTC(2026, 9, 26, 0, index * 2 + 1)).toISOString(),
     evidence: { report, reportBytes: JSON.stringify(report), raw } };
   });
   return { authority, manifest, evidence: { schema: 1, freezeSha256: BITGET_PAIRED_FREEZE_SHA256,
-    runId: '10', jobId: '30', runnerId: '40', attempt: 1, refs: { baseline: A, candidate: B }, candidateTree: tree,
+    runId: '10', jobId: '30', runnerId: '40', attempt: 1, refs: { baseline: A, candidate }, candidateTree: tree,
     order: [...BITGET_COHORT_ORDER], cpuModel: 'fixture EPYC', imageOS: 'ubuntu24', imageVersion: 'fixture-image',
     nodeSha256: sha('node'), protocolSha256: BITGET_PAIRED_PROTOCOL_SHA256, archives, cohorts } };
+}
+
+function anchorFixture(data, mutate = () => {}) {
+  const evidence = structuredClone(data.evidence), authority = bitgetAnchorAuthority(data.authority);
+  evidence.refs.baseline = BITGET_CUMULATIVE_ANCHOR;
+  const archive = evidence.archives.baseline;
+  archive.source = BITGET_CUMULATIVE_ANCHOR;
+  archive.metadata.hashes['safe_cex_wasm_bg.wasm'] = sha(BITGET_CUMULATIVE_ANCHOR);
+  archive.files['safe_cex_wasm_bg.wasm'] = sha(BITGET_CUMULATIVE_ANCHOR);
+  archive.metadata.sourceHead = BITGET_CUMULATIVE_ANCHOR;
+  archive.metadataBytes = JSON.stringify(archive.metadata) + '\n';
+  archive.files['build.json'] = sha(archive.metadataBytes);
+  for (const cohort of evidence.cohorts) {
+    cohort.before.startedAt = new Date(Date.parse(cohort.before.startedAt) + 3_600_000).toISOString();
+    cohort.finishedAt = new Date(Date.parse(cohort.finishedAt) + 3_600_000).toISOString();
+    if (cohort.before.arm === 'baseline') {
+      cohort.before.source = BITGET_CUMULATIVE_ANCHOR;
+      cohort.before.hashes = structuredClone(archive.files);
+      cohort.evidence.report.ciWasm = structuredClone(archive.metadata);
+      cohort.evidence.reportBytes = JSON.stringify(cohort.evidence.report);
+    }
+  }
+  mutate(evidence);
+  return { authority, evidence, manifest };
+}
+function certificateFor(data) {
+  const tip = assessBitgetPairedSteady(data), anchor = assessBitgetPairedSteady(anchorFixture(data));
+  assert.equal(tip.valid, true, tip.errors.join('; '));
+  assert.equal(anchor.valid, true, anchor.errors.join('; '));
+  return combineBitgetPairedCertificates(tip.certificate, anchor.certificate);
 }
 
 test('fixed counterbalanced pooled q certifies only steady; .90 readiness is separate by CPU model', () => {
@@ -86,7 +117,7 @@ test('frozen tolerance detects a five-percent slowdown without refitting', () =>
 test('PR evidence cannot supply baseline authority, R0 or a tolerance override', () => {
   const forged = fixture(); forged.authority = { ...forged.authority };
   assert.equal(assessBitgetPairedSteady(forged).valid, false);
-  for (const key of ['T', 'tolerance', 'threshold', 'R0', 'r0', 'baselineOverride']) {
+  for (const key of ['T', 'tolerance', 'threshold', 'R0', 'r0', 'baselineOverride', 'anchorOverride', 'A0']) {
     const data = fixture(); data.evidence[key] = key === 'baselineOverride' ? B : 2;
     assert.equal(assessBitgetPairedSteady(data).valid, false, key);
   }
@@ -137,7 +168,7 @@ test('other objectives retain their original failures and are never granted a st
 });
 
 test('certifier consumes an immutable issued certificate; a copied/edited receipt grants nothing', () => {
-  const data = fixture(1, .92), certificate = assessBitgetPairedSteady(data).certificate;
+  const data = fixture(1, .92), certificate = certificateFor(data);
   const first = data.evidence.cohorts[1].evidence;
   delete first.report.ciWasm;
   first.reportBytes = JSON.stringify(first.report);
@@ -146,6 +177,9 @@ test('certifier consumes an immutable issued certificate; a copied/edited receip
   assert.equal(classifyInitialCase(first, manifest, certificate).decision, 'first');
   assert.throws(() => classifyInitialCase(first, manifest, { ...certificate }));
   assert.throws(() => { certificate.steadyAccepted = false; });
+  assert.throws(() => { certificate.anchor.authority.baseline = B; });
+  assert.throws(() => { certificate.anchor.measurementWindow.startedAt = '2020-01-01'; });
+  assert.throws(() => { certificate.tip.runtimeIdentity.cpuModel = 'other'; });
   const usdc = structuredClone(first); usdc.report.venue = 'bitgetusdc';
   assert.throws(() => classifyInitialCase(usdc, manifest, certificate));
   first.execution.measuredCheckoutSha = A;
@@ -153,7 +187,7 @@ test('certifier consumes an immutable issued certificate; a copied/edited receip
 });
 
 test('other CPU objectives still require their original two-run mean after steady replacement', () => {
-  const data = fixture(1, 1), certificate = assessBitgetPairedSteady(data).certificate;
+  const data = fixture(1, 1), certificate = certificateFor(data);
   const make = (cpu, second) => {
     const value = structuredClone(data.evidence.cohorts[1].evidence);
     for (const slot of value.raw) {
@@ -182,11 +216,56 @@ test('other CPU objectives still require their original two-run mean after stead
 });
 
 test('a family certificate cannot authorize a different module or a combined build', () => {
-  const certificate = assessBitgetPairedSteady(fixture()).certificate;
+  const certificate = certificateFor(fixture());
   const entries = new Map([['manifest.json', Buffer.from(JSON.stringify({ entries: Object.entries(certificate.moduleHashes)
     .map(([name, sha256]) => ({ path: `sdk-rs/hosts/wasm/pkg/node/${name}`, type: 'file', sha256 })) }))]]);
   assert.equal(pairedCertificateForRuntime({ certificate }, { mode: 'family' }, entries), certificate);
   assert.equal(pairedCertificateForRuntime({ certificate }, { mode: 'combined' }, entries), undefined);
   entries.set('manifest.json', Buffer.from(JSON.stringify({ entries: [] })));
   assert.throws(() => pairedCertificateForRuntime({ certificate }, { mode: 'family' }, entries));
+});
+
+test('both independent comparisons are mandatory and cumulative creep blocks a passing tip', () => {
+  assert.equal(BITGET_CUMULATIVE_ANCHOR, '518d3953c09daf63c1345ea465bbc55bd313f53a');
+  for (const [tipQ, anchorQ, expected] of [[1, 1, true], [1, 1.05, false], [1.05, 1, false]]) {
+    const data = fixture(tipQ), tip = assessBitgetPairedSteady(data).certificate;
+    const anchor = assessBitgetPairedSteady(anchorFixture(fixture(anchorQ))).certificate;
+    assert.equal(combineBitgetPairedCertificates(tip, anchor).steadyAccepted, expected);
+  }
+  const data = fixture(1, .92), tip = assessBitgetPairedSteady(data).certificate;
+  const first = data.evidence.cohorts[1].evidence;
+  assert.throws(() => classifyInitialCase(first, manifest, tip), 'single witness cannot displace steady');
+  const anchor = assessBitgetPairedSteady(anchorFixture(data)).certificate;
+  for (const absent of [null, tip, { ...anchor }]) assert.throws(() => combineBitgetPairedCertificates(tip, absent));
+  assert.throws(() => bitgetAnchorAuthority({ ...data.authority }));
+});
+
+test('witnesses must share the physical job and canonical path with disjoint ordered windows', () => {
+  const data = fixture(), tip = assessBitgetPairedSteady(data).certificate;
+  for (const mutate of [x => {
+    for (const cohort of x.cohorts) {
+      cohort.before.startedAt = new Date(Date.parse(cohort.before.startedAt) - 3_600_000).toISOString();
+      cohort.finishedAt = new Date(Date.parse(cohort.finishedAt) - 3_600_000).toISOString();
+    }
+  }, x => { for (const cohort of x.cohorts) cohort.before.modulePath += '-anchor'; }]) {
+    const anchor = assessBitgetPairedSteady(anchorFixture(data, mutate));
+    assert.equal(anchor.valid, true, anchor.errors.join('; '));
+    assert.throws(() => combineBitgetPairedCertificates(tip, anchor.certificate));
+  }
+  const foreign = fixture(); foreign.authority = bitgetPairedAuthority({ ...inputs(), job: { ...inputs().job, id: 31 } });
+  foreign.evidence.jobId = '31';
+  const anchor = assessBitgetPairedSteady(anchorFixture(foreign));
+  assert.equal(anchor.valid, true, anchor.errors.join('; '));
+  assert.throws(() => combineBitgetPairedCertificates(tip, anchor.certificate));
+});
+
+test('identical pinned anchor and candidate passes without advancing the anchor', () => {
+  const data = fixture(1, .85, BITGET_CUMULATIVE_ANCHOR);
+  const result = assessBitgetPairedSteady(anchorFixture(data));
+  assert.equal(result.valid, true, result.errors.join('; '));
+  assert.equal(result.certificate.q, 1);
+  assert.deepEqual(result.certificate.moduleHashes, anchorFixture(data).evidence.archives.baseline.metadata.hashes);
+  assert.equal(data.evidence.archives.candidate.files['safe_cex_wasm_bg.wasm'], sha(BITGET_CUMULATIVE_ANCHOR));
+  assert.equal(result.certificate.authority.baseline, result.certificate.authority.candidate);
+  assert.equal(certificateFor(data).steadyAccepted, true);
 });

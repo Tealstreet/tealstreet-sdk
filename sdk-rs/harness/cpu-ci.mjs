@@ -18,7 +18,8 @@ import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtime
 import { loadGateLedger } from './verify-gates.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { selectBitgetPair } from './bitget-paired-ci.mjs';
-import { assessBitgetPairedSteady, pairedSteadyAssessment } from './bitget-paired-steady.mjs';
+import { assessBitgetPairedSteady, pairedSteadyAssessment, bitgetAnchorAuthority,
+  combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
 
 import { CPU_REMEASURE_SUITES, requireCpuRemeasureSuite } from './cpu-rollout.mjs';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -227,21 +228,27 @@ async function loadBitgetPaired(context) {
       'Rust / Bitget counterbalanced steady CPU', 'Retain counterbalanced Bitget steady evidence', context.checkoutSha);
     const directory = resolve(context.env.RUNNER_TEMP, 'authenticated-bitget-paired');
     artifactEntriesToDirectory(bundle.entries, directory);
-    const evidence = readBitgetPairedEvidence(resolve(directory, 'records'));
     const authority = await selectBitgetPair({ reader: context.reader, runId: context.runId, root: context.root });
-    for (const [index, cohort] of evidence.cohorts.entries()) {
-      const key = sha256(`bitget-paired:${index + 1}`);
-      insist(cohort.before.measurementKey === key, 'paired cohort measurement key differs');
-      authenticateMeasurementWindow({ key, job: bundle.job, logBytes: bundle.logBytes,
-        execution: { runId: authority.runId, jobId: authority.jobId, runnerId: authority.runnerId,
-          attempt: 1, measuredCheckoutSha: context.checkoutSha,
-          startedAt: cohort.before.startedAt, completedAt: cohort.finishedAt } });
-      restorePairedRawOutputs(context.root, cohort.evidence);
-      revalidateRecordedEvidence(cohort.evidence, { root: context.root });
+    const measured = {};
+    for (const [name, selected] of Object.entries({ tip: authority, anchor: bitgetAnchorAuthority(authority) })) {
+      const evidence = readBitgetPairedEvidence(resolve(directory, name, 'records'));
+      for (const [index, cohort] of evidence.cohorts.entries()) {
+        const key = sha256(`bitget-paired:${name}:${index + 1}`);
+        insist(cohort.before.measurementKey === key, 'paired cohort measurement key differs');
+        authenticateMeasurementWindow({ key, job: bundle.job, logBytes: bundle.logBytes,
+          execution: { runId: authority.runId, jobId: authority.jobId, runnerId: authority.runnerId,
+            attempt: 1, measuredCheckoutSha: context.checkoutSha,
+            startedAt: cohort.before.startedAt, completedAt: cohort.finishedAt } });
+        restorePairedRawOutputs(context.root, cohort.evidence);
+        revalidateRecordedEvidence(cohort.evidence, { root: context.root });
+      }
+      const result = assessBitgetPairedSteady({ authority: selected, evidence, manifest: manifest() });
+      insist(result.valid, result.errors.join('\n'));
+      measured[name] = result.certificate;
     }
-    const result = assessBitgetPairedSteady({ authority, evidence, manifest: manifest() });
-    insist(result.valid && result.certificate.steadyAccepted, result.errors.join('\n') || 'paired steady regression');
-    return { certificate: result.certificate, bundle };
+    const certificate = combineBitgetPairedCertificates(measured.tip, measured.anchor);
+    insist(certificate.steadyAccepted, 'tip or cumulative anchor steady regression');
+    return { certificate, bundle };
   })();
   return context.bitgetPaired;
 }

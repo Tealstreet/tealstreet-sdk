@@ -26,7 +26,7 @@ export function readBitgetPairedEvidence(directory) {
   const json = name => parseCohortJson(read(name));
   const jsonText = name => { const bytes = read(name); parseCohortJson(bytes); return bytes.toString('utf8'); };
   const plan = json('plan.json'), comparison = json('comparison.json');
-  insist(!['T', 'tolerance', 'threshold', 'R0', 'r0', 'baselineOverride'].some(key => Object.hasOwn(plan, key)),
+  insist(!['T', 'tolerance', 'threshold', 'R0', 'r0', 'baselineOverride', 'anchorOverride', 'A0'].some(key => Object.hasOwn(plan, key)),
     'PR-supplied acceptance authority in measurement plan');
   insist(plan.protocolSha256 === BITGET_PAIRED_PROTOCOL_SHA256 && plan.freezeSha256 === BITGET_PAIRED_FREEZE_SHA256,
     'unapproved measurement protocol or calibration freeze');

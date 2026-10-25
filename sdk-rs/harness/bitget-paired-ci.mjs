@@ -6,7 +6,8 @@ import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { createGithubReader } from './cpu-cohort.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256,
-  assessBitgetPairedSteady, bitgetPairedAuthority } from './bitget-paired-steady.mjs';
+  assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
+  combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
 
 const insist = (ok, message) => { if (!ok) throw new Error(`Bitget paired CI: ${message}`); };
 const git = (root, ...args) => {
@@ -49,28 +50,36 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
     String(runId) === env.GITHUB_RUN_ID, 'measurement requires original Actions attempt1');
   const authority = await selectBitgetPair({ reader, runId, root });
   mkdirSync(destination, { recursive: false });
-  const authorityPath = resolve(destination, 'authority.json'), script = resolve(destination, 'collect-bitget-paired.py');
-  write(authorityPath, { ...authority, protocolSha256: BITGET_PAIRED_PROTOCOL_SHA256,
-    freezeSha256: BITGET_PAIRED_FREEZE_SHA256 });
+  const script = resolve(destination, 'collect-bitget-paired.py');
   copyFileSync(resolve(root, 'sdk-rs/harness/collect-bitget-paired.py'), script);
-  const records = resolve(destination, 'records');
-  try {
-    const child = spawnSync('python3', [script, '--baseline', authority.baseline,
-      '--candidate', authority.candidate, '--authority', authorityPath, '--out', records],
-    { cwd: root, env, stdio: 'inherit' });
-    insist(child.status === 0 && !child.error && !child.signal, 'fixed measurement did not complete; no retry');
-  } finally {
-    git(root, 'checkout', '--detach', authority.candidate);
+  const witnesses = { tip: authority, anchor: bitgetAnchorAuthority(authority) };
+  for (const [name, selected] of Object.entries(witnesses)) {
+    const directory = resolve(destination, name); mkdirSync(directory);
+    const authorityPath = resolve(directory, 'authority.json');
+    write(authorityPath, { ...selected, protocolSha256: BITGET_PAIRED_PROTOCOL_SHA256,
+      freezeSha256: BITGET_PAIRED_FREEZE_SHA256 });
+    try {
+      const child = spawnSync('python3', [script, '--baseline', selected.baseline,
+        '--candidate', selected.candidate, '--authority', authorityPath, '--out', resolve(directory, 'records'),
+        '--module-path', resolve(destination, 'active-module')], { cwd: root, env, stdio: 'inherit' });
+      insist(child.status === 0 && !child.error && !child.signal, `${name} fixed measurement did not complete; no retry`);
+    } finally {
+      git(root, 'checkout', '--detach', authority.candidate);
+    }
   }
   const current = await selectBitgetPair({ reader, runId, root });
   insist(isDeepStrictEqual(current, authority), 'source/base/physical producer changed during measurement');
-  const evidence = readBitgetPairedEvidence(records);
   const manifest = JSON.parse(readFileSync(resolve(root, 'sdk-rs/harness/known-gate-failures.json'), 'utf8'));
-  const result = assessBitgetPairedSteady({ authority: current, evidence, manifest });
+  const measured = Object.fromEntries(Object.entries(witnesses).map(([name, selected]) => {
+    const result = assessBitgetPairedSteady({ authority: selected,
+      evidence: readBitgetPairedEvidence(resolve(destination, name, 'records')), manifest });
+    insist(result.valid, result.errors.join('\n')); return [name, result.certificate];
+  }));
+  const certificate = combineBitgetPairedCertificates(measured.tip, measured.anchor);
+  const result = { valid: true, errors: [], certificate };
   write(resolve(destination, 'steady-assessment.json'), result);
-  insist(result.valid, result.errors.join('\n'));
-  console.log(JSON.stringify({ q: result.certificate.q, tolerance: result.certificate.tolerance,
-    steadyAccepted: result.certificate.steadyAccepted, readinessByCpuModel: result.certificate.readiness,
+  console.log(JSON.stringify({ tipQ: certificate.tip.q, anchorQ: certificate.anchor.q, tolerance: certificate.tolerance,
+    steadyAccepted: certificate.steadyAccepted, readinessByCpuModel: certificate.readinessByCpuModel,
     otherObjectivesRemainUnchanged: true }));
   insist(result.certificate.steadyAccepted, 'counterbalanced non-regression bound exceeded');
   return result;

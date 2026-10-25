@@ -7,21 +7,28 @@ import { median, performanceFailures, performanceObjectives, REQUIRED_IMPROVEMEN
 
 export const BITGET_PAIRED_TOLERANCE = 1.023110;
 export const BITGET_PAIRED_FREEZE_SHA256 = 'ee6b8fd762184969b2eacf7a5ef030bc8872acfbc474ca229377f1b181e99b62';
+export const BITGET_CUMULATIVE_ANCHOR = '518d3953c09daf63c1345ea465bbc55bd313f53a';
 export const BITGET_COHORT_ORDER = Object.freeze(['baseline', 'candidate', 'candidate', 'baseline',
   'candidate', 'baseline', 'baseline', 'candidate']);
 export const BITGET_PAIRED_PROTOCOL_SHA256 = createHash('sha256').update(JSON.stringify({
   order: BITGET_COHORT_ORDER, pairsPerCohort: 9, correctnessPairsPerCohort: 1, attempt: 1,
   statistic: '(median(B Rust36)/median(B TS36))/(median(A Rust36)/median(A TS36))',
   scope: 'bitget:public:steadyCpuMs', freezeSha256: BITGET_PAIRED_FREEZE_SHA256,
+  comparisons: ['tip', 'anchor'], cumulativeAnchor: BITGET_CUMULATIVE_ANCHOR,
 })).digest('hex');
 const authorities = new WeakSet();
 const certificates = new WeakSet();
+const combinedCertificates = new WeakSet();
 const same = isDeepStrictEqual;
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const oid = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const hash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const insist = (ok, message) => { if (!ok) throw new Error(`Bitget paired steady: ${message}`); };
+const freezeTree = value => {
+  if (value && typeof value === 'object') { Object.values(value).forEach(freezeTree); Object.freeze(value); }
+  return value;
+};
 const exactCase = report => report?.venue === 'bitget' && report.private === false &&
   report.tape === 'sdk-rs/harness/fixtures/bitget-public.jsonl.gz' && report.books === 'BTCUSDT,ETHUSDT';
 
@@ -49,7 +56,14 @@ export function bitgetPairedAuthority({ run, pull, landing, job, checkoutSha, ch
   'missing unique same-run original physical producer');
   const value = Object.freeze({ runId: String(run.id), attempt: 1, jobId: String(job.id),
     runnerId: String(job.runner_id), baseline, candidate: checkoutSha,
-    candidateTree: checkoutTree, head: run.head_sha, pullNumber });
+    candidateTree: checkoutTree, head: run.head_sha, pullNumber, witness: 'tip' });
+  authorities.add(value);
+  return value;
+}
+
+export function bitgetAnchorAuthority(tip) {
+  insist(authorities.has(tip) && tip.witness === 'tip', 'anchor requires issued tip authority');
+  const value = Object.freeze({ ...tip, baseline: BITGET_CUMULATIVE_ANCHOR, witness: 'anchor' });
   authorities.add(value);
   return value;
 }
@@ -74,7 +88,7 @@ function assessContent(authority, evidence, manifest) {
   insist(evidence?.schema === 1 && evidence.freezeSha256 === BITGET_PAIRED_FREEZE_SHA256 &&
     evidence.attempt === 1 && evidence.runId === authority.runId && evidence.jobId === authority.jobId &&
     evidence.runnerId === authority.runnerId, 'evidence is not bound to the original physical producer');
-  insist(!['T', 'tolerance', 'threshold', 'R0', 'r0', 'baselineOverride'].some(key => Object.hasOwn(evidence, key)),
+  insist(!['T', 'tolerance', 'threshold', 'R0', 'r0', 'baselineOverride', 'anchorOverride', 'A0'].some(key => Object.hasOwn(evidence, key)),
     'PR-supplied acceptance authority is forbidden');
   insist(same(evidence.order, BITGET_COHORT_ORDER) && evidence.cohorts?.length === 8, 'complete fixed ABBA/BAAB required');
   insist(evidence.refs?.baseline === authority.baseline && evidence.refs?.candidate === authority.candidate &&
@@ -139,6 +153,11 @@ function assessContent(authority, evidence, manifest) {
   const q = summary.candidate.rustTsRatio / summary.baseline.rustTsRatio;
   insist(Number.isFinite(q) && q > 0, 'nonfinite pooled contrast');
   return { schema: 1, rule: 'bitget-public-steady-counterbalanced-pooled', scope: 'bitget:public:steadyCpuMs',
+    canonicalModulePath: canonicalPath,
+    runtimeIdentity: { cpuModel: evidence.cpuModel, imageOS: evidence.imageOS,
+      imageVersion: evidence.imageVersion, nodeSha256: evidence.nodeSha256 },
+    measurementWindow: { startedAt: evidence.cohorts[0].before.startedAt,
+      completedAt: evidence.cohorts.at(-1).finishedAt },
     steadyAccepted: q <= BITGET_PAIRED_TOLERANCE, q, tolerance: BITGET_PAIRED_TOLERANCE,
     freezeSha256: BITGET_PAIRED_FREEZE_SHA256, authority, pooled: summary,
     readiness: { cpuModel: evidence.cpuModel, rustTsRatio: summary.candidate.rustTsRatio,
@@ -150,7 +169,7 @@ function assessContent(authority, evidence, manifest) {
  * and revalidate original strict reports before using this supplement. */
 export function assessBitgetPairedSteady({ authority, evidence, manifest }) {
   try {
-    const certificate = Object.freeze({ ...assessContent(authority, evidence, manifest),
+    const certificate = freezeTree({ ...assessContent(authority, evidence, manifest),
       tapeSha256: evidence.cohorts[0].evidence.report.tapeSha256,
       moduleHashes: Object.freeze({ ...evidence.archives.candidate.metadata.hashes }) });
     certificates.add(certificate);
@@ -160,8 +179,29 @@ export function assessBitgetPairedSteady({ authority, evidence, manifest }) {
 }
 
 export function hasPairedBitgetSteady(certificate, report, source) {
-  return certificates.has(certificate) && certificate.steadyAccepted === true && exactCase(report) &&
+  return combinedCertificates.has(certificate) && certificate.steadyAccepted === true && exactCase(report) &&
     report.tapeSha256 === certificate.tapeSha256 && (report.ciWasm?.sourceHead ?? source) === certificate.authority.candidate;
+}
+
+export function combineBitgetPairedCertificates(tip, anchor) {
+  insist(certificates.has(tip) && certificates.has(anchor) && tip.authority.witness === 'tip' &&
+    anchor.authority.witness === 'anchor' && anchor.authority.baseline === BITGET_CUMULATIVE_ANCHOR,
+  'both independently issued tip and pinned-anchor witnesses are required');
+  for (const field of ['runId', 'attempt', 'jobId', 'runnerId', 'candidate', 'candidateTree', 'head'])
+    insist(tip.authority[field] === anchor.authority[field], 'witnesses belong to different candidates or physical jobs');
+  insist(tip.tapeSha256 === anchor.tapeSha256 && same(tip.moduleHashes, anchor.moduleHashes) &&
+    same(tip.runtimeIdentity, anchor.runtimeIdentity) && tip.canonicalModulePath === anchor.canonicalModulePath,
+    'witness tape/module/CPU/canonical path differs');
+  insist(Date.parse(tip.measurementWindow.completedAt) <= Date.parse(anchor.measurementWindow.startedAt),
+    'tip and anchor measurement windows overlap or are reversed');
+  const certificate = freezeTree({ schema: 1, rule: 'bitget-public-steady-tip-and-anchor',
+    authority: tip.authority, tapeSha256: tip.tapeSha256, moduleHashes: tip.moduleHashes,
+    steadyAccepted: tip.steadyAccepted && anchor.steadyAccepted, tolerance: BITGET_PAIRED_TOLERANCE,
+    anchorSource: BITGET_CUMULATIVE_ANCHOR, tip, anchor,
+    readinessByCpuModel: { cpuModel: tip.readiness.cpuModel,
+      comparisons: { tip: tip.readiness, anchor: anchor.readiness } }, noOverallSuiteCertification: true });
+  combinedCertificates.add(certificate);
+  return certificate;
 }
 
 export function pairedSteadyAssessment(assessment, report, certificate, source) {
