@@ -286,6 +286,12 @@ fn declared_progress_refreshes_receive_without_granting_ready() {
             .iter()
             .any(|event| matches!(event, LifecycleEvent::Ready { .. }))
     );
+    h.text(100_000., "pong");
+    h.text(140_000., "pong");
+    h.advance(154_999.);
+    assert!(h.current());
+    h.advance(155_000.);
+    assert!(h.timeout(Timeout::Auth));
 }
 #[test]
 fn declared_partial_ack_refreshes_receive() {

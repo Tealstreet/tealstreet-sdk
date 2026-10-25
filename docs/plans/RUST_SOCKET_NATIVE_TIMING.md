@@ -2,8 +2,8 @@
 
 Owner: codex-9czdjh. Required managed-sockets reviewer: claude-55ao7t.
 Overseer assigns one shared engine PR for the three gaps identified against
-6fb44235f3e. Kraken venue plan is #2172; venue originals wait for that plan to
-land. The local originals checkpoint adds an inert opt-in API surface and
+6fb44235f3e. Kraken venue plan #2172 landed at 74db4cd0768; its venue originals are
+a separate consumer checkpoint. The local originals checkpoint adds an inert opt-in API surface and
 real engine controls; corrected runtime behavior and venue adoption follow review.
 
 ## Contract and linkage
@@ -181,3 +181,40 @@ enabled and only this intentionally RED module excluded. Existing venue assertio
 bodies are unchanged; their enabled-mode runs and feature-OFF parity remain
 qualification gates. No feature-mode CI row is added until source makes the new
 originals GREEN. No build profile, harness, venue dependency or inventory changes.
+
+## Corrected source checkpoint
+
+After 55ao7t ORIGINALS/API CLEAR at 04bc5bcf683, actual #2162 landing 0a54e37b1e8
+is plain-merged. The old Bitget CPU exception does not apply to qualification.
+The original enabled-mode existing-adopter targets execute 94 PASS (37 Backpack,
+21 OKX, 16 Phemex private, 9 Phemex public, 11 WEEX), with unchanged test bodies.
+The 138 existing engine socket controls also pass WITH socket-native-timing on.
+Both original review-build targets are removed after completion.
+
+The corrected source makes all 25 new controls GREEN. The Progress control adds
+an exact auth expiry check: after Progress at 55000 with a 100000 ms auth stage,
+Pongs keep receive live, 154999 remains current and 155000 retires for Auth.
+No pre-existing assertion is changed. This executes the previously RED-gated
+completion/duplicate/quiet-traffic suffixes too; it still does not substitute for
+Kraken's separate all-three-native-payload codec proof.
+
+Driver registration validates finite-positive timeout and the closed Private /
+Required / Native / Reconnect policy before its existing registration publishes.
+Snapshot and native timing use separate registration entries; there is no API
+that installs both timeout modes on one feed. Native timing contributes its delay
+to the existing arithmetic representability preflight. The stable anchor is set
+only on a newly constructed Supervisor. Existing Config/FeedPolicy shapes stay
+unchanged, and the source audit finds no exhaustive Control/TrafficPolicy match
+in venue crates; no non_exhaustive annotation is needed.
+
+OPEN arms the initial deadline before the existing watch is rearmed. Completion
+consumes only current text scope and clears only that deadline. It allocates no
+resource and leaves an earlier watch harmlessly armed to recheck the surviving
+bounds. It never calls authenticated or changes Ready/receive/stability state.
+Declared refresh is computed from closed native control evidence and uses the
+single existing received(now) call in finish_control for auth transitions.
+Ready remains the exact old stable-origin calculation; Open uses the dedicated
+OPEN origin. Explicit feature-mode OFF/ON rows include enabled strict Clippy.
+
+Source review, refreshed existing-adopter controls, feature-OFF pairs, scoped
+strict/fmt/bans and exact CI remain gates; no size or publication claim yet.
