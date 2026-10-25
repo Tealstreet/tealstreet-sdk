@@ -44,6 +44,43 @@ pub(in super::super) struct Admission {
 }
 
 impl Call {
+    /// A logical call with its first physical attempt selected. Shared by every
+    /// owner phase so the construction exists once.
+    #[inline(never)]
+    pub(super) fn open(
+        context: Context,
+        terms: CallTerms,
+        window: CallWindow,
+        ids: Range<u64>,
+        signing: Option<Range<u64>>,
+        now: f64,
+        predecessor: Option<Delivery>,
+    ) -> Result<Self, Error> {
+        let mut call = Call {
+            context: context.clone(),
+            terms,
+            window,
+            ids,
+            signing,
+            selected: 0,
+            admission: Admission {
+                context,
+                attempt: Attempt {
+                    request: RequestId(0),
+                    generation: 0,
+                },
+                timer: TimerId(0),
+                signing: None,
+                deadline: window.deadline(),
+                predecessor: None,
+            },
+            stage: Stage::Ready,
+            released_failure: None,
+        };
+        call.select(now, predecessor)?;
+        Ok(call)
+    }
+
     pub(super) fn matches(&self, delivery: &Delivery) -> bool {
         self.context.same_issuer(&delivery.context)
             && self.context == delivery.context

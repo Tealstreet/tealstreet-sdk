@@ -8194,3 +8194,50 @@ its unsent work and publication authority. Store contains no numeric command
 waiter list or terminal fan-out. Callers retain native fallback and error
 handling; no numeric fallback stands in for managed completion.
 See [RUST_METADATA_FRESHNESS.md](RUST_METADATA_FRESHNESS.md).
+
+### TxFlow unsigned account-setting polls
+
+Each activeAssetData setting poll retains one keyless Background Read Context
+through managed Prepare/Bind/Claim and exact current-generation DATA validation.
+Explicit Primary egress preserves account routing for the wallet/vault query;
+there is no fabricated credential, Session or PublicCors override. The new
+20,000 ms admission-to-expiry bound includes stalled preparation and binding,
+with Never retry at the physical layer and no aggregate account-poll deadline.
+Successful DATA publishes native setting/hedged state while its exact Context
+remains live, then retires custody before the native 100 ms successor. Failure
+and revision-stale current replies also retire before that successor; the
+60-second refresh and setting/hedge reducers retain native behavior. Admission pressure follows one bounded successor; nonfinite
+refusal creates no timer or HTTP. Old callbacks cannot clear replacement owners.
+
+## Paradex command candle Read ownership
+
+FetchCandles retains the original caller Read root across documented klines and
+its native once-only TradingView fallback. Wide intervals still start directly
+with TradingView. Each physical call gets a fresh Never child clipped to that
+root. **NEW policy:** its 20s admission-to-expiry bound includes Prepare, Bind,
+route waits and transport; it is not a 20s cap on the entire two-call walk.
+Exact root/child DATA validation precedes streamed rows, envelope and codec.
+A released first-call failure or physical timeout may fall back only while the
+original root lives; typed preparation/queue refusal is strict. Original root
+expiry owns one terminal and discards every staged prefix without fallback.
+Shared typed fields are retained, including local pre-release NotSent, while
+native string failures keep their absent optional metadata. Full capacity now
+refuses before HTTP; root plus one child need two slots. Subscription polls, discovery,
+account-start delegation, private history and signing keep their existing paths.
+
+
+### Polymarket unsigned Gamma catalogue pages
+
+Unsigned Gamma /markets/keyset pages use separate keyless Background Read
+Contexts with Never retry and an explicit 20,000 ms admission-to-expiry bound,
+including stalled host Prepare/Bind. This is a new physical lifetime bound on
+the previously unbounded raw sender; it imposes no aggregate cursor-walk deadline.
+Exact current-page DATA authority precedes row/envelope parsing, walk dedup and
+publication. Final rows and prediction metadata still publish atomically; an
+expired or failed page never publishes its prefix. The native whole-walk retry
+starts from the first page after its existing jittered Backoff and clears native
+walk state there. Physical contexts retire before any next page or failure retry.
+Unissued admission/queue pressure backs off the first page without recursive
+page admission. Private startup, midpoint progression, cursor geometry, quoted
+HTTP data and signing/key selection retain their native behavior. No command or
+financial outcome is created by this Background Read adoption.

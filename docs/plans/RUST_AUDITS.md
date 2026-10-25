@@ -3278,3 +3278,18 @@ query coalescing or joined managed adoption is claimed. Native financial fences
 remain separate. BingX Plan/observer production wiring still requires the
 reviewed planned-execution seam and independent-observer controls.
 [Implementation and limits](RUST_METADATA_FRESHNESS.md).
+
+## Paradex command candle custody
+
+One original caller Read root owns at most two native unsigned routes. Fresh
+20s/Never children use exact delivery guards before item/envelope parsing;
+released failures bind through managed dispatch and retained child ownership,
+then validate the original root before native fallback. Preparation refusals are
+strict. Native wire, financial codecs, limit behavior, row order and poll paths
+are retained. Two numeric terminal occurrences are removed (public 5->3,
+family 41->39); retained raw calls are subscription polling only.
+
+Architecture gate: No. The venue consumes shared root/child admission, delivery,
+retirement and typed failure APIs; it adds no issuer, local timer or authority map.
+The old saturated-candles raw-send expectation is explicitly superseded by shared
+Capacity; its literal native wire assertions remain after genuine recovery.
