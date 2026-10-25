@@ -340,3 +340,11 @@ check, default/serial-only clippy, scoped strict clippy and local bans pass.
 The feature-off fixture lock observation is cfg-gated; this fixes only its
 compilation, with no runtime or assertion change. Paired size measures and
 source review are pending; source runtime blobs are exact c0ad5639ecd.
+
+
+CI closure correction: the prior engine-feature job exercised serial Plans and
+Session Bearer separately, so it could pass without this opt-in combination.
+Add one explicit combined mode (condition-waits, mutation barriers, order locks,
+serial-plans, session-bearer and test support) while preserving every existing
+mode and family closure. Metadata-only before/after comparison confirms exactly
+one new mode and no closure change. Runtime and WASM build inputs are unchanged.
