@@ -178,9 +178,14 @@ CI's merge-ref figure includes landing growth, so it is not the gate.
    - Under the gate it stays unmigrated; it is queued for after S1's `CoreCx`
      makes the helper non-generic.
 6. **Phase 2:** GRVT (10) with WOO (1). WOO's +55 is accepted only if the
-   phase is net negative (overseer).
+   phase is net negative (overseer). Landed as #2138 (`c444d223647`):
+   GRVT -750, WOO +55, Bitget, BitgetUSDC and Bybit 0, combined -823.
 7. **Phase 3:** the remaining in-scope families, one commit each, each within
-   the gate.
+   the gate. #2144, vs `875bc1ac1f9`: Hyperliquid -379, WEEX -347,
+   Paradex -25, MEXC +51 (single site), Bitget, BitgetUSDC and Bybit 0,
+   combined -728.
+   - Orderly (2) measured +161, over the gate. It is deferred with Backpack
+     to after S1 (overseer).
 
 ## Appendix: strict-shape sites at `b0008964fbb`
 
