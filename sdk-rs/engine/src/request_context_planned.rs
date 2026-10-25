@@ -939,28 +939,15 @@ impl<P> Cx<'_, P> {
         )?
         .with_retry(body.policy.retry)?;
         context.bind_issuer(&self.io.request_contexts.issuer);
-        let mut call = Call {
-            context: context.clone(),
-            terms: entry.terms,
+        let call = Call::open(
+            context.clone(),
+            entry.terms,
             window,
-            ids: entry.ids.clone(),
-            signing: entry.signing.clone(),
-            selected: 0,
-            admission: Admission {
-                context: context.clone(),
-                attempt: Attempt {
-                    request: RequestId(0),
-                    generation: 0,
-                },
-                timer: TimerId(0),
-                signing: None,
-                deadline: window.deadline(),
-                predecessor: None,
-            },
-            stage: Stage::Ready,
-            released_failure: None,
-        };
-        call.select(self.now, self.io.http_delivery.clone())?;
+            entry.ids.clone(),
+            entry.signing.clone(),
+            self.now,
+            self.io.http_delivery.clone(),
+        )?;
         let owner = self
             .io
             .request_contexts
