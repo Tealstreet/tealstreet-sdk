@@ -94,6 +94,33 @@ the import reads both maxima from the same locked store, never caller numbers.
 This audit is not implementation or host-drain proof. Do not expose a takeover
 switch until the native and WASM host adapters satisfy these conditions.
 
+### Native transport retirement originals
+
+The separate native-drain checkpoint starts on landed #2160 at b9dfc734a363.
+It adds an optional object-safe Transport::drain method behind the non-default
+nonce-drain feature. Its default is Unsupported (None), including the current
+NetworkTransport. Drained has no public constructor, serialization or Clone;
+the declaration cannot manufacture a successful retirement receipt.
+
+Run the target explicitly with cargo test --locked -p safe-cex-native
+--no-default-features --features nonce-drain --test nonce_drain. Four assertion
+REDs require a real response-body task to retire, a held raw preparation to be
+canceled and joined, admission to seal before polling the drain future, and a
+repeated drain to keep that seal. The custom-transport GREEN retains ordinary
+request use and dyn compatibility while refusing unsupported drain capability.
+Loopback listeners distinguish a sealed refusal from a failed connection.
+The dedicated run has four intended assertion REDs and one GREEN, with no
+ignored controls or setup failures; strict Clippy and all 54 native library
+tests pass. Cargo refuses the original target without its opt-in. The scratch
+target is deleted after qualification.
+
+These originals cover the native transport boundary only. They do not prove
+issuer registration, nonce-store fencing/import, managed/signing/socket Host
+retirement, WASM promise settlement or a complete cross-process census. Those
+controls and exact source review remain required; no namespace or hosted
+activation follows from this feature or a drain result. The tealstreet-next
+worker/process generation checkpoint targets master without a deployment.
+
 ## B. Approved owner/window and terminal policy
 
 Native Futures sends have timeout_ms=None; Spot explicitly sets 20,000ms per
