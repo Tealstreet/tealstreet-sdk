@@ -8900,3 +8900,134 @@ override remains a separate adoption, with no status-wide grant or raw fallback.
 A parked operation expires Timeout/NotSent, while the command still follows its
 journal: released refusal plus an unreleased resend is Unknown with a fence and
 reconciliation; earlier IDs remain. No existing journal projection is changed.
+
+### Backpack public and private sockets
+
+Both native connections use engine feed/epoch custody with the existing 20s idle,
+5s ping, 1s–16s backoff and 10s connect policy. Private authentication remains the
+native freshly signed SUBSCRIBE, then PING and loaded-Orders-guarded account
+reads, once per real Opened epoch; there is no ACK wait or managed-signing claim.
+Public 4002 retains native half-RTT publication, and current malformed text still
+refreshes AnyText liveness. Account HTTP reducers, fill/poll and repair behavior
+stay outside this lifecycle adoption.
+
+Public additions/removals commit their local demand only with the exact interest
+proposal. Refusal rolls back that change and preserves committed peers. Each
+book snapshot waits for its own genuine depth-interest handoff; surviving keys
+keep current rebased wake custody when another key is removed. Native book
+recovery requests the same handoff before its existing bounded HTTP observation.
+
+NEW resource-pressure policy: unresolved current-epoch interests may make at most
+three capacity observations, 1s apart, after the initial refusal. Only Capacity
+schedules this work. A captured early timer rearms to its original not-before
+without consuming an observation; equality or later delivery consumes one.
+Commits do not reset cooldown/exhaustion, and resolved demand cancels its exact
+timer. Nonfinite time schedules no work. This grants no HTTP, authentication or
+socket retry authority. The native encoder refuses serialized frames above
+65,536 bytes as Capacity before shared emission. Engine Ready replay failures
+retain the inherited fail-closed feed disposition; they are separate from
+recoverable venue proposals. Both legacy socket sites and their family row are
+removed together; no generic engine, signer or credential migration is included.
+
+Native fixture qualification replaces duplicate Opened reread triggers only in
+one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit and
+unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without_repair
+with real reconnects and replies at their captured advertised observation times.
+This supersedes only those fixture clocks/socket IDs; payload timestamps and
+all native financial/assertion predicates remain unchanged. Other fixture clocks
+and shared startup/message/reply helpers remain intact.
+
+The additional account-read overlap sites native_live_stale_positions_keep_next_without_publication,
+balance_overlap (including its254-peer fanout consumer), and
+native_balance_older_than_committed_never_wins_after_two_more_discards now use
+real first-open/settled refreshes before the original poll, then genuine reconnect
+for the newer snapshot. Relative fill/discard/acceptance spacing follows that
+actual opening. fill() derives wire E from the observation clock, so those generated
+E values and observation-derived Store timestamps shift with it. This necessary
+fixture-clock supersession is approved; raw financial literals, prices, amounts,
+fill counts, all assertion predicates and production reducers remain unchanged.
+
+Two further fixture-only clock supersessions are approved: public
+rest_query_success_failure_and_stream_resubscription_have_independent_state
+resubscribes and answers its held query/new seed at3 after its existing removal
+at3; unrelated subscribe() callers retain0. Trading
+reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements
+replaces duplicate Opened2100 with an actual Close/retry-at/new socket/Open and
+prepared read at that observation time. ORDER.createdAt1000, last_update1000,
+all financial assertions and the original cancellation request/ACK are unchanged.
+
+## Kraken local prerequisite policy and caller projection
+
+Inert prerequisite policy and shared-fixture checkpoint, started on
+9977ccf1aa6; no runtime change, activation or inventory prune. The overseer approved NEW Futures 20s physical calls and Spot 100s
+nontrade/token retry-chain bounds while preserving native Spot 20s physical
+timeouts, native retry ledgers, history 50-page/caller-wait caps and serial
+command length. Token work remains socket-epoch bound. The exact owner table is
+[RUST_KRAKEN_PRIVATE_PREREQUISITES.md](RUST_KRAKEN_PRIVATE_PREREQUISITES.md).
+
+Named follow-up: richer Kraken partial-write caller projection. Shared journal
+per-item Rejected/NotSent truth is retained; caller-visible errors deliberately
+keep native outcome=None after progress, accepted IDs or protective cancel.
+Source controls must assert journal truth and caller projection independently.
+Native cancel/ACK/replacement ordering remains serial; this grants no parallel
+nonce barrier authority. Namespace takeover still requires bounded owner review. Protective amendment
+uses the existing serial Plan and its cancel DATA/fact custody, with current
+Store provenance checked before replacement; no new release hook or parallel
+barrier authority is introduced. Hosted adapter and activation stay held.
+
+The takeover census covers issuers we own: SDK nonce core, native/WASM hosts,
+and tealstreet-next worker/process generations. Their epoch-bound fence and
+joined work-lease retirement precede atomic import of both reserved and
+released maxima, including the target's state. No proof of remote nonexecution
+is required. Another application using the same Kraken API key is outside the
+census, with native-equivalent exposure: an invalid-nonce collision is a
+definitive pre-execution refusal, not permission to replay the write. Unknown
+external issuers therefore do not block takeover. This ruling grants no hosted
+activation; the working exact-nonce adapter remains a prerequisite.
+
+## WEEX Depth and both socket lifecycle custody (local qualification)
+
+Subscription Depth uses independent keyless Primary Background observations
+with a NEW20s physical bound, Never retry and no pacing. Pre-open/bootstrap,
+reconnect and gap observations remain independent of eligible topic handoff.
+Live accepted publication precedes exact retirement and response-driven native
+reconciliation. Both socket roles use engine epochs with unchanged signed
+primary upgrade bytes and no authentication ACK wait; native subscription and
+refresh work occurs once on Opened. No generic engine or signing cutover occurs.
+
+Fixture supersessions are explicit: seven account stream controls add genuine
+first Opened/prepared drain at their existing NOW before the six pending reads
+finish. Three public Depth controls (depth_ignores_old_frames_and_heals_gaps_with_buffered_diffs,
+old_snapshots_and_failures_cannot_replace_a_resubscribed_book, and
+malformed_depth_is_not_an_authoritative_deletion) align physical observations to
+bootstrap1773295700000 plus the same relative offsets, with replies at that
+actual clock. Payloads and original financial/wire assertions remain unchanged;
+other public adaptations only drive actual preparation at existing clocks.
+Two public interest fixtures (websocket_candles_allow_two_hours_but_rest_rejects_it
+and active_tickers_send_incremental_diffs_and_identical_updates_send_nothing)
+use genuine bootstrap observation0 before their unchanged0..3 events. The
+parameterized bootstrap preserves every wire literal and test assertion; default
+started() retains the original1773295700000 clock for all other callers. Other
+shared helpers and dedicated delayed/equality expiry controls remain intact.
+On refused required public invalidation, exact native Depth cleanup precedes
+failure propagation and public replacement is denied; sibling feeds/read owners
+remain independent. Expanded custody, quota and native qualification remain gates.
+
+Two post-start private-fill trading oracles add only Engine.start1000 and its
+genuine prepared drain before their unchanged account importer:
+fill_only_socket_event_during_cancel_blocks_replacement_before_order_update and
+fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliation.
+Their first Opened1002, all prior assertions/payloads and financial/event clocks
+stay exact; the new initial catalogue read is unanswered. No global autostart
+or new command-before-start compatibility is implied.
+
+Native topic ordering is retained in both directions: subscriptions use the
+proposed order, while removed topics use their previous committed order. A
+reverse-catalogue ticker control pins the exact unsubscribe wire order.
+
+Corrected local source qualification preserves the NEW20s Depth observation
+bound and approved fixture supersessions above. The current-tip local pair is
+WEEX1212633->1274315 (+61682) and combined13908680->13920684 (+12004),
+with unchanged fixed budgets and Node/Web parity. Combined is local evidence;
+frozen-head CI remains the family-size record. Remaining14F/20O request refs
+and all signing/credential inventory stay unchanged.

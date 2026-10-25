@@ -166,3 +166,56 @@ Native Phemex working references include failed_late_cancel_is_reported_as_an_er
 4. Venue source adoption, exact map pruning, provider/native source reviews, scoped tests, paired family+combined sizes, frozen push/one qualifying run, READY and exact-tree GO remain separate. Other Backpack/Phemex slices may proceed independently.
 
 No current runtime, test execution, API availability, production readiness or automatic mutation authority is claimed by this plan.
+
+## Originals (claude-fe7lgm, reviewer codex-ih35js)
+
+Engine feature `repair-mutations = ["order-locks", "http-plans"]`. Only the
+adopting Phemex and Backpack families will enable it, so other families stay
+byte-identical. `http-plans` is required because the command mint takes the
+admitted `Preflight`. The API lives in `engine/src/repair.rs`, and the
+controls in `engine/src/repair_tests.rs` drive real command admission, real
+Background Read delivery and the real Prepare/Bind/Claim path.
+
+Two engine facts settle plan items:
+
+- Identities and the signer are frozen once the engine starts (`set_identities`
+  and `set_signer` refuse after `started`, and no event installs, replaces or
+  clears credentials). E1's credential-install generation is therefore
+  structural within one engine instance and needs no counter. A GREEN control
+  pins both setters.
+- There is no engine teardown path. Entitlements and roots retire through the
+  subject and root lifecycle only.
+
+API (inert at this checkpoint):
+
+| Call | Proof the core checks |
+| --- | --- |
+| `mint_command_repair(&Preflight, subjects)` | the Preflight is this Bound entry's admitted WriteAfterReads Preflight (empty or with a serial Plan) and its write credential is the installed primary, which becomes the repair signer. A ReadOnly Preflight, a Bound Read entry or a stale Preflight refuses before any ID allocation. No subjects mints nothing |
+| `commit_repair_snapshot(read, tokens, publish)` | wraps `Store::commit_orders_snapshot` inside the exact live Background Read DATA delivery of `read`. The `SnapshotReceipt` binds that delivery's request, the post-commit orders revision and the earliest token stamp. Failure callbacks and stale tokens get no receipt |
+| `mint_snapshot_repair(&SnapshotReceipt, primary, subject, symbol)` | the receipt belongs to the current delivery (else `NotData`), the Store has not changed since the commit (else `Stale`), the committed rows contain the subject with that symbol (else `StoreMissing`), no live or spent-unresolved entitlement covers it (else `Duplicate`), and `primary` is the installed primary (else `NoPrimary`) |
+| `admit_repair_cancel(members)` | callable only outside any command entry, with no delivery or with a Background Read or Repair delivery. Up to 10 compatible subjects, possibly from several command-origin entitlements, spent atomically |
+| `admit_repair_replace(entitlement, subject, binding)` | the cancel leg of one snapshot subject. The root reserves its placing symbol scope from admission, so a cancel-all for that symbol waits until the root ends |
+| `repair_successor(root)` | once, after an engine-recorded accepted cancel. The old order showing Cancelled does not suppress it |
+| `retire_repair_subject(entitlement, key, Retire)` | unspent subjects only, idempotent. `Terminal` requires the Store order to be Closed or Canceled. `CompleteRead(&SnapshotReceipt)` requires a committed snapshot whose tokens began after the mint and which no longer contains the subject (else `Stale`) |
+| `Venue::on_repair_notice` | once per ended root and per refused snapshot mint, outside any command entry |
+
+Every repair leg signs with the recorded primary under
+Policy{Mutation, 20_000 ms, Never}. Each `Warn` reads "Automatic repair
+authority unavailable: <reason>", with "capacity exhausted" for capacity.
+
+Original execution on tip `d3b392b0b14`:
+
+- `--features repair-mutations,serial-plans`: 34 controls, 31 assertion
+  REDs and 3 GREEN.
+- `--features repair-mutations`: 33 controls, 30 REDs and 3 GREEN.
+- The GREEN controls are the frozen identities and signer, the native empty
+  write Preflight completing through `done_empty_plan`, and the empty mint
+  that refuses.
+- Every other engine test passes.
+- No fixture panic or missing method counts as a RED.
+- Setup assertions (a successful mint or snapshot commit) gate the later
+  suffixes, which are not execution evidence until source exists.
+
+Deferred to source review, where the inert stubs cannot express them: wrong
+issuer or foreign handles, saturated-credit and retire-before-successor
+accounting, the per-subject partial-ack facts, and host (JS/capsule) parity.

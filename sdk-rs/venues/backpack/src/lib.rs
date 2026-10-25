@@ -4,6 +4,7 @@ mod depth_query;
 mod history;
 mod identity;
 pub mod sign;
+mod socket_codec;
 mod trading;
 mod wire;
 
@@ -12,10 +13,10 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
     Command, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
+use socket_codec::Connection;
 use std::collections::HashMap;
 use wire::*;
 
@@ -47,6 +48,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
+    SocketSnapshot(String),
     #[cfg(test)]
     SigningProbe,
     Identity(identity::Request),
@@ -90,30 +92,6 @@ impl Pending {
             Self::Daily { context, .. } => Some((SeedRead::Daily, context)),
             Self::Marks { context, .. } => Some((SeedRead::Marks, context)),
             _ => None,
-        }
-    }
-}
-
-struct Connection {
-    socket: Option<SocketId>,
-    open: bool,
-    ping_at: f64,
-    supervisor: Supervisor,
-}
-
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            ping_at: 0.0,
-            supervisor: Supervisor::new(Config {
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(5_000.0),
-                backoff_base_ms: 1_000.0,
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
         }
     }
 }
@@ -185,17 +163,11 @@ pub struct Backpack {
 
 impl Backpack {
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.public.socket.is_none() {
-            // Suppressed public feeds never open; supervising them would only churn retries.
-            if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-                self.public.supervisor.connecting(cx);
-            }
-            self.public.socket = Some(
-                cx.connect(
-                    safe_cex_engine::SocketSpec::new(WS)
-                        .channel(safe_cex_engine::SocketChannel::Public),
-                ),
-            );
+        if !self.public.started
+            && cx.public_feed_policy() == PublicFeedPolicy::Direct
+            && let Err(error) = self.connect_feed(cx, false)
+        {
+            Self::socket_notice(cx, error);
         }
     }
     fn seed_read(&mut self, cx: &mut Cx<'_, Pending>, kind: SeedRead) {
@@ -450,25 +422,6 @@ impl Backpack {
             trading: trading::Trading::default(),
             generation: 0,
         }
-    }
-
-    fn subscribe(&self, cx: &mut Cx<'_, Pending>, topics: Vec<String>, add: bool) {
-        if !self.public.open || topics.is_empty() {
-            return;
-        }
-        #[derive(serde::Serialize)]
-        struct Subscription<'a> {
-            method: &'a str,
-            params: Vec<String>,
-        }
-        cx.send(
-            self.public.socket.unwrap(),
-            serde_json::to_string(&Subscription {
-                method: if add { "SUBSCRIBE" } else { "UNSUBSCRIBE" },
-                params: topics,
-            })
-            .unwrap(),
-        );
     }
 
     fn finish_seed(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -839,40 +792,39 @@ impl Venue for Backpack {
             );
             return;
         }
+        if let Err(error) = self.register_sockets(cx) {
+            Self::socket_notice(cx, error);
+            return;
+        }
         self.seed_read(cx, SeedRead::Markets);
     }
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.account.socket.socket == Some(socket) {
-            self.private_open(cx, socket);
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = true;
-        self.public.ping_at = cx.now;
-        self.public.supervisor.opened(cx);
-        let topics = cx
-            .store
-            .markets()
-            .iter()
-            .flat_map(|m| {
-                [
-                    format!("ticker.{}", m.id),
-                    format!("trade.{}", m.id),
-                    format!("bookTicker.{}", m.id),
-                ]
-            })
-            .chain(self.books.keys().map(|s| format!("depth.{s}")))
-            .chain(self.candles.keys().map(|(s, i)| format!("kline.{i}.{s}")))
-            .collect();
-        self.subscribe(cx, topics, true);
-        cx.send(socket, "{\"method\":\"PING\"}");
-        let symbols: Vec<_> = self.books.keys().cloned().collect();
-        for s in symbols {
-            self.books.get_mut(&s).unwrap().recoveries = 0;
-            self.snapshot(cx, &s);
-        }
+    fn on_open(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId) {}
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.managed_socket_event(cx, event)
+    }
+    fn on_socket_interests_released(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        pending: Pending,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.released_socket_snapshots(cx, epoch, pending)
+    }
+    fn encode_socket_interests(
+        &self,
+        _store: &safe_cex_engine::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.encode_public_interests(feed, subscribe, items, emit)
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account.socket.socket == Some(socket) {
@@ -884,7 +836,6 @@ impl Venue for Backpack {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.supervisor.received(cx.now);
         let result = (|| {
             let envelope: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
             if let Some(error) = envelope.error {
@@ -903,22 +854,7 @@ impl Venue for Backpack {
             cx.notice(safe_cex_engine::Level::Error, code::STREAM_MALFORMED, e);
         }
     }
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.account.socket.socket == Some(socket) {
-            self.private_close(cx, socket);
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = false;
-        self.public.socket = None;
-        for state in self.books.values_mut() {
-            state.generation += 1;
-            state.sync = Sync::Waiting(vec![]);
-        }
-        self.public.supervisor.retry(cx);
-    }
+    fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         if let Some((kind, context)) = pending.seed()
             && (self.seed.requests[kind as usize].as_ref() != Some(context)
@@ -932,7 +868,7 @@ impl Venue for Backpack {
             return;
         }
         let result = match pending {
-            Pending::Identity(_) => return,
+            Pending::SocketSnapshot(_) | Pending::Identity(_) => return,
             Pending::History(request) => {
                 self.history_item(cx, request, item);
                 return;
@@ -1321,6 +1257,9 @@ impl Venue for Backpack {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.socket_interest_timer(cx, timer) {
+            return;
+        }
         if self.account_timer(cx, timer) {
             return;
         }
@@ -1328,31 +1267,12 @@ impl Venue for Backpack {
             self.seed_read(cx, kind);
             return;
         }
-        match self.public.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => {}
-            Tick::Reconnect => return self.connect_public(cx),
-            Tick::Ping => {
-                if let Some(socket) = self.public.socket {
-                    self.public.ping_at = cx.now;
-                    cx.send(socket, "{\"method\":\"PING\"}");
-                }
-                return;
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.public.socket {
-                    cx.close(socket);
-                    self.on_close(cx, socket, 1006);
-                }
-                return;
-            }
-            Tick::Handled => return,
-        }
         if let Some(symbol) = self
             .books
             .iter()
             .find_map(|(s, b)| matches!(b.sync,Sync::Retry(t, _) if t==timer).then(|| s.clone()))
         {
-            self.snapshot(cx, &symbol);
+            self.request_book_snapshot(cx, symbol);
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -1361,35 +1281,8 @@ impl Venue for Backpack {
             return;
         }
         match command {
-            Command::SubscribeOrderBook { symbol } => {
-                if let Some(state) = self.books.get_mut(&symbol) {
-                    state.subscribers += 1;
-                    return;
-                }
-                self.books.insert(
-                    symbol.clone(),
-                    BookState {
-                        book: Book::default(),
-                        sync: Sync::Waiting(vec![]),
-                        subscribers: 1,
-                        generation: 0,
-                        recoveries: 0,
-                    },
-                );
-                if self.public.open {
-                    self.subscribe(cx, vec![format!("depth.{symbol}")], true);
-                    self.snapshot(cx, &symbol);
-                }
-            }
-            Command::UnsubscribeOrderBook { symbol } => {
-                if let Some(state) = self.books.get_mut(&symbol) {
-                    state.subscribers -= 1;
-                    if state.subscribers == 0 {
-                        self.books.remove(&symbol);
-                        self.subscribe(cx, vec![format!("depth.{symbol}")], false);
-                    }
-                }
-            }
+            Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
+            Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, symbol),
             Command::SubscribeCandles { symbol, interval } => {
                 if !supported(interval) {
                     cx.notice(
@@ -1399,21 +1292,10 @@ impl Venue for Backpack {
                     );
                     return;
                 }
-                let count = self.candles.entry((symbol.clone(), interval)).or_default();
-                *count += 1;
-                if *count == 1 {
-                    self.subscribe(cx, vec![format!("kline.{interval}.{symbol}")], true);
-                }
+                self.subscribe_candles(cx, symbol, interval);
             }
             Command::UnsubscribeCandles { symbol, interval } => {
-                let key = (symbol.clone(), interval);
-                if let Some(count) = self.candles.get_mut(&key) {
-                    *count -= 1;
-                    if *count == 0 {
-                        self.candles.remove(&key);
-                        self.subscribe(cx, vec![format!("kline.{interval}.{symbol}")], false);
-                    }
-                }
+                self.unsubscribe_candles(cx, symbol, interval);
             }
             Command::FetchCandles {
                 symbol,
