@@ -45,8 +45,8 @@ fn engine_window(read: bool, public: bool, recv_window: Option<f64>) -> Engine<B
     e.set_identities(identities).unwrap();
     e.start(NOW);
     for _ in 0..12 {
-        let reads: Vec<_> = e
-            .drain_actions()
+        let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
             .filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
