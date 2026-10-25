@@ -8733,9 +8733,9 @@ restoration are retained.
 
 Four unchanged legacy fingerprints remain exclusively for commandless late
 repair: lib.rs fc8a5b682da0, 34b6cbe60cec, 6cf35cca0977 and trading.rs
-e6f9b79a027f. Their removal requires the separate constrained known-order
-cancel-repair core plan, owned by codex-ih35js and reviewed by claude-fe7lgm,
-with a second real venue consumer before approval. No Background Mutation,
-Session-auth substitute, fabricated command or new legacy sender is permitted.
-
-
+e6f9b79a027f. Their removal requires the shared repair Mutation core from the landed
+RUST_REPAIR_MUTATION_AUTHORITY.md plan (#2147), covering Phemex cancel-only and
+Backpack cancel-then-place. claude-fe7lgm owns engine implementation;
+codex-ih35js reviews and separately adopts Phemex after the actual core landing.
+No general Background Mutation, Session-auth substitute, fabricated command or
+new legacy sender is permitted.

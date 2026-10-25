@@ -139,14 +139,14 @@ records the holdouts. The initial consumer is not a 28-to-zero claim.
 | venues/phemex/src/lib.rs | 6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219 | 1 |
 | venues/phemex/src/trading.rs | e6f9b79a027f31adbd5a2b4c25669770848c36a0b761835a87f5783a961f4790 | 1 |
 
-The named prerequisite is **Constrained known-order cancel repair**. After this
-consumer's source is up, codex-ih35js writes its separate core plan, fe7lgm
-reviews it, and a second real venue consumer must be named before approval.
-Phemex's remaining repair fingerprints go to zero on that actual core landing.
-The shared primitive requires its own core plan/review: constrained cancel of
-an already-known order, no place/amend or command terminal, uncertain-write
-fence/order-lock composition, Never, managed signing/expiry/pacing, and a second
-real venue consumer. This consumer does not implement that shared policy.
+The prerequisite is the shared [repair Mutation authority plan](RUST_REPAIR_MUTATION_AUTHORITY.md),
+landed in #2147 at `094a1fb836f`. Phemex cancel-only and Backpack cancel-then-place
+are its two native consumers. claude-fe7lgm owns engine originals and source;
+codex-ih35js reviews and later adopts the Phemex consumer. These four holdouts
+remain unchanged until that consumer separately adopts the actual core landing.
+Phemex retains cancel-only intent, native grouping, no command terminal, Never,
+managed signing/expiry/pacing and the uncertain-write fence/order locks.
+This supported-funnel PR implements none of the shared repair core.
 
 ## Original and source-stage controls
 
