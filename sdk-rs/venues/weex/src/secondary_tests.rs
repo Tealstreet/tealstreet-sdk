@@ -82,5 +82,9 @@ fn public_only_account_with_secondary_inheriting_primary_passphrase_starts() {
     };
     let mut engine = crate::setup::engine(opts);
     engine.start(1700000000000.0);
-    assert!(engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        safe_cex_engine::test_support::prepared_actions(&mut engine, 1700000000000.0)
+            .into_iter()
+            .any(|a| matches!(a, Action::Http(_)))
+    );
 }
