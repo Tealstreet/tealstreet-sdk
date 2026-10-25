@@ -92,3 +92,25 @@ Fresh composed engine library rows pass 1,232 serial/condition/barrier/nonce,
 same ten existing ignored tests. Strict all-target Clippy passes all three
 rows; scoped formatting and full bans/ratchets pass. The incoming unscheduled
 nonce barrier refusal and ordinary-plan positive controls run in these rows.
+
+
+## Resumed landing-tip verification
+
+Plain-merge of actual `34999f973f9` gives measured source `285801cd67f`.
+README keeps incoming rows plus this plan row once; every own SDK source and
+test blob remains exact to the green reviewed head `38788da3380`. The only
+incoming engine change is the independently landed socket helper.
+
+A fresh same-tip pair retains Bitget 1,475,547 -> 1,473,607 (-1,940) and Bybit
+1,397,889 -> 1,397,892 (+3, the accepted tolerance). Web/Node agree and the raw
+Bybit artifact still shrinks by one byte; all shipped hashes match the prior
+same-source measurements. Rust 1.99.0/Binaryen 132 profiles are unchanged.
+The completed measurement target is removed and receipts/artifacts retained.
+
+Fresh focused controls pass 42 serial schedule/admission cases, 37 declared
+schedule cases, and both nonce barrier/ordinary positives in serial-enabled
+and serial-disabled barrier configurations (two each). Strict all-target
+Clippy passes serial and declared rows; formatting and full bans/ratchets pass.
+The qualifying full Rust run 40200956576 and general run 40200956635 are green
+on `38788da3380`. Current-tip integration requires the auditor's composed-tree
+check before publishing/landing; no source edit is hidden behind this carry.
