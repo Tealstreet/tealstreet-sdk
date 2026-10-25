@@ -3,7 +3,8 @@
 Owner: codex-9czdjh. Required managed-sockets reviewer: claude-55ao7t.
 Overseer assigns one shared engine PR for the three gaps identified against
 6fb44235f3e. Kraken venue plan is #2172; venue originals wait for that plan to
-land. This checkpoint is plan-only, without engine, venue, feature or map edits.
+land. The local originals checkpoint adds an inert opt-in API surface and
+real engine controls; corrected runtime behavior and venue adoption follow review.
 
 ## Contract and linkage
 
@@ -154,3 +155,29 @@ tables, and run builds serially with JOBS4. Scoped strict checks, feature OFF/ON
 and existing-adopter controls, full bans, source review and exact-head green CI
 precede READY to 8x5tm1. Auditor exact-tree GO precedes guarded owner SDK merge.
 No Kraken activation, namespace takeover, hosted adapter or deploy is claimed.
+
+## Local compiling originals checkpoint
+
+On composition 26c48fbd6e4 (actual landing 74db4cd0768 included), 25 new real-engine
+controls execute: 17 intended assertion REDs and 8 working GREENs, zero ignored.
+The inert registration ignores NativeTiming, initial completion returns Stale,
+and Declared currently uses PongOnly while Traffic is not delivered. These are
+original surfaces, not the timing implementation or permission to enable a venue.
+Four initial fixture compilation errors were corrected before this receipt; no
+compiler failure is counted as a behavioral RED.
+
+The harness retains actual SetTimer/ClearTimer handles, delivers due timers in
+order and uses real Open/Message/Command/HTTP/Binary/lifecycle callbacks. Each
+invalid timeout has its own test, so NaN and both infinities actually execute.
+The scope control reaches real forbidden callbacks before its first success RED.
+Earlier REDs gate later completion/duplicate/quiet-traffic suffixes; they are not
+claimed as executed success evidence. The shared completion fixture supplies the
+venue text boundary; Kraken's all-three-native-payload decode proof remains a
+separate venue original after #2172.
+
+Strict enabled-mode library/test Clippy passes with warnings denied. The existing
+engine socket controls execute 138 PASS, zero failed/ignored, with the new feature
+enabled and only this intentionally RED module excluded. Existing venue assertion
+bodies are unchanged; their enabled-mode runs and feature-OFF parity remain
+qualification gates. No feature-mode CI row is added until source makes the new
+originals GREEN. No build profile, harness, venue dependency or inventory changes.

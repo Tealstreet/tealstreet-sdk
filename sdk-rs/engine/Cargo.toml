@@ -20,6 +20,8 @@ condition-waits = ["serial-plans"]
 session-bearer = []
 # Temporary migration boundary; remove after all legacy socket families adopt.
 managed-sockets = []
+# Opt-in native receive, initial-payload and stability timing.
+socket-native-timing = ["managed-sockets"]
 order-locks = []
 # Engine-issued repair cancel/replace authority; only Phemex and Backpack link it.
 repair-mutations = ["order-locks", "http-plans"]

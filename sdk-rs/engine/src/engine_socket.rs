@@ -93,6 +93,18 @@ impl<P> Cx<'_, P> {
         self.io.core.managed_sockets = true;
         Ok(feed)
     }
+    #[cfg(feature = "socket-native-timing")]
+    pub fn register_socket_feed_with_native_timing(
+        &mut self,
+        policy: FeedPolicy,
+        _timing: crate::socket_lifecycle::NativeTiming,
+    ) -> Result<FeedId, SocketError> {
+        self.register_socket_feed(policy)
+    }
+    #[cfg(feature = "socket-native-timing")]
+    pub fn complete_socket_initial_payload(&mut self) -> Result<(), SocketError> {
+        Err(SocketError::Stale)
+    }
     /// Keep login permission independent of a connect-origin native snapshot bound.
     pub fn register_socket_feed_with_snapshot(
         &mut self,
@@ -2237,3 +2249,7 @@ mod tests {
 #[cfg(test)]
 #[path = "socket_handoff_tests.rs"]
 mod handoff_tests;
+
+#[cfg(all(test, feature = "socket-native-timing"))]
+#[path = "socket_native_timing_tests.rs"]
+mod native_timing_tests;
