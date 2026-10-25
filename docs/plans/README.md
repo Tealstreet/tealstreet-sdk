@@ -437,4 +437,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Paradex subscription candle poll custody | Source and local size gates CLEAR; qualifying CI pending | Before changing poll Background Read ownership, stale generations, native fallback or completion/recovery timers. | [RUST_PARADEX_CANDLE_POLL_CONTEXT.md](RUST_PARADEX_CANDLE_POLL_CONTEXT.md) |
 
+| Backpack public-seed Read custody | Source/scoped checks CLEAR; exact-head CI pending | Before managing Markets, tickers and MarkPrices startup/recovery observations. | [RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md](RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md) |
+
 | [Orderly local candle and identity completions](RUST_ORDERLY_LOCAL_READ_COMPLETIONS.md) | Plan/original controls: six immediate Read completions, 23F/24O to 17F/18O; finite native behavior retained. |
