@@ -27,9 +27,21 @@ pub(crate) fn headers(
     impl Venue for Probe {
         type Pending = Pending;
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-            let pending = Pending::Markets {
-                rows: vec![],
-                invalid: false,
+            let context = cx
+                .http_context(
+                    safe_cex_engine::request_context::Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            let pending = Pending::Discovery {
+                context,
+                rows: Discovered::Markets(vec![]),
             };
             self.venue.send(
                 cx,

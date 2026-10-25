@@ -143,6 +143,7 @@ impl KrakenSpot {
     fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, context: Context, pending: Pending) {
         if let Err((pending, reason)) = cx.request_managed(
             context,
+            None,
             Method::Get,
             format!("https://api.kraken.com/0/public/{path}"),
             None,
@@ -160,6 +161,7 @@ impl KrakenSpot {
         };
         if let Err((pending, error)) = cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!("https://api.kraken.com/0/public/OHLC{params}"),
             None,

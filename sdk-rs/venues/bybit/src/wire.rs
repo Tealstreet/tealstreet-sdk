@@ -867,55 +867,19 @@ pub struct PlacedResult<'a> {
     pub order_id: Opt<'a>,
 }
 
-/// `/v5/order/create-batch` and `/v5/order/cancel-batch`: one result and one
-/// status per request, in request order.
+/// `/v5/order/create-batch` and `/v5/order/cancel-batch`: one result per
+/// request, in request order.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Batch<'a> {
     #[serde(borrow, default)]
     pub result: Option<BatchResult<'a>>,
-    #[serde(borrow, default)]
-    pub ret_ext_info: Option<BatchStatuses<'a>>,
 }
 
 #[derive(Deserialize)]
 pub struct BatchResult<'a> {
     #[serde(borrow, default)]
     pub list: Vec<PlacedResult<'a>>,
-}
-
-#[derive(Deserialize)]
-pub struct BatchStatuses<'a> {
-    #[serde(borrow, default)]
-    pub list: Vec<BatchStatus<'a>>,
-}
-
-#[derive(Deserialize)]
-pub struct BatchStatus<'a> {
-    #[serde(default)]
-    pub code: i64,
-    #[serde(borrow, default)]
-    pub msg: Opt<'a>,
-}
-
-/// `/v5/account/set-margin-mode` explains a refusal in `result.reasons`.
-#[derive(Deserialize)]
-pub struct MarginModeResult<'a> {
-    #[serde(borrow, default)]
-    pub result: Option<MarginModeReasons<'a>>,
-}
-
-#[derive(Deserialize)]
-pub struct MarginModeReasons<'a> {
-    #[serde(borrow, default)]
-    pub reasons: Vec<MarginModeReason<'a>>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MarginModeReason<'a> {
-    #[serde(borrow, default)]
-    pub reason_msg: Opt<'a>,
 }
 
 /// `/v5/account/transaction-log` row.

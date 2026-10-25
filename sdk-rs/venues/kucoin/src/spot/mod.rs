@@ -231,6 +231,7 @@ impl KucoinSpot {
         };
         match cx.request_managed_with_headers(
             context,
+            None,
             Method::Get,
             format!("{REST}{path}"),
             sign::PUBLIC_HEADERS,
@@ -1656,6 +1657,7 @@ impl Venue for KucoinSpot {
                 );
                 match cx.request_managed_with_headers(
                     context.clone(),
+                    None,
                     Method::Get,
                     format!("{REST}{path}"),
                     sign::PUBLIC_HEADERS,
