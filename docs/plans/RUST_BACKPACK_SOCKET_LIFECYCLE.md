@@ -1,10 +1,11 @@
 # Backpack public and private socket lifecycle
 
-Status: plan-only on actual landing tip34999f973f9ac9581cd4342d5cf23e4fa06c0142,
+Status: plan/API and original controls CLEAR; source proposal under review.
+Original baseline is actual landing tip34999f973f9ac9581cd4342d5cf23e4fa06c0142,
 which includes account-read #2139 at3f2c90991c26cbf639a5001095bea962c9e1e295.
-Owner codex-mxb4mq; native/API reviewer codex-hcmq3f. No runtime, tests, Cargo
-feature, inventories or CI changes at this checkpoint. Overseer has approved BOTH native lifecycles to resolve the mixed-mode blocker.
-Source/originals remain HELD until hcmq3f reviews this full-scope API plan.
+Owner codex-mxb4mq; native/API reviewer codex-hcmq3f. Runtime, Cargo features, inventories and CI remain unchanged at the original
+control checkpoint. Overseer approved BOTH native lifecycles. hcmq3f cleared
+plan/API ccfdd72 and originals3d541; exact source application remains gated.
 
 ## Approved slice and inventory
 
@@ -186,7 +187,7 @@ credential and request inventories stay incoming-exact),
 exact unowned preservation, source/fixture review and paired size gates. One
 frozen push, one PR-triggered qualifying run; no WIP pushes or duplicate dispatch.
 On full green plus source CLEAR, mark READY and send head/tree/size/run evidence
-to auditor8x5tm1. Auditor exact-tree GO precedes the overseer's merge. No source,
+to auditor8x5tm1. Auditor exact-tree GO precedes the owner's guarded head-matched merge. No source,
 original execution, build/size, CI, readiness or landing proof is claimed here.
 
 ## Original-control checkpoint
@@ -212,3 +213,23 @@ Original receipt/logs stay outside Git. Original/native-control review precedes
 source application. Keep the19 bodies unchanged, add further lifecycle/pressure
 controls at source stage, retain all native assertion/wire clocks, and execute
 every gated suffix before sourcefreeze. No source, size/CI or READY claim here.
+
+## Additive source-stage controls on unchanged runtime
+
+The original19 target remains an entire byte-exact prefix. Eight additive
+controls pin full Store wire snapshots and complete action capture at hostile
+clocks/retired epochs, ordered auth/PING/physical-read trace, sibling survival,
+public4002 half-RTT versus private no-latency, malformed AnyText liveness, the
+unloaded-Orders opening guard and public-only startup with installed identities.
+Unchanged-runtime target27:12 working GREEN,15 assertion RED,0ignored. One new
+public-only expectation was corrected before this receipt: native public-only
+marks account sections loaded while keeping orders/positions/balance empty.
+That assertion correction is not an original regression claim. The original19
+bodies and their5GREEN/14RED evidence remain unchanged.
+
+The first source proposal e9cd3b77 is HELD for two hcm P2s: aggregate book
+continuation cancellation after one unsubscribe, and nontransactional interest
+refusal/whole-feed stop. Corrected source must use independently required depth
+keys and commit/rollback native demand with actual interest transactions.
+Additive real two-book wake and capacity/refusal/recovery controls remain gates.
+No runtime, size, CI or READY claim accompanies these additive controls.

@@ -385,3 +385,311 @@ fn unopened_private_malformed_payload_is_inert_before_native_diagnostics() {
     );
     assert!(h.sent.is_empty() && h.http.is_empty());
 }
+
+fn store_frame(h: &Harness) -> Vec<u8> {
+    let store = h.engine.store();
+    let mut writer = safe_cex_engine::wire::FrameWriter::new(vec![], 0.);
+    store.write(&store.everything(), &mut writer);
+    writer.finish()
+}
+
+fn latency(h: &Harness) -> f64 {
+    let frame = store_frame(h);
+    let (_, status) = safe_cex_engine::wire::sections(&frame)
+        .find(|(section, _)| *section == safe_cex_engine::wire::section::STATUS)
+        .unwrap();
+    f64::from_le_bytes(status[8..16].try_into().unwrap())
+}
+
+fn full_denied_ingress(h: &mut Harness, socket: SocketId, now: f64, text: &str) {
+    let before = store_frame(h);
+    let timers: Vec<_> = h.timers.iter().map(|(id, _)| *id).collect();
+    let reads: Vec<_> = h.http.iter().map(|r| r.id).collect();
+    h.engine.handle(now, Event::WsMessage { socket, text });
+    h.engine.prepare_dispatch(now);
+    let actions: Vec<_> = h.engine.drain_actions().collect();
+    assert_eq!(
+        store_frame(h),
+        before,
+        "complete public/private Store unchanged"
+    );
+    for action in actions {
+        match action {
+            Action::WsClose { socket: closed } => assert_eq!(closed, socket),
+            Action::ClearTimer { timer } => assert!(timers.contains(&timer)),
+            Action::SetTimer { at_ms, .. } => {
+                assert!(now.is_finite() && at_ms.is_finite() && at_ms >= now);
+            }
+            Action::ManagedHttp(action) => match *action {
+                safe_cex_engine::request_context::HttpAction::Cancel { preparation, .. } => {
+                    assert!(reads.contains(&preparation.attempt().request));
+                }
+                _ => panic!("denied ingress creates managed physical work"),
+            },
+            _ => panic!("denied ingress emits work or native diagnostics: {action:?}"),
+        }
+    }
+}
+
+#[test]
+fn hostile_ingress_preserves_full_store_and_all_actions_are_exact_cleanup() {
+    for channel in [SocketChannel::Public, SocketChannel::Private] {
+        for now in [1001., 21000., f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut h = Harness::new(PublicFeedPolicy::Direct);
+            let socket = h.socket(channel.clone());
+            if now != 1001. {
+                h.open(channel.clone());
+            }
+            full_denied_ingress(
+                &mut h,
+                socket,
+                now,
+                if channel == SocketChannel::Public {
+                    TICKER
+                } else {
+                    ORDER
+                },
+            );
+        }
+    }
+}
+
+#[test]
+fn retired_socket_payload_and_malformed_text_are_inert_across_sibling_epochs() {
+    for channel in [SocketChannel::Public, SocketChannel::Private] {
+        let mut h = Harness::new(PublicFeedPolicy::Direct);
+        let old = h.open(channel.clone());
+        h.now = 1001.;
+        h.event(Event::WsClosed {
+            socket: old,
+            code: 1006,
+        });
+        h.advance(2000.);
+        let new = h.open(channel.clone());
+        assert_ne!(old, new);
+        for text in [
+            TICKER,
+            ORDER,
+            "{",
+            r#"{"error":{"code":4002,"message":"PONG"}}"#,
+        ] {
+            full_denied_ingress(&mut h, old, 2001., text);
+        }
+    }
+}
+
+#[test]
+fn exact_action_order_is_private_auth_then_ping_then_account_observations() {
+    let mut h = Harness::new(PublicFeedPolicy::Direct);
+    let socket = h.socket(SocketChannel::Private);
+    h.engine.handle(1000., Event::WsOpened { socket });
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, 1000.);
+    let mut trace = vec![];
+    for action in actions {
+        match action {
+            Action::WsSend { socket: sent, text } => {
+                assert_eq!(sent, socket);
+                trace.push(text);
+            }
+            Action::Http(request) => trace.push(request.url),
+            Action::SetTimer { .. } | Action::ClearTimer { .. } => {}
+            _ => panic!("unexpected private-open action: {action:?}"),
+        }
+    }
+    assert_eq!(trace.len(), 5);
+    assert_eq!(trace[0], expected_auth(1000));
+    assert_eq!(trace[1], PING);
+    assert!(trace[2].ends_with("/orders"));
+    assert!(trace[3].ends_with("/position"));
+    assert!(trace[4].ends_with("/capital/collateral"));
+}
+
+#[test]
+fn closing_one_feed_keeps_the_open_sibling_live() {
+    for close_private in [true, false] {
+        let mut h = Harness::new(PublicFeedPolicy::Direct);
+        let public = h.open(SocketChannel::Public);
+        let private = h.open(SocketChannel::Private);
+        h.clear_observations();
+        let closed = if close_private { private } else { public };
+        let sibling = if close_private { public } else { private };
+        h.now = 1001.;
+        h.event(Event::WsClosed {
+            socket: closed,
+            code: 1006,
+        });
+        assert!(!h.closed.contains(&sibling));
+        h.advance(2000.);
+        assert_eq!(
+            h.socket(if close_private {
+                SocketChannel::Public
+            } else {
+                SocketChannel::Private
+            }),
+            sibling
+        );
+        if close_private {
+            h.message(public, TICKER);
+            assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
+        } else {
+            h.message(private, ORDER);
+            assert!(h.engine.store().order("unexpected").is_some());
+        }
+    }
+}
+
+#[test]
+fn public_pong_keeps_native_half_rtt_private_pong_does_not_publish_latency() {
+    let mut h = Harness::new(PublicFeedPolicy::Direct);
+    let public = h.open(SocketChannel::Public);
+    let private = h.open(SocketChannel::Private);
+    h.now = 1040.;
+    let pong = r#"{"error":{"code":4002,"message":"PONG"}}"#;
+    h.message(public, pong);
+    assert_eq!(latency(&h), 20.);
+    let frame = store_frame(&h);
+    h.now = 1080.;
+    h.message(private, pong);
+    assert_eq!(store_frame(&h), frame);
+}
+
+#[test]
+fn malformed_current_public_text_keeps_any_text_liveness_and_native_diagnostic() {
+    let mut h = Harness::new(PublicFeedPolicy::Direct);
+    let public = h.open(SocketChannel::Public);
+    h.now = 20000.;
+    let before = store_frame(&h);
+    h.message(public, "{");
+    assert_eq!(h.notices, 1);
+    assert_eq!(store_frame(&h), before);
+    h.advance(21000.);
+    assert!(
+        !h.closed.contains(&public),
+        "malformed current text renewed native idle observation"
+    );
+    h.advance(40000.);
+    assert!(
+        h.closed.contains(&public),
+        "last actual observation expires at equality"
+    );
+}
+
+fn startup_with_options(options: Options, fail_initial_orders: bool) -> Harness {
+    let mut engine = support::configured_account(options);
+    engine.start(1000.);
+    let mut h = Harness {
+        engine,
+        now: 1000.,
+        connects: vec![],
+        timers: vec![],
+        sent: vec![],
+        http: vec![],
+        closed: vec![],
+        notices: 0,
+        timer_writes: 0,
+    };
+    h.collect();
+    for _ in 0..16 {
+        if h.http.is_empty() {
+            break;
+        }
+        for r in std::mem::take(&mut h.http) {
+            let (status, body) = if r.url.ends_with("/markets") {
+                (200, MARKETS)
+            } else if r.url.ends_with("/tickers") {
+                (200, TICKERS)
+            } else if r.url.ends_with("/account") {
+                (200, r#"{"leverageLimit":"10"}"#)
+            } else if r.url.ends_with("/capital/collateral") {
+                (200, support::BALANCE)
+            } else if fail_initial_orders && r.url.ends_with("/orders") {
+                (500, "orders unavailable")
+            } else {
+                assert!(
+                    ["/markPrices", "/position", "/orders"]
+                        .iter()
+                        .any(|s| r.url.ends_with(s)),
+                    "unexpected startup URL {}",
+                    r.url
+                );
+                (200, "[]")
+            };
+            h.event(Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            });
+        }
+    }
+    assert!(h.http.is_empty());
+    assert!(h.engine.store().loaded().markets && h.engine.store().loaded().tickers);
+    h.clear_observations();
+    h
+}
+
+#[test]
+fn unloaded_orders_first_private_open_authenticates_without_account_refresh() {
+    let mut h = startup_with_options(
+        Options {
+            key: Some("test-primary".into()),
+            secret: Some(STANDARD.encode([7; 32])),
+            ..Default::default()
+        },
+        true,
+    );
+    assert!(!h.engine.store().loaded().orders);
+    let private = h.open(SocketChannel::Private);
+    assert_eq!(
+        h.sent,
+        [(private, expected_auth(1000)), (private, PING.into())]
+    );
+    assert!(
+        h.http.is_empty(),
+        "unloaded native Orders guard prevents the three opening reads"
+    );
+    h.message(private, ORDER);
+    assert!(h.engine.store().order("unexpected").is_some());
+}
+
+#[test]
+fn public_only_with_installed_primary_and_saved_read_identity_never_starts_private_socket() {
+    for secondary in [false, true] {
+        let mut h = startup_with_options(
+            Options {
+                key: Some("test-primary".into()),
+                secret: Some(STANDARD.encode([7; 32])),
+                public_data_only: true,
+                read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
+                    key: "test-read".into(),
+                    secret: STANDARD.encode([9; 32]),
+                    passphrase: None,
+                }),
+                ..Default::default()
+            },
+            false,
+        );
+        assert!(
+            h.connects
+                .iter()
+                .all(|(channel, _)| *channel == SocketChannel::Public)
+        );
+        assert!(h.engine.store().loaded().orders);
+        assert!(h.engine.store().orders().is_empty());
+        assert!(h.engine.store().positions().is_empty());
+        assert_eq!(h.engine.store().balance().total, 0.);
+        let public = h.open(SocketChannel::Public);
+        assert_eq!(h.sent.len(), 2);
+        h.advance(11000.);
+        assert!(
+            h.connects
+                .iter()
+                .all(|(channel, _)| *channel == SocketChannel::Public)
+        );
+        assert!(h.http.is_empty(), "no private startup or account poll");
+        h.message(public, TICKER);
+        assert_eq!(h.engine.store().ticker(SYMBOL).unwrap().last, 105.);
+    }
+}
