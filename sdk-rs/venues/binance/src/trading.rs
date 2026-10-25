@@ -606,6 +606,7 @@ impl BinanceFutures {
             if cx
                 .request_signed_managed(
                     context.clone(),
+                    None,
                     planned.method,
                     format!("{}{}", self.urls.account_rest, planned.path),
                     None,

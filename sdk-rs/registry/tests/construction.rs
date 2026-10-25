@@ -635,8 +635,9 @@ fn bybit_regional_and_remote_signing_markers_suppress_opposite_host_diagnostics(
         type Output = Vec<safe_cex_engine::Action>;
         fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
             engine.start(1_000.0);
-            let request = engine
-                .drain_actions()
+            // The fee read is managed: the fixture driver completes its preparation.
+            let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000.0)
+                .into_iter()
                 .find_map(|action| match action {
                     safe_cex_engine::Action::Http(request)
                         if request.url.contains("/v5/account/fee-rate") =>
@@ -657,6 +658,8 @@ fn bybit_regional_and_remote_signing_markers_suppress_opposite_host_diagnostics(
                     },
                 },
             );
+            // The probe is a managed Background read: it surfaces as a Prepare.
+            engine.prepare_dispatch(1_001.0);
             engine.drain_actions().collect()
         }
     }
@@ -675,7 +678,16 @@ fn bybit_regional_and_remote_signing_markers_suppress_opposite_host_diagnostics(
             RejectFee,
         )
         .unwrap();
-        assert_eq!(actions.iter().any(|action| matches!(action, safe_cex_engine::Action::Http(request) if request.url == "https://api-demo.bybit.com/v5/user/query-api")), expected_probe);
+        let probe = |url: &str| url == "https://api-demo.bybit.com/v5/user/query-api";
+        assert_eq!(
+            actions.iter().any(|action| match action {
+                safe_cex_engine::Action::Http(request) => probe(&request.url),
+                safe_cex_engine::Action::ManagedHttp(managed) => matches!(managed.as_ref(),
+                    safe_cex_engine::request_context::HttpAction::Prepare { request, .. } if probe(&request.url)),
+                _ => false,
+            }),
+            expected_probe
+        );
     }
 }
 

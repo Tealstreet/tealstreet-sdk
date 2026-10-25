@@ -14,15 +14,13 @@ pub mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::book::{Book, BookSide};
-use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::request_context::Context;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
-use safe_cex_engine::{
-    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
-};
+use safe_cex_engine::{Command, Cx, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
@@ -118,7 +116,7 @@ pub enum Pending {
     },
     Account(account::Request),
     Trade(trading::Request),
-    History(history::Request),
+    History(Box<history::Request>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -395,32 +393,6 @@ impl BinanceFutures {
     fn signed_recipe(&self, credentials: Credentials, query: Query) -> sign::Http {
         sign::Http::new(credentials, query, self.options.recv_window, true)
             .with_header_policy(self.options.signing_policy.header_policy())
-    }
-
-    fn signed(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        role: CredentialRole,
-        method: Method,
-        path: &str,
-        query: Query,
-        pending: Pending,
-    ) {
-        let Ok((selection, credentials)) = self.credentials.select(role) else {
-            return;
-        };
-        let request = cx.request(
-            method,
-            format!("{}{path}", self.urls.account_rest),
-            vec![],
-            None,
-            pending,
-        );
-        selection.sign(
-            cx,
-            request,
-            Box::new(self.signed_recipe(credentials.clone(), query)),
-        );
     }
 
     fn connect_url(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, url: &str) {
@@ -1511,7 +1483,7 @@ impl Venue for BinanceFutures {
             Pending::Klines { context, candles } => self.on_klines(cx, context, candles, response),
             Pending::Account(request) => self.on_account_response(cx, request, response),
             Pending::Trade(request) => self.on_trade_response(cx, request, Ok(response)),
-            Pending::History(request) => self.on_history_response(cx, request, Ok(response)),
+            Pending::History(request) => self.on_history_response(cx, *request, response),
         }
     }
 
@@ -1622,9 +1594,30 @@ impl Venue for BinanceFutures {
             Pending::Klines { context, .. } => {
                 let _ = cx.fail_context(&context, error);
             }
-            Pending::History(request) => self.on_history_sign_failed(cx, request, error),
+            Pending::History(request) => self.history_failed(cx, *request, error, true),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
+    }
+
+    /// Managed history keeps the typed failure, such as a page Timeout.
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        match pending {
+            Pending::History(request) => self.history_failed(cx, *request, error, false),
+            pending => self.on_request_failed(cx, pending, &error.message),
+        }
+    }
+
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.retire_history(owner);
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1658,7 +1651,12 @@ impl Venue for BinanceFutures {
             Pending::BookTickers => self.source_finished(cx, source::BOOK, Err(error)),
             Pending::PremiumIndex => self.source_finished(cx, source::PREMIUM, Err(error)),
             Pending::Trade(request) => self.on_trade_response(cx, request, Err(error)),
-            Pending::History(request) => self.on_history_response(cx, request, Err(error)),
+            Pending::History(request) => self.history_failed(
+                cx,
+                *request,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+                false,
+            ),
             Pending::Identity(_) => unreachable!(),
         }
     }

@@ -5,22 +5,24 @@ use crate::{Action, Command, Engine, Event, Method, Notice, Response, SocketId, 
 // The baseline checkpoint used logical liveness alone. Only the authority call
 // changes here; the original native/Store publication assertions stay exact.
 fn authority<P>(cx: &Cx<'_, P>, context: &Context) -> Result<(), Error> {
-    let ids = cx.io.next_id;
-    let actions = cx.io.actions.len();
-    let contexts = cx.io.request_contexts.contexts.len();
-    let commands = cx.io.request_contexts.commands.len();
+    let ids = cx.io.core.next_id;
+    let actions = cx.io.core.actions.len();
+    let contexts = cx.io.core.request_contexts.contexts.len();
+    let commands = cx.io.core.request_contexts.commands.len();
     let before = cx
         .io
+        .core
         .http_delivery
         .as_ref()
         .map(|d| (d.context.clone(), d.attempt));
     let result = cx.validate_background_read_http_delivery(context);
-    assert_eq!(cx.io.next_id, ids);
-    assert_eq!(cx.io.actions.len(), actions);
-    assert_eq!(cx.io.request_contexts.contexts.len(), contexts);
-    assert_eq!(cx.io.request_contexts.commands.len(), commands);
+    assert_eq!(cx.io.core.next_id, ids);
+    assert_eq!(cx.io.core.actions.len(), actions);
+    assert_eq!(cx.io.core.request_contexts.contexts.len(), contexts);
+    assert_eq!(cx.io.core.request_contexts.commands.len(), commands);
     assert_eq!(
         cx.io
+            .core
             .http_delivery
             .as_ref()
             .map(|d| (d.context.clone(), d.attempt)),
@@ -75,6 +77,7 @@ impl Venue for Probe {
         self.socket = Some(cx.connect("wss://background-read.test"));
         cx.request_managed(
             actual.clone(),
+            None,
             Method::Get,
             "https://background-read.test/catalogue".into(),
             None,
@@ -123,6 +126,7 @@ impl Venue for Probe {
         self.argument = Some(leg.clone());
         cx.request_managed(
             leg.clone(),
+            None,
             Method::Get,
             "https://background-read.test/execution".into(),
             None,
@@ -308,7 +312,7 @@ fn background_delivery_refusals_preserve_existing_issuer_deadline_and_owner_rule
         };
         let actual = cx.http_context(Scope::Background, policy()).unwrap();
         let mut argument = actual.clone();
-        cx.io.http_delivery = Some(Delivery {
+        cx.io.core.http_delivery = Some(Delivery {
             context: actual.clone(),
             attempt: Attempt {
                 request: RequestId(99),
@@ -318,7 +322,7 @@ fn background_delivery_refusals_preserve_existing_issuer_deadline_and_owner_rule
         let expected = match case {
             0 => Ok(()),
             1 => {
-                cx.io.http_delivery = None;
+                cx.io.core.http_delivery = None;
                 Err(Error::Revoked)
             }
             2 => {
@@ -348,7 +352,7 @@ fn background_delivery_refusals_preserve_existing_issuer_deadline_and_owner_rule
                     p.operation = Operation::Mutation;
                 }
                 argument = cx.http_context(Scope::Command(7), p).unwrap();
-                cx.io.http_delivery.as_mut().unwrap().context = argument.clone();
+                cx.io.core.http_delivery.as_mut().unwrap().context = argument.clone();
                 Err(Error::Invalid)
             }
             8 => {

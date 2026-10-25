@@ -278,6 +278,7 @@ impl Paradex {
         let pending = Pending::Public(Request::ManagedSeed(context.clone(), Box::new(request)));
         match cx.request_managed(
             context,
+            None,
             Method::Get,
             format!("{}{path}", self.rest()),
             None,
@@ -1300,6 +1301,7 @@ impl Paradex {
         if let Some(context) = context {
             match cx.request_managed(
                 context,
+                None,
                 Method::Get,
                 format!("{}{path}", self.rest()),
                 None,

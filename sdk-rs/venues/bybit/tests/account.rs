@@ -592,10 +592,17 @@ fn places_a_batch_with_attached_brackets_and_exact_parameters() {
         200,
         r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"category":"linear","symbol":"BTCUSDT","orderId":"1666800494330512128","orderLinkId":"","createAt":"1713434102752"},{"category":"linear","symbol":"ETHUSDT","orderId":"","orderLinkId":"","createAt":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110007,"msg":"Insufficient available balance"}]},"time":1713434102753}"#,
     );
+    // D4: a partial batch fails KnownPartial with its proven native IDs.
+    let error = h.notices.iter().find_map(|notice| match notice {
+        safe_cex_engine::Notice::CommandFailed { command: 7, error } => Some(error),
+        _ => None,
+    });
+    let error = error.expect("partial batch failure");
     assert_eq!(
-        h.result(7),
-        Some(&Ok(r#"["1666800494330512128"]"#.to_owned()))
+        error.partial.as_ref().map(|p| p.order_ids.clone()),
+        Some(vec!["1666800494330512128".to_owned()])
     );
+    assert_ne!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     assert!(
         h.logs
             .iter()
@@ -646,8 +653,9 @@ fn a_transport_failure_on_a_batch_is_not_resent() {
         request: batch,
         error: "connection reset",
     });
-    assert!(h.requests.is_empty(), "the venue may have the orders");
     assert!(matches!(h.result(9), Some(Err(message)) if message == "connection reset"));
+    // The venue may have the orders: reconcile once, never resend.
+    h.reconcile_once(EMPTY_LIST);
 }
 
 #[test]
@@ -711,12 +719,12 @@ fn amends_in_place_and_moves_attached_brackets_on_the_parent() {
     h.reply(
         amend.id,
         200,
-        r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"c6f055d9-7f21-4079-913d-e6523a9cfffa","orderLinkId":"linear-004"},"retExtInfo":{},"time":1672217093461}"#,
+        // The documented shape, echoing this amend's target (strict ACK).
+        &format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"orderId":"{ORDER_ID}","orderLinkId":"linear-004"}},"retExtInfo":{{}},"time":1672217093461}}"#
+        ),
     );
-    assert_eq!(
-        h.result(12),
-        Some(&Ok(r#"["c6f055d9-7f21-4079-913d-e6523a9cfffa"]"#.to_owned()))
-    );
+    assert_eq!(h.result(12), Some(&Ok(format!(r#"["{ORDER_ID}"]"#))));
 
     h.command(Command::AmendOrder {
         command: 13,
@@ -781,8 +789,15 @@ fn cancels_in_batches_and_treats_an_order_already_gone_as_canceled() {
             .status,
         OrderStatus::Canceled
     );
-    assert_eq!(store.order(other).unwrap().status, OrderStatus::Canceled);
+    // D2: an absent-order row is no local Cancelled transition; the one
+    // reconcile order read decides.
+    assert_eq!(store.order(other).unwrap().status, OrderStatus::Open);
     assert_eq!(h.result(14), Some(&Ok("[]".to_owned())));
+    assert!(h.has_request("/v5/order/realtime"), "one reconcile read");
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY_LIST);
+    }
+    assert!(h.engine.store().order(other).is_none());
 }
 
 #[test]
@@ -962,11 +977,9 @@ fn ambiguous_batch_responses_never_resend_creates() {
         );
         let batch = h.take("/v5/order/create-batch");
         h.reply(batch.id, status, response);
-        assert!(
-            h.requests.is_empty(),
-            "an accepted batch may be hidden: {status} {response}"
-        );
         assert!(matches!(h.result(50), Some(Err(_))));
+        // An accepted batch may be hidden: reconcile once, never resend.
+        h.reconcile_once(EMPTY_LIST);
     }
 }
 
@@ -1379,8 +1392,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    // Account reads are managed: the fixture driver prepares and signs them.
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_500.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -1457,8 +1471,8 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
                 },
             );
         }
-        reads = engine
-            .drain_actions()
+        reads = safe_cex_engine::test_support::prepared_actions(engine, now)
+            .into_iter()
             .filter_map(|a| match a {
                 safe_cex_engine::Action::Http(r) => Some(r),
                 _ => None,
@@ -1961,7 +1975,10 @@ fn write_failures_never_claim_a_refusal_the_answer_does_not_prove() {
     h.reply(
         cancel.id,
         200,
-        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":"x"},{"orderId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110020,"msg":"not allowed"}]}}"#,
+        // Strict ACK: the accepted row echoes its requested target.
+        &format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{{"orderId":"{ORDER_ID}"}},{{"orderId":""}}]}},"retExtInfo":{{"list":[{{"code":0,"msg":"OK"}},{{"code":110020,"msg":"not allowed"}}]}}}}"#
+        ),
     );
     assert_eq!(h.outcomes, [(14, None)]);
 }
@@ -2683,9 +2700,10 @@ fn owned_history_first_page_failure_is_typed_and_never_empty_success() {
                 error.kind.is_some(),
                 "typed: kind {kind}, failure {failure}"
             );
-            // venue_error's numeric fallback is an HTTP status, not a native
-            // envelope code. This adapter adds no fabricated venueCode.
-            assert_eq!(error.venue_code, None, "kind {kind}, failure {failure}");
+            // A native envelope refusal keeps its retCode; venue_error's numeric
+            // fallback is an HTTP status, and no venueCode is fabricated from it.
+            let native = (failure == 0).then(|| "10001".to_owned());
+            assert_eq!(error.venue_code, native, "kind {kind}, failure {failure}");
             if failure == 2 {
                 assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
             }
@@ -3048,4 +3066,161 @@ fn stale_join_discards_staged_unsupported_diagnostics_without_consuming_memory()
             .count(),
         1
     );
+}
+
+// D1: every amend that writes `/v5/position/trading-stop` is a position TP/SL
+// setting, so `34040` (not modified) is the requested state already holding.
+#[test]
+fn trading_stop_amends_treat_tpsl_not_modified_as_satisfied() {
+    for kind in ["full", "trailing"] {
+        let mut h = ready();
+        h.message(
+            "/v5/private",
+            r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Full","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#,
+        );
+        if kind == "trailing" {
+            let mut trailing = h.engine.store().order("position-stop").unwrap().clone();
+            trailing.kind = safe_cex_engine::model::OrderType::TrailingStopLoss;
+            h.engine.store_mut().upsert_order(trailing);
+        }
+        h.command(Command::AmendOrder {
+            command: 55,
+            id: "position-stop".into(),
+            price: Some(87000.0),
+            amount: None,
+        });
+        let request = h.take("/v5/position/trading-stop");
+        assert!(
+            body(&request).contains(if kind == "trailing" {
+                "trailingStop"
+            } else {
+                r#""tpslMode":"Full""#
+            }),
+            "{kind}"
+        );
+        h.reply(
+            request.id,
+            200,
+            r#"{"retCode":34040,"retMsg":"not modified","result":{}}"#,
+        );
+        assert_eq!(h.result(55), Some(&Ok("[]".to_owned())), "{kind}");
+        assert!(!h.has_request("/v5/position/trading-stop"), "{kind}");
+    }
+}
+
+/// 1d-ii A3: a reconcile asked for while an older order read is still out
+/// issues its own fresh read; the older one predates the uncertain write.
+#[test]
+fn a_reconcile_during_an_in_flight_order_read_issues_its_own_read() {
+    let mut h = ready();
+    place(
+        &mut h,
+        31,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let first = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: first,
+        error: "connection reset",
+    });
+    let reads = |h: &Harness| {
+        h.requests
+            .iter()
+            .filter(|r| r.url.contains("/v5/order/realtime"))
+            .count()
+    };
+    // One page per settle coin.
+    let per_read = reads(&h);
+    assert!(per_read > 0, "the first seal's reconcile read");
+    place(
+        &mut h,
+        32,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 89000.0)],
+    );
+    let second = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: second,
+        error: "connection reset",
+    });
+    assert_eq!(
+        reads(&h),
+        2 * per_read,
+        "the second seal does not wait on or join the older read"
+    );
+    // The abandoned older pages answer late; their rows never publish.
+    let stale = r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[{"symbol":"BTCUSDT","orderId":"abandoned-order","side":"Buy","orderType":"Limit","orderStatus":"New","qty":"0.01","price":"90000","positionIdx":0}],"nextPageCursor":""}}"#;
+    let older: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .take(per_read)
+        .map(|r| r.id)
+        .collect();
+    for id in older {
+        h.reply(id, 200, stale);
+    }
+    assert!(h.engine.store().order("abandoned-order").is_none());
+}
+
+/// A refused snapshot page is re-read once, re-signed with Bybit's corrected
+/// clock, through the classifier (a streamed refusal carries no list).
+#[test]
+fn a_refused_order_page_is_re_read_with_the_corrected_clock() {
+    let mut h = log_safe_engine();
+    place(
+        &mut h,
+        33,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let batch = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: batch,
+        error: "connection reset",
+    });
+    h.advance(5000.0);
+    let page = h.take("/v5/order/realtime");
+    let refusal = serde_json::json!({"retCode":10002,"retMsg":format!("recv_window req_timestamp[6000],server_timestamp[9000], origin_string[{LOG_SECRET}] {SIGNED_URL}"),"result":{}}).to_string();
+    h.reply(page.id, 200, &refusal);
+    let retry = h
+        .requests
+        .iter()
+        .find(|r| r.url == page.url)
+        .expect("the same page is re-read once")
+        .clone();
+    assert_eq!(
+        Harness::header(&retry, "X-BAPI-TIMESTAMP").as_deref(),
+        Some("9000")
+    );
+    assert_private_notices_are_safe(&h);
+}
+
+/// A second signature refusal of a page fails without leaking its signed origin.
+#[test]
+fn a_twice_refused_order_page_never_leaks_its_signed_origin() {
+    let mut h = log_safe_engine();
+    place(
+        &mut h,
+        34,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let batch = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: batch,
+        error: "connection reset",
+    });
+    let page = h.take("/v5/order/realtime");
+    h.reply(page.id, 200, &rejected_signed_origin(10004));
+    let retry = h
+        .requests
+        .iter()
+        .position(|r| r.url == page.url)
+        .map(|i| h.requests.remove(i))
+        .expect("re-read once");
+    h.reply(retry.id, 200, &rejected_signed_origin(10004));
+    assert!(
+        !h.requests.iter().any(|r| r.url == page.url),
+        "no third read"
+    );
+    assert_private_notices_are_safe(&h);
+    assert!(h.logs.iter().all(|line| !line.contains(LOG_SECRET)));
 }

@@ -1,6 +1,7 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
 use crate::{Lighter, Pending, sign};
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -179,8 +180,8 @@ impl Lighter {
             Command::PlaceOrders { command, orders } => {
                 // This venue cannot honor a caller ID, including on a later batch item.
                 if orders.iter().any(|o| o.client_order_id.is_some()) {
-                    cx.fail(
-                        command,
+                    refuse(
+                        cx,
                         not_sent("Lighter does not support caller client order IDs"),
                     );
                     return;
@@ -188,7 +189,7 @@ impl Lighter {
                 let steps = match self.prepare_orders(cx, orders) {
                     Ok(steps) => steps,
                     Err(error) => {
-                        cx.fail(command, not_sent(error));
+                        refuse(cx, not_sent(error));
                         return;
                     }
                 };
@@ -198,18 +199,18 @@ impl Lighter {
                 let mut steps = VecDeque::new();
                 for id in ids {
                     if id.parse::<u64>().is_err() {
-                        cx.fail(
-                            command,
+                        refuse(
+                            cx,
                             not_sent("Cannot cancel Lighter order: expected a numeric order index"),
                         );
                         return;
                     }
                     let Some(order) = cx.store.order(&id).cloned() else {
-                        cx.fail(command, not_sent(format!("Lighter order {id} not found")));
+                        refuse(cx, not_sent(format!("Lighter order {id} not found")));
                         return;
                     };
                     if let Err(error) = market_id(cx, &order.symbol) {
-                        cx.fail(command, not_sent(error));
+                        refuse(cx, not_sent(error));
                         return;
                     }
                     steps.push_back(Step::Cancel(Box::new(order)));
@@ -242,18 +243,18 @@ impl Lighter {
                     .chain(self.trading.queue.iter())
                     .any(|j| j.amend.as_ref().is_some_and(|o| o.id == id))
                 {
-                    cx.fail(
-                        command,
+                    refuse(
+                        cx,
                         not_sent("Lighter order already has an amendment pending"),
                     );
                     return;
                 }
                 let Some(old) = cx.store.order(&id).cloned() else {
-                    cx.fail(command, not_sent("Lighter order not found"));
+                    refuse(cx, not_sent("Lighter order not found"));
                     return;
                 };
                 if !matches!(old.status, OrderStatus::Open | OrderStatus::Creating) {
-                    cx.fail(command, not_sent("Lighter order is not open for amendment"));
+                    refuse(cx, not_sent("Lighter order is not open for amendment"));
                     return;
                 }
                 let kind = protective_kind(cx, &old, price.unwrap_or(old.price));
@@ -282,7 +283,7 @@ impl Lighter {
                 let mut steps = match self.prepare_orders(cx, vec![opts]) {
                     Ok(steps) => steps,
                     Err(error) => {
-                        cx.fail(command, not_sent(error));
+                        refuse(cx, not_sent(error));
                         return;
                     }
                 };
@@ -321,8 +322,8 @@ impl Lighter {
                 symbol: _,
             } => {
                 if hedged {
-                    cx.fail(
-                        command,
+                    refuse(
+                        cx,
                         not_sent("Lighter supports one-way position mode only")
                             .kind(ErrorKind::Unsupported),
                     );
@@ -1394,6 +1395,20 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 /// The submission may have executed; callers must reconcile before resending.
 fn uncertain(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
+}
+
+/// A native pre-I/O refusal settles only the genuine Mutation entry.
+fn refuse(cx: &mut Cx<'_, Pending>, error: VenueError) {
+    let Ok(context) = cx.admit_http_command(Policy {
+        operation: Operation::Mutation,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }) else {
+        return;
+    };
+    let _ = cx.fail_context(&context, error);
 }
 
 #[cfg(test)]

@@ -32,13 +32,13 @@ struct Probe {
 impl Probe {
     fn outside(&mut self, cx: &mut Cx<'_, ()>) {
         if self.outside {
-            let ids = cx.io.next_id;
+            let ids = cx.io.core.next_id;
             assert!(matches!(
                 initial(cx, policy()),
                 Err(CommandEntryError::Revoked)
             ));
-            assert_eq!(cx.io.next_id, ids);
-            assert!(cx.io.request_contexts.commands.is_empty());
+            assert_eq!(cx.io.core.next_id, ids);
+            assert!(cx.io.core.request_contexts.commands.is_empty());
             self.checks += 1;
         }
     }
@@ -144,13 +144,13 @@ fn preflight_cannot_borrow_entry_after_an_opaque_side_effect() {
     let actions = run(
         |cx| {
             cx.send(SocketId(9), "native activity");
-            let ids = cx.io.next_id;
+            let ids = cx.io.core.next_id;
             assert!(matches!(
                 initial(cx, policy()),
                 Err(CommandEntryError::Revoked)
             ));
-            assert_eq!(cx.io.next_id, ids);
-            assert!(cx.io.request_contexts.commands.is_empty());
+            assert_eq!(cx.io.core.next_id, ids);
+            assert!(cx.io.core.request_contexts.commands.is_empty());
         },
         false,
     );
@@ -161,12 +161,12 @@ fn context_initial_owner_excludes_preflight_without_a_second_rejection() {
     let actions = run(
         |cx| {
             let root = cx.admit_http_command(read_policy()).unwrap();
-            let ids = cx.io.next_id;
+            let ids = cx.io.core.next_id;
             assert!(matches!(
                 initial(cx, policy()),
                 Err(CommandEntryError::Revoked)
             ));
-            assert_eq!(cx.io.next_id, ids);
+            assert_eq!(cx.io.core.next_id, ids);
             cx.done_context(&root, "cached".into()).unwrap();
         },
         false,
@@ -195,12 +195,12 @@ fn cached_preflight_terminal_cannot_remint_its_entry() {
         |cx| {
             let owner = initial(cx, policy()).unwrap();
             cx.done_preflight(&owner, "cached".into()).unwrap();
-            let ids = cx.io.next_id;
+            let ids = cx.io.core.next_id;
             assert!(matches!(
                 initial(cx, policy()),
                 Err(CommandEntryError::Revoked)
             ));
-            assert_eq!(cx.io.next_id, ids);
+            assert_eq!(cx.io.core.next_id, ids);
             cx.done(7, "duplicate".into());
             cx.fail(7, "duplicate");
         },
@@ -235,7 +235,7 @@ fn invalid_preflight_is_one_engine_owned_read_rejection() {
 fn preflight_owner_capacity_rejection_cannot_remint_or_emit_twice() {
     let actions = run(
         |cx| {
-            let ids = cx.io.next_id;
+            let ids = cx.io.core.next_id;
             assert!(matches!(
                 initial(cx, policy()),
                 Err(CommandEntryError::Rejected(Error::Capacity))
@@ -244,7 +244,7 @@ fn preflight_owner_capacity_rejection_cannot_remint_or_emit_twice() {
                 initial(cx, policy()),
                 Err(CommandEntryError::Revoked)
             ));
-            assert_eq!(cx.io.next_id, ids);
+            assert_eq!(cx.io.core.next_id, ids);
             cx.done(7, "duplicate".into());
             cx.fail(7, "duplicate");
         },
@@ -275,10 +275,10 @@ fn genuine_preflight_keeps_its_captured_command_intent_through_admission() {
         |cx| {
             let owner = initial(cx, policy()).unwrap();
             assert!(
-                matches!(owner.owner(), Owner::Command { id: 7, generation } if generation == cx.io.request_contexts.commands[&7].generation)
+                matches!(owner.owner(), Owner::Command { id: 7, generation } if generation == cx.io.core.request_contexts.commands[&7].generation)
             );
             assert_eq!(
-                cx.io.request_contexts.commands[&7].intent,
+                cx.io.core.request_contexts.commands[&7].intent,
                 Some(crate::classify::Intent::Read)
             );
             cx.done_preflight(&owner, "cached".into()).unwrap();

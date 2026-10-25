@@ -2403,6 +2403,38 @@ that hot path. No authority policy, codec, venue-specific shortcut or legacy-sit
 exemption changes. Exact paired CI performance and family memory/size gates remain
 separate evidence from diagnostic profiles.
 
+
+## Ordinary Bybit Plan adoption
+
+Ordinary Bybit writes move from the legacy job pipeline to the shared Preflight
+and Plan core; Hyro and every option-symbol command stay on the legacy pipeline until
+their own adoption (D5, remove-before-master-merge). One const code table and a
+strict object-only acknowledgement codec record write facts before any Store or
+Demo publication; refusals that carry rows or IDs are unproven, and no text or
+transport loss authorizes a resend. The partial-stop protection-cancel leg
+needs `plan_protection_cancel_leg_context`, carried on the child until its own
+engine follow-up PR merges after #1857 and #1873. Legacy inventory: one
+`trading.rs` site pruned; the rest serves the Hyro/option pipeline.
+
+
+## Bybit candles and no-I/O answers (slice 1a)
+
+`FetchCandles` is a single command Read Context (`admit_http_command`, managed
+GET with `X-Referer`, streamed `result.list`, `validate_read_http_delivery`
+before every row and the terminal, `done_context`/`fail_context`). The cached
+`FetchBalanceInfo` answer and the disabled-product refusal are admitted before
+answering, with no HTTP, timer or Store activity. Exact prune: seven `lib.rs`
+occurrences (three candle refusals, two kline terminals, the balance `done`,
+the disabled-product `fail`); the shared `send` chokepoint is unchanged.
+
+## Bybit environment probe (slice 1b)
+
+The opposite-environment key probe is a Background signed Read Context with
+its native 2 s window on the managed lifecycle; the venue timer is retired and
+the probe attributes a key only under its own validated Context. Native
+confirmation, hints and the single terminal are unchanged. Exact prune: the
+probe's `lib.rs` `request` and one `sign_http`.
+
 ## Draft socket lifecycle architecture adoption
 
 The shared Supervisor alone did not own current epochs, auth acceptance,

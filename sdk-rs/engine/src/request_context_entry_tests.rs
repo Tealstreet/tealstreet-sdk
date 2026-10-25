@@ -42,12 +42,12 @@ impl Venue for Probe {
         self.calls += 1;
         if let Some(activity) = self.activity {
             activity(cx);
-            let ids = cx.io.next_id;
+            let ids = cx.io.core.next_id;
             assert_eq!(
                 cx.admit_http_command(read_policy()),
                 Err(crate::request_context::CommandEntryError::Revoked)
             );
-            assert_eq!(cx.io.next_id, ids);
+            assert_eq!(cx.io.core.next_id, ids);
             cx.done(7, "legacy result".into());
             return;
         }
@@ -142,7 +142,7 @@ fn unissued_read_command_is_rejected_once_without_a_numeric_fallback() {
     );
     assert_eq!(errors[0].kind, Some(ErrorKind::Internal));
     assert_eq!(errors[0].outcome, None);
-    assert!(e.io.managed_http.is_empty());
+    assert!(e.io.core.managed_http.is_empty());
     assert!(!actions.iter().any(|a| matches!(
         a,
         Action::ManagedHttp(_) | Action::SetTimer { .. } | Action::Sign { .. }
@@ -167,7 +167,7 @@ fn unissued_write_command_is_not_sent_without_a_context_or_write_journal() {
         .collect::<Vec<_>>();
     assert_eq!(errors.len(), 1, "write entry refusal must be engine-owned");
     assert_eq!(errors[0].outcome, Some(crate::Outcome::NotSent));
-    assert!(e.io.managed_http.is_empty());
+    assert!(e.io.core.managed_http.is_empty());
     assert!(!actions.iter().any(|a| matches!(
         a,
         Action::ManagedHttp(_) | Action::SetTimer { .. } | Action::Sign { .. }
@@ -189,12 +189,12 @@ fn terminal_count(actions: &[Action]) -> usize {
         .count()
 }
 fn assert_reissue_refused(cx: &mut Cx<'_, ()>) {
-    let ids = cx.io.next_id;
+    let ids = cx.io.core.next_id;
     assert_eq!(
         cx.http_context(Scope::Command(7), read_policy()),
         Err(crate::request_context::Error::Revoked)
     );
-    assert_eq!(cx.io.next_id, ids, "refusal must precede allocation");
+    assert_eq!(cx.io.core.next_id, ids, "refusal must precede allocation");
 }
 #[test]
 fn automatic_rejection_cannot_reissue_a_generic_context_or_complete_twice() {
@@ -269,7 +269,7 @@ fn nonfinite_time_cannot_deliver_a_duplicate_command_over_an_existing_read_owner
             e.venue.calls, 0,
             "existing ownership blocks entry even at invalid time"
         );
-        assert!(e.io.request_contexts.command_live(7, 1.));
+        assert!(e.io.core.request_contexts.command_live(7, 1.));
         assert_eq!(terminal_count(&e.drain_actions().collect::<Vec<_>>()), 0);
     }
 }
@@ -280,14 +280,14 @@ fn safe_id_refusal_is_typed_nonfatal_and_leaves_no_owner_or_actions() {
         fill: Some(0),
         callback: Some(|cx| {
             use crate::request_context::{CommandEntryError, Error};
-            let before = cx.io.next_id;
+            let before = cx.io.core.next_id;
             assert_eq!(
                 cx.admit_http_command(read_policy()),
                 Err(CommandEntryError::Rejected(Error::Capacity))
             );
-            assert_eq!(cx.io.next_id, before);
-            assert!(cx.io.request_contexts.command_entry_unowned(7));
-            assert!(!cx.io.next_id.failed());
+            assert_eq!(cx.io.core.next_id, before);
+            assert!(cx.io.core.request_contexts.command_entry_unowned(7));
+            assert!(!cx.io.core.next_id.failed());
             assert_eq!(
                 cx.admit_http_command(read_policy()),
                 Err(CommandEntryError::Revoked)
@@ -297,7 +297,7 @@ fn safe_id_refusal_is_typed_nonfatal_and_leaves_no_owner_or_actions() {
     });
     e.start(0.);
     e.drain_actions().for_each(drop);
-    e.io.next_id =
+    e.io.core.next_id =
         crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
     e.handle(1., Event::Command(command()));
     let actions = e.drain_actions().collect::<Vec<_>>();
@@ -316,7 +316,7 @@ fn invalid_new_command_clock_is_rejected_once_without_an_owner() {
                     cx.admit_http_command(read_policy()),
                     Err(CommandEntryError::Rejected(Error::Invalid))
                 );
-                assert!(cx.io.request_contexts.command_entry_unowned(7));
+                assert!(cx.io.core.request_contexts.command_entry_unowned(7));
             }),
             ..Default::default()
         });
@@ -333,17 +333,17 @@ fn successful_entry_keeps_sibling_contexts_and_refuses_numeric_completion() {
         callback: Some(|cx| {
             use crate::request_context::CommandEntryError;
             let root = cx.admit_http_command(read_policy()).unwrap();
-            let ids = cx.io.next_id;
+            let ids = cx.io.core.next_id;
             assert_eq!(
                 cx.admit_http_command(read_policy()),
                 Err(CommandEntryError::Revoked)
             );
-            assert_eq!(cx.io.next_id, ids);
+            assert_eq!(cx.io.core.next_id, ids);
             let child = cx.http_leg_context(&root, read_policy()).unwrap();
             assert_eq!(child.owner(), root.owner());
             cx.fail(7, "must not steal Context");
             cx.done(7, "must not steal Context".into());
-            assert_eq!(terminal_count(&cx.io.actions), 0);
+            assert_eq!(terminal_count(&cx.io.core.actions), 0);
             cx.done_context(&root, "[]".into()).unwrap();
         }),
         ..Default::default()
@@ -389,7 +389,7 @@ fn legacy_http_and_no_id_ws_activity_revoke_only_new_entry_rights() {
         e.drain_actions().for_each(drop);
         e.handle(1., Event::Command(command()));
         assert_eq!(terminal_count(&e.drain_actions().collect::<Vec<_>>()), 1);
-        assert!(e.io.command_entry.is_none());
+        assert!(e.io.core.command_entry.is_none());
     }
 }
 #[test]
@@ -397,12 +397,12 @@ fn start_timer_and_public_callbacks_cannot_borrow_command_entry() {
     let mut e = crate::test_support::seeded_engine(Probe {
         fill: Some(0),
         outside: Some(|cx| {
-            let ids = cx.io.next_id;
+            let ids = cx.io.core.next_id;
             assert_eq!(
                 cx.admit_http_command(read_policy()),
                 Err(crate::request_context::CommandEntryError::Revoked)
             );
-            assert_eq!(cx.io.next_id, ids);
+            assert_eq!(cx.io.core.next_id, ids);
         }),
         ..Default::default()
     });
@@ -424,6 +424,7 @@ fn start_timer_and_public_callbacks_cannot_borrow_command_entry() {
     let request = cx
         .request_managed(
             root,
+            None,
             Method::Get,
             "https://venue.test/background".into(),
             None,
@@ -447,7 +448,7 @@ fn start_timer_and_public_callbacks_cannot_borrow_command_entry() {
             },
         },
     );
-    assert!(e.io.command_entry.is_none());
+    assert!(e.io.core.command_entry.is_none());
     assert_eq!(terminal_count(&e.drain_actions().collect::<Vec<_>>()), 0);
 }
 #[test]
@@ -473,7 +474,7 @@ fn venue_action_gets_entry_but_unsupported_account_command_does_not() {
     e.handle(2., Event::Command(Command::FetchAccount { command: 7 }));
     assert_eq!(e.venue.calls, 1);
     assert_eq!(terminal_count(&e.drain_actions().collect::<Vec<_>>()), 1);
-    assert!(e.io.command_entry.is_none());
+    assert!(e.io.core.command_entry.is_none());
 }
 #[cfg(feature = "order-locks")]
 #[test]
@@ -492,7 +493,8 @@ fn deferred_cancel_gets_its_own_entry_after_the_placement_releases() {
         ..Default::default()
     });
     e.start(0.);
-    e.io.order_locks
+    e.io.core
+        .order_locks
         .acquire(
             &Command::PlaceOrders {
                 command: 9,
@@ -510,8 +512,8 @@ fn deferred_cancel_gets_its_own_entry_after_the_placement_releases() {
         }),
     );
     assert_eq!(e.venue.calls, 0);
-    assert!(e.io.command_entry.is_none());
-    e.io.order_locks.finish(9, false);
+    assert!(e.io.core.command_entry.is_none());
+    e.io.core.order_locks.finish(9, false);
     e.handle(
         2.,
         Event::TimerFired {
@@ -578,6 +580,7 @@ fn caught_command_panic_fences_real_held_permit_and_pending_signer() {
     let root = cx.http_context(Scope::Background, read_policy()).unwrap();
     cx.request_managed(
         root,
+        None,
         Method::Get,
         "https://venue.test/held".into(),
         None,
@@ -728,7 +731,8 @@ fn unissued_locked_place_releases_only_its_own_scope_without_uncertainty() {
     });
     e.start(0.);
     e.drain_actions().for_each(drop);
-    e.io.order_locks
+    e.io.core
+        .order_locks
         .acquire(
             &Command::AmendOrderWithSymbol {
                 command: 42,
@@ -749,10 +753,10 @@ fn unissued_locked_place_releases_only_its_own_scope_without_uncertainty() {
         }),
     );
     assert_eq!(e.venue.calls, 1);
-    assert!(!e.io.order_locks.contains(7));
-    assert!(!e.io.active_commands.contains(&7));
-    assert!(e.io.order_locks.contains(42));
-    assert!(!e.io.order_locks.uncertain(""));
+    assert!(!e.io.core.order_locks.contains(7));
+    assert!(!e.io.core.active_commands.contains(&7));
+    assert!(e.io.core.order_locks.contains(42));
+    assert!(!e.io.core.order_locks.uncertain(""));
     assert_eq!(terminal_count(&e.drain_actions().collect::<Vec<_>>()), 1);
     e.handle(
         2.,
@@ -765,8 +769,8 @@ fn unissued_locked_place_releases_only_its_own_scope_without_uncertainty() {
         e.venue.calls, 2,
         "no phantom placement lock defers the following cancel"
     );
-    assert!(!e.io.order_locks.contains(8));
-    assert!(e.io.order_locks.contains(42));
+    assert!(!e.io.core.order_locks.contains(8));
+    assert!(e.io.core.order_locks.contains(42));
     assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, error }) if error.outcome == Some(crate::Outcome::NotSent))));
 }
 
@@ -794,7 +798,7 @@ mod managed_socket_activity {
         }
     }
     fn feed(cx: &Cx<'_, ()>) -> FeedId {
-        cx.io.socket_driver.state.feeds()[0]
+        cx.io.core.socket_driver.state.feeds()[0]
     }
     fn run(activity: fn(&mut Cx<'_, ()>)) {
         let mut e = crate::test_support::seeded_engine(Probe {
@@ -810,7 +814,7 @@ mod managed_socket_activity {
         e.drain_actions().for_each(drop);
         e.handle(1., Event::Command(command()));
         assert_eq!(terminal_count(&e.drain_actions().collect::<Vec<_>>()), 1);
-        assert!(e.io.command_entry.is_none());
+        assert!(e.io.core.command_entry.is_none());
     }
     #[test]
     fn managed_close_revokes_fresh_command_entry() {
@@ -872,7 +876,7 @@ fn duplicate_active_command_id_is_rejected_before_the_venue_sees_it() {
     );
     assert_eq!(e.venue.calls, 1);
     assert_eq!(terminal_count(&e.drain_actions().collect::<Vec<_>>()), 0);
-    assert!(e.io.active_commands.contains(&7));
+    assert!(e.io.core.active_commands.contains(&7));
     for (now, duplicate) in [
         (
             2.,
@@ -908,6 +912,6 @@ fn duplicate_active_command_id_is_rejected_before_the_venue_sees_it() {
             a,
             Action::Notice(Notice::Event(event)) if event.code == log_code::COMMAND_DUPLICATE
         )));
-        assert!(e.io.active_commands.contains(&7));
+        assert!(e.io.core.active_commands.contains(&7));
     }
 }

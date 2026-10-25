@@ -67,6 +67,7 @@ fn first_root_owner(command: u32, root: Context) -> ReadCompletion {
 fn queue(cx: &mut Cx<'_, Pending>, pending: Pending) {
     cx.request_managed(
         pending.leg.clone(),
+        None,
         Method::Get,
         "https://history.test/read".into(),
         None,
