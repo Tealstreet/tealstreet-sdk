@@ -33,6 +33,11 @@ The deadline comes from the already-computed absolute task window. EngineHost
 exports this read-only; it cannot reconstruct authority from received payloads,
 receive time or timeoutMs. Session-login mapping must use the genuine task.
 This is an API proposal, not a claim that the seam exists or is approved.
+Current Selection does not retain the full role/PrimaryReason, signing Pending
+does not retain selected slot/role, and send_signed/connect_signed may have no
+HTTP Context. Retain complete ownership at admission through the genuine owner;
+missing v2 metadata refuses before callback. Never infer Primary or SessionAuth
+from method, route, socket or algorithm. Existing v1 gains no invented metadata.
 
 Current remoteSignerProvider accepts HmacSha256, UTF-8 sign payloads and
 stamp/expiry receipts; it refuses nonce, result parts and remote Secondary.
@@ -66,6 +71,14 @@ sign-res.d = {
   owning signing attempt and includes its generation binding; it grants no
   authority. Same-attempt repair gets a NEW id/work/receipt. Session auth uses
   its genuine signing task/session generation, never a fabricated HTTP command.
+  Action::Sign.attempt is a signing-task RequestId, distinct from the stable
+  managed request_context::Attempt and preparation generation. The wire must
+  preserve that distinction: attemptId correlates the signing task; retained
+  managed-owner metadata identifies its Attempt/preparation, while session-owner
+  metadata binds its genuine session task/generation. Exact typed representation
+  is part of the engine API gate. Stale repair gets a NEW signing task,
+  correlation and preparation plus new receipt/MAC, retaining the managed
+  Attempt; an old reply can never attach to the repair.
 - receipt is complete, including significant presence/absence. Nonce is a
   canonical decimal u64 JSON STRING end to end, never Number. A nonce-less
   request cannot acquire one in transport. Results echo exactly the original
