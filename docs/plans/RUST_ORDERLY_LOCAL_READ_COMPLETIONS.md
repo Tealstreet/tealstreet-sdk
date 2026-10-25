@@ -102,3 +102,24 @@ are under /tmp/codex-orderly-local-read-original* and are not repository files.
 Only index, this plan and the new target differ from actual76f; all production,
 old fixtures, Cargo, maps and checkers are byte-exact. No push or CI at this
 checkpoint; bounded native/custody review is required before production.
+
+## Additional original admission controls
+
+While reviews were unreachable, added a separate local_read_admission target on
+unchanged production. Its forwarding Probe retains native capabilities and
+streamed item handling, bootstraps genuine Markets/Tickers where needed and
+allocates 256 genuine Background peers in a preceding no-ID callback.
+Six independent capacity controls cover all six branches, including empty
+candle and identity success. Each reaches the intended missing shared-capacity
+assertion: legacy emits its native result/error instead of one shared refusal.
+The recovery assertions behind those RED boundaries remain cutover gates.
+Two working controls prove real 256-slot saturation/recovery and retained
+identity owner duplicate rejection, owner completion, 600 fixed-clock native
+identity queries and recovery of all credits. These legacy controls alone do
+not certify the future helper's admission or credit behavior.
+
+Corrected run: eight executed, six intended assertion RED / two GREEN / zero
+ignored. The first fixture run omitted capabilities/on_item forwarding and
+failed before intended custody checks; it is excluded from RED evidence. The
+first eleven-test target remains byte-exact to its original commit. Production,
+old fixtures and maps are unchanged. No source cutover or CI claim follows.
