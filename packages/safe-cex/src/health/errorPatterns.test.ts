@@ -316,3 +316,20 @@ describe('hyrotrader auth rejections the simulator sends', () => {
     expect(match('retCode:10003 retMsg:API key is invalid.')).toBe('auth_invalid');
   });
 });
+
+describe('mexc permission rejections the venue sends', () => {
+  const match = (message: string) => {
+    const patterns = mergePatterns(DEFAULT_ERROR_PATTERNS, EXCHANGE_SPECIFIC_PATTERNS.mexc);
+    for (const pattern of patterns) {
+      for (const p of pattern.patterns) {
+        const hit = typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message);
+        if (hit) return pattern.category;
+      }
+    }
+    return null;
+  };
+
+  it('classifies missing API-key trading write access as a permission error', () => {
+    expect(match('Please enable API Key trading information write access')).toBe('auth_permissions');
+  });
+});
