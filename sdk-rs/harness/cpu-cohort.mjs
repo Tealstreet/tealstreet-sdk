@@ -239,18 +239,20 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
   check(token === undefined || typeof token === 'string', 'invalid read token');
   const snapshots = [], snapshotKeys = new Set(), logs = new Map(), logIndices = new Map();
   const immutableResponses = new Map(), completedJobs = new Set();
-  const get = async (path, binary = false, immutable = false, kind = 'metadata') => {
+  const get = async (path, binary = false, immutable = false, kind = 'metadata', graphqlQuery) => {
     if (immutable && immutableResponses.has(path)) {
       const raw = immutableResponses.get(path); requireGithubResponseSize(raw.length, kind);
       return binary ? Buffer.from(raw) : parseCohortJson(raw);
     }
-    const url = `https://api.github.com/repos/${repository}/${path}`;
+    const url = graphqlQuery ? 'https://api.github.com/graphql' : `https://api.github.com/repos/${repository}/${path}`;
     const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
     let response, initialStatus, raw;
     for (let attempt = 0; attempt < GITHUB_TRANSPORT_ATTEMPTS; attempt++) {
       let retryReason;
       try {
-        response = await fetchImpl(url, { method: 'GET', headers, redirect: 'manual', cache: 'no-store' });
+        response = await fetchImpl(url, { method: graphqlQuery ? 'POST' : 'GET',
+          headers: graphqlQuery ? { ...headers, 'Content-Type': 'application/json' } : headers,
+          ...(graphqlQuery ? { body: JSON.stringify({ query: graphqlQuery }) } : {}), redirect: 'manual', cache: 'no-store' });
         initialStatus = response.status;
         if (binary && response.status === 302) {
           const location = new URL(response.headers.get('location'));
@@ -317,6 +319,16 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
       return get(`actions/artifacts/${id(artifactId)}/zip`, true, true, kind);
     },
     getCommit: (commit) => { check(gitId(commit), 'invalid commit identity'); return get(`git/commits/${commit}`, false, true); },
+    getRustLanding: () => {
+      check(repository === 'Tealstreet/tealstreet-sdk', 'Rust landing ref requires the base repository');
+      return get('git/ref/heads/feat/rust-rewrite');
+    },
+    getPullBaseOid: async (number) => {
+      check(repository === 'Tealstreet/tealstreet-sdk', 'Rust pull metadata requires the base repository');
+      const data = await get(`graphql:pull-base:${id(number)}`, false, false, 'metadata',
+        `query { repository(owner: "Tealstreet", name: "tealstreet-sdk") { pullRequest(number: ${id(number)}) { baseRefOid } } }`);
+      return data.data?.repository?.pullRequest?.baseRefOid ?? null;
+    },
     getTree: (tree) => { check(gitId(tree), 'invalid tree identity'); return get(`git/trees/${tree}?recursive=1`, false, true); },
     getBlob: (blob) => { check(gitId(blob), 'invalid blob identity'); return get(`git/blobs/${blob}`, false, true); },
     getPull: (number) => get(`pulls/${id(number)}`),

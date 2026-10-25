@@ -13,8 +13,17 @@ Before each cohort it restores the selected independent package to the same
 canonical module path, verifies every source/package seal and records a physical
 log window. Missing, stale, partial, duplicate or retried evidence fails closed.
 
-A is selected from the authenticated original run base snapshot, with the entire B tree
-independently recomputed from A and the exact PR head. Landing push runs use the
+A is the authenticated checkout commit's first parent, with the entire B tree
+independently recomputed from A and the exact PR head. API and local Git must
+agree on the checkout tree and exactly two parents; parent two is the run's PR
+head. Parent one must be an ancestor of the authenticated live target and lie
+on its first-parent landing chain; fixed A0 must be on that same chain. The target comes only from the base repo's
+GET git/ref/heads/feat/rust-rewrite; the fetched local ref must agree exactly.
+The run-associated base.sha, pull-metadata base.sha and GraphQL baseRefOid can
+all be stale: log all three alongside the live target and selected parent,
+without gating ancestry on any metadata SHA. A single-parent PR-head checkout
+cannot qualify.
+Landing push runs use the
 authenticated actual first parent. No workflow input or report may choose A or
 the tolerance. Later target landings cannot move that issued A. A changed PR
 head, source tree or physical producer invalidates the result. Final
