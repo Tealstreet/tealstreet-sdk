@@ -735,3 +735,545 @@ fn native_bad_page_rolls_back_without_poisoning_retry_identities() {
     assert_eq!(rows[0]["id"], "accepted");
     assert_eq!(rows[1]["id"], "retry-id");
 }
+
+// ---- Source-stage controls (the original bodies above remain frozen) ----
+
+#[test]
+fn response_408_without_promotion_spends_only_the_native_retry_budget() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    query_with_wait(&mut h, fills(), 60_000);
+    for delay in [250., 500., 750.] {
+        let start = h.now;
+        h.respond("/order/fills", 408, r#"{"code":"40010","msg":"not ready"}"#);
+        fire_new(&mut h, &before, start + delay - 1.);
+        assert_eq!(fills_requests(&h), 0, "no early retry");
+        fire_new(&mut h, &before, start + delay);
+        assert_eq!(fills_requests(&h), 1);
+        assert!(!h.requests.iter().any(|r| r.url.contains("/v3/trade/fills")));
+    }
+    h.respond("/order/fills", 200, &page("", "recovered"));
+    assert!(terminals(&h)[0].is_ok());
+}
+
+#[test]
+fn typed_integrity_failure_never_retries_or_returns_an_accepted_prefix() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    query_with_wait(&mut h, fills(), 60_000);
+    h.respond("/order/fills", 200, &page("next", "accepted"));
+    h.timer_after(100.);
+    let bad = h.take("/order/fills");
+    h.event(safe_cex_engine::Event::HttpStart {
+        request: bad.id,
+        status: 200,
+        headers: "",
+    });
+    // A complete list with a non-UTF8 envelope reaches the typed integrity path.
+    h.event(safe_cex_engine::Event::HttpChunk {
+        request: bad.id,
+        data: b"{\"code\":\"00000\",\"data\":{\"fillList\":[],\"endId\":\"\"},\"bad\":\"\xff\"}",
+    });
+    h.event(safe_cex_engine::Event::HttpEnd { request: bad.id });
+    let result = terminals(&h);
+    assert_eq!(result.len(), 1);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(
+        error.message,
+        "response did not contain the expected list: {\"code\":\"00000\",\"data\":{\"fillList\":[],\"endId\":\"\"},\"bad\":\"�\"}"
+    );
+    let until = h.now + 2_000.;
+    fire_new(&mut h, &before, until);
+    assert_eq!(fills_requests(&h), 0);
+    assert_eq!(terminals(&h).len(), 1);
+}
+
+#[test]
+fn root_equality_wins_in_both_response_and_timer_event_orders() {
+    for response_first in [true, false] {
+        let mut h = Harness::classic();
+        let before = armed(&h);
+        let start = h.now;
+        query_with_wait(&mut h, fills(), 500);
+        let r = h.take("/order/fills");
+        h.now = start + 500.;
+        if response_first {
+            h.reply(r.id, 200, &page("next", "too-late"));
+        }
+        fire_new(&mut h, &before, start + 500.);
+        h.reply(r.id, 200, &page("", "stale"));
+        fire_new(&mut h, &before, start + 1_000.);
+        let result = terminals(&h);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].as_ref().is_err_and(timeout));
+        assert_eq!(fills_requests(&h), 0);
+    }
+}
+
+#[test]
+fn promotion_does_not_renew_the_original_receipt() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    let start = h.now;
+    query_with_wait(&mut h, fills(), 300);
+    h.now += 200.;
+    h.respond("/order/fills", 500, r#"{"code":"40085","msg":"upgrade"}"#);
+    fire_new(&mut h, &before, start + 300.);
+    let result = terminals(&h);
+    assert_eq!(result.len(), 1);
+    assert!(result[0].as_ref().is_err_and(timeout));
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"00000","data":{"holdMode":"hedge_mode"}}"#,
+    );
+    fire_new(&mut h, &before, start + 1_000.);
+    assert!(!h.requests.iter().any(|r| r.url.contains("/v3/trade/fills")));
+    assert_eq!(terminals(&h).len(), 1);
+}
+
+#[test]
+fn each_exact_endpoint_prepares_with_its_selected_routing_intent() {
+    use safe_cex_engine::request_context::RoutingIntent;
+    for secondary in [false, true] {
+        for (query, path) in [
+            (fills(), "/order/fills"),
+            (
+                Query::OrderHistory {
+                    symbol: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+                "/orders-history",
+            ),
+            (
+                Query::Income {
+                    symbol: None,
+                    kind: None,
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+                "/account/bill",
+            ),
+            (
+                Query::PublicTrades {
+                    symbol: "BTCUSDT".into(),
+                    limit: None,
+                },
+                "/market/fills",
+            ),
+        ] {
+            let mut h = Harness::started(FixtureOptions {
+                key: Some("key".into()),
+                secret: Some("material".into()),
+                passphrase: Some("pass".into()),
+                read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
+                    key: "read-key".into(),
+                    secret: "read-material".into(),
+                    passphrase: Some("read-pass".into()),
+                }),
+                ..Default::default()
+            });
+            h.load_public();
+            h.respond(
+                "/account/settings",
+                200,
+                r#"{"code":"40084","msg":"Classic","data":null}"#,
+            );
+            let actions = query_raw(&mut h, query);
+            let intents: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::ManagedHttp(http) => match http.as_ref() {
+                        HttpAction::Prepare {
+                            request, intent, ..
+                        } if request.url.contains(path) => Some(*intent),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect();
+            let expected = if path == "/market/fills" {
+                RoutingIntent::Public
+            } else if secondary {
+                RoutingIntent::Secondary
+            } else {
+                RoutingIntent::Primary
+            };
+            assert_eq!(intents, vec![expected], "{path}, secondary={secondary}");
+        }
+    }
+}
+
+#[test]
+fn preparation_refusal_is_strict_and_does_not_consume_a_transport_retry() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    let actions = query_raw(&mut h, fills());
+    let token = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::ManagedHttp(http) => match http.as_ref() {
+                HttpAction::Prepare {
+                    request,
+                    preparation,
+                    ..
+                } if request.url.contains("/order/fills") => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    h.engine.http_preparation_failed(
+        h.now,
+        token,
+        safe_cex_engine::request_context::Error::Capacity,
+        VenueError::new("history route queue refused").kind(ErrorKind::Internal),
+    );
+    h.collect();
+    let result = terminals(&h);
+    assert_eq!(result.len(), 1);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.message, "history route queue refused");
+    let until = h.now + 2_000.;
+    fire_new(&mut h, &before, until);
+    assert_eq!(fills_requests(&h), 0);
+    assert_eq!(terminals(&h).len(), 1);
+}
+
+#[test]
+fn holding_preparation_until_root_expiry_cannot_release_or_complete() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    let start = h.now;
+    h.engine
+        .handle_command(
+            h.now,
+            Command::Query {
+                command: COMMAND,
+                query: fills(),
+            },
+            Some(250),
+        )
+        .unwrap();
+    h.engine.prepare_dispatch(h.now);
+    let actions: Vec<_> = h.engine.drain_actions().collect();
+    let (token, id) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::ManagedHttp(http) => match http.as_ref() {
+                HttpAction::Prepare {
+                    request,
+                    preparation,
+                    ..
+                } if request.url.contains("/order/fills") => Some((*preparation, request.id)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    h.absorb(
+        actions
+            .into_iter()
+            .filter(|a| !matches!(a, Action::ManagedHttp(_)))
+            .collect(),
+    );
+    fire_new(&mut h, &before, start + 250.);
+    h.engine.http_prepared(
+        h.now,
+        token,
+        Prepared {
+            id: id.0,
+            expires_at: None,
+        },
+    );
+    h.collect();
+    h.reply(id, 200, &page("", "late"));
+    let result = terminals(&h);
+    assert_eq!(result.len(), 1);
+    assert!(result[0].as_ref().is_err_and(timeout));
+    assert_eq!(fills_requests(&h), 0);
+}
+
+#[test]
+fn stale_old_page_cannot_mutate_the_current_page_or_retry_state() {
+    let mut h = Harness::classic();
+    query_with_wait(&mut h, fills(), 60_000);
+    let first = h.take("/order/fills");
+    h.reply(first.id, 200, &page("next", "accepted"));
+    h.timer_after(100.);
+    let second = h.take("/order/fills");
+    for _ in 0..3 {
+        h.reply(first.id, 500, r#"{"code":"40085"}"#);
+    }
+    assert!(terminals(&h).is_empty());
+    h.reply(second.id, 200, &page("", "fresh"));
+    let result = terminals(&h);
+    let rows: Value = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    assert_eq!(rows[0]["id"], "accepted");
+    assert_eq!(rows[1]["id"], "fresh");
+}
+
+struct HistoryProvider {
+    local: safe_cex_engine::signing::Provider,
+    refuse: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+impl safe_cex_engine::signing::Signer for HistoryProvider {
+    fn sign(
+        &self,
+        work: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        self.local.sign(work)
+    }
+    fn sign_ready(
+        &self,
+        work: &safe_cex_engine::signing::SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
+        if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+            Some(Err(safe_cex_engine::signing::SignError::Refused))
+        } else {
+            self.local.sign_ready(work)
+        }
+    }
+}
+
+#[test]
+fn genuine_provider_refusal_stops_first_and_later_pages_without_retry() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    for prefix in [false, true] {
+        let refuse = Arc::new(AtomicBool::new(false));
+        let mut h = Harness::started_configure(
+            FixtureOptions {
+                key: Some("key".into()),
+                secret: Some("material".into()),
+                passphrase: Some("pass".into()),
+                ..Default::default()
+            },
+            false,
+            |engine| {
+                let local = engine.signer().unwrap();
+                engine
+                    .set_signer(Some(Arc::new(HistoryProvider {
+                        local,
+                        refuse: refuse.clone(),
+                    })))
+                    .unwrap();
+            },
+        );
+        h.load_public();
+        h.respond("/account/settings", 200, r#"{"code":"40084","data":null}"#);
+        let before = armed(&h);
+        if !prefix {
+            refuse.store(true, Ordering::SeqCst);
+        }
+        query_with_wait(&mut h, fills(), 60_000);
+        if prefix {
+            h.respond("/order/fills", 200, &page("next", "accepted"));
+            refuse.store(true, Ordering::SeqCst);
+            h.timer_after(100.);
+        }
+        let result = terminals(&h);
+        assert_eq!(result.len(), 1);
+        let error = result[0].as_ref().unwrap_err();
+        assert_eq!(error.message, "Signing provider refused the request");
+        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        let until = h.now + 2_000.;
+        fire_new(&mut h, &before, until);
+        assert_eq!(fills_requests(&h), 0);
+        assert_eq!(terminals(&h).len(), 1);
+    }
+}
+
+#[test]
+fn network_retry_uses_a_fresh_stamp_and_keeps_the_page_cursor() {
+    let mut h = Harness::classic();
+    query_with_wait(&mut h, fills(), 60_000);
+    let first = h.take("/order/fills");
+    let stamp = first
+        .headers
+        .iter()
+        .find(|(name, _)| *name == "ACCESS-TIMESTAMP")
+        .unwrap()
+        .1
+        .clone();
+    h.event(safe_cex_engine::Event::HttpFailed {
+        request: first.id,
+        error: "stream envelope is not UTF-8",
+    });
+    // The wording resembles integrity, but its engine-recorded kind is Network.
+    h.timer_after(250.);
+    let retry = h.take("/order/fills");
+    let next = &retry
+        .headers
+        .iter()
+        .find(|(name, _)| *name == "ACCESS-TIMESTAMP")
+        .unwrap()
+        .1;
+    assert_ne!(&stamp, next);
+    assert_eq!(first.url, retry.url);
+    h.reply(retry.id, 200, &page("", "retried"));
+    assert!(terminals(&h)[0].is_ok());
+}
+
+#[test]
+fn repeated_cursor_and_global_page_cap_are_strict() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    query_with_wait(&mut h, fills(), 300_000);
+    for n in 0..1_000 {
+        assert!(
+            fills_requests(&h) > 0,
+            "page {n}, clock {}, terminal {:?}",
+            h.now,
+            terminals(&h)
+        );
+        h.respond(
+            "/order/fills",
+            200,
+            &page(&format!("cursor-{n}"), &n.to_string()),
+        );
+        if n < 999 {
+            let until = h.now + 100.;
+            fire_new(&mut h, &before, until);
+        }
+    }
+    let result = terminals(&h);
+    assert_eq!(result.len(), 1);
+    assert_eq!(
+        result[0].as_ref().unwrap_err().message,
+        "Bitget history page cap reached; result incomplete"
+    );
+    assert_eq!(fills_requests(&h), 0);
+
+    let mut h = Harness::classic();
+    query_with_wait(&mut h, fills(), 60_000);
+    h.respond("/order/fills", 200, &page("same", "one"));
+    h.timer_after(100.);
+    h.respond("/order/fills", 200, &page("same", "two"));
+    let result = terminals(&h);
+    assert_eq!(result.len(), 1);
+    assert_eq!(
+        result[0].as_ref().unwrap_err().message,
+        "Bitget history cursor did not advance; result incomplete"
+    );
+}
+
+#[test]
+fn expiry_under_registry_pressure_retires_only_the_matching_parked_query() {
+    let mut h = Harness::private_started();
+    let before = armed(&h);
+    let start = h.now;
+    query_with_wait(&mut h, fills(), 200);
+    for command in 100..356 {
+        h.engine
+            .handle_command(
+                h.now,
+                Command::Query {
+                    command,
+                    query: fills(),
+                },
+                Some(60_000),
+            )
+            .unwrap();
+        h.collect();
+    }
+    let refused: HashSet<_> = h
+        .done
+        .iter()
+        .filter_map(|(id, result)| result.is_err().then_some(*id))
+        .collect();
+    assert!(!refused.is_empty(), "real registry capacity is exhausted");
+    assert!(!refused.contains(&COMMAND));
+    fire_new(&mut h, &before, start + 400.);
+    assert_eq!(terminals(&h).len(), 1);
+    assert!(terminals(&h)[0].as_ref().is_err_and(timeout));
+    assert_eq!(
+        h.done.iter().filter(|(id, _)| *id != COMMAND).count(),
+        refused.len(),
+        "live peers did not retire"
+    );
+    h.engine
+        .handle_command(
+            h.now,
+            Command::Query {
+                command: 900,
+                query: fills(),
+            },
+            Some(60_000),
+        )
+        .unwrap();
+    h.collect();
+    assert!(
+        !h.done.iter().any(|(id, _)| *id == 900),
+        "the retired owner's capacity was returned"
+    );
+    assert_eq!(fills_requests(&h), 0);
+}
+
+#[test]
+fn a_non_utf8_body_without_a_list_is_also_strict_integrity_failure() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    query_with_wait(&mut h, fills(), 60_000);
+    let bad = h.take("/order/fills");
+    h.event(safe_cex_engine::Event::HttpStart {
+        request: bad.id,
+        status: 200,
+        headers: "",
+    });
+    h.event(safe_cex_engine::Event::HttpChunk {
+        request: bad.id,
+        data: &[0xff],
+    });
+    h.event(safe_cex_engine::Event::HttpEnd { request: bad.id });
+    let result = terminals(&h);
+    assert_eq!(result.len(), 1);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert!(
+        error
+            .message
+            .starts_with("response did not contain the expected list:")
+    );
+    let until = h.now + 2_000.;
+    fire_new(&mut h, &before, until);
+    assert_eq!(fills_requests(&h), 0);
+    assert_eq!(terminals(&h).len(), 1);
+}
+
+#[test]
+fn promotion_resets_only_the_native_detection_wait() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    let start = h.now;
+    query_with_wait(&mut h, fills(), 30_000);
+    h.now = start + 9_000.;
+    h.respond("/order/fills", 408, r#"{"code":"40085","msg":"upgrade"}"#);
+    fire_new(&mut h, &before, start + 17_000.);
+    assert!(
+        terminals(&h).is_empty(),
+        "promotion resets the native 10 s detection budget"
+    );
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"00000","data":{"holdMode":"hedge_mode"}}"#,
+    );
+    fire_new(&mut h, &before, start + 17_100.);
+    h.respond(
+        "/v3/trade/fills",
+        200,
+        r#"{"code":"00000","data":{"list":[],"cursor":""}}"#,
+    );
+    assert_eq!(terminals(&h), vec![Ok("[]".into())]);
+}

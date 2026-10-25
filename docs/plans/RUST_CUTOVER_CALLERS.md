@@ -8824,3 +8824,17 @@ TS-visible changes:
   - Unknown: 50001, 50004, 50013 and 50026 keep their Unknown outcome, but now with no refusal kind.
 - **Unproven acknowledgements.** A malformed body, a missing order ID, a row-count mismatch or a row-level 50004 projects as the engine's fixed Internal / Unknown.
 - **Uncertain writes reconcile through the engine.** The uncertain-write account refresh now runs from the engine's `reconcile_uncertain`, once per uncertain seal. Cancel-all stays fenced until that fresh order snapshot is accepted.
+
+### Bitget history original Read custody
+
+History fills, orders, income and unsigned PublicTrades retain one genuine Read
+root and the original caller receipt across detection, promotion, windows, pages
+and native retry waits. Every physical page uses a fresh managed child, bounded
+by both the original receipt and 20 seconds from dequeue, including preparation,
+signing and queueing. Equality expires before response admission in either event
+order. Typed integrity, provider and local refusals fail with their original
+cause and consume no transport retry. Native response compatibility, including
+40085 on HTTP 408/5xx, still uses actual response bodies. Native three retries
+and strict incomplete failure remain; no prefix success or INCOMPLETE marker is
+introduced. Expiry removes only this owner’s parked work. The unrelated account
+completion remains the one Bitget legacy request site.

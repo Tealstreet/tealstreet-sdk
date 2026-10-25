@@ -132,9 +132,9 @@ assertions remain byte-exact; any unavoidable fixture carry is reviewed separate
 | --- | --- | --- |
 | Private mode not detected | park100ms and re-check native account state | native10s detection deadline; original caller receipt still wins |
 | Successful cursor/page or next window | accept page, retire leg, park100ms | same root, cursor/window and accepted rows retained |
-| Native response error, malformed list/row/cursor or genuine Network/physical Timeout | discard only provisional page, retire leg, park250/500/750ms | three retries then strict `Bitget history incomplete: ...`; no prefix-success or INCOMPLETE marker |
+| Native response error, missing list/invalid row/cursor or genuine Network/physical Timeout | discard only provisional page, retire leg, park250/500/750ms | three retries then strict `Bitget history incomplete: ...`; no prefix-success or INCOMPLETE marker |
 | Native body code40085, including HTTP408/5xx | native promote_uta, clear provisional page and reset detection deadline to now+10s, park100ms | preserve accepted earlier pages/windows/cursor; original root never resets |
-| Provider/signing/credential/preparation refusal or typed Internal/integrity failure | retain original typed cause and strictly reject root | no transport retry, no page-success or invented recovery |
+| Provider/signing/credential/preparation refusal, malformed stream or typed Internal/integrity failure | retain original typed cause and strictly reject root | no transport retry, no page-success or invented recovery |
 | Repeated nonempty cursor or global1000-page cap | native strict error text | no successful prefix terminal |
 | Original root equality/expiry, whether in flight or parked | shared engine expiry seals once before venue DATA | matching continuation cleanup only; no timer-created replacement root |
 
@@ -168,15 +168,18 @@ intentionally expose the legacy paths without forging Context or ownership.
 Record the executed RED/GREEN count on this unchanged source before production.
 An unclaimed test intentionally withholds Claim; its bytes must never complete.
 
-Additional source-stage gates (not claimed as current tests): Primary/Secondary
-Prepare.intent bound to each exact endpoint, held provider/queue refusal and
-fresh stamp after native retry, original-deadline equality in both event orders,
-auth detection after40085 across that deadline, exact physical timeout then fresh
-Read, typed integrity/no retry, accepted-prefix invalid-current-page rollback,
-page-cap and all range/limit/refusal precedence, repeated stale delivery and owner
-retirement under256 unrelated live peers. Do not assert an unreachable source
-branch by fabricating handles. Keep source-stage additions separate from frozen
-original bodies so review can verify carry.
+The source-stage controls are additive after the frozen original full blob. The
+34-test funnel target now passes, including14 added controls for exact endpoint
+Primary/Secondary/Public Prepare intents, queue and genuine provider refusal,
+held preparation through expiry, fresh signing stamp on Network retry, both root
+equality event orders,40085 detection reset without receipt renewal,408 without
+40085 at250/500/750ms, typed malformed/UTF-8 refusal with no retry or prefix
+success, stale pages,1000-page/repeated-cursor strict exhaustion, and retirement
+under actual256-entry registry pressure. Existing native history14/14 and
+fee-asset2/2 pass unchanged, covering exact financial and window wire assertions.
+The only changes to two newly added controls after their first execution were
+pinning the actual malformed-envelope message and isolating history timers from
+a native2s account timer collision. No original body or production fix was needed.
 
 ## Size, CPU, checks and freeze
 
@@ -233,3 +236,29 @@ unsupported/range precedence and the whole-walk helper's one-page clock slack.
 The native HTTP408/500+40085 promotion remains exercised through real replies;
 source adds408 without40085 retry plus typed Internal/provider no-retry.
 The CPU rule for this PR is **q <= T**, not the historical absolute bound.
+
+## Local source and measurement receipt
+
+The venue-only cutover removes history11F/12O plus the orphaned lib sender and
+sign-error3F/3O. The exact request map leaves the unrelated account1F/1O; credential,
+signing and socket maps and generic engine/host sources are unchanged. The
+financial decoder body is byte-identical apart from its leading delivery guard.
+The reviewed strengthened originals remain an exact full-blob prefix.
+
+Paired baseline on actual b0ee0a9a4d5: Bitget1,468,034 and combined13,908,680
+shipped bytes (web and node identical). Method: unchanged harness/build.sh,
+Rust1.99.0, wasm-bindgen0.2.129, Binaryen132 required, jobs4, no profile overlay.
+Raw/shipped artifacts, SHA256s and logs are retained in the scratch measurement
+receipt; each measurement target was deleted. The first-source pair must use
+the identical build path and method before any budget or size claim is made.
+
+Focused source execution:34 funnel plus14 existing history and2 fee-asset tests
+PASS,0 failed,0 ignored. Full bans and ratchets PASS. Full venue native PASS (333 tests,0 failed,0 ignored). Strict
+all-target clippy and scoped rustfmt --check PASS; no CI or READY is claimed.
+
+The orphan sender had two fixture consumers. The secondary-header unit fixture
+now enters a genuine Read or serial Mutation Plan and uses managed preparation;
+its exact header oracles are unchanged. The history provider-refusal control
+uses the real synchronous managed provider and pins the exact typed refusal and
+absence of native retry timers. Its orphaned legacy Sign helpers were removed.
+All other existing financial, trading, account and socket assertions are intact.

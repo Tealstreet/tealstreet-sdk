@@ -1,8 +1,15 @@
 //! Native cursor reads; response lists stream and never enter the flush frame.
 use crate::wire::{Envelope, Identifier, Number};
 use crate::{BitgetFutures, Pending, sign};
+use safe_cex_engine::history::{ReadCompletion, ReadHistoryRows};
 use safe_cex_engine::paging::{self, WindowOrder};
-use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, json::ArrayAt, num};
+use safe_cex_engine::request_context::{
+    CommandEntryError, Context, Operation, Owner, Policy, RetryPolicy,
+};
+use safe_cex_engine::signing::Identity;
+use safe_cex_engine::{
+    CommandId, Cx, ErrorKind, Method, Query, Response, TimerId, VenueError, json::ArrayAt, num,
+};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashSet, VecDeque};
 
@@ -21,19 +28,22 @@ pub struct History {
     waiting: Vec<(TimerId, Request)>,
 }
 
+type HistoryWindows = VecDeque<(Option<f64>, Option<f64>)>;
+
 pub struct Request {
-    pub(crate) command: CommandId,
+    leg: Option<Context>,
+    identity: Option<Identity>,
     detect_deadline: f64,
     query: Query,
     uta: bool,
-    windows: VecDeque<(Option<f64>, Option<f64>)>,
+    windows: HistoryWindows,
     window: (Option<f64>, Option<f64>),
     cursor: Option<String>,
     cursors: HashSet<String>,
     seen: HashSet<String>,
     pages: u32,
     retries: u8,
-    rows: Vec<Row>,
+    rows: ReadHistoryRows<Row>,
     page: Vec<Row>,
     page_count: usize,
     invalid: bool,
@@ -233,21 +243,14 @@ struct UtaBill<'a> {
 }
 
 impl BitgetFutures {
-    pub(crate) fn start_query(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        query: Query,
-    ) {
+    fn query_windows(&self, query: &Query, now: f64) -> Result<HistoryWindows, &'static str> {
         let public = matches!(query, Query::PublicTrades { .. });
         if !public && !self.private_enabled() {
-            cx.fail(command, "Bitget credentials are required");
-            return;
+            return Err("Bitget credentials are required");
         }
-        let (from, to) = match &query {
+        let (from, to) = match query {
             Query::OrderByClientId { .. } => {
-                cx.fail(command, "Bitget client-order-id query is not supported");
-                return;
+                return Err("Bitget client-order-id query is not supported");
             }
             Query::Fills { from_ms, to_ms, .. }
             | Query::OrderHistory { from_ms, to_ms, .. }
@@ -260,10 +263,8 @@ impl BitgetFutures {
             .any(|n| !n.is_finite() || n < 0.0)
             || matches!((from,to),(Some(a),Some(b)) if a>b)
         {
-            cx.fail(command, "invalid Bitget history range");
-            return;
+            return Err("invalid Bitget history range");
         }
-        // Supplying one boundary still produces a bounded native request.
         let from = if !public
             && from.is_none()
             && let Some(end) = to
@@ -273,31 +274,66 @@ impl BitgetFutures {
             from
         };
         let to = if !public && from.is_some() {
-            Some(to.unwrap_or(cx.now))
+            Some(to.unwrap_or(now))
         } else {
             to
         };
         if matches!((from,to),(Some(a),Some(b)) if a>b) {
-            cx.fail(command, "invalid Bitget history range");
-            return;
+            return Err("invalid Bitget history range");
         }
-        let mut windows: VecDeque<_> = if let (Some(a), Some(b)) = (from, to) {
-            match paging::windows(a, b, 30.0 * DAY - 1.0, WindowOrder::OldestFirst, 1000) {
-                Some(windows) => windows
-                    .into_iter()
-                    .map(|(a, b)| (Some(a), Some(b)))
-                    .collect(),
-                None => {
-                    cx.fail(command, "Bitget history range exceeds 1000 windows");
-                    return;
-                }
-            }
+        if let (Some(a), Some(b)) = (from, to) {
+            paging::windows(a, b, 30.0 * DAY - 1.0, WindowOrder::OldestFirst, 1000)
+                .map(|windows| {
+                    windows
+                        .into_iter()
+                        .map(|(a, b)| (Some(a), Some(b)))
+                        .collect()
+                })
+                .ok_or("Bitget history range exceeds 1000 windows")
         } else {
-            VecDeque::from([(from, to)])
+            Ok(VecDeque::from([(from, to)]))
+        }
+    }
+
+    pub(crate) fn start_query(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        query: Query,
+    ) {
+        let windows = self.query_windows(&query, cx.now);
+        let public = matches!(query, Query::PublicTrades { .. });
+        let (credential, identity) = if windows.is_ok() && !public {
+            self.read_selection(endpoint(&query, self.account.uta))
+        } else {
+            (None, None)
+        };
+        let root = match cx.admit_caller_read_root(credential, None) {
+            Ok(root) => root,
+            Err(CommandEntryError::Revoked) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            Err(CommandEntryError::Rejected(_)) => return,
+        };
+        let mut windows = match windows {
+            Ok(windows) => windows,
+            Err(error) => {
+                let _ = cx.fail_context(&root, error);
+                return;
+            }
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.clone()) {
+            Ok(completion) => completion,
+            Err(error) => {
+                let _ = cx.fail_context(&root, error.read_venue_error());
+                return;
+            }
         };
         let window = windows.pop_front().expect("one window");
         let request = Request {
-            command,
+            leg: None,
+            identity,
             detect_deadline: cx.now + 10_000.0,
             query,
             uta: self.account.uta,
@@ -308,7 +344,7 @@ impl BitgetFutures {
             seen: HashSet::new(),
             pages: 0,
             retries: 0,
-            rows: vec![],
+            rows: ReadHistoryRows::new(completion, encode_rows),
             page: vec![],
             page_count: 0,
             invalid: false,
@@ -323,47 +359,24 @@ impl BitgetFutures {
         let public = matches!(r.query, Query::PublicTrades { .. });
         r.uta = self.account.uta;
         let (endpoint, symbol, order, limit) = match &r.query {
-            Query::OrderByClientId { .. } => {
-                cx.fail(r.command, "Bitget client-order-id query is not supported");
-                return;
-            }
+            Query::OrderByClientId { .. } => unreachable!("refused before query admission"),
             Query::Fills {
                 symbol,
                 order_id,
                 limit,
                 ..
             } => (
-                if r.uta {
-                    "/api/v3/trade/fills"
-                } else {
-                    "/api/v2/mix/order/fills"
-                },
+                endpoint(&r.query, r.uta),
                 symbol.as_deref(),
                 order_id.as_deref(),
                 *limit,
             ),
-            Query::OrderHistory { symbol, limit, .. } => (
-                if r.uta {
-                    "/api/v3/trade/history-orders"
-                } else {
-                    "/api/v2/mix/order/orders-history"
-                },
-                symbol.as_deref(),
-                None,
-                *limit,
-            ),
-            Query::Income { limit, .. } => (
-                if r.uta {
-                    "/api/v3/account/financial-records"
-                } else {
-                    "/api/v2/mix/account/bill"
-                },
-                None,
-                None,
-                *limit,
-            ),
+            Query::OrderHistory { symbol, limit, .. } => {
+                (endpoint(&r.query, r.uta), symbol.as_deref(), None, *limit)
+            }
+            Query::Income { limit, .. } => (endpoint(&r.query, r.uta), None, None, *limit),
             Query::PublicTrades { symbol, limit } => (
-                "/api/v2/mix/market/fills",
+                endpoint(&r.query, r.uta),
                 Some(symbol.as_str()),
                 None,
                 *limit,
@@ -414,10 +427,51 @@ impl BitgetFutures {
         } else {
             ArrayAt::Envelope(ARRAYS)
         };
+        let leg = match cx.http_leg_context(
+            r.rows.root(),
+            Policy {
+                operation: Operation::Read,
+                credential: r.rows.root().credential().cloned(),
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(leg) => leg,
+            Err(error) => {
+                self.query_strict_failed(cx, r, error.read_venue_error());
+                return;
+            }
+        };
+        r.leg = Some(leg.clone());
+        let url = format!("{}{path}", crate::paths::REST);
+        let identity = r.identity.clone();
         let pending = Pending::History(Box::new(r));
-        self.send(cx, Method::Get, &path, at, !public, pending);
+        let queued = if public {
+            cx.request_managed(leg, None, Method::Get, url, None, pending)
+        } else {
+            cx.request_signed_managed(
+                leg,
+                None,
+                Method::Get,
+                url,
+                None,
+                Box::new(sign::Http::new(identity, path)),
+                pending,
+            )
+        };
+        match queued {
+            Ok(id) => cx.stream_response(id, at),
+            Err((Pending::History(request), error)) => {
+                self.query_strict_failed(cx, *request, error.venue_error())
+            }
+            Err(_) => unreachable!("history queue returns its own pending"),
+        }
     }
     pub(crate) fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
+        if !r.delivered(cx) {
+            return;
+        }
         if r.uta && matches!(r.query, Query::Income { .. }) {
             self.query_uta_bill(r, item);
             return;
@@ -758,6 +812,9 @@ impl BitgetFutures {
         mut r: Request,
         response: Response<'_>,
     ) {
+        if !r.delivered(cx) {
+            return;
+        }
         if serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
             .ok()
             .is_some_and(|e| e.code.0 == Some(40085.0))
@@ -767,7 +824,9 @@ impl BitgetFutures {
             r.page_count = 0;
             r.invalid = false;
             r.detect_deadline = cx.now + 10_000.0;
-            self.history.waiting.push((cx.set_timer(100.0), r));
+            if r.retire_leg(cx) {
+                self.history.waiting.push((cx.set_timer(100.0), r));
+            }
             return;
         }
         let valid = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
@@ -801,25 +860,35 @@ impl BitgetFutures {
         };
         let cursor = cursor.filter(|_| r.page_count > 0);
         r.page_count = 0;
-        for row in r.page.drain(..) {
-            if r.seen.insert(row.identity()) {
-                r.rows.push(row);
+        {
+            let leg = r.leg.as_ref().expect("validated physical page");
+            let Ok(mut page) = r.rows.admit(cx, leg) else {
+                return;
+            };
+            for row in r.page.drain(..) {
+                if r.seen.insert(row.identity()) {
+                    page.stage(row);
+                }
             }
+            page.accept_page();
+        }
+        if !r.retire_leg(cx) {
+            return;
         }
         r.retries = 0;
         r.pages += 1;
         if let Some(cursor) = cursor {
             if !r.cursors.insert(cursor.clone()) {
-                cx.fail(
-                    r.command,
-                    "Bitget history cursor did not advance; result incomplete",
+                let _ = r.rows.reject(
+                    cx,
+                    VenueError::new("Bitget history cursor did not advance; result incomplete"),
                 );
                 return;
             }
             if r.pages >= MAX_PAGES {
-                cx.fail(
-                    r.command,
-                    "Bitget history page cap reached; result incomplete",
+                let _ = r.rows.reject(
+                    cx,
+                    VenueError::new("Bitget history page cap reached; result incomplete"),
                 );
                 return;
             }
@@ -834,18 +903,23 @@ impl BitgetFutures {
             self.history.waiting.push((cx.set_timer(100.0), r));
             return;
         }
-        r.rows
-            .sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
-        match serde_json::to_string(&r.rows).map_err(|e| e.to_string()) {
-            Ok(data) => cx.done(r.command, data),
-            Err(error) => cx.fail(r.command, error),
-        };
+        let _ = r.rows.finish_with(cx, Ok(()), |mut rows| {
+            rows.sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
+            encode_rows(&rows)
+        });
     }
     pub(crate) fn query_failed(&mut self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
-        if r.retries >= 3 {
-            cx.fail(r.command, format!("Bitget history incomplete: {error}"));
+        if !r.retire_leg(cx) {
             return;
         }
+        if r.retries >= 3 {
+            let _ = r.rows.reject(
+                cx,
+                VenueError::new(format!("Bitget history incomplete: {error}")),
+            );
+            return;
+        }
+        r.rows.discard_staged_page();
         r.retries += 1;
         r.page.clear();
         r.page_count = 0;
@@ -854,12 +928,45 @@ impl BitgetFutures {
             .waiting
             .push((cx.set_timer(250.0 * f64::from(r.retries)), r));
     }
+    pub(crate) fn query_strict_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut r: Request,
+        error: VenueError,
+    ) {
+        if r.retire_leg(cx) {
+            let _ = r.rows.reject(cx, error);
+        }
+    }
+
+    pub(crate) fn query_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        r: Request,
+        error: VenueError,
+    ) {
+        if matches!(error.kind, Some(ErrorKind::Network | ErrorKind::Timeout)) {
+            self.query_failed(cx, r, &error.message);
+        } else {
+            self.query_strict_failed(cx, r, error);
+        }
+    }
+
+    pub(crate) fn history_retired(&mut self, owner: Owner) {
+        self.history
+            .waiting
+            .retain(|(_, request)| request.rows.root().owner() != owner);
+    }
+
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(i) = self.history.waiting.iter().position(|(t, _)| *t == timer) {
             let (_, r) = self.history.waiting.swap_remove(i);
             if !matches!(r.query, Query::PublicTrades { .. }) && !self.account.detected {
                 if cx.now >= r.detect_deadline {
-                    cx.fail(r.command, "Bitget account detection did not complete");
+                    let _ = r.rows.reject(
+                        cx,
+                        VenueError::new("Bitget account detection did not complete"),
+                    );
                     return;
                 }
                 self.history.waiting.push((cx.set_timer(100.0), r));
@@ -869,6 +976,36 @@ impl BitgetFutures {
         }
     }
 }
+impl Request {
+    pub(crate) fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg
+            .as_ref()
+            .is_some_and(|leg| self.rows.validate_delivery(cx, leg).is_ok())
+    }
+    fn retire_leg(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        self.leg
+            .take()
+            .is_none_or(|leg| cx.finish_http_context(&leg).is_ok())
+    }
+}
+
+fn encode_rows(rows: &[Row]) -> Result<String, VenueError> {
+    serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
+}
+
+fn endpoint(query: &Query, uta: bool) -> &'static str {
+    match query {
+        Query::Fills { .. } if uta => "/api/v3/trade/fills",
+        Query::Fills { .. } => "/api/v2/mix/order/fills",
+        Query::OrderHistory { .. } if uta => "/api/v3/trade/history-orders",
+        Query::OrderHistory { .. } => "/api/v2/mix/order/orders-history",
+        Query::Income { .. } if uta => "/api/v3/account/financial-records",
+        Query::Income { .. } => "/api/v2/mix/account/bill",
+        Query::PublicTrades { .. } => "/api/v2/mix/market/fills",
+        Query::OrderByClientId { .. } => unreachable!("refused before query admission"),
+    }
+}
+
 fn side(s: &str) -> Option<&'static str> {
     if s.eq_ignore_ascii_case("buy") {
         Some("buy")

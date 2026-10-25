@@ -460,4 +460,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | OKX ordered write ownership | Source GO (dazzy3); exact-head CI green | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |
 
-| Bitget history Read funnel | [RUST_BITGET_HISTORY_READ_FUNNEL.md](RUST_BITGET_HISTORY_READ_FUNNEL.md) | codex-ih35js | Plan and original controls on8fced; migrate history12 plus orphaned lib3, current API review required. |
+| Bitget history Read funnel | [RUST_BITGET_HISTORY_READ_FUNNEL.md](RUST_BITGET_HISTORY_READ_FUNNEL.md) | codex-ih35js | Local source onb0ee;333 native tests pass; exact source review and paired Bitget/combined sizes precede PR. |
