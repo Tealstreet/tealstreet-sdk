@@ -6,7 +6,8 @@
 //! expiry result; this module does not implement a second clock/backoff loop.
 use crate::socket::{Config, Timeout};
 use crate::{ErrorKind, SocketChannel, SocketId, VenueError};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use sorted::{Map, Set};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 pub const MAX_FEEDS: usize = 512;
@@ -265,8 +266,8 @@ struct QueuedBatch {
 }
 #[derive(Default)]
 struct Interests {
-    desired: BTreeMap<Arc<str>, Arc<Interest>>,
-    released: BTreeMap<Arc<str>, Arc<Interest>>,
+    desired: Map<Arc<str>, Arc<Interest>>,
+    released: Map<Arc<str>, Arc<Interest>>,
     revision: u64,
     queue: VecDeque<QueuedBatch>,
 }
@@ -855,7 +856,7 @@ impl Lifecycle {
         }
         // Bound all retained input and eventual released copies before cloning
         // argument state or invoking a native encoder.
-        let mut unique = BTreeSet::new();
+        let mut unique = Set::default();
         let mut desired_bytes = 0usize;
         for item in interests.rows() {
             if item.key.is_empty()
@@ -919,9 +920,8 @@ impl Lifecycle {
             .ok_or(SocketError::Capacity)?;
         // Reuse immutable rows only when both key and native arguments match.
         // Changed arguments keep a distinct released row until unsubscribe.
-        // Inserted one by one: `collect` would sort and bulk-build a separate
-        // copy of the tree code for every input shape.
-        let mut desired = BTreeMap::new();
+        // Collected, then sorted once into the map (BTreeMap insert semantics).
+        let mut entries = Vec::new();
         match interests {
             InterestInput::Proposed(rows) => {
                 for i in rows {
@@ -933,16 +933,17 @@ impl Lifecycle {
                         .filter(|previous| previous.as_ref() == &i)
                         .cloned()
                         .unwrap_or_else(|| Arc::new(i));
-                    desired.insert(row.key.clone(), row);
+                    entries.push((row.key.clone(), row));
                 }
             }
             InterestInput::Retained(rows) => {
                 for row in rows {
-                    desired.insert(row.key.clone(), row);
+                    entries.push((row.key.clone(), row));
                 }
             }
         }
-        let mut forced = BTreeSet::new();
+        let desired = Map::from_entries(entries);
+        let mut forced = Set::default();
         for key in repair {
             forced.insert(key.as_str());
         }
@@ -969,11 +970,11 @@ impl Lifecycle {
             if items.is_empty() {
                 continue;
             }
-            let mut expected = BTreeSet::new();
+            let mut expected = Set::default();
             for item in &items {
                 expected.insert(item.key.as_ref());
             }
-            let mut covered = BTreeSet::new();
+            let mut covered = Set::default();
             let mut failure = None;
             let result = {
                 let mut emit = |batch: EncodedBatch| {
@@ -1069,6 +1070,237 @@ impl Lifecycle {
             }
         }
         Some(queued.batch.text)
+    }
+}
+
+/// Sorted, deduplicated storage with the `BTreeMap`/`BTreeSet` operations and
+/// key order the interest state uses, without each tree's node code: that code
+/// is a fixed managed-sockets link cost in every family that enables the feature.
+/// A feed's interests (up to `MAX_INTERESTS`) are built with one sort, not one
+/// insert at a time; single updates use binary search.
+mod sorted {
+    use std::borrow::Borrow;
+    use std::ops::Index;
+
+    #[derive(Clone, Debug)]
+    pub(super) struct Map<K, V>(Vec<(K, V)>);
+
+    impl<K, V> Default for Map<K, V> {
+        fn default() -> Self {
+            Self(Vec::new())
+        }
+    }
+
+    impl<K: Ord, V> Map<K, V> {
+        fn find<Q: Ord + ?Sized>(&self, key: &Q) -> Result<usize, usize>
+        where
+            K: Borrow<Q>,
+        {
+            self.0.binary_search_by(|(k, _)| k.borrow().cmp(key))
+        }
+        pub(super) fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&V>
+        where
+            K: Borrow<Q>,
+        {
+            self.find(key).ok().map(|i| &self.0[i].1)
+        }
+        pub(super) fn contains_key<Q: Ord + ?Sized>(&self, key: &Q) -> bool
+        where
+            K: Borrow<Q>,
+        {
+            self.find(key).is_ok()
+        }
+        /// As `BTreeMap::insert`: an existing key keeps its original key value
+        /// and only the value is replaced.
+        pub(super) fn insert(&mut self, key: K, value: V) -> Option<V> {
+            match self.find(&key) {
+                Ok(i) => Some(std::mem::replace(&mut self.0[i].1, value)),
+                Err(i) => {
+                    self.0.insert(i, (key, value));
+                    None
+                }
+            }
+        }
+        pub(super) fn remove<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<V>
+        where
+            K: Borrow<Q>,
+        {
+            self.find(key).ok().map(|i| self.0.remove(i).1)
+        }
+        pub(super) fn values(&self) -> impl Iterator<Item = &V> {
+            self.0.iter().map(|(_, v)| v)
+        }
+        pub(super) fn clear(&mut self) {
+            self.0.clear();
+        }
+        /// As inserting each entry into a `BTreeMap` in order: one stable sort,
+        /// then for a repeated key its first key value and its last value.
+        pub(super) fn from_entries(mut entries: Vec<(K, V)>) -> Self {
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut map: Vec<(K, V)> = Vec::with_capacity(entries.len());
+            for (key, value) in entries {
+                match map.last_mut() {
+                    Some(last) if last.0 == key => last.1 = value,
+                    _ => map.push((key, value)),
+                }
+            }
+            Self(map)
+        }
+    }
+
+    #[cfg(test)]
+    impl<K: Ord, V> Map<K, V> {
+        pub(super) fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+            self.0.iter().map(|(k, v)| (k, v))
+        }
+        pub(super) fn keys(&self) -> impl Iterator<Item = &K> {
+            self.0.iter().map(|(k, _)| k)
+        }
+        pub(super) fn len(&self) -> usize {
+            self.0.len()
+        }
+        pub(super) fn is_empty(&self) -> bool {
+            self.0.is_empty()
+        }
+    }
+
+    #[cfg(test)]
+    impl<K, V> IntoIterator for Map<K, V> {
+        type Item = (K, V);
+        type IntoIter = std::vec::IntoIter<(K, V)>;
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.into_iter()
+        }
+    }
+
+    impl<K: Ord + Borrow<Q>, V, Q: Ord + ?Sized> Index<&Q> for Map<K, V> {
+        type Output = V;
+        fn index(&self, key: &Q) -> &V {
+            self.get(key).expect("no entry found for key")
+        }
+    }
+
+    #[derive(Debug)]
+    pub(super) struct Set<T>(Vec<T>);
+
+    impl<T> Default for Set<T> {
+        fn default() -> Self {
+            Self(Vec::new())
+        }
+    }
+
+    impl<T: Ord> Set<T> {
+        /// As `BTreeSet::insert`: false when the value was already present.
+        pub(super) fn insert(&mut self, value: T) -> bool {
+            match self.0.binary_search(&value) {
+                Ok(_) => false,
+                Err(i) => {
+                    self.0.insert(i, value);
+                    true
+                }
+            }
+        }
+        pub(super) fn contains<Q: Ord + ?Sized>(&self, value: &Q) -> bool
+        where
+            T: Borrow<Q>,
+        {
+            self.0.binary_search_by(|v| v.borrow().cmp(value)).is_ok()
+        }
+        pub(super) fn iter(&self) -> std::slice::Iter<'_, T> {
+            self.0.iter()
+        }
+        pub(super) fn len(&self) -> usize {
+            self.0.len()
+        }
+    }
+
+    #[cfg(test)]
+    mod parity {
+        use super::{Map, Set};
+        use std::collections::{BTreeMap, BTreeSet};
+        use std::sync::Arc;
+
+        /// A fixed xorshift stream: the same operations every run.
+        fn ops(seed: u64, n: usize) -> impl Iterator<Item = (u8, String, u32)> {
+            let mut x = seed;
+            (0..n).map(move |i| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                ((x % 5) as u8, format!("k{}", x % 23), i as u32)
+            })
+        }
+
+        #[test]
+        fn map_matches_btreemap_for_every_operation_and_order() {
+            for seed in 1..40u64 {
+                let mut ours: Map<Arc<str>, u32> = Map::default();
+                let mut tree: BTreeMap<Arc<str>, u32> = BTreeMap::new();
+                for (op, key, value) in ops(seed, 300) {
+                    let key: Arc<str> = key.into();
+                    match op {
+                        0 | 1 => {
+                            let fresh: Arc<str> = key.to_string().into();
+                            assert_eq!(
+                                ours.insert(fresh.clone(), value),
+                                tree.insert(fresh, value)
+                            );
+                        }
+                        2 => assert_eq!(ours.remove(key.as_ref()), tree.remove(key.as_ref())),
+                        3 => assert_eq!(ours.get(key.as_ref()), tree.get(key.as_ref())),
+                        _ => assert_eq!(ours.contains_key(&key), tree.contains_key(&key)),
+                    }
+                    let a: Vec<_> = ours.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                    let b: Vec<_> = tree.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                    assert_eq!(a, b, "seed {seed}");
+                    // BTreeMap keeps a repeated key's first allocation.
+                    for ((ka, _), (kb, _)) in ours.iter().zip(tree.iter()) {
+                        assert!(Arc::ptr_eq(ka, kb) || ka == kb);
+                    }
+                }
+                let ours_values: Vec<_> = ours.values().copied().collect();
+                let tree_values: Vec<_> = tree.values().copied().collect();
+                assert_eq!(ours_values, tree_values);
+            }
+        }
+
+        #[test]
+        fn from_entries_matches_inserting_into_a_btreemap_in_order() {
+            for seed in 1..40u64 {
+                let entries: Vec<(Arc<str>, u32)> =
+                    ops(seed, 200).map(|(_, k, v)| (k.into(), v)).collect();
+                let mut tree = BTreeMap::new();
+                let mut first_keys: BTreeMap<Arc<str>, Arc<str>> = BTreeMap::new();
+                for (k, v) in &entries {
+                    tree.insert(k.clone(), *v);
+                    first_keys.entry(k.clone()).or_insert_with(|| k.clone());
+                }
+                let ours = Map::from_entries(entries);
+                let a: Vec<_> = ours.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                let b: Vec<_> = tree.into_iter().collect();
+                assert_eq!(a, b, "seed {seed}");
+                for (k, _) in ours.iter() {
+                    assert!(Arc::ptr_eq(k, &first_keys[k]), "first key kept");
+                }
+            }
+        }
+
+        #[test]
+        fn set_matches_btreeset() {
+            for seed in 1..40u64 {
+                let mut ours = Set::default();
+                let mut tree = BTreeSet::new();
+                for (op, key, _) in ops(seed, 300) {
+                    if op < 3 {
+                        assert_eq!(ours.insert(key.clone()), tree.insert(key.clone()));
+                    } else {
+                        assert_eq!(ours.contains(key.as_str()), tree.contains(key.as_str()));
+                    }
+                    assert_eq!(ours.len(), tree.len());
+                    assert!(ours.iter().eq(tree.iter()));
+                }
+            }
+        }
     }
 }
 
