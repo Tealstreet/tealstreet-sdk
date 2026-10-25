@@ -23,7 +23,9 @@ about +16 KB. These buckets/symbols are not an additive shipped-byte budget:
 inlining and collection ownership overlap, and Binaryen changes reachability.
 The baseline and adoption comparisons above are distinct experiments.
 
-The newer fresh-directory c6a5 baseline reported by 55ao7t is:
+Reported baseline sizes, **pending source-tree confirmation**: 55ao7t supplied
+these as the base side of the #2127 pair, but has not independently confirmed
+that its source tree is exactly c6a5. A fresh c6a5 comparison is in progress:
 
 | Local family composition | Shipped bytes |
 | --- | ---: |
@@ -53,7 +55,8 @@ Erasure can reduce combined duplication without helping Bybit. It is not the
 missing 44 KB and must not be credited as a per-family saving.
 
 Current source already marks process_pending_socket_work, socket_refused,
-socket_effects and Driver::finish_control inline-never. Do not propose those
+socket_effects, take/restore_socket_driver, Driver::finish_ingress and
+Driver::finish_control inline-never. Do not propose those
 existing attributes as new cuts. Keep (a), (c), (d) separate from this design;
 none of the estimates below may be added to their results without a union build.
 
@@ -71,28 +74,47 @@ Check the complete source/callback graph before declaring handoff, repair,
 one-shot frames or snapshot completion unused. HTTP session waits are outside
 this socket plan and cannot be disabled to fund its size.
 
-Propose conservative Venue-level socket capability constants with FULL as the
-compatibility default. Engine<V> can then statically omit a proven unused
-handoff arm/callback from timer dispatch, action drain and retirement. A separate
-NONE declaration is only for a proven non-adopter, not an inference from a
-runtime managed_sockets bool. Combined dispatch must preserve each venue's own
-capabilities; Cargo feature unification alone cannot select them.
+Prefer one static capability declaration on P, shared by Cx<P> admission and
+Engine<V> through V::Pending, following dazzy3's suggestion. A proposed
+SocketCapabilities trait supplies FULL default constants (for example HANDOFF,
+REPAIR and SNAPSHOT); implementations for audited venue Pending types may narrow
+only proved-unused paths. Engine then omits the matching handoff/timer/drain
+arms, and Cx admission specializes to the same declaration before allocation or
+retaining a payload. No runtime flag or cached permission is needed. A separate
+NONE declaration requires a proven non-adopter; Cargo feature unification alone
+cannot select per-venue capabilities.
 
-Important API constraint: Cx<P> does not know V. A Venue constant in Engine is
-insufficient while Cx still admits disabled work into a shared proposal enum.
-The implementation design must also separate plain desired proposals from
-optional handoff/repair work, and carry the immutable declaration to their
-admission boundary. No boolean hot-path bypass, new cached permission, or
-silently ignored continuation is acceptable. Before implementation, review how
-misdeclared unsupported API calls fail before allocation/retained Pending,
-without changing any existing FULL consumer's behavior. That declaration is a
-new API contract requiring separate review, not an already approved refusal.
+Cx<P> does not know V, so a Venue-only constant was insufficient. Pending-based
+constants solve that boundary, but introduce explicit compatibility work:
+Venue has one associated Pending type, not a globally enforced one-to-one
+mapping. Shared unit Pending in probes/fixtures, or reused Pending across venue
+variants, must retain FULL or have compatible declarations. Audit all consumers
+before adding bounds; keep feature-off public Cx/Io users compiling. Trait
+defaults do not provide a blanket implementation that can later be overridden
+on stable Rust: enumerate explicit FULL implementations rather than relying on
+specialization. Whether the bound lives only on socket APIs or on Venue's
+associated type remains a separate API review decision.
+
+Also separate plain desired proposals from optional handoff/repair work. A
+misdeclared unsupported API call must fail with a reviewed typed refusal before
+allocation/retained Pending, never silently ignore work or skip cleanup. FULL
+consumers retain existing behavior. This declaration is a new API contract
+requiring separate review, not an already approved refusal.
 
 Default FULL means the feature-only non-adopter pays its present cost until it
 explicitly proves NONE. Existing adopter behavior must remain identical for all
 reachable inputs. Capability tests must deliberately drive each API and show
 that no admitted work is stranded by an omitted dispatch arm. This reachability
-work is the first implementation gate; dazzy3 offered a follow-up audit after S1.
+work is the first implementation gate and belongs to this plan's owner;
+dazzy3 stays off it unless handed a bounded slice. A whole Bybit-tree lexical
+scan of prototype 0ca830b2d28 finds no call to set_socket_interests_then,
+repair_socket_interests, send_after_socket_interests,
+register_socket_feed_with_snapshot or complete_socket_snapshot. Handoff's sole
+Cx constructor is set_socket_interests_then. This is a source-search fact, not a
+complete callback/indirect reachability proof. First attribute the raw dominator
+subtrees for that constructor and continuation dispatch/drain on the prototype;
+use them to tighten the capability hypothesis before designing its API. Shared
+callees and indirect roots must not be credited as exclusive savings.
 
 ### 2. Keep payload custody out of the shared continuation algorithm
 
@@ -114,6 +136,8 @@ currently call propose_interests(..., Option<(required, P)>).
 Compare a sorted bounded payload Vec against existing storage; do not assume a
 new lookup container saves bytes. Keep a single canonical association between
 metadata and payload and test it under removal, retirement and failed encoding.
+Keep this metadata core in engine_socket/engine storage, outside
+socket_lifecycle.rs::replace_with_repair; any overlap there waits for (d) to land.
 Erasure is useful only if emitted code proves shared metadata/collection bodies;
 otherwise retain the simpler original storage.
 
@@ -127,18 +151,23 @@ record where ownership permits. If a bounded Vec plus head cursor replaces a
 queue, preserve logical FIFO, capacity, retained-byte accounting, drop timing,
 remove/retain behavior and wrap/compaction behavior with trace parity controls.
 No pop-front shift of a large queue in the steady path merely to save bytes.
-Do not duplicate #2127's map/set work or 55ao7t's replacement helper.
+set_socket_interests_then also retains a BTreeMap<&str, &Interest> and a
+BTreeSet<&str> after #2127. Gating out handoff should remove these together;
+otherwise compare sorted borrowed rows plus duplicate/required-key checks,
+preserving original admission order and exact refusal behavior. Do not count
+both that cut and its containing capability subtree. Do not duplicate #2127's
+map/set work or 55ao7t's replacement helper (including its local unique set).
 
 ### 4. Narrow the Driver/Supervisor execution boundary
 
 Driver is already a non-generic struct; its begin, timer, finish_control,
 release_frame and retirement methods are generic only through Cx<P>.
 Supervisor also takes Cx<P> for timers, jitter and action publication. After S1,
-consider a borrowed non-generic scheduling facade over the existing engine core:
-raw now, exact timer allocator/registry/action sink and existing jitter source.
-Driver decision bodies use that facade, while venue/store/Pending/signing/native
-callbacks stay in the thin Engine<V> shell. No new dyn Venue object or delayed
-command list is required.
+use S1's borrowed, non-generic CoreCx/CoreIo directly after S1 lands: raw now,
+timer allocator/registry/action sink and existing entropy/jitter source. Do not
+introduce a second scheduling wrapper. Driver decision bodies use CoreCx, while
+venue/store/Pending/signing/native callbacks stay in the thin Engine<V> shell.
+No new dyn Venue object or delayed command list is required.
 
 This is an API sketch, not a second Supervisor or clock. Preserve direct,
 synchronous calls: authentication_progress allocates the replacement timer
@@ -148,8 +177,8 @@ A deferred vector of timer commands would change those semantics and is rejected
 Retirement cancels runtime work, revokes ownership, cancels signing/transports,
 and completes native invalidation in the existing order before replacement.
 
-If S1 already supplies the exact required operations, use that facade rather
-than invent another core wrapper. Keep this work separate from generic engine
+Verify S1's actual landed operations and visibility before selecting exact
+signatures. Keep this work separate from generic engine
 HTTP/Plan internals and from replace_with_repair. Combined may benefit strongly;
 Bybit alone is likely neutral or slightly larger without reachability reduction.
 
@@ -204,6 +233,9 @@ No arithmetic sum of independent PR savings and no net-size claim from twiggy.
 No source, tests, Cargo, build scripts, allowances, inventory or CI changed here.
 Coordination: dazzy3 confirmed the socket methods above are outside S1 and supplied
 its adverse single-family evidence; 55ao7t confirmed ownership of (a)/(c)/(d)
-and corrected the duplicated (a) measurement. Request their bounded plan review
-before assigning source. Implementation order: actual prerequisites and levers,
+and corrected the duplicated (a) measurement. Dazzy3 CLEARed ec4b70f0316 as a
+plan; 55ao7t reported no blockers, with baseline provenance, remaining handoff
+collections and the (d) cut-line corrections incorporated here. Pending-based
+capabilities and reuse of S1 CoreCx are design refinements awaiting exact API
+review before source. Implementation order: actual prerequisites and levers,
 reachability proof, one isolated structural candidate, measured union decision.
