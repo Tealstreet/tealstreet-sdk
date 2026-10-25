@@ -52,7 +52,8 @@ No engine cargo feature is needed. `admit_caller_read_root`, `SelectedRead`, `Re
    - Rows are admitted only after `validate_delivery`, then `finish_http_context`.
 5. **Hooks.**
    - An `on_http_failed` override keeps the typed Timeout. Binance has none today, so the default would drop the kind.
-   - `read_root_retired` drops the queued native state for that owner.
+   - `read_root_retired` drops the queued native state for that owner. It also finds that owner's parked ranged-income state, which is venue state rather than a pending, removes it and `clear_timer`s the 2 s chunk timer (as WEEX does on Revoked, `history.rs:485-493`).
+   - **Chunk timer (fe7lgm).** The 2 s timer is a venue timer, not root custody. During the gap no leg is in flight, but the 120 s root wait keeps running. The timer path checks `cx.validate_read_root_context(root)` before calling `root.leg(..)`. If the root is Revoked, it drops the state and the timer silently, because a timer queued just before expiry can fire after retirement.
    - `Pending::History` is boxed.
 
 The reference implementation is `venues/weex/src/history.rs`: `history_root` :400-439, `send_history_page` :503-603, the range and single income owners :787-836, `history_next_income` :1010, and the soft and strict endings :1421-1461.
@@ -83,11 +84,14 @@ The reference implementation is `venues/weex/src/history.rs`: `history_root` :40
 | --- | ---: | ---: |
 | Engine features needed | none | none |
 | Avoided: `http-plans` linked, no use (measured, for reference) | +66,651 | about 0 (already linked) |
-| Engine Read-root paths now reached: `SelectedRead`, caller root, `ReadCompletion`, `ReadRangeHistory` (estimate) | +8K to +20K | about 0 (OKX, WEEX and Bybit already instantiate them) |
+| Engine Read-root paths now reached: `SelectedRead`, caller root, `ReadCompletion`, `ReadRangeHistory` (estimate) | +8K to +20K | +5K to +15K (fe7lgm). The history owners are generic over the row type, and the root and leg methods are generic over `Cx<'_, P>`, so Binance's row types and `Pending` add a new monomorphized copy. Only `SelectedRead`, the registry and the expiry sweep are shared. |
 | Binance venue code, net of the removed legacy funnel (estimate) | -2K to +5K | -2K to +5K |
-| **Expected total** | **+6K to +25K, so about 1.24M to 1.26M** | **about 0 to +5K** |
+| **Expected total** | **+6K to +25K, so about 1.24M to 1.26M** | **about +3K to +20K, within the 261K of combined room** |
 
-The engine-path estimate is the uncertain part. Binance is a single-`Pending` family, so the generic read-root code instantiates once. The first source commit measures it, with the native `LegacyAuthority` history removed, before the PR run.
+The engine-path estimate is the uncertain part. Binance is a single-`Pending` family, so the generic read-root code instantiates once there.
+
+- **First source commit.** It measures the Binance family and the combined bundle, each paired against the bare tip (the #2109 method), plus Bybit and Bitget on the composed tree under the standing rule, before the PR run.
+- **First no-features adopter.** Binance would be the first family without `http-plans` to instantiate `ReadRangeHistory`. WEEX, its only user today, has `http-plans`. Nothing in it is gated, and that no-features build is the proof (fe7lgm).
 
 ## Original REDs (next, before source)
 
@@ -97,7 +101,9 @@ A new target, `venues/binance/tests/history_context.rs`, run against the unchang
 2. **Lookup.** The lookup is a managed Primary(`ClientOrderLookup`) preparation.
 3. **Unanswered page.** An unanswered page ends at 20 s as a typed Timeout. A late reply publishes nothing.
 4. **Root expiry.** Root expiry mid-walk is a strict Timeout with no rows and no marker.
-5. **Unstamped command.** An unstamped command is refused NotSent before any I/O.
+5. **Expiry in the chunk gap.** The root expires during the 2 s gap. When the timer then fires, there is no HTTP and exactly one terminal (fe7lgm).
+
+A command with no wait receipt is refused NotSent before any I/O. This cannot be driven through the public `Engine::handle`, which stamps the default wait, so it is a source-stage control.
 
 GREEN native controls, from `history_owned.rs`, `lookup.rs` and `queries_variants.rs`, are kept and re-pinned:
 
