@@ -266,3 +266,21 @@ Prepare/Bind/Claim at the already-existing epoch event clock. The own native
 target was deleted after this failed review-build phase. Final qualification is
 rerun after integrating the newly landed tip; no green freeze claim is made
 from that failed pass.
+
+
+## Qualified native source and landing-tip composition
+
+The corrected full WEEX source pass is392PASS/0FAIL/0ignored, including all47
+public-seed custody and pressure controls. Strict all-target Clippy, formatting,
+full bans and the repository TypeScript fast lane pass. All45 original custody
+controls retain their118 original assertions; public46 and account173 assertions
+are token-exact, and all15 startup predicates remain unchanged after normalizing
+only the genuine action collector. The approved six admission-clock alignments
+preserve every response/event timestamp, payload and financial assertion.
+
+Actual35ae6c6b254 is plain-merged automatically. The WEEX subtree is byte-exact
+to the native-qualified source; the incoming serial schedule engine changes are
+unmodified. The reviewer holds the immutable source/fixture/map artifact for
+bounded inspection. The auditor accepts the first-source34999 pair plus absolute
+WEEX and combined fit on this composition; no fresh bare-tip pair or unrelated
+Bybit/Bitget measurement is required for this venue-only source change.
