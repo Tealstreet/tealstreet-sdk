@@ -1,7 +1,7 @@
 # Kraken native adoption: local prerequisite cut
 
-Local, unpushed on actual 9977ccf1aa6, authorized by the overseer while #2156
-qualifies. Companion to landed RUST_KRAKEN_PRIVATE_DISPATCH_ADOPTION.md and its
+Started locally on actual 9977ccf1aa6 while #2156 qualified. The overseer now
+authorizes publication of the inert policy and shared-fixture checkpoint only. Companion to landed RUST_KRAKEN_PRIVATE_DISPATCH_ADOPTION.md and its
 26 original controls. No bridge activation, hosted adapter, inventory prune or
 native signing cutover is authorized by a prototype result. Owner codex-9czdjh;
 uufub4 reviews nonce/dispatch and fe7lgm the shared engine seam. Numeric table B was approved by claude-ddi2il on 2026-10-26. New bounds
@@ -183,8 +183,9 @@ separate gates.
 Commit plan/policy checkpoint, compiling assertion REDs, then bounded core/nonce
 review before widening shared release authority. Implement only agreed seams;
 unknown host evidence and unresolved policy remain closed, never activate via
-an option. All work stays local/unpushed per the overseer. Scoped engine/Kraken
-checks at JOBS=4, no workspace-wide build unless needed to freeze. Any future
+an option. This PR publishes only the policy and shared-engine controls; further source
+implementation and activation retain their separate owner gates. Scoped
+engine/Kraken checks use JOBS=4; workspace gates run when needed to freeze. Any future
 publication of generic engine changes measures Kraken, Bybit, Bitget and combined
 on the composed landing tree, same profiles/budgets, and deletes own scratch
 targets after every measurement/review build. No hosted or namespace activation

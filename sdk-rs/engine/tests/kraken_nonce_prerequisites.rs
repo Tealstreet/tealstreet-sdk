@@ -24,13 +24,12 @@ use safe_cex_engine::{
 use std::sync::Arc;
 
 fn identity() -> Identity {
-    Identity {
-        credential: KeyRef("kraken-prerequisite/credential".into()),
-        signing: KeyRef("kraken-prerequisite/signing".into()),
-        passphrase: None,
-        stable_id: Some("kraken-prerequisite/account".into()),
-        extra: Default::default(),
-    }
+    let mut identity = Identity::new(
+        KeyRef("kraken-prerequisite/credential".into()),
+        Some(KeyRef("kraken-prerequisite/signing".into())),
+    );
+    identity.stable_id = Some("kraken-prerequisite/account".into());
+    identity
 }
 
 struct Recipe(NonceClaim);
@@ -63,7 +62,7 @@ impl SignStep for Recipe {
             context: Default::default(),
             operations: vec![SignOperation::Sign {
                 algorithm: Algorithm::HmacSha256,
-                key: identity().signing,
+                key: identity().signing_ref()?.clone(),
                 payload: vec![PayloadPart::Bytes {
                     bytes: body.into_bytes(),
                 }],
