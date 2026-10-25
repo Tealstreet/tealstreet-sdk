@@ -702,6 +702,9 @@ impl<P> Cx<'_, P> {
     /// Park an unissued, eligible Slot on a login Session before it consumes an
     /// attempt. `session_ready` issues its leg with a fresh window under the
     /// same Plan root and Slot; nothing is spent while parked.
+    /// Known gap: the parked unit keeps only `intent`, so a protection-cancel leg
+    /// resumes as a plain cancel. The first venue to combine a Plan session wait with
+    /// protection-cancel legs must carry that flag through the parked unit, RED first.
     pub fn plan_session_wait(
         &mut self,
         plan: &Plan,
