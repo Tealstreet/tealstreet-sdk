@@ -398,5 +398,186 @@ class PrecisionRed(unittest.TestCase):
                 'venues/reference/src/support/only_tests.rs']})
 
 
+
+class DataMacroProvenance(unittest.TestCase):
+    """Only the extra data-macro row changes; all sender evidence survives."""
+
+    @staticmethod
+    def source(body, kind='&Request', generics='', prefix=''):
+        return (prefix + ' fn handle' + generics
+                + "(cx: &mut Cx<'_, P>, request: " + kind + ') { '
+                + 'let escaped = opaque(cx); ' + body + ' }')
+
+    def prod(self, source):
+        prod, test = ban.context_fingerprints(source)
+        self.assertFalse(test)
+        return prod
+
+    def test_all_thirteen_escaped_data_occurrences_have_no_extra_row(self):
+        examples = [
+            ('matches!(request.kind, Kind::Algo)', 2),
+            ('matches!(request.kind, Kind::Normal | Kind::Algo)', 4),
+            ('format!("limit=100&page={}", request.page)', 1),
+            ('matches!(request.kind, Kind::Metadata)', 1),
+            ('matches!(request.kind, Kind::Balance)', 1),
+            ('matches!(request.kind, Kind::Normal)', 1),
+            ('matches!(request.kind, Kind::Config | Kind::Metadata)', 2),
+            ('matches!(request.kind, Kind::Positions)', 1),
+        ]
+        body = ';'.join(expression for expression, count in examples for _ in range(count)) + ';'
+        source = self.source(body)
+        self.assertEqual(sum(ban.fingerprints(source).values()), 13)
+        self.assertEqual(self.prod(source), {})
+
+    def test_format_references_literals_and_pattern_parentheses(self):
+        for expression in ['format!("{} {}", &request.page, 100)',
+                           'matches!(request.kind, Kind::One(_) | Kind::Two { field: _ })']:
+            with self.subTest(expression=expression):
+                self.assertEqual(self.prod(self.source(expression + ';')), {})
+
+    def test_actual_sender_and_wrapper_hashes_are_preserved(self):
+        for call in ['cx.request(1)', 'cx.request_streamed(1)',
+                     'cx.request_streamed_body(1)', 'cx.sign_http(1)',
+                     'cx.done(1)', 'cx.fail(1)', 'cx.r#request(1)',
+                     'cx.request::<Pending>(1)', 'Cx::request(cx, 1)',
+                     '<Cx as Send>::request(cx, 1)', '(cx).request(1)',
+                     'Alias::request(cx, 1)', 'let send = Cx::request']:
+            for wrapper in ['matches!({CALL}, Kind::Normal)', 'format!("{}", {CALL})']:
+                expression = wrapper.replace('{CALL}', call)
+                source = self.source(expression + ';')
+                with self.subTest(expression=expression):
+                    self.assertEqual(self.prod(source), dict(ban.fingerprints(expression)))
+
+    def test_pure_sibling_never_hides_a_raw_call(self):
+        raw = 'matches!(cx.request(1), Kind::Normal);'
+        self.assertEqual(self.prod(self.source('matches!(request.kind, Kind::Normal);' + raw)),
+                         dict(ban.fingerprints(raw)))
+
+    def test_unknown_nested_callable_and_capability_arguments_stay_frozen(self):
+        for expression in ['unknown!(request.kind)', 'path::matches!(request.kind, Kind::Normal)',
+                           'format!("{}", request.page())', 'format!("{}", (request.page))',
+                           'format!("{}", request[0])', 'format!("{}", request::<T>)',
+                           'format!("{}", other!(request.page))',
+                           'matches!(request.kind(), Kind::Normal)',
+                           'matches!((request.kind), Kind::Normal)',
+                           'matches!(request.kind, other!(Kind::Normal))',
+                           'format!("{} {}", request.page, cx)',
+                           'format!("{}", selector(request))']:
+            with self.subTest(expression=expression):
+                self.assertTrue(self.prod(self.source(expression + ';')))
+
+    def test_nonconcrete_or_closure_parameters_cannot_borrow_data_proof(self):
+        for kind, generics in [('T', '<T>'), ('impl Trait', ''), ('&dyn Trait', ''),
+                               ('_', ''), ('&mut _', ''), ('Vec<T>', '<T>'),
+                               ('Self::Request', ''), ('&mut Cx<\'_, P>', '')]:
+            source = self.source('matches!(request.kind, Kind::Normal);', kind, generics)
+            with self.subTest(kind=kind):
+                self.assertTrue(self.prod(source))
+        for parameters in ['request', 'request: &Request']:
+            source = self.source('each(|' + parameters
+                                 + '| { matches!(request.kind, Kind::Normal); });')
+            with self.subTest(parameters=parameters):
+                self.assertTrue(self.prod(source))
+
+    def test_every_rebinding_anywhere_in_the_fn_refuses_precision(self):
+        for binding in ['let request = other;', 'let mut request = other;',
+                        'let (request, _) = other;', 'let Request { request, .. } = other;',
+                        'for request in rows {}', 'if let Some(request) = other {}',
+                        'while let Some(request) = other {}',
+                        'match other { Some(request) => {}, _ => {} }',
+                        'each(|request| {});', 'each(|request: &Request| {});',
+                        'let alias = request;']:
+            for before in [True, False]:
+                expression = 'matches!(request.kind, Kind::Normal);'
+                source = self.source(binding + expression if before else expression + binding)
+                with self.subTest(binding=binding, before=before):
+                    self.assertTrue(self.prod(source))
+
+    def test_visible_macro_shadows_and_import_aliases_are_conservative(self):
+        for prefix in ['macro_rules! matches { ($x:expr,$p:pat) => { true } }',
+                       'macro_rules! format { ($($x:tt)*) => { 0 } }',
+                       'use other::matches;', 'use other::custom as matches;',
+                       'use other::{custom as format};', 'use other::*;']:
+            source = self.source('matches!(request.kind, Kind::Normal);'
+                                 'format!("{}", request.page);', prefix=prefix)
+            with self.subTest(prefix=prefix):
+                self.assertEqual(sum(self.prod(source).values()), 2)
+
+    def test_test_partition_and_plain_socket_fingerprints_stay_independent(self):
+        pure = self.source('matches!(request.kind, Kind::Normal);')
+        raw = self.source('matches!(cx.request(1), Kind::Normal);')
+        self.assertEqual(ban.context_fingerprints('#[cfg(test)] ' + pure), ({}, {}))
+        prod, test = ban.context_fingerprints('#[cfg(test)] ' + raw)
+        self.assertFalse(prod)
+        self.assertEqual(test, dict(ban.fingerprints('matches!(cx.request(1), Kind::Normal);')))
+        self.assertEqual(sum(ban.fingerprints(pure).values()), 1)
+
+
+class DataMacroModuleProvenance(unittest.TestCase):
+    """Real tracked files/declarations; no inferred external macro exports."""
+
+    def inventory(self, root_source='mod wire; mod account;', target='pub struct Request;',
+                  consumer_prefix='use crate::wire::*;', extras=None, consumer='account.rs'):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = pathlib.Path(directory)
+            sdk = repo / 'sdk-rs'
+            venue = sdk / 'venues/reference/src'
+            venue.mkdir(parents=True)
+            files = {'lib.rs': root_source, 'wire.rs': target,
+                     consumer: consumer_prefix + DataMacroProvenance.source(
+                         'matches!(request.kind, Kind::Normal);')}
+            files.update(extras or {})
+            for name, source in files.items():
+                path = venue / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source)
+            for args in [['init'], ['add', 'sdk-rs']]:
+                subprocess.run(['git', '-C', str(repo), *args], check=True,
+                               capture_output=True, text=True)
+            with mock.patch.object(ban, 'ROOT', sdk):
+                prod, test = ban.request_sites()
+            self.assertFalse(test)
+            return prod
+
+    def test_single_hop_private_imports_do_not_reexport_macros_to_sibling(self):
+        for imports in ['', 'use external::Thing;', 'use external::*;',
+                        'use external::{Thing, Other};']:
+            with self.subTest(imports=imports):
+                self.assertEqual(self.inventory(target=imports + 'pub struct Request;'), {})
+
+    def test_every_visible_reexport_and_macro_source_stays_conservative(self):
+        for target in ['pub use external::*;', 'pub(crate) use external::*;',
+                       'pub(super) use external::*;', 'pub(self) use external::*;',
+                       'pub(in crate) use external::*;', 'pub use external::matches;',
+                       'macro_rules! custom { () => { 0 } }', 'macro custom() {}',
+                       '#[macro_use] extern crate external;', '#[macro_export] fn custom() {}',
+                       'mod nested;', 'unknown_items!();']:
+            with self.subTest(target=target):
+                self.assertTrue(self.inventory(target=target))
+
+    def test_missing_ambiguous_path_conditional_and_grouped_targets_stay_conservative(self):
+        for root, prefix, extras in [
+                ('mod account;', 'use crate::missing::*;', {}),
+                ('mod wire; mod account;', 'use crate::wire::*;', {'wire/mod.rs': ''}),
+                ('#[path="wire.rs"] mod wire; mod account;', 'use crate::wire::*;', {}),
+                ('#[cfg(feature="x")] mod wire; mod account;', 'use crate::wire::*;', {}),
+                ('mod wire; mod account;', 'use crate::{wire::*};', {}),
+                ('mod wire; mod account;', 'use super::wire::*;', {}),
+                ('mod wire; mod account;', 'use external::*;', {}),
+                ('mod wire; mod account;', 'use crate::wire::*; use external::*;', {})]:
+            with self.subTest(root=root, prefix=prefix):
+                self.assertTrue(self.inventory(root_source=root, consumer_prefix=prefix, extras=extras))
+
+    def test_descendant_cannot_use_private_target_import_exception(self):
+        self.assertTrue(self.inventory(root_source='mod wire;', target='use external::*; mod account;',
+                                       consumer='wire/account.rs'))
+
+    def test_ancestor_macro_shadow_stays_conservative(self):
+        for prefix in ['macro_rules! matches { ($x:expr,$p:pat) => { true } }',
+                       'use external::custom as matches;', '#[macro_use] extern crate external;']:
+            with self.subTest(prefix=prefix):
+                self.assertTrue(self.inventory(root_source=prefix + 'mod wire; mod account;'))
+
+
 if __name__ == '__main__':
     unittest.main()
