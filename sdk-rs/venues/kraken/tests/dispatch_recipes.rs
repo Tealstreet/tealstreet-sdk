@@ -115,6 +115,9 @@ impl Venue for Probe {
     fn http_release() -> HttpRelease<Self> {
         HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
     }
+    fn dispatch_nonce() -> bool {
+        true
+    }
     fn start(&mut self, _: &mut Cx<'_, ()>) {}
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
         let selected = if self.spot {
@@ -144,7 +147,7 @@ impl Venue for Probe {
             recipe.url().to_owned()
         };
         let body = recipe.body().map(str::to_owned);
-        cx.request_signed_managed(root, self.method, url, body, Box::new(recipe), ())
+        cx.request_signed_managed(root, None, self.method, url, body, Box::new(recipe), ())
             .unwrap();
     }
     fn on_sign_error(&mut self, _: &mut Cx<'_, ()>, _: (), error: VenueError) {
@@ -731,6 +734,9 @@ impl Venue for RetainedProbe {
     }
     fn http_release() -> HttpRelease<Self> {
         HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    }
+    fn dispatch_nonce() -> bool {
+        true
     }
     fn start(&mut self, _: &mut Cx<'_, RetainedPending>) {}
     fn on_command(&mut self, cx: &mut Cx<'_, RetainedPending>, _: Command) {

@@ -663,3 +663,18 @@ The nonce owner's separate measurements and explicit-feature real-WASM proof
 remain bounded core/engine+recipe evidence. The fresh stacked PR run must certify
 the combined recipe head and fixed family budgets; no local result substitutes
 for that gate. Freeze and push once for one PR-triggered run, with no dispatch.
+
+### Actual nonce landing composition
+
+The recipe now plain-merges actual nonce landing
+c5d7c3595af7c9ab189df6e386df1f872466b4a9. The only merge conflict is the
+plan index, resolved as the incoming index plus the recipe row once. Engine,
+registry, hosts and inventory files remain exact to that landing; the production
+recipe and trusted setup bodies remain exact to the reviewed recipe checkpoint.
+
+Two test venues explicitly return true from the landed dispatch_nonce capability,
+matching the real Kraken family opt-in. Their NonceUnscheduled release callbacks
+and all assertions remain unchanged. The direct managed request passes None for
+the new optional Session argument; this recipe-only control binds no bearer.
+Default Kraken tests pass 337/0/0 and strict crate Clippy passes. These fixture
+adaptations do not adopt any native private caller or clear hosted/namespace gates.
