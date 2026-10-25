@@ -1,1 +1,8 @@
-{}
+{
+  "venues/bitget/src/lib.rs": [
+    {
+      "old": "704e3037e3c7c4eb59c2231c2278deb5d1db0ebea6e55a92b963166f94a34dc2",
+      "new": "cfc6b7fbf7585d64ea3fd3339ba6b3b6d5313a14039f353d8d8f2ab25f5795dc"
+    }
+  ]
+}
