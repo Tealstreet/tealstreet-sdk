@@ -293,3 +293,11 @@ The fresh256 suffix passes strict clippy. Removing only that appended block
 reconstructs the entire5126 target byte-for-byte, so every earlier assertion and
 native GREEN body is unchanged. The13RED/16GREEN runtime receipt remains bound
 to5126; the new suffix is typed but unexecuted. Its own target is removed.
+
+The checkpoint is published separately from adoption, as for Kraken #2154.
+The non-default private-adoption-originals feature gates this test target while
+the thirteen custody assertions remain RED. Run it explicitly with
+cargo test -p safe-cex-venue-hyperliquid --features private-adoption-originals
+--test request_context_trading -- --test-threads=1. Normal workspace CI retains
+all existing native tests. The original target is unchanged from 17baf7b6cbf;
+the gate is not a production feature or a claim that the custody gaps are fixed.
