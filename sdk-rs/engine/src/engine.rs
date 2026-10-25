@@ -919,6 +919,9 @@ struct PendingHttp<P> {
 
 #[path = "read_root_expiry.rs"]
 mod read_root_expiry;
+#[cfg(feature = "repair-mutations")]
+#[path = "repair_core.rs"]
+mod repair_core;
 #[path = "request_context_registry.rs"]
 mod request_context_registry;
 
@@ -1543,6 +1546,8 @@ struct IoCore {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
+    #[cfg(feature = "repair-mutations")]
+    repairs: repair_core::Repairs,
     // Reconcile reads the engine owes the venue, one per uncertain seal: the
     // symbols (`None` = all) and the earliest time to ask.
     #[cfg(feature = "order-locks")]
@@ -1677,6 +1682,8 @@ impl Default for IoCore {
             http_history_failure: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
+            #[cfg(feature = "repair-mutations")]
+            repairs: Default::default(),
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
             command_entry: None,
@@ -3720,6 +3727,8 @@ impl<V: Venue> Engine<V> {
         }
         self.handle_received(now, event);
         self.io.core.command_waits.end_receipt();
+        #[cfg(feature = "repair-mutations")]
+        self.flush_repair_notices(now);
     }
 
     /// Dispatch one host command with the caller's own wait. A non-finite
@@ -3744,6 +3753,8 @@ impl<V: Venue> Engine<V> {
         }
         self.handle_received(now, Event::Command(command));
         self.io.core.command_waits.end_receipt();
+        #[cfg(feature = "repair-mutations")]
+        self.flush_repair_notices(now);
         Ok(())
     }
 
@@ -3960,7 +3971,16 @@ impl<V: Venue> Engine<V> {
         let previous = std::mem::replace(&mut self.io.core.http_delivery, delivery.clone());
         #[cfg(feature = "managed-sockets")]
         let socket_message = self.io.core.socket_message.take();
+        #[cfg(feature = "repair-mutations")]
+        let previous_data = self.begin_repair_data(match (&event, &delivery) {
+            (Event::HttpResponse { request, .. } | Event::HttpEnd { request }, Some(_)) => {
+                Some(*request)
+            }
+            _ => None,
+        });
         self.handle_event_scoped(now, event, physical_timeout);
+        #[cfg(feature = "repair-mutations")]
+        self.end_repair_data(previous_data);
         #[cfg(feature = "http-plans")]
         {
             self.io.core.http_history_failure = None;
@@ -3972,6 +3992,10 @@ impl<V: Venue> Engine<V> {
         }
         if let Some(delivery) = delivery.as_ref() {
             self.io.core.request_contexts.exit_delivery(delivery);
+        }
+        #[cfg(feature = "repair-mutations")]
+        if let Some(delivery) = delivery.as_ref() {
+            self.repair_delivered(delivery, now);
         }
         self.flush_http_plans(now);
     }

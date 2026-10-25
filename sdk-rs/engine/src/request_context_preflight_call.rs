@@ -22,6 +22,16 @@ pub(in super::super) struct State {
 }
 
 impl State {
+    /// The admitted write-after-reads credential, for repair mint custody.
+    #[cfg(feature = "repair-mutations")]
+    pub(in crate::engine) fn repair_write_credential(
+        &self,
+    ) -> Option<&crate::request_context::Credential> {
+        (self.policy.purpose == PreflightPurpose::WriteAfterReads)
+            .then_some(self.policy.write_credential.as_ref())
+            .flatten()
+    }
+
     pub(super) fn new(policy: PreflightPolicy) -> Self {
         Self {
             policy,

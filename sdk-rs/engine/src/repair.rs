@@ -2,10 +2,8 @@
 //! workflows that outlive their discovery callback. See
 //! docs/plans/RUST_REPAIR_MUTATION_AUTHORITY.md.
 //!
-//! Inert declarations for the original controls; source follows reviewed REDs.
-use crate::request_context::{Context, Credential, Preflight};
-use crate::store::OrderSnapshotToken;
-use crate::{CommandId, Cx, RequestId};
+//! The engine-side custody lives in `engine/repair_core.rs`.
+use crate::{CommandId, RequestId};
 
 /// Spendable repair authority. Opaque; only the issuing engine validates it.
 #[derive(Debug, PartialEq, Eq)]
@@ -58,6 +56,8 @@ pub enum RepairRefusal {
     Retired,
     /// Members disagree on issuer, primary, intent, origin kind or side.
     Incompatible,
+    /// An order lock held by a command or another root covers it.
+    Conflict,
     TooMany,
     Capacity,
     /// The declared primary credential is not the installed primary.
@@ -114,81 +114,4 @@ pub enum RepairNotice<'a> {
         subjects: &'a [Subject],
         reason: RepairRefusal,
     },
-}
-
-impl<P> Cx<'_, P> {
-    /// Mint cancel authority for subjects owed by the current admitted
-    /// command. The Preflight must be this Bound entry's WriteAfterReads
-    /// Preflight; its primary write credential becomes the repair's signer.
-    pub fn mint_command_repair(
-        &mut self,
-        _preflight: &Preflight,
-        _subjects: Vec<Subject>,
-    ) -> Result<Entitlement, RepairRefusal> {
-        Err(RepairRefusal::Invalid)
-    }
-
-    /// Commit an accepted whole Orders snapshot inside the exact live
-    /// Background Read DATA delivery of `read`, as `Store::commit_orders_snapshot`.
-    pub fn commit_repair_snapshot<I, F>(
-        &mut self,
-        _read: &Context,
-        _tokens: I,
-        _publish: F,
-    ) -> Option<SnapshotReceipt>
-    where
-        I: IntoIterator<Item = OrderSnapshotToken>,
-        F: FnOnce(&[crate::model::Order]) -> Vec<crate::model::Order>,
-    {
-        None
-    }
-
-    /// Mint cancel-then-place authority for one order that this delivery's
-    /// committed snapshot published, before the Read retires.
-    pub fn mint_snapshot_repair(
-        &mut self,
-        _receipt: &SnapshotReceipt,
-        _primary: Credential,
-        _subject: Subject,
-        _symbol: &str,
-    ) -> Result<Entitlement, RepairRefusal> {
-        Err(RepairRefusal::Invalid)
-    }
-
-    /// Spend compatible subjects as one cancel request.
-    pub fn admit_repair_cancel(
-        &mut self,
-        _members: &[(&Entitlement, &Subject, Binding<'_>)],
-    ) -> Result<(RepairRoot, Context), RepairRefusal> {
-        Err(RepairRefusal::Invalid)
-    }
-
-    /// The cancel leg of one snapshot subject's cancel-then-place.
-    pub fn admit_repair_replace(
-        &mut self,
-        _entitlement: &Entitlement,
-        _subject: &Subject,
-        _binding: Binding<'_>,
-    ) -> Result<(RepairRoot, Context), RepairRefusal> {
-        Err(RepairRefusal::Invalid)
-    }
-
-    /// The single placement leg after an engine-recorded accepted cancel.
-    pub fn repair_successor(&mut self, _root: &RepairRoot) -> Result<Context, RepairRefusal> {
-        Err(RepairRefusal::Invalid)
-    }
-
-    pub fn retire_repair_subject(
-        &mut self,
-        _entitlement: &Entitlement,
-        _key: &str,
-        _proof: Retire<'_>,
-    ) -> Result<(), RepairRefusal> {
-        Err(RepairRefusal::Invalid)
-    }
-
-    /// Unspent subjects still covered by this entitlement.
-    pub fn repair_subjects(&self, _entitlement: &Entitlement) -> Vec<Subject> {
-        Vec::new()
-    }
 }

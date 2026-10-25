@@ -1964,6 +1964,10 @@ impl<V: Venue> Engine<V> {
                                 self.io.core.order_locks.note_command_write(id);
                             }
                         }
+                        #[cfg(feature = "repair-mutations")]
+                        Owner::Repair { generation } => {
+                            self.io.core.order_locks.note_repair_write(generation)
+                        }
                         _ => {}
                     }
                 }
@@ -2416,6 +2420,8 @@ impl<V: Venue> Engine<V> {
                 );
                 self.io.core.http_write_reply =
                     Some((response.status, response.headers.to_owned()));
+                #[cfg(feature = "repair-mutations")]
+                let previous_data = self.begin_repair_data(Some(request));
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -2425,10 +2431,14 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
+                #[cfg(feature = "repair-mutations")]
+                self.end_repair_data(previous_data);
                 self.io.core.http_write_reply = None;
             }
             self.io.core.http_delivery = previous;
             self.io.core.request_contexts.exit_delivery(&delivery);
+            #[cfg(feature = "repair-mutations")]
+            self.repair_delivered(&delivery, now);
             self.io.discard_managed(request);
         }
         drop(record);

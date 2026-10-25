@@ -171,6 +171,7 @@ mod repair {
         successors: Vec<Result<(), RepairRefusal>>,
         successor_slot: Option<crate::CredentialSlot>,
         failures: usize,
+        reconciles: Vec<Option<Vec<String>>>,
     }
     impl Repairer {
         fn mark(cx: &Cx<'_, Context>) -> (crate::resource_ids::ResourceIds, usize) {
@@ -449,6 +450,7 @@ mod repair {
             }
         }
         fn on_timer(&mut self, cx: &mut Cx<'_, Context>, _: TimerId) {
+            self.timer = Some(cx.set_timer(cx.now + 100.));
             if self.replace {
                 let s = subject("old-1");
                 let result = cx.admit_repair_replace(
@@ -475,6 +477,9 @@ mod repair {
             for group in std::mem::take(&mut self.groups) {
                 self.admit(cx, &group);
             }
+        }
+        fn reconcile_uncertain(&mut self, _: &mut Cx<'_, Context>, symbols: Option<&[String]>) {
+            self.reconciles.push(symbols.map(<[String]>::to_vec));
         }
         fn on_repair_notice(&mut self, cx: &mut Cx<'_, Context>, notice: RepairNotice<'_>) {
             self.notice_outside_entry
@@ -834,12 +839,20 @@ mod repair {
         assert!(!e.io.core.order_locks.uncertain("BTCUSD"));
     }
     #[test]
-    fn a_released_unknown_repair_cancel_fences_its_symbol() {
+    fn a_released_unknown_repair_cancel_reconciles_its_symbol() {
+        // As for a command: an Unknown cancel reconciles; only a sent placing
+        // scope that fails marks its symbol uncertain.
         let (mut e, token) = one_root(&["c1"]);
         release(&mut e, token, 2.);
         reply(&mut e, token, 3., 503, "gateway");
         assert!(e.venue.notices[0].contains("cancel: Unknown"), "{:?}", e.venue.notices);
-        assert!(e.io.core.order_locks.uncertain("BTCUSD"));
+        let btc = Some(vec!["BTCUSD".to_owned()]);
+        assert!(
+            e.io.core.reconcile_due.iter().any(|(symbols, _)| *symbols == btc)
+                || e.venue.reconciles.contains(&btc),
+            "a reconcile read for the symbol is queued"
+        );
+        assert!(!e.io.core.order_locks.uncertain("BTCUSD"));
     }
     #[test]
     fn a_settled_notice_runs_outside_any_entry_and_may_admit_the_next_group() {
