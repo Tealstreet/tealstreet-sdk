@@ -1078,6 +1078,13 @@ mod serial_plans {
     }
 
     #[test]
+    fn serial_07_an_id_less_known_partial_call_is_an_effect_before_a_refusal() {
+        let error = failed(&refusals(false, false, &["mixed:", "reject"]))
+            .expect("a refusal without the flag fails");
+        assert_eq!(error.outcome, None, "the known-partial call took effect");
+    }
+
+    #[test]
     fn serial_07_a_not_sent_first_call_fails_with_the_flag_true() {
         let mut e = engine(Serial {
             total: 3,
