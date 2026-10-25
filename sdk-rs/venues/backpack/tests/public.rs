@@ -12,7 +12,16 @@ fn http(e: &mut Driver, needle: &str) -> HttpRequest {
     http_at(e, needle, 0.)
 }
 fn http_at(e: &mut Driver, needle: &str, now: f64) -> HttpRequest {
-    safe_cex_engine::test_support::prepared_actions(e, now)
+    let mut actions = safe_cex_engine::test_support::prepared_actions(e, now);
+    let handoff = actions.iter().find_map(|action| match action {
+        Action::SetTimer { timer, at_ms } if *at_ms == now => Some(*timer),
+        _ => None,
+    });
+    if let Some(timer) = handoff {
+        e.handle(now, Event::TimerFired { timer });
+        actions.extend(safe_cex_engine::test_support::prepared_actions(e, now));
+    }
+    actions
         .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.contains(needle) => Some(r),
@@ -86,13 +95,16 @@ fn seed() -> (Driver, SocketId) {
     (e, socket)
 }
 fn subscribe(e: &mut Driver) -> HttpRequest {
+    subscribe_at(e, 0.0)
+}
+fn subscribe_at(e: &mut Driver, now: f64) -> HttpRequest {
     e.handle(
-        0.0,
+        now,
         Event::Command(Command::SubscribeOrderBook {
             symbol: "SOL_USDC_PERP".into(),
         }),
     );
-    http(e, "depth")
+    http_at(e, "depth", now)
 }
 fn delta(e: &mut Driver, socket: SocketId, first: u64, last: u64) {
     let text = format!(
@@ -624,15 +636,15 @@ fn rest_query_success_failure_and_stream_resubscription_have_independent_state()
         }),
     );
     e.drain_actions().for_each(drop);
-    let new_snapshot = subscribe(&mut e);
-    reply(&mut e, &request, r#"{"bids":[],"asks":[]}"#);
+    let new_snapshot = subscribe_at(&mut e, 3.0);
+    reply_at(&mut e, &request, 3.0, r#"{"bids":[],"asks":[]}"#);
     assert!(
         e.drain_actions()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 79, .. }))),
         "independent query survives subscription generation replacement"
     );
     assert!(e.venue().book("SOL_USDC_PERP").is_none());
-    reply(&mut e, &new_snapshot, SNAP);
+    reply_at(&mut e, &new_snapshot, 3.0, SNAP);
     assert_eq!(
         e.venue().book("SOL_USDC_PERP").unwrap().bids(),
         [(140.0, 1.0), (139.0, 2.0)]
