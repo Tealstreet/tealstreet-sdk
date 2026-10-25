@@ -936,6 +936,10 @@ pub fn topic(text: &str) -> Option<&str> {
 }
 
 #[cfg(test)]
+#[path = "wire_rows/parity_tests.rs"]
+mod row_parity_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
