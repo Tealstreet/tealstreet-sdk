@@ -6449,31 +6449,6 @@ distinguish the following:
 
 
 
-## Retained command readiness
-
-With the engine's `http-plans` feature, native FIFO commands can park their own
-Preflight during genuine entry and activate it once after a predecessor physically
-retires. They keep their original command generation; waiting creates no request,
-timer or artificial deadline. Final native Plan admission establishes its bound.
-A predecessor's HTTP DATA cannot donate command-entry or response authority to
-the next command. Cleanup returns only an already-parked handle; actual activation
-runs after cleanup, callback exit and the execution sweep.
-
-A ready callback must finish, submit a bounded prerequisite read or admit its Plan.
-An unhandled callback or a selected read with no submitted HTTP fails once with
-Internal. ReadOnly has no write outcome; a truly unissued mutation is NotSent.
-NX consumes that one terminal and keeps any prior uncertain effects for ordinary
-reconciliation. Ready custody cannot submit or retire another command's work.
-Root expiry and preparation refusal wake the successor in the same engine event;
-no unrelated feed event is needed. No host wire or signer capability is added.
-
-While either retained-Preflight readiness or Plan readiness owns the callback,
-Session creation, derived legs, retirement and waiter changes refuse with State
-before reserving IDs or consuming timers/continuations. Session-ready/failed
-drains return empty; session_wait returns its pending unchanged. Read-only
-session_live and the active Plan's own APIs remain available. Ordinary Session,
-socket, timer and startup callbacks retain their existing Session authority.
-
 ## Selected caller-wait roots and physical history pages
 
 Signed plain command reads can retain one selected identity, slot, route and
@@ -8034,55 +8009,6 @@ still projects the one shared journal, including accepted IDs and uncertainty.
 
 BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
 The core declaration alone does not migrate either venue or remove legacy sites.
-
-### Bybit fee, account info and wallet reads on managed authority (slice 1d-i)
-
-| Change | Outcome | NX handling |
-| --- | --- | --- |
-| The startup fee read, account info and the wallet are signed Background reads with a 20 s window | An expired fee read keeps its contract (a warning, empty fees, markets still publish); an expired account-info or wallet read takes its existing failure path | None. |
-| Re-reads after a signature/timestamp refusal | Once, re-signed, only on a native `10002`/`10004`; a message that merely mentions `recv_window` under another code is a plain failure (was a text-matched resend). Bybit's server clock is still observed from the refusal | None. |
-| Hyro | Unchanged: no account-info read and an empty fee map; its wallet read takes the same managed path | None. |
-
-### Bybit order and position snapshots on managed authority (slice 1d-ii)
-
-| Change | Outcome | NX handling |
-| --- | --- | --- |
-| Each order or position snapshot is one Background owner: every page, settle coin and cursor is a leg with a 20 s window, inside a 60 s window for the whole read | A snapshot that cannot finish in time fails like any other read and is retried by the existing cadence; rows and staleness rules are unchanged | None. |
-| The reconcile read after an uncertain or absent-order write | Always a fresh read; an older snapshot still in flight is abandoned (its late pages are ignored) instead of joined, so the fence clears only on rows read after the write | An order row may stay until that fresh read lands. |
-| Signed snapshot reads after a signature/timestamp refusal | Re-read once, only on a native `10002`/`10004` (no text match) | None. |
-
-### Bybit account identity on managed authority (slice 3)
-
-| Change | Command outcome | NX handling |
-| --- | --- | --- |
-| `fetchAccount` is a signed command read with a 20 s window, signed with the read key when configured | `timeout` when it expires; a late answer is ignored | None. |
-| Refusals before any request (invalid options, invalid read key, no primary key) | Typed `NotSent`: `invalidInput`, `invalidInput`, `authInvalid`; texts unchanged (was untyped) | Branch on `kind`. |
-| A signature/timestamp refusal | Re-read once only on a native `10002`/`10004`; text never re-reads | None. |
-
-### Bybit market refresh refusals (slice 2)
-
-| Change | Command outcome | NX handling |
-| --- | --- | --- |
-| `refreshMarkets` on a shared public-feed consumer | Typed `NotSent` `unsupported` under the command's admitted authority (was the same kind with no outcome); text unchanged | Refresh the shared source instead. |
-| Invalid options during a refresh walk | Every joined caller fails `NotSent` `invalidInput` at once (was silent until the 30 s deadline; not reachable through startup today) | None. |
-
-
-### Bybit Hyro non-placement commands on the ordinary Plan (Hyro H1)
-
-| Change | Command outcome | NX handling |
-| --- | --- | --- |
-| Hyro `amendOrder`, `cancelOrders`, `cancelSymbolOrders`, `setLeverage`, `setMarginType`, `setPositionMode` run as managed Plan calls (placements stay legacy until H2) | Unchanged shapes; each write leg has its own managed window | None. |
-| Any of them while Hyro private state is reconnecting | Typed `NotSent` before any I/O; a later leg that finds it recovering fails `NotSent` with the legacy recovering text | None. |
-| Hyro "not modified" / "already gone" answers | Classified by native code only (`34040` Satisfied; `110001`/`170213` cancel Satisfied and fenced); text no longer decides | None. |
-| A Hyro write resend | Only on a native `10002`/`10004`; host-error text never resends | None. |
-| An unknown or absent-order Hyro write | One fresh full Hyro snapshot reconciles it and clears the order fence (Hyro never cleared it before) | None. |
-
-Unverified wire assumption (ruling D): no HyroTrader cancel/amend reply has
-been captured. A reply without `result.orderId`, or an "already gone" answer
-without native `110001`/`170213`, seals Unknown and reconciles via a fresh
-snapshot; it is never reported gone. Follow-up: capture real Hyro cancel,
-amend and already-gone replies when a Hyro account is available, then pin
-them as fixtures.
 
 ### Bybit duplicate-link create refusals (R2)
 
