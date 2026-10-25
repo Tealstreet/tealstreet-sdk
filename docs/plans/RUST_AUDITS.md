@@ -3268,3 +3268,28 @@ with unchanged native text/kind. The provably dead private-phase arm is deleted;
 all earlier handlers and pre-entry refusals remain. Exactly two lib singleton
 hashes disappear; no catalog, account, trading, queue or signer adoption.
 All18 originals, library7 and trading42 pass; source reviews/CI remain separate.
+## Metadata/settings freshness core
+
+The engine/Store owner supplies BingX query coalescing, settings-write fences
+and background settings publication observations. WEEX retains its incoming
+managed Context leverage reader and native settings revision; only background
+settings proposals and Store write fences use this shared boundary. No WEEX
+query coalescing or joined managed adoption is claimed. Native financial fences
+remain separate. BingX Plan/observer production wiring still requires the
+reviewed planned-execution seam and independent-observer controls.
+[Implementation and limits](RUST_METADATA_FRESHNESS.md).
+
+## Paradex command candle custody
+
+One original caller Read root owns at most two native unsigned routes. Fresh
+20s/Never children use exact delivery guards before item/envelope parsing;
+released failures bind through managed dispatch and retained child ownership,
+then validate the original root before native fallback. Preparation refusals are
+strict. Native wire, financial codecs, limit behavior, row order and poll paths
+are retained. Two numeric terminal occurrences are removed (public 5->3,
+family 41->39); retained raw calls are subscription polling only.
+
+Architecture gate: No. The venue consumes shared root/child admission, delivery,
+retirement and typed failure APIs; it adds no issuer, local timer or authority map.
+The old saturated-candles raw-send expectation is explicitly superseded by shared
+Capacity; its literal native wire assertions remain after genuine recovery.

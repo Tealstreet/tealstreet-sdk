@@ -8,8 +8,6 @@ use crate::{Command, Query};
 use serde::Deserialize;
 
 /// Commands shared by JavaScript and native WebSocket clients.
-#[derive(Deserialize)]
-#[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
     RefreshMarkets {
         command: u32,
@@ -61,9 +59,7 @@ enum CommandIn {
     AmendOrder {
         command: u32,
         id: String,
-        #[serde(default)]
         price: Option<f64>,
-        #[serde(default)]
         amount: Option<f64>,
     },
     #[cfg(feature = "command-kucoinspot")]
@@ -71,21 +67,17 @@ enum CommandIn {
         command: u32,
         id: String,
         symbol: String,
-        #[serde(default)]
         price: Option<f64>,
-        #[serde(default)]
         amount: Option<f64>,
     },
     CancelSymbolOrders {
         command: u32,
         symbol: String,
     },
-    #[serde(rename_all = "camelCase")]
     SetLeverage {
         command: u32,
         symbol: String,
         leverage: f64,
-        #[serde(default)]
         side: Option<PositionSide>,
     },
     SetMarginType {
@@ -96,14 +88,12 @@ enum CommandIn {
     SetPositionMode {
         command: u32,
         hedged: bool,
-        #[serde(default)]
         symbol: Option<String>,
     },
     #[cfg(feature = "command-asterdex")]
     FetchStpMode {
         command: u32,
     },
-    #[serde(alias = "getAccount")]
     FetchAccount {
         command: u32,
     },
@@ -111,7 +101,6 @@ enum CommandIn {
     FetchOrderBook {
         command: u32,
         symbol: String,
-        #[serde(default)]
         limit: Option<u32>,
     },
     #[cfg(feature = "command-asterdex")]
@@ -122,7 +111,6 @@ enum CommandIn {
     #[cfg(feature = "command-schedule-cancel")]
     ScheduleCancel {
         command: u32,
-        #[serde(default)]
         time: Option<f64>,
     },
     FetchAccountTier {
@@ -137,11 +125,8 @@ enum CommandIn {
     },
     FetchClosedPositions {
         command: u32,
-        #[serde(default)]
         symbol: Option<String>,
-        #[serde(default)]
         from: Option<f64>,
-        #[serde(default)]
         to: Option<f64>,
     },
     FetchLeverage {
@@ -152,46 +137,29 @@ enum CommandIn {
         command: u32,
         symbol: String,
     },
-    #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
-        #[serde(default)]
         symbol: Option<String>,
-        #[serde(default)]
         order_id: Option<String>,
-        #[serde(default)]
         from: Option<f64>,
-        #[serde(default)]
         to: Option<f64>,
-        #[serde(default)]
         limit: Option<u32>,
     },
     FetchOrderHistory {
         command: u32,
-        #[serde(default)]
         symbol: Option<String>,
-        #[serde(default)]
         from: Option<f64>,
-        #[serde(default)]
         to: Option<f64>,
-        #[serde(default)]
         limit: Option<u32>,
     },
-    #[serde(rename_all = "camelCase")]
     FetchIncome {
         command: u32,
-        #[serde(default)]
         symbol: Option<String>,
-        #[serde(default)]
         income_type: Option<String>,
-        #[serde(default)]
         from: Option<f64>,
-        #[serde(default)]
         to: Option<f64>,
-        #[serde(default)]
         limit: Option<u32>,
     },
-    #[serde(rename_all = "camelCase")]
     FindOrderByClientOrderId {
         command: u32,
         symbol: String,
@@ -200,21 +168,684 @@ enum CommandIn {
     FetchPublicTrades {
         command: u32,
         symbol: String,
-        #[serde(default)]
         limit: Option<u32>,
     },
-    #[serde(rename_all = "camelCase")]
     FetchCandles {
         command: u32,
         symbol: String,
         interval: Interval,
-        #[serde(default)]
         limit: Option<u32>,
-        #[serde(default)]
         from: Option<f64>,
-        #[serde(default)]
         to: Option<f64>,
     },
+}
+
+/// The command tag alone. A variant identifier, so a non-string or unknown
+/// tag fails exactly as the derived internally tagged enum did.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(variant_identifier, rename_all = "camelCase")]
+enum Op {
+    RefreshMarkets,
+    #[cfg(feature = "command-options")]
+    FetchOptionChain,
+    #[cfg(feature = "command-options")]
+    FetchOptionExpiries,
+    #[cfg(feature = "command-options")]
+    FetchAccountGreeks,
+    SetTickerSymbols,
+    SubscribeOrderBook,
+    UnsubscribeOrderBook,
+    SubscribeCandles,
+    UnsubscribeCandles,
+    PlaceOrders,
+    CancelOrders,
+    #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
+    CancelOrdersWithSymbols,
+    AmendOrder,
+    #[cfg(feature = "command-kucoinspot")]
+    AmendOrderWithSymbol,
+    CancelSymbolOrders,
+    SetLeverage,
+    SetMarginType,
+    SetPositionMode,
+    #[cfg(feature = "command-asterdex")]
+    FetchStpMode,
+    #[serde(alias = "getAccount")]
+    FetchAccount,
+    #[cfg(feature = "command-order-book")]
+    FetchOrderBook,
+    #[cfg(feature = "command-asterdex")]
+    SetStpMode,
+    #[cfg(feature = "command-schedule-cancel")]
+    ScheduleCancel,
+    FetchAccountTier,
+    SetAccountTier,
+    FetchBalanceInfo,
+    FetchClosedPositions,
+    FetchLeverage,
+    FetchMaxLeverage,
+    FetchFills,
+    FetchOrderHistory,
+    FetchIncome,
+    FindOrderByClientOrderId,
+    FetchPublicTrades,
+    FetchCandles,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::RefreshMarkets with 1 element")]
+struct RefreshMarketsIn {
+    command: u32,
+}
+
+#[cfg(feature = "command-options")]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchOptionChain with 2 elements")]
+struct FetchOptionChainIn {
+    command: u32,
+    query: crate::model::OptionChainQuery,
+}
+
+#[cfg(feature = "command-options")]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchOptionExpiries with 2 elements")]
+struct FetchOptionExpiriesIn {
+    command: u32,
+    underlying: String,
+}
+
+#[cfg(feature = "command-options")]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchAccountGreeks with 1 element")]
+struct FetchAccountGreeksIn {
+    command: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::SetTickerSymbols with 1 element")]
+struct SetTickerSymbolsIn {
+    symbols: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::SubscribeOrderBook with 1 element")]
+struct SubscribeOrderBookIn {
+    symbol: String,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::UnsubscribeOrderBook with 1 element")]
+struct UnsubscribeOrderBookIn {
+    symbol: String,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::SubscribeCandles with 2 elements")]
+struct SubscribeCandlesIn {
+    symbol: String,
+    interval: Interval,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::UnsubscribeCandles with 2 elements")]
+struct UnsubscribeCandlesIn {
+    symbol: String,
+    interval: Interval,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::PlaceOrders with 2 elements")]
+struct PlaceOrdersIn {
+    command: u32,
+    orders: Vec<PlaceOrderOpts>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::CancelOrders with 2 elements")]
+struct CancelOrdersIn {
+    command: u32,
+    ids: Vec<String>,
+}
+
+#[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::CancelOrdersWithSymbols with 2 elements")]
+struct CancelOrdersWithSymbolsIn {
+    command: u32,
+    orders: Vec<CancelOrderRef>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::AmendOrder with 4 elements")]
+struct AmendOrderIn {
+    command: u32,
+    id: String,
+    #[serde(default)]
+    price: Option<f64>,
+    #[serde(default)]
+    amount: Option<f64>,
+}
+
+#[cfg(feature = "command-kucoinspot")]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::AmendOrderWithSymbol with 5 elements")]
+struct AmendOrderWithSymbolIn {
+    command: u32,
+    id: String,
+    symbol: String,
+    #[serde(default)]
+    price: Option<f64>,
+    #[serde(default)]
+    amount: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::CancelSymbolOrders with 2 elements")]
+struct CancelSymbolOrdersIn {
+    command: u32,
+    symbol: String,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    expecting = "struct variant CommandIn::SetLeverage with 4 elements"
+)]
+struct SetLeverageIn {
+    command: u32,
+    symbol: String,
+    leverage: f64,
+    #[serde(default, deserialize_with = "crate::model::replayed_enum::optional")]
+    side: Option<PositionSide>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::SetMarginType with 3 elements")]
+struct SetMarginTypeIn {
+    command: u32,
+    symbol: String,
+    isolated: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::SetPositionMode with 3 elements")]
+struct SetPositionModeIn {
+    command: u32,
+    hedged: bool,
+    #[serde(default)]
+    symbol: Option<String>,
+}
+
+#[cfg(feature = "command-asterdex")]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchStpMode with 1 element")]
+struct FetchStpModeIn {
+    command: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchAccount with 1 element")]
+struct FetchAccountIn {
+    command: u32,
+}
+
+#[cfg(feature = "command-order-book")]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchOrderBook with 3 elements")]
+struct FetchOrderBookIn {
+    command: u32,
+    symbol: String,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[cfg(feature = "command-asterdex")]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::SetStpMode with 2 elements")]
+struct SetStpModeIn {
+    command: u32,
+    #[serde(deserialize_with = "crate::model::replayed_enum::required")]
+    mode: StpMode,
+}
+
+#[cfg(feature = "command-schedule-cancel")]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::ScheduleCancel with 2 elements")]
+struct ScheduleCancelIn {
+    command: u32,
+    #[serde(default)]
+    time: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchAccountTier with 1 element")]
+struct FetchAccountTierIn {
+    command: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::SetAccountTier with 2 elements")]
+struct SetAccountTierIn {
+    command: u32,
+    tier: String,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchBalanceInfo with 1 element")]
+struct FetchBalanceInfoIn {
+    command: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchClosedPositions with 4 elements")]
+struct FetchClosedPositionsIn {
+    command: u32,
+    #[serde(default)]
+    symbol: Option<String>,
+    #[serde(default)]
+    from: Option<f64>,
+    #[serde(default)]
+    to: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchLeverage with 2 elements")]
+struct FetchLeverageIn {
+    command: u32,
+    symbol: String,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchMaxLeverage with 2 elements")]
+struct FetchMaxLeverageIn {
+    command: u32,
+    symbol: String,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    expecting = "struct variant CommandIn::FetchFills with 6 elements"
+)]
+struct FetchFillsIn {
+    command: u32,
+    #[serde(default)]
+    symbol: Option<String>,
+    #[serde(default)]
+    order_id: Option<String>,
+    #[serde(default)]
+    from: Option<f64>,
+    #[serde(default)]
+    to: Option<f64>,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchOrderHistory with 5 elements")]
+struct FetchOrderHistoryIn {
+    command: u32,
+    #[serde(default)]
+    symbol: Option<String>,
+    #[serde(default)]
+    from: Option<f64>,
+    #[serde(default)]
+    to: Option<f64>,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    expecting = "struct variant CommandIn::FetchIncome with 6 elements"
+)]
+struct FetchIncomeIn {
+    command: u32,
+    #[serde(default)]
+    symbol: Option<String>,
+    #[serde(default)]
+    income_type: Option<String>,
+    #[serde(default)]
+    from: Option<f64>,
+    #[serde(default)]
+    to: Option<f64>,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    expecting = "struct variant CommandIn::FindOrderByClientOrderId with 3 elements"
+)]
+struct FindOrderByClientOrderIdIn {
+    command: u32,
+    symbol: String,
+    client_order_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::FetchPublicTrades with 3 elements")]
+struct FetchPublicTradesIn {
+    command: u32,
+    symbol: String,
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    expecting = "struct variant CommandIn::FetchCandles with 6 elements"
+)]
+struct FetchCandlesIn {
+    command: u32,
+    symbol: String,
+    interval: Interval,
+    #[serde(default)]
+    limit: Option<u32>,
+    #[serde(default)]
+    from: Option<f64>,
+    #[serde(default)]
+    to: Option<f64>,
+}
+
+/// Pass 2: only the chosen variant's payload, straight from the text.
+fn decode_payload(op: Op, json: &str) -> Result<CommandIn, serde_json::Error> {
+    Ok(match op {
+        Op::RefreshMarkets => {
+            let RefreshMarketsIn { command } = payload(json)?;
+            CommandIn::RefreshMarkets { command }
+        }
+        #[cfg(feature = "command-options")]
+        Op::FetchOptionChain => {
+            let FetchOptionChainIn { command, query } = payload(json)?;
+            CommandIn::FetchOptionChain { command, query }
+        }
+        #[cfg(feature = "command-options")]
+        Op::FetchOptionExpiries => {
+            let FetchOptionExpiriesIn {
+                command,
+                underlying,
+            } = payload(json)?;
+            CommandIn::FetchOptionExpiries {
+                command,
+                underlying,
+            }
+        }
+        #[cfg(feature = "command-options")]
+        Op::FetchAccountGreeks => {
+            let FetchAccountGreeksIn { command } = payload(json)?;
+            CommandIn::FetchAccountGreeks { command }
+        }
+        Op::SetTickerSymbols => {
+            let SetTickerSymbolsIn { symbols } = payload(json)?;
+            CommandIn::SetTickerSymbols { symbols }
+        }
+        Op::SubscribeOrderBook => {
+            let SubscribeOrderBookIn { symbol } = payload(json)?;
+            CommandIn::SubscribeOrderBook { symbol }
+        }
+        Op::UnsubscribeOrderBook => {
+            let UnsubscribeOrderBookIn { symbol } = payload(json)?;
+            CommandIn::UnsubscribeOrderBook { symbol }
+        }
+        Op::SubscribeCandles => {
+            let SubscribeCandlesIn { symbol, interval } = payload(json)?;
+            CommandIn::SubscribeCandles { symbol, interval }
+        }
+        Op::UnsubscribeCandles => {
+            let UnsubscribeCandlesIn { symbol, interval } = payload(json)?;
+            CommandIn::UnsubscribeCandles { symbol, interval }
+        }
+        Op::PlaceOrders => {
+            let PlaceOrdersIn { command, orders } = payload(json)?;
+            CommandIn::PlaceOrders { command, orders }
+        }
+        Op::CancelOrders => {
+            let CancelOrdersIn { command, ids } = payload(json)?;
+            CommandIn::CancelOrders { command, ids }
+        }
+        #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
+        Op::CancelOrdersWithSymbols => {
+            let CancelOrdersWithSymbolsIn { command, orders } = payload(json)?;
+            CommandIn::CancelOrdersWithSymbols { command, orders }
+        }
+        Op::AmendOrder => {
+            let AmendOrderIn {
+                command,
+                id,
+                price,
+                amount,
+            } = payload(json)?;
+            CommandIn::AmendOrder {
+                command,
+                id,
+                price,
+                amount,
+            }
+        }
+        #[cfg(feature = "command-kucoinspot")]
+        Op::AmendOrderWithSymbol => {
+            let AmendOrderWithSymbolIn {
+                command,
+                id,
+                symbol,
+                price,
+                amount,
+            } = payload(json)?;
+            CommandIn::AmendOrderWithSymbol {
+                command,
+                id,
+                symbol,
+                price,
+                amount,
+            }
+        }
+        Op::CancelSymbolOrders => {
+            let CancelSymbolOrdersIn { command, symbol } = payload(json)?;
+            CommandIn::CancelSymbolOrders { command, symbol }
+        }
+        Op::SetLeverage => {
+            let SetLeverageIn {
+                command,
+                symbol,
+                leverage,
+                side,
+            } = payload(json)?;
+            CommandIn::SetLeverage {
+                command,
+                symbol,
+                leverage,
+                side,
+            }
+        }
+        Op::SetMarginType => {
+            let SetMarginTypeIn {
+                command,
+                symbol,
+                isolated,
+            } = payload(json)?;
+            CommandIn::SetMarginType {
+                command,
+                symbol,
+                isolated,
+            }
+        }
+        Op::SetPositionMode => {
+            let SetPositionModeIn {
+                command,
+                hedged,
+                symbol,
+            } = payload(json)?;
+            CommandIn::SetPositionMode {
+                command,
+                hedged,
+                symbol,
+            }
+        }
+        #[cfg(feature = "command-asterdex")]
+        Op::FetchStpMode => {
+            let FetchStpModeIn { command } = payload(json)?;
+            CommandIn::FetchStpMode { command }
+        }
+        Op::FetchAccount => {
+            let FetchAccountIn { command } = payload(json)?;
+            CommandIn::FetchAccount { command }
+        }
+        #[cfg(feature = "command-order-book")]
+        Op::FetchOrderBook => {
+            let FetchOrderBookIn {
+                command,
+                symbol,
+                limit,
+            } = payload(json)?;
+            CommandIn::FetchOrderBook {
+                command,
+                symbol,
+                limit,
+            }
+        }
+        #[cfg(feature = "command-asterdex")]
+        Op::SetStpMode => {
+            let SetStpModeIn { command, mode } = payload(json)?;
+            CommandIn::SetStpMode { command, mode }
+        }
+        #[cfg(feature = "command-schedule-cancel")]
+        Op::ScheduleCancel => {
+            let ScheduleCancelIn { command, time } = payload(json)?;
+            CommandIn::ScheduleCancel { command, time }
+        }
+        Op::FetchAccountTier => {
+            let FetchAccountTierIn { command } = payload(json)?;
+            CommandIn::FetchAccountTier { command }
+        }
+        Op::SetAccountTier => {
+            let SetAccountTierIn { command, tier } = payload(json)?;
+            CommandIn::SetAccountTier { command, tier }
+        }
+        Op::FetchBalanceInfo => {
+            let FetchBalanceInfoIn { command } = payload(json)?;
+            CommandIn::FetchBalanceInfo { command }
+        }
+        Op::FetchClosedPositions => {
+            let FetchClosedPositionsIn {
+                command,
+                symbol,
+                from,
+                to,
+            } = payload(json)?;
+            CommandIn::FetchClosedPositions {
+                command,
+                symbol,
+                from,
+                to,
+            }
+        }
+        Op::FetchLeverage => {
+            let FetchLeverageIn { command, symbol } = payload(json)?;
+            CommandIn::FetchLeverage { command, symbol }
+        }
+        Op::FetchMaxLeverage => {
+            let FetchMaxLeverageIn { command, symbol } = payload(json)?;
+            CommandIn::FetchMaxLeverage { command, symbol }
+        }
+        Op::FetchFills => {
+            let FetchFillsIn {
+                command,
+                symbol,
+                order_id,
+                from,
+                to,
+                limit,
+            } = payload(json)?;
+            CommandIn::FetchFills {
+                command,
+                symbol,
+                order_id,
+                from,
+                to,
+                limit,
+            }
+        }
+        Op::FetchOrderHistory => {
+            let FetchOrderHistoryIn {
+                command,
+                symbol,
+                from,
+                to,
+                limit,
+            } = payload(json)?;
+            CommandIn::FetchOrderHistory {
+                command,
+                symbol,
+                from,
+                to,
+                limit,
+            }
+        }
+        Op::FetchIncome => {
+            let FetchIncomeIn {
+                command,
+                symbol,
+                income_type,
+                from,
+                to,
+                limit,
+            } = payload(json)?;
+            CommandIn::FetchIncome {
+                command,
+                symbol,
+                income_type,
+                from,
+                to,
+                limit,
+            }
+        }
+        Op::FindOrderByClientOrderId => {
+            let FindOrderByClientOrderIdIn {
+                command,
+                symbol,
+                client_order_id,
+            } = payload(json)?;
+            CommandIn::FindOrderByClientOrderId {
+                command,
+                symbol,
+                client_order_id,
+            }
+        }
+        Op::FetchPublicTrades => {
+            let FetchPublicTradesIn {
+                command,
+                symbol,
+                limit,
+            } = payload(json)?;
+            CommandIn::FetchPublicTrades {
+                command,
+                symbol,
+                limit,
+            }
+        }
+        Op::FetchCandles => {
+            let FetchCandlesIn {
+                command,
+                symbol,
+                interval,
+                limit,
+                from,
+                to,
+            } = payload(json)?;
+            CommandIn::FetchCandles {
+                command,
+                symbol,
+                interval,
+                limit,
+                from,
+                to,
+            }
+        }
+    })
 }
 
 impl From<CommandIn> for Command {
@@ -452,7 +1083,187 @@ impl From<CommandIn> for Command {
 // Inline both boundaries to avoid copying a large command enum across crates.
 #[inline(always)]
 pub fn decode_command(json: &str) -> Result<Command, serde_json::Error> {
-    serde_json::from_str::<CommandIn>(json).map(Command::from)
+    decode_command_in(json).map(Command::from)
+}
+
+/// Two passes over the same text replace serde's buffered internally tagged
+/// enum. Pass 1 reads the tag and validates every other value exactly as the
+/// buffer did; pass 2 parses only the chosen variant's payload.
+#[inline(never)]
+fn decode_command_in(json: &str) -> Result<CommandIn, serde_json::Error> {
+    let Tag(op) = serde_json::from_str(json)?;
+    decode_payload(op, json).map_err(|error| {
+        // The buffered replay raised payload errors without a position.
+        if error.classify() != serde_json::error::Category::Data || error.line() == 0 {
+            return error;
+        }
+        let text = error.to_string();
+        let message = text.rfind(" at line ").map_or(&text[..], |at| &text[..at]);
+        <serde_json::Error as serde::de::Error>::custom(message)
+    })
+}
+
+/// Pass 1: the tag, from a map key or a sequence's first element. Every other
+/// value, at any depth, is parsed in full (not skimmed) so number range and
+/// escape errors stay where the buffered decoder raised them.
+struct Tag(Op);
+
+impl<'de> Deserialize<'de> for Tag {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Tag;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("internally tagged enum CommandIn")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Tag, A::Error> {
+                let op = seq
+                    .next_element::<Op>()?
+                    .ok_or_else(|| serde::de::Error::missing_field("op"))?;
+                while seq.next_element::<Validated>()?.is_some() {}
+                Ok(Tag(op))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Tag, A::Error> {
+                let mut op = None;
+                while let Some(key) = map.next_key::<std::borrow::Cow<'de, str>>()? {
+                    if key == "op" {
+                        if op.is_some() {
+                            return Err(serde::de::Error::duplicate_field("op"));
+                        }
+                        op = Some(map.next_value::<Op>()?);
+                    } else {
+                        map.next_value::<Validated>()?;
+                    }
+                }
+                op.map(Tag)
+                    .ok_or_else(|| serde::de::Error::missing_field("op"))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
+/// Any JSON value, parsed in full and discarded.
+struct Validated;
+
+impl<'de> Deserialize<'de> for Validated {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Validated;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("any value")
+            }
+            fn visit_bool<E>(self, _: bool) -> Result<Validated, E> {
+                Ok(Validated)
+            }
+            fn visit_i64<E>(self, _: i64) -> Result<Validated, E> {
+                Ok(Validated)
+            }
+            fn visit_u64<E>(self, _: u64) -> Result<Validated, E> {
+                Ok(Validated)
+            }
+            fn visit_f64<E>(self, _: f64) -> Result<Validated, E> {
+                Ok(Validated)
+            }
+            fn visit_str<E>(self, _: &str) -> Result<Validated, E> {
+                Ok(Validated)
+            }
+            fn visit_unit<E>(self) -> Result<Validated, E> {
+                Ok(Validated)
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Validated, A::Error> {
+                while seq.next_element::<Validated>()?.is_some() {}
+                Ok(Validated)
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Validated, A::Error> {
+                while map.next_key::<Validated>()?.is_some() {
+                    map.next_value::<Validated>()?;
+                }
+                Ok(Validated)
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
+/// Pass 2 for one variant: its struct from the map (unknown keys, the tag
+/// included, were validated in pass 1), or the sequence after its tag.
+fn payload<P: serde::de::DeserializeOwned>(json: &str) -> Result<P, serde_json::Error> {
+    struct Visitor<P>(std::marker::PhantomData<P>);
+    impl<'de, P: Deserialize<'de>> serde::de::Visitor<'de> for Visitor<P> {
+        type Value = P;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("internally tagged enum CommandIn")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<P, A::Error> {
+            P::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<P, A::Error> {
+            seq.next_element::<serde::de::IgnoredAny>()?;
+            let mut counted = Counted {
+                seq: &mut seq,
+                taken: 0,
+            };
+            let value = P::deserialize(serde::de::value::SeqAccessDeserializer::new(&mut counted))?;
+            let taken = counted.taken;
+            let mut extra = 0;
+            while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                extra += 1;
+            }
+            if extra > 0 {
+                return Err(serde::de::Error::invalid_length(
+                    taken + extra,
+                    &InSequence(taken),
+                ));
+            }
+            Ok(value)
+        }
+    }
+    let mut deserializer = serde_json::Deserializer::from_str(json);
+    let value = serde::Deserializer::deserialize_any(
+        &mut deserializer,
+        Visitor::<P>(std::marker::PhantomData),
+    )?;
+    deserializer.end()?;
+    Ok(value)
+}
+
+/// Counts the elements a payload consumed from the shared sequence.
+struct Counted<'a, A> {
+    seq: &'a mut A,
+    taken: usize,
+}
+
+impl<'de, A: serde::de::SeqAccess<'de>> serde::de::SeqAccess<'de> for &mut Counted<'_, A> {
+    type Error = A::Error;
+    fn next_element_seed<T: serde::de::DeserializeSeed<'de>>(
+        &mut self,
+        seed: T,
+    ) -> Result<Option<T::Value>, A::Error> {
+        let next = self.seq.next_element_seed(seed)?;
+        self.taken += usize::from(next.is_some());
+        Ok(next)
+    }
+}
+
+/// serde's own wording for a sequence with leftover elements.
+struct InSequence(usize);
+
+impl serde::de::Expected for InSequence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0 == 1 {
+            f.write_str("1 element in sequence")
+        } else {
+            write!(f, "{} elements in sequence", self.0)
+        }
+    }
 }
 
 /// Host configuration is outside the command/result ID domain.
@@ -601,6 +1412,10 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
         timeout_ms,
     })
 }
+
+#[cfg(test)]
+#[path = "command_wire_compat_tests.rs"]
+mod wire_compat;
 
 #[cfg(test)]
 mod tests {

@@ -1184,6 +1184,16 @@ impl WeexFutures {
                 self.account.invalidate_orders();
             } else {
                 self.account.invalidate_settings();
+                let scope = match &step.call {
+                    Call::Leverage { symbol, .. } | Call::Margin { symbol, .. } => {
+                        Some(symbol.as_str())
+                    }
+                    _ => None,
+                };
+                if let Err(error) = cx.store.metadata_write_started(command, scope) {
+                    let _ = cx.fail_plan(&plan, error);
+                    return;
+                }
             }
             match &step.call {
                 Call::Place { orders, .. } => {
@@ -1288,6 +1298,9 @@ impl WeexFutures {
         request: Request,
         error: VenueError,
     ) {
+        // Engine failure routing consumes this request's Pending exactly once;
+        // a late failure has no Pending and cannot reach a reused command here.
+        cx.store.metadata_write_finished(request.command);
         rollback(
             cx,
             &request.call,
@@ -1323,6 +1336,7 @@ impl WeexFutures {
         {
             return;
         }
+        cx.store.metadata_write_finished(request.command);
         if context::rate_limited(cx, &request.context) {
             self.paused_until = self
                 .paused_until

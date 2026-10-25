@@ -78,7 +78,7 @@ pub fn bootstrap_with_meta(
         &r,
         r#"{"success":true,"code":0,"data":{"instrumentId":1,"lastPrice":"100","markPx":"100","oraclePx":"100"}}"#,
     );
-    actions.extend(e.drain_actions());
+    actions.extend(safe_cex_engine::test_support::prepared_actions(&mut e, NOW));
     let timer = actions
         .iter()
         .find_map(|a| match a {
@@ -87,7 +87,10 @@ pub fn bootstrap_with_meta(
         })
         .unwrap();
     e.handle(NOW + 25.0, Event::TimerFired { timer });
-    actions.extend(e.drain_actions());
+    actions.extend(safe_cex_engine::test_support::prepared_actions(
+        &mut e,
+        NOW + 25.0,
+    ));
     let socket = actions
         .iter()
         .find_map(|a| match a {
