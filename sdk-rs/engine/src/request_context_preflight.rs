@@ -205,25 +205,30 @@ impl<P> Cx<'_, P> {
         self.with_command_entry(operation, |cx, command| cx.issue_preflight(command, policy))
     }
 
-    /// Opt into the exact caller receipt cap before asynchronous Read work.
-    /// Missing receipt uses the shared typed refusal. Expired capture is Revoked
-    /// without effects; Fresh custody remains for reject_expired_command(Read).
+    /// Opt into the exact caller receipt cap. A ReadOnly cap bounds its Read
+    /// work; a WriteAfterReads cap bounds only the Preflight phase, and its
+    /// Plan never inherits it. Missing receipt uses the shared typed refusal.
+    /// Expired capture is Revoked without effects.
     pub fn begin_preflight_with_command_wait(
         &mut self,
         policy: PreflightPolicy,
     ) -> Result<Preflight, crate::request_context::CommandEntryError> {
         use crate::request_context::CommandEntryError;
-        if policy.purpose != PreflightPurpose::ReadOnly || !self.io.fresh_command_entry() {
+        let operation = match policy.purpose {
+            PreflightPurpose::ReadOnly => Operation::Read,
+            PreflightPurpose::WriteAfterReads => Operation::Mutation,
+        };
+        if !self.io.fresh_command_entry() {
             return Err(CommandEntryError::Revoked);
         }
         let cap = match self.io.command_receipt() {
             Ok(cap) => cap,
-            Err(reason) => return Err(self.reject_command_entry(Operation::Read, reason)),
+            Err(reason) => return Err(self.reject_command_entry(operation, reason)),
         };
         if !self.now.is_finite() || cap.1 - self.now < 1. {
             return Err(CommandEntryError::Revoked);
         }
-        self.with_command_entry(Operation::Read, |cx, command| {
+        self.with_command_entry(operation, |cx, command| {
             let preflight = cx.issue_preflight(command, policy)?;
             cx.io
                 .core

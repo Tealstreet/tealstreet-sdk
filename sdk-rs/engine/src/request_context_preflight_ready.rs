@@ -16,6 +16,12 @@ pub(super) enum Activation {
 }
 
 impl ContextRegistry {
+    /// Whether this Preflight still waits in its park, woken or not, so its
+    /// caller's cap still governs it.
+    pub(in crate::engine) fn preflight_waiting(&self, handle: &Preflight) -> bool {
+        self.preflight_state(handle)
+            .is_ok_and(|state| matches!(state.activation, Activation::Parked | Activation::Queued))
+    }
     pub(in crate::engine) fn end_preflight_admission(&mut self) {
         while let Some(handle) = self.preflight_initial.pop() {
             if let Ok(state) = self.preflight_state_mut(&handle)
@@ -178,11 +184,32 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Revoked);
         }
+        // A capped write Preflight's caller wait keeps running while it is parked.
+        let cap = state
+            .receipt_cap
+            .filter(|_| state.policy.purpose == PreflightPurpose::WriteAfterReads)
+            .map(|(_, cap)| cap);
+        let timer = match cap {
+            Some(_) => Some(crate::TimerId(
+                self.io.reserve_ids(1).ok_or(Error::Capacity)?.start,
+            )),
+            None => None,
+        };
         self.io
             .core
             .request_contexts
             .preflight_state_mut(handle)?
             .activation = Activation::Parked;
+        if let (Some(at_ms), Some(timer)) = (cap, timer) {
+            self.io
+                .core
+                .write_preflight_waits
+                .push((at_ms, handle.clone(), timer));
+            self.io
+                .core
+                .actions
+                .push(crate::Action::SetTimer { timer, at_ms });
+        }
         Ok(())
     }
 
@@ -359,7 +386,10 @@ impl crate::engine::CoreCx<'_> {
                 .request_contexts
                 .condition_preflights
                 .push((timer, handle.clone()));
-            self.io.core.actions.push(Action::SetTimer { timer, at_ms });
+            self.io
+                .core
+                .actions
+                .push(crate::Action::SetTimer { timer, at_ms });
         }
         Ok(())
     }

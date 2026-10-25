@@ -33,6 +33,15 @@ struct Probe {
     wake_expired: bool,
     /// uufub4 P2: the queued command inherits an earlier maybe-sent write.
     inherit: bool,
+    /// Exhaust resource IDs just before parking.
+    exhaust_before_park: bool,
+    park_results: Vec<Result<(), crate::request_context::Error>>,
+    /// Admit a serial Plan from the ready callback.
+    #[cfg(feature = "serial-plans")]
+    admit_on_ready: bool,
+    #[cfg(feature = "serial-plans")]
+    plans: Vec<crate::request_context::Plan>,
+    venue_timers: usize,
     ready: Vec<Preflight>,
 }
 
@@ -58,8 +67,18 @@ impl Venue for Probe {
                 if self.inherit {
                     cx.inherit_preflight_uncertainty(&preflight).unwrap();
                 }
-                cx.park_preflight(&preflight).unwrap();
-                self.queued.push(preflight);
+                if self.exhaust_before_park {
+                    cx.io.core.next_id = crate::resource_ids::ResourceIds::starting_at(
+                        crate::resource_ids::MAX_RESOURCE_ID + 1,
+                    );
+                }
+                let parked = cx.park_preflight(&preflight);
+                self.park_results.push(parked);
+                if parked.is_ok() {
+                    self.queued.push(preflight);
+                } else {
+                    let _ = cx.fail_preflight(&preflight, "park refused");
+                }
             }
             Err(error) => self.entries.push(Err(error)),
         }
@@ -76,14 +95,37 @@ impl Venue for Probe {
         let preflight = self.queued.remove(expired);
         self.wake_expired.then_some(preflight)
     }
-    fn on_http_preflight_ready(&mut self, _: &mut Cx<'_, ()>, preflight: &Preflight) {
+    fn on_http_preflight_ready(&mut self, _cx: &mut Cx<'_, ()>, preflight: &Preflight) {
         self.ready.push(preflight.clone());
+        self.queued
+            .retain(|queued| queued.owner() != preflight.owner());
+        #[cfg(feature = "serial-plans")]
+        if self.admit_on_ready {
+            let (plan, _) = _cx
+                .admit_serial_plan(
+                    preflight,
+                    crate::request_context::plan::SerialCall {
+                        operation: Operation::Mutation,
+                        timeout_ms: 20_000,
+                        attempts: 1,
+                    },
+                    crate::request_context::plan::SerialPolicy {
+                        credential: write_policy().write_credential.unwrap(),
+                        pacing: None,
+                        refusals_complete: false,
+                    },
+                )
+                .expect("admitted before the cap");
+            self.plans.push(plan);
+        }
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
     fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
     fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
-    fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+    fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {
+        self.venue_timers += 1;
+    }
     fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
     fn book(&self, _: &str) -> Option<&Book> {
         None
@@ -297,5 +339,106 @@ fn cap_expiry_releases_the_order_lock_for_the_next_command_on_the_symbol() {
         engine.venue.entries,
         vec![Ok(()), Ok(())],
         "an unsent expired command leaves no fence on BTCUSD"
+    );
+}
+
+/// Wake the oldest parked capped Preflight at `now` and dispatch it.
+fn wake(engine: &mut Engine<Probe>, now: f64) {
+    let parked = engine
+        .venue
+        .queued
+        .first()
+        .cloned()
+        .expect("a parked Preflight");
+    let mut cx = Cx {
+        now,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    cx.request_preflight_ready(&parked).unwrap();
+    engine.prepare_dispatch(now);
+}
+
+#[test]
+fn a_late_duplicate_cap_fire_never_reaches_the_venue() {
+    let (mut engine, actions) = queued(Probe::default());
+    let timer = cap_timer(&actions);
+    let at = 10. + f64::from(WAIT_MS);
+    engine.handle(at, Event::TimerFired { timer });
+    engine.handle(at + 5., Event::TimerFired { timer });
+    let settled: Vec<_> = engine.drain_actions().collect();
+    assert_eq!(failures(&settled, 2).len(), 1);
+    assert_eq!(
+        engine.venue.venue_timers, 0,
+        "the engine owns its cap timer"
+    );
+}
+
+#[test]
+fn a_park_without_a_timer_id_is_refused_and_tracks_nothing() {
+    let (engine, actions) = queued(Probe {
+        exhaust_before_park: true,
+        ..Probe::default()
+    });
+    assert_eq!(
+        engine.venue.park_results,
+        vec![Err(crate::request_context::Error::Capacity)]
+    );
+    assert!(engine.io.core.write_preflight_waits.is_empty());
+    assert!(!actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+}
+
+#[test]
+fn a_woken_sibling_leaves_its_cap_while_the_next_still_expires_on_time() {
+    let (mut engine, _) = queued(Probe::default());
+    engine.handle_command(20., place(3), Some(WAIT_MS)).unwrap();
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let third = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == 20. + f64::from(WAIT_MS) => Some(*timer),
+            _ => None,
+        })
+        .expect("command 3's own cap timer");
+    wake(&mut engine, 500.);
+    assert_eq!(engine.venue.ready.len(), 1, "command 2 woke before its cap");
+    let cleanup: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        cleanup
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer { .. })),
+        "the woken Preflight's cap timer is cleared"
+    );
+    assert_eq!(engine.io.core.write_preflight_waits.len(), 1);
+    engine.handle(20. + f64::from(WAIT_MS), Event::TimerFired { timer: third });
+    let settled: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        failures(&settled, 2).is_empty(),
+        "the woken command keeps running"
+    );
+    assert_eq!(
+        failures(&settled, 3).len(),
+        1,
+        "the sibling expires at its own cap"
+    );
+}
+
+#[cfg(feature = "serial-plans")]
+#[test]
+fn a_plan_admitted_before_the_cap_runs_past_it() {
+    let (mut engine, actions) = queued(Probe {
+        admit_on_ready: true,
+        ..Probe::default()
+    });
+    let timer = cap_timer(&actions);
+    wake(&mut engine, 500.);
+    assert_eq!(engine.venue.plans.len(), 1);
+    engine.drain_actions().for_each(drop);
+    engine.handle(10. + f64::from(WAIT_MS), Event::TimerFired { timer });
+    engine.prepare_dispatch(60_000.);
+    let settled: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        failures(&settled, 2).is_empty(),
+        "a write Plan never inherits the caller cap (RED18)"
     );
 }
