@@ -1,6 +1,6 @@
 # Credential-only trusted setup
 
-Status: PLAN, revision 4. Phase 2 (D1 + D2, D4 `MissingKey`) is #2132.
+Status: PLAN, revision 4. Phase 2 (D1 + D2, D4 `MissingKey`) landed as #2132 (`a2c914e2b24`).
 Revision 4 records zs5e83's G2-G6 answers (GRVT recipe plan `4e6c4f4f3bd`,
 `deaa151acb1`) and replaces the open G3 and G6 with D3's typed login intent and
 D6's per-operation Optional absence. ddi2il disposed revision 4 APPROVED on
