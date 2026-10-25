@@ -1589,6 +1589,7 @@ struct Io<P> {
     host_algorithms: Option<Vec<crate::signing::Algorithm>>,
     dispatch_now: f64,
     signing_admission: Vec<(Action, crate::signing::SignError)>,
+    signing_latch: SigningLatch,
     streams: crate::IdMap<RequestId, (ArrayAt, ItemCheck)>,
     incoming: crate::IdMap<RequestId, Incoming>,
     timers: crate::IdMap<TimerId, ()>,
@@ -1696,6 +1697,7 @@ impl<P> Default for Io<P> {
             host_algorithms: None,
             dispatch_now: 0.,
             signing_admission: Vec::new(),
+            signing_latch: SigningLatch::default(),
             streams: Default::default(),
             incoming: Default::default(),
             timers: Default::default(),
@@ -1908,11 +1910,19 @@ impl<P> Cx<'_, P> {
         self.io.private_feed_policy
     }
 
+    /// `SocketId(0)` stands for a connect the engine suppressed.
+    fn inert_socket(&self, socket: SocketId) -> bool {
+        socket.0 == 0
+            && (self.io.public_feed_policy != PublicFeedPolicy::Direct
+                || self.io.signing_latch.roles != 0)
+    }
+
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
         let spec = spec.into();
         if self.io.managed_socket_active()
             || spec.channel == Some(SocketChannel::Public)
                 && self.io.public_feed_policy != PublicFeedPolicy::Direct
+            || self.io.signing_latch.blocks(spec.channel.as_ref())
         {
             return SocketId(0);
         }
@@ -1974,7 +1984,7 @@ impl<P> Cx<'_, P> {
         if !self.managed_send_allowed(socket) {
             return;
         }
-        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
+        if self.inert_socket(socket) {
             return;
         }
         self.io.opaque_entry_activity();
@@ -2009,7 +2019,7 @@ impl<P> Cx<'_, P> {
     /// use this after revoking the epoch, before native invalidation; public
     /// close can then enter retirement without recursively invoking itself.
     fn close_socket_transport(&mut self, socket: SocketId) {
-        if socket.0 == 0 && self.io.public_feed_policy != PublicFeedPolicy::Direct {
+        if self.inert_socket(socket) {
             return;
         }
         self.io.opaque_entry_activity();
@@ -2178,13 +2188,16 @@ impl<P> Cx<'_, P> {
             .io
             .signing
             .stage(attempt, outbound.clone(), step, timer, self.now);
-        let error = staged.as_ref().err();
-        if error.is_some() {
+        if let Err(error) = staged {
             // Retain the continuation even when admission fails, so the engine
-            // reports a typed pre-dispatch failure instead of silently dropping it.
-            self.io
-                .signing_admission
-                .push((outbound, crate::signing::SignError::Unavailable));
+            // reports a typed pre-dispatch failure instead of silently dropping
+            // it. Only a latched missing key keeps its own kind.
+            let error = if error == crate::signing::SignError::MissingKey {
+                error
+            } else {
+                crate::signing::SignError::Unavailable
+            };
+            self.io.signing_admission.push((outbound, error));
             return;
         }
         if timer.0 != 0 {
@@ -3637,6 +3650,7 @@ impl<V: Venue> Engine<V> {
         };
         if let Event::Signed { attempt, result } = event {
             if !self.io.signing.is_managed(attempt) || self.signing_pending(attempt) {
+                self.provider_refused(attempt, &result);
                 self.sign_completed(now, attempt, result);
             }
             if self.venue.cancel_needs_stored_order() {
@@ -4510,6 +4524,27 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    /// A missing key on primary material latches signing (`SigningLatch`).
+    fn provider_refused(
+        &mut self,
+        attempt: RequestId,
+        result: &Result<crate::signing::SignResult, crate::signing::SignError>,
+    ) {
+        if let Err(crate::signing::SignError::MissingKey) = result {
+            let startup = self.startup_watch_at.is_some();
+            let io = &mut self.io;
+            let primary = io.signing.prepared_primary(attempt);
+            SigningLatch::missing_key(
+                &mut io.signing,
+                primary,
+                startup,
+                &mut io.actions,
+                &mut io.health,
+                io.min_level,
+            );
+        }
+    }
+
     fn sign_failed(&mut self, now: f64, outbound: Action, error: crate::signing::SignError) {
         let mut cx = Cx {
             now,
@@ -4527,6 +4562,21 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {
+                let io = &mut *cx.io;
+                // Records the role; managed feeds also stop on it.
+                #[cfg_attr(not(feature = "managed-sockets"), allow(unused_variables))]
+                let refused = io
+                    .signing_latch
+                    .socket_failed(&io.signing, &io.sockets, socket);
+                #[cfg(feature = "managed-sockets")]
+                if refused
+                    && cx.io.managed_socket_active()
+                    && let Some(epoch) = cx.io.socket_driver.state.socket_epoch(socket)
+                {
+                    cx.stop_socket_feed(epoch.feed());
+                    self.flush_http_owner_retirements();
+                    return;
+                }
                 if cx.io.managed_socket_active() {
                     cx.close(socket);
                 } else {
@@ -4988,10 +5038,23 @@ impl<V: Venue> Engine<V> {
                                 self.io.entropy.as_ref(),
                             ),
                             self.io.protocol_clock.revision(),
+                            &self.io.identities,
                         ) {
                             Ok(work) => work,
                             Err(error) => {
                                 let emitted = self.io.actions.len();
+                                if let Some(primary) = self.io.signing.take_credential_refusal() {
+                                    let startup = self.startup_watch_at.is_some();
+                                    let io = &mut self.io;
+                                    SigningLatch::missing_key(
+                                        &mut io.signing,
+                                        primary,
+                                        startup,
+                                        &mut io.actions,
+                                        &mut io.health,
+                                        io.min_level,
+                                    );
+                                }
                                 self.sign_completed(now, attempt, Err(error));
                                 self.queue_dispatch_callback_actions(&mut queued, emitted);
                                 continue;
@@ -5001,6 +5064,7 @@ impl<V: Venue> Engine<V> {
                             self.io.signer.as_ref().and_then(|s| s.sign_ready(&work))
                         {
                             let emitted = self.io.actions.len();
+                            self.provider_refused(attempt, &result);
                             self.sign_completed(now, attempt, result);
                             // Inline local completion retains original mixed action order.
                             self.queue_dispatch_callback_actions(&mut queued, emitted);
@@ -5422,6 +5486,71 @@ fn apply_signature(
 /// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
 pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
 
+/// Credential-level signing refusal. Non-generic, so the combined build holds
+/// one copy rather than one per venue engine.
+#[derive(Default)]
+struct SigningLatch {
+    /// Socket roles whose signing was refused; they are never reconnected.
+    roles: u8,
+}
+
+impl SigningLatch {
+    #[inline(never)]
+    fn blocks(&self, channel: Option<&SocketChannel>) -> bool {
+        channel.is_some_and(|channel| self.roles & (1 << SocketRoles::role(channel)) != 0)
+    }
+
+    /// Whether signing is latched; if so, the failed socket's role is too.
+    #[inline(never)]
+    fn socket_failed(
+        &mut self,
+        signing: &crate::signing_dispatch::Dispatch,
+        sockets: &SocketRoles,
+        socket: SocketId,
+    ) -> bool {
+        if !signing.refused() {
+            return false;
+        }
+        if let Some(role) = sockets.role_of(socket) {
+            self.roles |= 1 << role;
+        }
+        true
+    }
+
+    /// A key missing from primary material can never sign: fail once,
+    /// visibly, and during startup fail `start` (`Identities::primary_owns`).
+    #[inline(never)]
+    fn missing_key(
+        signing: &mut crate::signing_dispatch::Dispatch,
+        primary: bool,
+        startup: bool,
+        actions: &mut Vec<Action>,
+        health: &mut Health,
+        min_level: Level,
+    ) {
+        if !primary || !signing.refuse() {
+            return;
+        }
+        let error = crate::signing::SignError::MissingKey;
+        push_event(
+            actions,
+            health,
+            min_level,
+            LogEvent {
+                level: Level::Error,
+                code: log_code::CONFIG_INVALID,
+                message: format!("Signing cannot succeed with the installed credentials: {error}"),
+                fields: Vec::new(),
+            },
+        );
+        if startup {
+            actions.push(Action::Notice(Notice::StartupFailed {
+                error: error.venue_error(),
+            }));
+        }
+    }
+}
+
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
 #[derive(Default)]
 struct SocketRoles {
@@ -5439,6 +5568,12 @@ impl SocketRoles {
             SocketChannel::Private => 1,
             SocketChannel::Business => 2,
         }
+    }
+
+    fn role_of(&self, socket: SocketId) -> Option<u8> {
+        self.live
+            .iter()
+            .find_map(|(id, role)| (*id == socket).then_some(*role))
     }
 
     fn connected(&mut self, socket: SocketId, channel: &SocketChannel, health: &mut Health) {
