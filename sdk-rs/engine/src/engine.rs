@@ -922,6 +922,9 @@ struct PendingHttp<P> {
 
 #[path = "read_root_expiry.rs"]
 mod read_root_expiry;
+#[cfg(feature = "repair-mutations")]
+#[path = "repair_core.rs"]
+mod repair_core;
 #[path = "request_context_registry.rs"]
 mod request_context_registry;
 
@@ -1546,6 +1549,8 @@ struct IoCore {
     http_failure_kind: ErrorKind,
     // Status and headers of the managed write reply being delivered.
     http_write_reply: Option<(u16, String)>,
+    #[cfg(feature = "repair-mutations")]
+    repairs: repair_core::Repairs,
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     http_status_exempt: Option<RequestId>,
     // Reconcile reads the engine owes the venue, one per uncertain seal: the
@@ -1686,6 +1691,8 @@ impl Default for IoCore {
             http_history_failure: None,
             http_failure_kind: ErrorKind::Network,
             http_write_reply: None,
+            #[cfg(feature = "repair-mutations")]
+            repairs: Default::default(),
             #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
             http_status_exempt: None,
             #[cfg(feature = "order-locks")]
@@ -3173,6 +3180,16 @@ pub trait Venue {
     ) {
     }
 
+    /// A repair root ended or a snapshot mint was refused. Runs outside any
+    /// command entry, like `reconcile_uncertain`; it grants no new authority.
+    #[cfg(feature = "repair-mutations")]
+    fn on_repair_notice(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _notice: crate::repair::RepairNotice<'_>,
+    ) {
+    }
+
     /// A Plan Slot parked on a Session ended unissued because the Session was
     /// retired or failed. This runs in that Plan's ready custody: re-park the Slot
     /// on another live Session, or fail the Plan. Nothing was sent for it.
@@ -3928,6 +3945,8 @@ impl<V: Venue> Engine<V> {
         }
         self.handle_received(now, event);
         self.io.core.command_waits.end_receipt();
+        #[cfg(feature = "repair-mutations")]
+        self.flush_repair_notices(now);
     }
 
     /// Dispatch one host command with the caller's own wait. A non-finite
@@ -3952,6 +3971,8 @@ impl<V: Venue> Engine<V> {
         }
         self.handle_received(now, Event::Command(command));
         self.io.core.command_waits.end_receipt();
+        #[cfg(feature = "repair-mutations")]
+        self.flush_repair_notices(now);
         Ok(())
     }
 
@@ -4168,7 +4189,16 @@ impl<V: Venue> Engine<V> {
         let previous = std::mem::replace(&mut self.io.core.http_delivery, delivery.clone());
         #[cfg(feature = "managed-sockets")]
         let socket_message = self.io.core.socket_message.take();
+        #[cfg(feature = "repair-mutations")]
+        let previous_data = self.begin_repair_data(match (&event, &delivery) {
+            (Event::HttpResponse { request, .. } | Event::HttpEnd { request }, Some(_)) => {
+                Some(*request)
+            }
+            _ => None,
+        });
         self.handle_event_scoped(now, event, physical_timeout);
+        #[cfg(feature = "repair-mutations")]
+        self.end_repair_data(previous_data);
         #[cfg(feature = "http-plans")]
         {
             self.io.core.http_history_failure = None;
@@ -4180,6 +4210,10 @@ impl<V: Venue> Engine<V> {
         }
         if let Some(delivery) = delivery.as_ref() {
             self.io.core.request_contexts.exit_delivery(delivery);
+        }
+        #[cfg(feature = "repair-mutations")]
+        if let Some(delivery) = delivery.as_ref() {
+            self.repair_delivered(delivery, now);
         }
         self.flush_http_plans(now);
     }
