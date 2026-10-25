@@ -141,7 +141,8 @@ The classifier and reducer must agree on exact row correlation before source.
 The proposed call bound is 20,000 ms from call eligibility/admission through
 Prepare, signing, Bind and physical I/O, with attempts=1. Native trading supplies
 no explicit request timeout. This is a NEW contract, not native timeout parity;
-it needs the overseer's value disposition and CALLERS disclosure before source.
+the overseer approved that value and one-attempt/unbounded-root shape; CALLERS
+must disclose it before source.
 The serial root has no wall-clock and WriteAfterReads binds no caller receipt.
 A caller receipt expiry does not kill a queued/active multi-step job. Do not
 invent a 20 s whole-command cap. Delayed serial calls retain the existing API's
@@ -151,10 +152,10 @@ eligibility/window semantics, not a guessed timer.
 
 | Gate | Exact question and proposed owner |
 | --- | --- |
-| Actual-agent nonce authority | Current NonceClaim::mint and matches_identity use NonceKey::stable_id. HYPERLIQUID_AGENT legacy reserve uses ethereum_address, so selecting that domain with today's stable-id claim would split the sequence. Need an engine-issued, selected-identity-bound actual-agent subject attested by provider PublicAddress; preserve TxFlow/native sharing and release freshness without a caller-forged address. Proposal: m26ps4 (nonce/credential owner), reviewer 9czdjh/uufub4. No shared source assignment inferred. |
-| Installed minimum material | The only secret is the agent secp256k1 scalar, not an API key or GRVT Session token. Wallet, account/application_id and vault are public and may differ from agent. Perps trade checks only nonempty scalar; standalone spot additionally requires its configured wallet to match the scalar. Preserve scalar-only/perps and missing/empty/public-only precedence without inventing a credential key/ref. Review trusted signing-only installation/public-address resolution with m26ps4 before source; do not force a new secret or stable_id input. |
+| Actual-agent nonce authority | Current NonceClaim::mint and matches_identity use NonceKey::stable_id. HYPERLIQUID_AGENT legacy reserve uses ethereum_address, so selecting that domain with today's stable-id claim would split the sequence. Need an engine-issued, selected-identity-bound actual-agent subject attested by provider PublicAddress; preserve TxFlow/native sharing and release freshness without a caller-forged address. Assigned by the overseer to m26ps4 for design/source after phase3, reviewers9czdjh/uufub4; still OPEN until reviewed/landed. |
+| Installed minimum material | The only secret is the agent secp256k1 scalar, not an API key or GRVT Session token. Wallet, account/application_id and vault are public and may differ from agent. Perps trade checks only nonempty scalar; standalone spot additionally requires its configured wallet to match the scalar. Preserve scalar-only/perps and missing/empty/public-only precedence without inventing a credential key/ref. The overseer APPROVED trusted scalar-only setup and this native distinction. Exact shared installation/public-address resolution remains to be reviewed with m26ps4; do not force a new secret or stable_id input. |
 | Actual-release pacing | Native records queue-time 334 ms; the older TRADE architecture calls for release-time pacing. SerialPlan refuses nonzero policy pacing. Review a shared-compatible release gate and exact native timing controls with the Plan/pacing owner (fe7lgm/uufub4), including whether the stricter release anchor is a ruled change. No venue-local parallel pacing authority or pretending nonzero serial pacing is accepted. |
-| Per-call 20 s | Proposed new bound above; overseer behavior/value disposition, not silently inherited from GRVT. Preserve unbounded root/FIFO and no write replay. |
+| Per-call 20 s | APPROVED new20s per-call bound, attempts1 and unbounded serial root (same ruling as Kraken). CALLERS disclosure remains required; preserve FIFO and no write replay. |
 | Classifier/late evidence | Correlate full native status arrays before projection; native mixed/partial and journal outcome differences disclosed. ScheduleCancel uses its control-specific codec and cannot inherit order-reconciliation proof. Existing engine APIs first; any absent fact/evidence shape returns to its owner. |
 
 Feature intent at adoption: serial-plans, condition-waits, dispatch-signing,
@@ -224,3 +225,16 @@ Bybit/Bitget gates apply; do not attribute that to this venue-only plan. Remove
 each own scratch target after measurement/review builds and retain sources,
 logs and tables. No build, size, CI, source or installed-constructor clearance
 is claimed by this plan commit.
+
+
+## Overseer disposition after plan submission
+
+Actual-agent nonce authority is assigned to m26ps4 after phase3, reviewed by
+9czdjh/uufub4, and remains OPEN. Trusted scalar-only setup is approved, with
+public wallet/user/vault separate from secrets and the native spot pair check
+retained; actual setup API fit is still a source gate. NEW20s per-call, one
+attempt and an unbounded serial root are approved. Native334ms pacing must be
+preserved; fe7lgm/uufub4 are asked for serial-Plan release-pacing disposition.
+Any needed engine pacing feature returns to the overseer for an owner; no
+venue-local authority is authorized. Plan/native originals may proceed while
+nonce and pacing remain OPEN; neither is bypassed by a green native control.
