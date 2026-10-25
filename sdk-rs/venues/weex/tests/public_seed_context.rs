@@ -7,8 +7,8 @@ use safe_cex_engine::request_context::{
     RoutingIntent, Scope,
 };
 use safe_cex_engine::{
-    Action, Command, Cx, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Response, SocketId,
-    TimerId, Venue, VenueError,
+    Action, Command, Cx, Engine, ErrorKind, Event, HttpRequest, Method, Notice, RequestId,
+    Response, SocketId, TimerId, Venue, VenueError,
 };
 use safe_cex_venue_weex::{Pending, WeexFutures};
 use std::collections::VecDeque;
@@ -162,13 +162,60 @@ struct Output {
     requests: Vec<HttpRequest>,
     prepares: Vec<(Preparation, HttpRequest, RoutingIntent)>,
     actions: Vec<Action>,
+    resources: Vec<Resource>,
+    cleanup: Vec<Action>,
     legacy: usize,
     claimed: usize,
 }
+#[derive(Clone, Copy, Debug)]
+struct Resource {
+    request: RequestId,
+    preparation: Preparation,
+    timer: TimerId,
+}
+fn resources(actions: &[Action]) -> Vec<Resource> {
+    let mut timer = None;
+    let mut found = Vec::new();
+    for action in actions {
+        match action {
+            Action::SetTimer { timer: current, .. } => timer = Some(*current),
+            Action::ManagedHttp(action) => {
+                if let HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } = action.as_ref()
+                {
+                    // Managed issuance emits its physical timer before Prepare.
+                    // Both values come from this actual action trace, never next IDs.
+                    found.push(Resource {
+                        request: request.id,
+                        preparation: *preparation,
+                        timer: timer
+                            .take()
+                            .expect("observed physical timer before Prepare"),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+fn resource(out: &Output, id: RequestId) -> Option<Resource> {
+    out.resources.iter().find(|r| r.request == id).copied()
+}
 fn drain(e: &mut Driver, now: f64) -> Output {
     let mut out = Output::default();
-    let mut queue: VecDeque<_> = e.drain_actions().collect();
+    let initial: Vec<_> = e.drain_actions().collect();
+    out.resources = resources(&initial);
+    let mut queue: VecDeque<_> = initial.into();
     while let Some(a) = queue.pop_front() {
+        if matches!(&a, Action::ClearTimer { .. })
+            || matches!(&a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Cancel { .. }))
+        {
+            out.cleanup.push(a.clone());
+        }
         match a {
             Action::Http(r) => {
                 out.legacy += 1;
@@ -258,12 +305,160 @@ fn started_with_peers(kind: usize, watch: bool, peers: usize) -> (Driver, HttpRe
     (e, r, out)
 }
 fn no_new_work(out: &[Action]) {
-    assert!(!out.iter().any(|a| matches!(a,
-        Action::Http(_) | Action::SetTimer { .. } | Action::WsConnect { .. }
-        | Action::WsSend { .. } | Action::Sign { .. } | Action::SignPayload { .. }
-        | Action::Notice(_)
-    ) || matches!(a, Action::ManagedHttp(a) if !matches!(a.as_ref(), HttpAction::Cancel { .. }))),
-    "invalid clock must only clean up its issued request: {out:?}");
+    assert!(
+        out.is_empty(),
+        "unissued work owns no cleanup or other action: {out:?}"
+    );
+}
+#[derive(Clone, Debug, Default)]
+struct Cleanup {
+    timers: Vec<TimerId>,
+    preparations: Vec<Preparation>,
+}
+impl Cleanup {
+    fn issued(resource: Option<Resource>) -> Self {
+        resource.map_or_else(Self::default, |r| Self {
+            timers: vec![r.timer],
+            preparations: vec![r.preparation],
+        })
+    }
+    fn remaining(&self, seen: &Self) -> Self {
+        Self {
+            timers: self
+                .timers
+                .iter()
+                .copied()
+                .filter(|t| !seen.timers.contains(t))
+                .collect(),
+            preparations: self
+                .preparations
+                .iter()
+                .copied()
+                .filter(|p| !seen.preparations.contains(p))
+                .collect(),
+        }
+    }
+    fn complete(&self, seen: &Self) {
+        assert!(
+            self.remaining(seen).timers.is_empty(),
+            "missing exact timer cleanup"
+        );
+        assert!(
+            self.remaining(seen).preparations.is_empty(),
+            "missing exact preparation cleanup"
+        );
+    }
+}
+fn only_cleanup(out: &[Action], allowed: &Cleanup) -> Cleanup {
+    let mut seen = Cleanup::default();
+    for action in out {
+        match action {
+            Action::ClearTimer { timer }
+                if allowed.timers.contains(timer) && !seen.timers.contains(timer) =>
+            {
+                seen.timers.push(*timer)
+            }
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Cancel {
+                    preparation,
+                    signing: None,
+                } if allowed.preparations.contains(preparation)
+                    && !seen.preparations.contains(preparation) =>
+                {
+                    seen.preparations.push(*preparation)
+                }
+                _ => panic!("unexpected or unrelated cleanup/work: {out:?}"),
+            },
+            _ => panic!("unexpected or unrelated cleanup/work: {out:?}"),
+        }
+    }
+    seen
+}
+fn store_snapshot(e: &Driver) -> Vec<u8> {
+    let store = e.store();
+    let mut frame = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.);
+    store.write(&store.everything(), &mut frame);
+    frame.finish()
+}
+struct Independent {
+    command: u32,
+    request: HttpRequest,
+    resource: Resource,
+    cleanup: Cleanup,
+}
+fn independent(e: &mut Driver) -> Independent {
+    independent_with_command(e, 991)
+}
+fn independent_with_command(e: &mut Driver, command: u32) -> Independent {
+    e.handle_command(
+        NOW + 1.5,
+        Command::FetchOrderBook {
+            command,
+            symbol: "INDEPENDENT".into(),
+            limit: Some(1),
+        },
+        Some(100_000),
+    )
+    .unwrap();
+    let out = drain(e, NOW + 1.5);
+    assert_eq!(out.requests.len(), 1);
+    let request = out.requests[0].clone();
+    let resource = resource(&out, request.id).expect("actual independent managed request");
+    assert!(e.http_release(request.id).is_some());
+    let mut cleanup = Cleanup::issued(Some(resource));
+    for action in out.actions {
+        match action {
+            Action::SetTimer { timer, .. } if !cleanup.timers.contains(&timer) => {
+                cleanup.timers.push(timer)
+            }
+            Action::ClearTimer { timer } => cleanup.timers.retain(|id| *id != timer),
+            _ => {}
+        }
+    }
+    Independent {
+        command,
+        request,
+        resource,
+        cleanup,
+    }
+}
+fn complete_independent(e: &mut Driver, read: Independent) {
+    assert!(
+        e.http_release(read.request.id).is_some(),
+        "unrelated released sibling was canceled"
+    );
+    let before = store_snapshot(e);
+    respond(
+        e,
+        &read.request,
+        NOW + 6.,
+        200,
+        r#"{"lastUpdateId":"77","bids":[["1","2"]],"asks":[]}"#,
+    );
+    let mut cleanup = Vec::new();
+    let mut done = 0;
+    for action in e.drain_actions() {
+        match action {
+            Action::Notice(Notice::CommandDone { command, result }) if command == read.command => {
+                done += 1;
+                assert_eq!(
+                    result,
+                    r#"{"bids":[{"price":1.0,"amount":2.0,"total":2.0}],"asks":[],"lastUpdateId":"77"}"#
+                );
+            }
+            action => cleanup.push(action),
+        }
+    }
+    assert_eq!(done, 1, "unrelated managed read stays usable");
+    let seen = only_cleanup(&cleanup, &read.cleanup);
+    read.cleanup.complete(&seen);
+    assert!(seen.preparations.contains(&read.resource.preparation));
+    assert!(e.http_release(read.request.id).is_none());
+    assert_eq!(
+        store_snapshot(e),
+        before,
+        "book query cannot mutate any Store/readiness section"
+    );
 }
 fn retry(out: &[Action], now: f64) -> TimerId {
     out.iter()
@@ -409,6 +604,78 @@ fn fixture_peers_are_finite_and_all_256_credits_are_reusable() {
     drain(&mut e, NOW + 1.);
 }
 #[test]
+fn independent_managed_read_fixture_completes_with_exact_cleanup() {
+    let (mut e, _) = engine(1, false);
+    control(&mut e, NOW, "boot");
+    drain(&mut e, NOW);
+    let read = independent(&mut e);
+    complete_independent(&mut e, read);
+    control(&mut e, NOW + 7., "validate");
+    control(&mut e, NOW + 7., "release");
+    control(&mut e, NOW + 7., "credits");
+    drain(&mut e, NOW + 7.);
+}
+#[test]
+fn full_store_snapshot_detects_silent_private_readiness_changes() {
+    for section in 0..3 {
+        let (mut e, _) = engine(0, false);
+        let before = store_snapshot(&e);
+        match section {
+            0 => e.store_mut().set_balance(Default::default()),
+            1 => e.store_mut().set_positions(Vec::new()),
+            _ => e.store_mut().set_orders(Vec::new()),
+        }
+        assert_ne!(
+            store_snapshot(&e),
+            before,
+            "readiness-only mutation escaped the full snapshot"
+        );
+    }
+}
+#[test]
+fn cleanup_matcher_rejects_unrelated_duplicate_and_new_actions() {
+    let (mut e, _) = engine(0, false);
+    let first = independent(&mut e);
+    let other = independent_with_command(&mut e, 992);
+    let allowed = Cleanup::issued(Some(first.resource));
+    let matching = vec![
+        Action::ClearTimer {
+            timer: first.resource.timer,
+        },
+        Action::ManagedHttp(Box::new(HttpAction::Cancel {
+            preparation: first.resource.preparation,
+            signing: None,
+        })),
+    ];
+    allowed.complete(&only_cleanup(&matching, &allowed));
+    let mut duplicate = matching.clone();
+    duplicate.extend(matching.clone());
+    let cases = [
+        vec![Action::ClearTimer {
+            timer: other.resource.timer,
+        }],
+        vec![Action::ManagedHttp(Box::new(HttpAction::Cancel {
+            preparation: other.resource.preparation,
+            signing: None,
+        }))],
+        vec![Action::SetTimer {
+            timer: first.resource.timer,
+            at_ms: NOW + LIMIT,
+        }],
+        duplicate,
+    ];
+    for actions in cases {
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| only_cleanup(
+                &actions, &allowed
+            )))
+            .is_err()
+        );
+    }
+    complete_independent(&mut e, first);
+    complete_independent(&mut e, other);
+}
+#[test]
 fn partial_catalogue_retains_valid_peers_and_native_skip_diagnostics() {
     let (mut e, r, _) = started(0);
     let body = INFO.replace("\"symbols\":[", "\"symbols\":[{\"broken\":true},");
@@ -487,6 +754,7 @@ fn failed_seed_sibling_is_inert_before_and_after_generation_reset() {
     for sibling_first in [false, true] {
         let (mut e, _, initial) = started(1);
         let old_book = request(&initial, 2);
+        let old_cleanup = Cleanup::issued(resource(&initial, old_book.id));
         e.handle(
             NOW + 2.,
             Event::HttpFailed {
@@ -510,9 +778,36 @@ fn failed_seed_sibling_is_inert_before_and_after_generation_reset() {
         let fresh = drain(&mut e, NOW + 1002.);
         assert_eq!(fresh.requests.len(), 2);
         if !sibling_first {
+            let at_rollover = only_cleanup(&fresh.cleanup, &old_cleanup);
+            if !at_rollover.timers.is_empty() || !at_rollover.preparations.is_empty() {
+                old_cleanup.complete(&at_rollover);
+            }
+            if let Some(old) = resource(&initial, old_book.id) {
+                assert_eq!(
+                    e.http_release(old.request).is_some(),
+                    at_rollover.preparations.is_empty()
+                );
+            }
+            for current in &fresh.resources {
+                assert!(
+                    e.http_release(current.request).is_some(),
+                    "fresh generation must stay live"
+                );
+            }
+            let before = store_snapshot(&e);
             respond(&mut e, &old_book, NOW + 1003., 200, BOOK);
-            assert!(e.drain_actions().next().is_none());
+            let returned: Vec<_> = e.drain_actions().collect();
+            let remaining = old_cleanup.remaining(&at_rollover);
+            remaining.complete(&only_cleanup(&returned, &remaining));
+            assert!(e.http_release(old_book.id).is_none());
+            assert_eq!(store_snapshot(&e), before);
             assert!(!e.store().loaded().tickers);
+            for current in &fresh.resources {
+                assert!(
+                    e.http_release(current.request).is_some(),
+                    "stale delivery canceled fresh work"
+                );
+            }
         }
         respond(&mut e, &request(&fresh, 1), NOW + 1004., 200, DAILY);
         drain(&mut e, NOW + 1004.);
@@ -724,17 +1019,24 @@ fn invalid_admission(now: f64) {
     let (mut e, _) = engine(1, false);
     control(&mut e, NOW, "boot");
     drain(&mut e, NOW);
+    let unrelated = independent(&mut e);
+    let before = store_snapshot(&e);
     control(&mut e, now, "start");
     no_new_work(&e.drain_actions().collect::<Vec<_>>());
     assert!(e.store().markets().is_empty());
-    control(&mut e, NOW + 1., "validate");
-    control(&mut e, NOW + 1., "release");
-    control(&mut e, NOW + 1., "credits");
-    drain(&mut e, NOW + 1.);
+    assert_eq!(store_snapshot(&e), before);
+    control(&mut e, NOW + 2., "validate");
+    complete_independent(&mut e, unrelated);
+    control(&mut e, NOW + 7., "release");
+    control(&mut e, NOW + 7., "credits");
+    drain(&mut e, NOW + 7.);
 }
 fn invalid_released_failure(kind: usize, now: f64) {
     let (mut e, r, initial) = started_with_peers(kind, false, 1);
+    let unrelated = independent(&mut e);
     let markets = e.store().markets().to_vec();
+    let before = store_snapshot(&e);
+    let owned = Cleanup::issued(resource(&initial, r.id));
     e.handle(
         now,
         Event::HttpFailed {
@@ -742,24 +1044,43 @@ fn invalid_released_failure(kind: usize, now: f64) {
             error: "returned at invalid clock",
         },
     );
-    no_new_work(&e.drain_actions().collect::<Vec<_>>());
+    let out: Vec<_> = e.drain_actions().collect();
+    let seen = only_cleanup(&out, &owned);
+    owned.complete(&seen);
     assert_eq!(e.store().markets(), markets);
     assert!(!e.store().loaded().tickers);
+    assert_eq!(
+        store_snapshot(&e),
+        before,
+        "invalid failure changed full Store/readiness"
+    );
+    assert!(e.http_release(r.id).is_none());
     control(&mut e, NOW + 2., "validate");
     if kind != 0 {
         let sibling = request(&initial, if kind == 1 { 2 } else { 1 });
-        e.handle(
-            NOW + 3.,
-            Event::HttpFailed {
-                request: sibling.id,
-                error: "finite sibling cleanup",
-            },
+        let sibling_resource =
+            resource(&initial, sibling.id).expect("observed managed seed sibling");
+        assert!(
+            e.http_release(sibling.id).is_some(),
+            "seed sibling was wrongly canceled"
         );
-        drain(&mut e, NOW + 3.);
+        respond(
+            &mut e,
+            &sibling,
+            NOW + 3.,
+            200,
+            if kind == 1 { BOOK } else { DAILY },
+        );
+        let out: Vec<_> = e.drain_actions().collect();
+        let expected = Cleanup::issued(Some(sibling_resource));
+        expected.complete(&only_cleanup(&out, &expected));
+        assert!(e.http_release(sibling.id).is_none());
+        assert_eq!(store_snapshot(&e), before);
     }
-    control(&mut e, NOW + 4., "release");
-    control(&mut e, NOW + 4., "credits");
-    drain(&mut e, NOW + 4.);
+    complete_independent(&mut e, unrelated);
+    control(&mut e, NOW + 7., "release");
+    control(&mut e, NOW + 7., "credits");
+    drain(&mut e, NOW + 7.);
 }
 fn invalid_preparation_failure(kind: usize, now: f64) {
     let (mut e, _) = engine(1, true);
@@ -785,34 +1106,67 @@ fn invalid_preparation_failure(kind: usize, now: f64) {
         "adopted native request must expose genuine preparation custody"
     );
     let p = found.unwrap();
+    let captured = resources(&initial);
+    let current = captured
+        .iter()
+        .find(|r| r.preparation == p)
+        .copied()
+        .unwrap();
+    let unrelated = independent(&mut e);
+    let before = store_snapshot(&e);
     e.http_preparation_failed(
         now,
         p,
         Error::Invalid,
         VenueError::new("invalid host observation").kind(ErrorKind::Internal),
     );
-    no_new_work(&e.drain_actions().collect::<Vec<_>>());
+    let out: Vec<_> = e.drain_actions().collect();
+    let owned = Cleanup::issued(Some(current));
+    owned.complete(&only_cleanup(&out, &owned));
+    assert_eq!(
+        store_snapshot(&e),
+        before,
+        "invalid preparation failure changed full Store/readiness"
+    );
+    assert!(!e.http_preparation_pending(p));
     control(&mut e, NOW + 2., "validate");
-    for a in initial {
-        if let Action::ManagedHttp(a) = a
-            && let HttpAction::Prepare { preparation, .. } = *a
-            && preparation != p
-        {
-            e.http_preparation_failed(
-                NOW + 3.,
-                preparation,
-                Error::Invalid,
-                VenueError::new("finite sibling cleanup"),
-            );
-            drain(&mut e, NOW + 3.);
-        }
+    for sibling in captured.into_iter().filter(|r| r.preparation != p) {
+        assert!(
+            e.http_preparation_pending(sibling.preparation),
+            "unrelated preparation was canceled"
+        );
+        e.http_prepared(
+            NOW + 3.,
+            sibling.preparation,
+            Prepared {
+                id: sibling.request.0,
+                expires_at: None,
+            },
+        );
+        let bound = drain(&mut e, NOW + 3.);
+        assert_eq!(bound.requests.len(), 1);
+        assert_eq!(bound.requests[0].id, sibling.request);
+        assert!(e.http_release(sibling.request).is_some());
+        respond(
+            &mut e,
+            &bound.requests[0],
+            NOW + 4.,
+            200,
+            if kind == 1 { BOOK } else { DAILY },
+        );
+        let out: Vec<_> = e.drain_actions().collect();
+        let expected = Cleanup::issued(Some(sibling));
+        expected.complete(&only_cleanup(&out, &expected));
+        assert_eq!(store_snapshot(&e), before);
     }
-    control(&mut e, NOW + 4., "release");
-    control(&mut e, NOW + 4., "credits");
-    drain(&mut e, NOW + 4.);
+    complete_independent(&mut e, unrelated);
+    control(&mut e, NOW + 7., "release");
+    control(&mut e, NOW + 7., "credits");
+    drain(&mut e, NOW + 7.);
 }
 fn invalid_ticker_retry_admission(now: f64) {
     let (mut e, r, initial) = started_with_peers(1, false, 1);
+    let unrelated = independent(&mut e);
     e.handle(
         NOW + 2.,
         Event::HttpFailed {
@@ -822,15 +1176,24 @@ fn invalid_ticker_retry_admission(now: f64) {
     );
     let out = drain(&mut e, NOW + 2.);
     let timer = retry(&out.actions, NOW + 2.);
+    let before = store_snapshot(&e);
     e.handle(now, Event::TimerFired { timer });
     no_new_work(&e.drain_actions().collect::<Vec<_>>());
     assert!(!e.store().loaded().tickers);
+    assert_eq!(store_snapshot(&e), before);
     control(&mut e, NOW + 3., "validate");
-    respond(&mut e, &request(&initial, 2), NOW + 4., 200, BOOK);
-    drain(&mut e, NOW + 4.);
-    control(&mut e, NOW + 5., "release");
-    control(&mut e, NOW + 5., "credits");
-    drain(&mut e, NOW + 5.);
+    let sibling = request(&initial, 2);
+    let sibling_resource = resource(&initial, sibling.id).expect("actual managed seed sibling");
+    assert!(e.http_release(sibling.id).is_some());
+    respond(&mut e, &sibling, NOW + 4., 200, BOOK);
+    let out: Vec<_> = e.drain_actions().collect();
+    let expected = Cleanup::issued(Some(sibling_resource));
+    expected.complete(&only_cleanup(&out, &expected));
+    assert_eq!(store_snapshot(&e), before);
+    complete_independent(&mut e, unrelated);
+    control(&mut e, NOW + 7., "release");
+    control(&mut e, NOW + 7., "credits");
+    drain(&mut e, NOW + 7.);
 }
 macro_rules! invalid_clock_tests {
     ($admission:ident, $retry:ident, $markets:ident, $daily:ident, $book:ident,

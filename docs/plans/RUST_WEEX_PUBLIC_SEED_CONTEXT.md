@@ -167,3 +167,33 @@ compilation and is excluded. Logs remain under /tmp/codex-weex-public-seed-*,
 not in the repository. Runtime, prior fixtures, Cargo and inventories remain
 byte-exact to c5d7. Source awaits bounded original review; paired WEEX+combined
 measurement remains a gate at the first source commit.
+
+## Original cleanup precision correction
+
+The original review at b0956681833 requested two test-contract P2 corrections,
+without authorizing runtime changes. The corrected controls capture the actual
+managed timer/Prepare pairs from the action trace and admit only those exact
+ClearTimer and unsigned Cancel actions, once each. Unissued work must return
+an empty action queue; there is no wildcard action or cleanup exemption.
+
+Every invalid-clock case snapshots Store.everything through a fixed-time frame,
+covering public/private rows, balance, settings and all loaded/readiness flags.
+A real independently released native book query must stay live and then complete
+with its exact original result and owned cleanup. Current seed siblings are also
+proved live; held sibling preparations must still Bind/Claim and complete valid
+native data before deliberate final credit recovery. These are deeper suffixes,
+not a claim that missing-Prepare legacy paths executed them.
+
+The old-generation response control permits its captured old request's complete
+cleanup either at rollover or at stale delivery, exactly once across those two
+boundaries. It compares the full Store frame, rejects any other delivery action,
+and requires fresh-generation releases to remain live and successfully publish.
+This replaces an overstrict empty-queue assertion; it is not a new runtime RED.
+
+Three additive working controls validate the independent managed query fixture,
+prove readiness-only balance/positions/orders changes affect the full snapshot,
+and show that the cleanup matcher rejects another genuine request's timer or
+preparation, duplicate cleanup, and new timer actions. Baseline qualification is
+45 executed:34 intended assertion RED,11 GREEN,0 ignored. The original34 RED
+boundaries remain, including nine explicit missing-Prepare assertions. Production,
+prior fixtures, Cargo and inventories remain unchanged by these corrections.
