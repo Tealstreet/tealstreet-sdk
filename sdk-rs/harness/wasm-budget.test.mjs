@@ -16,9 +16,9 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 test('only Bitget carries the one-time venue allowance, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['bitget', 'bitgetusdc']);
   for (const venue of ['bitget', 'bitgetusdc']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1_343_488 + 20_480);
-    assert.equal(wasmBudgetError(1_363_968, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_363_969, 'venue', venue), /exceeds 1363968/);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1_343_488 + 65_536);
+    assert.equal(wasmBudgetError(1_409_024, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_409_025, 'venue', venue), /exceeds 1409024/);
   }
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue', 'okx'), /exceeds 1343488/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue'), /exceeds 1343488/);
