@@ -966,6 +966,15 @@ impl<T, P> RowsAdmission<'_, '_, T, P> {
         self.owner.completion.bind_page(self.leg, self.attempt);
         self.owner.accept_page_inner();
     }
+    /// A fully validated page that cannot prove the rest of its range, such as
+    /// a single page that filled its limit, keeps its rows and the first gap.
+    pub fn accept_page_with_coverage(&mut self, gap: Option<String>) {
+        self.owner.completion.bind_page(self.leg, self.attempt);
+        if let Some(message) = gap {
+            self.owner.completion.incomplete(message);
+        }
+        self.owner.accept_page_inner();
+    }
 }
 impl<T, P> CursorAdmission<'_, '_, T, P> {
     fn commit_page_identities(&mut self) {
