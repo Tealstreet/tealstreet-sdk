@@ -14,6 +14,8 @@ pub mod plan;
 #[cfg(feature = "http-plans")]
 #[path = "request_context_owner.rs"]
 mod ownership;
+#[cfg(feature = "condition-waits")]
+pub use ownership::{ConditionOwner, ConditionWait};
 #[cfg(feature = "http-plans")]
 pub use ownership::{
     HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,

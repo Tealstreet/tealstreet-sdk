@@ -220,6 +220,9 @@ pub(super) struct ContextRegistry {
     preflight_ready: VecDeque<Preflight>,
     #[cfg(feature = "http-plans")]
     preflight_initial: Vec<Preflight>,
+    /// Engine-bounded Preflight condition waits, by timer.
+    #[cfg(feature = "condition-waits")]
+    condition_preflights: Vec<(crate::TimerId, Preflight)>,
     /// Scoped delivery loans outlive temporary marker removal and even owner
     /// cleanup. Readiness may run only after the true outermost scope exits.
     #[cfg(feature = "http-plans")]
@@ -2174,7 +2177,8 @@ impl<P> Cx<'_, P> {
     /// The one declared exception for an amend's cancel leg: the old order of a
     /// cancel-then-recreate whose replacement is position-bound protection
     /// (reduce-only / close-on-trigger), so an absent old order is safe to
-    /// replace. Never declare it for any other replacement.
+    /// replace. Never declare it for any other replacement. Plan legs use it on
+    /// the leg Context before its first request.
     pub fn http_write_protection_cancel_leg(&mut self, context: &Context) -> Result<(), Error> {
         self.narrow_leg(context, crate::classify::Intent::Cancel, true)
     }

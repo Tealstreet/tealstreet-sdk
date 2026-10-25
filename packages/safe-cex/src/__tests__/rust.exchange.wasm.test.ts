@@ -216,6 +216,7 @@ const bybitTransport = (category: 'linear' | 'inverse' | 'spot' = 'linear') => {
   const symbol = category === 'inverse' ? 'BTCUSD' : 'BTCUSDT';
   const list = (rows: unknown[]) => ({ list: rows, nextPageCursor: '' });
   const transport: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       socketUrls.push(url);

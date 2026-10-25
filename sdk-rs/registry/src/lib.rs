@@ -659,6 +659,31 @@ pub fn prepare_local_signer_for(
 #[cfg(feature = "apexomni")]
 const APEXOMNI_NO_SECONDARY: &str =
     "ApeX has no read credentials; a secondary key is not supported";
+/// Every ApeX private request is signed, so a private account whose key has
+/// no secret is refused rather than retried as an unsignable account.
+#[cfg(feature = "apexomni")]
+const APEXOMNI_SECRET_REQUIRED: &str = "ApeX requires the API secret with the API key";
+
+/// A primary with no signing material can never sign. Public data still works,
+/// so a public account drops it (the venue says so); a private one is refused.
+#[cfg(feature = "apexomni")]
+fn apexomni_unsignable(
+    identities: &mut safe_cex_engine::signing::Identities,
+    public_data_only: bool,
+) -> Result<bool, VenueError> {
+    if !identities
+        .primary
+        .as_ref()
+        .is_some_and(|identity| identity.signing.0.is_empty())
+    {
+        return Ok(false);
+    }
+    if !public_data_only {
+        return Err(invalid(APEXOMNI_SECRET_REQUIRED));
+    }
+    identities.primary = None;
+    Ok(true)
+}
 /// The legacy start refusal, now at trusted setup before any order exists.
 #[cfg(feature = "apexomni")]
 const APEXOMNI_SEED_INVALID: &str = "Invalid OmniKey seed: expected 65-byte Ethereum signature";
@@ -1297,11 +1322,15 @@ pub fn build_with_signer<T: Visit>(
                 }
                 None => (signer, Default::default()),
             };
+            let mut identities = identities;
+            let credentials_ignored =
+                apexomni_unsignable(&mut identities, options.public_data_only)?;
             let mut engine = Engine::new(
                 ApexOmni::new(ApexOmniOptions {
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
                     identity: identities.primary.clone(),
+                    credentials_ignored,
                     tick_interval_ms: None,
                 }),
                 entropy,
