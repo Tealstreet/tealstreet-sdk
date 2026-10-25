@@ -36,7 +36,7 @@ pub fn ready_with_timers(
     e.start(1000.0);
     let mut sockets = Vec::new();
     for _ in 0..12 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
         if actions.is_empty() {
             break;
         }

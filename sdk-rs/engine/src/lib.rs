@@ -15,8 +15,12 @@ pub mod execution;
 pub mod execution_group;
 pub mod fence;
 pub mod history;
+mod id_map;
+pub(crate) use id_map::IdMap;
 pub mod json;
 pub mod log;
+#[cfg(feature = "metadata-freshness")]
+pub mod metadata;
 pub mod model;
 pub mod nonce;
 pub mod num;
@@ -37,7 +41,7 @@ pub mod signing_headers;
 pub mod signing_policy;
 mod signing_release;
 pub use signing_dispatch::{DispatchContext, SignStep};
-pub use signing_release::SigningRelease;
+pub use signing_release::{SigningRelease, StampFloor};
 pub mod socket;
 #[cfg(feature = "managed-sockets")]
 mod socket_driver;

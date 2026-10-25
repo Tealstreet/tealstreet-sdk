@@ -1,8 +1,8 @@
 //! Live last prices value the balance like TS; reported PnL covers absent or placeholder quotes.
 mod support;
 use safe_cex_engine::{Action, Event, HttpRequest, Notice, TimerId};
-use safe_cex_venue_apexomni::{ApexOmni, Options};
-use support::{MARKETS, TestEngine, response};
+use safe_cex_venue_apexomni::Options;
+use support::{MARKETS, Material, Prepared, TestEngine, private_engine, response};
 const BALANCE: &str = r#"{"code":0,"data":{"totalEquityValue":"1000","initialMargin":"100","maintenanceMargin":"20"}}"#;
 fn account(pnl: Option<f64>) -> String {
     let pnl = pnl.map_or_else(String::new, |p| format!(",\"unrealisedPnl\":\"{p}\""));
@@ -20,13 +20,17 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
-                key: Some("key".into()),
-                secret: Some("secret".into()),
-                passphrase: Some("pass".into()),
-                omni_key_seed: Some("11".repeat(65)),
-                ..Options::default()
-            })),
+            engine: private_engine(
+                Options {
+                    ..Options::default()
+                },
+                &Material {
+                    key: "key",
+                    signing: "secret",
+                    passphrase: Some("pass"),
+                    seed: Some(("11".repeat(65)).to_string()),
+                },
+            ),
             requests: vec![],
             timers: vec![],
             logs: vec![],
@@ -38,7 +42,7 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in self.engine.prepared(self.now) {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),

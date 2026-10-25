@@ -566,6 +566,7 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
     }
 }
 
+#[cfg(feature = "bybit")]
 #[test]
 fn hyro_raw_config_preserves_network_demo_and_missing_production_fallback() {
     use safe_cex_venues::HyroConfig;
