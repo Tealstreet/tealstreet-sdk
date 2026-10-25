@@ -8864,3 +8864,10 @@ or new command-before-start compatibility is implied.
 Native topic ordering is retained in both directions: subscriptions use the
 proposed order, while removed topics use their previous committed order. A
 reverse-catalogue ticker control pins the exact unsubscribe wire order.
+
+Corrected local source qualification preserves the NEW20s Depth observation
+bound and approved fixture supersessions above. The current-tip local pair is
+WEEX1212633->1274315 (+61682) and combined13908680->13920684 (+12004),
+with unchanged fixed budgets and Node/Web parity. Combined is local evidence;
+frozen-head CI remains the family-size record. Remaining14F/20O request refs
+and all signing/credential inventory stay unchanged.

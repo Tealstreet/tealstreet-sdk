@@ -341,3 +341,31 @@ new control reaches a literal ETH/BTC-versus-BTC/ETH unsubscribe assertion failu
 the narrow selector correction passes all39 controls with strict Clippy and fmt.
 The prior38 control bodies remain unchanged. This correction changes no IDs,
 hourly quota, recovery cadence or custody authority.
+
+## Corrected source freeze qualification
+
+Full native qualification at fd8dd8d7558 is430PASS/0FAIL/0ignored, including
+the approved trading initialization. The subsequent unsubscribe correction
+966fb89a10a passes all39 controls and strict all-target Clippy/fmt; its previous38
+control bodies are unchanged. hcmq3f clears both exact source pins, including
+fixture and inventory preservation. The plain integration-tip merge1a02f3aa96f
+is automatic and keeps the entire WEEX subtree byte-exact to966fb89a10a. Root
+typecheck/lint, the stable-tree root tests, full bans and5 budget controls pass.
+The root test run overlapping the aborted legacy-master merge is excluded.
+
+The LOCAL current pair uses bare integration tip b0ee0a9a4d5 versus composed
+1a02f3aa96f, with Rust1.99.0, wasm-bindgen0.2.129, Binaryen132, jobs4 and
+BINARYEN_CORES4 under the unchanged shipping build commands/profiles:
+
+| Artifact | Bare bytes | Composed bytes | Delta | Fixed budget | Headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| WEEX | 1212633 | 1274315 | +61682 | 1343488 | 69173 |
+| Combined | 13908680 | 13920684 | +12004 | 14155776 | 235092 |
+
+Optimized Node/Web bytes and hashes match for every build. Each of the four
+measurement targets is deleted, retaining source archives, logs and hash tables.
+This pair supersedes no earlier attribution: aa758->74e remains first-source
+evidence only. Combined proof is LOCAL; frozen-head CI supplies the family-size
+record. No generic engine/host/crypto/registry, shared Cargo input, signing or
+credential inventory differs from the integration tip. Exact-head CI, final
+composition/receipt carry and auditor GO remain gates before landing.
