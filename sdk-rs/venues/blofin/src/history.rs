@@ -1,7 +1,11 @@
 //! Rare reads stream into typed results; they never change the account store.
 use super::*;
-use safe_cex_engine::history::{Completion, CursorHistory, ReadCompletion, ReadCursorHistory};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
+use safe_cex_engine::request_context::{CommandEntryError, Operation};
+use safe_cex_engine::selected_read::{
+    CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
+};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{ErrorKind, Outcome, VenueError};
 use safe_cex_engine::{
@@ -15,7 +19,9 @@ const MAX_PAGES: u32 = 100;
 
 pub struct Request {
     query: Query,
-    history: CursorHistory<Mapped>,
+    root: ReadRoot,
+    leg: Option<ReadLeg>,
+    history: ReadCursorHistory<Mapped>,
     /// Smallest numeric trade id on the current page: the next `after`.
     last_cursor: String,
     received: usize,
@@ -94,12 +100,25 @@ fn encode_result(query: &Query, rows: Vec<Mapped>) -> Result<String, VenueError>
     result.map_err(|error| VenueError::new(error.to_string()))
 }
 impl Request {
-    fn finish(self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
-        let Self { query, history, .. } = self;
-        history.finish_with(cx, result, |rows| encode_result(&query, rows));
+    pub(crate) fn valid_delivery(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg.as_ref().is_some_and(|leg| {
+            self.root.validate_delivery(cx, leg).is_ok()
+                && self.history.validate_delivery(cx, leg.context()).is_ok()
+        })
     }
-    fn reject(self, cx: &mut Cx<'_, Pending>, error: VenueError) {
-        self.history.reject(cx, error);
+    fn release(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = self.leg.take() {
+            let _ = cx.finish_http_context(leg.context());
+        }
+    }
+    fn finish(mut self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        self.release(cx);
+        let Self { query, history, .. } = self;
+        let _ = history.finish_with(cx, result, |rows| encode_result(&query, rows));
+    }
+    fn reject(mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        self.release(cx);
+        let _ = self.history.reject(cx, error);
     }
 }
 impl PublicTradesRequest {
@@ -290,24 +309,21 @@ impl Blofin {
             }
             query => query,
         };
-        let completion = Completion::new(command);
         if !matches!(
             query,
             Query::PublicTrades { .. } | Query::OrderByClientId { .. }
         ) && !self.signed()
         {
-            completion.finish(cx, Ok("[]".into()));
+            Self::empty_history(cx);
             return;
         }
         let (symbol, from, to) = match &query {
             Query::OrderByClientId { .. } => {
-                completion.finish(
-                    cx,
-                    Err(
-                        VenueError::new("BloFin client-order-ID lookup is unsupported")
-                            .kind(ErrorKind::Unsupported)
-                            .outcome(Outcome::NotSent),
-                    ),
+                cx.refuse_command(
+                    Operation::Read,
+                    VenueError::new("BloFin client-order-ID lookup is unsupported")
+                        .kind(ErrorKind::Unsupported)
+                        .outcome(Outcome::NotSent),
                 );
                 return;
             }
@@ -335,34 +351,59 @@ impl Blofin {
             || to.is_some_and(|v| !v.is_finite())
             || from.zip(to).is_some_and(|(f, t)| f > t)
         {
-            completion.finish(
-                cx,
-                Err(VenueError::new("Invalid BloFin history time range")
+            cx.refuse_command(
+                Operation::Read,
+                VenueError::new("Invalid BloFin history time range")
                     .kind(ErrorKind::InvalidInput)
-                    .outcome(Outcome::NotSent)),
+                    .outcome(Outcome::NotSent),
             );
             return;
         }
         if let Some(s) = symbol
             && cx.store.market(s).is_none()
         {
-            completion.finish(
-                cx,
-                Err(VenueError::new(format!("Unknown market {s}"))
+            cx.refuse_command(
+                Operation::Read,
+                VenueError::new(format!("Unknown market {s}"))
                     .kind(ErrorKind::InvalidInput)
-                    .outcome(Outcome::NotSent)),
+                    .outcome(Outcome::NotSent),
             );
             return;
         }
         if matches!(&query, Query::Fills { symbol: None, .. }) {
-            completion.finish(cx, Ok("[]".into()));
+            Self::empty_history(cx);
             return;
         }
+        let (selected, message) = self.read_selection();
+        let root = match SelectedRead::command_root(
+            cx,
+            selected,
+            LocalRefusal {
+                diagnostic: Some(message.into()),
+                error: message.into(),
+            },
+        ) {
+            Ok(root) => root,
+            Err(CommandReadError::Entry(CommandEntryError::Revoked)) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            Err(_) => return,
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.context().clone()) {
+            Ok(completion) => completion,
+            Err(reason) => {
+                let _ = cx.fail_context(root.context(), reason.read_venue_error());
+                return;
+            }
+        };
         self.history_page(
             cx,
             Request {
                 query,
-                history: CursorHistory::new(
+                root,
+                leg: None,
+                history: ReadCursorHistory::new(
                     completion,
                     CursorWalk::new(MAX_PAGES),
                     |_| "BloFin income pagination did not finish".into(),
@@ -375,9 +416,32 @@ impl Blofin {
             },
         );
     }
-    fn history_page(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+    /// A keyless account, or fills with no symbol, answer `[]` under the caller root.
+    fn empty_history(cx: &mut Cx<'_, Pending>) {
+        match cx.admit_caller_read_root(None, None) {
+            Ok(root) => {
+                let _ = cx.done_context(&root, "[]".into());
+            }
+            Err(CommandEntryError::Rejected(_)) => {}
+            Err(CommandEntryError::Revoked) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+            }
+        }
+    }
+    fn history_page(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
+        let leg = match request.root.leg(
+            cx,
+            ReadLegPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+            },
+        ) {
+            Ok(leg) => leg,
+            Err(reason) => return request.reject(cx, reason.read_venue_error()),
+        };
         let (endpoint, symbol, from, to, limit) = match &request.query {
-            Query::OrderByClientId { .. } => {
+            // Public trades read through `start_public_trades`; never here.
+            Query::OrderByClientId { .. } | Query::PublicTrades { .. } => {
                 request.reject(
                     cx,
                     VenueError::new("BloFin client-order-ID lookup is unsupported")
@@ -423,13 +487,6 @@ impl Blofin {
                 *to_ms,
                 100,
             ),
-            Query::PublicTrades { symbol, limit } => (
-                "/api/v1/market/trades",
-                Some(symbol.as_str()),
-                None,
-                None,
-                limit.unwrap_or(100).clamp(1, 100),
-            ),
         };
         let mut params = Vec::new();
         if let Some(s) = symbol.and_then(|s| cx.store.market(s)) {
@@ -452,31 +509,41 @@ impl Blofin {
             params.push(format!("after={}", encode(cursor)));
         }
         let path = format!("{endpoint}?{}", params.join("&"));
-        let headers = if matches!(request.query, Query::PublicTrades { .. }) {
-            Ok(vec![])
-        } else {
-            self.headers(
-                |bytes| cx.fill_signing_entropy(bytes),
-                &path,
-                Method::Get,
-                cx.now,
-                "",
-            )
-        };
-        match headers {
-            Ok(headers) => {
-                cx.request_streamed(
+        let url = format!("{}{path}", self.host());
+        let testnet = self.options.testnet;
+        if let Err((Pending::History(request), reason)) = leg.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url,
+                body: None,
+                stream: Some(ArrayAt::EnvelopeField("data")),
+            },
+            |identity| {
+                Box::new(crate::dispatch_signing::Http::new(
+                    identity.clone(),
+                    testnet,
                     Method::Get,
-                    format!("{}{path}", self.host()),
-                    headers,
-                    ArrayAt::EnvelopeField("data"),
-                    Pending::History(request),
-                );
-            }
-            Err(e) => request.reject(cx, VenueError::new(e)),
+                    path,
+                    None,
+                ))
+            },
+            |leg| {
+                request.leg = Some(leg);
+                Pending::History(request)
+            },
+        ) {
+            request.reject(cx, reason.read_venue_error());
         }
     }
     pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
+        let Some(leg) = &request.leg else { return };
+        if request.root.validate_delivery(cx, leg).is_err() {
+            return;
+        }
+        let Ok(mut page) = request.history.admit(cx, leg.context()) else {
+            return;
+        };
         let row = match serde_json::from_str::<Row<'_>>(item) {
             Ok(r) => r,
             Err(_) => {
@@ -552,7 +619,7 @@ impl Blofin {
             row.trade_id.to_string()
         };
         if id.is_empty()
-            || (!matches!(request.query, Query::Fills { .. }) && !request.history.fresh(id.clone()))
+            || (!matches!(request.query, Query::Fills { .. }) && !page.fresh(id.clone()))
         {
             return;
         }
@@ -612,7 +679,7 @@ impl Blofin {
                 if price <= 0.0 || qty <= 0.0 || !matches!(side_value.as_str(), "buy" | "sell") {
                     return;
                 }
-                if !request.history.fresh(id.clone()) {
+                if !page.fresh(id.clone()) {
                     return;
                 }
                 let fee = [
@@ -632,7 +699,7 @@ impl Blofin {
                 } else {
                     row.fee_currency.as_ref()
                 };
-                request.history.stage(Mapped::Fill(Execution {
+                page.stage(Mapped::Fill(Execution {
                     id,
                     timestamp: (time / 1000.0).floor(),
                     symbol: symbol.clone(),
@@ -655,7 +722,7 @@ impl Blofin {
                 let Some(contract_size) = market.map(|m| m.contract_size.unwrap_or(1.0)) else {
                     return;
                 };
-                request.history.stage(Mapped::Order(HistoricalOrder {
+                page.stage(Mapped::Order(HistoricalOrder {
                     id,
                     symbol: symbol.clone(),
                     side: side(&row.side),
@@ -707,7 +774,7 @@ impl Blofin {
                     {
                         continue;
                     }
-                    request.history.stage(Mapped::Income(Income {
+                    page.stage(Mapped::Income(Income {
                         symbol: symbol.clone(),
                         income_type: kind,
                         income: value,
@@ -719,15 +786,7 @@ impl Blofin {
                     }));
                 }
             }
-            Query::PublicTrades { .. } => {
-                let Some(market) = market else {
-                    return;
-                };
-                request
-                    .history
-                    .stage(Mapped::Trade(public_trade(&row, market, id, time)));
-            }
-            Query::OrderByClientId { .. } => request.failed = true,
+            Query::PublicTrades { .. } | Query::OrderByClientId { .. } => request.failed = true,
         }
     }
     pub(crate) fn history_response(
@@ -736,6 +795,9 @@ impl Blofin {
         mut request: Request,
         response: Response<'_>,
     ) {
+        if !request.valid_delivery(cx) {
+            return;
+        }
         if let Err(error) = check(&response) {
             request.finish(cx, Err(VenueError::new(error)));
             return;
@@ -769,8 +831,16 @@ impl Blofin {
             fresh: request.received,
             want_more,
         };
-        match request.history.advance(page) {
+        let step = {
+            let Some(leg) = &request.leg else { return };
+            let Ok(mut admitted) = request.history.admit(cx, leg.context()) else {
+                return;
+            };
+            admitted.advance(page)
+        };
+        match step {
             CursorStep::More(_) => {
+                request.release(cx);
                 request.received = 0;
                 self.history_page(cx, request);
             }
@@ -781,13 +851,23 @@ impl Blofin {
             ),
         }
     }
+    /// A signing refusal is strict even after accepted rows, as native headers were.
+    pub(crate) fn history_refused(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        request.reject(cx, error);
+    }
+    /// A failed page keeps accepted rows with one INCOMPLETE; a typed kind is kept.
     pub(crate) fn history_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        error: &str,
+        error: VenueError,
     ) {
-        request.finish(cx, Err(VenueError::new(error)));
+        request.finish(cx, Err(error));
     }
 
     fn start_public_trades(

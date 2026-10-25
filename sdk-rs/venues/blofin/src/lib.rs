@@ -961,6 +961,7 @@ impl Venue for Blofin {
             Pending::Managed(context, pending) => self.public_failure(cx, context, *pending, error),
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
             Pending::Closed(request) => Self::closed_failed(cx, request, error),
+            Pending::History(request) => self.history_refused(cx, request, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -970,6 +971,7 @@ impl Venue for Blofin {
             // The shared Network/Timeout kind stays; its text is the native message.
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
             Pending::Closed(request) => Self::closed_failed(cx, request, error),
+            Pending::History(request) => self.history_failed(cx, request, error),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -989,7 +991,7 @@ impl Venue for Blofin {
                 return;
             }
             Pending::History(request) => {
-                self.history_failed(cx, request, error);
+                self.history_failed(cx, request, VenueError::new(error));
                 return;
             }
             Pending::Closed(request) => {

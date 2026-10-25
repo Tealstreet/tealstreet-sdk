@@ -190,7 +190,8 @@ fn general_history_first_failures_are_typed_and_never_accept_streamed_prefixes()
             query(&mut h, 7, q);
             let r = h.take(path);
             fail(&mut h, r, kind);
-            if operation == 3 && kind == 2 {
+            // Managed reads keep a transport loss typed as Network, public or private.
+            if kind == 2 {
                 let error = outcome(&h, 7)
                     .expect("command settled")
                     .expect_err("must reject");
