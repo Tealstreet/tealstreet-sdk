@@ -6533,6 +6533,24 @@ fill, transport or signing behavior. The tape and declared-failure policy retain
 their existing meaning; a clean intermediate capture does not certify private
 parity.
 
+## Binance history under the caller Read root (#2118)
+
+Binance (`binance`, `binancepm`) fills, orders, income, public trades and
+client-order lookup run under the caller command's Read root, with one managed
+leg per physical page. Endpoints, query parameters, 7-day fill windows, the
+ranged-income identity and its 2 s chunk pacing, accepted-prefix-plus-marker
+endings, the `-2013`-only `ABSENT` lookup and Spot/COIN-M "not supported" are
+unchanged. TS-visible:
+
+- **Per-page bound.** Each page ends at 20 s as a typed Timeout. Native pages
+  had no request deadline.
+- **Root wait.** The caller command wait bounds the whole walk: 120 s by
+  default. A ranged income walk crosses it at about 14 months of range (2 s per
+  7-day chunk) and ends as a strict Timeout with no rows and no marker, as WEEX
+  and Bybit already do. Callers raise `rustCommandTimeoutMs` for longer walks.
+- **Unstamped commands.** A command without a wait receipt is refused NotSent
+  before any I/O. It is never given a default root.
+
 ## Hyperliquid perps history caller-root custody
 
 Perps fills, orders, income, public trades and uncached REST client-ID lookup now
