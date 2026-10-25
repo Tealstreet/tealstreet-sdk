@@ -422,7 +422,7 @@ fn full_pending_queue_rejects_dependent_ws_message_instead_of_dropping_it() {
         cx.send_signed(SocketId(42), "auth".into(), Box::new(Step));
     }
     cx.send(SocketId(42), "dependent");
-    assert_eq!(engine.io.signing_admission.len(), 1);
+    assert_eq!(engine.io.core.signing_admission.len(), 1);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(
         a,
@@ -988,6 +988,7 @@ fn materialized_outbound_is_reprepared_after_same_raw_time_calibration() {
     assert!(
         engine
             .io
+            .core
             .actions
             .iter()
             .any(|a| matches!(a, Action::SignedOutbound { .. }))

@@ -44,12 +44,17 @@ mod claim;
 
 impl<V: Venue> Engine<V> {
     fn mutation_group_members(&self, request: RequestId) -> Result<Option<Vec<RequestId>>, Error> {
-        let managed = self.io.managed_http.get(&request).ok_or(Error::Revoked)?;
+        let managed = self
+            .io
+            .core
+            .managed_http
+            .get(&request)
+            .ok_or(Error::Revoked)?;
         let key = managed.group.as_ref().ok_or(Error::State)?.key;
         let mut ids = Vec::new();
         ids.try_reserve_exact(key.count)
             .map_err(|_| Error::Capacity)?;
-        for (&id, managed) in &self.io.managed_http {
+        for (&id, managed) in &self.io.core.managed_http {
             if let Some(member) = &managed.group
                 && member.key.same_group(key)
             {
@@ -62,13 +67,21 @@ impl<V: Venue> Engine<V> {
         if ids.len() != key.count {
             return Ok(None);
         }
-        ids.sort_unstable_by_key(|id| self.io.managed_http[id].group.as_ref().unwrap().key.ordinal);
+        ids.sort_unstable_by_key(|id| {
+            self.io.core.managed_http[id]
+                .group
+                .as_ref()
+                .unwrap()
+                .key
+                .ordinal
+        });
         for (ordinal, id) in ids.iter().enumerate() {
-            let managed = &self.io.managed_http[id];
+            let managed = &self.io.core.managed_http[id];
             let member = managed.group.as_ref().unwrap();
             if member.key.ordinal != ordinal
                 || self
                     .io
+                    .core
                     .request_contexts
                     .mutation_group_key(managed.lifecycle.context())?
                     != Some(member.key)
@@ -80,7 +93,7 @@ impl<V: Venue> Engine<V> {
     }
 
     pub(super) fn pump_mutation_group(&mut self, now: f64, request: RequestId) {
-        let Some(managed) = self.io.managed_http.get(&request) else {
+        let Some(managed) = self.io.core.managed_http.get(&request) else {
             return;
         };
         let token = managed.lifecycle.preparation();
@@ -88,6 +101,7 @@ impl<V: Venue> Engine<V> {
         if let Err((failed, error)) = result {
             let preparation = self
                 .io
+                .core
                 .managed_http
                 .get(&failed)
                 .map_or(token, |managed| managed.lifecycle.preparation());
@@ -112,9 +126,9 @@ impl<V: Venue> Engine<V> {
             return Ok(());
         };
         for id in &ids {
-            let managed = &self.io.managed_http[id];
+            let managed = &self.io.core.managed_http[id];
             managed
-                .validate(&self.io.request_contexts, now)
+                .validate(&self.io.core.request_contexts, now)
                 .map_err(|error| (*id, error))?;
             if managed
                 .lifecycle
@@ -126,7 +140,7 @@ impl<V: Venue> Engine<V> {
         let mut wait: Option<f64> = None;
         let mut bound = f64::MAX;
         for id in &ids {
-            let managed = &self.io.managed_http[id];
+            let managed = &self.io.core.managed_http[id];
             if managed.lifecycle.group_needs_activation() {
                 managed
                     .lifecycle
@@ -136,6 +150,7 @@ impl<V: Venue> Engine<V> {
             bound = bound.min(managed.lifecycle.group_activation_bound());
             if let Some(at) = self
                 .io
+                .core
                 .http_pacing
                 .check(managed.lifecycle.context().pacing(), now)
                 .map_err(|error| (*id, error))?
@@ -145,30 +160,32 @@ impl<V: Venue> Engine<V> {
         }
         if let Some(at) = wait {
             self.io
+                .core
                 .actions
                 .try_reserve(1)
                 .map_err(|_| (request, Error::Capacity))?;
-            let managed = self.io.managed_http.get_mut(&ids[0]).unwrap();
+            let managed = self.io.core.managed_http.get_mut(&ids[0]).unwrap();
             managed.group.as_mut().unwrap().pacing_wait = true;
-            self.io.actions.push(Action::SetTimer {
+            self.io.core.actions.push(Action::SetTimer {
                 timer: managed.timer,
                 at_ms: at.min(bound),
             });
             return Ok(());
         }
-        if self.io.managed_http[&ids[0]]
+        if self.io.core.managed_http[&ids[0]]
             .group
             .as_ref()
             .unwrap()
             .pacing_wait
         {
             self.io
+                .core
                 .actions
                 .try_reserve(1)
                 .map_err(|_| (request, Error::Capacity))?;
-            let managed = self.io.managed_http.get_mut(&ids[0]).unwrap();
+            let managed = self.io.core.managed_http.get_mut(&ids[0]).unwrap();
             managed.group.as_mut().unwrap().pacing_wait = false;
-            self.io.actions.push(Action::SetTimer {
+            self.io.core.actions.push(Action::SetTimer {
                 timer: managed.timer,
                 at_ms: managed.lifecycle.deadline(),
             });
@@ -178,7 +195,7 @@ impl<V: Venue> Engine<V> {
             .try_reserve_exact(ids.len())
             .map_err(|_| (request, Error::Capacity))?;
         for id in &ids {
-            let managed = &self.io.managed_http[id];
+            let managed = &self.io.core.managed_http[id];
             if managed.lifecycle.group_needs_activation() {
                 managed
                     .lifecycle
@@ -186,6 +203,7 @@ impl<V: Venue> Engine<V> {
                     .map_err(|error| (*id, error))?;
                 if let Some(attempt) = managed.signing_attempt {
                     self.io
+                        .core
                         .signing
                         .validate_managed_activation(attempt, managed.lifecycle.deadline())
                         .map_err(|_| (*id, Error::State))?;
@@ -200,13 +218,19 @@ impl<V: Venue> Engine<V> {
         }
         // All routes and activation storage/checks precede declaration-order work.
         for (id, packet) in activation {
-            let managed = self.io.managed_http.get_mut(&id).expect("validated member");
+            let managed = self
+                .io
+                .core
+                .managed_http
+                .get_mut(&id)
+                .expect("validated member");
             if let Some(attempt) = managed.signing_attempt {
                 managed
                     .lifecycle
                     .begin_signing()
                     .expect("validated route phase");
                 self.io
+                    .core
                     .signing
                     .activate_managed(attempt, managed.lifecycle.deadline())
                     .expect("validated signing phase");
@@ -228,7 +252,7 @@ impl<V: Venue> Engine<V> {
     fn announce_mutation_group(&mut self, ids: Vec<RequestId>) -> Result<(), Error> {
         let mut announce = false;
         for id in &ids {
-            let managed = &self.io.managed_http[id];
+            let managed = &self.io.core.managed_http[id];
             let member = managed.group.as_ref().unwrap();
             let Some(permit) = member.permit else {
                 return Ok(());
@@ -248,7 +272,7 @@ impl<V: Venue> Engine<V> {
             .try_reserve_exact(ids.len())
             .map_err(|_| Error::Capacity)?;
         permits.extend(ids.iter().map(|id| {
-            self.io.managed_http[id]
+            self.io.core.managed_http[id]
                 .group
                 .as_ref()
                 .unwrap()
@@ -261,6 +285,7 @@ impl<V: Venue> Engine<V> {
             .try_reserve_exact(ids.len())
             .map_err(|_| Error::Capacity)?;
         self.io
+            .core
             .actions
             .try_reserve(1)
             .map_err(|_| Error::Capacity)?;
@@ -269,7 +294,7 @@ impl<V: Venue> Engine<V> {
             unreachable!()
         };
         for id in ids {
-            let managed = self.io.managed_http.get_mut(&id).unwrap();
+            let managed = self.io.core.managed_http.get_mut(&id).unwrap();
             let member = managed.group.as_mut().unwrap();
             members.push(GroupPacket {
                 preparation: managed.lifecycle.preparation(),
@@ -277,7 +302,7 @@ impl<V: Venue> Engine<V> {
             });
             member.announced = true;
         }
-        self.io.actions.push(Action::ManagedHttp(action));
+        self.io.core.actions.push(Action::ManagedHttp(action));
         Ok(())
     }
 }
