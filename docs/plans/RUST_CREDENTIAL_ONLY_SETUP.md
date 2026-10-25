@@ -1,184 +1,255 @@
 # Credential-only trusted setup
 
-Status: PLAN. Review first; no source before CLEAR. Owner: shared credential
-core (m26ps4). First consumer: GRVT (zs5e83's recipe, plan `c13acb15e56` on
-`feat/rust-grvt-write-funnel-plan`). This plan does not edit that recipe;
-decisions that touch it are listed under Open questions for GRVT.
+Status: PLAN, revision 2. It folds in kuhwxi's review (B1-B5, M1-M2), fe7lgm's
+review (points 1-5) and ddi2il's ruling on G1 and G3. No source before CLEAR.
+Owner: shared credential core (m26ps4). First consumer: GRVT, whose recipe is
+zs5e83's (plan `c13acb15e56` on `feat/rust-grvt-write-funnel-plan`). This plan
+does not edit that recipe; G2, G4 and G5 stay open for zs5e83.
 
 ## Problem
 
-Some venues authenticate a session with an API key alone. A signing key is
-needed only for operations that sign. GRVT logs in with `api_key`, and its
-CancelOrders, CancelSymbolOrders and SetLeverage are session-authenticated
-unsigned calls. Only placement needs the secp256k1 scalar.
+Some venues authenticate a session with an API key alone, and need a signing
+key only for the operations that sign. GRVT logs in with `api_key`. Its
+CancelOrders, CancelSymbolOrders and SetLeverage are session-authenticated and
+unsigned; only placement needs the secp256k1 scalar.
 
-Trusted setup cannot represent that account today:
+Trusted setup cannot represent that account today (state at `ad0b74afdf8`).
 
-1. **No signing ref means an empty-string sentinel.**
-   `DecodedIdentity::references` (`sdk-rs/crypto/src/signer.rs`) writes
-   `signing: KeyRef("")` when the secret is empty. `Identity::validate()`
-   rejects any empty ref, and venues filter identities through it
-   (Binance, BingX, Bitget, AsterDEX, ...), so the key-only identity is
-   dropped. Treating `""` as "no signing key" would be a fake ref under another
-   name.
-2. **Setup loses the key-presence facts.** `LocalIdentity.key` is
-   `#[serde(default)] Secret`, so an omitted key and `key: ""` both decode to
-   an empty key. A whitespace-only key installs as an ordinary credential.
-   GRVT's native login checks Option presence (`Some("")` logs in with
-   `api_key ""`; `None` does not log in). `fetch_identity` checks
-   `trim().is_empty()`. A venue cannot recover either fact from a ref, and it
-   must not keep the raw key.
+**1. An absent key becomes an empty-string sentinel.**
+`DecodedIdentity::references` (`sdk-rs/crypto/src/signer.rs`) always returns
+an `Identity` when a `LocalIdentity` is supplied. It writes `KeyRef("")` for
+empty decoded key material (`credential`) and for empty secret material
+(`signing`). `CredentialSetupPolicy::apply_to_identities` checks only
+complete slots, so incomplete slots are kept. A key-only setup therefore
+installs `{credential: "primary.credential", signing: ""}`. What happens next
+depends on the crate:
+- The 19 crates that filter through `Identity::validate()` drop it. These
+  include Binance, BingX, Bitget and AsterDEX.
+- The 8 crates that never call `validate()` receive it: apexomni,
+  breakoutprop, grvt, hyperliquid, lighter, orderly, paradex and polymarket.
+  Of these, apexomni, lighter and orderly read `Identity.signing`, once each.
+- Registry construction (`registry/src/construction.rs:210,233`) reads
+  `id.signing.0.is_empty()` for `Input::Secret` and `AsterLocalAuth`.
+
+Treating `""` as "no signing key" would be a fake ref under another name.
+
+**2. Setup loses the key-presence facts.** `LocalIdentity.key` is a
+`#[serde(default)] Secret`. An omitted key, `"key": null` and `"key": ""` all
+decode to an empty key, and a whitespace-only key installs as an ordinary
+credential. GRVT's native login checks Option presence: `Some("")` logs in
+with `api_key ""`, and `None` does not log in. Its `fetch_identity` checks
+`trim().is_empty()`. A venue cannot recover either fact from a ref, and it
+must not keep the raw key.
 
 ## Goals
 
-- An identity can carry a credential with **no signing ref**, as an explicit
-  absence that the type checker enforces at every consumer.
-- Trusted setup records one non-secret fact about the supplied primary key:
-  `Absent | Empty | Blank | Nonblank`. It is computed before the key is
-  consumed, and nothing retains the key.
-- Every existing family behaves the same. Their identities still require a
-  signing ref, so a key-only setup still installs nothing they can use.
+- **Explicit absence:** an identity can carry a credential and **no signing
+  ref**. The absence is explicit, private to the type, and reachable only
+  through accessors.
+- **Declared acceptance:** whether a family accepts such a primary is declared
+  setup policy, enforced at registry and setup. It is never a venue filter.
+- **Key-presence fact:** trusted setup records one non-sensitive fact about the
+  supplied primary key, `Absent | Empty | Blank | Nonblank`. The fact is
+  computed before the key is consumed, and nothing keeps the key.
+- **No behaviour change:** every existing family keeps its current terminals.
+  That is pinned for both validating and non-validating crates (K1, K4, K5).
 
 ## Non-goals
 
-- No change to `Selection` or `Slots`. They are generic over slot material,
-  so a credential-only identity in the primary slot selects for Mutation and
-  SessionAuth as it is. Selection never refuses because signing material is
-  absent (zs5e83 correction 1).
-- No credential-optional identity. An identity still needs a nonempty
-  credential ref; an Empty key installs no credential ref (correction 2).
-- No remote, delegated or payload-signer credential-only accounts. Their
-  existing construction refusals stay.
-- No GRVT source. GRVT adopts this in its own recipe.
+- **No selection change.** `Selection` and `Slots` are generic over slot
+  material, so a credential-only primary selects for Mutation and SessionAuth
+  as it is. Selection never refuses because signing material is absent.
+- **No credential cutover.** `credential: KeyRef` keeps `""` as its
+  credential-absent sentinel (B3). That is deliberate:
+  - Credential-only is a valid state that some family accepts.
+  - Credential-absent is never valid for any family.
+  - A slot with `credential = ""` fails both `validate()` and
+    `validate_credential()`.
+
+  Cutting `credential` over too would move every secret-only terminal for no
+  consumer.
+- **No credential-only on remote, payload-signer or delegated paths.** The G1
+  policy and B1 refuse them; this decides kuhwxi's G5 view for those paths.
+  GRVT may still raise legacy callback shapes under G5.
+- **No GRVT source.**
 
 ## Decisions
 
-**D1: `Identity.signing: Option<KeyRef>`, as a direct cutover.**
-- `None` means the slot has no signing material. `Some("")` stays invalid,
-  exactly as today.
-- Serde: `#[serde(default, skip_serializing_if = "Option::is_none")]`.
-  External or delegated JSON that omits `signing` means absent; `"signing": ""`
-  is still rejected by validation.
-- `Identity::validate()` keeps its meaning and requires `Some(valid)`. Every
-  existing venue filter therefore still drops a credential-only identity.
-- New `Identity::validate_credential()` accepts an absent signing ref but
-  still validates credential, passphrase, stable id and extras. Only a family
-  that adopts credential-only setup calls it.
-- New `Identity::signing_ref() -> Result<&KeyRef, SignError>` returns
-  `InvalidRequest` on `None`. The roughly 168 current `.signing` reads (27
-  source files) move to it mechanically. The compiler finds each one; none may
-  default to an empty ref.
-- `CredentialSetupPolicy::apply_to_identities`: "complete" becomes credential
-  and signing both present. Passphrase and extra checks keep their current
-  boundaries. A credential-only slot is not complete, which is today's
-  behaviour for an empty secret.
-- `LocalSigner` setup: `references` emits `None` for empty secret material.
-  Algorithm declaration, the alias check (`primary.signing` must exist) and
-  `install` use the `Option`. `remoteSignerProvider.ts` and
-  `delegatedSignerSetup.ts` keep minting a signing ref; their identities are
-  never credential-only.
-- Rejected alternative: a parallel `PresentationIdentity` slot type. It would
-  keep two identity paths and a second selection input.
+**D1: `Identity.signing` becomes private `Option<KeyRef>`, in one direct
+cutover.**
+- The field is private. Access goes through:
+  - `Identity::new(credential, signing: Option<KeyRef>, ...)`;
+  - `signing_ref() -> Result<&KeyRef, SignError>`, which returns
+    `InvalidRequest` on `None`;
+  - `signing_opt() -> Option<&KeyRef>`, used only by setup, construction
+    resolution and the alias check.
 
-**D2: `LocalIdentity.key: Option<Secret>`, plus the `KeyPresence` fact.**
-- `key` loses `#[serde(default)]`, so omitted means `None`. JS
-  `JSON.stringify` already omits `undefined`, so an absent `options.key`
-  arrives as `None` and `""` arrives as `Some("")`.
+  No consumer can write `unwrap_or_default()` or build a fresh empty ref (fe7
+  point 3, B4). Serde keeps working through `#[serde(default,
+  skip_serializing_if = "Option::is_none")]` on the private field.
+- **Bans backstop:** outside tests, `check-bans.sh` rejects
+  `KeyRef(String::new())` and `KeyRef("".into())` / `KeyRef::from("")`, except
+  the two validation-metadata sites (`signer.rs` passphrase and extra
+  placeholders, about lines 319 and 324). Those never touch `signing`.
+- **`validate()` keeps its meaning:** it requires a valid `signing`, so
+  validating families still drop the slot. `validate_credential()` accepts an
+  absent `signing` but still checks the credential, passphrase, stable id and
+  extras.
+- **Setup:** `references` emits `signing: None` for empty secret material.
+  The algorithm declaration, the alias check and `install` use the `Option`.
+  `apply_to_identities` keeps "complete" meaning both refs are present, so it
+  keeps today's boundaries.
+- **Construction resolution:** `Input::Secret` and `AsterLocalAuth` read
+  `signing_opt().is_some()`. A pinned test shows that `None` and today's
+  `Some("")` give the same `Resolved` (K5).
+- **Migration:** consumers move to `signing_ref()` mechanically, and the
+  compiler finds each one. The count of `Identity.signing` reads is smaller
+  than a raw grep, which also matches `io.signing`, entropy and JS fields
+  (M1). It is not a gate.
+
+**D2 (G1, decided): declared signing policy, enforced at setup.**
+- **The field:** `IdentitySetupPolicy.signing: SigningPolicy`, either
+  `Required` (the default) or `Optional`. Serde gives it a default and skips it
+  when it equals `Required`. The TS construction-rules `IdentitySetupPolicy`
+  gains `signing?: 'optional'` and emits it only when it is Optional. A
+  round-trip test pins that every existing policy serializes byte-for-byte as
+  before (M2).
+- **Required:** setup refuses a primary whose credential is present but
+  signing is absent. It fails `InvalidRequest` with the existing
+  `invalid("Invalid local signer setup")` terminal, before any provider
+  install.
+  - Exception: when today's family-specific builder already decides that
+    case, by never building a key-only `LocalIdentity` (Backpack's
+    `present(key) && present(secret)`, for example), that builder's gate runs
+    first and stays unchanged.
+  - Exception: when today's slot is incomplete and is merely filtered later,
+    K1, K4 and K5 pin the before and after terminal. Any change needs an
+    explicit ruling and is not silently collapsed.
+- **Optional:** setup installs the credential-only identity, and the venue
+  uses `validate_credential()`.
+- **External boundary (B1):** remote, delegated and hosted `Identities` JSON
+  that omits `signing`, or sends `null`, is refused at construction unless the
+  family's primary policy is Optional. A Required family keeps today's
+  parse-error terminal. Secondary slots always require `signing`.
+
+**D3: the key-presence fact, `LocalIdentity.key: Option<Secret>`.**
+- `key` drops `#[serde(default)]`. An omitted key and `"key": null` both mean
+  `None`, which is `Absent`.
+- The WASM entry takes setup as a JSON string (`signer_setup_json:
+  Option<String>`, `hosts/wasm/src/lib.rs`). `JSON.stringify` already omits
+  `undefined`, so an absent `options.key` arrives as `None` and `""` arrives as
+  `Some("")`.
 - `pub enum KeyPresence { Absent, Empty, Blank, Nonblank }` lives in
-  `safe_cex_engine::signing`. Setup computes it from the **raw** supplied
-  primary key, before any `trim_credential` policy. Blank means nonempty and
-  empty after Rust `str::trim` (Unicode White_Space); TS uses the existing
-  `rustTrim`.
-- The setup result carries it as
-  `SetupFacts { primary_key: KeyPresence }`, returned next to `Identities` by
-  `from_setup_with_policy_and_mode` and the JSON variant. Registry setup hands
-  it to venue construction through the same record that carries
-  `read_status` and `readCredentialsValid` (D4).
-- Existing families ignore `SetupFacts`. Native per-family setup builders that
+  `safe_cex_engine::signing`.
+- **How it is computed (B5):**
+  - from a borrowed `&str` of the raw `Option<Secret>`, before any
+    `trim_credential` policy;
+  - Blank means nonempty and empty after `str::trim` on that borrow, using
+    Unicode White_Space;
+  - there is no owned or trimmed copy outside `Zeroizing`;
+  - non-UTF-8 raw input is `Nonblank`, because decoding refuses it later.
+- **`SetupFacts { primary_key: KeyPresence }`:** it covers the primary only
+  and holds only the enum. Its `Debug` and serialized forms are the variant
+  name, and it is never formatted into diagnostics beyond that.
+  `from_setup_with_policy_and_mode` and the JSON variant return it beside
+  `Identities`. The registry hands it to venue construction on the record that
+  already carries `read_status` and `readCredentialsValid`.
+- **Existing families** ignore `SetupFacts`. Native per-family builders that
   read `options.key` (`registry/src/lib.rs`, `asterdex_setup.rs`) keep their
-  current presence gates; only the `Secret` wrapping changes.
+  presence gates; only the `Secret` wrapping changes.
+- **G3** (Empty-key login selection) may revise D3. Under the B3 model, Empty
+  gives `{credential: "", signing: ...}`, which is invalid for both
+  validators. It gates phase 3.
 
-**D3: signing is checked per operation, not per selection.**
-- An operation that signs takes its key through `signing_ref()`. With
-  `None`, it fails `InvalidRequest` (`NotSent`) inside its preparation,
-  before any provider call or I/O, under the same contract as a missing
-  provider ref today.
-- Unsigned session-authenticated Mutations never call it, so they keep
-  working.
-- A family that needs typed admission earlier, before queue or placement
-  effects, does it in its own command admission. The shared core supplies
-  only the fact and the accessor (see G2).
+**D4: signing is checked per operation, not per selection, on every path
+(B4).**
+- Every operation that signs takes its key through `signing_ref()`. That
+  covers the HTTP sign prepare, the socket SessionAuth login Sign ops and the
+  dispatch-time signing work.
+- With `None`, the operation fails `InvalidRequest` / `NotSent` before any
+  provider call, connect, send or HTTP.
+- Unsigned session-authenticated Mutations never call `signing_ref()`, so
+  they stay available.
+- A family wanting earlier typed admission, before queue effects, does it in
+  its own command admission (GRVT: G2).
 
-**D4: one evaluator per setup path, pinned by a parity matrix.**
-- Local WASM and native setup compute `KeyPresence` in Rust, inside
-  `LocalSigner` setup, from the key they consume.
-- The delegated and remote JS setups never produce credential-only
-  identities, so they report no fact. A family that declares credential-only
-  support refuses them, as today.
-- One matrix pins every input × path pair. Inputs: missing key, `""`,
-  `"  "`, `"\u{85}"` (NEL, trimmed), `"\u{feff}"` (BOM, kept), `" k "` and
-  `"k"`. Paths: native and WASM JSON. TS needs no second evaluator because the
-  key goes into Rust setup.
+**D5: one evaluator per path, with a parity matrix.**
+- Local WASM and native setup both compute `KeyPresence` in Rust, from the key
+  they consume.
+- Delegated and remote JS setups never produce credential-only identities
+  (D2), so they report no fact. TS needs no second evaluator.
 
 ## Original tests (RED before GREEN)
 
-Shared-core REDs, each failing on `ad0b74afdf8` for the intended reason:
+Shared-core REDs. Each fails on `ad0b74afdf8` for the stated reason.
 
 | ID | Test | Fails today because |
 | --- | --- | --- |
-| C1 | Key-only `LocalSetup` installs an identity with `credential = Some`, `signing = None`; `validate_credential()` is Ok and `validate()` is Err | `signing` is `KeyRef("")`; there is no absent state |
-| C2 | Omitted key and `key: ""` give `KeyPresence::Absent` and `Empty`, with no credential ref for either | serde default collapses them |
-| C3 | Presence matrix from D4 across the native and WASM-JSON setup paths | no fact exists |
-| C4 | `signing_ref()` on a credential-only identity returns `InvalidRequest`; a Sign prepare built from it publishes no Sign effect and sends no HTTP | no accessor; an empty ref reaches the provider |
-| C5 | Unsigned SessionAuth and Mutation selections over a credential-only primary return Primary with `session_egress` granted | the identity is filtered before selection by every current builder (control on `Slots` alone) |
-| C6 | JSON round-trip: an omitted `signing` deserializes `None`; `"signing": ""` fails validation; serialization of `None` omits the field | the field is mandatory |
+| C1 | An Optional family's key-only `LocalSetup` installs `signing = None`; `validate_credential()` is Ok, `validate()` is Err | `signing` is `KeyRef("")`, and there is no policy |
+| C2 | An omitted key, `"key": null` and `"key": ""` give `Absent`, `Absent` and `Empty` | serde default collapses them |
+| C3 | Presence matrix: absent, `null`, `""`, `"  "`, `"\u{85}"` (NEL, trimmed), `"\u{feff}"` (BOM, kept), `" k "`, `"k"`. Run through native setup and the WASM JSON entry TS actually calls | no fact exists |
+| C4 | `signing_ref()` on `None` refuses an HTTP sign prepare. Custody: the signing reservation and the Context are released (`Serial::signs` and the planned-write reservation), the terminal is `InvalidRequest` + `NotSent`, a peer command on the same registry still prepares, and there is no Sign effect or HTTP | no accessor; an empty ref reaches the provider |
+| C4s | A socket SessionAuth login that signs, given `None`, refuses before connect or send, with the same custody | same |
+| C4p | Serial Plan: an unsigned call settles, then a signing call with `None` fails that call `NotSent`. The projection keeps the settled call's facts, with no Rejected or NotSent overclaim | same |
+| C5 | Control on `Slots` alone: Mutation and SessionAuth over a credential-only primary choose Primary, and `session_egress` is granted | (control) |
+| C6 | Identity JSON: omitting `signing` gives `None` and serializing `None` omits the field. `"signing": ""` fails `validate()` and `validate_credential()` | the field is mandatory |
+| C7 | A Required family refuses a key-only local setup at registry construction, with no venue code involved; an Optional fixture family gets the identity | no policy |
+| C8 | A Required family's remote, delegated and hosted identities without `signing` are refused at construction with today's terminal | after D1 they would parse as `None` |
+| C9 | `SetupFacts` `Debug` and serde output contain only the variant name | no type |
 
 Behaviour-neutral controls, green before and after:
 
-- K1: every family's existing key-only, secret-only, public-only and complete
-  setup tests are unchanged. That covers the `credentials.rs` assertions, the
-  MEXC trim policy, OKX, Bitget and WEEX passphrase rules, the AsterDEX
-  mapping, Backpack PublicRead, the ApeX extra and the Polymarket L1 wallet.
-- K2: the alias secondary (`signing_from_primary`) still refuses a missing
+- **K1:** every family's existing key-only, secret-only, public-only and
+  complete setup tests are unchanged. This covers the `credentials.rs`
+  assertions, the MEXC trim policy, the OKX, Bitget and WEEX passphrase rules,
+  the AsterDEX mapping, Backpack PublicRead, the ApeX extra and the
+  Polymarket L1 wallet.
+- **K2:** the alias secondary (`signing_from_primary`) still refuses a missing
   primary signing ref.
-- K3: the delegated and remote setup TS tests are unchanged, and
-  `credentialPresence` and `derivePublicMode` are unchanged.
+- **K3:** the delegated and remote setup TS tests, `credentialPresence` and
+  `derivePublicMode` are unchanged.
+- **K4:** for apexomni, breakoutprop, grvt, hyperliquid, lighter, orderly,
+  paradex and polymarket, pin the key-only and secret-only setup terminal:
+  kind, outcome and message before and after. For each crate either pin it,
+  or show that the crate never consumes `Identity`.
+- **K5:** `construction::resolve` gives the same `Resolved` for a `None` and a
+  `Some("")` signing, for `Input::Secret` and `AsterLocalAuth`.
+- **K6:** the IdentitySetupPolicy round-trip from M2.
 
 ## Phases
 
-1. Plan review (this document). REDs C1-C6 come only after CLEAR.
-2. D1: the Option cutover, with all consumers through `signing_ref()`, as one
-   commit. Gates: workspace all-targets check, engine feature modes, the
-   K1/K2 controls, bans and WASM sizes for every family plus combined.
-3. D2/D4: `Option<Secret>` key, `KeyPresence` and `SetupFacts` through the
-   registry construction record, with C2/C3 GREEN.
-4. Docs: a `RUST_CUTOVER_CALLERS.md` row (external providers may omit
-   `signing` for credential-only identities only in families that declare
-   it), plus the `RUST_SIGNER.md` identity contract.
+1. Plan review (this document). C1-C9 REDs come after CLEAR.
+2. D1 + D2: the private `Option` cutover, the signing policy, the external
+   boundary and the bans rule. C1, C4-C8 and K1-K6 go GREEN.
+3. D3 + D5: the `Option<Secret>` key, `KeyPresence` and `SetupFacts`. C2, C3
+   and C9 go GREEN. **This phase does not start until G3 is answered** with
+   zs5e83. If the answer reopens D3, D3 is revised first.
+4. Docs: a `RUST_CUTOVER_CALLERS.md` row saying external providers may omit
+   `signing` only for Optional families, and the `RUST_SIGNER.md` identity
+   contract.
 
-Each phase needs an independent review answering: "Is this a per-venue fix of
-a cross-cutting concern?"
+Every phase's gates:
+- workspace all-targets check;
+- engine feature modes;
+- bans;
+- WASM sizes for every family and combined, against the base.
+
+Each phase also needs an independent review that answers: "Is this a
+per-venue fix of a cross-cutting concern?"
 
 ## Open questions for GRVT (zs5e83, when the recipe resumes)
 
-- G1: **policy declaration.** Does GRVT need a construction-rules field
-  saying "this family accepts credential-only primaries", or does the venue
-  simply call `validate_credential()`? The recommendation is a declared
-  `IdentitySetupPolicy.signing: Required | Optional` (default `Required`), so
-  the registry refuses credential-only setups for every other family by
-  policy rather than by a filter.
-- G2: **placement admission.** Refuse placement typed in GRVT's command
-  admission using `signing_ref()` plus the declared `Secp256k1Digest`
-  capability, before queue effects (recipe step 5). Or is the D3 preparation
-  refusal enough?
-- G3: **Empty login.** With `KeyPresence::Empty` there is no credential ref,
-  so no identity, so no SessionAuth selection. Which selection or
-  `session_egress` does the `api_key ""` login use? Option: a primary-slot
-  Selection constructor taking a `KeyPresence::Empty` fact and no material.
-  That needs a shared-core change.
-- G4: **Blank.** A whitespace-only key installs a credential ref
-  (`trim_credential=false`), logs in with those exact bytes, and identity
-  eligibility reads `Blank`. Confirm that matches native diagnostics and I/O
-  precedence.
-- G5: **legacy callbacks.** Does any GRVT remote, payload or delegated
-  construction need credential-only support? This plan assumes no.
+- **G2: placement admission.** Refuse placement typed in GRVT's command
+  admission, using `signing_ref()` and the declared Secp256k1Digest
+  capability, before queue effects. kuhwxi's view: the D4 `NotSent` floor is
+  safe, but GRVT should refuse earlier.
+- **G3: Empty login (gates phase 3).** Under `KeyPresence::Empty` the slot is
+  `{credential: "", signing: None}`, and it fails both validators. Which
+  Selection and `session_egress` does the `api_key ""` login use? One option
+  is a primary-slot Selection built from the Empty fact with no material. That
+  is a further shared-core change and may revise D3.
+- **G4: Blank keys.** A whitespace-only key installs a credential ref
+  (`trim_credential=false`) and logs in with those exact bytes; identity
+  eligibility reads Blank. Confirm the native diagnostic and I/O precedence.
+- **G5: legacy callbacks.** Do any GRVT remote, payload or delegated shapes
+  need credential-only support? D2 refuses them by default.
