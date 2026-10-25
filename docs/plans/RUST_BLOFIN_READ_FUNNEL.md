@@ -135,6 +135,19 @@ paired measurement on that tip (Rust 1.99.0, Binaryen 132,
 full source. If combined exceeds +10K, stop and report to the overseer. No
 budget is raised. After the measurement, delete the scratch `target/`.
 
+Measured before S1 (S1 had not landed). Tip `aec49a904bc` against the full
+source `5cd98272caa` (tree `8843eebce99`), Rust 1.99.0, wasm-bindgen 0.2.129,
+Binaryen 132, `BINARYEN_CORES=4`, shipped profiles:
+
+| Bundle   | Before bytes | After bytes |  Delta |
+| -------- | -----------: | ----------: | -----: |
+| BloFin   |      999,498 |   1,005,092 | +5,594 |
+| Combined |   14,036,202 |  14,040,650 | +4,448 |
+
+The first-source pair (closed positions only, tip `34999f973f9`) was BloFin
++5,375 and combined +3,474. Both are within the +10K pre-S1 bar and the
+venue budget (1,343,488).
+
 ## Original controls (RED first)
 
 Each RED fails on the base:
