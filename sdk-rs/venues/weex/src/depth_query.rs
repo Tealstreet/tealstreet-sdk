@@ -199,7 +199,6 @@ impl WeexFutures {
                 path: paths::DEPTH.into(),
                 query,
                 task: Task::BookQuery(request),
-                stream: None,
             });
             return;
         }

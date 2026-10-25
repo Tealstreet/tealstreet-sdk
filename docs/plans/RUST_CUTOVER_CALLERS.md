@@ -8742,6 +8742,24 @@ Follow-up (engine owner): a shared ReadFailure backoff. The engine grants read
 resends but has no delay policy, so AsterDEX keeps its own 1/2/3 s timer, as
 other families do. That timer goes away when the shared backoff lands.
 
+## WEEX public discovery and ticker seed custody
+
+Markets, Daily and BookTickers admit independent keyless Background Reads only
+when eligible after the native pause. Each physical observation has a NEW20s
+bound, Never retry, no pacing, explicit Primary intent and unchanged route None.
+Exact DATA plus ticker generation precede row/status/rate/diagnostic effects.
+Publication stays inside live custody; exact retirement precedes both catalogue
+successors, socket/private startup and native retry hooks. Finite owned Timeout
+retires then follows the existing native backoff/startup once. Nonfinite clocks
+allow exact issued cleanup only, without new work or Store/readiness effects.
+Old seed generations cannot publish or affect the current pause/seed. Native
+backoff creates a fresh bounded observation; no aggregate retry cap is implied.
+The orphan streamed legacy sender is removed; nonstream subscription Depth is
+unchanged. Fixture-only admission-clock supersession aligns six catalogue starts
+to their already-existing epoch response time, with all response/event clocks,
+payloads and financial assertions retained and truncated-stream0->1->2 unchanged.
+Standalone custody controls retain genuine delayed/equality expiry coverage.
+
 ## OKX ordered writes on a streamed serial Plan (#2117)
 
 PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder, SetLeverage and SetPositionMode for OKX now run as one command-owned streamed serial Plan behind a WriteAfterReads Preflight. These are unchanged: entry precedence, planning, batching, endpoints, bodies, the demo header, client-ID progress receipts, accepted-ID order and per-command concurrency.
