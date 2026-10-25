@@ -1,7 +1,7 @@
 //! Serialized nonce allocation and submissions. Transport failures never replay writes.
 use crate::{Lighter, Pending, sign};
 use safe_cex_engine::model::*;
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::Operation;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -1399,16 +1399,7 @@ fn uncertain(message: impl Into<String>) -> VenueError {
 
 /// A native pre-I/O refusal settles only the genuine Mutation entry.
 fn refuse(cx: &mut Cx<'_, Pending>, error: VenueError) {
-    let Ok(context) = cx.admit_http_command(Policy {
-        operation: Operation::Mutation,
-        credential: None,
-        timeout_ms: 20_000,
-        pacing: None,
-        retry: RetryPolicy::Never,
-    }) else {
-        return;
-    };
-    let _ = cx.fail_context(&context, error);
+    cx.refuse_command(Operation::Mutation, error);
 }
 
 #[cfg(test)]
