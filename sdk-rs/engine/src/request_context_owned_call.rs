@@ -13,11 +13,23 @@ pub(super) struct Call {
     pub(super) selected: u16,
     pub(super) admission: Admission,
     pub(super) stage: Stage,
+    pub(super) released_failure: Option<ReleasedReadFailure>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine) enum ReleasedReadFailure {
+    Network,
+    PhysicalTimeout,
 }
 
 pub(super) enum Stage {
     Ready,
-    Active { failed: bool },
+    Active {
+        failed: bool,
+    },
+    /// A failed call whose retry waits on a login Session: nothing is selected
+    /// until its resume, and the default failure tail leaves it alone.
+    Parked,
 }
 
 /// Private one-use queue/failure custody. A Context clone cannot construct it.
@@ -32,6 +44,43 @@ pub(in super::super) struct Admission {
 }
 
 impl Call {
+    /// A logical call with its first physical attempt selected. Shared by every
+    /// owner phase so the construction exists once.
+    #[inline(never)]
+    pub(super) fn open(
+        context: Context,
+        terms: CallTerms,
+        window: CallWindow,
+        ids: Range<u64>,
+        signing: Option<Range<u64>>,
+        now: f64,
+        predecessor: Option<Delivery>,
+    ) -> Result<Self, Error> {
+        let mut call = Call {
+            context: context.clone(),
+            terms,
+            window,
+            ids,
+            signing,
+            selected: 0,
+            admission: Admission {
+                context,
+                attempt: Attempt {
+                    request: RequestId(0),
+                    generation: 0,
+                },
+                timer: TimerId(0),
+                signing: None,
+                deadline: window.deadline(),
+                predecessor: None,
+            },
+            stage: Stage::Ready,
+            released_failure: None,
+        };
+        call.select(now, predecessor)?;
+        Ok(call)
+    }
+
     pub(super) fn matches(&self, delivery: &Delivery) -> bool {
         self.context.same_issuer(&delivery.context)
             && self.context == delivery.context
@@ -63,6 +112,7 @@ impl Call {
         };
         self.selected += 1;
         self.stage = Stage::Ready;
+        self.released_failure = None;
         Ok(())
     }
 }

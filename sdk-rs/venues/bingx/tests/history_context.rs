@@ -63,6 +63,9 @@ fn drain(engine: &mut Engine<Bingx>, now: f64) -> Output {
                     output.claimed += 1;
                     output.requests.push(request);
                 }
+                HttpAction::BindGroup { .. } => {
+                    panic!("BingX fixture declares no Mutation barriers")
+                }
                 HttpAction::Cancel { .. } => {}
             },
             action => output.actions.push(action),
@@ -788,6 +791,9 @@ fn a_delayed_bind_is_refused_at_root_expiry_without_a_physical_release() {
                     },
                 ),
                 HttpAction::Bind { permit, .. } => break permit,
+                HttpAction::BindGroup { .. } => {
+                    panic!("BingX fixture declares no Mutation barriers")
+                }
                 HttpAction::Cancel { .. } => panic!("live bind cannot cancel"),
             }
         }

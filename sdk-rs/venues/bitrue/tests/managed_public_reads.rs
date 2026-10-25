@@ -1,13 +1,15 @@
+mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, Response, SocketId, TimerId};
-use safe_cex_venue_bitrue::{Bitrue, Options};
+use safe_cex_venue_bitrue::Bitrue;
+use support::Options;
 
 const SYMBOL: &str = "E-BTC-USDT";
 const TRADE: &str = r#"{"side":"buy","price":60000,"vol":1,"amount":60000}"#;
 fn boot() -> (Engine<Bitrue>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Bitrue::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(0.);
     let request = e
         .drain_actions()

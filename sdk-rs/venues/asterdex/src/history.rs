@@ -1,10 +1,10 @@
 //! Typed rare reads; Aster executions carry cumulative PnL, unlike Binance.
 use crate::{AsterDex, Pending, account, sign::Query};
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::model::{OrderStatus, OrderType};
+use safe_cex_engine::model::{Interval, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::{CommandId, Cx, Query as Read, Response, TimerId};
+use safe_cex_engine::{Command, CommandId, Cx, Query as Read, Response, TimerId};
 use safe_cex_venue_binance::wire::{HistoricalOrderRow, UserTrade};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -12,6 +12,12 @@ use std::collections::HashMap;
 
 const MAX_WINDOW_MS: f64 = 7.0 * 24.0 * 3_600_000.0;
 const INCOME_CHUNK_DELAY_MS: f64 = 2_000.0;
+
+pub(crate) enum LocalRead<'a> {
+    History(Result<&'static str, &'static str>),
+    Leverage(&'a str),
+    Unsupported(Interval),
+}
 
 #[derive(Default)]
 pub struct HistoryState {
@@ -294,16 +300,24 @@ fn normalize(rows: &mut [Execution]) {
     }
 }
 impl AsterDex {
-    pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
+    pub(crate) fn local_read<'a>(&self, command: &'a Command) -> Option<LocalRead<'a>> {
+        let Command::Query { query: read, .. } = command else {
+            return match command {
+                Command::FetchLeverage { symbol, .. } => Some(LocalRead::Leverage(symbol)),
+                Command::FetchCandles { interval, .. } if !crate::supported(*interval) => {
+                    Some(LocalRead::Unsupported(*interval))
+                }
+                _ => None,
+            };
+        };
         if !self.credentials.has_primary() && !matches!(read, Read::PublicTrades { .. }) {
-            cx.done(command, "[]".into());
-            return;
+            return Some(LocalRead::History(Ok("[]")));
         }
-        let (from, to, bounded, income) = match &read {
+        let (from, to, bounded, income) = match read {
             Read::Fills { from_ms, to_ms, .. } | Read::OrderHistory { from_ms, to_ms, .. } => (
                 *from_ms,
                 *to_ms,
-                matches!(&read, Read::OrderHistory { .. }),
+                matches!(read, Read::OrderHistory { .. }),
                 false,
             ),
             Read::Income { from_ms, to_ms, .. } => (*from_ms, *to_ms, false, true),
@@ -317,25 +331,48 @@ impl AsterDex {
                 .zip(to)
                 .is_some_and(|(from, to)| to < from || (income && to == from))
         {
-            cx.fail(command, "Invalid Aster history time range");
-            return;
+            return Some(LocalRead::History(Err("Invalid Aster history time range")));
         }
         if bounded
             && from
                 .zip(to)
                 .is_some_and(|(from, to)| to - from > MAX_WINDOW_MS)
         {
-            cx.fail(
-                command,
+            return Some(LocalRead::History(Err(
                 "Aster order history requires a time window of at most seven days",
-            );
-            return;
+            )));
         }
-        let (endpoint, query, pending, private) = match read {
-            Read::OrderByClientId { .. } => {
-                cx.fail(command, "Aster does not support caller client order IDs");
-                return;
+        match read {
+            Read::OrderByClientId { .. } => Some(LocalRead::History(Err(
+                "Aster does not support caller client order IDs",
+            ))),
+            Read::Fills {
+                symbol,
+                from_ms,
+                to_ms,
+                ..
+            } => {
+                if symbol.as_deref().is_none_or(str::is_empty) {
+                    return Some(LocalRead::History(Ok("[]")));
+                }
+                if from_ms.zip(*to_ms).is_some_and(|(_, to)| to + 1.0 <= to) {
+                    return Some(LocalRead::History(Err("Invalid Aster history time range")));
+                }
+                None
             }
+            Read::OrderHistory { symbol, .. }
+                if self.version == crate::sign::Version::V1
+                    && symbol.as_deref().is_none_or(str::is_empty) =>
+            {
+                Some(LocalRead::History(Ok("[]")))
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
+        let (endpoint, query, pending, private) = match read {
+            Read::OrderByClientId { .. } => unreachable!("local read handled at command entry"),
             Read::Fills {
                 symbol,
                 order_id,
@@ -343,15 +380,8 @@ impl AsterDex {
                 to_ms,
                 limit,
             } => {
-                let Some(symbol) = symbol.filter(|symbol| !symbol.is_empty()) else {
-                    cx.done(command, "[]".into());
-                    return;
-                };
+                let symbol = symbol.expect("local read handled at command entry");
                 if let Some((from, to)) = from_ms.zip(to_ms) {
-                    if to + 1.0 <= to {
-                        cx.fail(command, "Invalid Aster history time range");
-                        return;
-                    }
                     let limit = limit.unwrap_or(500).clamp(1, 1000);
                     self.next_fill_page(
                         cx,
@@ -398,28 +428,20 @@ impl AsterDex {
                 from_ms,
                 to_ms,
                 limit,
-            } => {
-                if self.version == crate::sign::Version::V1
-                    && symbol.as_deref().is_none_or(str::is_empty)
-                {
-                    cx.done(command, "[]".into());
-                    return;
-                }
-                (
-                    "allOrders",
-                    Query::new()
-                        .opt_str("symbol", symbol.as_deref())
-                        .num("limit", f64::from(limit.unwrap_or(500).clamp(1, 1000)))
-                        .opt_num("startTime", from_ms)
-                        .opt_num("endTime", to_ms),
-                    Request::Orders {
-                        command,
-                        rows: Vec::new(),
-                        invalid: false,
-                    },
-                    true,
-                )
-            }
+            } => (
+                "allOrders",
+                Query::new()
+                    .opt_str("symbol", symbol.as_deref())
+                    .num("limit", f64::from(limit.unwrap_or(500).clamp(1, 1000)))
+                    .opt_num("startTime", from_ms)
+                    .opt_num("endTime", to_ms),
+                Request::Orders {
+                    command,
+                    rows: Vec::new(),
+                    invalid: false,
+                },
+                true,
+            ),
             Read::Income {
                 symbol,
                 kind,

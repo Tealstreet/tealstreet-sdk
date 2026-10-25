@@ -54,6 +54,8 @@ pub enum Pending {
         valid: bool,
     },
     Signed(Box<Signed>),
+    /// One FetchLeverage read under its engine-admitted metadata Plan.
+    Metadata(Box<account::MetadataLeg>),
 }
 
 /// A signed request kept re-signable, so a signature rejection is resent once.
@@ -869,7 +871,7 @@ impl Venue for Bingx {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Identity(_) => {}
+            Pending::Identity(_) | Pending::Metadata(_) => {}
             Pending::Signed(signed) => self.on_item(cx, &mut signed.inner, item),
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
@@ -987,6 +989,18 @@ impl Venue for Bingx {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Metadata(leg) = pending {
+            match &self.credentials {
+                Some(credentials) => {
+                    self.account
+                        .metadata_response(cx, credentials, *leg, response)
+                }
+                None => {
+                    account::fail_metadata_plan(cx, &leg, "BingX metadata requires credentials")
+                }
+            }
+            return;
+        }
         if let Pending::Identity(read) = pending {
             self.identity_response(cx, read, response);
             return;
@@ -1018,6 +1032,9 @@ impl Venue for Bingx {
             Pending::Trade(request) => {
                 if request.changes_settings() {
                     self.account.settings_changed();
+                }
+                if let Some(scope) = request.settings_scope() {
+                    cx.store.invalidate_metadata(scope);
                 }
                 self.account.bump_orders();
                 self.account.bump_positions();
@@ -1241,6 +1258,8 @@ impl Venue for Bingx {
                     self.account.on_sign_failed(cx, request, error, credentials);
                 }
             }
+            // Provider refusal is typed and is never venue-auth evidence.
+            Pending::Metadata(leg) => account::fail_metadata_plan(cx, &leg, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
@@ -1262,6 +1281,15 @@ impl Venue for Bingx {
             Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
         );
         match pending {
+            Pending::Metadata(leg) => {
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    code::REQUEST_FAILED,
+                    format!("BingX private request failed: {error}"),
+                );
+                account::fail_metadata_plan(cx, &leg, account::metadata_error(error));
+                return;
+            }
             Pending::Signed(signed) => {
                 if let Some(context) = signed.context()
                     && matches!(&signed.inner, Pending::Candles { .. })
@@ -1377,12 +1405,19 @@ impl Venue for Bingx {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         if matches!(
-            &command,
+            command,
             Command::SetLeverage { .. }
                 | Command::SetMarginType { .. }
                 | Command::SetPositionMode { .. }
         ) {
             self.account.settings_changed();
+        }
+        match &command {
+            Command::SetLeverage { symbol, .. } | Command::SetMarginType { symbol, .. } => {
+                cx.store.invalidate_metadata(Some(symbol))
+            }
+            Command::SetPositionMode { .. } => cx.store.invalidate_metadata(None),
+            _ => {}
         }
         if let Command::FetchAccount { .. } = command {
             self.fetch_identity(cx);
@@ -1390,7 +1425,7 @@ impl Venue for Bingx {
         }
         match command {
             Command::FetchLeverage { command, symbol } => {
-                let publish = !self.trading.settings_pending();
+                let publish = !cx.store.metadata_write_pending(&symbol);
                 self.account.fetch_metadata(
                     cx,
                     self.credentials.as_ref(),
