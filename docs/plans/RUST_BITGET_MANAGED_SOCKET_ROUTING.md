@@ -53,19 +53,26 @@ Reviewer for the shared socket API: claude-dazzy3.
   - Wins over `recover`.
 - **Evidence.** `AuthEvidence::RouteRefused(VenueError)` is a new pre-login control result. The driver retires the epoch with a new `RetireReason::RouteRefused`.
   - The next connect carries `reject_route`.
-  - That reconnect skips backoff once per refusal: TS advances immediately. A host that ignores the flag stays bounded by the next refusal's ordinary backoff.
+  - **Backoff bound (dazzy3 A, option i).** Only the first refusal of a streak skips backoff. Every later refusal in the same streak reconnects at ordinary backoff pace, so a host that ignores `reject_route` can never hot-loop on a deterministic 40018/40024. A conforming host still walks every candidate, paying the backoff per extra route. A successful login ends the streak. The producer owns this bound: the managed driver on the managed path, the venue supervisor on the legacy path.
+- **Composition with `recover` (dazzy3 C).** `reject_route` and `recover` are orthogonal and are both carried. `reject_route` decides the candidate for that one connect: advance exactly one, and do not apply `recover`'s jump-to-last in the same connect. `recover` keeps its meaning for venue state: classic Bitget's `needs_recovery` resubscribe is still carried and honoured, so a route switch never drops recovery.
 - **Exhaustion.**
   - When a `reject_route` connect has no candidate left, the host does not dial. It emits `Event::WsRouteExhausted { socket }`.
   - That event is host-only, enqueued after `connect` returns, and dropped for a stale socket.
+  - **It is that socket's only terminal.** A host that emits it emits no open and no close for the socket. The engine treats it as that epoch's sole terminal, so there is never a double retire.
   - The driver turns it into `LifecycleEvent::RouteExhausted`. It is never a peer close.
   - The default handling is today's close-and-retry path, so venues that don't opt in are unchanged.
-- **Private UTA route.** The engine and native host plans gain a URL-scoped private route (`wsPrivateUta`), mirroring `public_ws_routes`. The UTA `directUrls` bypass and its routing-table comment are removed.
+- **The connect after exhaustion (dazzy3 B).** Any connect after `RouteExhausted` carries `reject_route = false`, and the host dials the last candidate: it stays where the walk ended, matching `WsDirectFallback`'s sticky choice. Native `SocketAttempts`, TS `WsDirectFallback` and the WASM pass-through agree on this. For Bitget, ruling 3 means no such connect happens: it stops. Venues on the default close-and-retry path use this rule.
+  - REDs per host: refuse every route, then exhaustion with no dial, then the next connect dials the last candidate with no second exhaustion.
+- **One host contract on both paths.** `rejectRoute` plus `WsRouteExhausted` is the same host contract on the legacy and managed paths; only the producer differs. Adoption later moves only the evidence source, not the hosts or the event.
+- **Private UTA route.** The engine and native host plans gain a URL-scoped private route (`wsPrivateUta`), mirroring `public_ws_routes`. The UTA `directUrls` bypass and its comment are removed from `packages/safe-cex/src/transport/tealstreet/routing/routingTable.ts`, the TS single source. That TS change is part of the same cutover and is named in Callers, so native and TS can't diverge.
 - **Owner and review.** This is the shared socket core: dazzy3 reviews it. The original REDs cover the engine, TS host, native host and WASM host.
 
 ### (3) Bitget 40018/40024 evidence
 
 - **Pre-login refusal.** A 40018 (IP-bound key) or 40024 (restricted location) refusal before login maps to `RouteRefused`. It logs TS's "trying the next route" warning and reports no error.
 - **Exhaustion (ruling 3, matches TS).** On route exhaustion, report the native egress refusal once as an `AUTH_REJECTED` notice, never a startup failure or deactivation, and stop reconnecting the private socket. There is no silent retry loop; a test pins zero reconnects after exhaustion. Recovery is a new start, as in TS.
+  - **The stop releases startup cleanly.** REST startup and public feeds are unaffected, and nothing waits on the stopped private socket. A RED pins that startup resolves with no hang.
+  - dazzy3 proposed instead retrying the last route under a long capped backoff (60 s or more). That is recorded as the alternative; ruling 3 stands unless the overseer reopens it.
 - **TS counters.** Carried over as data: `MAX_UNAUTHENTICATED_TUNNEL_CLOSES = 2` and `MAX_FAILED_TUNNEL_CONNECTS = 6`. Each sends `reject_route` once its threshold is met.
 - **REST is unchanged.** REST 40018 keeps `AuthPermission`.
 
@@ -88,7 +95,8 @@ The base is tip `f3ed1f32bf0`: Bitget is 1,340,440 in CI, and the allowance is 1
 `SocketContext` already reaches the hosts from Bitget's legacy `cx.connect` (`lib.rs:313-356`). The same `reject_route` flag, the host-only `WsRouteExhausted` event and a default-close `Venue::on_route_exhausted` can therefore work without the managed lifecycle.
 
 - Estimated size: about +3K to +6K on Bitget and +3K to +8K combined.
-- Trade-off: it extends a path the engine marks as a temporary migration boundary. Managed adoption would then have to carry the seam over later.
+- Trade-off: it extends a path the engine marks as a temporary migration boundary. Because the host contract is the same on both paths, adoption later moves only the producer.
+- **Ownership on this path.** The venue supervisor owns the skip bound (A) and treats exhaustion as the socket's only terminal. The connect-after-exhaustion rule (B) applies to venues that keep the default.
 
 ## Ordering against slice 3 under the Bitget budget
 
