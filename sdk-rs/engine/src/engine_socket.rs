@@ -2219,3 +2219,7 @@ mod tests {
 #[cfg(test)]
 #[path = "socket_handoff_tests.rs"]
 mod handoff_tests;
+
+#[cfg(test)]
+#[path = "socket_capability_tests.rs"]
+mod capability_tests;
