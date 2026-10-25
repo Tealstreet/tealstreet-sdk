@@ -91,3 +91,38 @@ describe('hosted Rust construction refuses wallet material before retaining opti
     });
   }
 });
+
+describe('hosted setup refusal metadata and callback custody', () => {
+  const material = 'private-material-sentinel';
+  const cases: Array<[ExchangeName, Partial<ExchangeOptions>]> = [
+    ['paradex', { key: ' ' }],
+    ['paradex', { key: privateKey, payloadSigner: vi.fn(), secret: material }],
+    ['paradex', { key: '', payloadSigner: vi.fn(), starkPrivateKey: material }],
+    ['polymarket', { key: '', polymarket: { apiSecret: material } }],
+    ['polymarket', { key: '', polymarket: { apiPassphrase: material } }],
+  ];
+  for (const mode of ['hostedMode', 'remoteSigner'] as const) {
+    it.each(cases)(`${mode} %s material refuses with typed metadata before any provider`, (name, fields) => {
+      const provider = remote();
+      const load = vi.fn();
+      setWasmEngineLoader(load);
+      let error: unknown;
+      try { construct(name, { ...fields, [mode]: mode === 'hostedMode' ? true : provider }); }
+      catch (caught) { error = caught; }
+      expect(error).toBeInstanceOf(ExchangeError);
+      expect(error).toMatchObject({
+        kind: 'invalidInput', outcome: 'notSent',
+        message: 'Hosted Rust accounts accept public signing metadata only',
+      });
+      expect(String(error)).not.toContain(material);
+      expect(provider.sign).not.toHaveBeenCalled();
+      expect(load).not.toHaveBeenCalled();
+    });
+    it(`${mode} a non-callable payloadSigner cannot classify key as public`, () => {
+      expect(() => construct('paradex', {
+        [mode]: mode === 'hostedMode' ? true : remote(),
+        payloadSigner: true as unknown as ExchangeOptions['payloadSigner'],
+      })).toThrowError(ExchangeError);
+    });
+  }
+});

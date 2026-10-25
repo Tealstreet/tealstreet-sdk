@@ -8564,3 +8564,15 @@ The remaining conservative discovery macro witness is retained. The old stale
 response fixture's no-action count is explicitly superseded by exactly one
 ClearTimer for the retired managed HTTP deadline; no native publication,
 fallback, recovery, notice or poll timer is permitted in that suffix.
+
+## Hosted Rust wallet-material construction refusal
+
+Paradex and Polymarket callers selecting hostedMode or remoteSigner must provide
+only public metadata. Construction now refuses private fields synchronously as
+invalidInput/notSent, including public-only accounts, before options retention,
+WASM loading or I/O. Paradex key is public only under the configured payloadSigner
+contract; addresses remain public. Polymarket key, L2 apiSecret/apiPassphrase and
+both families' secret/starkPrivateKey must be absent or empty. No callback or
+engine fallback is introduced; local mode is unchanged. This supersedes the
+Paradex wrapper fixture that allowed remote HTTP plus local JWT signing.
+See RUST_SIGNER_REMOTE_WIRE_AND_IMPORT.md for the owner ruling and original REDs.

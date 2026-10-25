@@ -612,6 +612,15 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    if ((options.hostedMode || options.remoteSigner) && (exchangeName === 'paradex' || exchangeName === 'polymarket')) {
+      // The payload callback declares Paradex key public; its felt bytes cannot prove custody.
+      const privateKey = exchangeName === 'polymarket' || typeof options.payloadSigner !== 'function' ? options.key : undefined;
+      if (privateKey || options.secret || options.starkPrivateKey
+        || (exchangeName === 'polymarket' && (options.polymarket?.apiSecret || options.polymarket?.apiPassphrase))) {
+        const message = 'Hosted Rust accounts accept public signing metadata only';
+        throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+      }
+    }
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
     if (options.localSigner !== undefined && !bridgeConstruction.dispatchSigning) {
       const message = 'Local signer setup is not supported for this Rust venue yet';

@@ -94,11 +94,10 @@ describe('Rust Paradex account boundary', () => {
     expect(payloadSigner).not.toHaveBeenCalled();
   });
 
-  it('allows the TS remote HTTP signer alongside local JWT signing', async () => {
+  it('refuses a remote HTTP signer alongside local JWT private-key material', () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
-    const { exchange, construct } = setup({ remoteSigner });
-    await exchange.start();
-    expect(construct).toHaveBeenCalledOnce();
+    // Hosted custody now refuses the old local-JWT fallback at construction.
+    expect(() => setup({ remoteSigner })).toThrow('Hosted Rust accounts accept public signing metadata only');
     expect(remoteSigner.sign).not.toHaveBeenCalled();
   });
 

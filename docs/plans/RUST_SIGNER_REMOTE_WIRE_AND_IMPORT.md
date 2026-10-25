@@ -179,7 +179,7 @@ Consequences for this plan:
 - Before P8 admits keyless hosted signing for either family, NX must stop
   sending their signing material, for example by moving it out of `key` or
   excluding it from `INIT_FIELDS`.
-- **SDK guard (approved 2026-10-25; source checkpoint pending).** Sam's
+- **SDK guard (approved 2026-10-25; SDK source checkpoint).** Sam's
   overseer ruled to refuse hosted Rust material now, before hosted-leases
   hardening. A hosted account is selected explicitly by `hostedMode` or
   `remoteSigner`; key length and scalar range never select its mode.
