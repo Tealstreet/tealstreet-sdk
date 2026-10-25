@@ -114,6 +114,19 @@ import failure and public-glob working probe. It permits originals and an exact
 unapplied source preview; source and every removed-row proof still require both
 reviewers before application.
 
+### Consumer item-generation refusal
+
+An opaque macro in the invocation's module or a containing block may introduce
+standard-macro shadows or imports without a data argument. Refuse the purity
+proof for those invocations independently of METHODS-spelled arguments. Unknown
+position/scope stays conservative, including expression positions this narrow
+implementation does not classify. Use the same proved lexical module/block
+separation; unrelated functions and sibling/child modules do not become visible.
+No venue/hash/generator-name exemption. Both source-local and tracked-module
+controls pin named-import install/shadow/import generators with empty arguments,
+module/same-block and after-invocation cases, ordinary/explicit-shadow working
+controls, disjoint scopes, raw wrappers and the later nested-let proof.
+
 ## Originals and hostile controls
 
 Append controls to the existing Python checker tests. Preserve every existing

@@ -570,15 +570,15 @@ class DataMacroModuleProvenance(unittest.TestCase):
     """Real tracked files/declarations; no inferred external macro exports."""
 
     def inventory(self, root_source='mod wire; mod account;', target='pub struct Request;',
-                  consumer_prefix='use crate::wire::*;', extras=None, consumer='account.rs'):
+                  consumer_prefix='use crate::wire::*;', extras=None, consumer='account.rs',
+                  body='matches!(request.kind, Kind::Normal);'):
         with tempfile.TemporaryDirectory() as directory:
             repo = pathlib.Path(directory)
             sdk = repo / 'sdk-rs'
             venue = sdk / 'venues/reference/src'
             venue.mkdir(parents=True)
             files = {'lib.rs': root_source, 'wire.rs': target,
-                     consumer: consumer_prefix + DataMacroProvenance.source(
-                         'matches!(request.kind, Kind::Normal);')}
+                     consumer: consumer_prefix + DataMacroProvenance.source(body)}
             files.update(extras or {})
             for name, source in files.items():
                 path = venue / name
@@ -656,6 +656,39 @@ class DataMacroModuleProvenance(unittest.TestCase):
         prod, test = ban.context_fingerprints(source)
         self.assertFalse(prod)
         self.assertTrue(test)
+
+
+    def test_opaque_item_generators_without_data_arguments_stay_conservative(self):
+        for generator in ['install!();', 'install_shadow!();', 'install_import!();',
+                          'external::install!();', 'install! {}']:
+            for local in [False, True]:
+                expression = 'matches!(request.kind, Kind::Normal);'
+                prefix = 'use external::{install, install_shadow, install_import};'
+                source = DataMacroProvenance.source(
+                    generator + expression if local else expression,
+                    prefix=prefix + ('' if local else generator))
+                with self.subTest(generator=generator, local=local):
+                    self.assertTrue(ban.context_fingerprints(source)[0])
+                    self.assertTrue(self.inventory(consumer_prefix=prefix +
+                        ('' if local else generator) + 'use crate::wire::*;',
+                        body=generator + expression if local else expression))
+
+    def test_generator_after_invocation_and_unknown_expression_position_stay_conservative(self):
+        expression = 'matches!(request.kind, Kind::Normal);'
+        for generator in ['install!();', 'let value = install!();']:
+            with self.subTest(generator=generator):
+                self.assertTrue(ban.context_fingerprints(
+                    DataMacroProvenance.source(expression + generator))[0])
+                self.assertTrue(self.inventory(body=expression + generator))
+
+    def test_disjoint_generator_scopes_do_not_broaden_visibility(self):
+        expression = 'matches!(request.kind, Kind::Normal);'
+        for prefix in ['fn elsewhere() { install!(); }',
+                       '#[cfg(test)] mod tests { install!(); }']:
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.inventory(consumer_prefix=prefix + 'use crate::wire::*;'), {})
+        self.assertEqual(self.inventory(body=expression +
+                         'match result { Err(_) => { install!(); }, _ => {} }'), {})
 
 
 if __name__ == '__main__':
