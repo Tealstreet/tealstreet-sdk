@@ -431,7 +431,9 @@ class DataMacroProvenance(unittest.TestCase):
 
     def test_format_references_literals_and_pattern_parentheses(self):
         for expression in ['format!("{} {}", &request.page, 100)',
-                           'matches!(request.kind, Kind::One(_) | Kind::Two { field: _ })']:
+                           'matches!(request.kind, Kind::One(_) | Kind::Two { field: _ })',
+                           'format!("{{cx}} {}", request.page)',
+                           'format!("{0:?}", request.page)']:
             with self.subTest(expression=expression):
                 self.assertEqual(self.prod(self.source(expression + ';')), {})
 
@@ -463,6 +465,10 @@ class DataMacroProvenance(unittest.TestCase):
                            'matches!(request.kind, other!(Kind::Normal))',
                            'matches!(request.kind, Kind::Normal if side_effect())',
                            'format!("{} {}", request.page, cx)',
+                           'format!("{cx} {}", request.page)',
+                           'format!(r#"{cx} {}"#, request.page)',
+                           'format!("{cx:?} {}", request.page)',
+                           'format!("{:width$}", request.page)',
                            'format!("{}", selector(request))']:
             with self.subTest(expression=expression):
                 self.assertTrue(self.prod(self.source(expression + ';')))
@@ -488,7 +494,10 @@ class DataMacroProvenance(unittest.TestCase):
                         'match other { Some(request) => {}, _ => {} }',
                         'match other { Row { request, .. } => {}, _ => {} }',
                         'each(|request| {});', 'each(|request: &Request| {});',
-                        'let alias = request;', 'bind!(request);']:
+                        'let alias = request;', 'bind!(request);',
+                        'let r#request = other;', 'for r#request in rows {}',
+                        'match other { Some(r#request) => {}, _ => {} }',
+                        'each(|r#request| {});']:
             for before in [True, False]:
                 expression = 'matches!(request.kind, Kind::Normal);'
                 source = self.source(binding + expression if before else expression + binding)
@@ -539,7 +548,9 @@ class DataMacroProvenance(unittest.TestCase):
         for prefix in ['macro_rules! matches { ($x:expr,$p:pat) => { true } }',
                        'macro_rules! format { ($($x:tt)*) => { 0 } }',
                        'use other::matches;', 'use other::custom as matches;',
-                       'use other::{custom as format};', 'use other::*;']:
+                       'use other::{custom as format};', 'use other::*;',
+                       'use other::r#matches;', 'use other::r#format;',
+                       'macro_rules! r#matches { ($x:expr,$p:pat) => { true } }']:
             source = self.source('matches!(request.kind, Kind::Normal);'
                                  'format!("{}", request.page);', prefix=prefix)
             with self.subTest(prefix=prefix):
@@ -637,6 +648,14 @@ class DataMacroModuleProvenance(unittest.TestCase):
                      'use super::*; matches!(request.kind, Kind::Normal);']:
             with self.subTest(body=body):
                 self.assertTrue(ban.context_fingerprints(DataMacroProvenance.source(body))[0])
+
+
+    def test_tokenized_literal_braces_cannot_hide_an_enclosing_glob(self):
+        source = ('#[cfg(test)] mod tests { use external::*; const TEXT: &str = r#"} {"#; '
+                  + DataMacroProvenance.source('matches!(request.kind, Kind::Normal);') + ' }')
+        prod, test = ban.context_fingerprints(source)
+        self.assertFalse(prod)
+        self.assertTrue(test)
 
 
 if __name__ == '__main__':

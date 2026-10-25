@@ -7,7 +7,9 @@ which includes #2165. Branch: fix/rust-request-macro-provenance.
 The overseer explicitly ruled the13 WEEX account occurrences false positives:
 all six HTTP endpoints already use managed SelectedRead. This is a separate
 checker PR, not the local account-custody audit and not a venue cutover.
-Status: plan first; no checker, runtime, test or inventory changes yet.
+Status: plan and Python originals committed locally. The checker preview is
+unapplied; no runtime or inventory changes. Both exact preview reviews remain
+required before application.
 
 ## Exact problem
 
@@ -133,6 +135,9 @@ body/assertion and both production/test inventory partitions. No Cargo build.
   re-exports, exported macro, macro_rules/decl_macro, macro_use, path or conditional
   declarations, missing/ambiguous targets, nested modules, grouped/external/super
   globs and descendant consumers. Record actual declarations and target blobs.
+- Raw identifiers in macro imports/definitions and all binding forms obey the
+  same identity as ordinary spelling. Implicit format captures and named-width
+  selectors cannot hide a Cx/unknown capability inside the atomic literal.
 - Working controls for literal method-like text, ordinary typed data references,
   resolved Cx members and non-Cx fields; both default source-local index and
   workspace escape index. Existing taint, ownership and baseline tests pass.
