@@ -179,7 +179,7 @@ fn append(words: &mut Vec<u8>, integer: u64) {
     words.extend_from_slice(&word(integer));
 }
 
-fn digest(order: &Order<'_>, chain_id: u64) -> Result<[u8; 32], String> {
+pub(crate) fn digest(order: &Order<'_>, chain_id: u64) -> Result<[u8; 32], String> {
     if order.legs.is_empty()
         || order.legs.iter().any(|leg| leg.contract_size == 0)
         || !(1..=4).contains(&order.time_in_force)

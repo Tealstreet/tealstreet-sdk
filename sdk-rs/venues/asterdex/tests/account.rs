@@ -971,9 +971,15 @@ fn position_mode_read_retries_are_jittered_below_their_nominal_backoff() {
     let mut h = H::pending_mode();
     let mut delays = vec![];
     for nominal in [1_000.0, 2_000.0, 4_000.0, 8_000.0] {
-        let before = h.timers.len();
+        // A managed read clears its own deadline timer, so select new timers by id.
+        let before: Vec<_> = h.timers.iter().map(|(id, _)| *id).collect();
         h.reply("/positionSide/dual", r#"{"code":-1000,"msg":"busy"}"#);
-        let added = &h.timers[before..];
+        let added: Vec<_> = h
+            .timers
+            .iter()
+            .filter(|(id, _)| !before.contains(id))
+            .copied()
+            .collect();
         assert_eq!(added.len(), 1, "one mode retry timer: {added:?}");
         let (timer, at) = added[0];
         let delay = at - h.now;
