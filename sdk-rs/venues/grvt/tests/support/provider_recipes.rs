@@ -6,7 +6,7 @@ use safe_cex_engine::request_context::{
     self, HttpAction, Operation as Effect, Policy, Prepared, RetryPolicy,
 };
 use safe_cex_engine::signing::{
-    Capability, CredentialSetupPolicy, IdentitySetupPolicy, SignFuture, Signer,
+    Capability, CredentialSetupPolicy, IdentitySetupPolicy, SignFuture, Signer, SigningPolicy,
 };
 use safe_cex_engine::{Command, Cx, Engine, Event, HttpRequest, Venue, VenueError};
 use std::collections::VecDeque;
@@ -619,4 +619,40 @@ fn expired_order_refuses_before_provider_or_bind_without_renewal() {
         f.errors.lock().unwrap()[0].kind,
         Some(safe_cex_engine::ErrorKind::Timeout)
     );
+}
+
+#[test]
+fn credential_only_primary_cannot_construct_an_order_recipe() {
+    let (_provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new("grvt-credential-only-fixture".into()),
+                secret: Secret::new(String::new()),
+                secret_encoding: KeyEncoding::Hex,
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                signing: SigningPolicy::Optional,
+                secret_encoding: Some(KeyEncoding::Hex),
+                signing_algorithm: Some(Algorithm::Secp256k1Digest),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
+    .unwrap();
+    let identity = identities
+        .primary
+        .as_ref()
+        .expect("trusted credential-only slot");
+    assert!(identity.validate_credential().is_ok());
+    assert!(matches!(identity.signing_ref(), Err(SignError::MissingKey)));
+    let order = Arc::new(FrozenOrder::new(fields(), false).unwrap());
+    assert!(matches!(
+        CreateOrder::new(identity, ADDRESS, order),
+        Err(SignError::InvalidRequest)
+    ));
 }

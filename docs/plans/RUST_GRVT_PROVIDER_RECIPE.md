@@ -540,3 +540,19 @@ There is no signing_opt(), empty sentinel or G6 latch workaround. The provider
 recipe remains a signed-operation API; credential-only login selection and
 installed native cutover remain at the #2149 boundary. The 8c695 receipt is the
 pre-composition execution receipt; it is not a new composed-test claim.
+
+### Landed resend and credential-only recipe refusal
+
+The local recipe branch now contains actual #2146 landing f895d0d7018. Its
+engine, scripts and harness are exact incoming; the merge resolves README and
+CALLERS only, as incoming plus the unchanged GRVT suffix once. This does not
+activate the native GRVT funnel or claim G3/G6 source has landed.
+
+CreateOrder uses the landed D1 signing_ref() accessor. A new control installs a
+real credential-only primary through trusted Optional setup, verifies its valid
+credential and absent signing ref, and requires the order recipe constructor
+to refuse InvalidRequest before producing work. It invents no credential or
+signing ref. This is a pure recipe admission control, not an Empty login intent,
+engine G6 journal/latch control or installed GRVT constructor certification.
+G3/G6 and native queue/login cutover remain held; the composed scoped receipt
+must pass before source-carry review.
