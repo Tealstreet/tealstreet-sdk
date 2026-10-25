@@ -2187,19 +2187,20 @@ impl CommandWrites {
     #[cfg(feature = "serial-plans")]
     pub fn reports(&self) -> impl Iterator<Item = &str> {
         self.streamed_retained()
-            .flat_map(|(_, _, reports)| reports.messages.iter().map(String::as_str))
+            .flat_map(|(_, _, reports)| reports.messages.iter())
             .chain(self.terminal_reports())
+            .map(String::as_str)
     }
     #[cfg(not(feature = "serial-plans"))]
     pub fn reports(&self) -> impl Iterator<Item = &str> {
-        self.terminal_reports()
+        self.terminal_reports().map(String::as_str)
     }
 
-    fn terminal_reports(&self) -> impl Iterator<Item = &str> {
+    fn terminal_reports(&self) -> impl Iterator<Item = &String> {
         self.ordered_attempts()
             .into_iter()
             .filter(|attempt| self.terminal(attempt))
-            .flat_map(|last| last.reports.messages.iter().map(String::as_str))
+            .flat_map(|last| last.reports.messages.iter())
     }
 }
 
@@ -2212,7 +2213,9 @@ impl CommandWrites {
     fn streamed_retained(
         &self,
     ) -> impl Iterator<Item = &(RequestId, VenueError, RejectionReports)> {
-        self.stream.iter().flat_map(|stream| stream.retained.iter())
+        self.streamed()
+            .map_or(&[][..], |stream| stream.retained.as_slice())
+            .iter()
     }
 
     fn serial_uncertain(&self) -> bool {
