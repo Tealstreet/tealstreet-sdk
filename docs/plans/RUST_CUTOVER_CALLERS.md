@@ -8781,6 +8781,37 @@ to their already-existing epoch response time, with all response/event clocks,
 payloads and financial assertions retained and truncated-stream0->1->2 unchanged.
 Standalone custody controls retain genuine delayed/equality expiry coverage.
 
+### Phemex supported remaining funnel
+
+History, income, optional-key public discovery/depth/candles and command writes
+use managed selection and completion ownership. Private selection remains
+Secondary then Primary; lookup and writes stay Primary. Public optional-key
+selection preserves Secondary-only configurations. The 20s child deadline now
+covers preparation/provider/queue time, while Read roots keep the original caller
+receipt. Serial writes preserve native unbounded duration and finite native
+split validation, with no resend on uncertainty.
+
+Income failures after accepted output preserve those rows and emit the native
+Warn-level INCOMPLETE marker before the successful partial result. This applies
+to integrity, signing/provider, local submission and transport failures alike;
+rows staged by the failed page never leak into the result. With no accepted
+output, the original typed failure is retained without rows or marker. Exact
+Read-root expiry/retirement still revokes later callbacks.
+Engine-sealed unproven writes retain
+one exact deferred native cleanup: Store/fence state precedes the next command's
+planning, recovery I/O follows its admission, and no second terminal is emitted.
+Raw signing expiry plus 5000ms, immediate panic cancel-all and native per-row
+restoration are retained.
+
+Four unchanged legacy fingerprints remain exclusively for commandless late
+repair: lib.rs fc8a5b682da0, 34b6cbe60cec, 6cf35cca0977 and trading.rs
+e6f9b79a027f. Their removal requires the shared repair Mutation core from the landed
+RUST_REPAIR_MUTATION_AUTHORITY.md plan (#2147), covering Phemex cancel-only and
+Backpack cancel-then-place. claude-fe7lgm owns engine implementation;
+codex-ih35js reviews and separately adopts Phemex after the actual core landing.
+No general Background Mutation, Session-auth substitute, fabricated command or
+new legacy sender is permitted.
+
 ## Kraken local prerequisite policy and caller projection
 
 Local, unpushed prerequisite work on 9977ccf1aa6; no activation or inventory
