@@ -416,3 +416,58 @@ Decisions (overseer, 2026-10-25):
   request.rs is deleted (17 occurrences). The signed write branch, trading and
   listenKey remain for slice 3.
 
+
+### Slice 3 design (trade plans)
+
+#2093 has landed. Base: slice 2 (PR 2148). Scope: every trading job in
+`trading.rs` and the last legacy signed branch in `request.rs`, so AsterDEX
+reaches zero inventory (7 occurrences).
+
+1. **Entry.** Every trade command opens `begin_preflight`
+   (`WriteAfterReads`, with the primary write credential). The native local
+   refusals keep their order (CommandError, then the failure) and end through
+   `fail_preflight`. This replaces today's `admit_http_command`-on-refusal path.
+   Validation, routing capacity and acknowledged-ID pruning are unchanged.
+2. **Admission.** A valid job admits one Plan at entry (`admit_plan`):
+   - One `StepBound` per native step.
+   - Each step has one `CallBound { timeout_ms: 20_000, attempts: 2,
+     retry_window: FreshAttempt }`; the second attempt exists only for the
+     -1022/-1021 resend.
+   - `independent_calls` follows the job's native `continue_on_error`
+     (cancel batches and multi-order placement continue after a failure;
+     amend and single settings do not).
+   - Retry is `DefinitiveRefusal`.
+   - Amend declares a `MutationTerminalBound` after its cancel step. "Filled
+     while cancelling" ends the plan with data, and no replacement is sent.
+3. **Release.** Each step mints `plan_leg_context_with_intent` (Place, Cancel,
+   Amend or Setting) when it dequeues, after any clock wait. It releases through
+   `request_signed_managed` with the existing `Recipe`. Nothing signs while
+   awaiting the clock.
+4. **Facts.**
+   - A native success reports `WriteFact::Accepted` (placed ID or cancelled ID).
+   - A native error is classified with a static AsterDEX table:
+     - -1022 (V1) and -1021 are definitive pre-execution refusals that earn one
+       resend through `plan_resend_context`. -1021 resyncs the clock first.
+     - -2011 "unknown order" on an ordinary cancel stays an idempotent success.
+     - Other codes are Rejected.
+   - A released 408/5xx, or a transport loss after release, is
+     `http_write_unproven` (Unknown).
+   - Earlier accepted IDs survive a later failure.
+5. **Terminal.** `done_plan` with the native result bytes, or `fail_plan` with
+   the native error. Today's aggregation stays: a later rejection after a
+   success is not Rejected.
+6. **FetchStpMode** is a read, so it becomes a slice-2 command read (caller
+   root plus leg), not a Plan.
+7. **Deleted:** the legacy signed `request`/`request_streamed` branch,
+   `selection.sign`, and the `Pending::Signed` write handling.
+
+Open questions for review:
+
+1. Does `independent_calls: true` give the native "continue after a failed
+   cancel" semantics, with outcomes aggregated per call, or do batches need one
+   plan per independent step?
+2. Is FetchStpMode as a command read acceptable, instead of a ReadOnly
+   preflight?
+
+Budget: measured on the composed tip and on dazzy3's S1, per the overseer's
+ruling, with the exact numbers taken to the overseer.
