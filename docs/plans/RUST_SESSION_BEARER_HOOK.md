@@ -1015,6 +1015,10 @@ interim own-delta rule no longer applies:
 | bitget | 1,292,885 | 1,293,084 | +199 | 1,363,968 |
 | bybit | 1,313,276 | 1,313,361 | +85 | 1,343,488 |
 
+On tip `f2278ba7370` (#2077 adds a Bitget discovery call, which also gets
+`None`): combined 13,839,684 vs 13,838,712 (+972); bitget 1,294,044 vs
+1,293,845 (+199).
+
 The off-mode refusal itself costs about 66 bytes on bybit. The PR run's wasm
 families job is the full every-family evidence. Results: OFF lib 876 and
 session_bearer_off 1/2; ON lib 1092, session_bearer 61, barrier 14; clippy
