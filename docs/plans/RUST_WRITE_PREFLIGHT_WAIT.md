@@ -1,7 +1,7 @@
 # Caller wait for parked WriteAfterReads Preflights
 
 Owner: claude-dazzy3 (overseer follow-up from #2157, after fe7lgm's note).
-Reviewers: claude-fe7lgm (receipt custody), codex-uufub4 (Plan core).
+Reviewers: claude-fe7lgm (receipt custody, plan CLEAR), codex-uufub4 (Plan core).
 Base: `feat/rust-rewrite` `f895d0d7018`. **Plan only; no source.**
 
 ## Problem
@@ -88,15 +88,31 @@ and the FIFO advances".
    - a capped ReadOnly Preflight on a Mutation route is still refused;
    - `park_preflight_for` is unchanged.
 
-## Open questions for review
+## Review dispositions (fe7lgm, CLEAR on receipt custody)
 
-- (a) Tracking: a separate index beside `read_roots`, or generalize
-  `read_roots` to carry Preflight owners? The second shares the sweep but widens
-  a read-specific invariant.
-- (b) The expiry error: reuse `Error::TimedOut.venue_error()` with
-  `Outcome::NotSent`, as BloFin does today, or the receipt-expiry refusal
-  `reject_expired_command(Mutation)` emits? I'd prefer the latter, so expiry
-  reads the same at entry and while parked.
+- (a) **Separate index.** It shares the sweep mechanics through one small
+  helper: the timer table, prepare-then-mark, early re-arm and equality.
+  `read_roots` keeps its read-only invariant: a tracked caller-wait root stays
+  Read, and Mutation is refused under it. Its seal is a read-root terminal,
+  whereas this one is a Preflight NotSent plus the venue retirement hook. The
+  new index is gated with the Preflight code (`http-plans`).
+- (b) **Expiry error.** Exactly the refusal that
+  `reject_expired_command(Operation::Mutation)` emits, so expiry reads the same
+  at entry and while parked: outcome NotSent, kind Timeout, with no journal
+  entry or write fact.
+- **P1, expiry custody.** It fires from top-level timer handling, outside any
+  command entry and any delivery, as `expire_read_roots` does. It seals once,
+  then calls `on_http_owner_retired_preflight` once with no Cx authority to
+  admit work for the dead command. RED: a venue that calls admit or
+  `request_preflight_ready` on the expired Preflight inside the hook gets
+  Revoked.
+- **P2, order locks.** A parked trading command holds its order-lock scope from
+  `Event::Command`. Cap expiry releases it through the normal command finish;
+  an unsent command gets no fence. RED: the next queued command on that symbol
+  is not refused as a conflict.
+- **P3, entry.** Binding the cap on WriteAfterReads keeps `fresh_command_entry`
+  and consumes the one entry loan exactly as ReadOnly does. RED: a second begin
+  in the same callback is Revoked and allocates nothing.
 
 ## Sizes and checks
 
