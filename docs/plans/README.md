@@ -439,4 +439,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Backpack public-seed Read custody | Source/scoped checks CLEAR; exact-head CI pending | Before managing Markets, tickers and MarkPrices startup/recovery observations. | [RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md](RUST_BACKPACK_PUBLIC_SEED_READ_CUSTODY.md) |
 
-| Backpack account GET Read custody | Plan only; native/API review pending | Before managing Info, Positions, Balance and Orders observations; preserve native snapshots and continuation order. | [RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md](RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md) |
+| Backpack account GET Read custody | Plan CLEAR; originals reproduced, review pending | Before managing Info, Positions, Balance and Orders observations; preserve native snapshots and continuation order. | [RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md](RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md) |
