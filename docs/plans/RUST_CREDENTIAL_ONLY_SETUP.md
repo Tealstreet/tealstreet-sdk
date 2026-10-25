@@ -279,8 +279,8 @@ per-venue fix of a cross-cutting concern?"
 - **G2: placement admission.** Refuse placement typed in GRVT's command
   admission, using `signing_ref()` and the declared Secp256k1Digest
   capability, before queue effects. kuhwxi's view: the D4 `NotSent` floor is
-  safe, but GRVT should refuse earlier. Decide before the first Optional
-  family lands: today one signed attempt on a credential-only primary latches
+  safe, but GRVT should refuse earlier. Blocking on GRVT's adoption PR (the
+  first Optional family), with kuhwxi: today one signed attempt on a credential-only primary latches
   all later signed staging, key-only presentation steps and startup
   included (D4). Either admission refuses first so nothing reaches the
   latch, or the latch skips `signing_ref()` absence for an Optional primary,
