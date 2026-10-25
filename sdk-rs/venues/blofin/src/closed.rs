@@ -2,9 +2,10 @@
 //! rows, which the host maps with the TS mappers. Rows dedupe on `historyId`,
 //! not `positionId`, and page by the smallest `historyId` seen.
 use super::*;
+use safe_cex_engine::CommandWait;
 use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
-use safe_cex_engine::request_context::{CommandEntryError, Operation};
+use safe_cex_engine::request_context::{CommandEntryError, Error as RequestError, Operation};
 use safe_cex_engine::selected_read::{
     CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
 };
@@ -88,6 +89,19 @@ impl Blofin {
             }
             return;
         }
+        // The caller's wait bounds the whole walk: an expired or unstamped
+        // receipt is the shared typed refusal, never a defaulted root.
+        match cx.command_wait() {
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Read);
+                return;
+            }
+            Some(CommandWait::Remaining(_)) => {}
+        }
         let (selected, message) = self.read_selection();
         let root = match SelectedRead::command_root(
             cx,
@@ -159,6 +173,8 @@ impl Blofin {
             },
         ) {
             Ok(leg) => leg,
+            // An expired or retired root already has the engine's terminal.
+            Err(RequestError::Revoked) => return,
             // Strict: a refused page is never a recoverable partial (shared owner contract).
             Err(reason) => {
                 let _ = request.history.reject(cx, reason.read_venue_error());

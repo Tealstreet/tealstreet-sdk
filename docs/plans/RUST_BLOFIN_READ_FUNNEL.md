@@ -52,20 +52,23 @@ the six frozen macros leave the inventory as well.
      plus INCOMPLETE) are unchanged.
 2. **Closed positions** (`request_closed_page`): the same leg shape on the
    existing `ReadCursorHistory` owner, as OKX closed positions do. Cursor,
-   bounds, the 100-page cap and page delay are unchanged.
-   - Intentional caller change, recorded in the area plan's step 5: a
-     preparation, policy or signing refusal becomes strict
-     (`history.reject`). Today it routes through the recoverable
-     `history.finish`, so after an accepted full page it now rejects with no
+   bounds and the 100-page cap are unchanged. There is no page delay or page
+   timer: the next page is requested from the response.
+   - Intentional caller change, recorded in the area plan's step 5: a leg
+     admission or queue refusal (preparation or policy) becomes strict
+     (`history.reject`), so after an accepted full page it rejects with no
      partial result or marker. The reason is the shared owner's contract
      (`engine/src/history.rs`, `reject`): "Strict endpoint-policy rejection is
      not a recoverable failed page, even when earlier pages were accepted.
-     Never publish its rows or marker."
-   - That is the rule BloFin general history (`request.reject` on a refused
-     leg) and OKX closed positions (`history.reject` on a refused leg) already
-     follow. #2133 changed only page failures, not refusals. Closed positions
-     are the one BloFin read that deviates today, and this aligns them. The
-     change is recorded in CALLERS.
+     Never publish its rows or marker." BloFin general history and OKX closed
+     positions already follow it, and #2133 changed only page failures, not
+     refusals.
+   - A signing failure stays a recoverable page failure, as it is today and as
+     in OKX closed positions: accepted rows plus one INCOMPLETE. History keeps
+     its existing strict signing refusal
+     (`header_preparation_refusal_is_strict_after_accepted_rows`). Each read
+     keeps today's signing semantics, and only the leg-admission refusal
+     changes. The change is recorded in CALLERS.
    - An ordinary later-page transport/HTTP/parse failure still recovers the
      accepted rows with one INCOMPLETE.
 3. **Account reads** (`private_read`): startup margin and position-mode
@@ -85,11 +88,39 @@ the six frozen macros leave the inventory as well.
      never lingers until engine expiry (the Bybit #1971 finding, fixed in
      #2115).
 
+## Root entry and failure boundaries
+
+These follow the Binance #2118 adoption.
+
+- **Entry order.** The keyless `[]` answer and local refusals (unsupported
+  client-ID lookup, invalid range, unknown market) come first, through
+  `refuse_command` or a public `[]` root. Then `command_wait()`: Expired goes to
+  `reject_expired_command(Read)` and an unstamped receipt goes to
+  `reject_unstamped_command(Read)`; neither is ever defaulted. Only then
+  `SelectedRead::command_root`, which fixes the identity for the whole query.
+- **Root expiry.** The caller's wait bounds the whole walk. Root expiry is the
+  engine's strict Timeout, with no rows and no marker. This is TS-visible and is
+  recorded in CALLERS beside the per-page 20 s bound.
+- **Leg admission.** `root.leg(..)` returning `Revoked` (root expired or
+  retired) drops the state silently, because the engine owns that terminal. Any
+  other leg error is a strict reject through `read_venue_error`.
+- **Custody.** Every streamed item checks the root's and the owner's delivery
+  before staging. A failed delivery has no body; one leg is in flight per query,
+  so the failure belongs to that leg (stated at `on_http_failed`). Every
+  terminal finishes its leg's Context.
+- **Typed failures.** `on_http_failed` and `on_sign_error` route history and
+  closed positions with their `VenueError` kept, so a 20 s page Timeout stays
+  typed and a transport loss is `Network`. Private history used to report
+  transport loss as `Internal` and now matches public trades.
+- **Retirement.** BloFin keeps no venue-side state for these reads and has no
+  page timers, so `read_root_retired` has nothing to remove.
+
 Invariants for every site:
 
 - exact URL, path and query bytes;
 - the same header set (the recipe's signed headers plus `UNSIGNED_HEADERS`);
-- the same Pending variant and decode path;
+- the same Pending variant and decode path (`Pending::Account` now also carries
+  its admitted read);
 - no Store-effect, revision or startup-failure change;
 - no engine, host, provider recipe, signing inventory or credential inventory
   change.
@@ -117,9 +148,11 @@ Each RED fails on the base:
   passphrase or credentials refuses with today's text and no request;
 - history accepted-page partial and first-page rejection are unchanged through
   the managed leg;
-- a closed-positions preparation refusal after an accepted full page rejects
-  with no partial or marker, while an ordinary later-page failure still keeps
-  the accepted rows;
+- a closed-positions leg refusal after an accepted full page rejects with no
+  partial or marker, while an ordinary later-page or signing failure still
+  keeps the accepted rows;
+- a later closed-positions page that times out in its 20 s window keeps the
+  accepted rows with one INCOMPLETE;
 - the inventory for these three files reaches 0.
 
 A regression control (GREEN on the base, since legacy reads hold no Context)
@@ -128,8 +161,18 @@ positions revision, then the late REST answer: nothing is published from it,
 and its leg holds no owner capacity. This uses #2115's capacity probe against a
 run where the read completes normally.
 
-Existing GREEN controls stay byte-exact: the history, closed-positions,
-account, startup and HMAC dispatch fixtures.
+Existing controls keep their assertions. The native fixtures change only how
+they drive the engine:
+
+- managed reads release through Prepare/Bind/Claim at the event time
+  (`Harness::handle`);
+- `respond` answers at the harness start time;
+- keyed fixtures build through the registry's trusted setup
+  (`tests/trusted/mod.rs`);
+- the parked-provider rig parks only after the account's own signed reads load.
+
+Two leverage tests now pin the refusal at the settings reads that share the
+identity. One history pin records transport loss as `Network`.
 
 ## Delivery
 

@@ -1,8 +1,9 @@
 //! Rare reads stream into typed results; they never change the account store.
 use super::*;
+use safe_cex_engine::CommandWait;
 use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
-use safe_cex_engine::request_context::{CommandEntryError, Operation};
+use safe_cex_engine::request_context::{CommandEntryError, Error as RequestError, Operation};
 use safe_cex_engine::selected_read::{
     CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
 };
@@ -380,6 +381,19 @@ impl Blofin {
             Self::empty_history(cx);
             return;
         }
+        // The caller's wait bounds the whole walk: an expired or unstamped
+        // receipt is the shared typed refusal, never a defaulted root.
+        match cx.command_wait() {
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            None => {
+                let _ = cx.reject_unstamped_command(Operation::Read);
+                return;
+            }
+            Some(CommandWait::Remaining(_)) => {}
+        }
         let (selected, message) = self.read_selection();
         let root = match SelectedRead::command_root(
             cx,
@@ -443,6 +457,8 @@ impl Blofin {
             },
         ) {
             Ok(leg) => leg,
+            // An expired or retired root already has the engine's terminal.
+            Err(RequestError::Revoked) => return,
             Err(reason) => return request.reject(cx, reason.read_venue_error()),
         };
         let (endpoint, symbol, from, to, limit) = match &request.query {

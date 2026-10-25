@@ -983,6 +983,8 @@ impl Venue for Blofin {
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
+    /// A failed delivery has no body to validate. History and closed positions
+    /// keep one leg in flight per query, so the failure belongs to that leg.
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),

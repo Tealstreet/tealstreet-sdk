@@ -311,3 +311,42 @@ fn a_cursor_cycle_keeps_rows_with_owned_incomplete_instead_of_requesting_again()
         Action::Notice(Notice::CommandDone { command: 9, .. })
     ));
 }
+
+/// 4yjlw0 on #2143: a later page that times out in its own 20s window is an
+/// ordinary page failure. It keeps the accepted rows with one INCOMPLETE and
+/// never turns strict like a refused leg.
+#[test]
+fn a_later_page_timeout_keeps_the_accepted_rows_with_owned_incomplete() {
+    let mut h = Harness::new();
+    h.seed();
+    h.actions.clear();
+    fetch(&mut h, None, None, None);
+    let rows: Vec<_> = (1000..1100).map(|id| row(&id.to_string(), "p")).collect();
+    h.reply("positions-history", &page(&rows));
+    let sent = h.now;
+    assert!(
+        h.pending
+            .iter()
+            .any(|r| r.url.contains("positions-history"))
+    );
+    let window = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == sent + 20_000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("the second page's 20s window");
+    h.handle(sent + 20_000.0, Event::TimerFired { timer: window });
+    h.collect();
+    let got: Vec<serde_json::Value> = serde_json::from_str(
+        &result(&h)
+            .expect("settled")
+            .expect("a page timeout keeps the accepted rows"),
+    )
+    .unwrap();
+    assert_eq!(got.len(), 100);
+    assert!(h.actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+}
