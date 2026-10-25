@@ -446,6 +446,36 @@ impl Venue for Pressure {
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.venue.start(cx);
     }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        self.venue.capture_http_reconciliation(pending)
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.venue.on_http_owner_retired(owner);
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        pending: Vec<Pending>,
+    ) {
+        self.venue.read_root_retired(owner, pending);
+    }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: safe_cex_engine::Response<'_>,
+    ) {
+        self.venue.on_stream_error(cx, pending, response);
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.venue.capabilities()
     }
@@ -492,13 +522,30 @@ impl Venue for Pressure {
             }
             if symbols == &["fill-http"] {
                 self.paused.store(true, std::sync::atomic::Ordering::SeqCst);
+                let sentinel = cx
+                    .http_context(
+                        Scope::Background,
+                        Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 120_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap();
+                cx.finish_http_context(&sentinel).unwrap();
                 for _ in 0..256 {
                     let id = cx.request(
                         Method::Get,
                         "https://api.phemex.com/peer".into(),
                         vec![],
                         None,
-                        Pending::Markets(vec![], true),
+                        Pending::PublicCandles {
+                            context: sentinel.clone(),
+                            rows: vec![],
+                            invalid: true,
+                        },
                     );
                     cx.sign_http(
                         id,
@@ -519,7 +566,7 @@ impl Venue for Pressure {
         self.venue.on_command(cx, command);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, r: Response<'_>) {
-        if !matches!(p, Pending::Markets(_, true)) {
+        if !matches!(p, Pending::PublicCandles { invalid: true, .. }) {
             self.venue.on_response(cx, p, r);
         }
     }
@@ -527,7 +574,7 @@ impl Venue for Pressure {
         self.venue.on_item(cx, p, item);
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: &str) {
-        if !matches!(p, Pending::Markets(_, true)) {
+        if !matches!(p, Pending::PublicCandles { invalid: true, .. }) {
             self.venue.on_request_failed(cx, p, error);
         }
     }
@@ -535,7 +582,7 @@ impl Venue for Pressure {
         self.venue.on_http_failed(cx, p, error);
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, error: VenueError) {
-        if !matches!(p, Pending::Markets(_, true)) {
+        if !matches!(p, Pending::PublicCandles { invalid: true, .. }) {
             self.venue.on_sign_error(cx, p, error);
         }
     }
@@ -837,7 +884,7 @@ fn reconciliation_capacity_refusal_releases_reading_and_recovers_on_primary() {
                 orders: vec![opts("uncertain")],
             }),
         );
-        let a: Vec<_> = e.drain_actions().collect();
+        let a = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 1_000.);
         let create = request(&a, "/g-orders/create");
         e.handle(
             NOW + 1500.,

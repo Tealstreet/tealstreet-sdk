@@ -413,7 +413,8 @@ fn malformed_full_ws_snapshot_heals_without_publishing_an_empty_book() {
         .unwrap();
     e.handle(1003., Event::TimerFired { timer });
     assert!(
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_actions(&mut e, 1003.)
+            .into_iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.contains("fullbook")))
     );
 }
@@ -457,7 +458,8 @@ fn startup_retry_waits_for_the_complete_rate_limit_pause() {
     assert_eq!(at, 60000.);
     e.handle(at, Event::TimerFired { timer });
     assert!(
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_actions(&mut e, at)
+            .into_iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/public/products")))
     );
 }
