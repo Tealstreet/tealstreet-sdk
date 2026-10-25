@@ -129,8 +129,12 @@ Algorithm admission has two lines. At genuine command or Preflight admission,
 check the selected ref's declared StarkDigest against the provider capability
 through Cx::can_sign, before queueing or provisional effects; Unsupported refuses
 with NotSent. Prepare checks again. At this tip, signing_algorithm is a trusted
-IdentitySetupPolicy field, not an Identity field; the declaration must follow the
-selected opaque ref. Paradex is a Required signing family: auth itself needs
+IdentitySetupPolicy field, not an Identity field, and runs only for trusted
+LocalSetup. Hosted injected Identities carry no setup policy: host declarations
+through set_host_algorithms supply capability for their refs. Server-subkey
+construction gets it from the in-process Signer::can_sign for the selected ref.
+These are Cx::can_sign's per-mode sources, not serialized policy on Identities.
+Paradex is a Required signing family: auth itself needs
 Stark, so absent capability means no private Session can be created. Setup or
 construction refusal is consistent with GRVT G6's per-operation rule because
 Paradex has no credential-only/Optional private path. The landed #2109 MissingKey
