@@ -6793,33 +6793,23 @@ when one is configured, otherwise the primary key. An unanswered read ends at
 20 s and startup discovery retries on its native backoff. URLs, row decoding,
 partial-catalogue rules, the seeded ticker count and the 429 pause are unchanged.
 
-## BingX ordinary trading uses the complete native Plan
+## BingX trading and request funnel (#2159, supersedes #1954)
 
-PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder and native settings
-writes admit the full serial request list under genuine WriteAfterReads
-Preflight. Each physical attempt keeps its native 20s timeout; a parsed numeric
-100001 proof permits one fresh signature attempt with the same client order ID
-and bytes apart from timestamp/signature. Signature-like text, HTTP408/5xx,
-malformed ACKs, effect-bearing refusal IDs and unlisted codes never grant resend.
-Unknown errors keep native diagnostics and proven IDs in the shared journal.
-80014 is a Place-only InvalidInput refusal; earlier accepted per-request IDs
-produce KnownPartial rather than whole failure. Ordinary cancellation batches
-continue independent siblings after provider/transport/delivered gateway failure;
-other commands keep their native stop-on-error behavior. No failed call is
-retried by that continuation.
+codex-uufub4's reviewed #1954 source is adopted and its native controls are kept. What changes:
 
-80016 means absent order, not confirmed cancellation. It succeeds only for a
-validated ordinary Cancel leg and leaves the local order unchanged until the
-required fresh-owner full order read reconciles it; the symbol remains fenced
-until orders_reconciled. An old snapshot cannot clear that fence or overwrite a
-newly completed read. Unknown/system responses and malformed replies are now
-explicit Unknown (malformed codec replies carry Internal); native messages and
-accepted prefix IDs remain. Exact delivery and write-effect eligibility precede
-Store reducers. Root expiry and retirement use shared typed cleanup once.
-The declaration/citations and native controls are in RUST_BINGX_TRADING_CONTEXT.
-Metadata, session/account queries, history and the remaining shared staging
-funnels are separate conversions. This caller branch depends on #1939 and does
-not alter the frozen engine source.
+- **Ordered writes stream.** PlaceOrders (split lots and protection legs), AmendOrder, CancelSymbolOrders, SetLeverage, SetMarginType and SetPositionMode run on one streamed serial Plan behind a WriteAfterReads Preflight. Each next call is admitted from the previous call's accepted DATA (`continue_serial_plan`), so native `split()`'s 10,000-lot maximum is no longer refused for request capacity. Each call keeps its native 20 s bound. A parsed numeric 100001 still permits one fresh-signature resend, with the same client order ID.
+- **Independent cancels stay complete.** CancelOrders, the only native `continue_on_error` job, keeps #1954's complete Plan with `independent_calls`. A sibling continues past any failure, Unknown included, with no retry.
+- **cancelReplace refusal is outcome None.** Under STOP_ON_FAILURE the cancel may already have taken effect, so a refused `/trade/cancelReplace` is recorded with known effects. It projects outcome None, keeps its kind, grants no resend (100001 included) and makes no further call. The original order stays until a read proves otherwise.
+- **Unchanged from #1954:**
+  - 80016 is absence, not cancellation. It is satisfied only for a plain Cancel leg.
+  - The symbol stays fenced until `orders_reconciled`. An older snapshot can neither clear the fence nor overwrite a newer read.
+  - Unknown, system and malformed replies are explicit Unknown, with native messages and accepted-prefix IDs kept.
+  - A trigger replace whose cancel answers 80016 prepares no replacement.
+- **Primary-signed reconcile snapshot.** The order snapshot that `reconcile_uncertain` issues selects `PrimaryRead { PostUnknownOrderRead }`. A configured read key never signs the read that clears an unknown-write fence.
+- **No cancel-all fence after a lost create (known gap).** BingX keeps native concurrency (no `guard_pending_placements`), per overseer ruling. A lost create therefore reconciles on the primary key but does not fence cancel-all. Venues with placement guards close this gap.
+- **Keyless reads are managed.** Without a key, the tickers and lists are managed unsigned Background reads and klines is a command Read. Both complete and fail through their Context, with the native public headers. `stage()`, `issue()`, the legacy signed resend and the numeric candle `done`/`fail` are deleted. A candle read whose admission is refused fails through a fresh command Context.
+
+`account.rs`'s remaining legacy sites are a later slice.
 
 ## Lighter synchronous history Read custody
 

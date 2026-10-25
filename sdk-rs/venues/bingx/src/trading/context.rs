@@ -4,7 +4,14 @@ use safe_cex_engine::classify::{CodeTable, Intent, Key, Row, SatisfiedIntent, Ve
 use safe_cex_engine::request_context::{
     Credential, Operation, PlanPolicy, Policy, Preflight, PreflightPolicy, PreflightPurpose,
     RetryPolicy,
-    plan::{CallBound, RetryWindow, StepBound},
+    plan::{CallBound, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound},
+};
+
+/// Each ordered write has its native 20 s bound; 100001 permits one resend.
+pub(super) const SERIAL: SerialCall = SerialCall {
+    operation: Operation::Mutation,
+    timeout_ms: 20_000,
+    attempts: 2,
 };
 
 // BingX Swap V2 common error codes: https://bingx-api.github.io/docs/#/en-us/swapV2/base-info.html
@@ -97,12 +104,35 @@ impl Entry {
             }
         }
     }
-    pub(super) fn admit(
+    /// Ordered writes stream: each next call is admitted from the previous
+    /// call's DATA, so a native split is never capped by a declared length.
+    pub(super) fn admit_serial(
         &self,
         cx: &mut Cx<'_, Pending>,
         count: usize,
-        independent: bool,
-    ) -> Option<Plan> {
+    ) -> Option<(Plan, Slot)> {
+        let Self::Preflight(owner, credential) = self else {
+            return None;
+        };
+        if count == 0 {
+            let _ = cx.done_empty_plan(owner, "[]".into());
+            return None;
+        }
+        let policy = SerialPolicy {
+            credential: credential.clone(),
+            pacing: None,
+            refusals_complete: false,
+        };
+        match cx.admit_serial_plan(owner, SERIAL, policy) {
+            Ok(admitted) => Some(admitted),
+            Err(error) => {
+                self.reject(cx, error.venue_error());
+                None
+            }
+        }
+    }
+    /// Native `continue_on_error` cancels: independent sibling calls.
+    pub(super) fn admit_independent(&self, cx: &mut Cx<'_, Pending>, count: usize) -> Option<Plan> {
         let Self::Preflight(owner, credential) = self else {
             return None;
         };
@@ -130,7 +160,7 @@ impl Entry {
                 credential: Some(credential.clone()),
                 pacing: None,
                 retry: RetryPolicy::DefinitiveRefusal,
-                independent_calls: independent,
+                independent_calls: true,
             },
         ) {
             Ok(plan) => Some(plan),

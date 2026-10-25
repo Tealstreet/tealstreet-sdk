@@ -1,9 +1,11 @@
-//! Trading commands are preflighted completely, then issued one write at a time.
+//! Trading commands are preflighted completely, then issued one write at a time:
+//! ordered writes on a streamed serial Plan, native continue-on-error cancels as
+//! independent calls of a complete Plan.
 use crate::Pending;
 #[path = "trading/context.rs"]
 mod context;
 use crate::sign::{Credentials, Params};
-use context::{Entry, TABLE};
+use context::{Entry, SERIAL, TABLE};
 use safe_cex_engine::classify::{Intent, Native, NativeCode, Verdict, WriteFact};
 use safe_cex_engine::model::{
     MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
@@ -113,6 +115,8 @@ struct Job {
 struct Run {
     job: Job,
     plan: Plan,
+    /// A serial Plan's next admitted call; independent Plans list their slots.
+    next: Option<Slot>,
     native_ids: Vec<String>,
     error: Option<VenueError>,
 }
@@ -480,7 +484,16 @@ impl Trading {
         }
         match result {
             Ok(job) => {
-                if let Some(plan) = entry.admit(cx, job.steps.len(), job.continue_on_error) {
+                let admitted = if job.continue_on_error {
+                    entry
+                        .admit_independent(cx, job.steps.len())
+                        .map(|plan| (plan, None))
+                } else {
+                    entry
+                        .admit_serial(cx, job.steps.len())
+                        .map(|(plan, slot)| (plan, Some(slot)))
+                };
+                if let Some((plan, next)) = admitted {
                     on_entry();
                     self.retain_open_orders(cx.store);
                     self.jobs.insert(
@@ -488,6 +501,7 @@ impl Trading {
                         Run {
                             job,
                             plan,
+                            next,
                             native_ids: Vec::new(),
                             error: None,
                         },
@@ -520,10 +534,13 @@ impl Trading {
         }
         if let Some(step) = run.job.steps.pop_front() {
             let plan = run.plan.clone();
-            let slot = match cx
-                .plan_slots(&plan)
-                .and_then(|slots| slots.into_iter().next().ok_or(Error::State))
-            {
+            let next = match run.next.take() {
+                Some(slot) => Ok(slot),
+                None => cx
+                    .plan_slots(&plan)
+                    .and_then(|slots| slots.into_iter().next().ok_or(Error::State)),
+            };
+            let slot = match next {
                 Ok(slot) => slot,
                 Err(error) => {
                     let _ = cx.fail_plan(&plan, error.venue_error());
@@ -695,15 +712,16 @@ impl Trading {
         if let Some(data) = data {
             data.evidence_ids(&mut evidence);
         }
+        let call = &request.call;
         let absent = envelope.as_ref().is_ok_and(|e| e.code == 80016)
             && matches!(
-                &request.call,
+                call,
                 Call::Cancel {
                     absent_ok: true,
                     ..
                 }
             );
-        let canceled = matches!(&request.call, Call::Replace { .. })
+        let canceled = matches!(call, Call::Replace { .. })
             && data.is_some_and(|data| {
                 matches!(data.cancel_result.as_ref(), "SUCCESS" | "true" | "TRUE")
             });
@@ -774,12 +792,19 @@ impl Trading {
                 fact
             };
             let satisfied = matches!(fact.verdict(), Verdict::Satisfied(_));
+            // STOP_ON_FAILURE may cancel before refusing the placement: native
+            // leaves a refused cancelReplace without an outcome, and never resends it.
+            let replace_refused = matches!(call, Call::Replace { .. })
+                && matches!(
+                    fact.verdict(),
+                    Verdict::Refused(_) | Verdict::RefusedResend(_)
+                );
             let error = fact.error().clone();
             let grant = match cx.http_write_fact(
                 &request.context,
                 WriteFact::Failed {
                     fact,
-                    known_effects: canceled,
+                    known_effects: canceled || replace_refused,
                 },
                 None,
             ) {
@@ -816,18 +841,12 @@ impl Trading {
             apply(self, cx, &request.call, canceled);
             on_effects(cx, &request);
         }
-        if cx
-            .finish_plan_call(&request.plan, &request.slot, &request.context)
-            .is_err()
-        {
-            let _ = cx.fail_plan(&request.plan, unknown("BingX write settlement refused"));
-            return;
-        }
         let Some(run) = self
             .jobs
             .get_mut(&request.command)
             .filter(|run| run.plan.owner() == request.plan.owner())
         else {
+            let _ = cx.finish_plan_call(&request.plan, &request.slot, &request.context);
             return;
         };
         match result {
@@ -835,6 +854,18 @@ impl Trading {
             Err(error) => {
                 let _ = run.error.get_or_insert(error);
             }
+        }
+        // An ordered write continues only from this call's accepted DATA.
+        let settled =
+            if !run.job.continue_on_error && run.error.is_none() && !run.job.steps.is_empty() {
+                cx.continue_serial_plan(&request.plan, &request.slot, &request.context, SERIAL)
+                    .map(|slot| run.next = Some(slot))
+            } else {
+                cx.finish_plan_call(&request.plan, &request.slot, &request.context)
+            };
+        if settled.is_err() {
+            let _ = cx.fail_plan(&request.plan, unknown("BingX write settlement refused"));
+            return;
         }
         self.advance(cx, credentials, request.command);
     }

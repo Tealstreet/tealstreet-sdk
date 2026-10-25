@@ -171,3 +171,37 @@ fn keyless_klines_complete_and_fail_through_their_context() {
         );
     }
 }
+
+fn klines_headers(options: support::Options) -> Vec<(&'static str, String)> {
+    let mut engine = support::engine(options);
+    engine.start(0.);
+    issue_candles(&mut engine);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 10.);
+    physical(&actions)
+        .into_iter()
+        .find(|r| r.url.contains("/quote/klines"))
+        .expect("one klines read")
+        .headers
+}
+
+#[test]
+fn managed_reads_keep_the_native_public_and_signed_header_vectors() {
+    let content = ("Content-Type", "application/json, charset=utf-8".to_owned());
+    assert_eq!(
+        klines_headers(support::Options::default()),
+        [("X-SOURCE-KEY", "Tealstreet".to_owned()), content.clone()]
+    );
+    let signed = klines_headers(support::Options {
+        key: Some("fixture-primary".into()),
+        secret: Some("fixture-signing-material".into()),
+        ..Default::default()
+    });
+    assert_eq!(
+        signed,
+        [
+            ("X-SOURCE-KEY", "Tealstreet".to_owned()),
+            ("X-BX-APIKEY", "fixture-primary".to_owned()),
+            content,
+        ]
+    );
+}

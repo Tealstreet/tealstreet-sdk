@@ -15,10 +15,10 @@ use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
+use safe_cex_engine::selected_read::ReadRole;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, RequestId, Response, SocketId, TimerId,
-    Venue, num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
@@ -81,64 +81,6 @@ impl Signed {
     fn context(&self) -> Option<&safe_cex_engine::request_context::Context> {
         self.custody.as_ref().map(managed::Custody::context)
     }
-}
-
-/// Signs and sends a request; signed requests can be re-signed after a 100001.
-pub(crate) fn issue(
-    cx: &mut Cx<'_, Pending>,
-    credentials: Option<&Credentials>,
-    method: Method,
-    path: &'static str,
-    params: Params,
-    at: Option<ArrayAt>,
-    pending: Pending,
-) -> RequestId {
-    let pending = if credentials.is_some() && sign::signs(path) {
-        Pending::Signed(Box::new(Signed {
-            inner: pending,
-            method,
-            path,
-            params: params.clone(),
-            at,
-            resent: false,
-            custody: None,
-        }))
-    } else {
-        pending
-    };
-    stage(cx, credentials, method, path, params, at, pending)
-}
-
-/// Stage native intent; only shared dispatch can materialize credentials.
-/// This is the one temporary legacy provider staging site.
-pub fn stage<P>(
-    cx: &mut Cx<'_, P>,
-    credentials: Option<&Credentials>,
-    method: Method,
-    path: &'static str,
-    params: Params,
-    at: Option<safe_cex_engine::json::ArrayAt>,
-    pending: P,
-) -> safe_cex_engine::RequestId {
-    let recipe = credentials.map(|c| {
-        sign::dispatch::Http::new(c.identity(method).clone(), method, path, params.clone())
-    });
-    let (url, headers, body) = params.render(
-        method,
-        path,
-        vec![(
-            sign::unsigned_headers(method)[0].0,
-            sign::unsigned_headers(method)[0].1.into(),
-        )],
-    );
-    let id = match at {
-        Some(at) => cx.request_streamed_body(method, url, headers, body, at, pending),
-        None => cx.request(method, url, headers, body, pending),
-    };
-    if let Some(recipe) = recipe {
-        cx.sign_http(id, Box::new(recipe));
-    }
-    id
 }
 
 pub(crate) fn signature_rejected(body: &str) -> bool {
@@ -366,61 +308,22 @@ impl Bingx {
                 },
                 pending,
                 safe_cex_engine::request_context::Scope::Background,
-                None,
+                ReadRole::Read { scope: None },
             ) {
                 self.on_sign_error(cx, *pending, error);
             }
-        } else {
-            issue(
-                cx,
-                None,
-                Method::Get,
-                path,
-                Params::new(),
-                Some(ArrayAt::EnvelopeField("data")),
-                pending,
-            );
-        }
-    }
-
-    fn resend(&self, cx: &mut Cx<'_, Pending>, signed: Signed) {
-        cx.notice(
-            Level::Warn,
-            code::REQUEST_FAILED,
-            "BingX rejected a request signature; re-signing it once",
-        );
-        let Signed {
-            inner,
-            method,
-            path,
-            params,
-            at,
-            ..
-        } = signed;
-        let scope = match &inner {
-            Pending::Account(request) => account::auth_scope(request),
-            _ => None,
-        };
-        let pending = Pending::Signed(Box::new(Signed {
-            inner,
-            method,
-            path,
-            params: params.clone(),
-            at,
-            resent: true,
-            custody: None,
-        }));
-        let id = stage(
+        } else if let Err((pending, error)) = managed::public(
             cx,
-            self.credentials.as_ref(),
-            method,
-            path,
-            params,
-            at,
+            managed::Read {
+                method: Method::Get,
+                path,
+                params: Params::new(),
+                at: Some(ArrayAt::EnvelopeField("data")),
+            },
             pending,
-        );
-        if let (Some(scope), Some(credentials)) = (scope, self.credentials.as_ref()) {
-            account::tag_read(cx, id, method, credentials, scope);
+            safe_cex_engine::request_context::Scope::Background,
+        ) {
+            self.on_sign_error(cx, *pending, error);
         }
     }
 
@@ -1031,11 +934,7 @@ impl Venue for Bingx {
                     return;
                 }
                 if !signed.resent && signature_rejected(response.body) {
-                    if signed.context().is_some() {
-                        self.resend_managed(cx, *signed);
-                    } else {
-                        self.resend(cx, *signed);
-                    }
+                    self.resend_managed(cx, *signed);
                 } else {
                     let context = signed.context().cloned();
                     match (&context, signed.inner) {
@@ -1200,14 +1099,6 @@ impl Venue for Bingx {
                     );
                 }
             }
-            Pending::Candles {
-                command,
-                rows,
-                valid: true,
-            } => match candle_data(rows) {
-                Ok(data) => cx.done(command, data),
-                Err(error) => cx.fail(command, error),
-            },
             pending => self.on_request_failed(cx, pending, "malformed BingX list row"),
         }
     }
@@ -1219,11 +1110,7 @@ impl Venue for Bingx {
     ) {
         match pending {
             Pending::Signed(signed) if !signed.resent && signature_rejected(response.body) => {
-                if signed.context().is_some() {
-                    self.resend_managed(cx, *signed);
-                } else {
-                    self.resend(cx, *signed);
-                }
+                self.resend_managed(cx, *signed);
             }
             Pending::Signed(signed) => {
                 if signed.context().is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
@@ -1390,9 +1277,10 @@ impl Venue for Bingx {
                 }
                 return;
             }
+            // Only a refused read admission leaves candles without custody.
             Pending::Candles { command, .. } => {
                 cx.command_error(command, error);
-                cx.fail(command, error);
+                refuse_candle_query(cx, error);
                 return;
             }
             Pending::Markets { .. } => self.retry_list(cx, List::Markets),
@@ -1602,20 +1490,22 @@ impl Venue for Bingx {
                         },
                         pending,
                         safe_cex_engine::request_context::Scope::Command(command),
-                        None,
+                        ReadRole::Read { scope: None },
                     ) {
                         self.on_sign_error(cx, *pending, error);
                     }
-                } else {
-                    issue(
-                        cx,
-                        None,
-                        Method::Get,
-                        paths::KLINES,
+                } else if let Err((pending, error)) = managed::public(
+                    cx,
+                    managed::Read {
+                        method: Method::Get,
+                        path: paths::KLINES,
                         params,
-                        Some(ArrayAt::EnvelopeField("data")),
-                        pending,
-                    );
+                        at: Some(ArrayAt::EnvelopeField("data")),
+                    },
+                    pending,
+                    safe_cex_engine::request_context::Scope::Command(command),
+                ) {
+                    self.on_sign_error(cx, *pending, error);
                 }
             }
             other => {
