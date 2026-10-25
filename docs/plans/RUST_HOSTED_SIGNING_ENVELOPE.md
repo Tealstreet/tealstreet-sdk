@@ -361,6 +361,9 @@ must execute before source; F3 remains the explicitly declared follow-up above.
    Paradex auth/create/modify positives and every excluded operation, changed
    method/path, auth subkey substitution and multi-order batch also pin the
    same no-callback refusal; a valid tag never bypasses the closed rules.
+   G6 Optional intentional signing absence refuses SigningNotConfigured during
+   preparation, before any Action::Sign, sign_meta lookup or v2 frame. Pin that
+   ordering without importing Optional behavior into Required Paradex startup.
 2. Complete receipt presence/equality, exact nonce/descriptor/header/form,
    malformed u64 and 32/64-byte graph/result controls; literal vectors plus
    independent Node/Python HMAC and independent Stark verification.
