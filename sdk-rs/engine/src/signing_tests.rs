@@ -2064,8 +2064,29 @@ fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
     );
 }
 
-/// A secondary read slot's permanent refusal fails that request only; the
-/// same refusal on a primary ref latches signing for the account.
+/// The local signer, which reports every ref as missing.
+struct MissingKeyLocal;
+impl crate::signing::Signer for MissingKeyLocal {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign(&self, _: SignRequest) -> crate::signing::SignFuture {
+        Box::pin(std::future::ready(Err(SignError::MissingKey)))
+    }
+    fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        Some(Err(SignError::MissingKey))
+    }
+}
+
+fn latched(actions: impl Iterator<Item = Action>) -> bool {
+    actions.into_iter().any(|action| {
+        matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
+            if code == log_code::CONFIG_INVALID)
+    })
+}
+
+/// A secondary read slot's missing key fails that request only; the same
+/// refusal on a primary ref latches signing for the account.
 #[test]
 fn only_a_primary_ref_refusal_latches_while_a_secondary_exists() {
     let identity = |credential: &str, signing: &str| crate::signing::Identity {
@@ -2086,29 +2107,62 @@ fn only_a_primary_ref_refusal_latches_while_a_secondary_exists() {
                 secondary: Some(identity("account/read-credential", "account/read")),
             })
             .unwrap();
+        engine
+            .set_signer(Some(std::sync::Arc::new(MissingKeyLocal)))
+            .unwrap();
         engine.start(1000.);
-        let (attempt, _) = staged(&mut engine);
-        engine.handle(
-            1001.,
-            Event::Signed {
-                attempt,
-                result: Err(SignError::MissingKey),
-            },
-        );
+        let latched = latched(engine.drain_actions().collect::<Vec<_>>().into_iter());
         assert_eq!(
             engine.venue.failed, 1,
             "the request itself fails either way"
         );
-        engine.drain_actions().any(|action| {
-            matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
-                if code == log_code::CONFIG_INVALID)
-        })
+        latched
     };
     assert!(
         !refused("account/read"),
         "a secondary refusal never latches"
     );
     assert!(refused("account/primary"), "a primary refusal latches");
+}
+
+/// No host reports `MissingKey`, but if one did asynchronously, only that
+/// request fails: nothing latches, and the next signed request still stages.
+#[test]
+fn an_asynchronous_missing_key_fails_its_request_without_latching() {
+    let mut engine = engine();
+    let (attempt, _) = staged(&mut engine);
+    engine.handle(
+        1001.,
+        Event::Signed {
+            attempt,
+            result: Err(SignError::MissingKey),
+        },
+    );
+    assert_eq!(engine.venue.failed, 1, "the request fails, NotSent");
+    assert!(!latched(
+        engine.drain_actions().collect::<Vec<_>>().into_iter()
+    ));
+    let mut cx = Cx {
+        now: 1002.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let request = cx.request(
+        Method::Post,
+        "https://venue.test/private".into(),
+        vec![],
+        None,
+        (),
+    );
+    cx.sign_http(request, Box::new(Step));
+    cx.route_request(request, RequestRoute::Primary);
+    engine.prepare_dispatch(1002.);
+    assert!(
+        engine
+            .drain_actions()
+            .any(|action| matches!(action, Action::Sign { .. })),
+        "signing is not latched"
+    );
 }
 
 /// A socket login whose key is missing fails identically on every reconnect,
@@ -2241,23 +2295,14 @@ fn a_latch_never_refuses_an_unsigned_frame_held_behind_a_login() {
         None,
         (),
     );
-    cx.sign_http(request, Box::new(Step));
+    cx.sign_http(request, Box::new(MissingKeyStep));
     cx.route_request(request, RequestRoute::Primary);
     let socket = cx.connect(private());
     cx.send_signed(socket, "auth".into(), Box::new(Step));
     engine.prepare_dispatch(1000.);
-    let (attempt, _) = staged(&mut engine);
-    engine.handle(
-        1001.,
-        Event::Signed {
-            attempt,
-            result: Err(SignError::MissingKey),
-        },
-    );
-    assert!(engine.drain_actions().any(|action| {
-        matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
-            if code == log_code::CONFIG_INVALID)
-    }));
+    assert!(latched(
+        engine.drain_actions().collect::<Vec<_>>().into_iter()
+    ));
     let mut cx = Cx {
         now: 1002.,
         store: &mut engine.store,

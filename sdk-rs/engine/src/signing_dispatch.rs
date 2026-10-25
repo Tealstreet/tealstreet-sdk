@@ -88,8 +88,6 @@ pub(crate) struct Pending {
     pub receipt: SignReceipt,
     prepared_protocol_at: Option<f64>,
     header_policy: ResultHeaderPolicy,
-    /// Whether the prepared request names primary material (`primary_owns`).
-    primary: bool,
 }
 impl Pending {
     fn receipt_expired(&self, raw_now: f64) -> bool {
@@ -150,10 +148,6 @@ impl Dispatch {
     }
     pub fn take_credential_refusal(&mut self) -> Option<bool> {
         self.credential_refused.take()
-    }
-    /// Whether the attempt's prepared request names primary material.
-    pub fn prepared_primary(&self, id: RequestId) -> bool {
-        self.pending.get(&id).is_some_and(|p| p.primary)
     }
     pub fn next_id(&mut self) -> RequestId {
         RequestId(self.next.next_or_fatal())
@@ -352,7 +346,6 @@ impl Dispatch {
                 receipt: Default::default(),
                 prepared_protocol_at: None,
                 header_policy,
-                primary: true,
             },
         );
         Ok(deadline)
@@ -484,7 +477,6 @@ impl Dispatch {
             self.credential_refused = Some(identities.primary_owns(&work));
             return Err(SignError::MissingKey);
         }
-        p.primary = identities.primary_owns(&work);
         // Refuse a non-progressing recipe before an immediate provider can enter
         // an endless stale/reprepare loop at one unchanged dispatch clock.
         if work
