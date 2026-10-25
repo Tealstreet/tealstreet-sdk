@@ -102,7 +102,7 @@ fn malformed_ws_position_row_preserves_its_symbol_and_totals_while_processing_va
 fn malformed_rest_required_quantity_preserves_last_good_position_snapshot() {
     let mut h = Harness::new();
     h.seed();
-    h.e.handle(10_000.0, Event::TimerFired { timer: h.tick });
+    h.handle(10_000.0, Event::TimerFired { timer: h.tick });
     h.collect();
     let bad = POSITION.replace("\"positions\":\"4\"", "\"positions\":null");
     h.reply(
@@ -129,7 +129,7 @@ fn malformed_ws_ticker_row_retains_known_ticker_and_processes_valid_sibling() {
             _ => None,
         })
         .unwrap();
-    h.e.handle(1.0, Event::WsMessage {
+    h.handle(1.0, Event::WsMessage {
         socket,
         text: r#"{"arg":{"channel":"tickers"},"data":[{"instId":"BTC-USDT","last":null},{"instId":"ETH-USDT","last":"3000","open24h":"2500","bidPrice":"2999","askPrice":"3001"}]}"#,
     });

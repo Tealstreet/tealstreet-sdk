@@ -875,6 +875,9 @@ mod command_wait_tests;
 #[path = "order_lock_capacity_tests.rs"]
 mod order_lock_capacity_tests;
 #[cfg(test)]
+#[path = "pending_drop_tests.rs"]
+mod pending_drop_tests;
+#[cfg(test)]
 #[path = "read_root_expiry_tests.rs"]
 mod read_root_expiry_tests;
 
@@ -1775,6 +1778,102 @@ impl Default for IoCore {
     }
 }
 
+/// Drops a managed call's pending without naming the venue's type. The drop
+/// happens synchronously, at the same point the typed removal did.
+trait PendingDiscard {
+    fn discard(&mut self, request: RequestId) -> bool;
+}
+
+impl<P> PendingDiscard for crate::IdMap<RequestId, PendingHttp<P>> {
+    fn discard(&mut self, request: RequestId) -> bool {
+        self.remove(&request).is_some()
+    }
+}
+
+/// The venue-independent view of `Io<P>`. Engine code that needs only this is
+/// compiled once, instead of once per venue.
+struct CoreIo<'a> {
+    core: &'a mut IoCore,
+    pending: &'a mut dyn PendingDiscard,
+}
+
+/// The venue-independent view of `Cx<P>`; see `CoreIo`.
+struct CoreCx<'a> {
+    now: f64,
+    #[cfg(feature = "metadata-freshness")]
+    store: &'a mut Store,
+    io: CoreIo<'a>,
+}
+
+impl<P> Io<P> {
+    #[inline]
+    fn core_io(&mut self) -> CoreIo<'_> {
+        CoreIo {
+            core: &mut self.core,
+            pending: &mut self.pending,
+        }
+    }
+}
+
+impl<P> Cx<'_, P> {
+    #[inline]
+    fn core(&mut self) -> CoreCx<'_> {
+        CoreCx {
+            now: self.now,
+            #[cfg(feature = "metadata-freshness")]
+            store: &mut *self.store,
+            io: self.io.core_io(),
+        }
+    }
+}
+
+/// The shared-borrow form of `CoreIo`, so venue-independent `&self` checks
+/// are compiled once.
+struct CoreIoRef<'a> {
+    core: &'a IoCore,
+}
+
+/// The shared-borrow form of `CoreCx`; see `CoreIoRef`.
+struct CoreRef<'a> {
+    #[allow(dead_code)]
+    now: f64,
+    io: CoreIoRef<'a>,
+}
+
+impl<P> Io<P> {
+    #[inline]
+    fn core_ref(&self) -> CoreIoRef<'_> {
+        CoreIoRef { core: &self.core }
+    }
+}
+
+impl<P> Cx<'_, P> {
+    #[inline]
+    fn core_ref(&self) -> CoreRef<'_> {
+        CoreRef {
+            now: self.now,
+            io: self.io.core_ref(),
+        }
+    }
+}
+
+impl CoreIo<'_> {
+    #[inline]
+    fn core_ref(&self) -> CoreIoRef<'_> {
+        CoreIoRef { core: &*self.core }
+    }
+}
+
+impl CoreCx<'_> {
+    #[inline]
+    fn core_ref(&self) -> CoreRef<'_> {
+        CoreRef {
+            now: self.now,
+            io: self.io.core_ref(),
+        }
+    }
+}
+
 impl<P> Default for Io<P> {
     fn default() -> Self {
         Self {
@@ -1804,6 +1903,66 @@ fn completion_delivery(
 }
 
 impl<P> Io<P> {
+    #[cfg(feature = "order-locks")]
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "order-locks", allow(dead_code))]
+    fn queue_reconcile(&mut self, symbols: Option<Vec<String>>, at: f64) {
+        self.core_io().queue_reconcile(symbols, at)
+    }
+
+    fn managed_socket_active(&self) -> bool {
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.core.managed_sockets
+        }
+        #[cfg(not(feature = "managed-sockets"))]
+        {
+            false
+        }
+    }
+    fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
+        let index = self
+            .core
+            .signatures
+            .iter()
+            .position(|(id, _)| *id == request)?;
+        Some(self.core.signatures.swap_remove(index).1)
+    }
+    #[inline]
+    fn next(&mut self) -> u64 {
+        self.core_io().next()
+    }
+
+    #[inline]
+    fn reserve_ids(&mut self, count: u64) -> Option<std::ops::Range<u64>> {
+        self.core_io().reserve_ids(count)
+    }
+
+    #[inline]
+    fn assert_action_safe(&mut self, action: &Action) {
+        self.core_io().assert_action_safe(action)
+    }
+
+    #[inline]
+    fn assert_actions_safe(&mut self) {
+        self.core_io().assert_actions_safe()
+    }
+
+    /// Splits the poll registry from the timer state it writes to.
+    fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
+        (
+            &mut self.core.polls,
+            TimerSink {
+                next_id: &mut self.core.next_id,
+                timers: &mut self.core.timers,
+                actions: &mut self.core.actions,
+            },
+        )
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
     /// Bounded: past the cap, coalesce into one full read that waits for the
     /// latest merged deadline, so no rate or credential wait is cut short.
     #[cfg(feature = "order-locks")]
@@ -1825,24 +1984,6 @@ impl<P> Io<P> {
         self.core.reconcile_due = vec![(None, latest)];
     }
 
-    fn managed_socket_active(&self) -> bool {
-        #[cfg(feature = "managed-sockets")]
-        {
-            self.core.managed_sockets
-        }
-        #[cfg(not(feature = "managed-sockets"))]
-        {
-            false
-        }
-    }
-    fn take_signature(&mut self, request: RequestId) -> Option<PendingSignature> {
-        let index = self
-            .core
-            .signatures
-            .iter()
-            .position(|(id, _)| *id == request)?;
-        Some(self.core.signatures.swap_remove(index).1)
-    }
     fn next(&mut self) -> u64 {
         next_engine_id(&mut self.core.next_id)
     }
@@ -1879,18 +2020,6 @@ impl<P> Io<P> {
         {
             self.core.next_id.invalidate();
         }
-    }
-
-    /// Splits the poll registry from the timer state it writes to.
-    fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
-        (
-            &mut self.core.polls,
-            TimerSink {
-                next_id: &mut self.core.next_id,
-                timers: &mut self.core.timers,
-                actions: &mut self.core.actions,
-            },
-        )
     }
 }
 
@@ -1986,28 +2115,9 @@ impl<P> Cx<'_, P> {
         self.queue_socket_transport(socket, spec);
         socket
     }
+    #[inline]
     fn queue_socket_transport(&mut self, socket: SocketId, spec: SocketSpec) {
-        let SocketSpec {
-            url,
-            channel,
-            context,
-            headers,
-            binary,
-        } = spec;
-        if let Some(channel) = &channel {
-            self.io
-                .core
-                .sockets
-                .connected(socket, channel, &mut self.io.core.health);
-        }
-        self.io.core.actions.push(Action::WsConnect {
-            binary,
-            socket,
-            url,
-            headers,
-            channel,
-            context,
-        });
+        self.core().queue_socket_transport(socket, spec)
     }
 
     /// Create an unsigned upgrade and stage it through the shared signing queue.
@@ -2236,58 +2346,9 @@ impl<P> Cx<'_, P> {
         self.stage_signed(index, Action::WsSend { socket, text }, step);
     }
 
+    #[inline]
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
-        if step.nonce_claim().is_some() {
-            self.io
-                .core
-                .signing_admission
-                .push((outbound, crate::signing::SignError::InvalidRequest));
-            return;
-        }
-        self.io.opaque_entry_activity();
-        self.io.assert_action_safe(&outbound);
-        let attempt = self.io.core.signing.next_id();
-        // Exhaustion is handled through the same asynchronous failure event.
-        let timer = if self.io.core.signer.as_ref().is_some_and(|s| s.immediate()) {
-            TimerId(0)
-        } else {
-            TimerId(self.io.next())
-        };
-        let staged = self
-            .io
-            .core
-            .signing
-            .stage(attempt, outbound.clone(), step, timer, self.now);
-        if let Err(error) = staged {
-            // Retain the continuation even when admission fails, so the engine
-            // reports a typed pre-dispatch failure instead of silently dropping
-            // it. Only a latched missing key keeps its own kind.
-            let error = if error == crate::signing::SignError::MissingKey {
-                error
-            } else {
-                crate::signing::SignError::Unavailable
-            };
-            self.io.core.signing_admission.push((outbound, error));
-            return;
-        }
-        if timer.0 != 0 {
-            self.io.core.actions.push(Action::SetTimer {
-                timer,
-                at_ms: staged.expect("checked admission"),
-            });
-        }
-        self.io.core.actions.insert(
-            index,
-            Action::Sign {
-                attempt,
-                work: crate::signing::SignRequest {
-                    receipt: Default::default(),
-                    operations: Vec::new(),
-                    context: Default::default(),
-                },
-                timeout_ms: 0,
-            },
-        );
+        self.core().stage_signed(index, outbound, step)
     }
 
     /// Stream a POSTed read while retaining its typed request body.
@@ -2466,9 +2527,9 @@ impl<P> Cx<'_, P> {
         level >= self.io.core.min_level
     }
 
-    /// [`Cx::event`] without fields.
+    #[inline]
     pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
-        self.event(level, code, message, Vec::new());
+        self.core().notice(level, code, message)
     }
 
     /// A `request.failed` read the venue retries on its own schedule. A repeat
@@ -2495,6 +2556,212 @@ impl<P> Cx<'_, P> {
         self.notice(level, log_code::REQUEST_FAILED, message);
     }
 
+    #[inline]
+    pub fn event(
+        &mut self,
+        level: Level,
+        code: &'static str,
+        message: impl Into<String>,
+        fields: Vec<(&'static str, Value)>,
+    ) {
+        self.core().event(level, code, message, fields)
+    }
+
+    pub fn deactivate(&mut self) {
+        count_auth_failure(&mut self.io.core, None);
+        self.io
+            .core
+            .actions
+            .push(Action::Notice(Notice::Deactivate));
+    }
+
+    /// Legacy numeric finalization. Managed commands use `done_context`.
+    pub fn done(&mut self, command: CommandId, result: String) {
+        let _ = self.finish_command(command, Ok(result), None);
+    }
+
+    #[inline]
+    pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
+        self.core().command_progress(command, receipts)
+    }
+
+    #[inline]
+    pub fn command_error(&mut self, command: CommandId, message: impl Into<String>) {
+        self.core().command_error(command, message)
+    }
+
+    pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
+        let error = error.into();
+        count_auth_failure(&mut self.io.core, Some(&error));
+        self.io
+            .core
+            .actions
+            .push(Action::Notice(Notice::StartupFailed { error }));
+    }
+
+    /// Legacy numeric finalization. Managed commands use `fail_context`.
+    pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
+        let _ = self.finish_command(command, Err(error.into()), None);
+    }
+
+    #[inline]
+    fn finish_command(
+        &mut self,
+        command: CommandId,
+        result: Result<String, VenueError>,
+        authority: Option<&crate::request_context::Context>,
+    ) -> Result<(), crate::request_context::Error> {
+        self.core().finish_command(command, result, authority)
+    }
+
+    #[inline]
+    fn finish_sealed_command(
+        &mut self,
+        command: CommandId,
+        success: Option<String>,
+        seal: request_context_registry::Seal,
+    ) -> Result<(), crate::request_context::Error> {
+        self.core().finish_sealed_command(command, success, seal)
+    }
+
+    /// Every placement in this response is proven accepted or explicitly rejected.
+    pub fn placement_resolved(&mut self, command: CommandId) {
+        #[cfg(feature = "order-locks")]
+        self.io.core.order_locks.resolved(command);
+        #[cfg(not(feature = "order-locks"))]
+        let _ = command;
+    }
+
+    /// Call only after accepting a complete, fresh authoritative order read.
+    /// A read started before an uncertain placement cannot clear its fence.
+    pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
+        #[cfg(feature = "order-locks")]
+        if let Some(token) = self.io.core.order_response_token {
+            self.io.core.order_locks.reconciled(symbol, token);
+        }
+        #[cfg(not(feature = "order-locks"))]
+        let _ = symbol;
+    }
+
+    /// Queue a live candle for the next frame; a newer update of the same
+    /// candle replaces the queued one.
+    pub fn candle(&mut self, symbol: &str, interval: Interval, candle: Candle) {
+        let same = self
+            .io
+            .core
+            .candles
+            .iter_mut()
+            .find(|(s, i, c)| s == symbol && *i == interval && c.timestamp == candle.timestamp);
+        match same {
+            Some(queued) => queued.2 = candle,
+            None => self
+                .io
+                .core
+                .candles
+                .push((symbol.to_owned(), interval, candle)),
+        }
+    }
+
+    /// Queue an execution for the next frame.
+    pub fn fill(&mut self, fill: Fill) {
+        self.io.core.fills.push((fill, None));
+    }
+
+    /// Preserve optional per-execution financials without inventing values for
+    /// cumulative/order-derived fills. Missing/nonfinite values stay absent.
+    pub fn fill_with_financials(&mut self, fill: Fill, mut financials: FillFinancials) {
+        financials.realized_pnl = financials.realized_pnl.filter(|v| v.is_finite());
+        financials.fee = financials.fee.filter(|v| v.is_finite());
+        let financials =
+            (financials.realized_pnl.is_some() || financials.fee.is_some()).then_some(financials);
+        self.io.core.fills.push((fill, financials));
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    fn queue_socket_transport(&mut self, socket: SocketId, spec: SocketSpec) {
+        let SocketSpec {
+            url,
+            channel,
+            context,
+            headers,
+            binary,
+        } = spec;
+        if let Some(channel) = &channel {
+            self.io
+                .core
+                .sockets
+                .connected(socket, channel, &mut self.io.core.health);
+        }
+        self.io.core.actions.push(Action::WsConnect {
+            binary,
+            socket,
+            url,
+            headers,
+            channel,
+            context,
+        });
+    }
+
+    fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
+        if step.nonce_claim().is_some() {
+            self.io
+                .core
+                .signing_admission
+                .push((outbound, crate::signing::SignError::InvalidRequest));
+            return;
+        }
+        self.io.opaque_entry_activity();
+        self.io.assert_action_safe(&outbound);
+        let attempt = self.io.core.signing.next_id();
+        // Exhaustion is handled through the same asynchronous failure event.
+        let timer = if self.io.core.signer.as_ref().is_some_and(|s| s.immediate()) {
+            TimerId(0)
+        } else {
+            TimerId(self.io.next())
+        };
+        let staged = self
+            .io
+            .core
+            .signing
+            .stage(attempt, outbound.clone(), step, timer, self.now);
+        if let Err(error) = staged {
+            // Retain the continuation even when admission fails, so the engine
+            // reports a typed pre-dispatch failure instead of silently dropping
+            // it. Only a latched missing key keeps its own kind.
+            let error = if error == crate::signing::SignError::MissingKey {
+                error
+            } else {
+                crate::signing::SignError::Unavailable
+            };
+            self.io.core.signing_admission.push((outbound, error));
+            return;
+        }
+        if timer.0 != 0 {
+            self.io.core.actions.push(Action::SetTimer {
+                timer,
+                at_ms: staged.expect("checked admission"),
+            });
+        }
+        self.io.core.actions.insert(
+            index,
+            Action::Sign {
+                attempt,
+                work: crate::signing::SignRequest {
+                    receipt: Default::default(),
+                    operations: Vec::new(),
+                    context: Default::default(),
+                },
+                timeout_ms: 0,
+            },
+        );
+    }
+
+    /// [`Cx::event`] without fields.
+    pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
+        self.event(level, code, message, Vec::new());
+    }
+
     /// Counted in [`Health`] whatever the host's minimum level.
     pub fn event(
         &mut self,
@@ -2505,13 +2772,12 @@ impl<P> Cx<'_, P> {
     ) {
         // A rejection often also arrives as an auth-kind failure or `deactivate`.
         if code == log_code::AUTH_REJECTED {
-            count_auth_failure(self.io, None);
+            count_auth_failure(self.io.core, None);
         }
-        let io = &mut *self.io;
         push_event(
-            &mut io.core.actions,
-            &mut io.core.health,
-            io.core.min_level,
+            &mut self.io.core.actions,
+            &mut self.io.core.health,
+            self.io.core.min_level,
             LogEvent {
                 level,
                 code,
@@ -2519,19 +2785,6 @@ impl<P> Cx<'_, P> {
                 fields,
             },
         );
-    }
-
-    pub fn deactivate(&mut self) {
-        count_auth_failure(self.io, None);
-        self.io
-            .core
-            .actions
-            .push(Action::Notice(Notice::Deactivate));
-    }
-
-    /// Legacy numeric finalization. Managed commands use `done_context`.
-    pub fn done(&mut self, command: CommandId, result: String) {
-        let _ = self.finish_command(command, Ok(result), None);
     }
 
     pub fn command_progress(&mut self, command: CommandId, receipts: Vec<OrderIdentityReceipt>) {
@@ -2556,20 +2809,6 @@ impl<P> Cx<'_, P> {
                 .actions
                 .push(Action::Notice(Notice::CommandError { command, message }));
         }
-    }
-
-    pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
-        let error = error.into();
-        count_auth_failure(self.io, Some(&error));
-        self.io
-            .core
-            .actions
-            .push(Action::Notice(Notice::StartupFailed { error }));
-    }
-
-    /// Legacy numeric finalization. Managed commands use `fail_context`.
-    pub fn fail(&mut self, command: CommandId, error: impl Into<VenueError>) {
-        let _ = self.finish_command(command, Err(error.into()), None);
     }
 
     // One non-generic seal/retire/publish path, including success conversion.
@@ -2700,7 +2939,7 @@ impl<P> Cx<'_, P> {
             Ok(result) => Notice::CommandDone { command, result },
             Err(error) => {
                 if credential_evidence {
-                    count_auth_failure(self.io, Some(&error));
+                    count_auth_failure(self.io.core, Some(&error));
                 }
                 Notice::CommandFailed { command, error }
             }
@@ -2708,59 +2947,6 @@ impl<P> Cx<'_, P> {
         self.io.entry_completed(command);
         self.io.core.actions.push(Action::Notice(notice));
         Ok(())
-    }
-
-    /// Every placement in this response is proven accepted or explicitly rejected.
-    pub fn placement_resolved(&mut self, command: CommandId) {
-        #[cfg(feature = "order-locks")]
-        self.io.core.order_locks.resolved(command);
-        #[cfg(not(feature = "order-locks"))]
-        let _ = command;
-    }
-
-    /// Call only after accepting a complete, fresh authoritative order read.
-    /// A read started before an uncertain placement cannot clear its fence.
-    pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
-        #[cfg(feature = "order-locks")]
-        if let Some(token) = self.io.core.order_response_token {
-            self.io.core.order_locks.reconciled(symbol, token);
-        }
-        #[cfg(not(feature = "order-locks"))]
-        let _ = symbol;
-    }
-
-    /// Queue a live candle for the next frame; a newer update of the same
-    /// candle replaces the queued one.
-    pub fn candle(&mut self, symbol: &str, interval: Interval, candle: Candle) {
-        let same = self
-            .io
-            .core
-            .candles
-            .iter_mut()
-            .find(|(s, i, c)| s == symbol && *i == interval && c.timestamp == candle.timestamp);
-        match same {
-            Some(queued) => queued.2 = candle,
-            None => self
-                .io
-                .core
-                .candles
-                .push((symbol.to_owned(), interval, candle)),
-        }
-    }
-
-    /// Queue an execution for the next frame.
-    pub fn fill(&mut self, fill: Fill) {
-        self.io.core.fills.push((fill, None));
-    }
-
-    /// Preserve optional per-execution financials without inventing values for
-    /// cumulative/order-derived fills. Missing/nonfinite values stay absent.
-    pub fn fill_with_financials(&mut self, fill: Fill, mut financials: FillFinancials) {
-        financials.realized_pnl = financials.realized_pnl.filter(|v| v.is_finite());
-        financials.fee = financials.fee.filter(|v| v.is_finite());
-        let financials =
-            (financials.realized_pnl.is_some() || financials.fee.is_some()).then_some(financials);
-        self.io.core.fills.push((fill, financials));
     }
 }
 
@@ -5817,16 +6003,16 @@ impl SocketRoles {
 }
 
 /// At most one per engine event; `error: None` is a definitive deactivation.
-fn count_auth_failure<P>(io: &mut Io<P>, error: Option<&VenueError>) {
+fn count_auth_failure(io: &mut IoCore, error: Option<&VenueError>) {
     let auth = error.is_none_or(|error| {
         matches!(
             error.kind,
             Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
         )
     });
-    if auth && !io.core.auth_failure_counted {
-        io.core.auth_failure_counted = true;
-        io.core.health.count(log_code::AUTH_REJECTED);
+    if auth && !io.auth_failure_counted {
+        io.auth_failure_counted = true;
+        io.health.count(log_code::AUTH_REJECTED);
     }
 }
 

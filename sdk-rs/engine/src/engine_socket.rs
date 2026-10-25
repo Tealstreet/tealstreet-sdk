@@ -130,8 +130,9 @@ impl<P> Cx<'_, P> {
         self.io.core.socket_message = None;
         Ok(())
     }
+    #[inline]
     pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
-        self.io.core.socket_driver.state.epoch(feed)
+        self.core_ref().socket_epoch(feed)
     }
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
         self.io.core.socket_driver.state.authenticated(feed)
@@ -371,6 +372,23 @@ impl<P> Cx<'_, P> {
                     .state
                     .socket_epoch(socket)
                     .is_some()
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "managed-sockets", allow(dead_code))]
+    #[inline]
+    pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
+        self.core_ref().socket_epoch(feed)
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "managed-sockets", allow(dead_code))]
+    pub fn socket_epoch(&self, feed: FeedId) -> Option<Epoch> {
+        self.io.core.socket_driver.state.epoch(feed)
     }
 }
 
