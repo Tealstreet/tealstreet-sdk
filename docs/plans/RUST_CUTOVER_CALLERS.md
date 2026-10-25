@@ -8565,6 +8565,22 @@ response fixture's no-action count is explicitly superseded by exactly one
 ClearTimer for the retired managed HTTP deadline; no native publication,
 fallback, recovery, notice or poll timer is permitted in that suffix.
 
+## Backpack public-seed Read custody
+
+Markets, daily tickers and MarkPrices issue keyless Background Read observations
+through managed Prepare/Bind/Claim and ArrayAt::Root streaming. Every observation
+has a NEW 20,000ms admission-to-expiry cap, Public egress, no pacing, Never retry,
+and static X-Broker-Id:1200. Native keyed Backoff recovery starts a distinct
+bounded observation; it renews no caller root and reuses no retired authority.
+Exact current Context/DATA validation precedes parsing, row diagnostics, status
+and native publication. Successful publication uses live DATA, then retires the
+completing Context before startup successors or backoff work. Failure cleanup
+retires first. Nonfinite callback time permits native failed-mark fallback but
+cannot schedule recovery or issue another observation. Native rows, partial
+catalogue repair, live ticker overlay, private-startup eligibility and retry
+jitter/counters stay unchanged. Account, trading, signing and socket production
+remain outside this adoption. Only the shared public-seed raw HTTP site is pruned.
+
 ## Hosted Rust wallet-material construction refusal
 
 Paradex and Polymarket callers selecting hostedMode or remoteSigner must provide

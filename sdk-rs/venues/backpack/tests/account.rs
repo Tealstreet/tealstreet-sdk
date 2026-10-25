@@ -2,6 +2,16 @@ mod support;
 use safe_cex_engine::{Action, Event, Notice, SocketId};
 use support::*;
 
+fn seed_requests(e: &mut Driver, now: f64) -> Vec<safe_cex_engine::HttpRequest> {
+    safe_cex_engine::test_support::prepared_actions(e, now)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 10_000.0;
 
@@ -71,7 +81,7 @@ fn partial_catalogue_is_reread_without_restarting_the_account() {
         .find(|(_, at)| jittered(*at - 1000.0, 1000.0))
         .expect("partial catalogue schedules a re-read");
     e.handle(at, Event::TimerFired { timer });
-    let reread = requests(&mut e);
+    let reread = seed_requests(&mut e, at);
     assert_eq!(reread.len(), 1);
     assert!(reread[0].url.ends_with("/api/v1/markets"));
     reply(&mut e, &reread[0], 200, MARKETS);
@@ -647,7 +657,7 @@ fn refresh_that_omits_a_held_market_keeps_it_with_its_position_and_order() {
         .find(|(_, at)| jittered(*at - 1000.0, 1000.0))
         .expect("partial catalogue schedules a re-read");
     e.handle(at, Event::TimerFired { timer });
-    let reread = requests(&mut e);
+    let reread = seed_requests(&mut e, at);
     // SOL_USDC_PERP drops out of the list while BTC_USDC_PERP stays malformed.
     reply(
         &mut e,
@@ -676,7 +686,7 @@ fn persistently_malformed_catalogue_stops_rereading_after_five_refreshes() {
     let (mut rereads, mut warned) = (0, false);
     while let Some((timer, at)) = retry.take() {
         e.handle(at, Event::TimerFired { timer });
-        let reread = requests(&mut e);
+        let reread = seed_requests(&mut e, at);
         reply(&mut e, &reread[0], 200, &markets);
         rereads += 1;
         for action in e.drain_actions() {
@@ -765,12 +775,12 @@ fn trigger_order_read_before_the_ticker_seed_is_relabelled_when_it_lands() {
         }),
     );
     e.start(1000.0);
-    let r = requests(&mut e).pop().unwrap();
+    let r = seed_requests(&mut e, 1000.0).pop().unwrap();
     reply(&mut e, &r, 200, MARKETS);
     let take_profit = r#"[{"id":"tp","symbol":"SOL_USDC_PERP","side":"Ask","orderType":"Market","triggerPrice":"150","quantity":"5","executedQuantity":"0","status":"TriggerPending","createdAt":1000}]"#;
     let mut seed = vec![];
     for _ in 0..6 {
-        for r in requests(&mut e) {
+        for r in seed_requests(&mut e, 1000.0) {
             if r.url.contains("/tickers") || r.url.contains("/markPrices") {
                 seed.push(r);
                 continue;
@@ -1065,13 +1075,13 @@ fn snapshot_unpriced_trigger() -> (Driver, SocketId, Vec<safe_cex_engine::HttpRe
         }),
     );
     e.start(1000.0);
-    let markets = requests(&mut e).pop().unwrap();
+    let markets = seed_requests(&mut e, 1000.0).pop().unwrap();
     reply(&mut e, &markets, 200, MARKETS);
     let trigger = r#"[{"id":"tp","symbol":"SOL_USDC_PERP","side":"Ask","orderType":"Market","triggerPrice":"150","triggerBy":"MarkPrice","quantity":"5","executedQuantity":"0","status":"TriggerPending","createdAt":1000}]"#;
     let mut seeds = vec![];
     let mut private = None;
     for _ in 0..6 {
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
         for action in actions {
             match action {
                 Action::Http(r) if r.url.contains("/tickers") || r.url.contains("/markPrices") => {
