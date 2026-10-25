@@ -17,6 +17,7 @@ use paths::Paths;
 pub use paths::{Category, Endpoints, Variant};
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::credential_selection::{CredentialRole, Selection, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -30,6 +31,17 @@ use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
+
+/// What a signed request's key is for; `BybitLinear::select_key` turns it
+/// into an engine `Slots::select` role.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KeyUse {
+    /// Any configured key, the read key first.
+    Read,
+    /// The read key only beside a primary (option Greeks, ordinary Plan reads).
+    AccountRead,
+    Write,
+}
 
 /// Bybit answers pings on public and private sockets alike; a socket silent
 /// for the idle timeout is treated as dead, since a half-open socket never closes.
@@ -75,9 +87,8 @@ pub struct Options {
     pub credentials: Option<safe_cex_engine::signing::Identity>,
 }
 safe_cex_crypto::redacted_debug!(Options);
-/// One REST request as sent, kept so a rejected signature can be resent.
+/// One REST request as sent, kept so a rejected signature can be re-read.
 pub struct Rest {
-    method: Method,
     path: &'static str,
     /// The query string of a GET, the JSON body of a POST.
     payload: String,
@@ -89,7 +100,6 @@ pub struct Rest {
 impl Rest {
     fn get(path: &'static str, query: Query) -> Self {
         Self {
-            method: Method::Get,
             path,
             payload: query.into_string(),
             stream: false,
@@ -107,17 +117,6 @@ impl Rest {
     fn signed(mut self) -> Self {
         self.signed = true;
         self
-    }
-
-    fn post(path: &'static str, body: String) -> Self {
-        Self {
-            method: Method::Post,
-            path,
-            payload: body,
-            stream: false,
-            signed: true,
-            resent: false,
-        }
     }
 }
 
@@ -142,7 +141,8 @@ pub enum Then {
     Options(options::Request),
     Candles(candles::Read),
     Account(account::Request),
-    Trade(trading::Request),
+    /// A Hyro link-filtered reconcile read.
+    Hyro(hyro::Lookup),
     /// An ordinary write or mode read on the engine's Preflight/Plan core.
     Ordinary(trading::ordinary::Request),
     History(history::Request),
@@ -439,25 +439,6 @@ pub(crate) fn signing_rejection(code: i64, message: &str) -> Option<String> {
     Some(format!("Bybit {reason} (retCode {code})"))
 }
 
-/// A rejection that is safe to resend once, re-signed: a bad signature
-/// (10004), or a timestamp outside the receive window. Bybit names its own
-/// clock in the latter, which corrects ours.
-fn resendable(text: &str) -> Option<Option<f64>> {
-    let lower = text.to_ascii_lowercase();
-    if lower.contains("\"retcode\":10004") || lower.contains("error sign") {
-        return Some(None);
-    }
-    if !lower.contains("recv_window") {
-        return None;
-    }
-    let server = text
-        .find("server_timestamp[")
-        .map(|at| &text[at + 17..])
-        .and_then(|rest| rest.split(']').next())
-        .and_then(|digits| digits.parse::<f64>().ok());
-    Some(server)
-}
-
 impl BybitLinear {
     pub fn new(options: Options) -> Self {
         let mut options = options;
@@ -662,51 +643,6 @@ impl BybitLinear {
         }
     }
 
-    /// Send one REST request; a signed one needs credentials.
-    fn send(&self, cx: &mut Cx<'_, Pending>, rest: Rest, then: Then) {
-        if self.config_error.is_some() {
-            return;
-        }
-        let mut url = format!("{}{}", self.paths.rest, rest.path);
-        if rest.method == Method::Get && !rest.payload.is_empty() {
-            url.push('?');
-            url.push_str(&rest.payload);
-        }
-        let credentials = self
-            .read_credentials
-            .as_ref()
-            .filter(|_| rest.method == Method::Get)
-            .or(self.credentials.as_ref());
-        let signing = if rest.signed {
-            let Some(credentials) = credentials else {
-                return;
-            };
-            Some(
-                sign::Http::new(credentials.clone(), rest.payload.clone(), self.recv_window)
-                    .with_header_policy(self.signing_policy.header_policy()),
-            )
-        } else {
-            None
-        };
-        let headers = vec![("X-Referer", sign::BROKER_ID.into())];
-        let body = (rest.method != Method::Get).then(|| rest.payload.clone());
-        let (method, stream) = (rest.method, rest.stream);
-        let pending = Pending {
-            category: self.category,
-            rest,
-            then,
-            read: None,
-        };
-        let request = if stream {
-            cx.request_streamed(method, url, headers, ArrayAt::Path(MARKETS_PATH), pending)
-        } else {
-            cx.request(method, url, headers, body, pending)
-        };
-        if let Some(signing) = signing {
-            cx.sign_http(request, Box::new(signing));
-        }
-    }
-
     /// Public startup discovery on its own Background Read with a 20 s window.
     fn send_discovery(&mut self, cx: &mut Cx<'_, Pending>, rest: Rest, then: Then) {
         self.send_read(cx, rest, then);
@@ -741,17 +677,10 @@ impl BybitLinear {
         signed: bool,
         timeout_ms: u32,
     ) -> Option<safe_cex_engine::request_context::Policy> {
-        use safe_cex_engine::request_context::{Credential, Policy, RetryPolicy};
+        use safe_cex_engine::request_context::{Policy, RetryPolicy};
         let credential = if signed {
-            let (slot, identity) = match (&self.read_credentials, &self.credentials) {
-                (Some(read), _) => (safe_cex_engine::CredentialSlot::Secondary, read),
-                (None, Some(primary)) => (safe_cex_engine::CredentialSlot::Primary, primary),
-                (None, None) => return None,
-            };
-            Some(Credential {
-                slot,
-                reference: identity.credential.clone(),
-            })
+            let (selection, identity) = self.select_key(KeyUse::Read)?;
+            Some(selection.credential(identity.credential.clone()))
         } else {
             None
         };
@@ -803,6 +732,40 @@ impl BybitLinear {
             .map_err(|error| error.venue_error())
     }
 
+    /// The read key signs GETs when one is set; the primary signs the rest.
+    pub(crate) fn signing_identity(
+        &self,
+        method: Method,
+    ) -> Option<&safe_cex_engine::signing::Identity> {
+        let key = if method == Method::Get {
+            KeyUse::Read
+        } else {
+            KeyUse::Write
+        };
+        self.select_key(key).map(|(_, identity)| identity)
+    }
+
+    /// The only key choice: the engine's slot rules over Bybit's two keys.
+    pub(crate) fn select_key(
+        &self,
+        key: KeyUse,
+    ) -> Option<(Selection, &safe_cex_engine::signing::Identity)> {
+        let policy = SlotPolicy {
+            secondary_requires_primary: key == KeyUse::AccountRead,
+        };
+        let role = match key {
+            KeyUse::Read | KeyUse::AccountRead => CredentialRole::Read { scope: None },
+            KeyUse::Write => CredentialRole::Mutation,
+        };
+        let slots = Slots::new(
+            self.credentials.as_ref(),
+            self.read_credentials.as_ref(),
+            policy,
+        );
+        let (selection, identity) = slots.select(role).ok()?;
+        Some((selection, *identity))
+    }
+
     pub(crate) fn queue_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -817,9 +780,7 @@ impl BybitLinear {
         }
         let signing = rest.signed.then(|| {
             let identity = self
-                .read_credentials
-                .as_ref()
-                .or(self.credentials.as_ref())
+                .signing_identity(Method::Get)
                 .expect("a signed read was admitted with a credential");
             sign::Http::new(identity.clone(), rest.payload.clone(), self.recv_window)
                 .with_header_policy(self.signing_policy.header_policy())
@@ -834,6 +795,7 @@ impl BybitLinear {
         let queued = match signing {
             Some(signing) => cx.request_signed_managed(
                 context,
+                None,
                 Method::Get,
                 url,
                 None,
@@ -842,6 +804,7 @@ impl BybitLinear {
             ),
             None => cx.request_managed_with_headers(
                 context,
+                None,
                 Method::Get,
                 url,
                 &[("X-Referer", sign::BROKER_ID)],
@@ -927,33 +890,6 @@ impl BybitLinear {
         let mut taken = pending.take().expect("checked above");
         taken.rest.resent = true;
         self.queue_read(cx, retry, taken.rest, taken.then);
-        true
-    }
-
-    /// Resend a rejected request once with a fresh signature; false when it
-    /// was already resent or the rejection is not one a resend can fix.
-    fn resend(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        pending: &mut Option<Pending>,
-        text: &str,
-    ) -> bool {
-        let Some(server_time) = resendable(text) else {
-            return false;
-        };
-        let Some(mut taken) = pending.take_if(|p| p.rest.signed && !p.rest.resent) else {
-            return false;
-        };
-        if let Some(server) = server_time {
-            cx.observe_protocol_time(server);
-        }
-        cx.notice(
-            Level::Warn,
-            code::REQUEST_FAILED,
-            "Bybit rejected a signed request; resending it once",
-        );
-        taken.rest.resent = true;
-        self.send(cx, taken.rest, taken.then);
         true
     }
 
@@ -1195,7 +1131,11 @@ impl BybitLinear {
         let Some(origin) = self.environment_probe_origin else {
             return false;
         };
-        let Some(credentials) = self.read_credentials.as_ref().or(self.credentials.as_ref()) else {
+        // Owned, so the probe can mark its attempt while it holds the key.
+        let Some((selection, credentials)) = self
+            .select_key(KeyUse::Read)
+            .map(|(selection, identity)| (selection, identity.clone()))
+        else {
             return false;
         };
         if credentials.validate().is_err() {
@@ -1204,20 +1144,12 @@ impl BybitLinear {
         let signing = sign::Http::new(credentials.clone(), String::new(), self.recv_window)
             .with_header_policy(self.signing_policy.header_policy());
         self.environment_probe_attempted = true;
-        use safe_cex_engine::request_context::{Credential, Operation, Policy, RetryPolicy, Scope};
-        let slot = if self.read_credentials.is_some() {
-            safe_cex_engine::CredentialSlot::Secondary
-        } else {
-            safe_cex_engine::CredentialSlot::Primary
-        };
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
         let Ok(context) = cx.http_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
-                credential: Some(Credential {
-                    slot,
-                    reference: credentials.credential.clone(),
-                }),
+                credential: Some(selection.credential(credentials.credential.clone())),
                 timeout_ms: ENVIRONMENT_PROBE_TIMEOUT_MS,
                 pacing: None,
                 retry: RetryPolicy::Never,
@@ -1234,6 +1166,7 @@ impl BybitLinear {
         if cx
             .request_signed_managed(
                 context.clone(),
+                None,
                 Method::Get,
                 format!("{origin}/v5/user/query-api"),
                 None,
@@ -2072,7 +2005,7 @@ impl BybitLinear {
             // Managed kline reads never reach the legacy public path.
             Then::Candles(_) => {}
             Then::Account(request) => self.on_account_response(cx, request, response),
-            Then::Trade(request) => self.on_trade_response(cx, request, response),
+            Then::Hyro(read) => self.on_hyro_response(cx, read, response),
             // Ordinary responses and failures never reach the public path.
             Then::Ordinary(_) => {}
             // Answers arrive with their page leg in on_response; only failures here.
@@ -2364,9 +2297,6 @@ impl BybitLinear {
             self.on_socket_timer(cx, channel, timer);
         }
         self.on_account_timer(cx, timer);
-        if self.category == self.primary_category {
-            self.on_trade_timer(cx, timer);
-        }
     }
 }
 
@@ -2671,14 +2601,7 @@ impl Venue for BybitLinear {
             let _ = cx.finish_http_context(&read);
             return;
         }
-        let mut pending = Some(pending);
-        if self.resend(cx, &mut pending, response.body) {
-            return;
-        }
-        let Some(Pending { then, .. }) = pending else {
-            return;
-        };
-        self.on_public_response(cx, then, Ok(response));
+        self.on_public_response(cx, pending.then, Ok(response));
     }
 
     fn on_stream_error(
@@ -2809,7 +2732,7 @@ impl Venue for BybitLinear {
         }
         self.select_category(pending.category);
         match pending.then {
-            Then::Trade(request) => self.on_trade_sign_failed(cx, request, error),
+            Then::Hyro(read) => self.on_hyro_response(cx, read, Err(&error.message)),
             Then::Identity(context) => self.identity_response(cx, context, Err(error)),
             Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
             Then::Options(request) => self.on_options_response(cx, request, Err(error)),
@@ -2842,19 +2765,9 @@ impl Venue for BybitLinear {
             return;
         }
         self.select_category(pending.category);
-        let mut pending = Some(pending);
-        // A managed read never takes the legacy text resend.
-        if pending.as_ref().is_some_and(|p| p.read.is_none())
-            && self.resend(cx, &mut pending, error)
-        {
-            return;
-        }
-        let Some(Pending {
+        let Pending {
             rest, then, read, ..
-        }) = pending
-        else {
-            return;
-        };
+        } = pending;
         // A rejected retry may arrive as a host error containing the signed origin URL.
         let safe_error = (rest.signed && rest.resent)
             .then_some("Bybit signed request failed after its signature retry");

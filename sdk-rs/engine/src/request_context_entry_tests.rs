@@ -424,6 +424,7 @@ fn start_timer_and_public_callbacks_cannot_borrow_command_entry() {
     let request = cx
         .request_managed(
             root,
+            None,
             Method::Get,
             "https://venue.test/background".into(),
             None,
@@ -578,6 +579,7 @@ fn caught_command_panic_fences_real_held_permit_and_pending_signer() {
     let root = cx.http_context(Scope::Background, read_policy()).unwrap();
     cx.request_managed(
         root,
+        None,
         Method::Get,
         "https://venue.test/held".into(),
         None,

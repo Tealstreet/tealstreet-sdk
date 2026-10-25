@@ -6449,31 +6449,6 @@ distinguish the following:
 
 
 
-## Retained command readiness
-
-With the engine's `http-plans` feature, native FIFO commands can park their own
-Preflight during genuine entry and activate it once after a predecessor physically
-retires. They keep their original command generation; waiting creates no request,
-timer or artificial deadline. Final native Plan admission establishes its bound.
-A predecessor's HTTP DATA cannot donate command-entry or response authority to
-the next command. Cleanup returns only an already-parked handle; actual activation
-runs after cleanup, callback exit and the execution sweep.
-
-A ready callback must finish, submit a bounded prerequisite read or admit its Plan.
-An unhandled callback or a selected read with no submitted HTTP fails once with
-Internal. ReadOnly has no write outcome; a truly unissued mutation is NotSent.
-NX consumes that one terminal and keeps any prior uncertain effects for ordinary
-reconciliation. Ready custody cannot submit or retire another command's work.
-Root expiry and preparation refusal wake the successor in the same engine event;
-no unrelated feed event is needed. No host wire or signer capability is added.
-
-While either retained-Preflight readiness or Plan readiness owns the callback,
-Session creation, derived legs, retirement and waiter changes refuse with State
-before reserving IDs or consuming timers/continuations. Session-ready/failed
-drains return empty; session_wait returns its pending unchanged. Read-only
-session_live and the active Plan's own APIs remain available. Ordinary Session,
-socket, timer and startup callbacks retain their existing Session authority.
-
 ## Selected caller-wait roots and physical history pages
 
 Signed plain command reads can retain one selected identity, slot, route and
@@ -7723,6 +7698,21 @@ deferral timer. Shared entry refusal is Read outcome none; preparation refusal
 retains typed NotSent. This command neither publishes nor repairs Store books or
 private account/session state. Limit remains ignored, d=50 and native wire remain.
 
+## Bitget contracts and tickers discovery under Background Context
+
+Startup contracts and tickers discovery for `bitget`, `bitgetusdc` and
+`bitgetinverse` now runs as one Background managed Read per physical read.
+URLs, the product and testnet mapping, the `X-CHANNEL-API-CODE` header, row
+codecs, skipped rows, empty-result `VenueUnavailable`, discovery error text, the
+`live_tickers` merge and the native `PublicRetries` schedule are unchanged.
+
+A discovery read now has a 20 s bound. It runs from admission to expiry and
+includes route, Prepare and Bind time. An unanswered read fails with a typed
+Timeout (outcome none) and retries on the native schedule, where before it
+waited with no deadline. A reply that arrives after its read expired publishes
+nothing and opens no sockets. Admission or queue refusals fail promptly into
+the same native backoff. The TS-visible startup results are unchanged.
+
 ### TxFlow immediate local command custody
 
 Fifteen local occurrences now consume genuine command entry through shared Read
@@ -8020,55 +8010,6 @@ still projects the one shared journal, including accepted IDs and uncertainty.
 BingX ordinary trading and Bybit #1914 adopt this in their separate caller PRs.
 The core declaration alone does not migrate either venue or remove legacy sites.
 
-### Bybit fee, account info and wallet reads on managed authority (slice 1d-i)
-
-| Change | Outcome | NX handling |
-| --- | --- | --- |
-| The startup fee read, account info and the wallet are signed Background reads with a 20 s window | An expired fee read keeps its contract (a warning, empty fees, markets still publish); an expired account-info or wallet read takes its existing failure path | None. |
-| Re-reads after a signature/timestamp refusal | Once, re-signed, only on a native `10002`/`10004`; a message that merely mentions `recv_window` under another code is a plain failure (was a text-matched resend). Bybit's server clock is still observed from the refusal | None. |
-| Hyro | Unchanged: no account-info read and an empty fee map; its wallet read takes the same managed path | None. |
-
-### Bybit order and position snapshots on managed authority (slice 1d-ii)
-
-| Change | Outcome | NX handling |
-| --- | --- | --- |
-| Each order or position snapshot is one Background owner: every page, settle coin and cursor is a leg with a 20 s window, inside a 60 s window for the whole read | A snapshot that cannot finish in time fails like any other read and is retried by the existing cadence; rows and staleness rules are unchanged | None. |
-| The reconcile read after an uncertain or absent-order write | Always a fresh read; an older snapshot still in flight is abandoned (its late pages are ignored) instead of joined, so the fence clears only on rows read after the write | An order row may stay until that fresh read lands. |
-| Signed snapshot reads after a signature/timestamp refusal | Re-read once, only on a native `10002`/`10004` (no text match) | None. |
-
-### Bybit account identity on managed authority (slice 3)
-
-| Change | Command outcome | NX handling |
-| --- | --- | --- |
-| `fetchAccount` is a signed command read with a 20 s window, signed with the read key when configured | `timeout` when it expires; a late answer is ignored | None. |
-| Refusals before any request (invalid options, invalid read key, no primary key) | Typed `NotSent`: `invalidInput`, `invalidInput`, `authInvalid`; texts unchanged (was untyped) | Branch on `kind`. |
-| A signature/timestamp refusal | Re-read once only on a native `10002`/`10004`; text never re-reads | None. |
-
-### Bybit market refresh refusals (slice 2)
-
-| Change | Command outcome | NX handling |
-| --- | --- | --- |
-| `refreshMarkets` on a shared public-feed consumer | Typed `NotSent` `unsupported` under the command's admitted authority (was the same kind with no outcome); text unchanged | Refresh the shared source instead. |
-| Invalid options during a refresh walk | Every joined caller fails `NotSent` `invalidInput` at once (was silent until the 30 s deadline; not reachable through startup today) | None. |
-
-
-### Bybit Hyro non-placement commands on the ordinary Plan (Hyro H1)
-
-| Change | Command outcome | NX handling |
-| --- | --- | --- |
-| Hyro `amendOrder`, `cancelOrders`, `cancelSymbolOrders`, `setLeverage`, `setMarginType`, `setPositionMode` run as managed Plan calls (placements stay legacy until H2) | Unchanged shapes; each write leg has its own managed window | None. |
-| Any of them while Hyro private state is reconnecting | Typed `NotSent` before any I/O; a later leg that finds it recovering fails `NotSent` with the legacy recovering text | None. |
-| Hyro "not modified" / "already gone" answers | Classified by native code only (`34040` Satisfied; `110001`/`170213` cancel Satisfied and fenced); text no longer decides | None. |
-| A Hyro write resend | Only on a native `10002`/`10004`; host-error text never resends | None. |
-| An unknown or absent-order Hyro write | One fresh full Hyro snapshot reconciles it and clears the order fence (Hyro never cleared it before) | None. |
-
-Unverified wire assumption (ruling D): no HyroTrader cancel/amend reply has
-been captured. A reply without `result.orderId`, or an "already gone" answer
-without native `110001`/`170213`, seals Unknown and reconciles via a fresh
-snapshot; it is never reported gone. Follow-up: capture real Hyro cancel,
-amend and already-gone replies when a Hyro account is available, then pin
-them as fixtures.
-
 ### Bybit duplicate-link create refusals (R2)
 
 | Change | Command outcome | NX handling |
@@ -8086,6 +8027,13 @@ them as fixtures.
 | A native refusal | Classified: keeps its `kind` and the native `venueCode` (was `internal` and no code) | Branch on `kind`. |
 | A signature/timestamp refusal (`10002`/`10004`) | Re-read once as a managed retry with Bybit's clock; host text never re-sends | None. |
 | Credentials | Unchanged: the read key when configured, else the primary; keyless account history is `[]` with no request | None. |
+
+### Bybit legacy executor removed (D-bybit)
+
+| Change | Command outcome | NX handling |
+| --- | --- | --- |
+| Every trading command runs on the managed ordinary path; the legacy job executor, text resend and unmanaged `send()` are gone | Unchanged shapes; no host text ever re-sends a request | None. |
+| Fill repair (`/v5/execution/list` for a lost fill) is a managed Background read | Re-reads once on a native `10002`/`10004`; text never re-sends | None. |
 ## Parallel Mutation preparation barrier
 
 A caller explicitly declares each all-Mutation parallel step and implements the
@@ -8457,3 +8405,37 @@ Unissued admission/queue pressure backs off the first page without recursive
 page admission. Private startup, midpoint progression, cursor geometry, quoted
 HTTP data and signing/key selection retain their native behavior. No command or
 financial outcome is created by this Background Read adoption.
+
+## Session-bound requests (Bearer hook)
+
+Plan: RUST_SESSION_BEARER_HOOK.md. This applies to venues that enable the
+`session-bearer` engine feature; without it a Session-bound request is refused
+`Invalid` at issue, before any effect, and an owning Plan fails "Session-bound
+requests require the session-bearer feature". A managed request bound to a Session takes
+its session headers just in time from the venue's `session_bearer`. That hook
+returns a bounded `SessionHeaders` set at the venue's declared
+`SessionPlacement`, fenced by one revision. Caller-visible behaviour for a
+venue that adopts the hook:
+
+- **NotReady waits instead of failing.** An unsent bound call whose bundle is
+  NotReady, or not newer than a revision the claim fence found moved or
+  cleared, parks inside its own call window. The venue's `session_ready`
+  announce re-prepares it with no attempt, grant or login spent. Expiry while
+  parked is the existing Timeout, NotSent, with health unchanged. The
+  engine's default `session_bearer` answers NotReady, so a Session-bound call
+  on a venue that does not implement the hook waits out its window instead of
+  failing at once (R4 change). No venue binds a Session today.
+- **Venue obligations.** The revision moves on every bundle change and on
+  every successful refresh, even with unchanged values; `session_bearer` and
+  `session_bearer_revision` read the same counter; the venue calls
+  `session_ready` after each refresh. A refresh that is never announced
+  leaves parked calls to expire at their window.
+- **Mutation groups.** A Session-bound request cannot join a Mutation group:
+  it is refused at issue before any effect, and the command fails once,
+  NotSent, InvalidInput, "Session-bound requests cannot join a Mutation
+  group". This applies to any venue that adopts `session_bearer` and declares
+  barriers. Group-claim revision checking (R11) is built by the first consumer
+  that needs bound groups.
+- **Header order.** The bundle goes First, or immediately after a named header
+  (`After`, falling back to First), as declared with the bundle. Collision and
+  whole-packet count/byte limits refuse NotSent, wiping the inserted copies.

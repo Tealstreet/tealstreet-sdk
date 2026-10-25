@@ -124,6 +124,7 @@ impl Cryptocom {
         };
         if let Err((pending, reason)) = cx.request_managed(
             context.clone(),
+            None,
             Method::Get,
             format!(
                 "{}/public/get-book?instrument_name={}&depth=50",

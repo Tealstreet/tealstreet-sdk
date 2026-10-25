@@ -164,7 +164,7 @@ impl ApexOmni {
         let queued = match custody {
             Custody::Public(context) => {
                 let pending = native.pending(read(Custody::Public(context.clone())));
-                cx.request_managed(context, wire.method, wire.url, None, pending)
+                cx.request_managed(context, None, wire.method, wire.url, None, pending)
                     .map(|id| {
                         if let Some(at) = wire.stream {
                             cx.stream_response(id, at);

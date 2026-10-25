@@ -21,9 +21,7 @@ use safe_cex_engine::request_context::{
     Policy, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData, ResendGrant,
     RetryEvidence, RetryPolicy, WriteResult,
 };
-use safe_cex_engine::{
-    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError,
-};
+use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError};
 use std::collections::VecDeque;
 
 mod placements;
@@ -214,20 +212,15 @@ impl BybitLinear {
         self.resume_ordinary(cx, id);
     }
 
-    fn ordinary_preflight(&self) -> (PreflightPolicy, Option<Credential>, Option<Credential>) {
-        let write_credential = self.credentials.as_ref().map(|identity| Credential {
-            slot: CredentialSlot::Primary,
-            reference: identity.credential.clone(),
-        });
-        let read_credential = self
-            .read_credentials
-            .as_ref()
-            .map(|identity| Credential {
-                slot: CredentialSlot::Secondary,
-                reference: identity.credential.clone(),
-            })
-            .or_else(|| write_credential.clone())
-            .filter(|_| write_credential.is_some());
+    pub(crate) fn ordinary_preflight(
+        &self,
+    ) -> (PreflightPolicy, Option<Credential>, Option<Credential>) {
+        let credential = |key| {
+            self.select_key(key)
+                .map(|(selection, identity)| selection.credential(identity.credential.clone()))
+        };
+        let write_credential = credential(crate::KeyUse::Write);
+        let read_credential = credential(crate::KeyUse::AccountRead);
         let purpose = if write_credential.is_some() {
             PreflightPurpose::WriteAfterReads
         } else {
@@ -495,12 +488,7 @@ impl BybitLinear {
         path: &'static str,
         payload: String,
     ) -> bool {
-        let identity = if method == Method::Get {
-            self.read_credentials.as_ref().or(self.credentials.as_ref())
-        } else {
-            self.credentials.as_ref()
-        };
-        let Some(identity) = identity else {
+        let Some(identity) = self.signing_identity(method) else {
             return false;
         };
         let mut url = format!("{}{}", self.paths.rest, path);
@@ -514,7 +502,6 @@ impl BybitLinear {
         let pending = Pending {
             category: self.category,
             rest: Rest {
-                method,
                 path,
                 payload,
                 stream: false,
@@ -527,7 +514,7 @@ impl BybitLinear {
             }),
             read: None,
         };
-        cx.request_signed_managed(context, method, url, body, Box::new(step), pending)
+        cx.request_signed_managed(context, None, method, url, body, Box::new(step), pending)
             .is_ok()
     }
 
@@ -1559,12 +1546,6 @@ impl BybitLinear {
                 self.apply_position_mode(cx, *hedged);
                 Decision::Next(Vec::new())
             }
-            Call::Hyro(_) | Call::ResolveMode { .. } => Self::unproven(
-                cx,
-                context,
-                "Bybit ordinary plan carried a legacy call",
-                &[],
-            ),
         }
     }
 

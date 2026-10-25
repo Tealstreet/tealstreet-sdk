@@ -30,6 +30,7 @@ impl Venue for Intent {
             .unwrap();
         cx.request_managed_with_headers(
             context,
+            None,
             self.native.method,
             self.native.url.clone(),
             JSON,
