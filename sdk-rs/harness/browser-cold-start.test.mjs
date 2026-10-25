@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import {
   archiveBrowserAssets, assetSpecs, browserServer, completeMeasurements, debuggingPort, measurementTable,
-  readBrowserInputs, stopChrome, validateMeasurements,
+  readBrowserInputs, stopChrome, validateMeasurements, waitForChrome,
 } from './browser-cold-start.mjs';
 import { Cdp, evaluateWorker } from './browser-cdp.mjs';
 
@@ -311,5 +311,118 @@ test('completion rejects existing errors and invalid samples before publishing s
     assert.equal(f.report.warnings, undefined);
     assert.equal(existsSync(join(f.directory, 'table.md')), false);
     assert.deepEqual(f.logs, []);
+  }
+});
+
+function launchFixture() {
+  const child = Object.assign(new EventEmitter(), {
+    pid: 1234, exitCode: null, signalCode: null, spawnfile: 'fixture-chrome',
+  });
+  let clock = 0, reads = 0;
+  const fixture = {
+    child,
+    options: {
+      now: () => clock,
+      wait: async (ms) => { clock += ms; fixture.tick(clock); },
+      readPort: () => { reads++; return fixture.read(); },
+    },
+    tick: () => {},
+    read: () => { throw Object.assign(new Error('not ready'), { code: 'ENOENT' }); },
+    get clock() { return clock; },
+    get reads() { return reads; },
+  };
+  return fixture;
+}
+const assertLaunchListenersRemoved = (child) => {
+  for (const name of ['spawn', 'exit', 'error']) assert.equal(child.listenerCount(name), 0);
+};
+
+test('Chrome launch waits for spawn and complete metadata under the original 15s bound', async () => {
+  const f = launchFixture();
+  f.tick = () => f.child.emit('spawn');
+  f.read = () => f.clock < 200 ? '12345\n' : '12345\n/devtools/browser/fixture\n';
+  assert.equal(await waitForChrome(f.child, '/fixture', f.options), 12345);
+  assert.equal(f.clock, 200);
+  assert.equal(f.reads, 2);
+  assertLaunchListenersRemoved(f.child);
+});
+
+test('Chrome spawn failures and normal/signaled exits fail before readiness with diagnostics', async () => {
+  for (const kind of ['error', 'exit', 'signal']) {
+    const f = launchFixture();
+    f.tick = () => {
+      if (kind === 'error') f.child.emit('error', new Error('fixture spawn refusal'));
+      else {
+        f.child.exitCode = kind === 'exit' ? 7 : null;
+        f.child.signalCode = kind === 'signal' ? 'SIGKILL' : null;
+        f.child.emit('exit', f.child.exitCode, f.child.signalCode);
+      }
+    };
+    await assert.rejects(waitForChrome(f.child, '/fixture', f.options), (error) => {
+      assert.match(error.message, kind === 'error' ? /spawn failed/ : /exited before debugging readiness/);
+      assert.equal(error.launch.phase, 'spawn');
+      assert.equal(error.launch.executable, 'fixture-chrome');
+      assert.equal(error.launch.pid, 1234);
+      assert.equal(error.launch.elapsedMs, 100);
+      assert.equal(error.launch.signal, kind === 'signal' ? 'SIGKILL' : null);
+      assert.equal(error.launch.exitCode, kind === 'exit' ? 7 : null);
+      return true;
+    });
+    assert.equal(f.reads, 0);
+    assertLaunchListenersRemoved(f.child);
+  }
+});
+
+test('Chrome termination wins over concurrently published ready metadata', async () => {
+  const f = launchFixture();
+  f.tick = () => f.child.emit('spawn');
+  f.read = () => {
+    f.child.signalCode = 'SIGTERM';
+    f.child.emit('exit', null, 'SIGTERM');
+    return '12345\n/devtools/browser/fixture\n';
+  };
+  await assert.rejects(waitForChrome(f.child, '/fixture', f.options), (error) => {
+    assert.match(error.message, /exited before debugging readiness/);
+    assert.equal(error.launch.phase, 'devtools-ready');
+    assert.equal(error.launch.signal, 'SIGTERM');
+    return true;
+  });
+  assertLaunchListenersRemoved(f.child);
+});
+
+test('Chrome spawn/missing/partial readiness cannot pass at or after 15 seconds', async () => {
+  for (const kind of ['spawn', 'missing', 'partial', 'equality']) {
+    const f = launchFixture();
+    f.tick = () => { if (kind !== 'spawn') f.child.emit('spawn'); };
+    if (kind === 'partial') f.read = () => '12345\n';
+    if (kind === 'equality') f.read = () => f.clock >= 15_000
+      ? '12345\n/devtools/browser/fixture\n' : '';
+    await assert.rejects(waitForChrome(f.child, '/fixture', f.options), (error) => {
+      assert.match(error.message, /debugging port timed out/);
+      assert.equal(error.launch.elapsedMs, 15_000);
+      assert.equal(error.launch.phase, kind === 'spawn' ? 'spawn' : 'devtools-ready');
+      assert.equal(error.launch.portFile, ['partial', 'equality'].includes(kind) ? 'partial' : 'missing');
+      return true;
+    });
+    assert.equal(f.clock, 15_000);
+    assertLaunchListenersRemoved(f.child);
+  }
+});
+
+test('Chrome metadata and filesystem refusals stay fail closed with launch diagnostics', async () => {
+  for (const kind of ['metadata', 'filesystem']) {
+    const f = launchFixture();
+    f.tick = () => f.child.emit('spawn');
+    f.read = () => {
+      if (kind === 'filesystem') throw Object.assign(new Error('fixture denied'), { code: 'EACCES' });
+      return '12345\nhttp://remote';
+    };
+    await assert.rejects(waitForChrome(f.child, '/fixture', f.options), (error) => {
+      assert.match(error.message, kind === 'metadata' ? /Invalid DevToolsActivePort/ : /Cannot read Chrome debugging metadata/);
+      assert.equal(error.launch.phase, 'devtools-ready');
+      assert.equal(error.launch.elapsedMs, 100);
+      return true;
+    });
+    assertLaunchListenersRemoved(f.child);
   }
 });
