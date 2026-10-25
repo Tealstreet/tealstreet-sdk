@@ -127,6 +127,8 @@ pub(crate) struct Dispatch {
     /// A preparation that named a missing credential ref, and whether that
     /// was primary material; taken once.
     credential_refused: Option<bool>,
+    /// A missing primary key latched signing: every later staging refuses.
+    refused: bool,
 }
 pub(crate) enum Completion {
     Ready(Pending, Action),
@@ -139,6 +141,13 @@ impl Dispatch {
         self.pending.is_empty() && self.outbound.is_empty()
     }
 
+    /// Latch signing; false when it already was.
+    pub fn refuse(&mut self) -> bool {
+        !std::mem::replace(&mut self.refused, true)
+    }
+    pub fn refused(&self) -> bool {
+        self.refused
+    }
     pub fn take_credential_refusal(&mut self) -> Option<bool> {
         self.credential_refused.take()
     }
@@ -289,6 +298,9 @@ impl Dispatch {
         timer: TimerId,
         now: f64,
     ) -> Result<f64, SignError> {
+        if self.refused {
+            return Err(SignError::MissingKey);
+        }
         if self.pending.len() + self.outbound.len() >= 256 || !now.is_finite() {
             return Err(SignError::Unavailable);
         }

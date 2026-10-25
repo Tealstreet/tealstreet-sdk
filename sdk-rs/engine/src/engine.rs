@@ -2177,10 +2177,6 @@ impl<P> Cx<'_, P> {
     fn stage_signed(&mut self, index: usize, outbound: Action, step: Box<dyn crate::SignStep>) {
         self.io.opaque_entry_activity();
         self.io.assert_action_safe(&outbound);
-        if let Some(error) = self.io.signing_latch.refused {
-            self.io.signing_admission.push((outbound, error));
-            return;
-        }
         let attempt = self.io.signing.next_id();
         // Exhaustion is handled through the same asynchronous failure event.
         let timer = if self.io.signer.as_ref().is_some_and(|s| s.immediate()) {
@@ -2192,13 +2188,16 @@ impl<P> Cx<'_, P> {
             .io
             .signing
             .stage(attempt, outbound.clone(), step, timer, self.now);
-        let error = staged.as_ref().err();
-        if error.is_some() {
+        if let Err(error) = staged {
             // Retain the continuation even when admission fails, so the engine
-            // reports a typed pre-dispatch failure instead of silently dropping it.
-            self.io
-                .signing_admission
-                .push((outbound, crate::signing::SignError::Unavailable));
+            // reports a typed pre-dispatch failure instead of silently dropping
+            // it. Only a latched missing key keeps its own kind.
+            let error = if error == crate::signing::SignError::MissingKey {
+                error
+            } else {
+                crate::signing::SignError::Unavailable
+            };
+            self.io.signing_admission.push((outbound, error));
             return;
         }
         if timer.0 != 0 {
@@ -4523,8 +4522,10 @@ impl<V: Venue> Engine<V> {
         if let Err(crate::signing::SignError::MissingKey) = result {
             let startup = self.startup_watch_at.is_some();
             let io = &mut self.io;
-            io.signing_latch.missing_key(
-                io.signing.prepared_primary(attempt),
+            let primary = io.signing.prepared_primary(attempt);
+            SigningLatch::missing_key(
+                &mut io.signing,
+                primary,
                 startup,
                 &mut io.actions,
                 &mut io.health,
@@ -4553,7 +4554,9 @@ impl<V: Venue> Engine<V> {
                 let io = &mut *cx.io;
                 // Records the role; managed feeds also stop on it.
                 #[cfg_attr(not(feature = "managed-sockets"), allow(unused_variables))]
-                let refused = io.signing_latch.socket_failed(&io.sockets, socket);
+                let refused = io
+                    .signing_latch
+                    .socket_failed(&io.signing, &io.sockets, socket);
                 #[cfg(feature = "managed-sockets")]
                 if refused
                     && cx.io.managed_socket_active()
@@ -5027,7 +5030,8 @@ impl<V: Venue> Engine<V> {
                                 if let Some(primary) = self.io.signing.take_credential_refusal() {
                                     let startup = self.startup_watch_at.is_some();
                                     let io = &mut self.io;
-                                    io.signing_latch.missing_key(
+                                    SigningLatch::missing_key(
+                                        &mut io.signing,
                                         primary,
                                         startup,
                                         &mut io.actions,
@@ -5470,8 +5474,6 @@ pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
 /// one copy rather than one per venue engine.
 #[derive(Default)]
 struct SigningLatch {
-    /// The first missing-key refusal; later signed actions fail with it.
-    refused: Option<crate::signing::SignError>,
     /// Socket roles whose signing was refused; they are never reconnected.
     roles: u8,
 }
@@ -5484,8 +5486,13 @@ impl SigningLatch {
 
     /// Whether signing is latched; if so, the failed socket's role is too.
     #[inline(never)]
-    fn socket_failed(&mut self, sockets: &SocketRoles, socket: SocketId) -> bool {
-        if self.refused.is_none() {
+    fn socket_failed(
+        &mut self,
+        signing: &crate::signing_dispatch::Dispatch,
+        sockets: &SocketRoles,
+        socket: SocketId,
+    ) -> bool {
+        if !signing.refused() {
             return false;
         }
         if let Some(role) = sockets.role_of(socket) {
@@ -5498,18 +5505,17 @@ impl SigningLatch {
     /// visibly, and during startup fail `start` (`Identities::primary_owns`).
     #[inline(never)]
     fn missing_key(
-        &mut self,
+        signing: &mut crate::signing_dispatch::Dispatch,
         primary: bool,
         startup: bool,
         actions: &mut Vec<Action>,
         health: &mut Health,
         min_level: Level,
     ) {
-        if !primary || self.refused.is_some() {
+        if !primary || !signing.refuse() {
             return;
         }
         let error = crate::signing::SignError::MissingKey;
-        self.refused = Some(error);
         push_event(
             actions,
             health,

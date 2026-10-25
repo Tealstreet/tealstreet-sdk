@@ -559,9 +559,6 @@ impl<P> Cx<'_, P> {
             body,
         };
         let signing_attempt = if let Some(step) = step {
-            if self.io.signing_latch.refused.is_some() {
-                return Err((pending, Error::Invalid));
-            }
             #[cfg(feature = "http-plans")]
             let attempt = admission
                 .and_then(|admission| admission.signing)
@@ -577,7 +574,11 @@ impl<P> Cx<'_, P> {
             ) {
                 return Err((
                     pending,
-                    if error == crate::signing::SignError::InvalidRequest {
+                    if matches!(
+                        error,
+                        crate::signing::SignError::InvalidRequest
+                            | crate::signing::SignError::MissingKey
+                    ) {
                         Error::Invalid
                     } else {
                         Error::Capacity
