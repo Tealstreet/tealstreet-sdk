@@ -1,7 +1,7 @@
 //! Streamed serial Plans: one live call, continued from exact custody, with no
 //! declared length and no root wall-clock.
 use super::*;
-use crate::request_context::plan::{CallBound, RetryWindow, SerialCall, SerialPolicy, StepBound};
+use crate::request_context::plan::{CallTerms, RetryWindow, SerialCall, SerialPolicy};
 use crate::request_context::{Credential, RetryPolicy};
 
 /// A serial root never expires by clock; it ends through custody or a stop.
@@ -13,6 +13,8 @@ pub(super) const JOURNAL_ATTEMPTS: usize = 2;
 pub(super) struct Serial {
     pub(super) refusals_complete: bool,
     call: SerialCall,
+    #[cfg(feature = "session-bearer")]
+    pub(super) session_seed: Option<(u64, u64)>,
     /// Read calls sign with the Preflight's read role (or go unsigned), never
     /// with the Plan's write credential.
     read: Option<Credential>,
@@ -46,6 +48,11 @@ impl Next {
 }
 
 impl Serial {
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn allows_session_read_resend(&self) -> bool {
+        self.call.operation == Operation::Read && self.call.attempts == 2
+    }
+
     #[cfg(feature = "condition-waits")]
     pub(super) fn condition_deadline(&self) -> Option<f64> {
         self.condition.map(|(_, at)| at).filter(|at| *at < ROOT)
@@ -80,7 +87,7 @@ pub(super) fn wake(timer: TimerId, at_ms: f64) -> Action {
 }
 
 fn retry_policy(call: SerialCall) -> RetryPolicy {
-    if call.attempts > 1 {
+    if call.attempts > 1 && call.operation == Operation::Mutation {
         RetryPolicy::DefinitiveRefusal
     } else {
         RetryPolicy::Never
@@ -90,7 +97,9 @@ fn retry_policy(call: SerialCall) -> RetryPolicy {
 fn validate_call(call: SerialCall) -> Result<(), Error> {
     if call.timeout_ms == 0
         || !(1..=2).contains(&call.attempts)
-        || (call.attempts > 1 && call.operation != Operation::Mutation)
+        || (!cfg!(feature = "session-bearer")
+            && call.operation == Operation::Read
+            && call.attempts > 1)
     {
         return Err(Error::Invalid);
     }
@@ -132,20 +141,16 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         self.io.core.http_pacing.validate_zero(policy.pacing)?;
-        let calls = [CallBound {
+        let schedule = Schedule::from_single_call(CallTerms {
+            wait_ms: 0,
             timeout_ms: first.timeout_ms,
             attempts: first.attempts.into(),
             retry_window: RetryWindow::FreshAttempt,
-            after_refusal: &[],
-        }];
-        let steps = [StepBound {
-            wait_ms: 0,
-            calls: &calls,
-        }];
+        });
         let (plan, _) = self.admit_plan_root(
             preflight,
-            AdmissionDeclaration {
-                steps: &steps,
+            PreparedAdmission {
+                schedule,
                 policy: PlanPolicy {
                     independent_calls: false,
                     operation: Operation::Mutation,
@@ -153,13 +158,17 @@ impl<P> Cx<'_, P> {
                     pacing: policy.pacing,
                     retry: retry_policy(first),
                 },
-                terminals: &[],
-                barriers: &[],
+                terminals: Ok(Vec::new()),
+                has_barriers: false,
+                #[cfg(feature = "http-mutation-barriers")]
+                barriers: Ok(Vec::new()),
             },
             false,
             Some(Serial {
                 refusals_complete: policy.refusals_complete,
                 call: first,
+                #[cfg(feature = "session-bearer")]
+                session_seed: None,
                 read: intent.read_credential,
                 #[cfg(feature = "condition-waits")]
                 condition: None,
@@ -210,6 +219,36 @@ impl<P> Cx<'_, P> {
             .map(drop)
     }
 
+    #[inline]
+    pub(super) fn continue_serial(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        next: SerialCall,
+        wake: Next,
+    ) -> Result<Slot, Error> {
+        self.core().continue_serial(plan, slot, context, next, wake)
+    }
+
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "serial-plans", allow(dead_code))]
+    fn commit_serial_continuation(
+        &mut self,
+        plan: &Plan,
+        context: &Context,
+        leg: Option<u64>,
+        next: SerialCall,
+        schedule: Schedule,
+        wake: Next,
+    ) -> Result<Slot, Error> {
+        self.core()
+            .commit_serial_continuation(plan, context, leg, next, schedule, wake)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     // Every check precedes the first change: a refusal leaves the current call
     // settleable exactly as it was.
     #[inline(never)]
@@ -245,8 +284,11 @@ impl<P> Cx<'_, P> {
             // A released Read's failure retries once more as a fresh Read; no
             // DATA or write fact is invented for it.
             Stage::Active { failed: true }
-                if matches!(wake, Next::After(_)) && context.operation() == Operation::Read =>
+                if !wake.parks() && context.operation() == Operation::Read =>
             {
+                if wake == Next::Now && call.released_failure.is_none() {
+                    return Err(Error::Revoked);
+                }
                 if !self
                     .io
                     .core
@@ -281,22 +323,17 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::Capacity);
         }
-        let calls = [CallBound {
+        let schedule = Schedule::from_single_call(CallTerms {
             timeout_ms: next.timeout_ms,
             attempts: next.attempts.into(),
             retry_window: RetryWindow::FreshAttempt,
-            after_refusal: &[],
-        }];
-        let steps = [StepBound {
             wait_ms: match wake {
                 Next::After(delay_ms) => delay_ms,
                 Next::Now => 0,
                 #[cfg(feature = "condition-waits")]
                 Next::Parked => 0,
             },
-            calls: &calls,
-        }];
-        let schedule = Schedule::from_steps(&steps)?;
+        })?;
         self.commit_serial_continuation(plan, context, leg, next, schedule, wake)
     }
 
@@ -384,9 +421,82 @@ impl<P> Cx<'_, P> {
         };
         body.handoff = handoff;
         body.serial.as_mut().expect("validated serial Plan").call = next;
+        #[cfg(feature = "session-bearer")]
+        {
+            body.serial
+                .as_mut()
+                .expect("validated serial Plan")
+                .session_seed = None;
+        }
         let slot = body.schedule.available().next().expect("next serial call");
         self.io.core.request_contexts.reserved_contexts += 1;
         self.rearm_plan(plan);
         Ok(slot)
+    }
+}
+
+#[cfg(feature = "session-bearer")]
+impl<P> Cx<'_, P> {
+    /// Select the current serial call's one authentication resend. Its bundle
+    /// floor is the refused attempt's bound revision, never the cache's now.
+    pub fn serial_plan_session_resend(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        evidence: crate::request_context::SessionResend,
+    ) -> Result<Context, Error> {
+        self.validate_plan_delivery(plan, context)?;
+        let registry = &self.io.core.request_contexts;
+        let body = registry.validate_plan(plan, self.now)?;
+        if body.serial.is_none() {
+            return Err(Error::State);
+        }
+        let index = body.schedule.ordinal(slot)?;
+        let call = body.entries[index]
+            .call
+            .as_ref()
+            .filter(|call| call.context == *context)
+            .ok_or(Error::Revoked)?;
+        if call.terms.attempts != 2 || call.selected >= 2 {
+            return Err(Error::RetryForbidden);
+        }
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        if !call.matches(delivery) {
+            return Err(Error::Revoked);
+        }
+        let seed = self.io.serial_session_revision(delivery)?;
+        match evidence {
+            crate::request_context::SessionResend::Write(grant)
+                if context.operation() == Operation::Mutation =>
+            {
+                self.http_resend_context(context, grant)?;
+            }
+            crate::request_context::SessionResend::Read
+                if context.operation() == Operation::Read => {}
+            _ => return Err(Error::Invalid),
+        }
+        let context = self.select_plan_retry(plan, slot, context)?;
+        self.io
+            .core
+            .request_contexts
+            .plan_body_mut(plan)
+            .expect("selected serial Plan")
+            .serial
+            .as_mut()
+            .expect("validated serial Plan")
+            .session_seed = Some(seed);
+        Ok(context)
+    }
+}
+
+#[cfg(feature = "session-bearer")]
+impl ContextRegistry {
+    pub(in super::super::super) fn serial_session_seed(
+        &self,
+        context: &Context,
+    ) -> Option<(u64, u64)> {
+        let plan = self.plan_from_context(context)?;
+        self.plan_body(&plan).ok()?.serial.as_ref()?.session_seed
     }
 }

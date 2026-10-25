@@ -146,72 +146,22 @@ impl<P> Cx<'_, P> {
         }
     }
 
+    #[inline]
     pub(in crate::engine) fn validate_preflight_activation(
         &self,
         handle: &Preflight,
     ) -> Result<(), Error> {
-        if !self.now.is_finite() {
-            return Err(Error::Invalid);
-        }
-        let state = self.io.core.request_contexts.preflight_state(handle)?;
-        if state.session_parked
-            || self
-                .io
-                .core
-                .http_preflight_ready
-                .as_ref()
-                .is_some_and(|ready| {
-                    !ready.issued_by(&self.io.core.request_contexts.issuer)
-                        || ready.owner() != handle.owner()
-                })
-            || self.io.core.http_plan_ready.is_some()
-            || self.io.core.http_plan_expiring.is_some()
-        {
-            return Err(Error::Revoked);
-        }
-        let allowed = if let Some(delivery) = self.io.core.http_delivery.as_ref() {
-            state.handoff.as_ref() == Some(delivery)
-                || state.call.first().is_some_and(|call| {
-                    call.matches(delivery) || call.admission.predecessor.as_ref() == Some(delivery)
-                })
-        } else {
-            state.activation == Activation::Initial
-                || (state.activation == Activation::Activating
-                    && self
-                        .io
-                        .core
-                        .http_preflight_ready
-                        .as_ref()
-                        .is_some_and(|ready| {
-                            ready.owner() == handle.owner()
-                                && ready.issued_by(&self.io.core.request_contexts.issuer)
-                        }))
-        };
-        allowed.then_some(()).ok_or(Error::Revoked)
+        self.core_ref().validate_preflight_activation(handle)
     }
 
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "condition-waits", allow(dead_code))]
+    #[inline]
     pub(in crate::engine) fn validate_preflight_failure_custody(
         &self,
         handle: &Preflight,
     ) -> Result<(), Error> {
-        if self.validate_preflight_activation(handle).is_ok() {
-            return Ok(());
-        }
-        if !self.now.is_finite() {
-            return Err(Error::Invalid);
-        }
-        self.io.core.request_contexts.preflight_state(handle)?;
-        // Failure-only cleanup outside all active loans never grants progress.
-        if self.io.core.http_delivery.is_none()
-            && self.io.core.http_plan_ready.is_none()
-            && self.io.core.http_plan_expiring.is_none()
-            && self.io.core.http_preflight_ready.is_none()
-            && self.io.core.command_entry.is_none()
-        {
-            Ok(())
-        } else {
-            Err(Error::Revoked)
-        }
+        self.core_ref().validate_preflight_failure_custody(handle)
     }
 
     /// Relinquish this genuine initial callback without creating I/O or time.
@@ -264,6 +214,113 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         self.park_preflight_condition(handle, bound_ms)
+    }
+
+    #[cfg(feature = "condition-waits")]
+    #[inline]
+    fn park_preflight_condition(
+        &mut self,
+        handle: &Preflight,
+        bound_ms: Option<u32>,
+    ) -> Result<(), Error> {
+        self.core().park_preflight_condition(handle, bound_ms)
+    }
+
+    #[cfg(feature = "condition-waits")]
+    #[inline]
+    pub(in crate::engine) fn seal_condition_preflight(
+        &mut self,
+        preflight: &Preflight,
+        error: VenueError,
+    ) -> Result<Seal, Error> {
+        self.core().seal_condition_preflight(preflight, error)
+    }
+
+    #[cfg(feature = "condition-waits")]
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "condition-waits", allow(dead_code))]
+    pub(in crate::engine) fn clear_preflight_condition(&mut self, handle: &Preflight) {
+        self.core().clear_preflight_condition(handle)
+    }
+
+    /// Queue a single wake intent. This callback gains no authority over it.
+    pub fn request_preflight_ready(&mut self, handle: &Preflight) -> Result<(), Error> {
+        if !self.now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        self.io.core.request_contexts.queue_preflight_ready(handle)
+    }
+
+    pub(in crate::engine) fn owned_http_admission(
+        &self,
+        context: &Context,
+    ) -> Result<Option<super::super::owned_call::Admission>, Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
+        if self
+            .io
+            .core
+            .http_plan_ready
+            .as_ref()
+            .is_some_and(|ready| ready.owner() != context.owner())
+        {
+            return Err(Error::Revoked);
+        }
+        let admission = self
+            .io
+            .core
+            .request_contexts
+            .owned_admission(context, self.io.core.http_delivery.as_ref())?;
+        if admission.as_ref().is_some_and(|a| {
+            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
+        }) && let Some(plan) = self.io.core.request_contexts.plan_from_context(context)
+            && !self.io.core.request_contexts.initial_plan_custody(&plan)?
+            && !self
+                .io
+                .core
+                .http_plan_ready
+                .as_ref()
+                .is_some_and(|ready| ready.same_plan(&plan))
+        {
+            return Err(Error::Revoked);
+        }
+        if admission.as_ref().is_some_and(|a| {
+            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
+        }) && let Ok(handle) = self.io.core.request_contexts.owner_from_context(context)
+        {
+            self.validate_preflight_activation(&handle)?;
+        }
+        Ok(admission)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(
+        all(feature = "http-plans", not(feature = "condition-waits")),
+        allow(dead_code)
+    )]
+    #[inline]
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "condition-waits", allow(dead_code))]
+    pub(in crate::engine) fn validate_preflight_activation(
+        &self,
+        handle: &Preflight,
+    ) -> Result<(), Error> {
+        self.core_ref().validate_preflight_activation(handle)
+    }
+
+    // Only some feature combinations call this.
+    #[cfg_attr(
+        all(feature = "http-plans", not(feature = "condition-waits")),
+        allow(dead_code)
+    )]
+    #[inline]
+    pub(in crate::engine) fn validate_preflight_failure_custody(
+        &self,
+        handle: &Preflight,
+    ) -> Result<(), Error> {
+        self.core_ref().validate_preflight_failure_custody(handle)
     }
 
     #[cfg(feature = "condition-waits")]
@@ -345,54 +402,75 @@ impl<P> Cx<'_, P> {
             self.io.core.actions.push(Action::ClearTimer { timer });
         }
     }
+}
 
-    /// Queue a single wake intent. This callback gains no authority over it.
-    pub fn request_preflight_ready(&mut self, handle: &Preflight) -> Result<(), Error> {
+impl crate::engine::CoreRef<'_> {
+    pub(in crate::engine) fn validate_preflight_activation(
+        &self,
+        handle: &Preflight,
+    ) -> Result<(), Error> {
         if !self.now.is_finite() {
             return Err(Error::Invalid);
         }
-        self.io.core.request_contexts.queue_preflight_ready(handle)
-    }
-
-    pub(in crate::engine) fn owned_http_admission(
-        &self,
-        context: &Context,
-    ) -> Result<Option<super::super::owned_call::Admission>, Error> {
-        self.validate_preflight_ready_owner(context.owner())?;
-        if self
-            .io
-            .core
-            .http_plan_ready
-            .as_ref()
-            .is_some_and(|ready| ready.owner() != context.owner())
-        {
-            return Err(Error::Revoked);
-        }
-        let admission = self
-            .io
-            .core
-            .request_contexts
-            .owned_admission(context, self.io.core.http_delivery.as_ref())?;
-        if admission.as_ref().is_some_and(|a| {
-            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
-        }) && let Some(plan) = self.io.core.request_contexts.plan_from_context(context)
-            && !self.io.core.request_contexts.initial_plan_custody(&plan)?
-            && !self
+        let state = self.io.core.request_contexts.preflight_state(handle)?;
+        if state.session_parked
+            || self
                 .io
                 .core
-                .http_plan_ready
+                .http_preflight_ready
                 .as_ref()
-                .is_some_and(|ready| ready.same_plan(&plan))
+                .is_some_and(|ready| {
+                    !ready.issued_by(&self.io.core.request_contexts.issuer)
+                        || ready.owner() != handle.owner()
+                })
+            || self.io.core.http_plan_ready.is_some()
+            || self.io.core.http_plan_expiring.is_some()
         {
             return Err(Error::Revoked);
         }
-        if admission.as_ref().is_some_and(|a| {
-            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
-        }) && let Ok(handle) = self.io.core.request_contexts.owner_from_context(context)
-        {
-            self.validate_preflight_activation(&handle)?;
+        let allowed = if let Some(delivery) = self.io.core.http_delivery.as_ref() {
+            state.handoff.as_ref() == Some(delivery)
+                || state.call.first().is_some_and(|call| {
+                    call.matches(delivery) || call.admission.predecessor.as_ref() == Some(delivery)
+                })
+        } else {
+            state.activation == Activation::Initial
+                || (state.activation == Activation::Activating
+                    && self
+                        .io
+                        .core
+                        .http_preflight_ready
+                        .as_ref()
+                        .is_some_and(|ready| {
+                            ready.owner() == handle.owner()
+                                && ready.issued_by(&self.io.core.request_contexts.issuer)
+                        }))
+        };
+        allowed.then_some(()).ok_or(Error::Revoked)
+    }
+
+    pub(in crate::engine) fn validate_preflight_failure_custody(
+        &self,
+        handle: &Preflight,
+    ) -> Result<(), Error> {
+        if self.validate_preflight_activation(handle).is_ok() {
+            return Ok(());
         }
-        Ok(admission)
+        if !self.now.is_finite() {
+            return Err(Error::Invalid);
+        }
+        self.io.core.request_contexts.preflight_state(handle)?;
+        // Failure-only cleanup outside all active loans never grants progress.
+        if self.io.core.http_delivery.is_none()
+            && self.io.core.http_plan_ready.is_none()
+            && self.io.core.http_plan_expiring.is_none()
+            && self.io.core.http_preflight_ready.is_none()
+            && self.io.core.command_entry.is_none()
+        {
+            Ok(())
+        } else {
+            Err(Error::Revoked)
+        }
     }
 }
 

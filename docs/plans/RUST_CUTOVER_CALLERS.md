@@ -3507,6 +3507,27 @@ unconverted paged histories remain open; this follow-on does not close the full
 history fan-out or prove deployed NX behavior.
 
 
+### BloFin private reads: managed history, closed positions and account reads
+
+BloFin fills, order history, income and closed positions now page under the
+caller's Read root at its exact receipt. Each page is one 20 s managed leg,
+capped by the root and signed by the #2084 HMAC recipe (Secondary else Primary
+for GET). Account settings, positions/balance and open/trigger order reads are
+each one Background read.
+- **Root expiry.** The caller's wait bounds the whole walk: expiry is a strict
+  Timeout, with no rows and no marker.
+- **Page failures.** A later-page transport, HTTP, parse or 20 s timeout failure
+  keeps the accepted rows with one `history.incomplete`. A failure before any
+  accepted rows rejects typed.
+- **Typed kinds.** Private history transport loss now reports `Network` rather
+  than `Internal`, as public trades already did.
+- **Closed-position refusals.** A closed-positions leg admission or queue
+  refusal is now strict (rejected with no rows) even after accepted pages, as
+  general history already was. A closed-position signing failure stays a
+  recoverable page failure, and general history's signing refusal stays strict.
+- **Unchanged.** Query bytes, results, row mapping and account Store effects. No
+  new frame or result schema.
+
 ### Bitunix histories: shared cursor and accepted-page completion
 
 Bitunix fills, orders and income now use the existing engine CursorHistory owner.
@@ -8709,6 +8730,78 @@ host nonce controls require its explicit `dispatch-nonce` forwarding feature.
 ### Backpack account GET observations
 
 Info, Positions, Balance and Orders each select one genuine installed Read identity from native-ready primary plus GET secondary, then hold a Background Read with a NEW 20s per-observation bound, no pacing and RetryPolicy::Never. Positions/Orders retain Root streaming; Info/Balance remain nonstreamed. Native revision/token fences govern publication independently of physical custody. DATA precedes rows, diagnostics and Store publication; exact retirement precedes corrective Balance, accepted repairs and original Next. Local configuration/selection refusals stay silent. Finite Capacity/TimedOut admission, the reviewed transient precommit kinds and owned expiry coalesce the existing 10s account poll only when absent; later polling creates a distinct observation. No immediate retry/Next or timer at nonfinite clocks. Native released transport/status/parse presentation and continuation remain intact. GET signing preserves native fractional receive-window truncation to zero; every non-GET still rejects zero. Direct constructors must install the valid read identity/provider alongside valid saved read status; registry construction supplies that atomic tuple. Raw nonstream writes and private WebSocket signing remain outside this adoption.
+
+## AsterDEX managed public reads and clock
+
+AsterDEX's public reads and its `/time` clock now go through engine read
+Contexts ([RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md),
+remaining-funnel slice 1). This covers FetchOrderBook, FetchCandles, startup
+exchangeInfo, the 24 h ticker seed, open interest and the keyless leverage
+brackets. Keyless public trades and every signed request keep their native path
+until their own slices.
+
+- **Read bound.** Each public read has a 20 s bound, retries included. Before,
+  it had none beyond the host default. An unanswered read now fails as a typed
+  `timeout`, and the open-interest and ticker refreshes resume after their
+  native delay instead of stalling.
+- **Retries.** Transport loss and retryable 429/5xx still retry up to three
+  times after 1, 2 and 3 s, now with engine permission under the original
+  bound. Startup discovery still never transport-retries. A resend due after the
+  bound fails as a timeout.
+- **Typed errors.** FetchOrderBook and FetchCandles failures keep the engine's
+  error kind (`network`, `timeout`, `internal`) instead of plain text. Native
+  messages for negative envelopes, malformed rows and HTTP status are unchanged.
+- **Clock.** Each of the four `/time` attempts is its own 5 s Background read.
+  Attempts 1-2 go direct and 3-4 through the public CORS egress, as before.
+  If the engine refuses to admit an attempt (for example at full capacity), the
+  same attempt retries after 1 s and is not counted as failed. Work waiting
+  for the clock waits with it.
+- **Completion.** FetchOrderBook and FetchCandles complete once, through their
+  command Context. A late or duplicate response completes nothing.
+
+Follow-up (engine owner): a shared ReadFailure backoff. The engine grants read
+resends but has no delay policy, so AsterDEX keeps its own 1/2/3 s timer, as
+other families do. That timer goes away when the shared backoff lands.
+
+## WEEX public discovery and ticker seed custody
+
+Markets, Daily and BookTickers admit independent keyless Background Reads only
+when eligible after the native pause. Each physical observation has a NEW20s
+bound, Never retry, no pacing, explicit Primary intent and unchanged route None.
+Exact DATA plus ticker generation precede row/status/rate/diagnostic effects.
+Publication stays inside live custody; exact retirement precedes both catalogue
+successors, socket/private startup and native retry hooks. Finite owned Timeout
+retires then follows the existing native backoff/startup once. Nonfinite clocks
+allow exact issued cleanup only, without new work or Store/readiness effects.
+Old seed generations cannot publish or affect the current pause/seed. Native
+backoff creates a fresh bounded observation; no aggregate retry cap is implied.
+The orphan streamed legacy sender is removed; nonstream subscription Depth is
+unchanged. Fixture-only admission-clock supersession aligns six catalogue starts
+to their already-existing epoch response time, with all response/event clocks,
+payloads and financial assertions retained and truncated-stream0->1->2 unchanged.
+Standalone custody controls retain genuine delayed/equality expiry coverage.
+
+
+### Seeded serial Session resend (engine API; GRVT adoption still separate)
+
+With serial-plans and session-bearer, a serial call may reserve two attempts.
+serial_plan_session_resend selects the same call's one remaining attempt from
+its exact DATA custody: a Mutation needs its classifier-created RefusedResend
+grant, and a Read keeps generic RetryPolicy Never. The selected attempt is seeded
+with the refused packet's bound Session revision and parks until a newer bundle
+is ready. It spends no additional logical call or refresh attempt. Existing
+write resend and Session resend share that one second credit. Engine-proven
+released Read transport failures may immediately continue as a new Read call;
+codec/integrity and unreleased failures cannot use that immediate path.
+
+The default-false status_exempt_refusal hook is venue-declared. Only a complete
+Unproven-status delivery (408 or 5xx) may consult it; a trusted full-envelope
+refusal then reaches DATA and the ordinary classified grant. Other and malformed
+bodies preserve Unknown, reconciliation and the fence. GRVT's parsed-code-1000
+override remains a separate adoption, with no status-wide grant or raw fallback.
+A parked operation expires Timeout/NotSent, while the command still follows its
+journal: released refusal plus an unreleased resend is Unknown with a fence and
+reconciliation; earlier IDs remain. No existing journal projection is changed.
 
 ### GRVT provider recipe: approved future external-signature contract
 

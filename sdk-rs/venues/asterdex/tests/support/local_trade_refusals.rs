@@ -206,6 +206,7 @@ fn configured(case: Case, seed_ack: bool) -> Engine<Probe> {
 }
 fn with_options(options: Options, seed_ack: bool) -> Engine<Probe> {
     let (mut inner, provider) = options.build();
+    inner.mark_clock_synced(NOW);
     if seed_ack {
         inner
             .trading

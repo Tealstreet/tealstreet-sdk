@@ -116,7 +116,9 @@ it.each([
       },
     });
     const actions = JSON.parse(engine.start(1_700_000_000_000));
-    expect(actions.some((action: { url?: string }) => action.url?.includes(`/fapi/${expected}/time`))).toBe(true);
+    // The clock is a managed read: its URL rides in the Prepare packet.
+    const url = (action: { url?: string; packet?: { url?: string } }) => action.url ?? action.packet?.url;
+    expect(actions.some((action: { url?: string; packet?: { url?: string } }) => url(action)?.includes(`/fapi/${expected}/time`))).toBe(true);
   } finally {
     (engine as unknown as { free(): void }).free();
   }

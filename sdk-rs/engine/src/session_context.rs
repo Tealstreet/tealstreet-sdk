@@ -799,6 +799,8 @@ impl<P> Cx<'_, P> {
     }
 }
 
+impl crate::engine::CoreCx<'_> {}
+
 impl<V: Venue> Engine<V> {
     /// A waiter's owner deadline passed before the venue drained it. Early
     /// timer delivery re-arms at the unchanged deadline.
