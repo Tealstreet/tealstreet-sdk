@@ -57,9 +57,18 @@ pub struct Selection {
     secondary_supplied: bool,
     evidence: Option<AccountReadScope>,
     session_auth: bool,
+    /// The exact role this selection was made for, for signing metadata.
+    #[cfg(feature = "sign-meta")]
+    role: CredentialRole,
 }
 
 impl Selection {
+    /// The exact role, including any primary reason and read scope.
+    #[cfg(feature = "sign-meta")]
+    pub fn role(&self) -> CredentialRole {
+        self.role
+    }
+
     /// Primary egress for a keyless session whose unsigned requests carry
     /// this key's login or token (`SessionPolicy.private_egress`).
     pub fn session_egress(&self) -> Option<PrivateEgress> {
@@ -170,6 +179,8 @@ impl<T> Slots<T> {
             secondary_supplied: self.secondary_supplied(),
             evidence,
             session_auth: role == CredentialRole::SessionAuth,
+            #[cfg(feature = "sign-meta")]
+            role,
         };
         Ok((selection, material))
     }

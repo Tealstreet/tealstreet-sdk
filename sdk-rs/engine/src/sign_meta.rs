@@ -1,7 +1,5 @@
 //! Read-only metadata for the current managed signing task, for hosted
 //! signing. See docs/plans/RUST_ENGINE_SIGN_META.md.
-//!
-//! Inert declarations for the original controls; source follows reviewed REDs.
 use crate::credential_selection::CredentialRole;
 use crate::{CredentialSlot, RequestId};
 

@@ -648,7 +648,10 @@ mod sign_meta {
                 }
             }
             fn on_command(&mut self, cx: &mut Cx<'_, Option<Context>>, _: Command) {
-                self.queue(cx, Operation::Mutation);
+                // The Read case queues from start(); the command adds nothing.
+                if self.path != Path::PlainOnRead {
+                    self.queue(cx, Operation::Mutation);
+                }
             }
             fn on_response(&mut self, _: &mut Cx<'_, Option<Context>>, _: Option<Context>, _: Response<'_>) {}
             fn on_request_failed(&mut self, _: &mut Cx<'_, Option<Context>>, _: Option<Context>, _: &str) {}
