@@ -82,9 +82,10 @@ cutover.**
 - The field is private. Access goes through:
   - `Identity::new(credential, signing: Option<KeyRef>, ...)`;
   - `signing_ref() -> Result<&KeyRef, SignError>`, which returns
-    `InvalidRequest` on `None`;
-  - `signing_opt() -> Option<&KeyRef>`, used only by setup, construction
-    resolution and the alias check.
+    `MissingKey` on `None`, so a missing primary key feeds the #2109 signing
+    latch;
+  - `signing_opt() -> Option<&KeyRef>` and `set_signing_ref()`, used only by
+    setup, construction resolution and the alias check.
 
   No consumer can write `unwrap_or_default()` or build a fresh empty ref (fe7
   point 3, B4). Serde keeps working through `#[serde(default,
@@ -93,9 +94,12 @@ cutover.**
   `KeyRef(String::new())` and `KeyRef("".into())` / `KeyRef::from("")`, except
   the two validation-metadata sites (`signer.rs` passphrase and extra
   placeholders, about lines 319 and 324). Those never touch `signing`.
-- `signing_opt()` must be `pub` across crates, so the same bans rule rejects
-  any call to it outside `crypto/src/signer.rs`, `registry/src/construction.rs`
-  and tests (kuhwxi X2). Otherwise it becomes the escape hatch the private
+- `signing_opt()` and `set_signing_ref()` must be `pub` across crates, so
+  `check-credential-only.py` (run by `check-bans.sh`) rejects any call outside
+  `crypto/src/signer.rs`, `engine/src/signing.rs`,
+  `registry/src/construction.rs` and `#[cfg(test)]` modules or `*_tests.rs`
+  files (kuhwxi X2). It also keeps `validate_credential()` inside
+  `engine/src/signing.rs`. Otherwise they become the escape hatch the private
   field closes.
 - **`validate()` keeps its meaning:** it requires a valid `signing`, so
   validating families still drop the slot. `validate_credential()` accepts an
@@ -106,8 +110,8 @@ cutover.**
   `apply_to_identities` keeps "complete" meaning both refs are present, so it
   keeps today's boundaries.
 - **Construction resolution:** `Input::Secret` and `AsterLocalAuth` read
-  `signing_opt().is_some()`. A pinned test shows that `None` and today's
-  `Some("")` give the same `Resolved` (K5).
+  whether `signing_opt()` is a nonempty ref. A pinned test shows that `None`
+  and today's `Some("")` give the same `Resolved` (K5).
 - **Migration:** consumers move to `signing_ref()` mechanically, and the
   compiler finds each one. The count of `Identity.signing` reads is smaller
   than a raw grep, which also matches `io.signing`, entropy and JS fields
@@ -131,10 +135,11 @@ construction, and Required is unchanged.**
   construction accepts it, through `validate_credential()`, which the registry
   calls when it hands the slot to construction. Acceptance therefore comes
   from declared policy, never from a venue filter (fe7 point 1).
-- **External boundary (B1):** remote, delegated and hosted `Identities` JSON
-  that omits `signing`, or sends `null`, is refused at construction unless the
-  family's primary policy is Optional. A Required family keeps today's
-  parse-error terminal. Secondary slots always require `signing`.
+- **External boundary (B1, C8 narrowed with kuhwxi):** remote, delegated and
+  hosted `Identities` JSON that omits `signing`, or sends `null`, is refused
+  for every family at the options parse, with today's "Invalid engine
+  options" terminal. No family is Optional yet, so per-family acceptance waits
+  for the first one. Secondary slots always require `signing`.
 
 **D3: the key-presence fact, `LocalIdentity.key: Option<Secret>`.**
 - `key` drops `#[serde(default)]`. An omitted key and `"key": null` both mean
@@ -170,8 +175,17 @@ construction, and Required is unchanged.**
 - Every operation that signs takes its key through `signing_ref()`. That
   covers the HTTP sign prepare, the socket SessionAuth login Sign ops and the
   dispatch-time signing work.
-- With `None`, the operation fails `InvalidRequest` / `NotSent` before any
-  provider call, connect, send or HTTP.
+- With `None`, the operation fails `MissingKey` (`InvalidInput` / `NotSent`,
+  "Signing key is not installed") before any provider call, connect, send or
+  HTTP. That is primary material, because setup requires a secondary's
+  signing ref (`Identities::primary_lacks_signing`), so it latches signing
+  (#2109) on every path, beside a secondary too (C4l): one `config.invalid`
+  notice, `StartupFailed` during startup, a socket role that never
+  reconnects, and every later signed staging refused, including steps that
+  only present the key without a signature.
+- Capability admission (`Cx::can_sign`) refuses an absent signing ref as
+  `MissingKey`; a missing extra ref stays `InvalidRequest` in any need order.
+  An admission refusal does not latch; the venue returns it.
 - Unsigned session-authenticated Mutations never call `signing_ref()`, so
   they stay available.
 - A family wanting earlier typed admission, before queue effects, does it in
@@ -192,13 +206,14 @@ Shared-core REDs. Each fails on `ad0b74afdf8` for the stated reason.
 | C1 | An Optional family's key-only `LocalSetup` installs `signing = None`; `validate_credential()` is Ok, `validate()` is Err | `signing` is `KeyRef("")`, and there is no policy |
 | C2 | An omitted key, `"key": null` and `"key": ""` give `Absent`, `Absent` and `Empty` | serde default collapses them |
 | C3 | Presence matrix: absent, `null`, `""`, `"  "`, `"\u{85}"` (NEL, trimmed), `"\u{feff}"` (BOM, kept), `" k "`, `"k"`. Run through native setup and the WASM JSON entry TS actually calls | no fact exists |
-| C4 | `signing_ref()` on `None` refuses an HTTP sign prepare. Custody: the signing reservation and the Context are released (`Serial::signs` and the planned-write reservation), the terminal is `InvalidRequest` + `NotSent`, a peer command on the same registry still prepares, and there is no Sign effect or HTTP | no accessor; an empty ref reaches the provider |
-| C4s | A socket SessionAuth login that signs, given `None`, refuses before send, with the same custody, and does not reconnect: a second-connection count of 0 under the X1 fix lane's terminal sign-failure path | same; today `sign_failed` on WsSend closes the socket and the supervisor reconnects with backoff |
-| C4p | Serial Plan: an unsigned call settles, then a signing call with `None` fails that call `NotSent`. The projection keeps the settled call's facts, with no Rejected or NotSent overclaim | same |
+| C4 | `signing_ref()` on `None` refuses an HTTP sign prepare. Custody: the signing reservation and the Context are released (`Serial::signs` and the planned-write reservation), the terminal is `MissingKey` (`InvalidInput` + `NotSent`), a peer signed command on the same registry still signs and releases (the installed primary signs and a secondary exists, so nothing latches), and there is no Sign effect or HTTP | no accessor; an empty ref reaches the provider |
+| C4s | A socket SessionAuth login that signs, given `None`, refuses before send and latches: one `config.invalid`, `StartupFailed` with `MissingKey` during startup, no Sign or WsSend, the socket closes, and no second connection for the role (#2109 latch) | same; today `sign_failed` on WsSend closes the socket and the supervisor reconnects with backoff |
+| C4l | With a secondary installed, an HTTP sign prepare for a credential-only primary's `None` latches once (`config.invalid`, `MissingKey`) | today `Some("")` latches through `primary_owns`; a step's own `MissingKey` beside a secondary did not |
+| C4p | Sequential Mutation Plan (`http-plans`): a signed call settles Accepted, then a signing call with `None` fails `MissingKey` in preparation. The projection keeps the settled call's facts, with no Rejected or NotSent overclaim | same |
 | C5 | Control on `Slots` alone: Mutation and SessionAuth over a credential-only primary choose Primary, and `session_egress` is granted | (control) |
 | C6 | Identity JSON: omitting `signing` gives `None` and serializing `None` omits the field. `"signing": ""` fails `validate()` and `validate_credential()` | the field is mandatory |
 | C7 | A Required family's key-only setup gives today's pinned terminal, with no venue code change. Only an Optional fixture family receives a slot that `validate_credential()` accepts at construction | no policy |
-| C8 | A Required family's remote, delegated and hosted identities without `signing` are refused at construction with today's terminal | after D1 they would parse as `None` |
+| C8 | Remote, delegated and hosted identities without `signing`, or with `null`, are refused for every family at the options parse with today's terminal | after D1 they would parse as `None` |
 | C9 | `SetupFacts` `Debug` and serde output contain only the variant name | no type |
 
 Behaviour-neutral controls, green before and after:
@@ -232,14 +247,17 @@ reconnects about every 30 seconds. The fix lane:
   terminal with a notice;
 - adds an ApeX admit check that refuses an empty signing ref.
 
-C4s and the apexomni K4 row assert the post-lane terminal, so phase 2 lands
-after that lane, or carries those two tests as dependent and records that.
+The lane landed as #2109 (`9bba5373dbb`): only `SignError::MissingKey` on
+primary material latches. Phase 2 merges it, so C4s and the apexomni K4 row
+(`apexomni_key_only`, now building `signing: None`) assert the post-lane
+terminal.
 
 ## Phases
 
 1. Plan review (this document). C1-C9 REDs come after CLEAR.
-2. D1 + D2: the private `Option` cutover, the signing policy, the external
-   boundary and the bans rule. C1, C4-C8 and K1-K6 go GREEN.
+2. D1 + D2, with D4's `MissingKey` refusal: the private `Option` cutover,
+   the signing policy, the external boundary and the bans rule. C1, C4-C8
+   (with C4l) and K1-K6 go GREEN.
 3. D3 + D5: the `Option<Secret>` key, `KeyPresence` and `SetupFacts`. C2, C3
    and C9 go GREEN. **This phase does not start until G3 is answered** with
    zs5e83. If the answer reopens D3, D3 is revised first.
@@ -261,7 +279,12 @@ per-venue fix of a cross-cutting concern?"
 - **G2: placement admission.** Refuse placement typed in GRVT's command
   admission, using `signing_ref()` and the declared Secp256k1Digest
   capability, before queue effects. kuhwxi's view: the D4 `NotSent` floor is
-  safe, but GRVT should refuse earlier.
+  safe, but GRVT should refuse earlier. Decide before the first Optional
+  family lands: today one signed attempt on a credential-only primary latches
+  all later signed staging, key-only presentation steps and startup
+  included (D4). Either admission refuses first so nothing reaches the
+  latch, or the latch skips `signing_ref()` absence for an Optional primary,
+  or it narrows to work that carries a signing operation.
 - **G3: Empty login (gates phase 3).** Under `KeyPresence::Empty` the slot is
   `{credential: "", signing: None}`, and it fails both validators. Which
   Selection and `session_egress` does the `api_key ""` login use? One option

@@ -288,7 +288,7 @@ impl Identity {
     /// The signing ref an operation that signs must use; absent is refused
     /// before any provider work.
     pub fn signing_ref(&self) -> Result<&KeyRef, SignError> {
-        self.signing.as_ref().ok_or(SignError::InvalidRequest)
+        self.signing.as_ref().ok_or(SignError::MissingKey)
     }
 
     /// Setup, construction resolution and the alias check only (bans-scoped).
@@ -361,6 +361,14 @@ impl Identities {
                 .primary
                 .as_ref()
                 .is_some_and(|primary| work.key_refs().any(|key| primary.owns(key)))
+    }
+
+    /// Setup requires a secondary's signing ref, so a step refused for an
+    /// absent one (`signing_ref()`) is primary material.
+    pub fn primary_lacks_signing(&self) -> bool {
+        self.primary
+            .as_ref()
+            .is_some_and(|primary| primary.signing.is_none())
     }
 }
 

@@ -10,13 +10,13 @@ use safe_cex_engine::request_context::{
     plan::{CallBound, RetryWindow, Slot, StepBound},
 };
 use safe_cex_engine::signing::{
-    Identity, KeyRef, Operation as SignOperation, SignError, SignFuture, SignReceipt, SignRequest,
-    SignResult, Signer,
+    Identities, Identity, KeyRef, Operation as SignOperation, SignError, SignFuture, SignReceipt,
+    SignRequest, SignResult, Signer,
 };
 use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{
     Action, Command, CredentialSlot, Cx, DispatchContext, Engine, ErrorKind, Event, HttpRequest,
-    Method, Notice, Outcome, Response, SignStep, SocketId, TimerId, Venue, VenueError,
+    LogEvent, Method, Notice, Outcome, Response, SignStep, SocketId, TimerId, Venue, VenueError,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -246,8 +246,12 @@ impl Signer for Provider {
 }
 
 fn engine(probe: Probe) -> (Engine<Probe>, Arc<AtomicUsize>) {
+    engine_with(probe, Identities::default())
+}
+fn engine_with(probe: Probe, identities: Identities) -> (Engine<Probe>, Arc<AtomicUsize>) {
     let provided = Arc::new(AtomicUsize::new(0));
     let mut engine = safe_cex_engine::test_support::seeded_engine(probe);
+    engine.set_identities(identities).unwrap();
     engine
         .set_signer(Some(Arc::new(Provider(provided.clone()))))
         .unwrap();
@@ -285,15 +289,41 @@ fn failed(actions: &[Action], command: u32) -> Option<VenueError> {
     })
 }
 
+/// Installed primary and secondary that both sign.
+fn signing_slots() -> Identities {
+    Identities {
+        primary: Some(signing(true)),
+        secondary: Some(Identity::new(
+            KeyRef("secondary.credential".into()),
+            Some(KeyRef("secondary.signing".into())),
+        )),
+    }
+}
+
+fn config_invalid(actions: &[Action]) -> usize {
+    actions
+        .iter()
+        .filter(|a| {
+            matches!(a, Action::Notice(Notice::Event(LogEvent { code, .. }))
+                if *code == safe_cex_engine::log::code::CONFIG_INVALID)
+        })
+        .count()
+}
+
 /// C4: the refused prepare reaches no provider and releases no HTTP, fails its
-/// command InvalidInput / NotSent, and releases its reservation and Context: a
-/// peer signed command afterwards still signs and releases.
+/// command InvalidInput / NotSent with MissingKey, and releases its reservation
+/// and Context: a peer signed command afterwards still signs and releases. The
+/// installed primary signs and a secondary exists, so the refusal is not
+/// primary material and nothing latches (C4l is the primary case).
 #[test]
 fn c4_absent_signing_ref_refuses_in_preparation_and_releases_custody() {
-    let (mut e, provided) = engine(Probe {
-        signed: vec![2],
-        ..Default::default()
-    });
+    let (mut e, provided) = engine_with(
+        Probe {
+            signed: vec![2],
+            ..Default::default()
+        },
+        signing_slots(),
+    );
     let out = amend(&mut e, NOW, 1);
     assert_eq!(provided.load(Ordering::SeqCst), 0, "no provider work");
     assert!(http(&out).is_empty(), "no HTTP for an absent ref: {out:?}");
@@ -301,7 +331,9 @@ fn c4_absent_signing_ref_refuses_in_preparation_and_releases_custody() {
     assert_eq!(error.kind, Some(ErrorKind::InvalidInput), "{error:?}");
     assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
     assert_eq!(e.venue().failures.len(), 1);
+    assert_eq!(e.venue().failures[0].1, SignError::MissingKey.venue_error());
 
+    assert_eq!(config_invalid(&out), 0, "not primary material: {out:?}");
     let peer = amend(&mut e, NOW + 1., 2);
     assert_eq!(
         provided.load(Ordering::SeqCst),
@@ -346,6 +378,7 @@ fn c4p_plan_keeps_a_settled_call_when_a_later_call_lacks_a_signing_ref() {
     );
     assert!(http(&out).is_empty(), "no HTTP for an absent ref: {out:?}");
     assert_eq!(e.venue().failures.len(), 1);
+    assert_eq!(e.venue().failures[0].1, SignError::MissingKey.venue_error());
     let error = failed(&out, 1).expect("command 1 terminal");
     assert_ne!(
         error.outcome,
@@ -362,4 +395,17 @@ fn c4p_plan_keeps_a_settled_call_when_a_later_call_lacks_a_signing_ref() {
         Some(vec!["settled-native-id".to_string()]),
         "the settled call's native id survives: {error:?}"
     );
+}
+
+/// C4l: with a secondary installed, an HTTP refusal for the credential-only
+/// primary's absent signing ref is still primary material and latches once.
+#[test]
+fn c4l_a_credential_only_primary_latches_beside_a_secondary() {
+    let mut identities = signing_slots();
+    identities.primary = Some(signing(false));
+    let (mut e, provided) = engine_with(Probe::default(), identities);
+    let out = amend(&mut e, NOW, 1);
+    assert_eq!(provided.load(Ordering::SeqCst), 0);
+    assert_eq!(config_invalid(&out), 1, "{out:?}");
+    assert_eq!(e.venue().failures[0].1, SignError::MissingKey.venue_error());
 }

@@ -450,11 +450,16 @@ impl Dispatch {
         let work = match p.step.prepare(&mut p.outbound, context) {
             Ok(work) => work,
             Err(error) => {
-                // A login refused before naming refs uses the primary.
+                // A login refused before naming refs uses the primary, as does
+                // any refusal while the primary has no signing ref.
                 if error == SignError::MissingKey {
                     let login =
                         matches!(p.outbound, Action::WsSend { .. } | Action::WsConnect { .. });
-                    self.credential_refused = Some(login || identities.secondary.is_none());
+                    self.credential_refused = Some(
+                        login
+                            || identities.secondary.is_none()
+                            || identities.primary_lacks_signing(),
+                    );
                 }
                 return Err(error);
             }
