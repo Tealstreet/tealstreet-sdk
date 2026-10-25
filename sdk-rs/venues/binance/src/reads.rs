@@ -14,7 +14,7 @@ pub(crate) struct Read {
     pub stream: Option<ArrayAt>,
 }
 
-fn policy(credential: Option<Credential>) -> Policy {
+pub(crate) fn policy(credential: Option<Credential>) -> Policy {
     Policy {
         operation: Operation::Read,
         credential,

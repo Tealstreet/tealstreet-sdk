@@ -10,13 +10,17 @@ const WEEK: f64 = 604_800_000.0;
 const INCOME: &str = r#"{"tranId":1,"symbol":"BTCUSDT","incomeType":"FUNDING_FEE","income":"2","asset":"USDT","time":20}"#;
 
 fn harness() -> Harness {
+    let mut h = started();
+    h.requests.clear();
+    h
+}
+fn started() -> Harness {
     let mut h = Harness::started(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         ..Options::default()
     });
     h.engine.set_log_level(Level::Error);
-    h.requests.clear();
     h
 }
 
@@ -77,7 +81,10 @@ fn a_fills_page_is_a_managed_read_preparation() {
 
 #[test]
 fn a_client_order_lookup_is_a_managed_primary_preparation() {
-    let mut h = harness();
+    // An unknown market answers UNKNOWN locally, before any lookup I/O.
+    let mut h = started();
+    h.load_public();
+    h.requests.clear();
     let (managed, legacy) = prepared(
         &mut h,
         Query::OrderByClientId {
