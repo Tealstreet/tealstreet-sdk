@@ -166,7 +166,7 @@ with no ignored REDs or fabricated managed fallback:
    once its reviewed constructor exists.
 
 Source-stage gates (not claimed as originals): delayed provider/route/Claim,
-strict integrity vs native transport recovery, exact physical/root equality
+typed first-page failure vs later accepted-prefix recovery, exact physical/root equality
 orders, provider refusal, zero eligible/accepted income prefix recovery, both
 currencies, staged malformed rollback, stale429 policy, depth unsubscribe/
 readd, native retry/resync timing, max1000 split+brackets and multi-input order,
@@ -262,9 +262,12 @@ credential-checked Preflight, with no dummy call.
 
 The 20s child bound now includes route preparation, provider work and signing
 queue time. History/income retain the original caller receipt; serial writes
-have no whole-job timer or step-count cap. Strict typed integrity/provider/local
-failures cannot recover accepted income prefixes; released Network/physical
-Timeout recovery and native valid-envelope accepted-prefix recovery remain.
+have no whole-job timer or step-count cap. Every later income-page failure,
+including integrity, signing/provider, local submission and transport failure,
+returns only the previously accepted rows with the native INCOMPLETE marker.
+The failed page's staged rows are discarded. A failure before any accepted
+output remains typed, with no rows and no marker. Original-root expiry still
+retires its exact owner; a stale failure cannot manufacture a completion.
 Original history transport fixtures now supply Network explicitly, rather than
 using a generic Internal error to represent a connection loss.
 
@@ -277,7 +280,7 @@ Probe wrappers forward the landed release/reconciliation/retirement hooks.
 
 Scoped execution: all 313 Phemex tests pass, zero ignored, including all 65
 unchanged trading tests. The dedicated target now has 27 passing controls:
-its 22 originals plus strict integrity/prefix rollback, caller-root equality
+its 22 originals plus typed first-page integrity, caller-root equality
 and reuse, physical timeout, and released 408/500 followed immediately by
 cancel-all. The last control pins no InvalidInput, one original Unknown terminal,
 no resend, restored Store rows and the exact signing-expiry reconciliation fence.
@@ -306,3 +309,43 @@ new item is the shared Plan admission instantiation, whose ownership checks
 cannot be discarded. No generic engine optimization is folded into this venue
 cutover. Re-measure combined on the actual composed landing tree after Bitget
 slice3; this first-source pair does not waive that landing gate.
+
+## Review correction and native prefix policy
+
+The unsupported trading variants re-enter the common planned-Err gate chain:
+duplicate/jobs32/private-key/settings precedence, InvalidInput for the final
+unsupported refusal, NotSent and the native command_error diagnostic. New
+controls pin public_data_only and 32 live admitted jobs. The latter are genuine
+queued Plans, rather than manufactured Contexts.
+
+The overseer requires native accepted-prefix income recovery for every later
+failure. Before changing source, the corrupt-USDC-page and real delegated
+signer-refusal controls both failed at expected prefix-success assertions on
+the first source. They retain accepted USDT rows plus the native Warn-level
+INCOMPLETE marker before completion; a first-page signer refusal remains
+InvalidInput/NotSent without a marker. The separate strict-prefix rejection and
+failure-kind dispatch helpers are removed, rather than retained as another
+policy route. Read ownership, exact leg retirement and failed-page rollback
+remain shared and unchanged.
+
+Other review corrections preserve HTTP error bodies, code-less error-envelope
+messages and native missing-list wording. Contract errors during Plan issue,
+fact recording or settlement clean up the exact job and attempt its Plan
+terminal with a diagnostic. An unissued next leg preserves earlier accepted IDs
+and refreshes/reconciles without inventing a lost order. Retirement fences only
+when its current native write actually released, retaining the job's maximum
+observed expiry then. Controls cover non-command settlement, restored Canceling
+rows and a retired middle split. Every lookup route proof now ties Primary
+Prepare.intent to the actual by-order-id request; the pressure wrapper forwards
+Read-root retirement and missing-list callbacks.
+
+The correction adds public-only/32-job native precedence, non-command/cancel/
+mid-split retirement, native failure text and a real delegated provider refusal
+before versus after accepted output. The unsupported-command controls also fail
+when the reviewed early-return regression is restored. Only native income
+recovery expectations replace the rejected strict-prefix expectation; no old
+financial assertion is weakened. After cleaning only this lane target, fresh execution passes all 320 scoped
+Phemex tests (34 in the remaining-funnel target), strict all-target Clippy and
+formatting. Both prefix REDs reproduce against the original income/lib source;
+both precedence controls reproduce against the old early-return mutation. Full
+bans/ratchets pass on the restored correction source.

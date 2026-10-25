@@ -461,6 +461,21 @@ impl Venue for Pressure {
     ) {
         self.venue.on_http_owner_retired(owner);
     }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        pending: Vec<Pending>,
+    ) {
+        self.venue.read_root_retired(owner, pending);
+    }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: safe_cex_engine::Response<'_>,
+    ) {
+        self.venue.on_stream_error(cx, pending, response);
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.venue.capabilities()
     }

@@ -783,7 +783,58 @@ fn secondary_reads_never_change_definitive_lookup_identity_or_routing() {
     assert!(r.route.is_none());
     respond(&mut e, &a, "[]", false);
     assert_eq!(result(&mut e).unwrap(), "[]");
-    let a = query(&mut e, lookup("caller"));
+    e.handle(
+        NOW,
+        Event::Command(Command::Query {
+            command: 10,
+            query: lookup("caller"),
+        }),
+    );
+    let pending = e.drain_raw_actions();
+    let preparation = pending
+        .iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match action.as_ref() {
+                safe_cex_engine::request_context::HttpAction::Prepare {
+                    request,
+                    preparation,
+                    intent: safe_cex_engine::request_context::RoutingIntent::Primary,
+                } if request.url.contains("/by-order-id") => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("the actual by-order-id request declares Primary");
+    e.http_prepared(
+        NOW,
+        preparation,
+        safe_cex_engine::request_context::Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let bound = e
+        .drain_raw_actions()
+        .into_iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                safe_cex_engine::request_context::HttpAction::Bind {
+                    preparation: bound,
+                    permit,
+                    request,
+                } if bound == preparation && request.url.contains("/by-order-id") => {
+                    Some((permit, request))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("exact prepared lookup binds");
+    assert!(matches!(
+        e.claim_http(NOW, bound.0),
+        Ok(safe_cex_engine::request_context::Claim::Released(_))
+    ));
+    let a = Action::Http(bound.1);
     let Action::Http(r) = &a else { unreachable!() };
     assert!(
         r.headers

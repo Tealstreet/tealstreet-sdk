@@ -535,7 +535,7 @@ fn native_signed_history_uses_secondary_but_lookup_stays_primary() {
         let mut e = seeded(true, true);
         let a = ask(&mut e, NOW, id, q);
         if id == 32 {
-            assert!(a.iter().any(|a| matches!(a,Action::ManagedHttp(action) if matches!(action.as_ref(),HttpAction::Prepare { intent:safe_cex_engine::request_context::RoutingIntent::Primary,.. }))));
+            assert!(a.iter().any(|a| matches!(a,Action::ManagedHttp(action) if matches!(action.as_ref(),HttpAction::Prepare { request, intent:safe_cex_engine::request_context::RoutingIntent::Primary,.. } if request.url.contains("/by-order-id")))));
         }
         let a = release(&mut e, NOW, a);
         let r = wire(&a, path);
@@ -870,7 +870,7 @@ fn managed_private_integrity_failures_keep_the_typed_cause_without_retry() {
     }
 }
 #[test]
-fn income_network_recovers_only_the_accepted_prefix_and_integrity_discards_it() {
+fn income_network_and_integrity_failures_preserve_accepted_prefix_and_marker() {
     for integrity in [false, true] {
         let mut e = seeded(true, true);
         let a = ask(&mut e, NOW, 802, income());
@@ -902,16 +902,12 @@ fn income_network_recovers_only_the_accepted_prefix_and_integrity_discards_it() 
         };
         let result = terminal(&output, 802);
         assert_eq!(result.len(), 1);
-        if integrity {
-            assert_eq!(
-                result[0].as_ref().unwrap_err().kind,
-                Some(ErrorKind::Internal)
-            );
-        } else {
-            let rows: Value = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
-            assert_eq!(rows.as_array().unwrap().len(), 1);
-            assert_eq!(rows[0]["income"], 1.);
-        }
+        let rows: Value = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!(rows[0]["income"], 1.);
+        assert!(output.iter().any(|action| matches!(action,
+            Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
+                && event.level == safe_cex_engine::Level::Warn && event.message.contains("INCOMPLETE"))));
         assert!(
             !output
                 .iter()
@@ -1075,5 +1071,330 @@ fn released_unproven_write_cleanup_precedes_immediate_cancel_all() {
                 .iter()
                 .all(|request| !request.url.contains("g-orders/create"))
         );
+    }
+}
+
+fn unsupported(id: u32) -> Command {
+    Command::FetchLeverage {
+        command: id,
+        symbol: "BTCUSDT".into(),
+    }
+}
+fn assert_refusal(actions: &[Action], id: u32, message: &str, kind: Option<ErrorKind>) {
+    let results = terminal(actions, id);
+    assert_eq!(results.len(), 1);
+    let error = results[0].as_ref().unwrap_err();
+    assert_eq!(error.message, message);
+    assert_eq!(error.kind, kind);
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandError{command,message:diagnostic}) if *command==id && diagnostic==message)));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+    );
+}
+#[test]
+fn unsupported_trading_keeps_native_key_and_input_precedence() {
+    let mut public = support::engine(Options {
+        public_data_only: true,
+        key: Some("fixture-primary".into()),
+        secret: Some("fixture-material".into()),
+        ..Default::default()
+    });
+    let output = at(&mut public, NOW, Event::Command(unsupported(860)));
+    assert_refusal(
+        &output,
+        860,
+        "Phemex private credentials are required",
+        Some(ErrorKind::AuthInvalid),
+    );
+    let mut private = engine(true, false);
+    let output = at(&mut private, NOW, Event::Command(unsupported(861)));
+    assert_refusal(
+        &output,
+        861,
+        "Phemex command is unsupported",
+        Some(ErrorKind::InvalidInput),
+    );
+}
+#[test]
+fn unsupported_trading_keeps_native_thirty_two_job_precedence() {
+    let (mut e, _) = started();
+    for i in 0..32 {
+        let output = at(
+            &mut e,
+            NOW + 10. + i as f64,
+            Event::Command(Command::PlaceOrders {
+                command: 900 + i,
+                orders: vec![opt(&format!("held-{i}"))],
+            }),
+        );
+        prepared(&output, "g-orders/create");
+    }
+    let output = at(&mut e, NOW + 50., Event::Command(unsupported(950)));
+    assert_refusal(
+        &output,
+        950,
+        "Phemex too many active trading commands",
+        None,
+    );
+}
+#[test]
+fn retired_place_settles_from_a_non_command_callback_once() {
+    let (mut e, socket) = started();
+    let output = at(&mut e, NOW + 10., Event::Command(placement(870)));
+    let output = release(&mut e, NOW + 10., output);
+    let request = wire(&output, "g-orders/create");
+    let failed = reply(&mut e, NOW + 11., &request, 408, "{}");
+    assert_eq!(terminal(&failed, 870).len(), 1);
+    assert!(
+        e.store()
+            .orders()
+            .iter()
+            .any(|order| order.status == OrderStatus::Creating)
+    );
+    let settled = at(
+        &mut e,
+        NOW + 12.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"type":"incremental","orders_p":[]}"#,
+        },
+    );
+    assert!(
+        e.store()
+            .orders()
+            .iter()
+            .all(|order| order.status != OrderStatus::Creating)
+    );
+    let expiry = value_header(&request, "x-phemex-request-expiry")
+        .parse::<f64>()
+        .unwrap()
+        * 1000.;
+    assert!(
+        settled
+            .iter()
+            .any(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==expiry+5000.))
+    );
+    assert!(terminal(&settled, 870).is_empty());
+    let again = at(
+        &mut e,
+        NOW + 13.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"type":"incremental","orders_p":[]}"#,
+        },
+    );
+    assert!(
+        !again
+            .iter()
+            .any(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==expiry+5000.))
+    );
+    assert!(terminal(&again, 870).is_empty());
+}
+#[test]
+fn retired_cancel_restores_unchanged_canceling_row_before_next_command() {
+    let (mut e, _) = started();
+    e.store_mut().upsert_order(cached_order("old-live"));
+    let output = at(
+        &mut e,
+        NOW + 10.,
+        Event::Command(Command::CancelOrders {
+            command: 871,
+            ids: vec!["old-live".into()],
+        }),
+    );
+    let output = release(&mut e, NOW + 10., output);
+    assert_eq!(
+        e.store().order("old-live").unwrap().status,
+        OrderStatus::Canceling
+    );
+    let failed = reply(&mut e, NOW + 11., &wire(&output, "/g-orders"), 500, "{}");
+    assert_eq!(terminal(&failed, 871).len(), 1);
+    let next = at(&mut e, NOW + 12., Event::Command(unsupported(872)));
+    assert_eq!(
+        e.store().order("old-live").unwrap().status,
+        OrderStatus::Open
+    );
+    assert!(terminal(&next, 871).is_empty());
+    assert_refusal(
+        &next
+            .iter()
+            .filter(|a| matches!(a, Action::Notice(_)))
+            .cloned()
+            .collect::<Vec<_>>(),
+        872,
+        "Phemex command is unsupported",
+        Some(ErrorKind::InvalidInput),
+    );
+}
+fn create_ack(request: &HttpRequest, id: &str) -> String {
+    json!({"code":0,"data":{"orderID":id,"clOrdID":value(request,"clOrdID"),"symbol":"BTCUSDT","side":"Buy","posSide":"Merged","orderType":"Limit","orderQtyRq":value(request,"orderQtyRq"),"priceRp":"69000","ordStatus":"New","execStatus":"New","timeInForce":"GoodTillCancel"}}).to_string()
+}
+#[test]
+fn retirement_mid_split_keeps_accepted_prefix_and_fences_only_released_lost_lot() {
+    let (mut e, _) = started();
+    let mut order = opt("unused");
+    order.client_order_id = None;
+    order.amount = 1.1;
+    let output = at(
+        &mut e,
+        NOW + 10.,
+        Event::Command(Command::PlaceOrders {
+            command: 873,
+            orders: vec![order],
+        }),
+    );
+    let output = release(&mut e, NOW + 10., output);
+    let first = wire(&output, "g-orders/create");
+    let next = reply(
+        &mut e,
+        NOW + 11.,
+        &first,
+        200,
+        &create_ack(&first, "accepted-prefix"),
+    );
+    let next = release(&mut e, NOW + 11., next);
+    let second = wire(&next, "g-orders/create");
+    let failed = reply(&mut e, NOW + 12., &second, 408, "{}");
+    let results = terminal(&failed, 873);
+    let error = results[0].as_ref().unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["accepted-prefix"]
+    );
+    let next = at(
+        &mut e,
+        NOW + 13.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 874,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let next = release(&mut e, NOW + 13., next);
+    assert_eq!(
+        value(&wire(&next, "/g-orders"), "orderID"),
+        "accepted-prefix"
+    );
+    assert!(
+        e.store()
+            .orders()
+            .iter()
+            .all(|order| order.status != OrderStatus::Creating)
+    );
+    let warnings: Vec<_> = next
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::Event(event)) => Some(event.message.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        warnings
+            .iter()
+            .any(|message| message.contains(&value(&second, "clOrdID")))
+    );
+    assert!(
+        warnings
+            .iter()
+            .all(|message| !message.contains(&value(&first, "clOrdID")))
+    );
+    assert!(terminal(&next, 873).is_empty());
+}
+#[test]
+fn native_write_error_messages_keep_http_body_and_codeless_error_text() {
+    for (status, body, expected) in [
+        (
+            400,
+            r#"{"code":11001,"msg":"balance","data":null}"#,
+            r#"HTTP 400: {"code":11001,"msg":"balance","data":null}"#,
+        ),
+        (
+            200,
+            r#"{"error":{"message":"bad"},"msg":"native failure"}"#,
+            "Phemex -1 native failure",
+        ),
+    ] {
+        let (mut e, _) = started();
+        let output = at(&mut e, NOW + 10., Event::Command(placement(875)));
+        let output = release(&mut e, NOW + 10., output);
+        let output = reply(
+            &mut e,
+            NOW + 11.,
+            &wire(&output, "g-orders/create"),
+            status,
+            body,
+        );
+        let result = terminal(&output, 875);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].as_ref().unwrap_err().message.contains(expected));
+    }
+}
+
+#[test]
+fn income_later_provider_loss_preserves_prefix_and_first_page_loss_stays_typed() {
+    for accepted in [false, true] {
+        let mut e = seeded(true, true);
+        if !accepted {
+            e.set_signer(None).unwrap();
+        }
+        let output = ask(&mut e, NOW, 880, income());
+        let mut output = release(&mut e, NOW, output);
+        if accepted {
+            let first = wire(&output, "tradeAccountDetail");
+            output = reply(
+                &mut e,
+                NOW + 1.,
+                &first,
+                200,
+                r#"[{"typeDesc":"REALIZED_PNL","amountRv":"1","balanceRv":"101","createTime":500,"currency":"USDT"}]"#,
+            );
+            let mut count = 0;
+            while !output.iter().any(|action| matches!(action,Action::ManagedHttp(action) if matches!(action.as_ref(),HttpAction::Prepare{request,..} if request.url.contains("currency=USDC")))) {
+                count+=1;assert!(count<=4);
+                output=release(&mut e,NOW+1.,output);
+                let next=wire(&output,"tradeAccountDetail");
+                output=reply(&mut e,NOW+1.,&next,200,"[]");
+            }
+            e.set_signer(None).unwrap();
+            output = release(&mut e, NOW + 2., output);
+        }
+        let attempt = output
+            .iter()
+            .find_map(|action| match action {
+                Action::Sign { attempt, .. } => Some(*attempt),
+                _ => None,
+            })
+            .expect("real delegated signing refusal");
+        output.extend(at(
+            &mut e,
+            if accepted { NOW + 2. } else { NOW },
+            Event::Signed {
+                attempt,
+                result: Err(safe_cex_engine::signing::SignError::Refused),
+            },
+        ));
+        let results = terminal(&output, 880);
+        assert_eq!(results.len(), 1);
+        let markers=output.iter().filter(|action| matches!(action,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE && event.level==safe_cex_engine::Level::Warn && event.message.contains("INCOMPLETE"))).count();
+        if accepted {
+            let rows: Value = serde_json::from_str(results[0].as_ref().unwrap()).unwrap();
+            assert_eq!(rows.as_array().unwrap().len(), 1);
+            assert_eq!(rows[0]["income"], 1.);
+            assert_eq!(markers, 1);
+        } else {
+            assert_eq!(
+                results[0].as_ref().unwrap_err().kind,
+                Some(ErrorKind::InvalidInput)
+            );
+            assert_eq!(
+                results[0].as_ref().unwrap_err().outcome,
+                Some(Outcome::NotSent)
+            );
+            assert_eq!(markers, 0);
+        }
+        assert!(requests(&output).is_empty());
     }
 }

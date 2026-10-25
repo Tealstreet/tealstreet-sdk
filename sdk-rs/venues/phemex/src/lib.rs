@@ -925,7 +925,7 @@ impl Venue for PhemexPerpetuals {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
             Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
             Pending::History(read) => self.history_failed(cx, read, error),
-            Pending::Income(read) => self.income_strict_failed(cx, read, error),
+            Pending::Income(read) => self.income_failed(cx, read, error),
             Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
@@ -943,7 +943,7 @@ impl Venue for PhemexPerpetuals {
         match pending {
             Pending::Identity(read) => self.identity_failed(cx, read, error),
             Pending::History(read) => self.history_failed(cx, read, error),
-            Pending::Income(read) => self.income_http_failed(cx, read, error),
+            Pending::Income(read) => self.income_failed(cx, read, error),
             Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
             Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(root.context(), error);
@@ -963,10 +963,33 @@ impl Venue for PhemexPerpetuals {
     ) {
         self.settle_retired_trading(cx);
         match pending {
-            pending @ (Pending::Income(_)
-            | Pending::History(_)
-            | Pending::Markets(..)
-            | Pending::Tickers(..)) => self.on_response(cx, pending, response),
+            Pending::Income(read) => {
+                if read.validate_delivery(cx).is_ok() {
+                    self.income_failed(
+                        cx,
+                        read,
+                        format!(
+                            "response did not contain the expected list: {}",
+                            response.body
+                        ),
+                    );
+                }
+            }
+            Pending::History(read) => {
+                if read.validate_delivery(cx).is_ok() {
+                    self.history_failed(
+                        cx,
+                        read,
+                        format!(
+                            "response did not contain the expected list: {}",
+                            response.body
+                        ),
+                    );
+                }
+            }
+            pending @ (Pending::Markets(..) | Pending::Tickers(..)) => {
+                self.on_response(cx, pending, response)
+            }
             pending => self.on_request_failed(
                 cx,
                 pending,
@@ -981,7 +1004,7 @@ impl Venue for PhemexPerpetuals {
         self.settle_retired_trading(cx);
         match p {
             Pending::Income(read) => {
-                self.income_strict_failed(cx, read, safe_cex_engine::VenueError::new(error))
+                self.income_failed(cx, read, safe_cex_engine::VenueError::new(error))
             }
             p => self.fail_pending(cx, p, error),
         }

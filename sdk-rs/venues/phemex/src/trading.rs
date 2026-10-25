@@ -175,7 +175,8 @@ enum Call {
 }
 #[derive(Deserialize)]
 struct Envelope {
-    code: i64,
+    #[serde(default)]
+    code: Option<i64>,
     #[serde(default)]
     error: Option<Box<RawValue>>,
     #[serde(default)]
@@ -956,9 +957,7 @@ impl PhemexPerpetuals {
             | Command::FetchAccount { command }
             | Command::FetchOrderBook { command, .. }
             | Command::FetchLeverage { command, .. } => {
-                let _ = command;
-                Self::finish_local_history(cx, Err("Phemex command is unsupported"));
-                return None;
+                (command, Err("Phemex command is unsupported".into()))
             }
             Command::PlaceOrders { command, orders } => {
                 (
@@ -1280,7 +1279,7 @@ impl PhemexPerpetuals {
         let context = match cx.plan_leg_context(&plan, &slot) {
             Ok(context) => context,
             Err(error) => {
-                let _ = cx.fail_plan(&plan, error.venue_error());
+                self.fail_unissued_trade(cx, id, error.venue_error());
                 return;
             }
         };
@@ -1468,7 +1467,8 @@ impl PhemexPerpetuals {
         let restored = !retired.is_empty();
         for retired in retired {
             self.restore_failed_trade(cx, &retired.request);
-            if let Some(expiry) = retired.signed_until.or(retired.request.signed_until) {
+            if let Some(released_expiry) = retired.request.signed_until {
+                let expiry = retired.signed_until.unwrap_or(released_expiry);
                 let lost = match &retired.request.call {
                     Call::Place { order, .. } => Some(&**order),
                     _ => None,
@@ -1568,14 +1568,15 @@ impl PhemexPerpetuals {
         let mut known_effects = false;
         let result = (|| {
             if !(200..300).contains(&response.status) {
-                return Err(format!("Phemex HTTP {}", response.status));
+                return Err(format!("HTTP {}: {}", response.status, response.body));
             }
             let env: Envelope = serde_json::from_str(response.body)
                 .map_err(|_| "Phemex malformed write acknowledgement")?;
             if env.error.is_some() {
-                return Err(format!("Phemex {} {}", env.code, env.msg));
+                return Err(format!("Phemex {} {}", env.code.unwrap_or(-1), env.msg));
             }
-            if env.code != 0 {
+            let code = env.code.ok_or("Phemex malformed write acknowledgement")?;
+            if code != 0 {
                 // Only documented balance/parameter/risk rejects with no order data
                 // prove no placement. Duplicate/routing/internal errors stay unknown.
                 // https://github.com/phemex/phemex-api-docs/blob/master/TradingErrorCode.md
@@ -1583,7 +1584,7 @@ impl PhemexPerpetuals {
                 if matches!(call, Call::Place { .. })
                     && env.data.as_ref().is_none_or(|data| data.get() == "null")
                     && matches!(
-                        env.code,
+                        code,
                         11001
                             | 11027
                             | 11034
@@ -1601,9 +1602,9 @@ impl PhemexPerpetuals {
                         .command
                         .inspect(|&command| cx.placement_resolved(command));
                     resolved = true;
-                    refusal_code = Some(NativeCode::Int(env.code));
+                    refusal_code = Some(NativeCode::Int(code));
                 }
-                return Err(format!("Phemex {} {}", env.code, env.msg));
+                return Err(format!("Phemex {} {}", code, env.msg));
             }
             match &request.call {
                 Call::Place {
@@ -1881,7 +1882,10 @@ impl PhemexPerpetuals {
                                 fact.unproven()
                             }
                         }
-                        Err(_) => return,
+                        Err(error) => {
+                            self.finish_failed_trade(cx, request, error.venue_error(), true);
+                            return;
+                        }
                     };
                     WriteFact::Failed {
                         fact,
@@ -1889,7 +1893,8 @@ impl PhemexPerpetuals {
                     }
                 }
             };
-            if cx.http_write_fact(context, fact, None).is_err() {
+            if let Err(error) = cx.http_write_fact(context, fact, None) {
+                self.finish_failed_trade(cx, request, error.venue_error(), true);
                 return;
             }
             if result.is_ok() {
@@ -1912,11 +1917,13 @@ impl PhemexPerpetuals {
                             return;
                         }
                     }
-                } else if cx.finish_plan_call(plan, slot, context).is_err() {
+                } else if let Err(error) = cx.finish_plan_call(plan, slot, context) {
+                    self.finish_failed_trade(cx, request, error.venue_error(), true);
                     return;
                 }
-            } else {
-                let _ = cx.finish_plan_call(plan, slot, context);
+            } else if let Err(error) = cx.finish_plan_call(plan, slot, context) {
+                self.finish_failed_trade(cx, request, error.venue_error(), true);
+                return;
             }
         }
         match result {
@@ -1970,6 +1977,24 @@ impl PhemexPerpetuals {
             Outcome::Unknown => safe_cex_engine::Outcome::Unknown,
         });
         self.finish_failed_trade(cx, request, error, matches!(outcome, Outcome::Unknown));
+    }
+
+    fn fail_unissued_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: CommandId,
+        mut error: VenueError,
+    ) {
+        let Some(job) = self.trading.jobs.remove(&id) else {
+            return;
+        };
+        if job.effective || !job.ids.is_empty() {
+            error.outcome = None;
+        }
+        self.account_refresh(cx);
+        cx.command_error(id, error.message.clone());
+        let _ = cx.fail_plan(&job.plan, error.partial_ids(&job.ids));
+        self.orders_reconcile(cx);
     }
 
     fn restore_failed_trade(&mut self, cx: &mut Cx<'_, Pending>, request: &Request) {

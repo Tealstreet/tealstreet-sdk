@@ -554,7 +554,7 @@ fn native_identity_get_uses_secondary_and_client_lookup_uses_primary() {
         }),
     );
     let output = actions(&mut e, NOW);
-    assert!(output.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(),safe_cex_engine::request_context::HttpAction::Prepare { intent:safe_cex_engine::request_context::RoutingIntent::Primary,.. }))));
+    assert!(output.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(),safe_cex_engine::request_context::HttpAction::Prepare { request, intent:safe_cex_engine::request_context::RoutingIntent::Primary,.. } if request.url.contains("/by-order-id")))));
     let lookup = physical(&output, "/by-order-id");
     assert_eq!(token(&lookup), "key");
     assert_eq!(lookup.route, None);

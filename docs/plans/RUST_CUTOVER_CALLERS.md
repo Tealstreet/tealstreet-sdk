@@ -8592,10 +8592,13 @@ covers preparation/provider/queue time, while Read roots keep the original calle
 receipt. Serial writes preserve native unbounded duration and finite native
 split validation, with no resend on uncertainty.
 
-Integrity/Internal, provider and local refusal fail strictly with their typed
-cause; accepted income prefixes recover only for native eligible released
-Network/physical Timeout or valid native business-envelope recovery. A typed stream
-integrity failure cannot publish an INCOMPLETE prefix. Engine-sealed unproven writes retain
+Income failures after accepted output preserve those rows and emit the native
+Warn-level INCOMPLETE marker before the successful partial result. This applies
+to integrity, signing/provider, local submission and transport failures alike;
+rows staged by the failed page never leak into the result. With no accepted
+output, the original typed failure is retained without rows or marker. Exact
+Read-root expiry/retirement still revokes later callbacks.
+Engine-sealed unproven writes retain
 one exact deferred native cleanup: Store/fence state precedes the next command's
 planning, recovery I/O follows its admission, and no second terminal is emitted.
 Raw signing expiry plus 5000ms, immediate panic cancel-all and native per-row

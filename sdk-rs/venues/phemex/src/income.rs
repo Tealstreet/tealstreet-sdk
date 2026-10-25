@@ -233,7 +233,7 @@ impl PhemexPerpetuals {
         ) {
             Ok(leg) => leg,
             Err(error) => {
-                self.income_strict_failed(cx, request, error.read_venue_error());
+                self.income_failed(cx, request, error.read_venue_error());
                 return;
             }
         };
@@ -263,7 +263,7 @@ impl PhemexPerpetuals {
                 Pending::Income(request)
             },
         ) {
-            self.income_strict_failed(cx, request, error.read_venue_error());
+            self.income_failed(cx, request, error.read_venue_error());
         }
     }
     pub(crate) fn income_item(
@@ -388,39 +388,6 @@ impl PhemexPerpetuals {
         error: impl Into<VenueError>,
     ) {
         self.income_finish(cx, request, Err(error.into()));
-    }
-    pub(crate) fn income_strict_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        error: VenueError,
-    ) {
-        if let Some(leg) = &request.leg {
-            let _ = cx.finish_http_context(leg.context());
-        }
-        if cx
-            .validate_read_root_context(request.root.context())
-            .is_ok()
-        {
-            self.retire_income(request.root.context().owner());
-            let _ = request.owner.reject(cx, error);
-        }
-    }
-    pub(crate) fn income_http_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        error: VenueError,
-    ) {
-        if matches!(
-            error.kind,
-            Some(safe_cex_engine::ErrorKind::Network | safe_cex_engine::ErrorKind::Timeout)
-        ) && error.outcome != Some(safe_cex_engine::Outcome::NotSent)
-        {
-            self.income_failed(cx, request, error);
-        } else {
-            self.income_strict_failed(cx, request, error);
-        }
     }
     pub(crate) fn retire_income(&mut self, owner: Owner) {
         self.income
