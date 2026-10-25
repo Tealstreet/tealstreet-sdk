@@ -479,7 +479,8 @@ fn v3_local_precedence_and_unscoped_remote_order_path_are_distinct() {
         native(&act(&mut engine, NOW, local, OWNER), local, OWNER);
         if matches!(local, Local::InvalidRange) {
             engine.handle(NOW + 1., Event::Command(Local::V1Orders.command(OWNER + 1)));
-            let output: Vec<_> = engine.drain_actions().collect();
+            // The clock is a managed read released through preparation.
+            let output = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW + 1.);
             assert!(
                 output
                     .iter()
