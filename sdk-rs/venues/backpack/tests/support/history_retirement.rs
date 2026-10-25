@@ -83,15 +83,24 @@ fn fifty_pages_retire_every_exact_leg_and_the_original_root() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
     use safe_cex_engine::signing::KeyEncoding;
-    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
-        primary: None,
-        secondary: Some(LocalIdentity {
-            key: Secret::new("read-key".into()),
-            secret: Secret::new(STANDARD.encode([9; 32])),
-            secret_encoding: KeyEncoding::Base64,
-            ..Default::default()
-        }),
-    })
+    let (provider, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: None,
+            secondary: Some(LocalIdentity {
+                key: Secret::new("read-key".into()),
+                secret: Secret::new(STANDARD.encode([9; 32])),
+                secret_encoding: KeyEncoding::Base64,
+                ..Default::default()
+            }),
+        },
+        safe_cex_engine::signing::CredentialSetupPolicy {
+            primary: None,
+            secondary: Some(safe_cex_engine::signing::IdentitySetupPolicy {
+                signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Ed25519),
+                ..Default::default()
+            }),
+        },
+    )
     .unwrap();
     let backpack = Backpack::new(crate::Options {
         public_data_only: true,
