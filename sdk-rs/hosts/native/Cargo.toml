@@ -6,6 +6,7 @@ publish.workspace = true
 description = "Native (tokio) host for the sans-I/O exchange engine"
 
 [features]
+dispatch-nonce = ["safe-cex-engine/dispatch-nonce"]
 default = ["venues"]
 http-plans = ["safe-cex-engine/http-plans"]
 http-mutation-barriers = ["http-plans", "safe-cex-engine/http-mutation-barriers"]
