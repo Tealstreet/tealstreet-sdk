@@ -886,7 +886,6 @@ impl Backpack {
                 targets,
                 leverage_revision: self.account.leverage_revision,
             }),
-            false,
         );
         if let Err(error) = result {
             if let Some(job) = self.trading.jobs.remove(&command) {

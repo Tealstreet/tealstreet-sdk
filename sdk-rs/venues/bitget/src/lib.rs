@@ -140,11 +140,6 @@ fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
 }
 
 /// A private send's body, or the array its streamed response decodes.
-pub(crate) enum Payload {
-    Body(Option<String>),
-    Stream(ArrayAt),
-}
-
 impl BitgetFutures {
     fn public_failed(
         &mut self,
@@ -289,15 +284,12 @@ impl BitgetFutures {
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
-        payload: Payload,
+        at: ArrayAt,
         signed: bool,
         pending: Pending,
     ) {
         let url = format!("{}{path}", paths::REST);
-        let id = match payload {
-            Payload::Stream(at) => cx.request_streamed(method, url, vec![], at, pending),
-            Payload::Body(body) => cx.request(method, url, vec![], body, pending),
-        };
+        let id = cx.request_streamed(method, url, vec![], at, pending);
         if !signed {
             return;
         }
@@ -663,6 +655,46 @@ impl Venue for BitgetFutures {
     fn guard_order_mutations(&self) -> bool {
         true
     }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => trading::trade_reconciliation(request),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trading_preflight_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_condition_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::ConditionOwner,
+        _: safe_cex_engine::VenueError,
+    ) {
+        self.trading_condition_expired(cx, owner);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trading_retired(owner)
+    }
 
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -859,7 +891,7 @@ impl Venue for BitgetFutures {
             return;
         }
         if let Pending::Trade(request) = pending {
-            self.trade_response(cx, *request, Ok(response));
+            self.trade_response(cx, *request, response);
             return;
         }
         if let Pending::Account {
@@ -873,7 +905,7 @@ impl Venue for BitgetFutures {
                 && cx.validate_background_read_http_delivery(&context).is_ok()
             {
                 self.account_response(cx, request, response);
-                self.resume_trading(cx);
+                self.wake_trading(cx);
             }
             let _ = cx.finish_http_context(&context);
             return;
@@ -1003,7 +1035,7 @@ impl Venue for BitgetFutures {
                 let command = request.command;
                 cx.fail(command, error)
             }
-            Pending::Trade(request) => self.trade_sign_failed(cx, *request, error),
+            Pending::Trade(request) => self.trade_call_failed(cx, *request, error, false),
             pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
             Pending::Account {
                 generation,
@@ -1013,7 +1045,7 @@ impl Venue for BitgetFutures {
                 let _ = cx.finish_http_context(&context);
                 if generation == self.account.generation {
                     self.account_sign_failed(cx, request, &error.message);
-                    self.resume_trading(cx);
+                    self.wake_trading(cx);
                 }
             }
         }
@@ -1033,6 +1065,7 @@ impl Venue for BitgetFutures {
                 let _ = cx.fail_context(&root, error);
             }
             Pending::Identity(root) if deadline => self.identity_failed(cx, &root, error),
+            Pending::Trade(request) => self.trade_call_failed(cx, *request, error, true),
             pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
@@ -1045,7 +1078,11 @@ impl Venue for BitgetFutures {
         }
         match pending {
             Pending::History(request) => self.query_failed(cx, *request, error),
-            Pending::Trade(request) => self.trade_response(cx, *request, Err(error)),
+            Pending::Trade(request) => {
+                let error = safe_cex_engine::VenueError::new(error)
+                    .kind(safe_cex_engine::ErrorKind::Network);
+                self.trade_call_failed(cx, *request, error, true)
+            }
             Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
@@ -1057,7 +1094,7 @@ impl Venue for BitgetFutures {
                 let _ = cx.finish_http_context(&context);
                 if generation == self.account.generation {
                     self.account_transport_failed(cx, request, error);
-                    self.resume_trading(cx);
+                    self.wake_trading(cx);
                 }
             }
             pending @ Pending::Discovery { .. } => {
@@ -1069,12 +1106,12 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.settle_retired_write(cx);
         if let Some(read) = self.discovery.on_timer(timer) {
             self.discovery_read(cx, read == DiscoveryRead::Tickers);
             return;
         }
         self.account_timer(cx, timer);
-        self.trade_timer(cx, timer);
         self.history_timer(cx, timer);
         for index in 0..self.sockets.len() {
             let tick = if index == 3 {
