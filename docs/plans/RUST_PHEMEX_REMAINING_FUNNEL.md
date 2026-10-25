@@ -349,3 +349,31 @@ Phemex tests (34 in the remaining-funnel target), strict all-target Clippy and
 formatting. Both prefix REDs reproduce against the original income/lib source;
 both precedence controls reproduce against the old early-return mutation. Full
 bans/ratchets pass on the restored correction source.
+
+## READY composition after both Bitget cuts
+
+Both engine size cuts are landed: #2142 at 35ae6c6b254 and #2145 at
+29186f5fe95. The branch also plain-merges actual #2152 and #2153. Its
+Phemex source and tests remain byte-exact to the reviewed green f2b5438dfe0;
+all shared source is incoming, with no authored engine or host change.
+README and CALLERS preserve incoming content plus the Phemex suffix once.
+
+On frozen 64edfa95f836c5e5434bee2d2d83c89a18681e10, composed with actual
+WEEX landing aa75847b5c9, combined shipped WASM is 14,072,421 bytes
+(Web equals Node), leaving 83,355 bytes under 14,155,776. Raw is 31,837,578
+bytes. Rust1.99.0/Binaryen132, unchanged profiles, jobs4; source remained
+clean and frozen throughout measurement, and the target was removed afterwards.
+This replaces earlier composition numbers as the landing size evidence.
+
+The subsequent actual tip 0a8c9625c49 adds only
+venues/kraken/tests/dispatch_signer_adoption.rs within sdk-rs. Its plain merge
+changes no release WASM input, Phemex source, engine source or manifest entry.
+The READY packet explicitly requests composed-tree carry of the measured bytes
+across this test-only landing; the auditor decides the exact landing tree.
+
+Fresh scoped execution on 64ed passes all 320 Phemex tests with zero ignored,
+strict all-target Clippy and fmt; full bans and all four ratchets pass. Source
+CLEAR carries from fe7 at ce0/f2. Complete successful CI anchors remain Rust
+40199755019 and general CI 40199755025, both on f2. No new workflow dispatch
+is requested. The four unchanged repair holdouts remain named in CALLERS and
+the request inventory; their migration follows actual repair-core landing.
