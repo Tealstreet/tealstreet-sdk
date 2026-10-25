@@ -64,6 +64,8 @@ mod planned_calls {
         /// Whether the Plan was still registered when a pending came back.
         expired_while_live: Vec<bool>,
         inherited: bool,
+        /// Fail a refused call with this note on the terminal message.
+        note: Option<&'static str>,
         // A delivered call reports itself as a complete order read.
         #[cfg(feature = "order-locks")]
         reconcile_reads: bool,
@@ -322,7 +324,10 @@ mod planned_calls {
                 )
                 .unwrap();
                 cx.finish_plan_call(&plan, &slot, &context).unwrap();
-                cx.fail_plan(&plan, "order refused").unwrap();
+                match self.note {
+                    Some(note) => cx.fail_plan_noted(&plan, "order refused", note).unwrap(),
+                    None => cx.fail_plan(&plan, "order refused").unwrap(),
+                }
                 return;
             }
             if response.body == "replace" {
@@ -2024,6 +2029,53 @@ mod planned_calls {
             Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error.outcome),
             _ => None,
         }).expect("command failure")
+    }
+    fn plan_failure(actions: &[Action]) -> crate::VenueError {
+        actions.iter().find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error.clone()),
+            _ => None,
+        }).expect("command failure")
+    }
+    fn refused_plan(note: Option<&'static str>) -> crate::VenueError {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            write: true, note, ..Default::default()
+        });
+        start(&mut e, 0.);
+        let (first, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+        release(&mut e, first, 0.);
+        response(&mut e, first, 1., "reject");
+        plan_failure(&e.drain_actions().collect::<Vec<_>>())
+    }
+    #[test]
+    fn a_failure_note_extends_the_selected_refusal_and_changes_nothing_else() {
+        let plain = refused_plan(None);
+        let mut noted = refused_plan(Some("protection rollback failed: provider refused"));
+        assert_eq!(noted.message, "order refused; protection rollback failed: provider refused");
+        noted.message = plain.message.clone();
+        assert_eq!(noted, plain, "kind, outcome, codes and IDs come from the journal");
+    }
+    #[test]
+    fn a_failure_note_extends_the_fallback_when_nothing_was_selected() {
+        let mut e = crate::test_support::seeded_engine(Plans {
+            write: true, idle: true, ..Default::default()
+        });
+        start(&mut e, 0.);
+        let plan = e.venue.plan.clone().unwrap();
+        let mut cx = Cx { now: 1., store: &mut e.store, io: &mut e.io };
+        cx.fail_plan_noted(&plan, "nothing to send", "rollback skipped").unwrap();
+        let error = plan_failure(&e.drain_actions().collect::<Vec<_>>());
+        assert_eq!(error.message, "nothing to send; rollback skipped");
+        assert_eq!(error.outcome, Some(crate::Outcome::NotSent));
+    }
+    #[test]
+    fn an_oversized_failure_note_is_truncated_without_touching_the_refusal() {
+        let note = "n".repeat(10_000);
+        let note: &'static str = Box::leak(note.into_boxed_str());
+        let error = refused_plan(Some(note));
+        assert!(error.message.starts_with("order refused; nnn"), "{}", error.message);
+        assert!(error.message.ends_with("[truncated]"));
+        assert!(error.message.len() < "order refused; ".len() + 4_096 + 1);
+        assert_eq!(error.outcome, Some(crate::Outcome::Rejected));
     }
     #[test]
     fn inherited_uncertainty_survives_plan_admission_without_a_released_attempt() {

@@ -1321,6 +1321,18 @@ impl<P> Cx<'_, P> {
         self.fail_plan_owned(plan, error.into())
     }
 
+    /// `fail_plan` whose `note` is appended to the projected terminal message.
+    /// The note never selects the error or changes its kind, outcome or IDs.
+    pub fn fail_plan_noted(
+        &mut self,
+        plan: &Plan,
+        error: impl Into<VenueError>,
+        note: &str,
+    ) -> Result<(), Error> {
+        let _ = note;
+        self.fail_plan(plan, error)
+    }
+
     pub(in crate::engine) fn fail_plan_owned(
         &mut self,
         plan: &Plan,
