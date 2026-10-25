@@ -487,3 +487,66 @@ fn duplicate_body_fields_cannot_disagree_with_the_canonical_instruction() {
     let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
     assert!(!out.iter().any(|action| matches!(action, Action::Http(_))));
 }
+
+#[test]
+fn zero_window_is_still_refused_for_every_non_get_recipe() {
+    for (method, path, rows, body) in [
+        (
+            Method::Post,
+            "/api/v1/order",
+            vec![row(&[
+                ("quantity", "1"),
+                ("side", "Bid"),
+                ("symbol", "SOL_USDC_PERP"),
+            ])],
+            "{\"quantity\":1,\"side\":\"Bid\",\"symbol\":\"SOL_USDC_PERP\"}",
+        ),
+        (
+            Method::Delete,
+            "/api/v1/order",
+            vec![row(&[("orderId", "123")])],
+            "{\"orderId\":\"123\"}",
+        ),
+        (
+            Method::Patch,
+            "/api/v1/account",
+            vec![row(&[("leverageLimit", "5")])],
+            "{\"leverageLimit\":\"5\"}",
+        ),
+    ] {
+        let request = sign::Request {
+            method,
+            path: path.into(),
+            rows,
+            body: Some(body.into()),
+            window: 1,
+        };
+        let working = one(request.clone());
+        assert!(
+            working
+                .headers
+                .iter()
+                .any(|(name, value)| *name == "X-Window" && value == "1")
+        );
+        let mut refused = engine(
+            sign::Request {
+                window: 0,
+                ..request
+            },
+            false,
+        );
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut refused, NOW);
+        assert!(
+            !actions.iter().any(|action| match action {
+                Action::Http(_) => true,
+                Action::ManagedHttp(action) => matches!(
+                    **action,
+                    safe_cex_engine::request_context::HttpAction::Bind { .. }
+                        | safe_cex_engine::request_context::HttpAction::BindGroup { .. }
+                ),
+                _ => false,
+            }),
+            "{method:?} zero window must not bind or dispatch"
+        );
+    }
+}

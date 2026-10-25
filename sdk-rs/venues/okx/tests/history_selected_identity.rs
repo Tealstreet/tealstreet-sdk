@@ -323,7 +323,7 @@ fn later_closed_page_keeps_original_secondary_selection_and_wire() {
     reply(&mut e, &r, NOW + 1., &support::envelope(&rows));
     let next = physical(&advance(&mut e, NOW + 101.), "/account/positions-history?");
     signed(&next, true);
-    assert!(next.url.contains("after=1709499999900"));
+    assert!(next.url.contains("after=1709499999902"));
     assert_ne!(r.id, next.id);
 }
 #[test]

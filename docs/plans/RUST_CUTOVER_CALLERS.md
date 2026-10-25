@@ -3212,8 +3212,11 @@ longer becomes an empty complete result. Its 20-page budget resets per window,
 raw duplicate rows stay intact, and one owner retains earlier incompleteness
 across later windows. Adjacent repeated cursors and non-adjacent cycles now stop
 early with incomplete coverage. OKX keeps its initial upper-bound cursor, lower
-bound, 100 ms continuing-page delay and immediate unchanged-cursor exhaustion;
-non-adjacent cycles stop with incomplete coverage. Neither method's arguments
+bound and 100 ms continuing-page delay. Each next page asks `after = oldest + 1`
+(the bound is exclusive), so rows sharing the oldest millisecond across a page
+break are fetched again and the re-sent boundary rows are dropped by count. A
+page that cannot advance (a full page inside one millisecond, or rows not older
+than the cursor) and non-adjacent cycles stop with incomplete coverage. Neither method's arguments
 change. This slice covers closed-position reads only; both venues' general
 history reads and the broader query-marker fan-out remain unfinished. No NX
 migration, deployment or B11 closure is claimed.
@@ -8703,6 +8706,9 @@ supplied nonce receipt. Public Rust opaque types/fields remain nameable, but
 feature-off minting refuses before recipe construction and physical IDs. Native
 host nonce controls require its explicit `dispatch-nonce` forwarding feature.
 
+### Backpack account GET observations
+
+Info, Positions, Balance and Orders each select one genuine installed Read identity from native-ready primary plus GET secondary, then hold a Background Read with a NEW 20s per-observation bound, no pacing and RetryPolicy::Never. Positions/Orders retain Root streaming; Info/Balance remain nonstreamed. Native revision/token fences govern publication independently of physical custody. DATA precedes rows, diagnostics and Store publication; exact retirement precedes corrective Balance, accepted repairs and original Next. Local configuration/selection refusals stay silent. Finite Capacity/TimedOut admission, the reviewed transient precommit kinds and owned expiry coalesce the existing 10s account poll only when absent; later polling creates a distinct observation. No immediate retry/Next or timer at nonfinite clocks. Native released transport/status/parse presentation and continuation remain intact. GET signing preserves native fractional receive-window truncation to zero; every non-GET still rejects zero. Direct constructors must install the valid read identity/provider alongside valid saved read status; registry construction supplies that atomic tuple. Raw nonstream writes and private WebSocket signing remain outside this adoption.
 ### Phemex supported remaining funnel
 
 History, income, optional-key public discovery/depth/candles and command writes
@@ -8731,4 +8737,5 @@ e6f9b79a027f. Their removal requires the separate constrained known-order
 cancel-repair core plan, owned by codex-ih35js and reviewed by claude-fe7lgm,
 with a second real venue consumer before approval. No Background Mutation,
 Session-auth substitute, fabricated command or new legacy sender is permitted.
+
 

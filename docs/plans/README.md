@@ -443,5 +443,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | [Orderly local candle and identity completions](RUST_ORDERLY_LOCAL_READ_COMPLETIONS.md) | Managed source; 19 originals and 3 expiry controls pass, 23F/24O to 17F/18O; source review and CI pending. |
 
 | Dispatch nonce reservation and release ordering | Source/review/local gates CLEAR; refreshed exact-head CI pending | Before reserving a selected-key nonce in SignStep preparation or changing nonce receipt and release-floor custody. | [RUST_DISPATCH_NONCE_RESERVATION.md](RUST_DISPATCH_NONCE_RESERVATION.md) |
-| Phemex remaining request funnel | [RUST_PHEMEX_REMAINING_FUNNEL.md](RUST_PHEMEX_REMAINING_FUNNEL.md) | codex-ih35js | Source correction: native gate precedence and income prefix recovery; source review/CI and composed landing size gates pending; four named repair holdouts. |
+
+| Backpack account GET Read custody | Plan CLEAR; originals reproduced, review pending | Before managing Info, Positions, Balance and Orders observations; preserve native snapshots and continuation order. | [RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md](RUST_BACKPACK_ACCOUNT_READ_CUSTODY.md) || Phemex remaining request funnel | [RUST_PHEMEX_REMAINING_FUNNEL.md](RUST_PHEMEX_REMAINING_FUNNEL.md) | codex-ih35js | Source correction: native gate precedence and income prefix recovery; source review/CI and composed landing size gates pending; four named repair holdouts. |
+
 
