@@ -182,32 +182,47 @@ fn history_provider_refusal_is_strict_without_transport_retry_timer() {
 fn place(h: &mut Harness, command: u32) {
     h.engine.handle(h.now,Event::Command(Command::PlaceOrders { command, orders:vec![serde_json::from_str(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.002,"price":90,"clientOrderId":"Owned123"}"#).unwrap()] }));
 }
+/// Trade calls sign through managed preparation; a synchronous provider
+/// refusal is that call's unreleased failure.
+fn refusing_classic() -> (Harness, Arc<AtomicBool>) {
+    let refuse = Arc::new(AtomicBool::new(false));
+    let mut h = refusing(refuse.clone());
+    load_classic(&mut h);
+    (h, refuse)
+}
+fn failed(out: &[Action], command: u32) -> Vec<&safe_cex_engine::VenueError> {
+    out.iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: c, error }) if *c == command => {
+                Some(error)
+            }
+            _ => None,
+        })
+        .collect()
+}
 #[test]
 fn first_mutation_refusal_is_not_sent_and_duplicate_completion_is_inert() {
-    let (mut h, parked) = classic();
-    parked.store(true, Ordering::SeqCst);
+    let (mut h, refuse) = refusing_classic();
+    refuse.store(true, Ordering::SeqCst);
     place(&mut h, 45);
-    let out: Vec<_> = h.engine.drain_actions().collect();
-    let id = staged(&out);
-    assert!(
-        out.iter()
-            .any(|a| matches!(a,Action::Sign {work,..} if work.context.method=="POST"))
-    );
-    let out = refuse(&mut h, id);
-    assert_eq!(out.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:45,error}) if error.outcome==Some(Outcome::NotSent))).count(),1);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+    let failures = failed(&out, 45);
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(Outcome::NotSent));
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(!refuse(&mut h, id).iter().any(|a| matches!(
+    let later = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+    assert!(!later.iter().any(|a| matches!(
         a,
         Action::Http(_) | Action::Notice(Notice::CommandFailed { command: 45, .. })
     )));
 }
 #[test]
 fn signature_retry_provider_refusal_preserves_the_prior_sent_attempt() {
-    let (mut h, parked) = classic();
+    let (mut h, refuse) = refusing_classic();
     place(&mut h, 46);
     h.collect();
     let write = h.take("/batch-place-order");
-    parked.store(true, Ordering::SeqCst);
+    refuse.store(true, Ordering::SeqCst);
     h.engine.handle(
         h.now,
         Event::HttpResponse {
@@ -219,34 +234,31 @@ fn signature_retry_provider_refusal_preserves_the_prior_sent_attempt() {
             },
         },
     );
-    let id = staged(&h.engine.drain_actions().collect::<Vec<_>>());
-    let out = refuse(&mut h, id);
-    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:46,error}) if error.outcome==Some(Outcome::Unknown))));
+    let out = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+    let failures = failed(&out, 46);
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(Outcome::Unknown));
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
 #[test]
 fn metadata_provider_refusal_bypasses_transport_read_retry() {
-    let (mut h, parked) = classic();
+    let (mut h, refuse) = refusing_classic();
     h.engine.store_mut().set_positions(vec![]);
-    parked.store(true, Ordering::SeqCst);
+    refuse.store(true, Ordering::SeqCst);
     place(&mut h, 47);
-    let out: Vec<_> = h.engine.drain_actions().collect();
-    let id = staged(&out);
-    assert!(
-        out.iter()
-            .any(|a| matches!(a,Action::Sign {work,..} if work.context.method=="GET"))
-    );
-    let out = refuse(&mut h, id);
-    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:47,error}) if error.outcome==Some(Outcome::NotSent))));
-    assert!(
-        !out.iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
-    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+    let failures = failed(&out, 47);
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].outcome, Some(Outcome::NotSent));
+    // Engine call-deadline timers only; never the native 250 ms read retry.
+    let retry = h.now + 250.;
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))
+        || matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == retry)));
 }
 
 fn uta() -> (Harness, Arc<AtomicBool>) {
     let parked = Arc::new(AtomicBool::new(false));
-    let mut h = configured(parked.clone());
+    let mut h = refusing(parked.clone());
     h.load_public();
     h.respond(
         "/account/settings",
@@ -313,8 +325,7 @@ fn rollback_provider_refusal_preserves_original_native_rejection_details() {
             },
         },
     );
-    let id = staged(&h.engine.drain_actions().collect::<Vec<_>>());
-    let out = refuse(&mut h, id);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
     let error = out
         .iter()
         .find_map(|a| match a {
@@ -325,70 +336,21 @@ fn rollback_provider_refusal_preserves_original_native_rejection_details() {
     assert_eq!(error.venue_code.as_deref(), Some("40017"));
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
     assert_eq!(error.outcome, None);
-    assert!(error.message.contains("replace rejected"));
-    assert!(error.message.contains("protection rollback failed"));
+    // The note now comes from `end`, which every unfinished rollback reaches.
+    assert_eq!(
+        error.message,
+        "Bitget 40017: replace rejected (HTTP 200); protection rollback failed: Signing provider refused the request"
+    );
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
 
 #[test]
-fn delayed_mutation_reprepares_stamp_without_changing_body_or_client_id() {
-    let (mut h, parked) = classic();
-    parked.store(true, Ordering::SeqCst);
-    place(&mut h, 49);
-    let (first, work) = h
-        .engine
-        .drain_actions()
-        .find_map(|a| match a {
-            Action::Sign { attempt, work, .. } => Some((attempt, work)),
-            _ => None,
-        })
-        .unwrap();
-    parked.store(false, Ordering::SeqCst);
-    let signed = h
-        .engine
-        .signer()
-        .unwrap()
-        .sign_ready(&work)
-        .unwrap()
-        .unwrap();
-    parked.store(true, Ordering::SeqCst);
+fn managed_mutation_signs_the_exact_body_and_client_id_at_release() {
+    let (mut h, _) = refusing_classic();
     h.now += 6001.;
-    h.engine.handle(
-        h.now,
-        Event::Signed {
-            attempt: first,
-            result: Ok(signed),
-        },
-    );
-    let out: Vec<_> = h.engine.drain_actions().collect();
-    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    let (second, work) = out
-        .into_iter()
-        .find_map(|a| match a {
-            Action::Sign { attempt, work, .. } => Some((attempt, work)),
-            _ => None,
-        })
-        .unwrap();
-    assert_ne!(first, second);
-    assert_eq!(work.receipt.stamp_ms, Some(h.now.floor()));
-    parked.store(false, Ordering::SeqCst);
-    let result = h.engine.signer().unwrap().sign_ready(&work).unwrap();
-    parked.store(true, Ordering::SeqCst);
-    h.engine.handle(
-        h.now,
-        Event::Signed {
-            attempt: second,
-            result,
-        },
-    );
-    let http = h
-        .engine
-        .drain_actions()
-        .find_map(|a| match a {
-            Action::Http(http) => Some(http),
-            _ => None,
-        })
-        .unwrap();
+    place(&mut h, 49);
+    h.collect();
+    let http = h.take("/batch-place-order");
     let header = |key| {
         &http
             .headers
@@ -399,7 +361,6 @@ fn delayed_mutation_reprepares_stamp_without_changing_body_or_client_id() {
     };
     assert_eq!(header("ACCESS-KEY"), "key");
     assert_eq!(header("ACCESS-TIMESTAMP"), &h.now.floor().to_string());
-    assert_eq!(http.route, None);
     let body = http.body.as_deref().unwrap();
     let rows: serde_json::Value = serde_json::from_str(body).unwrap();
     assert_eq!(rows["orderList"][0]["clientOid"], "Owned123");
@@ -413,6 +374,7 @@ fn delayed_mutation_reprepares_stamp_without_changing_body_or_client_id() {
             safe_cex_crypto::Encoding::Base64
         )
     );
+    assert_eq!(http.route, None);
 }
 #[test]
 fn private_login_blocks_ping_and_late_signature_after_retirement_is_inert() {

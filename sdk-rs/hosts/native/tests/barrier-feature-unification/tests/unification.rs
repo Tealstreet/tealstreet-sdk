@@ -33,6 +33,7 @@ impl safe_cex_engine::SignStep for Recipe {
     ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
         Ok(safe_cex_engine::signing::SignRequest {
             receipt: safe_cex_engine::signing::SignReceipt {
+                nonce: None,
                 stamp_ms: Some(cx.stamp_ms()),
                 expiry_ms: Some(cx.stamp_ms() + 5_000.),
             },

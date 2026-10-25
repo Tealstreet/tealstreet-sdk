@@ -646,6 +646,7 @@ impl SignStep for TxRecipe {
         }
         Ok(SignRequest {
             receipt: SignReceipt {
+                nonce: None,
                 stamp_ms: Some(stamp),
                 expiry_ms: Some(stamp + TX_TTL as f64),
             },
