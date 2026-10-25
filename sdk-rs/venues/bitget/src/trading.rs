@@ -1,36 +1,108 @@
 use crate::account::{clean, first, is_algo, is_hedged, margin, plan_type};
 use crate::wire::{Envelope, Identifier, Number, SymbolConfig, UtaSettings};
-use crate::{BitgetFutures, Pending, paths};
+use crate::{BitgetFutures, Pending, paths, sign};
 use safe_cex_engine::Level;
+use safe_cex_engine::classify::{
+    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, Verdict, WriteFact,
+};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::request_context::{Credential, Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
+use safe_cex_engine::request_context::{
+    ConditionOwner, ConditionWait, Context, Credential, HttpOwnerRetirement, Operation, Plan,
+    Policy, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData, RetryPolicy,
+};
 use safe_cex_engine::{
-    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, TimerId,
-    VenueError, num,
+    Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+/// Each call's own bound; the streamed Plan has no whole-job deadline.
+const CALL_MS: u32 = 20_000;
+/// Native wait for Classic/UTA account detection (scoped engine condition wait).
+const DETECTION_MS: u32 = 10_000;
+const DETECTION: &str = "Bitget account detection did not complete";
+
+/// Bitget's native write codes: 40009 earns the one fresh resend, 40010, 40725
+/// and 45001 prove nothing, and any other code is a pre-execution refusal.
+const CODES: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(40009),
+            verdict: Verdict::RefusedResend(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40010),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40725),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(45001),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+    ],
+    success: &[Key::Int(0)],
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: &[
+        (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+        (403, Verdict::Refused(ErrorKind::AuthPermission)),
+        (429, Verdict::Refused(ErrorKind::RateLimited)),
+    ],
+};
 
 #[derive(Default)]
 pub struct Trading {
-    acknowledged: std::collections::HashMap<String, (String, Planned)>,
-    queue: VecDeque<Command>,
+    acknowledged: HashMap<String, (String, Planned)>,
+    /// Commands behind the active job, each a Preflight parked with no I/O.
+    queue: VecDeque<Queued>,
     active: Option<Job>,
-    metadata_at: std::collections::HashMap<String, f64>,
-    retry: Option<(TimerId, Request)>,
-    detect_wait: Option<TimerId>,
+    metadata_at: HashMap<String, f64>,
+    /// A released write whose Plan the engine sealed itself (unproven status):
+    /// restore and reconcile at the next callback that holds Cx.
+    retired_write: Option<Planned>,
+}
+
+struct Queued {
+    preflight: Preflight,
+    intent: Command,
+    /// Detection expired while queued: fail NotSent in its ready custody.
+    detection_failed: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Condition {
+    Detection,
+    Positions,
+}
+
+enum Parked {
+    Preflight(Condition),
+    Plan(ConditionWait, Condition),
 }
 
 struct Job {
     id: CommandId,
+    preflight: Preflight,
+    plan: Option<Plan>,
+    parked: Option<Parked>,
+    /// A read retry armed on the Plan's own timer.
+    retry: Option<Request>,
+    /// The write call in flight, kept for an engine-sealed retirement.
+    live: Option<Planned>,
     intent: Command,
     original: Option<Order>,
     metadata: VecDeque<String>,
     waiting_positions: bool,
     positions_checked: bool,
     planned: bool,
-    outstanding: bool,
     calls: VecDeque<Planned>,
     fallback: Option<VecDeque<Planned>>,
     rollback: Option<Planned>,
@@ -42,10 +114,50 @@ struct Job {
 
 pub struct Request {
     command: CommandId,
+    slot: Slot,
+    context: Context,
     call: Planned,
+    method: Method,
+    path: String,
+    body: Option<String>,
     stream_revision: u64,
     signature_retry: bool,
     read_retries: u8,
+}
+
+/// One call as native would send it: exact method, path and body.
+struct Outgoing {
+    call: Planned,
+    method: Method,
+    path: String,
+    body: Option<String>,
+}
+
+enum Step {
+    Wait(Condition),
+    Call(Box<Outgoing>),
+    Fail(VenueError),
+    Finish,
+}
+
+/// Where the active job is driven from: Preflight custody (entry or ready),
+/// the current call's DATA, or a Plan-ready callback holding the next slot.
+enum At<'a> {
+    Entry,
+    Data(&'a Slot, &'a Context),
+    Ready(Slot),
+}
+
+/// What a write's native answer proves, for its journal fact.
+enum Answer {
+    Accepted(Vec<String>),
+    Batch {
+        expected: usize,
+        accepted: Vec<String>,
+        failures: Vec<String>,
+    },
+    Unproven,
+    Coded,
 }
 
 #[derive(Clone)]
@@ -245,6 +357,7 @@ struct Reply<'a> {
 
 impl BitgetFutures {
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        self.settle_retired_write(cx);
         let observed: Vec<_> = self
             .trading
             .acknowledged
@@ -273,25 +386,47 @@ impl BitgetFutures {
             self.refuse_entry(cx, not_sent(error));
             return;
         }
-        self.trading.queue.push_back(command);
-        self.resume_trading(cx);
+        // In-job reads sign with the static Read role; writes with Primary.
+        let (read_credential, _) = self.read_selection(paths::ACCOUNT);
+        let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
+            purpose: PreflightPurpose::WriteAfterReads,
+            read_credential,
+            write_credential: self.primary_credential(),
+        }) else {
+            return;
+        };
+        if self.trading.active.is_some() || !self.trading.queue.is_empty() {
+            if let Err(reason) = cx.park_preflight_for(&preflight, None) {
+                let _ = cx.fail_preflight(&preflight, not_sent(reason.venue_error().message));
+                return;
+            }
+            self.trading.queue.push_back(Queued {
+                preflight,
+                intent: command,
+                detection_failed: false,
+            });
+            return;
+        }
+        self.start_job(cx, preflight, command);
     }
 
-    /// A write refused before I/O admits a terminal-only Mutation owner, so the
-    /// engine caps it at NotSent. A rejected admission already failed the command.
-    fn refuse_entry(&self, cx: &mut Cx<'_, Pending>, error: VenueError) {
-        let credential = self
-            .options
+    fn primary_credential(&self) -> Option<Credential> {
+        self.options
             .credentials
             .as_ref()
             .filter(|identity| identity.validate().is_ok())
             .map(|identity| Credential {
                 slot: CredentialSlot::Primary,
                 reference: identity.credential.clone(),
-            });
+            })
+    }
+
+    /// A write refused before I/O admits a terminal-only Mutation owner, so the
+    /// engine caps it at NotSent. A rejected admission already failed the command.
+    fn refuse_entry(&self, cx: &mut Cx<'_, Pending>, error: VenueError) {
         if let Ok(context) = cx.admit_http_command(Policy {
             operation: Operation::Mutation,
-            credential,
+            credential: self.primary_credential(),
             timeout_ms: 20_000,
             pacing: None,
             retry: RetryPolicy::Never,
@@ -362,80 +497,65 @@ impl BitgetFutures {
         Ok(())
     }
 
-    pub(crate) fn resume_trading(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self
-            .trading
-            .active
-            .as_ref()
-            .is_some_and(|job| job.outstanding)
-        {
-            return;
-        }
-        let mut job = if let Some(job) = self.trading.active.take() {
-            job
-        } else if let Some(intent) = self.trading.queue.pop_front() {
-            let metadata = symbols(cx, &intent)
-                .into_iter()
-                .filter(|symbol| {
-                    cx.store.setting(symbol).is_none()
-                        || (!cx
-                            .store
-                            .positions()
-                            .iter()
-                            .any(|p| &p.symbol == symbol && p.contracts > 0.0)
-                            && !self
-                                .trading
-                                .metadata_at
-                                .get(symbol)
-                                .is_some_and(|at| cx.now - *at < 5_000.0))
-                })
-                .collect();
-            Job {
-                id: command_id(&intent).expect("trade command"),
-                original: if let Command::AmendOrder { id, .. } = &intent {
-                    cx.store.order(id).cloned()
-                } else {
-                    None
-                },
-                intent,
-                metadata,
-                waiting_positions: false,
-                positions_checked: false,
-                planned: false,
-                outstanding: false,
-                calls: VecDeque::new(),
-                fallback: None,
-                rollback: None,
-                error: None,
-                ids: vec![],
-                effective: false,
-            }
-        } else {
-            return;
+    fn start_job(&mut self, cx: &mut Cx<'_, Pending>, preflight: Preflight, intent: Command) {
+        let metadata = symbols(cx, &intent)
+            .into_iter()
+            .filter(|symbol| {
+                cx.store.setting(symbol).is_none()
+                    || (!cx
+                        .store
+                        .positions()
+                        .iter()
+                        .any(|p| &p.symbol == symbol && p.contracts > 0.0)
+                        && !self
+                            .trading
+                            .metadata_at
+                            .get(symbol)
+                            .is_some_and(|at| cx.now - *at < 5_000.0))
+            })
+            .collect();
+        let job = Job {
+            id: command_id(&intent).expect("trade command"),
+            preflight,
+            plan: None,
+            parked: None,
+            retry: None,
+            live: None,
+            original: if let Command::AmendOrder { id, .. } = &intent {
+                cx.store.order(id).cloned()
+            } else {
+                None
+            },
+            intent,
+            metadata,
+            waiting_positions: false,
+            positions_checked: false,
+            planned: false,
+            calls: VecDeque::new(),
+            fallback: None,
+            rollback: None,
+            error: None,
+            ids: vec![],
+            effective: false,
         };
-        if !self.account.detected {
-            if self.trading.detect_wait.is_none() {
-                self.trading.detect_wait = Some(cx.set_timer(10_000.0));
-            }
-            self.trading.active = Some(job);
-            return;
-        }
-        if let Some(timer) = self.trading.detect_wait.take() {
-            cx.clear_timer(timer);
+        self.drive(cx, job, At::Entry);
+    }
+
+    /// The native job order, without I/O except the borrowed position read.
+    fn next_step(&mut self, cx: &mut Cx<'_, Pending>, job: &mut Job) -> Step {
+        if !self.account.detected && !(job.planned && job.calls.is_empty()) {
+            return Step::Wait(Condition::Detection);
         }
         if job.waiting_positions {
             if self.positions_in_flight() {
-                self.trading.active = Some(job);
-                return;
+                return Step::Wait(Condition::Positions);
             }
             job.waiting_positions = false;
             job.positions_checked = true;
         }
         if let Some(symbol) = job.metadata.pop_front() {
             if cx.store.market(&symbol).is_none() {
-                self.trade_fail(cx, &job, not_sent(format!("Market {symbol} not found")));
-                self.resume_trading(cx);
-                return;
+                return Step::Fail(not_sent(format!("Market {symbol} not found")));
             }
             let call = Planned {
                 path: paths::ACCOUNT,
@@ -445,51 +565,31 @@ impl BitgetFutures {
                 },
                 effect: Effect::Metadata(symbol),
             };
-            self.issue_trade(cx, job, call, false, 0);
-            return;
+            return self.call_step(cx, call);
         }
         if !job.planned {
             if !job.positions_checked && needs_position_read(cx, &job.intent, self.account.uta) {
                 self.refresh_positions(cx);
                 if self.positions_in_flight() {
                     job.waiting_positions = true;
-                    self.trading.active = Some(job);
-                    return;
+                    return Step::Wait(Condition::Positions);
                 }
                 job.positions_checked = true;
             }
-            if let Err(error) = self.plan_job(cx, &mut job) {
-                self.trade_fail(cx, &job, not_sent(error));
-                self.resume_trading(cx);
-                return;
+            if let Err(error) = self.plan_job(cx, job) {
+                return Step::Fail(not_sent(error));
             }
-            self.warn_stop_downgrade(cx, &job);
+            self.warn_stop_downgrade(cx, job);
             job.planned = true;
         }
-        if let Some(call) = job.calls.pop_front() {
-            self.issue_trade(cx, job, call, false, 0);
-        } else {
-            match job.error.take() {
-                Some(error) => self.trade_fail(cx, &job, error),
-                None => cx.done(job.id, serde_json::to_string(&job.ids).expect("order ids")),
-            }
-            self.resume_trading(cx);
+        match job.calls.pop_front() {
+            Some(call) => self.call_step(cx, call),
+            None => Step::Finish,
         }
     }
 
-    fn issue_trade(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        mut job: Job,
-        call: Planned,
-        signature_retry: bool,
-        read_retries: u8,
-    ) {
-        let read = matches!(
-            call.effect,
-            Effect::Metadata(_) | Effect::ResolveAmend { .. }
-        );
-        let method = if read { Method::Get } else { Method::Post };
+    fn call_step(&self, cx: &Cx<'_, Pending>, call: Planned) -> Step {
+        let read = call.read();
         let path = match &call.effect {
             Effect::Metadata(symbol) => {
                 if self.account.uta {
@@ -497,11 +597,7 @@ impl BitgetFutures {
                 } else {
                     let coin = match self.margin_coin(cx, symbol) {
                         Ok(coin) => coin,
-                        Err(error) => {
-                            self.trade_fail(cx, &job, not_sent(error));
-                            self.resume_trading(cx);
-                            return;
-                        }
+                        Err(error) => return Step::Fail(not_sent(error)),
                     };
                     format!(
                         "{}?symbol={symbol}&productType={}&marginCoin={}",
@@ -516,28 +612,376 @@ impl BitgetFutures {
                 paths::ORDER_DETAIL,
                 call.payload.symbol.as_deref().unwrap_or_default(),
                 self.product(),
-                crate::sign::encode(client)
+                sign::encode(client)
             ),
             _ => call.path.to_owned(),
         };
         let body = (!read).then(|| serde_json::to_string(&call.payload).expect("Bitget payload"));
-        if let Effect::Cancel { orders, .. } = &call.effect {
+        let method = if read { Method::Get } else { Method::Post };
+        Step::Call(Box::new(Outgoing {
+            call,
+            method,
+            path,
+            body,
+        }))
+    }
+
+    /// Advances the active job from `at`: admit, continue, park, or settle.
+    fn drive(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, at: At<'_>) {
+        let current = match &at {
+            At::Data(slot, context) => Some((*slot, *context)),
+            _ => None,
+        };
+        match self.next_step(cx, &mut job) {
+            Step::Call(outgoing) => {
+                let next = serial(outgoing.call.operation());
+                let slot = match at {
+                    At::Entry => {
+                        let Some(credential) = self.primary_credential() else {
+                            return self.end(
+                                cx,
+                                job,
+                                None,
+                                not_sent("Bitget credentials are required"),
+                            );
+                        };
+                        let policy = SerialPolicy {
+                            credential,
+                            pacing: None,
+                            refusals_complete: true,
+                        };
+                        match cx.admit_serial_plan(&job.preflight, next, policy) {
+                            Ok((plan, slot)) => {
+                                job.plan = Some(plan);
+                                slot
+                            }
+                            Err(reason) => {
+                                let error = not_sent(reason.venue_error().message);
+                                return self.end(cx, job, None, error);
+                            }
+                        }
+                    }
+                    At::Data(slot, context) => {
+                        let plan = job.plan.clone().expect("live Plan");
+                        match cx.continue_serial_plan(&plan, slot, context, next) {
+                            Ok(slot) => slot,
+                            Err(reason) => {
+                                let error = VenueError::new(reason.venue_error().message);
+                                return self.end(cx, job, current, error);
+                            }
+                        }
+                    }
+                    At::Ready(slot) => slot,
+                };
+                self.issue(cx, job, slot, *outgoing);
+            }
+            Step::Wait(condition) => {
+                let bound = (condition == Condition::Detection).then_some(DETECTION_MS);
+                match at {
+                    At::Entry => match cx.park_preflight_for(&job.preflight, bound) {
+                        Ok(()) => {
+                            job.parked = Some(Parked::Preflight(condition));
+                            self.trading.active = Some(job);
+                        }
+                        Err(reason) => {
+                            let error = not_sent(reason.venue_error().message);
+                            self.end(cx, job, None, error);
+                        }
+                    },
+                    At::Data(slot, context) => {
+                        let plan = job.plan.clone().expect("live Plan");
+                        let next = serial(job.next_operation());
+                        match cx.serial_plan_condition_wait(&plan, slot, context, next, bound) {
+                            Ok(wait) => {
+                                job.parked = Some(Parked::Plan(wait, condition));
+                                self.trading.active = Some(job);
+                            }
+                            Err(reason) => {
+                                let error = VenueError::new(reason.venue_error().message);
+                                self.end(cx, job, current, error);
+                            }
+                        }
+                    }
+                    // A released condition is issued in this same flush; it cannot park again.
+                    At::Ready(_) => self.end(cx, job, None, not_sent(DETECTION)),
+                }
+            }
+            Step::Fail(error) => self.end(cx, job, current, error),
+            Step::Finish => self.finish(cx, job, current),
+        }
+    }
+
+    /// Queues one Plan call, applying native optimistic status after admission.
+    fn issue(&mut self, cx: &mut Cx<'_, Pending>, job: Job, slot: Slot, outgoing: Outgoing) {
+        let Outgoing {
+            call,
+            method,
+            path,
+            body,
+        } = outgoing;
+        let plan = job.plan.clone().expect("admitted Plan");
+        let context = if narrowable(&job.intent, call.intent()) {
+            cx.plan_leg_context_with_intent(&plan, &slot, call.intent())
+        } else {
+            cx.plan_leg_context(&plan, &slot)
+        };
+        let context = match context {
+            Ok(context) => context,
+            Err(reason) => {
+                let error = VenueError::new(reason.venue_error().message);
+                return self.end(cx, job, None, error);
+            }
+        };
+        let request = Request {
+            command: job.id,
+            slot,
+            context,
+            call,
+            method,
+            path,
+            body,
+            stream_revision: self.order_revision_clock(),
+            signature_retry: false,
+            read_retries: 0,
+        };
+        self.send_call(cx, job, request);
+    }
+
+    fn send_call(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, request: Request) {
+        job.live = (!request.call.read()).then(|| request.call.clone());
+        if let Effect::Cancel { orders, .. } = &request.call.effect {
             for order in orders {
                 cx.store.set_order_status(&order.id, OrderStatus::Canceling);
             }
         }
-        job.outstanding = true;
-        let command = job.id;
+        let identity = if request.call.read() {
+            self.read_selection(&request.path).1
+        } else {
+            self.signing_identity(Method::Post, &request.path).cloned()
+        };
+        let recipe = sign::Http::new(identity, request.path.clone());
+        let url = [paths::REST, request.path.as_str()].concat();
+        cx.command_progress(job.id, request.call.identities());
+        let (context, method, body) = (
+            request.context.clone(),
+            request.method,
+            request.body.clone(),
+        );
         self.trading.active = Some(job);
-        cx.command_progress(command, call.identities());
-        let pending = Pending::Trade(Box::new(Request {
-            command,
-            call,
-            stream_revision: self.order_revision_clock(),
-            signature_retry,
-            read_retries,
-        }));
-        self.send(cx, method, &path, crate::Payload::Body(body), true, pending);
+        if let Err((pending, reason)) = cx.request_signed_managed(
+            context,
+            method,
+            url,
+            body,
+            Box::new(recipe),
+            Pending::Trade(Box::new(request)),
+        ) && let Pending::Trade(request) = pending
+        {
+            self.trade_call_failed(cx, *request, reason.venue_error(), false);
+        }
+    }
+
+    /// Fails the job under its owner; after a write took effect it is never
+    /// Rejected or NotSent. Then wakes the next queued command.
+    fn end(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        job: Job,
+        current: Option<(&Slot, &Context)>,
+        mut error: VenueError,
+    ) {
+        if (job.effective || !job.ids.is_empty())
+            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+        {
+            error.outcome = None;
+        }
+        match &job.plan {
+            None => {
+                let _ = cx.fail_preflight(&job.preflight, error);
+            }
+            Some(plan) => {
+                if let Some((slot, context)) = current {
+                    let _ = cx.finish_plan_call(plan, slot, context);
+                }
+                let _ = cx.fail_plan(plan, error);
+            }
+        }
+        self.next_job(cx);
+    }
+
+    fn finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut job: Job,
+        current: Option<(&Slot, &Context)>,
+    ) {
+        if let Some(error) = job.error.take() {
+            return self.end(cx, job, current, error);
+        }
+        let ids = serde_json::to_string(&job.ids).expect("order ids");
+        match &job.plan {
+            None => {
+                let _ = cx.done_empty_plan(&job.preflight, ids);
+            }
+            Some(plan) => {
+                if let Some((slot, context)) = current {
+                    let _ = cx.finish_plan_call(plan, slot, context);
+                }
+                if cx.done_plan(plan, ids).is_err() {
+                    let _ =
+                        cx.fail_plan(plan, VenueError::new("Bitget job ended without its call"));
+                }
+            }
+        }
+        self.next_job(cx);
+    }
+
+    /// The active job ended: wake the oldest queued Preflight (FIFO).
+    fn next_job(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(queued) = self.trading.queue.front() {
+            let _ = cx.request_preflight_ready(&queued.preflight);
+        }
+    }
+
+    /// From a borrowed callback: release the active job's wait once its
+    /// condition holds. Never issues I/O itself.
+    pub(crate) fn wake_trading(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.settle_retired_write(cx);
+        let detected = self.account.detected;
+        let positions = self.positions_in_flight();
+        let Some(job) = self.trading.active.as_mut() else {
+            return;
+        };
+        let holds = |condition: &Condition| match condition {
+            Condition::Detection => detected,
+            Condition::Positions => !positions,
+        };
+        match &job.parked {
+            Some(Parked::Preflight(condition))
+                if holds(condition) && cx.request_preflight_ready(&job.preflight).is_ok() =>
+            {
+                job.parked = None;
+            }
+            Some(Parked::Plan(wait, condition))
+                if holds(condition) && cx.release_condition_wait(wait).is_ok() =>
+            {
+                job.parked = None;
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn trading_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &Preflight,
+    ) {
+        if let Some(mut job) = self.trading.active.take() {
+            if job.preflight.owner() == preflight.owner() {
+                job.parked = None;
+                return self.drive(cx, job, At::Entry);
+            }
+            self.trading.active = Some(job);
+            // Woken behind a live job: park again, still in FIFO order.
+            let _ = cx.park_preflight_for(preflight, None);
+            return;
+        }
+        let front = self
+            .trading
+            .queue
+            .front()
+            .is_some_and(|queued| queued.preflight.owner() == preflight.owner());
+        if !front {
+            let _ = cx.park_preflight_for(preflight, None);
+            return;
+        }
+        let queued = self.trading.queue.pop_front().expect("queued front");
+        if queued.detection_failed {
+            let _ = cx.fail_preflight(&queued.preflight, not_sent(DETECTION));
+            self.next_job(cx);
+            return;
+        }
+        self.start_job(cx, queued.preflight, queued.intent);
+    }
+
+    pub(crate) fn trading_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
+        let Some(mut job) = self.trading.active.take() else {
+            return;
+        };
+        let slot = job
+            .plan
+            .as_ref()
+            .filter(|own| own.owner() == plan.owner())
+            .and_then(|_| cx.plan_slots(plan).ok())
+            .and_then(|slots| slots.into_iter().next());
+        let Some(slot) = slot else {
+            self.trading.active = Some(job);
+            return;
+        };
+        if let Some(retry) = job.retry.take() {
+            return self.reissue(cx, job, slot, retry);
+        }
+        job.parked = None;
+        self.drive(cx, job, At::Ready(slot));
+    }
+
+    /// Detection did not complete within its bound: the job and every queued
+    /// command fail NotSent, each queued one in its own ready custody.
+    pub(crate) fn trading_condition_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &ConditionOwner,
+    ) {
+        let ours = self.trading.active.as_ref().is_some_and(|job| match owner {
+            ConditionOwner::Preflight(preflight) => job.preflight.owner() == preflight.owner(),
+            ConditionOwner::Plan(plan) => job
+                .plan
+                .as_ref()
+                .is_some_and(|own| own.owner() == plan.owner()),
+        });
+        if !ours {
+            return;
+        }
+        for queued in &mut self.trading.queue {
+            queued.detection_failed = true;
+        }
+        let job = self.trading.active.take().expect("active job");
+        self.end(cx, job, None, not_sent(DETECTION));
+    }
+
+    /// The engine retired a trading owner itself: forget it and name the next
+    /// queued Preflight to wake.
+    pub(crate) fn trading_retired(&mut self, owner: &HttpOwnerRetirement) -> Option<Preflight> {
+        self.trading
+            .queue
+            .retain(|queued| !owner.matches_preflight(&queued.preflight));
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| owner.matches_preflight(&job.preflight))
+        {
+            let job = self.trading.active.take().expect("retired job");
+            self.trading.retired_write = job.live;
+            return self
+                .trading
+                .queue
+                .front()
+                .map(|queued| queued.preflight.clone());
+        }
+        None
+    }
+
+    /// Native restore and reconcile for a write the engine sealed as Unknown.
+    pub(crate) fn settle_retired_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(call) = self.trading.retired_write.take() else {
+            return;
+        };
+        restore_canceling(cx, &call);
+        if matches!(call.effect, Effect::Place { .. }) {
+            self.account.orders_version = self.account.orders_version.wrapping_add(1);
+        }
+        self.refresh_orders(cx, false);
     }
 
     fn plan_job(&self, cx: &Cx<'_, Pending>, job: &mut Job) -> Result<(), String> {
@@ -1484,37 +1928,36 @@ impl BitgetFutures {
         Ok(())
     }
 
+    /// One call's DATA, validated as this Plan's exact delivery before decode.
     pub(crate) fn trade_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        response: Result<Response<'_>, &str>,
+        response: Response<'_>,
     ) {
         let Some(mut job) = self.trading.active.take() else {
             return;
         };
-        if job.id != request.command {
+        let delivered = job.id == request.command
+            && job
+                .plan
+                .as_ref()
+                .is_some_and(|plan| cx.validate_plan_delivery(plan, &request.context).is_ok());
+        if !delivered {
             self.trading.active = Some(job);
             return;
         }
-        job.outstanding = false;
-        if response
-            .as_ref()
+        let current = Some((&request.slot, &request.context));
+        let read = request.call.read();
+        if serde_json::from_str::<Envelope<serde::de::IgnoredAny>>(response.body)
             .ok()
-            .and_then(|r| serde_json::from_str::<Envelope<serde::de::IgnoredAny>>(r.body).ok())
             .is_some_and(|r| r.code.0 == Some(40085.0))
             && self.promote_uta(cx)
         {
-            if let Effect::Cancel { orders, .. } = &request.call.effect {
-                for o in orders {
-                    cx.store.update_order(&o.id, |row| {
-                        if row.status == OrderStatus::Canceling {
-                            row.status = o.status;
-                        }
-                    });
-                }
-            }
-            if job.ids.is_empty() {
+            restore_canceling(cx, &request.call);
+            // A 5xx proves nothing: the call's fact is Unknown and reconciles.
+            let proven = read || self.record(cx, &request, &response);
+            if job.ids.is_empty() && proven {
                 job.calls.clear();
                 job.planned = false;
                 job.positions_checked = false;
@@ -1523,38 +1966,31 @@ impl BitgetFutures {
                 job.fallback = None;
                 job.rollback = None;
                 self.trading.metadata_at.clear();
-                self.trading.active = Some(job);
-                self.resume_trading(cx);
-            } else {
-                let error = VenueError::new(format!(
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            let error = if proven {
+                VenueError::new(format!(
                     "Bitget switched to UTA after partial success; acknowledged IDs {:?}",
                     job.ids
-                ));
-                self.trade_fail(cx, &job, error);
+                ))
+            } else {
+                VenueError::new("Bitget requires UTA (HTTP status unproven)")
+                    .outcome(Outcome::Unknown)
+            };
+            self.end(cx, job, current, error);
+            if !proven {
+                self.refresh_orders(cx, false);
             }
             return;
         }
-        if matches!(
-            request.call.effect,
-            Effect::Metadata(_) | Effect::ResolveAmend { .. }
-        ) && response.is_err()
-            && request.read_retries < 3
-        {
-            self.retry_read(cx, job, request);
-            return;
-        }
         if let Effect::Metadata(symbol) = &request.call.effect {
-            if self.account.uta {
-                let parsed = response.map_err(str::to_owned).and_then(|r| {
-                    if r.status != 200 {
-                        return Err(format!("Bitget metadata HTTP {}", r.status));
-                    }
-                    serde_json::from_str::<Envelope<UtaSettings>>(r.body)
-                        .map_err(|e| e.to_string())
-                        .and_then(Envelope::checked)
-                });
+            let resolved = if self.account.uta {
+                let parsed = (response.status == 200)
+                    .then(|| serde_json::from_str::<Envelope<UtaSettings>>(response.body).ok())
+                    .flatten()
+                    .and_then(|e| e.checked().ok());
                 match parsed {
-                    Ok(settings) if !settings.hold_mode.is_empty() => {
+                    Some(settings) if !settings.hold_mode.is_empty() => {
                         self.apply_settings(cx, &settings);
                         if cx.store.setting(symbol).is_none() {
                             cx.store.update_setting(symbol, |s| {
@@ -1562,104 +1998,102 @@ impl BitgetFutures {
                                 s.margin_type = Some(MarginType::Cross);
                             });
                         }
-                        self.trading.metadata_at.insert(symbol.clone(), cx.now);
-                        self.trading.active = Some(job);
-                        self.resume_trading(cx);
+                        Ok(())
                     }
-                    _ => {
-                        let error = not_sent("Bitget UTA metadata could not be resolved");
-                        self.trade_fail(cx, &job, error);
-                        self.resume_trading(cx);
+                    _ => Err("Bitget UTA metadata could not be resolved"),
+                }
+            } else {
+                let parsed = (response.status == 200)
+                    .then(|| serde_json::from_str::<Envelope<SymbolConfig>>(response.body).ok())
+                    .flatten()
+                    .and_then(|e| e.checked().ok());
+                match parsed {
+                    Some(row) if !row.pos_mode.is_empty() && !row.margin_mode.is_empty() => {
+                        self.apply_symbol_config(cx, symbol, &row);
+                        Ok(())
                     }
+                    _ => Err("Bitget position mode or margin type could not be resolved"),
                 }
-                return;
-            }
-            let parsed = response.map_err(str::to_owned).and_then(|r| {
-                if r.status != 200 {
-                    return Err(format!("Bitget metadata HTTP {}", r.status));
-                }
-                serde_json::from_str::<Envelope<SymbolConfig>>(r.body)
-                    .map_err(|e| e.to_string())
-                    .and_then(Envelope::checked)
-            });
-            match parsed {
-                Ok(row) if !row.pos_mode.is_empty() && !row.margin_mode.is_empty() => {
-                    cx.store.set_hedged(is_hedged(&row.pos_mode));
-                    let kind = margin(&row.margin_mode);
-                    let leverage = if kind == MarginType::Cross {
-                        row.crossed_margin_leverage.or(1.0)
-                    } else {
-                        first(&[row.isolated_long_lever, row.isolated_short_lever]).unwrap_or(1.0)
-                    };
-                    cx.store.update_setting(symbol, |s| {
-                        s.leverage = leverage;
-                        s.margin_type = Some(kind);
-                        if kind == MarginType::Isolated && is_hedged(&row.pos_mode) {
-                            if let Some(long) = row.isolated_long_lever.0 {
-                                s.buy_leverage = Some(long);
-                            }
-                            if let Some(short) = row.isolated_short_lever.0 {
-                                s.sell_leverage = Some(short);
-                            }
-                            // Legacy scalar settings represent the long rail.
-                            s.leverage = s.buy_leverage.unwrap_or(leverage);
-                        } else {
-                            s.buy_leverage = Some(leverage);
-                            s.sell_leverage = Some(leverage);
-                        }
-                    });
+            };
+            return match resolved {
+                Ok(()) => {
                     self.trading.metadata_at.insert(symbol.clone(), cx.now);
-                    self.trading.active = Some(job);
-                    self.resume_trading(cx);
+                    self.drive(cx, job, At::Data(&request.slot, &request.context))
                 }
-                _ => {
-                    let error =
-                        not_sent("Bitget position mode or margin type could not be resolved");
-                    self.trade_fail(cx, &job, error);
-                    self.resume_trading(cx);
-                }
-            }
-            return;
+                Err(error) => self.end(cx, job, current, not_sent(error)),
+            };
         }
-        let status = response.as_ref().ok().map(|r| r.status);
-        let parsed = response.map_err(str::to_owned).and_then(|r| {
-            serde_json::from_str::<Reply>(r.body)
-                .map(|reply| (r.status, reply))
-                .map_err(|e| e.to_string())
-        });
+        let status = response.status;
+        let parsed = serde_json::from_str::<Reply>(response.body).map_err(|e| e.to_string());
         if let Effect::ResolveAmend { id, .. } = &request.call.effect {
-            let ready = parsed.as_ref().is_ok_and(|(status, reply)| {
-                *status == 200
+            let ready = parsed.as_ref().is_ok_and(|reply| {
+                status == 200
                     && reply.code.0 == Some(0.0)
                     && reply.data.as_ref().is_some_and(|d| {
                         !d.order_id.text().is_empty() && d.order_id.text().as_ref() != id
                     })
             });
             if !ready && request.read_retries < 3 {
-                self.retry_read(cx, job, request);
-                return;
+                return self.retry_read(cx, job, request);
             }
         }
-        let explicit_rejection = parsed.as_ref().is_ok_and(|(status, reply)| {
-            *status < 500
-                && *status != 408
+        let explicit_rejection = parsed.as_ref().is_ok_and(|reply| {
+            status < 500
+                && status != 408
                 && !reply
                     .code
                     .0
                     .is_some_and(|code| [40010.0, 40725.0, 45001.0].contains(&code))
-                && (*status >= 400 || reply.code.0.is_some_and(|code| code != 0.0))
+                && (status >= 400 || reply.code.0.is_some_and(|code| code != 0.0))
         });
-        if parsed
-            .as_ref()
-            .is_ok_and(|(_, reply)| reply.code.0 == Some(40009.0))
+        // The one native resend: a fresh Context re-signed under the same owner.
+        if !read
+            && parsed
+                .as_ref()
+                .is_ok_and(|reply| reply.code.0 == Some(40009.0))
             && !request.signature_retry
         {
-            self.issue_trade(cx, job, request.call, true, request.read_retries);
-            return;
+            let message = format!("Bitget 40009: sign signature error (HTTP {status})");
+            let native = native_code(parsed.as_ref().ok(), status);
+            let grant = cx
+                .http_write_failure(&request.context, &CODES, native.as_ref(), message, None)
+                .ok()
+                .and_then(|(_, grant)| grant);
+            let plan = job.plan.clone().expect("live Plan");
+            if let Some(context) = grant.and_then(|grant| {
+                cx.plan_resend_context(&plan, &request.slot, &request.context, grant)
+                    .ok()
+            }) {
+                let request = Request {
+                    context,
+                    signature_retry: true,
+                    ..request
+                };
+                return self.send_call(cx, job, request);
+            }
+            return self.call_settled(cx, job, request, parsed, status, explicit_rejection, true);
         }
+        self.call_settled(cx, job, request, parsed, status, explicit_rejection, false)
+    }
+
+    /// The native answer of a call that will not be resent: record its write
+    /// fact once, then fall back, roll back, fail, or continue as native.
+    #[allow(clippy::too_many_arguments)]
+    fn call_settled(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut job: Job,
+        request: Request,
+        parsed: Result<Reply<'_>, String>,
+        status: u16,
+        explicit_rejection: bool,
+        mut recorded: bool,
+    ) {
+        let current = Some((&request.slot, &request.context));
+        let native = native_code(parsed.as_ref().ok(), status);
         let mut error = match &parsed {
-            Ok((200, reply)) if reply.code.0 == Some(0.0) => None,
-            Ok((status, reply)) => Some(format!(
+            Ok(reply) if status == 200 && reply.code.0 == Some(0.0) => None,
+            Ok(reply) => Some(format!(
                 "Bitget {}: {} (HTTP {status})",
                 reply.code.get(),
                 reply.msg
@@ -1667,16 +2101,21 @@ impl BitgetFutures {
             Err(error) => Some(error.clone()),
         };
         if let Effect::Cancel { idempotent_missing: true, .. } = &request.call.effect
-            && parsed.as_ref().is_ok_and(|(_, reply)| reply.msg == "Failed to stop the strategy because the corresponding strategy ID could not be found") { error = None; }
+            && parsed.as_ref().is_ok_and(|reply| reply.msg == "Failed to stop the strategy because the corresponding strategy ID could not be found") { error = None; }
+        let mut answer = if error.is_none() {
+            Answer::Accepted(vec![])
+        } else {
+            Answer::Coded
+        };
         if error.is_some()
-            && matches!(request.call.effect, Effect::Amend { .. })
+            && request.call.is_amend()
             && explicit_rejection
             && let Some(fallback) = job.fallback.take()
         {
+            let message = error.clone().unwrap_or_default();
+            self.record_once(cx, &request, native, answer, &message, &mut recorded);
             job.calls = fallback;
-            self.trading.active = Some(job);
-            self.resume_trading(cx);
-            return;
+            return self.drive(cx, job, At::Data(&request.slot, &request.context));
         }
         let mut write_noted = false;
         // A 2xx success answer that does not account for every order.
@@ -1684,7 +2123,7 @@ impl BitgetFutures {
         if error.is_none()
             && let Effect::Cancel { orders, .. } = &request.call.effect
         {
-            let data = parsed.as_ref().ok().and_then(|(_, r)| r.data.as_ref());
+            let data = parsed.as_ref().ok().and_then(|r| r.data.as_ref());
             let retained = orders
                 .iter()
                 .any(|o| self.trading.acknowledged.contains_key(&native_id(o)));
@@ -1716,25 +2155,26 @@ impl BitgetFutures {
                     }
                 }
             }
-            if data.is_some_and(|d| !d.failure_list.is_empty()) {
-                error = Some(format!(
-                    "Bitget cancel failure: {}",
-                    data.expect("data")
-                        .failure_list
-                        .iter()
-                        .map(|e| e.error_msg.as_str())
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                ));
+            if let Some(failures) = data
+                .map(|d| failure_messages(&d.failure_list))
+                .filter(|f| !f.is_empty())
+            {
+                error = Some(format!("Bitget cancel failure: {}", failures.join("; ")));
+                answer = Answer::Batch {
+                    expected: orders.len(),
+                    accepted: accepted.into_iter().collect(),
+                    failures,
+                };
             } else if (request.call.path == paths::BATCH_CANCEL || retained)
                 && orders.iter().any(|o| !accepted.contains(&native_id(o)))
             {
                 unproven = true;
+                answer = Answer::Unproven;
                 error = Some("Bitget batch cancel did not acknowledge every order".into());
             }
         }
         if error.is_none() {
-            let data = parsed.as_ref().ok().and_then(|(_, r)| r.data.as_ref());
+            let data = parsed.as_ref().ok().and_then(|r| r.data.as_ref());
             if let Effect::Place { expected } = request.call.effect {
                 let mut ids: Vec<_> = data.map_or_else(Vec::new, |d| {
                     d.success_list
@@ -1753,182 +2193,45 @@ impl BitgetFutures {
                         ids.push(id.into_owned());
                     }
                 }
-                if let Some(d) = data
-                    && !d.failure_list.is_empty()
+                answer = Answer::Accepted(ids.clone());
+                if let Some(failures) = data
+                    .map(|d| failure_messages(&d.failure_list))
+                    .filter(|f| !f.is_empty())
                 {
                     error = Some(format!(
                         "Bitget batch failure after ids {ids:?}: {}",
-                        d.failure_list
-                            .iter()
-                            .map(|e| e.error_msg.as_str())
-                            .collect::<Vec<_>>()
-                            .join("; ")
+                        failures.join("; ")
                     ));
+                    answer = Answer::Batch {
+                        expected,
+                        accepted: ids.clone(),
+                        failures,
+                    };
                 } else if ids.len() != expected {
                     unproven = true;
+                    answer = Answer::Unproven;
                     error = Some(format!(
                         "Bitget acknowledged {} of {expected} orders; ids {ids:?}",
                         ids.len()
                     ));
                 }
                 if !ids.is_empty() {
-                    let p = &request.call.payload;
-                    let symbol = p.symbol.clone().unwrap_or_default();
-                    for id in &ids {
-                        if cx
-                            .store
-                            .orders()
-                            .iter()
-                            .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
-                            || self.order_terminal(id)
-                        {
-                            continue;
-                        }
-                        let strategy = matches!(
-                            request.call.path,
-                            paths::PLACE_TPSL | paths::PLACE_TRAILING | paths::UTA_STRATEGY
-                        );
-                        let mut payload = if self.account.uta {
-                            Payload {
-                                category: (!strategy).then(|| self.product().to_uppercase()),
-                                order_id: Some(id.clone()),
-                                ..Payload::default()
-                            }
-                        } else {
-                            let mut payload = Payload {
-                                symbol: Some(symbol.clone()),
-                                product_type: p.product_type.clone(),
-                                margin_coin: p.margin_coin.clone(),
-                                ..Payload::default()
-                            };
-                            if strategy {
-                                payload.plan_type = p.plan_type.clone();
-                                if request.call.path == paths::PLACE_TRAILING {
-                                    payload.order_id_list = Some(vec![CancelId {
-                                        order_id: id.clone(),
-                                    }]);
-                                } else {
-                                    payload.order_id = Some(id.clone());
-                                }
-                            } else {
-                                payload.order_id_list = Some(vec![CancelId {
-                                    order_id: id.clone(),
-                                }]);
-                            }
-                            payload
-                        };
-                        if p.client_oid.as_deref() == Some(id)
-                            && data.is_some_and(|d| d.order_id.text().is_empty())
-                        {
-                            // Native identity was not returned: only UTA accepts a client-id cancel here.
-                            if self.account.uta {
-                                payload.order_id = None;
-                                payload.client_oid = Some(id.clone());
-                            }
-                        }
-                        let kind = if strategy {
-                            if request.call.path == paths::PLACE_TRAILING {
-                                OrderType::TrailingStopLoss
-                            } else if p.plan_type.as_deref().is_some_and(|t| t.contains("profit")) {
-                                OrderType::TakeProfit
-                            } else {
-                                OrderType::StopLoss
-                            }
-                        } else {
-                            OrderType::Limit
-                        };
-                        let order = Order {
-                            id: id.clone(),
-                            symbol: symbol.clone(),
-                            kind,
-                            parent_id: None,
-                            status: OrderStatus::Open,
-                            side: OrderSide::Buy,
-                            price: 0.0,
-                            amount: 0.0,
-                            filled: 0.0,
-                            remaining: 0.0,
-                            reduce_only: false,
-                            close: None,
-                            client_order_id: None,
-                            time_in_force: None,
-                            last_update: cx.now,
-                            trigger_type: None,
-                            take_profit: None,
-                            stop_loss: None,
-                            extra: None,
-                        };
-                        let unresolved = !self.account.uta
-                            && p.client_oid.as_deref() == Some(id)
-                            && data.is_some_and(|d| d.order_id.text().is_empty());
-                        self.trading.acknowledged.insert(
-                            id.clone(),
-                            (
-                                symbol.clone(),
-                                Planned {
-                                    path: if unresolved {
-                                        ""
-                                    } else if self.account.uta {
-                                        if strategy {
-                                            paths::UTA_CANCEL_STRATEGY
-                                        } else {
-                                            paths::UTA_CANCEL
-                                        }
-                                    } else if strategy {
-                                        paths::CANCEL_PLAN
-                                    } else {
-                                        paths::BATCH_CANCEL
-                                    },
-                                    payload,
-                                    effect: Effect::Cancel {
-                                        orders: vec![order],
-                                        idempotent_missing: true,
-                                    },
-                                },
-                            ),
-                        );
-                    }
+                    self.acknowledge(cx, &request, data, &ids);
                     self.note_write(cx);
                     write_noted = true;
                 }
                 if error.is_none() {
-                    let p = &request.call.payload;
-                    let trailing = p
-                        .callback_ratio
-                        .as_ref()
-                        .or(p.new_callback_ratio.as_ref())
-                        .and_then(|v| v.parse().ok())
-                        .map(|v| ("ratio".to_owned(), v))
-                        .or_else(|| {
-                            p.trailing_stop_params
-                                .as_ref()
-                                .and_then(|rows| rows.first())
-                                .and_then(|v| {
-                                    v.trail_variance
-                                        .parse()
-                                        .ok()
-                                        .map(|variance| (v.trail_type.to_owned(), variance))
-                                })
-                        });
-                    if let Some(trailing) = trailing {
-                        for id in &ids {
-                            if self.order_revision(id) <= request.stream_revision {
-                                self.account.trailing.insert(id.clone(), trailing.clone());
-                            }
-                        }
-                    }
+                    self.retain_trailing(&request, &ids);
                 }
                 job.ids.extend(ids);
             }
         }
-        if let Some(error) = error {
-            let error = match (&parsed, status) {
-                (_, None) => VenueError::new(error)
-                    .kind(ErrorKind::Network)
-                    .outcome(Outcome::Unknown),
-                _ if unproven => VenueError::new(error).outcome(Outcome::Unknown),
-                (Ok((status, reply)), _) if explicit_rejection => {
-                    let error = VenueError::new(error).kind(match status {
+        if let Some(message) = error {
+            self.record_once(cx, &request, native, answer, &message, &mut recorded);
+            let error = match &parsed {
+                _ if unproven => VenueError::new(message).outcome(Outcome::Unknown),
+                Ok(reply) if explicit_rejection => {
+                    let error = VenueError::new(message).kind(match status {
                         401 => ErrorKind::AuthInvalid,
                         403 => ErrorKind::AuthPermission,
                         429 => ErrorKind::RateLimited,
@@ -1941,57 +2244,30 @@ impl BitgetFutures {
                     error.outcome(Outcome::Rejected)
                 }
                 // Explicit per-order refusals in a 2xx answer, without a documented code table.
-                (Ok((200, reply)), _) if reply.code.0 == Some(0.0) => VenueError::new(error),
+                Ok(reply) if status == 200 && reply.code.0 == Some(0.0) => VenueError::new(message),
                 // 408, 5xx, malformed answers and Bitget's ambiguous codes.
-                _ => VenueError::new(error).outcome(Outcome::Unknown),
+                _ => VenueError::new(message).outcome(Outcome::Unknown),
             };
-            if matches!(request.call.effect, Effect::Place { .. }) {
+            if request.call.is_place() {
                 self.account.orders_version = self.account.orders_version.wrapping_add(1);
             }
-            if let Effect::Cancel { orders, .. } = &request.call.effect {
-                for order in orders {
-                    cx.store.update_order(&order.id, |current| {
-                        if current.status == OrderStatus::Canceling {
-                            current.status = order.status;
-                        }
-                    });
-                }
-            }
+            restore_canceling(cx, &request.call);
             if explicit_rejection
-                && matches!(request.call.effect, Effect::Place { .. })
+                && request.call.is_place()
                 && job.error.is_none()
                 && let Some(rollback) = job.rollback.take()
             {
                 job.error = Some(error);
                 job.calls.clear();
                 job.calls.push_back(rollback);
-                self.trading.active = Some(job);
-                self.resume_trading(cx);
-                return;
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
             }
-            let error = match job.error.take() {
-                None => error,
-                Some(original) => VenueError {
-                    message: format!(
-                        "{}; protection rollback failed: {}",
-                        original.message, error.message
-                    ),
-                    // A lost or unproven rollback makes the result Unknown, with its kind.
-                    kind: if error.outcome == Some(Outcome::Unknown) {
-                        error.kind
-                    } else {
-                        original.kind
-                    },
-                    outcome: error.outcome.filter(|o| *o == Outcome::Unknown),
-                    ..original
-                },
-            };
-            self.trade_fail(cx, &job, error);
+            let error = with_rollback(job.error.take(), error);
+            self.end(cx, job, current, error);
             self.refresh_orders(cx, false);
-            self.resume_trading(cx);
             return;
         }
-        match request.call.effect {
+        match &request.call.effect {
             Effect::Cancel { orders, .. } => {
                 for order in orders {
                     self.mark_canceled(cx, &order.id);
@@ -2006,31 +2282,36 @@ impl BitgetFutures {
                 let next = parsed
                     .as_ref()
                     .ok()
-                    .and_then(|(_, reply)| reply.data.as_ref())
+                    .and_then(|reply| reply.data.as_ref())
                     .map(|d| d.order_id.text().into_owned())
-                    .filter(|s| !s.is_empty() && s != &id);
+                    .filter(|s| !s.is_empty() && s != id);
                 if let Some(next) = next {
                     self.commit_amend(
                         cx,
-                        &id,
+                        id,
                         &next,
-                        (price, amount, job.original.clone(), request.stream_revision),
-                        &client,
+                        (
+                            *price,
+                            *amount,
+                            job.original.clone(),
+                            request.stream_revision,
+                        ),
+                        client,
                     );
+                    answer = Answer::Accepted(vec![next.clone()]);
                     job.ids.push(next);
                 } else {
-                    let symbol = request.call.payload.symbol.clone();
                     job.calls.push_front(Planned {
                         path: paths::ORDER_DETAIL,
                         payload: Payload {
-                            symbol,
+                            symbol: request.call.payload.symbol.clone(),
                             ..Payload::default()
                         },
                         effect: Effect::ResolveAmend {
-                            id,
-                            price,
-                            amount,
-                            client,
+                            id: id.clone(),
+                            price: *price,
+                            amount: *amount,
+                            client: client.clone(),
                         },
                     });
                 }
@@ -2044,58 +2325,62 @@ impl BitgetFutures {
                 let next = parsed
                     .as_ref()
                     .ok()
-                    .and_then(|(_, reply)| reply.data.as_ref())
+                    .and_then(|reply| reply.data.as_ref())
                     .map(|d| d.order_id.text().into_owned())
-                    .filter(|s| !s.is_empty() && s != &id);
-                if let Some(next) = next {
-                    let newer_stream = self.order_revision(&next) > request.stream_revision;
-                    self.commit_amend(
-                        cx,
-                        &id,
-                        &next,
-                        (price, amount, job.original.clone(), request.stream_revision),
-                        &client,
-                    );
-                    if !self.order_terminal(&next)
-                        && !newer_stream
-                        && let Some(data) = parsed.as_ref().ok().and_then(|(_, r)| r.data.as_ref())
-                    {
-                        let inverse = self.inverse();
-                        cx.store.update_order(&next, |o| {
-                            if !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled) {
-                                if let Some(filled) = data.base_volume.0 {
-                                    o.filled = filled;
-                                    amend_remaining(o, inverse);
-                                }
-                                if let Some(status) = crate::account::order_status(&data.status) {
-                                    o.status = status;
-                                }
-                            }
-                        });
-                        if crate::account::order_status(&data.status).is_some_and(|s| {
-                            matches!(s, OrderStatus::Closed | OrderStatus::Canceled)
-                        }) {
-                            self.mark_canceled(cx, &next);
-                        }
-                    }
-                    job.ids.push(next);
-                } else {
+                    .filter(|s| !s.is_empty() && s != id);
+                let Some(next) = next else {
                     let error = VenueError::new(
                         "Bitget amendment identity is not available; refresh before further edits",
                     );
-                    self.trade_fail(cx, &job, error);
+                    self.end(cx, job, current, error);
                     self.refresh_orders(cx, false);
-                    self.resume_trading(cx);
                     return;
+                };
+                let newer_stream = self.order_revision(&next) > request.stream_revision;
+                self.commit_amend(
+                    cx,
+                    id,
+                    &next,
+                    (
+                        *price,
+                        *amount,
+                        job.original.clone(),
+                        request.stream_revision,
+                    ),
+                    client,
+                );
+                if !self.order_terminal(&next)
+                    && !newer_stream
+                    && let Some(data) = parsed.as_ref().ok().and_then(|r| r.data.as_ref())
+                {
+                    let inverse = self.inverse();
+                    cx.store.update_order(&next, |o| {
+                        if !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled) {
+                            if let Some(filled) = data.base_volume.0 {
+                                o.filled = filled;
+                                amend_remaining(o, inverse);
+                            }
+                            if let Some(status) = crate::account::order_status(&data.status) {
+                                o.status = status;
+                            }
+                        }
+                    });
+                    if crate::account::order_status(&data.status)
+                        .is_some_and(|s| matches!(s, OrderStatus::Closed | OrderStatus::Canceled))
+                    {
+                        self.mark_canceled(cx, &next);
+                    }
                 }
+                job.ids.push(next);
             }
             Effect::Leverage {
                 symbol,
                 leverage,
                 side,
             } => {
+                let (leverage, side) = (*leverage, *side);
                 self.account.config_at = Some(cx.now);
-                cx.store.update_setting(&symbol, |s| match side {
+                cx.store.update_setting(symbol, |s| match side {
                     Some(PositionSide::Long) => {
                         s.leverage = leverage;
                         s.buy_leverage = Some(leverage);
@@ -2108,22 +2393,24 @@ impl BitgetFutures {
                     }
                 });
                 cx.store.update_positions(|p| {
-                    if p.symbol == symbol && side.is_none_or(|side| p.side == side) {
+                    if &p.symbol == symbol && side.is_none_or(|side| p.side == side) {
                         p.leverage = leverage;
                     }
                 });
             }
             Effect::Margin { symbol, margin } => {
+                let margin = *margin;
                 self.account.config_at = Some(cx.now);
                 cx.store
-                    .update_setting(&symbol, |s| s.margin_type = Some(margin));
+                    .update_setting(symbol, |s| s.margin_type = Some(margin));
                 cx.store.update_positions(|p| {
-                    if p.symbol == symbol {
+                    if &p.symbol == symbol {
                         p.margin_type = Some(margin);
                     }
                 });
             }
             Effect::Mode(hedged) => {
+                let hedged = *hedged;
                 self.account.config_at = Some(cx.now);
                 cx.store.set_hedged(hedged);
                 cx.store.update_positions(|p| {
@@ -2136,70 +2423,392 @@ impl BitgetFutures {
             }
             _ => {}
         }
+        if !request.call.read() {
+            self.record_once(cx, &request, native, answer, "", &mut recorded);
+        }
         if !write_noted && request.call.path != paths::ORDER_DETAIL {
             self.note_write(cx);
         }
         if request.call.path != paths::ORDER_DETAIL {
             job.effective = true;
         }
-        self.trading.active = Some(job);
-        self.resume_trading(cx);
+        self.drive(cx, job, At::Data(&request.slot, &request.context));
     }
 
-    pub(crate) fn trade_sign_failed(
+    /// Records a write's journal fact exactly once; reads keep none.
+    fn record_once(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        native: Option<Native<'_>>,
+        answer: Answer,
+        message: &str,
+        recorded: &mut bool,
+    ) {
+        if *recorded || request.call.read() {
+            return;
+        }
+        *recorded = true;
+        let context = &request.context;
+        let _ = match answer {
+            Answer::Accepted(order_ids) => cx
+                .http_write_fact(context, WriteFact::Accepted { order_ids }, None)
+                .map(drop),
+            Answer::Batch {
+                expected,
+                accepted,
+                failures,
+            } => {
+                let mut items: Vec<_> = accepted
+                    .iter()
+                    .map(|id| BatchItem::Accepted(id.as_str()))
+                    .collect();
+                items.extend(failures.iter().map(|failure| {
+                    BatchItem::Native(Native {
+                        code: NativeCode::None,
+                        message: failure.as_str(),
+                    })
+                }));
+                cx.http_write_batch(context, &CODES, expected, &items, message, None)
+                    .map(drop)
+            }
+            Answer::Unproven => cx.http_write_unproven(context, message),
+            Answer::Coded => cx
+                .classify_write(context, &CODES, native.as_ref(), message)
+                .and_then(|fact| {
+                    cx.http_write_fact(
+                        context,
+                        WriteFact::Failed {
+                            fact,
+                            known_effects: false,
+                        },
+                        None,
+                    )
+                })
+                .map(drop),
+        };
+    }
+
+    /// The 40085 promotion's own write fact: true when it proves a refusal.
+    fn record(&self, cx: &mut Cx<'_, Pending>, request: &Request, response: &Response<'_>) -> bool {
+        let reply = serde_json::from_str::<Reply>(response.body).ok();
+        let native = native_code(reply.as_ref(), response.status);
+        let message = reply.as_ref().map_or_else(String::new, |reply| {
+            format!(
+                "Bitget {}: {} (HTTP {})",
+                reply.code.get(),
+                reply.msg,
+                response.status
+            )
+        });
+        let Ok(fact) = cx.classify_write(&request.context, &CODES, native.as_ref(), message) else {
+            return false;
+        };
+        let proven = fact.verdict().is_refusal();
+        let _ = cx.http_write_fact(
+            &request.context,
+            WriteFact::Failed {
+                fact,
+                known_effects: false,
+            },
+            None,
+        );
+        proven
+    }
+
+    /// Native placement custody: each acknowledged ID keeps its own cancel call
+    /// until the stream observes it.
+    fn acknowledge(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        request: &Request,
+        data: Option<&ReplyData<'_>>,
+        ids: &[String],
+    ) {
+        let p = &request.call.payload;
+        let symbol = p.symbol.clone().unwrap_or_default();
+        for id in ids {
+            if cx
+                .store
+                .orders()
+                .iter()
+                .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
+                || self.order_terminal(id)
+            {
+                continue;
+            }
+            let strategy = matches!(
+                request.call.path,
+                paths::PLACE_TPSL | paths::PLACE_TRAILING | paths::UTA_STRATEGY
+            );
+            let mut payload = if self.account.uta {
+                Payload {
+                    category: (!strategy).then(|| self.product().to_uppercase()),
+                    order_id: Some(id.clone()),
+                    ..Payload::default()
+                }
+            } else {
+                let mut payload = Payload {
+                    symbol: Some(symbol.clone()),
+                    product_type: p.product_type.clone(),
+                    margin_coin: p.margin_coin.clone(),
+                    ..Payload::default()
+                };
+                if strategy {
+                    payload.plan_type = p.plan_type.clone();
+                    if request.call.path == paths::PLACE_TRAILING {
+                        payload.order_id_list = Some(vec![CancelId {
+                            order_id: id.clone(),
+                        }]);
+                    } else {
+                        payload.order_id = Some(id.clone());
+                    }
+                } else {
+                    payload.order_id_list = Some(vec![CancelId {
+                        order_id: id.clone(),
+                    }]);
+                }
+                payload
+            };
+            if p.client_oid.as_deref() == Some(id)
+                && data.is_some_and(|d| d.order_id.text().is_empty())
+            {
+                // Native identity was not returned: only UTA accepts a client-id cancel here.
+                if self.account.uta {
+                    payload.order_id = None;
+                    payload.client_oid = Some(id.clone());
+                }
+            }
+            let kind = if strategy {
+                if request.call.path == paths::PLACE_TRAILING {
+                    OrderType::TrailingStopLoss
+                } else if p.plan_type.as_deref().is_some_and(|t| t.contains("profit")) {
+                    OrderType::TakeProfit
+                } else {
+                    OrderType::StopLoss
+                }
+            } else {
+                OrderType::Limit
+            };
+            let order = Order {
+                id: id.clone(),
+                symbol: symbol.clone(),
+                kind,
+                parent_id: None,
+                status: OrderStatus::Open,
+                side: OrderSide::Buy,
+                price: 0.0,
+                amount: 0.0,
+                filled: 0.0,
+                remaining: 0.0,
+                reduce_only: false,
+                close: None,
+                client_order_id: None,
+                time_in_force: None,
+                last_update: cx.now,
+                trigger_type: None,
+                take_profit: None,
+                stop_loss: None,
+                extra: None,
+            };
+            let unresolved = !self.account.uta
+                && p.client_oid.as_deref() == Some(id)
+                && data.is_some_and(|d| d.order_id.text().is_empty());
+            self.trading.acknowledged.insert(
+                id.clone(),
+                (
+                    symbol.clone(),
+                    Planned {
+                        path: if unresolved {
+                            ""
+                        } else if self.account.uta {
+                            if strategy {
+                                paths::UTA_CANCEL_STRATEGY
+                            } else {
+                                paths::UTA_CANCEL
+                            }
+                        } else if strategy {
+                            paths::CANCEL_PLAN
+                        } else {
+                            paths::BATCH_CANCEL
+                        },
+                        payload,
+                        effect: Effect::Cancel {
+                            orders: vec![order],
+                            idempotent_missing: true,
+                        },
+                    },
+                ),
+            );
+        }
+    }
+
+    fn retain_trailing(&mut self, request: &Request, ids: &[String]) {
+        let p = &request.call.payload;
+        let trailing = p
+            .callback_ratio
+            .as_ref()
+            .or(p.new_callback_ratio.as_ref())
+            .and_then(|v| v.parse().ok())
+            .map(|v| ("ratio".to_owned(), v))
+            .or_else(|| {
+                p.trailing_stop_params
+                    .as_ref()
+                    .and_then(|rows| rows.first())
+                    .and_then(|v| {
+                        v.trail_variance
+                            .parse()
+                            .ok()
+                            .map(|variance| (v.trail_type.to_owned(), variance))
+                    })
+            });
+        if let Some(trailing) = trailing {
+            for id in ids {
+                if self.order_revision(id) <= request.stream_revision {
+                    self.account.trailing.insert(id.clone(), trailing.clone());
+                }
+            }
+        }
+    }
+
+    fn apply_symbol_config(&self, cx: &mut Cx<'_, Pending>, symbol: &str, row: &SymbolConfig) {
+        cx.store.set_hedged(is_hedged(&row.pos_mode));
+        let kind = margin(&row.margin_mode);
+        let leverage = if kind == MarginType::Cross {
+            row.crossed_margin_leverage.or(1.0)
+        } else {
+            first(&[row.isolated_long_lever, row.isolated_short_lever]).unwrap_or(1.0)
+        };
+        cx.store.update_setting(symbol, |s| {
+            s.leverage = leverage;
+            s.margin_type = Some(kind);
+            if kind == MarginType::Isolated && is_hedged(&row.pos_mode) {
+                if let Some(long) = row.isolated_long_lever.0 {
+                    s.buy_leverage = Some(long);
+                }
+                if let Some(short) = row.isolated_short_lever.0 {
+                    s.sell_leverage = Some(short);
+                }
+                // Legacy scalar settings represent the long rail.
+                s.leverage = s.buy_leverage.unwrap_or(leverage);
+            } else {
+                s.buy_leverage = Some(leverage);
+                s.sell_leverage = Some(leverage);
+            }
+        });
+    }
+
+    /// A call that failed before or after release. A released read may retry
+    /// natively (250·n ms, three times) on the Plan's own timer.
+    pub(crate) fn trade_call_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         mut error: VenueError,
+        released: bool,
     ) {
         let Some(mut job) = self.trading.active.take() else {
             return;
         };
-        if job.id != request.command {
+        if job.id != request.command || job.plan.is_none() {
             self.trading.active = Some(job);
             return;
         }
-        job.outstanding = false;
-        if let Effect::Cancel { orders, .. } = &request.call.effect {
-            for order in orders {
-                cx.store.update_order(&order.id, |current| {
-                    if current.status == OrderStatus::Canceling {
-                        current.status = order.status;
-                    }
-                });
+        let plan = job.plan.clone().expect("live Plan");
+        if request.call.read() {
+            if released && request.read_retries < 3 {
+                let delay = 250 * (u32::from(request.read_retries) + 1);
+                if cx
+                    .continue_serial_plan_after(
+                        &plan,
+                        &request.slot,
+                        &request.context,
+                        delay,
+                        serial(Operation::Read),
+                    )
+                    .is_ok()
+                {
+                    job.retry = Some(Request {
+                        read_retries: request.read_retries + 1,
+                        ..request
+                    });
+                    self.trading.active = Some(job);
+                    return;
+                }
             }
+            let resolve = request.call.is_resolve();
+            let error = if resolve {
+                error.outcome(Outcome::Unknown)
+            } else if self.account.uta {
+                not_sent("Bitget UTA metadata could not be resolved")
+            } else {
+                not_sent("Bitget position mode or margin type could not be resolved")
+            };
+            self.end(cx, job, None, error);
+            if resolve {
+                self.refresh_orders(cx, false);
+            }
+            return;
         }
-        if request.signature_retry {
-            // Earlier native attempt reached the venue; never call the command wholly unsent.
+        restore_canceling(cx, &request.call);
+        if released || request.signature_retry {
+            // A released write, or a resend after the first attempt reached the venue.
             error.outcome = Some(Outcome::Unknown);
         }
-        if let Some(original) = job.error.take() {
-            error = VenueError {
-                message: format!(
-                    "{}; protection rollback failed: {}",
-                    original.message, error.message
-                ),
-                kind: if error.outcome == Some(Outcome::Unknown) {
-                    error.kind
-                } else {
-                    original.kind
-                },
-                outcome: error.outcome.filter(|outcome| *outcome == Outcome::Unknown),
-                ..original
-            };
+        if released && request.call.is_place() {
+            self.account.orders_version = self.account.orders_version.wrapping_add(1);
         }
-        self.trade_fail(cx, &job, error);
-        self.resume_trading(cx);
+        let error = with_rollback(job.error.take(), error);
+        let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
+        self.end(cx, job, None, error);
+        if released {
+            self.refresh_orders(cx, false);
+        }
     }
 
-    /// Fails the job; after a write took effect it is never Rejected or NotSent.
-    fn trade_fail(&mut self, cx: &mut Cx<'_, Pending>, job: &Job, mut error: VenueError) {
-        if (job.effective || !job.ids.is_empty())
-            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-        {
-            error.outcome = None;
+    fn retry_read(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, request: Request) {
+        let plan = job.plan.clone().expect("live Plan");
+        let delay = 250 * (u32::from(request.read_retries) + 1);
+        match cx.continue_serial_plan_after(
+            &plan,
+            &request.slot,
+            &request.context,
+            delay,
+            serial(Operation::Read),
+        ) {
+            Ok(()) => {
+                job.retry = Some(Request {
+                    read_retries: request.read_retries + 1,
+                    ..request
+                });
+                self.trading.active = Some(job);
+            }
+            Err(reason) => {
+                let current = Some((&request.slot, &request.context));
+                let error = VenueError::new(reason.venue_error().message).outcome(Outcome::Unknown);
+                self.end(cx, job, current, error);
+                self.refresh_orders(cx, false);
+            }
         }
-        cx.fail(job.id, error);
+    }
+
+    /// Issues a read retry on the slot the Plan's timer handed back.
+    fn reissue(&mut self, cx: &mut Cx<'_, Pending>, job: Job, slot: Slot, retry: Request) {
+        let plan = job.plan.clone().expect("live Plan");
+        match cx.plan_leg_context(&plan, &slot) {
+            Ok(context) => {
+                let request = Request {
+                    slot,
+                    context,
+                    ..retry
+                };
+                self.send_call(cx, job, request);
+            }
+            Err(reason) => {
+                let error = VenueError::new(reason.venue_error().message);
+                self.end(cx, job, None, error);
+            }
+        }
     }
 
     fn commit_amend(
@@ -2239,50 +2848,6 @@ impl BitgetFutures {
             order.status = OrderStatus::Open;
             self.mark_opened(cx.now, next);
             cx.store.upsert_order(order);
-        }
-    }
-
-    fn retry_read(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, mut request: Request) {
-        request.read_retries += 1;
-        job.outstanding = true;
-        self.trading.active = Some(job);
-        self.trading.retry = Some((
-            cx.set_timer(250.0 * f64::from(request.read_retries)),
-            request,
-        ));
-    }
-
-    pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.trading.detect_wait == Some(timer) {
-            self.trading.detect_wait = None;
-            if let Some(job) = self.trading.active.take() {
-                let error = not_sent("Bitget account detection did not complete");
-                self.trade_fail(cx, &job, error);
-            }
-            while let Some(command) = self.trading.queue.pop_front() {
-                if let Some(id) = command_id(&command) {
-                    cx.fail(id, not_sent("Bitget account detection did not complete"));
-                }
-            }
-            return;
-        }
-        if self
-            .trading
-            .retry
-            .as_ref()
-            .is_some_and(|(t, _)| *t == timer)
-        {
-            let (_, request) = self.trading.retry.take().expect("retry");
-            if let Some(mut job) = self.trading.active.take() {
-                job.outstanding = false;
-                self.issue_trade(
-                    cx,
-                    job,
-                    request.call,
-                    request.signature_retry,
-                    request.read_retries,
-                );
-            }
         }
     }
 }
@@ -2521,4 +3086,140 @@ fn leverage_limit(value: f64, fallback: f64) -> f64 {
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+fn serial(operation: Operation) -> SerialCall {
+    SerialCall {
+        operation,
+        timeout_ms: CALL_MS,
+        // Mutations carry the one native 40009 resend; reads never resend.
+        attempts: if matches!(operation, Operation::Mutation) {
+            2
+        } else {
+            1
+        },
+    }
+}
+
+/// The engine's leg narrowing: an amend's replacement Place or Setting, and a
+/// placement's Cancel or Setting. Every other leg keeps the command's intent.
+fn narrowable(command: &Command, intent: Intent) -> bool {
+    matches!(
+        (command, intent),
+        (Command::AmendOrder { .. }, Intent::Place | Intent::Setting)
+            | (
+                Command::PlaceOrders { .. },
+                Intent::Cancel | Intent::Setting
+            )
+    )
+}
+
+/// The reply's native code as classifier evidence; Bitget codes are integers.
+/// Native classifies 401, 403 and 429 by status, so those carry none.
+fn native_code<'a>(reply: Option<&'a Reply<'a>>, status: u16) -> Option<Native<'a>> {
+    if matches!(status, 401 | 403 | 429) {
+        return None;
+    }
+    let reply = reply?;
+    let code = reply.code.0.filter(|code| code.fract() == 0.0)?;
+    Some(Native {
+        code: NativeCode::Int(code as i64),
+        message: &reply.msg,
+    })
+}
+
+fn failure_messages(failures: &[Failure]) -> Vec<String> {
+    failures.iter().map(|e| e.error_msg.clone()).collect()
+}
+
+fn restore_canceling(cx: &mut Cx<'_, Pending>, call: &Planned) {
+    if let Effect::Cancel { orders, .. } = &call.effect {
+        for order in orders {
+            cx.store.update_order(&order.id, |current| {
+                if current.status == OrderStatus::Canceling {
+                    current.status = order.status;
+                }
+            });
+        }
+    }
+}
+
+/// A failed protection rollback keeps the original refusal; a lost or
+/// unproven rollback makes the result Unknown, with its kind.
+fn with_rollback(original: Option<VenueError>, error: VenueError) -> VenueError {
+    match original {
+        None => error,
+        Some(original) => VenueError {
+            message: format!(
+                "{}; protection rollback failed: {}",
+                original.message, error.message
+            ),
+            kind: if error.outcome == Some(Outcome::Unknown) {
+                error.kind
+            } else {
+                original.kind
+            },
+            outcome: error.outcome.filter(|o| *o == Outcome::Unknown),
+            ..original
+        },
+    }
+}
+
+/// Order identities that let the engine reconcile a released write.
+pub(crate) fn trade_reconciliation(
+    request: &Request,
+) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
+    let data = serde_json::to_string(&request.call.identities())
+        .map_err(|_| safe_cex_engine::request_context::Error::Invalid)?;
+    ReconciliationData::new(data)
+}
+
+impl Job {
+    /// The operation the job issues next once a condition wait releases.
+    fn next_operation(&self) -> Operation {
+        if !self.metadata.is_empty() || self.calls.front().is_some_and(Planned::read) {
+            Operation::Read
+        } else {
+            Operation::Mutation
+        }
+    }
+}
+
+impl Planned {
+    fn is_place(&self) -> bool {
+        matches!(self.effect, Effect::Place { .. })
+    }
+
+    fn is_amend(&self) -> bool {
+        matches!(self.effect, Effect::Amend { .. })
+    }
+
+    fn is_resolve(&self) -> bool {
+        matches!(self.effect, Effect::ResolveAmend { .. })
+    }
+
+    fn read(&self) -> bool {
+        matches!(
+            self.effect,
+            Effect::Metadata(_) | Effect::ResolveAmend { .. }
+        )
+    }
+
+    fn operation(&self) -> Operation {
+        if self.read() {
+            Operation::Read
+        } else {
+            Operation::Mutation
+        }
+    }
+
+    fn intent(&self) -> Intent {
+        match self.effect {
+            Effect::Metadata(_) | Effect::ResolveAmend { .. } => Intent::Read,
+            Effect::Place { .. } => Intent::Place,
+            Effect::Cancel { .. } => Intent::Cancel,
+            Effect::Amend { .. } => Intent::Amend,
+            Effect::Leverage { .. } | Effect::Margin { .. } | Effect::Mode(_) => Intent::Setting,
+        }
+    }
 }

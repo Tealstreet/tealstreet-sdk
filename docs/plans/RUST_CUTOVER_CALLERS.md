@@ -7588,6 +7588,41 @@ waited with no deadline. A reply that arrives after its read expired publishes
 nothing and opens no sockets. Admission or queue refusals fail promptly into
 the same native backoff. The TS-visible startup results are unchanged.
 
+## Bitget trading write job under a streamed serial Plan
+
+PlaceOrders, CancelOrders, CancelSymbolOrders, AmendOrder, SetLeverage,
+SetMarginType and SetPositionMode for `bitget`, `bitgetusdc` and
+`bitgetinverse` now run as one command-owned streamed serial Plan behind a
+WriteAfterReads Preflight. The following are unchanged: entry precedence,
+planning, batching, endpoints, bodies, the `X-CHANNEL-API-CODE` header, the
+in-job reads signed with the Read role, the one fresh resend for an HTTP-200
+40009, the replan after an HTTP-200 40085, the native read retries, the
+accepted-ID order and the queue order.
+
+TS-visible changes:
+
+- **Per-call bound.** Each call ends at 20 s as a typed Timeout. A released
+  write that times out is Unknown and reconciles. Native had no request deadline.
+- **Capacity.** More than 256 concurrent commands are refused Capacity,
+  NotSent, before any send. That count covers the active job plus queued
+  writes. Placements stay bound by the existing 64 order-lock scopes.
+- **408/5xx before the native code.** A write answered 408 or 5xx is the
+  engine's unproven answer: "HTTP response does not prove the write outcome",
+  `VenueUnavailable`, Unknown. It reconciles on the next account tick. That
+  covers 500+40009, which no longer resends, and 500+40085, which no longer
+  replans (ruled 2026-10-25).
+- **401/403/429 by status.** These keep their native kinds, but the
+  projected failure no longer carries the native venue code.
+- **All-refused batch.** A 200/`00000` batch whose every row is in
+  `failureList` projects Rejected, because Bitget lists every order as not
+  placed. A mixed batch keeps outcome none with the accepted IDs.
+- **Empty acknowledgement.** An acknowledgement that accounts for no order is
+  kind Internal, Unknown.
+- **Refusal after a replan.** If a job that was replanned after a refused
+  40085 later fails (for example, detection expires), the terminal is that
+  40085 refusal (Rejected, its native text) rather than a NotSent detection
+  failure.
+
 ### TxFlow immediate local command custody
 
 Fifteen local occurrences now consume genuine command entry through shared Read

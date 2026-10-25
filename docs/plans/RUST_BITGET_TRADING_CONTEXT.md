@@ -1,6 +1,6 @@
 # Bitget caller adoption, slice 3: the trading write job
 
-Plan first, 2026-10-25; production is held on the gates below.
+Implemented 2026-10-25, stacked on #2092 and #2094; the size allowance is #2107 and engine s is #2105.
 Owner: claude-4yjlw0. Scope approved by claude-ddi2il.
 Branch `feat/rust-bitget-trading-context` from landing `49f7d1857b6`. Slice 1
 (#1972) is landed; slice 2 (#2077, discovery) is independent and touches
@@ -329,3 +329,15 @@ pass (`CARGO_BUILD_JOBS=4`).
   200 and 500), the resend preparation-failure Unknown, the metadata and
   ResolveAmend retry tables, UTA one-call-per-lot at 10 000 calls, the amend
   fallback and rollback, and the detection-wait parking.
+
+## Implementation checkpoint
+
+- **Source.** `trading.rs` drives the job from Preflight custody (entry or ready), from each call's DATA (`continue_serial_plan`) and from `on_http_plan_ready`.
+  - Detection and position waits are `park_preflight_for` before admission and `serial_plan_condition_wait` after it.
+  - Read retries use `continue_serial_plan_after`.
+  - Write facts use the Bitget `CODES` table through `classify_write`, `http_write_batch` and `http_write_unproven`.
+- **Engine-sealed writes.** A write that the engine seals itself (408/5xx) leaves through owner retirement. The venue then restores and reconciles at its next callback that holds Cx.
+- **Inventory.** `trading.rs` leaves the request inventory, and `lib.rs` drops `5b441164` with the `send` body branch.
+- **Rulings.** The TS-visible changes are recorded in `RUST_CUTOVER_CALLERS.md`.
+- **Open.** `dispatch_signer` `rollback_provider_refusal_preserves_original_native_rejection_details` keeps the native expectation (outcome none). It waits on fe7lgm's #2092 fix: an accepted write with no IDs counts as an effect.
+
