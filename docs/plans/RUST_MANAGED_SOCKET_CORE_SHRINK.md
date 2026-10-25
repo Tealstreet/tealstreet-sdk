@@ -23,24 +23,33 @@ about +16 KB. These buckets/symbols are not an additive shipped-byte budget:
 inlining and collection ownership overlap, and Binaryen changes reachability.
 The baseline and adoption comparisons above are distinct experiments.
 
-**Superseded baseline rows:** 55ao7t withdrew all five previously reported
-Bybit-ms/OKX/Phemex/Bitget/combined baseline sizes. Their source tree was not
-confirmed as c6a5, or their environment differed. None is an active baseline
-for this plan's estimates or a before/after comparison.
+The earlier unconfirmed five-row baseline table was superseded pending a fresh
+pair. 55ao7t now reports the following **fresh paired** builds on exact c6a5
+versus c6a5 plus (a)'s two inline-never attributes. All sizes are shipped bytes;
+these are owner execution evidence, not builds performed for this document.
 
-55ao7t's fresh c6a5 combined build is **13,907,484 B**, 1,125 B below the
-withdrawn combined value. This is owner-reported baseline-only evidence, not a
-measured (a) result or independent execution here. Fresh family rows and the
-paired (a) measurements are pending. Do not subtract the earlier prototype size
-from this baseline; a new paired prototype build on the exact common composition
-and toolchain is required.
+| Family composition | c6a5 baseline | c6a5 + (a) | Delta |
+| --- | ---: | ---: | ---: |
+| Bybit-ms, feature linked without adoption | 1,451,162 | 1,451,162 | 0 |
+| OKX | 1,123,368 | 1,123,368 | 0 |
+| Phemex | 1,139,332 | 1,139,332 | 0 |
+| Bitget | 1,360,487 | 1,360,487 | 0; identical hash |
+| Combined | 13,907,484 | 13,907,484 | 0 |
+
+The four family baseline values are freshly reconfirmed; the earlier combined
+13,908,609 remains superseded (1,125 B higher). Lever (a) is **NULL and dropped**:
+LLVM already emits handle_managed_socket (1,490 raw B) and drain_socket_frames
+(932 raw B) as standalone symbols. The reported raw difference is only ten
+crate-hash metadata bytes. No PR or additional CPU run is justified for (a).
+Do not subtract the earlier adoption prototype size from this feature-only
+baseline; measure the prototype on the exact common composition/toolchain.
 
 ## Ownership and existing work
 
 | Work | Owner and boundary | Evidence / relation |
 | --- | --- | --- |
-| #2127 sorted Vec map/set | 55ao7t; socket_lifecycle interest collections | Reported paired Bybit-ms -8,086 B, OKX -3,258, Phemex -8,079, Bitget 0, combined -11,350; not additional savings against a prototype already based on #2127. |
-| (a) outline socket ingress/drain | 55ao7t; inline-never on handle_managed_socket and drain_socket_frames only | Unmeasured at this checkpoint. The initially repeated #2127 numbers were explicitly withdrawn by 55ao7t. |
+| #2127 sorted Vec map/set | 55ao7t; LANDED 89a469d42b8, tree 1d1261cb055 | Reported paired Bybit-ms -8,086 B, OKX -3,258, Phemex -8,079, Bitget 0, combined -11,350; not additional savings against a prototype already based on #2127. |
+| (a) outline socket ingress/drain | 55ao7t; experiment completed and dropped, no PR | Fresh paired zero shipped bytes in all five compositions; not a remaining candidate. |
 | (c) field-driven ActionOut encoder | 55ao7t; hosts/wasm/src/lib.rs | Unmeasured; preserve exact serialization. |
 | (d) shared replacement block | 55ao7t; replace_with_repair helper | Unmeasured; no replacement semantic change. |
 | S1 generic Cx/Io extraction | dazzy3, local d826748665e on refactor/rust-engine-plan-core-s1 | 101 P-free methods into CoreCx/CoreIo/CoreRef; dyn PendingDiscard for one removal. Only socket_epoch moves from engine_socket.rs. |
@@ -54,7 +63,7 @@ missing 44 KB and must not be credited as a per-family saving.
 Current source already marks process_pending_socket_work, socket_refused,
 socket_effects, take/restore_socket_driver, Driver::finish_ingress and
 Driver::finish_control inline-never. Do not propose those
-existing attributes as new cuts. Keep (a), (c), (d) separate from this design;
+existing attributes as new cuts. Keep (c), (d) separate from this design;
 none of the estimates below may be added to their results without a union build.
 
 ## Proposed structure, in measurement order
@@ -197,9 +206,11 @@ Bitget is expected to have zero socket-only change, verified on every real pair.
 | Driver/Supervisor non-generic scheduling boundary | -2 to +4 KB | -2 to +4 KB | 0 for socket-only code | -3 to -10 KB, excluding S1's existing savings |
 | Explicit NONE non-adopter declaration | Up to the roughly 47 KB linked-feature overhead for a genuine non-adopter; **zero credit for adopted Bybit** | Not applicable to adopters | 0 | No promise; other adopters retain core |
 
-55ao7t's (a)/(c)/(d) and queue consolidation together have an independent rough
--10 to -20 KB family hypothesis from dazzy3, overlapping this table. These ranges
-do not establish recovery of 44 KB. If paired union results remain short, report
+Dazzy3's earlier rough -10 to -20 KB family hypothesis included (a)/(c)/(d)
+and queue consolidation. It overlapped this table and preceded (a)'s zero-byte
+result; it is not an active combined savings estimate. Remaining (c)/(d) plus
+storage cuts need their own measured union. These ranges do not establish
+recovery of 44 KB. If paired union results remain short, report
 the remaining bytes and code reachability before proposing another structural
 change; Bybit stays parked and its allowance/CPU bounds remain unchanged.
 
@@ -235,7 +246,9 @@ No arithmetic sum of independent PR savings and no net-size claim from twiggy.
 No source, tests, Cargo, build scripts, allowances, inventory or CI changed here.
 Coordination: dazzy3 confirmed the socket methods above are outside S1 and supplied
 its adverse single-family evidence; 55ao7t confirmed ownership of (a)/(c)/(d)
-and corrected the duplicated (a) measurement. Dazzy3 CLEARed ec4b70f0316 as a
+and corrected the duplicated (a) measurement, then supplied the fresh null
+result recorded above. #2127 is landed; (d), then (c), remain 55ao7t's work.
+Dazzy3 CLEARed ec4b70f0316 as a
 plan; 55ao7t reported no blockers, with baseline provenance, remaining handoff
 collections and the (d) cut-line corrections incorporated here. Pending-based
 capabilities and reuse of S1 CoreCx are design refinements awaiting exact API
