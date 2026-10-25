@@ -116,3 +116,18 @@ GREEN native controls, from `history_owned.rs`, `lookup.rs` and `queries_variant
 - Spot and COIN-M unsupported results with no I/O.
 
 Scoped Binance tests and strict checks only, with `CARGO_BUILD_JOBS=4`.
+
+## Executed original checkpoint
+
+`venues/binance/tests/history_context.rs`, run against the unchanged base: **5 assertion REDs, 0 ignored**. Each fails for its intended reason:
+
+| Test | Why it fails on the base |
+| --- | --- |
+| `a_fills_page_is_a_managed_read_preparation` | no managed preparation; a legacy signed request |
+| `a_client_order_lookup_is_a_managed_primary_preparation` | no managed Primary preparation |
+| `an_unanswered_history_page_ends_at_its_bound_as_a_typed_timeout` | no page bound |
+| `root_expiry_mid_walk_is_a_strict_timeout_without_rows` | native keeps walking: no terminal at root expiry |
+| `a_chunk_timer_firing_after_expiry_sends_nothing` | native sends the next `/income` chunk after the wait |
+
+The existing native controls in `history_owned.rs`, `lookup.rs` and `queries_variants.rs` are unchanged and stay GREEN.
+
