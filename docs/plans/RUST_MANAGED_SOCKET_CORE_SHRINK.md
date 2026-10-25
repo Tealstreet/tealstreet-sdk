@@ -1,6 +1,7 @@
 # Managed socket core size design
 
-Owner: codex-5c57jl. **Plan only; no implementation or build-policy change.**
+Plan author: codex-5c57jl. Implementation owner: 55ao7t (overseer transfer);
+codex-5c57jl reviews plan fit, fe7lgm reviews source.
 Source inspection baseline: actual `c6a5c4bb0a406fccd93db00e9d9db270fce1112b`.
 This supplements [the lifecycle contract](RUST_SOCKET_LIFECYCLE_CORE.md), rather
 than replacing its authority, timing, retirement or financial obligations.
@@ -149,6 +150,76 @@ complete callback/indirect reachability proof. First attribute the raw dominator
 subtrees for that constructor and continuation dispatch/drain on the prototype;
 use them to tighten the capability hypothesis before designing its API. Shared
 callees and indirect roots must not be credited as exclusive savings.
+
+### 1a. Step 1 amendment: handoff capability only
+
+Agreed with codex-5c57jl as a deliberate amendment to section 1, after the
+overseer's ruling (ddi2il): gate handoff first; S1 and queue/metadata
+consolidation next; then re-measure Bybit adoption on that composed tree.
+
+**Evidence (tip 12d7a19785a, local fresh builds, shipped bytes).** Bybit
+without managed-sockets 1,397,796; feature linked without adoption 1,444,265;
+prototype `0ca830b2d28` adopted 1,450,372. The prototype calls six managed Cx
+entries (register_socket_feed, connect_socket, set_socket_interests,
+retire_socket, socket_epoch, send) and never set_socket_interests_then. Raw
+attribution of unreached-but-linked handoff code is about 5.3 KB
+(handle_socket_continuation, arm/rebase/cancel, the Continuation queue). This is
+attribution, not a shipped saving.
+
+**Single issuer.** A Continuation is constructed only in propose_interests when
+`after` is Some, and only set_socket_interests_then passes Some.
+set_socket_interests and repair_socket_interests pass None. No engine, host or
+registry code calls set_socket_interests_then; venue callers are Hyperliquid,
+OKX and TxFlow.
+
+**API.**
+- `SocketCapabilities { handoff: bool }` (Copy) with `FULL = { handoff: true }`,
+  and `const SOCKET_CAPABILITIES: SocketCapabilities = SocketCapabilities::FULL`
+  as a Venue trait default: no specialization and no per-Pending impls.
+- Engine<V> dispatch reads `V::SOCKET_CAPABILITIES.handoff` directly, so a
+  narrow venue's continuation arms, rebase, cancel and drain are statically
+  omitted.
+- Admission reads only a private, immutable IoCore copy of that same
+  declaration, installed in every real Engine<V> constructor before any
+  callback. It has no setter, config path or reset; there is no runtime
+  negotiation or independently granted permission.
+- set_socket_interests_then returns `Err(SocketError::NotPermitted)` as its
+  first statement when handoff is absent: before opaque_entry_activity,
+  validation allocations, proposal IDs, timers or any internal retention. Its
+  signature already returns `Result<u64, SocketError>`. The caller's Pending and
+  Vec arguments are dropped exactly once, normally.
+- Desired proposals, batch release, replay and signing fences stay unconditional.
+
+**Stop is out of step 1.** Engine::sign_failed's forced stop_socket_feed,
+socket_refused, fatal stop_all, retirement and shutdown are mandatory safety
+paths, so the shared stop body stays linked, and gating only optional venue
+admission would save little while forcing a `()`-to-`Result` cutover. Every
+stop, retire and shutdown path and signature stays exactly as it is. Any later
+stop capability is its own measured proposal, with an optional-admission versus
+private-forced split and a typed refusal design up front. Repair, snapshot and
+S1 CoreCx are also outside step 1.
+
+**Declarations.** Step 1 changes no venue's declaration; every venue keeps FULL.
+Bybit declares `handoff: false` only in its adoption PR.
+
+**Original controls, before plumbing.**
+1. The construction mirror equals `V::SOCKET_CAPABILITIES` for FULL and narrow
+   test venues.
+2. One Pending type serves a FULL venue and a narrow venue.
+3. Narrow set_socket_interests_then is NotPermitted with zero proposal IDs,
+   timers, queued work, effects or opaque activity, retains nothing, and drops
+   the caller's Pending exactly once.
+4. FULL set_socket_interests_then still completes through its continuation
+   (existing Hyperliquid/OKX/TxFlow suites plus an engine control).
+5. A narrow venue's plain set_socket_interests, batch release, replay, forced
+   sign-failure stop and shutdown all behave as before.
+
+**Size.** The shipping step-1 delta is **unmeasured**: the added field and
+branches can change layout even with every declaration FULL. Measure the actual
+composed Bybit, Bitget and combined, as for any generic engine change. A
+controlled scratch-only Bybit-ms pair declaring `handoff: false` is reported
+separately. Neither is summed with other levers, and the prototype estimate is
+not certified.
 
 ### 2. Keep payload custody out of the shared continuation algorithm
 
