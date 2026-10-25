@@ -1640,6 +1640,8 @@ struct Io<P> {
 }
 
 impl Default for IoCore {
+    // One caller per venue engine: inline it, so a family pays no extra call or copy.
+    #[inline]
     fn default() -> Self {
         Self {
             request_contexts: Default::default(),
