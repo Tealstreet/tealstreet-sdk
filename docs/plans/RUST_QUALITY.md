@@ -1957,3 +1957,35 @@ entries, followed by a reachable positive. Nine safe real commands prove earlier
 dispatch before the deleted private-phase diagnostic. Library7 and trading42
 also pass, for67 scoped tests with no ignored controls. Strict GRVT all-target
 Clippy/fmt and full ratchets PASS; broad workspace/WASM/performance stay in CI.
+Metadata/settings freshness: BingX query ownership and both adapters' background
+Store observations/write fences use the shared settings boundary. WEEX explicit
+leverage reads retain incoming managed Context/native-revision behavior and do
+not coalesce. Its duplicate-config control remains; the following own unlanded
+controls were removed when that query cutover was excluded:
+
+- `metadata_owner_coalesces_native_config_and_completes_both_callers`
+- `metadata_owner_fails_both_joined_callers_and_keeps_good_settings`
+- `metadata_owner_preserves_secondary_only_get_credentials`
+- `metadata_started_during_a_write_stays_nonpublishing_after_refusal`
+- `an_old_account_config_cannot_overwrite_completed_metadata`
+
+No incoming WEEX test is deleted or weakened. BingX's four original entry
+assertions remain unchanged. Its Plan/observer adoption still requires the
+reviewed shared seam, typed provider-refusal/pending-owner controls, native
+retry/lease and observer denial matrix, plus fresh family replay/size gates.
+[Scope and proof](RUST_METADATA_FRESHNESS.md).
+
+## Paradex command candle controls
+
+The unchanged-source originals execute 24 controls (16 assertion RED/8 GREEN).
+All 24 bodies are retained after adoption; six appended controls cover zero wait,
+stream integrity, late Bind, retired generation, post-success 254-peer liveness
+and a positive fractional remainder. All 30 pass. The scoped crate passes 281,
+with strict all-target Clippy and formatting checked. One prior raw-at-capacity
+transport expectation is replaced with managed Capacity and two-slot recovery;
+its exact URL/method/headers/body assertions are retained.
+
+Optimized Node/web before 1,331,336 and after 1,339,096 bytes (+7,760) fit the unchanged
+1,343,488-byte venue budget, using wasm-bindgen 0.2.129 and Binaryen 132. Profiles,
+budgets and build inputs are unchanged. Local controls/measurements do not certify
+replay, CPU, memory, final integration or CI readiness.

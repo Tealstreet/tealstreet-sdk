@@ -851,6 +851,9 @@ mod command_entry_tests;
 #[cfg(test)]
 #[path = "command_wait_tests.rs"]
 mod command_wait_tests;
+#[cfg(all(test, feature = "order-locks"))]
+#[path = "order_lock_capacity_tests.rs"]
+mod order_lock_capacity_tests;
 #[cfg(test)]
 #[path = "read_root_expiry_tests.rs"]
 mod read_root_expiry_tests;
@@ -2473,6 +2476,8 @@ impl<P> Cx<'_, P> {
             panic!("HTTP owner retirement bookkeeping failed");
         }
         self.io.untrack_read_root(command);
+        #[cfg(feature = "metadata-freshness")]
+        self.store.metadata_write_finished(command);
         #[cfg(feature = "order-locks")]
         {
             if write_sealed
@@ -3714,7 +3719,7 @@ impl<V: Venue> Engine<V> {
         );
     }
 
-    fn handle_event_scoped(&mut self, now: f64, event: Event<'_>, _physical_timeout: bool) {
+    fn handle_event_scoped(&mut self, now: f64, mut event: Event<'_>, _physical_timeout: bool) {
         // A new event cannot borrow an in-flight managed command's generation.
         // Sibling legs originate under Cx authority, not a repeated wire command.
         if let Event::Command(command) = &event
@@ -3724,24 +3729,29 @@ impl<V: Venue> Engine<V> {
             self.duplicate_command();
             return;
         }
-        if self.venue.cancel_needs_stored_order()
-            && !self.releasing
-            && let Event::Command(command) = &event
-        {
-            match command {
-                Command::PlaceOrders { command, .. } => self.io.placement_acks.placing(*command),
-                Command::CancelOrders { .. } | Command::AmendOrder { .. }
-                    if self.io.placement_acks.hold(
-                        &self.store,
-                        command,
-                        self.io.command_waits.receipt_of(command),
-                        now,
-                    ) =>
+        if self.venue.cancel_needs_stored_order() && !self.releasing {
+            if let Event::Command(Command::PlaceOrders { command, .. }) = &event {
+                self.io.placement_acks.placing(*command);
+            } else if matches!(
+                &event,
+                Event::Command(Command::CancelOrders { .. } | Command::AmendOrder { .. })
+            ) {
+                // Moved, not cloned, into the hold.
+                let Event::Command(command) = event else {
+                    unreachable!()
+                };
+                let receipt = self.io.command_waits.receipt_of(&command);
+                match self
+                    .io
+                    .placement_acks
+                    .hold(&self.store, command, receipt, now)
                 {
-                    self.release_held(now);
-                    return;
+                    Ok(()) => {
+                        self.release_held(now);
+                        return;
+                    }
+                    Err(command) => event = Event::Command(command),
                 }
-                _ => {}
             }
         }
         if self.public_feed_policy() != PublicFeedPolicy::Direct
@@ -4000,21 +4010,28 @@ impl<V: Venue> Engine<V> {
                     }
                     if (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements())
-                        && let Err(id) = cx.io.order_locks.acquire(
+                        && let Err(refusal) = cx.io.order_locks.acquire(
                             &command,
                             cx.store,
                             self.venue.fence_uncertain_cancel_all(),
                         )
                     {
-                        let error = match &command {
-                            Command::CancelSymbolOrders { symbol, .. }
+                        let error = match (refusal, &command) {
+                            (crate::order_locks::Refusal::Capacity(_), _) => {
+                                VenueError::new(crate::order_locks::CAPACITY_REACHED)
+                                    .kind(ErrorKind::Internal)
+                                    .outcome(crate::Outcome::NotSent)
+                            }
+                            (_, Command::CancelSymbolOrders { symbol, .. })
                                 if self.venue.fence_uncertain_cancel_all()
                                     && cx.io.order_locks.uncertain(symbol) =>
                             {
-                                "Placement outcome is uncertain; reconcile before cancel-all"
+                                "Placement outcome is uncertain; reconcile before cancel-all".into()
                             }
-                            _ => "Order amendment or cancellation is already in flight",
+                            _ => "Order amendment or cancellation is already in flight".into(),
                         };
+                        let (crate::order_locks::Refusal::Conflict(id)
+                        | crate::order_locks::Refusal::Capacity(id)) = refusal;
                         cx.refuse_before_entry(id, error);
                         return;
                     }
