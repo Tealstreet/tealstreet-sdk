@@ -10,7 +10,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick, Timeout};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, VenueError,
@@ -68,10 +68,12 @@ pub enum Pending {
     Trade(trading::Request),
     Account(account::Request),
     Markets {
+        context: Context,
         rows: Vec<Market>,
         invalid: bool,
     },
     Tickers {
+        context: Context,
         rows: Vec<Ticker>,
         invalid: bool,
     },
@@ -151,6 +153,13 @@ pub struct Orderly {
     funding: funding::FundingState,
 }
 impl Orderly {
+    fn seed_context(pending: &Pending) -> Option<(Seed, &Context)> {
+        match pending {
+            Pending::Markets { context, .. } => Some((Seed::Markets, context)),
+            Pending::Tickers { context, .. } => Some((Seed::Tickers, context)),
+            _ => None,
+        }
+    }
     fn candle_context(pending: &Pending) -> Option<&Context> {
         match pending {
             Pending::Candles { context, .. } | Pending::CandleHistory { context, .. } => {
@@ -169,7 +178,7 @@ impl Orderly {
         let context = Self::candle_context(&pending)
             .expect("candle continuation")
             .clone();
-        match cx.request_managed(context, Method::Get, url, None, pending) {
+        match cx.request_managed(context, None, Method::Get, url, None, pending) {
             Ok(request) => {
                 if streamed {
                     cx.stream_response(request, ArrayAt::Path(&["data", "rows"]));
@@ -270,11 +279,28 @@ impl Orderly {
             true
         }
     }
-    fn seed(&self, cx: &mut Cx<'_, Pending>, kind: Seed) {
+    fn seed(&mut self, cx: &mut Cx<'_, Pending>, kind: Seed) {
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.retry_seed(cx, kind, &error.to_string());
+                return;
+            }
+        };
         let (path, pending) = match kind {
             Seed::Markets => (
                 "/v1/public/info",
                 Pending::Markets {
+                    context: context.clone(),
                     rows: vec![],
                     invalid: false,
                 },
@@ -282,22 +308,29 @@ impl Orderly {
             Seed::Tickers => (
                 "/v1/public/futures",
                 Pending::Tickers {
+                    context: context.clone(),
                     rows: vec![],
                     invalid: false,
                 },
             ),
         };
-        cx.request_streamed(
+        match cx.request_managed(
+            context,
+            None,
             Method::Get,
             format!("{}{path}", self.rest()),
-            vec![],
-            ArrayAt::Path(&["data", "rows"]),
+            None,
             pending,
-        );
+        ) {
+            Ok(request) => cx.stream_response(request, ArrayAt::Path(&["data", "rows"])),
+            Err((pending, error)) => self.on_request_failed(cx, pending, &error.to_string()),
+        }
     }
     fn retry_seed(&mut self, cx: &mut Cx<'_, Pending>, kind: Seed, error: &str) {
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-        self.seed_backoff.failed(cx, kind);
+        if cx.now.is_finite() {
+            self.seed_backoff.failed(cx, kind);
+        }
     }
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, topic: &str, add: bool) {
         if !self.public.open {
@@ -746,6 +779,11 @@ impl Venue for Orderly {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Some((_, context)) = Self::seed_context(pending)
+            && cx.validate_background_read_http_delivery(context).is_err()
+        {
+            return;
+        }
         if let Some(context) = Self::candle_context(pending)
             && let Err(reason) = cx.validate_read_http_delivery(context, context)
         {
@@ -885,6 +923,12 @@ impl Venue for Orderly {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Some((_, context)) = Self::seed_context(&pending)
+            && let Err(error) = cx.validate_background_read_http_delivery(context)
+        {
+            self.on_request_failed(cx, pending, &error.to_string());
+            return;
+        }
         if let Some(context) = Self::candle_context(&pending)
             && let Err(reason) = cx.validate_read_http_delivery(context, context)
         {
@@ -927,46 +971,66 @@ impl Venue for Orderly {
         }
         match pending {
             Pending::Markets {
+                context,
                 rows,
                 invalid: false,
             } => {
                 if rows.is_empty() {
-                    self.seed_backoff.failed(cx, Seed::Markets);
+                    if cx.finish_http_context(&context).is_ok() {
+                        self.seed_backoff.failed(cx, Seed::Markets);
+                    }
                     return;
                 }
                 let mut native = HashMap::new();
                 for m in &rows {
                     let Some(settlement) = m.symbol.strip_prefix(&m.base) else {
-                        self.retry_seed(cx, Seed::Markets, "Orderly invalid market identity");
+                        if cx.finish_http_context(&context).is_ok() {
+                            self.retry_seed(cx, Seed::Markets, "Orderly invalid market identity");
+                        }
                         return;
                     };
                     let actual = format!("PERP_{}_{settlement}", m.base);
                     if native_parts(&actual).is_none()
                         || native.insert(m.symbol.clone(), actual).is_some()
                     {
-                        self.retry_seed(
-                            cx,
-                            Seed::Markets,
-                            "Orderly duplicate or invalid market identity",
-                        );
+                        if cx.finish_http_context(&context).is_ok() {
+                            self.retry_seed(
+                                cx,
+                                Seed::Markets,
+                                "Orderly duplicate or invalid market identity",
+                            );
+                        }
                         return;
                     }
                 }
                 self.native = native;
                 cx.store.set_markets(rows);
+                if cx.finish_http_context(&context).is_err() {
+                    return;
+                }
                 self.seed_backoff.succeeded(cx, &Seed::Markets);
                 self.account_start(cx);
                 self.seed(cx, Seed::Tickers);
             }
             Pending::Tickers {
+                context,
                 rows,
                 invalid: false,
             } => {
                 if rows.is_empty() {
-                    self.retry_seed(cx, Seed::Tickers, "Orderly ticker list has no usable rows");
+                    if cx.finish_http_context(&context).is_ok() {
+                        self.retry_seed(
+                            cx,
+                            Seed::Tickers,
+                            "Orderly ticker list has no usable rows",
+                        );
+                    }
                     return;
                 }
                 cx.store.set_tickers(rows);
+                if cx.finish_http_context(&context).is_err() {
+                    return;
+                }
                 self.seed_backoff.succeeded(cx, &Seed::Tickers);
                 self.connect_public(cx);
                 self.funding_start(cx);
@@ -1004,6 +1068,12 @@ impl Venue for Orderly {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Some((kind, context)) = Self::seed_context(&pending) {
+            if cx.finish_http_context(context).is_ok() {
+                self.retry_seed(cx, kind, error);
+            }
+            return;
+        }
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => {
@@ -1020,8 +1090,7 @@ impl Venue for Orderly {
                 }
             }
             Pending::History(request) => self.history_failed(cx, request, error),
-            Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
-            Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
+            Pending::Markets { .. } | Pending::Tickers { .. } => unreachable!(),
             Pending::Candles { context, .. } | Pending::CandleHistory { context, .. } => {
                 let _ = cx.fail_context(&context, error);
             }
@@ -1294,3 +1363,7 @@ impl Venue for Orderly {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/public_seed_custody.rs"]
+mod public_seed_custody;

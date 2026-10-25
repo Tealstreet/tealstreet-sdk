@@ -53,7 +53,7 @@ test('every cargo-caching Rust job prefetches after its toolchain and fetches gi
   assert.match(env, /CARGO_NET_RETRY: '\d+'/);
   const jobs = workflow.slice(workflow.indexOf('\njobs:\n')).split(/\n  (?=[a-z][a-z0-9-]*:\n)/).slice(1);
   const cargoJobs = jobs.filter((job) => job.includes('~/.cargo/git'));
-  assert.deepEqual(cargoJobs.map((job) => job.split(':')[0]), ['native', 'wasm', 'families', 'gate']);
+  assert.deepEqual(cargoJobs.map((job) => job.split(':')[0]), ['native', 'wasm', 'mutation-barrier-size', 'families', 'gate']);
   for (const job of cargoJobs) {
     const toolchain = job.indexOf('rustup show');
     const prefetch = job.indexOf('uses: ./.github/actions/prefetch-cargo');

@@ -14,8 +14,7 @@ use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Prec
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId,
-    Venue,
+    Command, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
 use std::collections::HashMap;
 use wire::*;
@@ -28,6 +27,8 @@ const PUBLIC_READ_HEADERS: &[(&str, &str)] = &[("X-Broker-Id", "1200")];
 #[derive(Default)]
 pub struct Options {
     pub identity: Option<safe_cex_engine::signing::Identity>,
+    pub read_identity: Option<safe_cex_engine::signing::Identity>,
+    pub read_credentials_status: Option<Result<(), sign::ReadCredentialsError>>,
     pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
     pub key: Option<String>,
@@ -46,7 +47,7 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 }
 
 pub enum Pending {
-    Identity(CommandId),
+    Identity(identity::Request),
     BookQuery {
         context: Context,
     },
@@ -218,7 +219,13 @@ impl Backpack {
         }
         self.seed.backoff.failed(cx, kind);
     }
-    pub fn new(options: Options) -> Self {
+    pub fn new(mut options: Options) -> Self {
+        if options.read_credentials_status.is_none() {
+            options.read_credentials_status = options
+                .read_credentials
+                .as_ref()
+                .map(|read| sign::validate_read_credentials(read.validate(), &read.secret));
+        }
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
@@ -358,6 +365,7 @@ impl Backpack {
         let url = format!("{REST}/api/v1/depth?{}", sign::query(&params));
         if let Err((pending, reason)) = cx.request_managed_with_headers(
             context.clone(),
+            None,
             Method::Get,
             url,
             PUBLIC_READ_HEADERS,
@@ -627,16 +635,12 @@ impl Venue for Backpack {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read.validate()
-        {
-            cx.notice(safe_cex_engine::Level::Error, code::CONFIG_INVALID, error);
-            return;
-        }
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = sign::Credentials::new(read.key.clone(), &read.secret)
-        {
-            cx.notice(safe_cex_engine::Level::Error, code::CONFIG_INVALID, error);
+        if let Some(Err(error)) = self.options.read_credentials_status {
+            cx.notice(
+                safe_cex_engine::Level::Error,
+                code::CONFIG_INVALID,
+                error.message(),
+            );
             return;
         }
         self.seed_read(cx, SeedRead::Markets);
@@ -899,8 +903,8 @@ impl Venue for Backpack {
             self.book_query_response(cx, &context, response);
             return;
         }
-        if let Pending::Identity(command) = pending {
-            self.identity_response(cx, command, response);
+        if let Pending::Identity(request) = pending {
+            self.identity_response(cx, request, response);
             return;
         }
         if let Pending::History(request) = pending {
@@ -1080,6 +1084,7 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error);
@@ -1099,6 +1104,7 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error);
             }
@@ -1115,6 +1121,7 @@ impl Venue for Backpack {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             pending => self.on_request_failed(cx, pending, &error.message),
         }
@@ -1145,8 +1152,8 @@ impl Venue for Backpack {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Identity(command) = pending {
-            self.identity_failed(cx, command, error);
+        if let Pending::Identity(request) = pending {
+            self.identity_failed(cx, request, safe_cex_engine::VenueError::new(error));
             return;
         }
         match pending {
@@ -1339,6 +1346,7 @@ impl Venue for Backpack {
                 let url = format!("{REST}/api/v1/klines?{}", sign::query(&params));
                 match cx.request_managed_with_headers(
                     context.clone(),
+                    None,
                     Method::Get,
                     url,
                     PUBLIC_READ_HEADERS,
@@ -1369,6 +1377,7 @@ impl Venue for Backpack {
                 let url = format!("{REST}/api/v1/depth?{}", sign::query(&params));
                 if let Err((pending, error)) = cx.request_managed_with_headers(
                     context.clone(),
+                    None,
                     Method::Get,
                     url,
                     PUBLIC_READ_HEADERS,

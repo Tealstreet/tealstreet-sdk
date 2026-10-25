@@ -1,13 +1,17 @@
 //! Independent settlement-account reconciliation and authenticated AOP stream.
 pub use crate::account_wire::Context;
 use crate::account_wire::{AccountRow, OrderRow, PositionRow, integer, order_side};
+use crate::read_owners::Background;
 use crate::{Pending, PhemexPerpetuals};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
+use safe_cex_engine::credential_selection::PrimaryReason;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Context as ReadContext, Error as ReadError};
+use safe_cex_engine::selected_read::{ReadRequest, ReadRole};
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
@@ -96,6 +100,7 @@ pub struct OrdersRead {
 struct Reconcile {
     generation: u64,
     reading: bool,
+    context: Option<ReadContext>,
     not_before: f64,
     failures: u32,
     incomplete: u32,
@@ -123,6 +128,7 @@ pub struct State {
     started: bool,
     cycle: u64,
     pending: u8,
+    reads: [Option<ReadContext>; 2],
     failed: bool,
     failures: u32,
     deadline: Option<TimerId>,
@@ -355,15 +361,44 @@ impl PhemexPerpetuals {
                 versions: HashMap::new(),
                 hold: false,
             };
-            self.request(
+            let read = match self.background_read(cx, ReadRole::Read { scope: None }) {
+                Ok(read) => read,
+                Err(error) => {
+                    self.account_failed(cx, request, &error.message);
+                    continue;
+                }
+            };
+            self.account.reads[currency] = Some(read.context().clone());
+            let path = "/g-accounts/accountPositions";
+            let query = format!("currency={name}");
+            let queued = read.queue(
                 cx,
-                Method::Get,
-                "/g-accounts/accountPositions",
-                &format!("currency={name}"),
-                None,
-                Pending::Account(request),
-                Some(ArrayAt::Path(&["data", "positions"])),
+                ReadRequest {
+                    method: Method::Get,
+                    url: format!("{}{path}?{query}", self.rest()),
+                    body: None,
+                    stream: Some(ArrayAt::Path(&["data", "positions"])),
+                },
+                |identity| {
+                    Box::new(crate::dispatch_signing::Http::new(
+                        identity.clone(),
+                        self.options.testnet,
+                        Method::Get,
+                        path.into(),
+                        query,
+                        None,
+                    ))
+                },
+                |read| {
+                    Pending::Account(Background {
+                        read,
+                        native: request,
+                    })
+                },
             );
+            if let Err((Pending::Account(read), error)) = queued {
+                self.account_read_failed(cx, read, &error.read_venue_error().message);
+            }
         }
     }
     fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -440,6 +475,99 @@ impl PhemexPerpetuals {
                 ..Default::default()
             },
         ));
+    }
+    fn currency_read_current(&self, read: &Background<Request>) -> bool {
+        read.native.cycle == self.account.cycle
+            && self.account.pending & (1 << read.native.currency) != 0
+            && self.account.reads[read.native.currency].as_ref() == Some(read.read.context())
+    }
+    pub(crate) fn currency_read_delivery(
+        &self,
+        cx: &Cx<'_, Pending>,
+        read: &Background<Request>,
+    ) -> Result<(), ReadError> {
+        if !self.currency_read_current(read) {
+            return Err(ReadError::Revoked);
+        }
+        cx.validate_background_read_http_delivery(read.read.context())
+    }
+    pub(crate) fn account_read_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: Background<Request>,
+        response: Response<'_>,
+    ) {
+        let current = self.currency_read_current(&read);
+        let _ = cx.finish_http_context(read.read.context());
+        if current {
+            self.account.reads[read.native.currency] = None;
+            self.account_response(cx, read.native, response);
+        }
+    }
+    pub(crate) fn account_read_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: Background<Request>,
+        error: &str,
+    ) {
+        let current = self.currency_read_current(&read);
+        let _ = cx.finish_http_context(read.read.context());
+        if current {
+            self.account.reads[read.native.currency] = None;
+            self.account_failed(cx, read.native, error);
+        }
+    }
+    fn orders_read_current(&self, read: &Background<OrdersRead>) -> bool {
+        self.account
+            .reconcile
+            .get(&read.native.symbol)
+            .is_some_and(|entry| {
+                entry.reading && entry.context.as_ref() == Some(read.read.context())
+            })
+    }
+    pub(crate) fn orders_read_delivery(
+        &self,
+        cx: &Cx<'_, Pending>,
+        read: &Background<OrdersRead>,
+    ) -> Result<(), ReadError> {
+        if !self.orders_read_current(read) {
+            return Err(ReadError::Revoked);
+        }
+        cx.validate_background_read_http_delivery(read.read.context())
+    }
+    pub(crate) fn orders_background_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: Background<OrdersRead>,
+        body: &str,
+    ) {
+        let current = self.orders_read_current(&read);
+        let _ = cx.finish_http_context(read.read.context());
+        if current {
+            self.account
+                .reconcile
+                .get_mut(&read.native.symbol)
+                .expect("current read")
+                .context = None;
+            self.orders_read_response(cx, read.native, body);
+        }
+    }
+    pub(crate) fn orders_background_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: Background<OrdersRead>,
+        error: &str,
+    ) {
+        let current = self.orders_read_current(&read);
+        let _ = cx.finish_http_context(read.read.context());
+        if current {
+            self.account
+                .reconcile
+                .get_mut(&read.native.symbol)
+                .expect("current read")
+                .context = None;
+            self.orders_read_failed(cx, read.native, error);
+        }
     }
     pub(crate) fn account_item(
         &mut self,
@@ -1417,15 +1545,57 @@ impl PhemexPerpetuals {
                 "symbol={}",
                 crate::trading::encode(self.native_symbol(&symbol))
             );
-            self.request(
+            let request = OrdersRead {
+                symbol: symbol.clone(),
+                generation,
+            };
+            let read = match self.background_read(
                 cx,
-                Method::Get,
-                "/g-orders/activeList",
-                &query,
-                None,
-                Pending::Orders(OrdersRead { symbol, generation }),
-                None,
+                ReadRole::Primary {
+                    reason: PrimaryReason::PostUnknownOrderRead,
+                    scope: None,
+                },
+            ) {
+                Ok(read) => read,
+                Err(error) => {
+                    self.orders_read_failed(cx, request, &error.message);
+                    continue;
+                }
+            };
+            self.account
+                .reconcile
+                .get_mut(&symbol)
+                .expect("reserved read")
+                .context = Some(read.context().clone());
+            let path = "/g-orders/activeList";
+            let queued = read.queue(
+                cx,
+                ReadRequest {
+                    method: Method::Get,
+                    url: format!("{}{path}?{query}", self.rest()),
+                    body: None,
+                    stream: None,
+                },
+                |identity| {
+                    Box::new(crate::dispatch_signing::Http::new(
+                        identity.clone(),
+                        self.options.testnet,
+                        Method::Get,
+                        path.into(),
+                        query,
+                        None,
+                    ))
+                },
+                |read| {
+                    Pending::Orders(Background {
+                        read,
+                        native: request,
+                    })
+                },
             );
+            if let Err((Pending::Orders(read), error)) = queued {
+                self.orders_background_failed(cx, read, &error.read_venue_error().message);
+            }
         }
     }
     pub(crate) fn orders_read_response(
@@ -1636,6 +1806,11 @@ impl PhemexPerpetuals {
         }
         if self.account.deadline == Some(timer) {
             self.account.deadline = None;
+            for context in &mut self.account.reads {
+                if let Some(context) = context.take() {
+                    let _ = cx.finish_http_context(&context);
+                }
+            }
             self.account.cycle += 1;
             self.account.pending = 0;
             self.account.failures = self.account.failures.saturating_add(1);

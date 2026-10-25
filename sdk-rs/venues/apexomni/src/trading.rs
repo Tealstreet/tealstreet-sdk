@@ -926,6 +926,7 @@ impl ApexOmni {
                 &job.preflight,
                 &steps,
                 PlanPolicy {
+                    independent_calls: false,
                     operation: Operation::Mutation,
                     credential: Some(Credential {
                         slot: CredentialSlot::Primary,
@@ -1062,6 +1063,7 @@ impl ApexOmni {
         self.trading.waiting = true;
         if let Err((Pending::Trade(delivery), error)) = cx.request_signed_managed(
             delivery.context.clone(),
+            None,
             delivery.unsigned.method,
             url,
             None,

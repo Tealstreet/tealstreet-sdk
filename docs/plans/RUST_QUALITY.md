@@ -1869,3 +1869,123 @@ lookup/signer/root suites pass89 tests across7 targets; strict all-target Clippy
 formatting and request/credential ratchets cover the scoped change. Existing
 financial assertions and fixtures are unchanged. Independent source/caller/map
 reviews and fresh exact-head CI remain required before READY.
+
+## GRVT fixed local setting controls
+
+Plan-first originals execute16 controls on unchanged production:7 intended
+assertion REDs/9 working GREENs/0 ignored. All16 now pass, including four real
+256-command capacity cases and exact first-peer retirement followed by native
+recovery and validation of all255 survivors. Separate NaN Event cases cover
+margin, hedged refusal and one-way projection. Native keyless/public-only,
+zero-wait and duplicate-owner assertions remain intact. The42 existing trading
+tests pass unchanged. Scoped strict GRVT Clippy and formatting are required;
+workspace, feature, WASM and performance coverage stays in CI.
+
+## GRVT local leverage Read refusal controls
+
+Plan-first12 originals execute4 intended assertion REDs/8 working GREENs on
+unchanged actual5d825. The exact target now passes12/12, including both real256
+Command Read capacity cases, exact first-peer retirement/native recovery and
+validation of all255 surviving peers. Genuine NaN Event, native metadata and
+market-before-account precedence, public-only/configured-but-unestablished,
+checked zero-wait and duplicate-owner assertions are retained. All44 existing
+account controls pass unchanged. Local Cargo remains scoped with four jobs;
+workspace/features, WASM and performance are CI gates.
+
+
+## GRVT catalog publication and deadline controls
+
+All26 original controls now pass, including the formerly gated Prepare/Bind,
+capacity recovery with255 surviving peers, timeout cleanup, fresh retry/refresh
+roots and stale stream-error suffixes. The real mid-stream item then expired
+final DATA control passes. A27th source-stage control pins unanswered catalog
+HTTP timeout/backoff under Shared public-feed mode without socket actions.
+Selected native account/login/products/refresh/public/startup and library targets
+bring the scoped total to123PASS/0ignored. Scoped all-target Clippy -D warnings
+passes with four jobs. Existing fixture transport collectors drive genuine
+Prepare/Bind/Claim; native assertions remain, with the socket-only fixture now
+servicing its allowed REST refresh. Workspace/features/WASM/performance remain
+CI gates; no local broad-build or full-CI claim.
+
+Post-review fixture check: the entire GRVT crate executes292PASS/0ignored.
+Depth-query startup also required the same genuine prepared_actions collector;
+only that bootstrap changes, with every assertion retained. The source-stage
+Shared-feed control now checks no socket actions at startup, timeout and retry.
+Production source remains byte-exact to0e0393051d5.
+
+## AsterDEX synchronous Read controls
+
+The committed original actual-Engine target executes20 behavioral assertion
+REDs plus six native working controls on unchanged production, with zero ignored.
+Each of ten terminals is tested at invalid clocks and full genuine-root capacity.
+Mainnet/testnet, V1/V3 precedence, exact native errors/JSON, finite positive cached
+leverage, missing/nonfinite cache, duplicate-owner isolation,300 synchronous ID
+reuses and keyless PublicTrades remote exemption remain covered. The managed
+target passes all26 without changing the original assertions. Existing financial
+and signature controls are retained. CI certifies WASM/replay/CPU/size/memory;
+local success makes no performance or merge-readiness claim.
+
+## AsterDEX local trading refusal controls
+
+The committed original target executes24 behavioral assertion REDs and9 native
+positives on unchanged production. The same33 controls now pass unchanged after
+adoption. Eight path shapes cover explicit Read/Mutation/auth fields and symbol
+cancellation at invalid/full entry, with genuine256 retained peer roots and
+actual retirement/recovery. Separate controls pin all three STP Read outcomes,
+credential-free auth-health, both pre-admission acknowledged-state boundaries,
+duplicate owner protection and300 synchronous reuses.
+
+Native positives retain exact V1 POST/V3 Secondary STP GET at full managed
+capacity, a9,999-place job with only its live acknowledgement consuming capacity,
+Store-first cancellation followed by exactly DELETE/order/Call::Cancel(live),
+and finite admitted missing-key cancellation cleanup. Private state is seeded
+before Engine construction in an explicit cfg(test) child, not presented as a
+provider or physical-release receipt. Existing financial tests are unchanged.
+Family size and replay certification are left to fresh CI; the downloaded
+1,321,596-byte baseline excludes lean #1987/#2006 and is not an adoption result.
+
+
+## GRVT local command tail controls
+
+The revised18 compiling original controls pass after production, including
+all previously gated capacity recovery suffixes: retire the exact first of256
+genuine Command Read peers, repeat the native refusal and validate255 survivors.
+Read None / approved Mutation NotSent, raw text and absent kind/code/hint,
+configured/public-only precedence, external NaN, zero caller wait and duplicate
+ownership are pinned. Actual engine symbol-amend rejection counts zero forwarded
+entries, followed by a reachable positive. Nine safe real commands prove earlier
+dispatch before the deleted private-phase diagnostic. Library7 and trading42
+also pass, for67 scoped tests with no ignored controls. Strict GRVT all-target
+Clippy/fmt and full ratchets PASS; broad workspace/WASM/performance stay in CI.
+Metadata/settings freshness: BingX query ownership and both adapters' background
+Store observations/write fences use the shared settings boundary. WEEX explicit
+leverage reads retain incoming managed Context/native-revision behavior and do
+not coalesce. Its duplicate-config control remains; the following own unlanded
+controls were removed when that query cutover was excluded:
+
+- `metadata_owner_coalesces_native_config_and_completes_both_callers`
+- `metadata_owner_fails_both_joined_callers_and_keeps_good_settings`
+- `metadata_owner_preserves_secondary_only_get_credentials`
+- `metadata_started_during_a_write_stays_nonpublishing_after_refusal`
+- `an_old_account_config_cannot_overwrite_completed_metadata`
+
+No incoming WEEX test is deleted or weakened. BingX's four original entry
+assertions remain unchanged. Its Plan/observer adoption still requires the
+reviewed shared seam, typed provider-refusal/pending-owner controls, native
+retry/lease and observer denial matrix, plus fresh family replay/size gates.
+[Scope and proof](RUST_METADATA_FRESHNESS.md).
+
+## Paradex command candle controls
+
+The unchanged-source originals execute 24 controls (16 assertion RED/8 GREEN).
+All 24 bodies are retained after adoption; six appended controls cover zero wait,
+stream integrity, late Bind, retired generation, post-success 254-peer liveness
+and a positive fractional remainder. All 30 pass. The scoped crate passes 281,
+with strict all-target Clippy and formatting checked. One prior raw-at-capacity
+transport expectation is replaced with managed Capacity and two-slot recovery;
+its exact URL/method/headers/body assertions are retained.
+
+Optimized Node/web before 1,331,336 and after 1,339,096 bytes (+7,760) fit the unchanged
+1,343,488-byte venue budget, using wasm-bindgen 0.2.129 and Binaryen 132. Profiles,
+budgets and build inputs are unchanged. Local controls/measurements do not certify
+replay, CPU, memory, final integration or CI readiness.

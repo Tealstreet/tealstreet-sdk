@@ -157,27 +157,27 @@ enum State {
 
 impl<P> Io<P> {
     pub(super) fn command_entry_id(&self) -> Option<CommandId> {
-        self.command_entry.as_ref().map(|entry| entry.command)
+        self.core.command_entry.as_ref().map(|entry| entry.command)
     }
 
     pub(super) fn fresh_command_entry(&self) -> bool {
-        self.command_entry.as_ref().is_some_and(|entry| {
+        self.core.command_entry.as_ref().is_some_and(|entry| {
             entry.state == State::Fresh
-                && entry.resources == self.next_id
-                && self.http_delivery.is_none()
+                && entry.resources == self.core.next_id
+                && self.core.http_delivery.is_none()
         })
     }
 
     pub(super) fn command_receipt(&self) -> Result<(u64, f64), crate::request_context::Error> {
         use crate::request_context::Error;
-        let entry = self.command_entry.as_ref().ok_or(Error::Revoked)?;
-        if self.http_delivery.is_some()
+        let entry = self.core.command_entry.as_ref().ok_or(Error::Revoked)?;
+        if self.core.http_delivery.is_some()
             || !matches!(entry.state, State::Fresh | State::Bound | State::Legacy)
         {
             return Err(Error::Revoked);
         }
-        let (receipt, deadline) = self.command_waits.stamp(entry.command).ok_or({
-            if self.command_waits.receipts == u64::MAX {
+        let (receipt, deadline) = self.core.command_waits.stamp(entry.command).ok_or({
+            if self.core.command_waits.receipts == u64::MAX {
                 Error::Capacity
             } else {
                 Error::Revoked
@@ -190,12 +190,15 @@ impl<P> Io<P> {
     }
 
     pub(super) fn begin_command_entry(&mut self, command: Option<CommandId>) {
-        assert!(self.command_entry.is_none(), "nested native command entry");
-        self.command_entry = command.map(|command| Entry {
+        assert!(
+            self.core.command_entry.is_none(),
+            "nested native command entry"
+        );
+        self.core.command_entry = command.map(|command| Entry {
             command,
-            resources: self.next_id,
+            resources: self.core.next_id,
             state: State::Fresh,
-            receipt: self.command_waits.entry_receipt(command),
+            receipt: self.core.command_waits.entry_receipt(command),
         });
     }
 
@@ -203,25 +206,28 @@ impl<P> Io<P> {
     /// own entry; the live command's otherwise).
     pub(super) fn finish_command_wait(&mut self, command: CommandId) {
         let entry = self
+            .core
             .command_entry
             .as_ref()
             .filter(|entry| entry.command == command)
             .map(|entry| entry.receipt);
         let carried = self
+            .core
             .command_waits
             .stamp(command)
             .is_some_and(|(receipt, _)| self.carries(receipt));
-        self.command_waits.finish(command, entry, carried);
+        self.core.command_waits.finish(command, entry, carried);
     }
 
     /// Whether a held cancellation, deferred cancel-all or released batch
     /// still carries `receipt`.
     fn carries(&self, receipt: u64) -> bool {
         #[cfg(feature = "order-locks")]
-        if self.order_locks.carries(receipt) {
+        if self.core.order_locks.carries(receipt) {
             return true;
         }
-        self.placement_acks.carries(receipt) || self.command_waits.batched.contains(&receipt)
+        self.core.placement_acks.carries(receipt)
+            || self.core.command_waits.batched.contains(&receipt)
     }
 
     /// Stamp one external receipt; past capacity, first drop expired stamps
@@ -232,49 +238,50 @@ impl<P> Io<P> {
         deadline: Option<f64>,
         now: f64,
     ) {
-        if self.command_waits.stamps.len() >= WAIT_STAMPS {
+        if self.core.command_waits.stamps.len() >= WAIT_STAMPS {
             let mut index = 0;
-            while let Some(&(_, receipt, at)) = self.command_waits.stamps.get(index) {
+            while let Some(&(_, receipt, at)) = self.core.command_waits.stamps.get(index) {
                 if at > now || self.carries(receipt) {
                     index += 1;
                 } else {
-                    self.command_waits.stamps.swap_remove(index);
+                    self.core.command_waits.stamps.swap_remove(index);
                 }
             }
         }
-        self.command_waits.receive(command, deadline);
+        self.core.command_waits.receive(command, deadline);
     }
     pub(super) fn end_command_entry(&mut self) {
-        self.command_entry = None;
+        self.core.command_entry = None;
     }
     /// Existing resources are not a second ID allocator. Changing their state,
     /// or staging an outbound operation without a new ID, burns fresh custody.
     pub(super) fn opaque_entry_activity(&mut self) {
-        if let Some(entry) = &mut self.command_entry
+        if let Some(entry) = &mut self.core.command_entry
             && entry.state == State::Fresh
         {
             entry.state = State::Legacy;
         }
     }
     pub(super) fn numeric_entry_completion_allowed(&self, command: CommandId) -> bool {
-        self.command_entry.as_ref().is_none_or(|entry| {
+        self.core.command_entry.as_ref().is_none_or(|entry| {
             entry.command != command || matches!(entry.state, State::Fresh | State::Legacy)
         })
     }
     pub(super) fn entry_context_allowed(&self, scope: Scope) -> bool {
-        self.command_entry.as_ref().is_none_or(|entry| {
+        self.core.command_entry.as_ref().is_none_or(|entry| {
             scope != Scope::Command(entry.command)
                 || !matches!(entry.state, State::Rejected | State::Spent)
         })
     }
     /// Read-only: this exact command's genuine callback holds its issued root.
     pub(super) fn entry_bound(&self, command: CommandId) -> bool {
-        self.command_entry
+        self.core
+            .command_entry
             .as_ref()
             .is_some_and(|entry| entry.command == command && entry.state == State::Bound)
     }
     pub(super) fn entry_completed(&mut self, command: CommandId) {
-        if let Some(entry) = &mut self.command_entry
+        if let Some(entry) = &mut self.core.command_entry
             && entry.command == command
         {
             entry.state = State::Spent;
@@ -285,7 +292,7 @@ impl<P> Io<P> {
 impl<P> Cx<'_, P> {
     /// An engine refusal before the venue's entry ends under this receipt's
     /// own entry, so a duplicate id never clears the live command's wait.
-    pub(super) fn refuse_before_entry(&mut self, command: CommandId, error: &str) {
+    pub(super) fn refuse_before_entry(&mut self, command: CommandId, error: impl Into<VenueError>) {
         self.io.begin_command_entry(Some(command));
         self.fail(command, error);
         self.io.end_command_entry();
@@ -319,12 +326,9 @@ impl<P> Cx<'_, P> {
         if self.command_wait() != Some(CommandWait::Expired) {
             return Err(CommandEntryError::Revoked);
         }
-        match self.with_command_entry(operation, |_, _| {
-            Err::<(), _>(crate::request_context::Error::TimedOut)
-        }) {
-            Err(CommandEntryError::Rejected(_)) => Ok(()),
-            Err(error) => Err(error),
-            Ok(()) => unreachable!("expiry never admits"),
+        match self.reject_command_entry(operation, crate::request_context::Error::TimedOut) {
+            CommandEntryError::Rejected(_) => Ok(()),
+            error => Err(error),
         }
     }
 
@@ -334,69 +338,97 @@ impl<P> Cx<'_, P> {
     pub fn admit_http_command(&mut self, policy: Policy) -> Result<Context, CommandEntryError> {
         self.with_command_entry(policy.operation, |cx, command| {
             let context = cx.http_context(Scope::Command(command), policy)?;
-            cx.io.request_contexts.retain_command_entry(&context);
+            cx.io.core.request_contexts.retain_command_entry(&context);
             Ok(context)
         })
     }
 
     /// One initial command transaction shared by Context and opaque Preflight
-    /// issuers. Only this callback loan can reject an unissued command.
+    /// issuers. Only this callback loan can reject an unissued command. The
+    /// generic shell only calls `issue`; both halves are shared, non-generic code.
     pub(in crate::engine) fn with_command_entry<T>(
         &mut self,
         operation: Operation,
         issue: impl FnOnce(&mut Self, CommandId) -> Result<T, crate::request_context::Error>,
     ) -> Result<T, CommandEntryError> {
-        let Some(entry) = &mut self.io.command_entry else {
+        let command = self.begin_command_transaction()?;
+        issue(self, command)
+            .map_err(|reason| self.reject_command_transaction(command, operation, reason))
+    }
+
+    /// Reject this genuine command entry without issuing anything.
+    pub(in crate::engine) fn reject_command_entry(
+        &mut self,
+        operation: Operation,
+        reason: crate::request_context::Error,
+    ) -> CommandEntryError {
+        match self.begin_command_transaction() {
+            Ok(command) => self.reject_command_transaction(command, operation, reason),
+            Err(error) => error,
+        }
+    }
+
+    #[inline(never)]
+    fn begin_command_transaction(&mut self) -> Result<CommandId, CommandEntryError> {
+        let Some(entry) = &mut self.io.core.command_entry else {
             return Err(CommandEntryError::Revoked);
         };
         if entry.state != State::Fresh {
             return Err(CommandEntryError::Revoked);
         }
-        if entry.resources != self.io.next_id || self.io.http_delivery.is_some() {
+        if entry.resources != self.io.core.next_id || self.io.core.http_delivery.is_some() {
             entry.state = State::Legacy;
             return Err(CommandEntryError::Revoked);
         }
         let command = entry.command;
         if !self
             .io
+            .core
             .request_contexts
             .prepare_command_entry(command, self.now)
         {
-            self.io.command_entry.as_mut().unwrap().state = State::Spent;
+            self.io.core.command_entry.as_mut().unwrap().state = State::Spent;
             return Err(CommandEntryError::Revoked);
         }
         // Suspend the fresh loan before ordinary issuance reserves an ID. Only
         // this exact transaction may produce its success or unissued rejection.
-        self.io.command_entry.as_mut().unwrap().state = State::Bound;
-        match issue(self, command) {
-            Ok(owner) => Ok(owner),
-            Err(reason) => {
-                // Typed issuance errors occur before owner insertion. Never
-                // erase a previous owner or leave opaque work runnable.
-                assert!(self.io.request_contexts.command_entry_unowned(command));
-                let entry = self
-                    .io
-                    .command_entry
-                    .as_mut()
-                    .expect("active command entry");
-                assert!(entry.command == command && entry.state == State::Bound);
-                entry.state = State::Rejected;
-                let error = if operation == Operation::Read {
-                    reason.read_venue_error()
-                } else {
-                    reason.venue_error()
-                };
-                #[cfg(feature = "order-locks")]
-                {
-                    self.io.order_locks.finish(command, true);
-                    self.io.active_commands.remove(&command);
-                }
-                self.io.finish_command_wait(command);
-                self.io
-                    .actions
-                    .push(Action::Notice(Notice::CommandFailed { command, error }));
-                Err(CommandEntryError::Rejected(reason))
-            }
+        self.io.core.command_entry.as_mut().unwrap().state = State::Bound;
+        Ok(command)
+    }
+
+    #[inline(never)]
+    fn reject_command_transaction(
+        &mut self,
+        command: CommandId,
+        operation: Operation,
+        reason: crate::request_context::Error,
+    ) -> CommandEntryError {
+        // Typed issuance errors occur before owner insertion. Never erase a
+        // previous owner or leave opaque work runnable.
+        assert!(self.io.core.request_contexts.command_entry_unowned(command));
+        let entry = self
+            .io
+            .core
+            .command_entry
+            .as_mut()
+            .expect("active command entry");
+        assert!(entry.command == command && entry.state == State::Bound);
+        entry.state = State::Rejected;
+        let error = if operation == Operation::Read {
+            reason.read_venue_error()
+        } else {
+            reason.venue_error()
+        };
+        #[cfg(feature = "order-locks")]
+        {
+            self.io.core.order_locks.finish(command, true);
+            self.io.core.active_commands.remove(&command);
         }
+        self.io.finish_command_wait(command);
+        self.io
+            .core
+            .actions
+            .push(Action::Notice(Notice::CommandFailed { command, error }));
+        CommandEntryError::Rejected(reason)
     }
 }

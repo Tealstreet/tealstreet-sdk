@@ -42,6 +42,7 @@ mod reconciled_writes {
             preflight,
             steps,
             PlanPolicy {
+                independent_calls: false,
                 operation: Operation::Mutation,
                 credential: Some(credential()),
                 pacing: None,
@@ -129,6 +130,7 @@ mod reconciled_writes {
         };
         cx.request_signed_managed(
             context.clone(),
+            None,
             Method::Post,
             "https://venue.test/write".into(),
             None,
@@ -146,6 +148,7 @@ mod reconciled_writes {
                 Ok(read) => {
                     cx.request_signed_managed(
                         read.clone(),
+                        None,
                         Method::Get,
                         "https://venue.test/orders".into(),
                         None,

@@ -19,21 +19,21 @@ impl ExecutionHandle {
 impl<P> Io<P> {
     pub(super) fn rearm_execution_timer(&mut self) {
         // Called on every HTTP completion; skip the scan when no group exists.
-        let next = if self.request_contexts.has_executions() {
-            self.request_contexts.next_execution_deadline()
+        let next = if self.core.request_contexts.has_executions() {
+            self.core.request_contexts.next_execution_deadline()
         } else {
             None
         };
-        if self.execution_timer.map(|(_, at)| at) == next {
+        if self.core.execution_timer.map(|(_, at)| at) == next {
             return;
         }
-        if let Some((timer, _)) = self.execution_timer.take() {
-            self.actions.push(Action::ClearTimer { timer });
+        if let Some((timer, _)) = self.core.execution_timer.take() {
+            self.core.actions.push(Action::ClearTimer { timer });
         }
         if let Some(at_ms) = next {
             let timer = TimerId(self.next());
-            self.actions.push(Action::SetTimer { timer, at_ms });
-            self.execution_timer = Some((timer, at_ms));
+            self.core.actions.push(Action::SetTimer { timer, at_ms });
+            self.core.execution_timer = Some((timer, at_ms));
         }
     }
 }
@@ -52,15 +52,16 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         // A tracked caller-wait root stays a plain Command Read owner.
-        if self.io.request_contexts.tracked_owner(founder) {
+        if self.io.core.request_contexts.tracked_owner(founder) {
             return Err(Error::Invalid);
         }
-        if !self.io.next_id.available(1) {
+        if !self.io.core.next_id.available(1) {
             return Err(Error::Capacity);
         }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let root = self
             .io
+            .core
             .request_contexts
             .begin_execution(identity, founder, policy, window, key, self.now)?;
         self.io.rearm_execution_timer();
@@ -75,8 +76,8 @@ impl<P> Cx<'_, P> {
         policy: Policy,
         window: Window,
     ) -> Result<ExecutionHandle, Error> {
-        if self.io.http_delivery.is_some() || !self.io.next_id.available(1) {
-            return Err(if self.io.http_delivery.is_some() {
+        if self.io.core.http_delivery.is_some() || !self.io.core.next_id.available(1) {
+            return Err(if self.io.core.http_delivery.is_some() {
                 Error::Revoked
             } else {
                 Error::Capacity
@@ -85,6 +86,7 @@ impl<P> Cx<'_, P> {
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let root = self
             .io
+            .core
             .request_contexts
             .begin_background_execution(identity, background, policy, window, self.now)?;
         self.io.rearm_execution_timer();
@@ -100,14 +102,14 @@ impl<P> Cx<'_, P> {
         background: &Context,
         policy: Policy,
     ) -> Result<ExecutionHandle, Error> {
-        if self.io.http_delivery.is_some() {
+        if self.io.core.http_delivery.is_some() {
             return Err(Error::Revoked);
         }
-        if !self.io.next_id.available(1) {
+        if !self.io.core.next_id.available(1) {
             return Err(Error::Capacity);
         }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        let (root, sealed) = self.io.request_contexts.begin_successor_execution(
+        let (root, sealed) = self.io.core.request_contexts.begin_successor_execution(
             identity,
             &previous.0,
             background,
@@ -129,14 +131,15 @@ impl<P> Cx<'_, P> {
         if !self.entry_callback(root) {
             return Err(Error::Revoked);
         }
-        if self.io.request_contexts.tracked_owner(root) {
+        if self.io.core.request_contexts.tracked_owner(root) {
             return Err(Error::Invalid);
         }
         self.sweep_executions();
-        let joined = self
-            .io
-            .request_contexts
-            .join_execution(&execution.0, root, key, self.now)?;
+        let joined =
+            self.io
+                .core
+                .request_contexts
+                .join_execution(&execution.0, root, key, self.now)?;
         self.io.rearm_execution_timer();
         Ok(joined)
     }
@@ -150,6 +153,7 @@ impl<P> Cx<'_, P> {
         self.validate_preflight_ready_owner(root.owner())?;
         let sealed = self
             .io
+            .core
             .request_contexts
             .detach_observer(root, error.into())?;
         self.finish_sealed(vec![sealed]);
@@ -165,6 +169,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<(), Error> {
         if self
             .io
+            .core
             .http_delivery
             .as_ref()
             .is_none_or(|delivery| delivery.context.owner() != execution.0.owner())
@@ -175,9 +180,39 @@ impl<P> Cx<'_, P> {
         self.sweep_executions();
         let sealed = self
             .io
+            .core
             .request_contexts
             .seal_execution(&execution.0, project)?;
         self.finish_sealed(sealed);
+        Ok(())
+    }
+
+    /// Publish order identities to every live observer, in the exact delivery
+    /// callback of one of this execution's legs; late joiners replay them.
+    pub fn execution_progress(
+        &mut self,
+        execution: &ExecutionHandle,
+        receipts: Vec<OrderIdentityReceipt>,
+    ) -> Result<(), Error> {
+        if self
+            .io
+            .core
+            .http_delivery
+            .as_ref()
+            .is_none_or(|delivery| delivery.context.owner() != execution.0.owner())
+        {
+            return Err(Error::Revoked);
+        }
+        // Owners already past their deadline time out before any progress.
+        self.sweep_executions();
+        let observers = self
+            .io
+            .core
+            .request_contexts
+            .execution_progress(&execution.0, receipts)?;
+        for (command, _, receipts) in observers {
+            self.command_progress(command, receipts);
+        }
         Ok(())
     }
 
@@ -191,6 +226,7 @@ impl<P> Cx<'_, P> {
         self.validate_preflight_ready_owner(execution.0.owner())?;
         if self
             .io
+            .core
             .request_contexts
             .planned_execution_root(&execution.0)
         {
@@ -198,6 +234,7 @@ impl<P> Cx<'_, P> {
         }
         if self
             .io
+            .core
             .http_delivery
             .as_ref()
             .is_some_and(|delivery| delivery.context.owner() != execution.0.owner())
@@ -208,6 +245,7 @@ impl<P> Cx<'_, P> {
         let error = error.into();
         let sealed = self
             .io
+            .core
             .request_contexts
             .seal_execution(&execution.0, |_| Err(error.clone()))?;
         self.finish_sealed(sealed);
@@ -221,21 +259,21 @@ impl<P> Cx<'_, P> {
         execution: &ExecutionHandle,
         leg: &Context,
     ) -> Result<(), Error> {
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         if delivery.context != *leg
             || leg.owner() != execution.0.owner()
             || !matches!(leg.owner(), Owner::Execution { .. })
         {
             return Err(Error::Revoked);
         }
-        self.io.request_contexts.validate(leg, self.now)
+        self.io.core.request_contexts.validate(leg, self.now)
     }
 
     /// Begin/join run only in the observer command's own genuine callback,
     /// in addition to the registry's exact root/issuer/generation checks.
     fn entry_callback(&self, root: &Context) -> bool {
         matches!(root.owner(), Owner::Command { id, .. } if self.io.entry_bound(id))
-            && self.io.http_delivery.is_none()
+            && self.io.core.http_delivery.is_none()
     }
 
     fn finish_sealed(&mut self, sealed: Vec<Sealed>) {
@@ -243,12 +281,14 @@ impl<P> Cx<'_, P> {
             // Entry-owned observer roots are retained until this exact seal.
             let root = self
                 .io
+                .core
                 .request_contexts
                 .observer_authority(&seal)
                 .expect("retained observer root");
             let finished = if seal.projected {
                 let (success, projected) =
                     self.io
+                        .core
                         .request_contexts
                         .seal_projected(seal.command, &root, seal.result);
                 self.finish_sealed_command(seal.command, success, projected)
@@ -263,11 +303,11 @@ impl<P> Cx<'_, P> {
 
     /// Engine-owned expiry and post-callback sweep; one terminal path.
     pub(super) fn sweep_executions(&mut self) {
-        if !self.io.request_contexts.has_executions() {
-            self.io.request_contexts.clear_retired_roots();
+        if !self.io.core.request_contexts.has_executions() {
+            self.io.core.request_contexts.clear_retired_roots();
             return;
         }
-        let sealed = self.io.request_contexts.expire_executions(self.now);
+        let sealed = self.io.core.request_contexts.expire_executions(self.now);
         self.finish_sealed(sealed);
     }
 }
@@ -297,6 +337,7 @@ impl<P> Cx<'_, P> {
         // a shared execution, refused before any group, credit or identity.
         if self
             .io
+            .core
             .request_contexts
             .preflight_receipt_cap(preflight)?
             .is_some()
@@ -304,6 +345,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         self.io
+            .core
             .request_contexts
             .prepare_planned_execution(founder, key)?;
         let shared = policy.clone();
@@ -311,6 +353,7 @@ impl<P> Cx<'_, P> {
         let (_, founder_root) = moved.expect("physical admission");
         let root = self
             .io
+            .core
             .request_contexts
             .begin_planned_execution(&plan, &shared, &founder_root, key, self.now)
             .expect("reserved before Plan admission");
@@ -322,8 +365,8 @@ impl<P> Cx<'_, P> {
     /// order lock or entry completion; observers are sealed separately.
     pub(super) fn finish_physical_plan(&mut self, owner: Owner, retired: Vec<RequestId>) {
         self.io.retire_physical_owner(owner, retired);
-        if !self.io.request_contexts.finish_physical(owner) {
-            self.io.http_owner_poison = true;
+        if !self.io.core.request_contexts.finish_physical(owner) {
+            self.io.core.http_owner_poison = true;
             panic!("HTTP physical owner retirement bookkeeping failed");
         }
     }
@@ -338,6 +381,7 @@ impl<P> Cx<'_, P> {
         mut sealed: Vec<Sealed>,
     ) {
         self.io
+            .core
             .request_contexts
             .seal_planned_execution(plan, &mut fanout, &mut sealed);
         for (seal, (_, reports)) in sealed.iter().zip(fanout) {
@@ -351,10 +395,10 @@ impl<P> Cx<'_, P> {
     /// Fail every physical Plan left with no observer, outside any delivery:
     /// its unsent work was already revoked and nothing may be published.
     pub(super) fn fail_orphaned_plans(&mut self) {
-        if !self.io.request_contexts.has_planned_executions() {
+        if !self.io.core.request_contexts.has_planned_executions() {
             return;
         }
-        while let Some(plan) = self.io.request_contexts.orphaned_plan() {
+        while let Some(plan) = self.io.core.request_contexts.orphaned_plan() {
             let failed = self.fail_plan(&plan, VenueError::new("No execution observer remains"));
             assert!(failed.is_ok(), "orphaned Plan seal {failed:?}");
         }

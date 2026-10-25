@@ -76,6 +76,8 @@ impl Preflight {
 /// Common semantics; per-call windows and retry credits come from the plan.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlanPolicy {
+    /// Independent Mutation calls may settle an unproven reply and continue siblings.
+    pub independent_calls: bool,
     pub operation: Operation,
     pub credential: Option<Credential>,
     pub pacing: Option<Pacing>,
@@ -147,4 +149,21 @@ impl HttpOwnerRetirement {
     pub(crate) fn preflight(&self) -> &Preflight {
         &self.preflight
     }
+}
+
+/// Release handle for a serial Plan parked on a venue condition. It carries the
+/// Plan's issuer and command generation, so it grants nothing by itself.
+#[cfg(feature = "condition-waits")]
+#[derive(Clone, Debug)]
+pub struct ConditionWait {
+    pub(crate) plan: Plan,
+    pub(crate) wait: u64,
+}
+
+/// The parked owner whose engine-bounded condition wait expired.
+#[cfg(feature = "condition-waits")]
+#[derive(Clone, Debug)]
+pub enum ConditionOwner {
+    Preflight(Preflight),
+    Plan(Plan),
 }

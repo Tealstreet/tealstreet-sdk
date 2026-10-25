@@ -409,11 +409,12 @@ impl LocalSigner {
             None => self.key(reference),
         }
     }
+    /// A local signer's missing ref never appears later.
     fn raw_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
         self.keys
             .get(reference)
             .map(|key| key.as_slice())
-            .ok_or(SignError::Unavailable)
+            .ok_or(SignError::MissingKey)
     }
     fn expand(
         &self,
@@ -533,14 +534,14 @@ impl LocalSigner {
                             mac.update(&message);
                             mac.finalize().into_bytes().to_vec()
                         }
-                        #[cfg(any(test, feature = "hmac-sha512"))]
+                        #[cfg(feature = "hmac-sha512")]
                         Algorithm::HmacSha512 => {
                             let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)
                                 .map_err(|_| SignError::InvalidRequest)?;
                             mac.update(&message);
                             mac.finalize().into_bytes().to_vec()
                         }
-                        #[cfg(not(any(test, feature = "hmac-sha512")))]
+                        #[cfg(not(feature = "hmac-sha512"))]
                         Algorithm::HmacSha512 => return Err(SignError::Unsupported),
                         Algorithm::Sha256SecretSuffix => {
                             let mut hash = Sha256::new();
@@ -615,7 +616,7 @@ fn asymmetric(algorithm: Algorithm) -> bool {
 fn implemented(algorithm: Algorithm) -> bool {
     match algorithm {
         Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => true,
-        Algorithm::HmacSha512 => cfg!(any(test, feature = "hmac-sha512")),
+        Algorithm::HmacSha512 => cfg!(feature = "hmac-sha512"),
         Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
         Algorithm::Ed25519
         | Algorithm::Es256
@@ -868,7 +869,7 @@ mod tests {
         signer.remove(&reference);
         assert!(matches!(
             signer.sign_now(&request),
-            Err(SignError::Unavailable)
+            Err(SignError::MissingKey)
         ));
         let own = serde_json::json!({"primary":{"passphrase":"primary"},"secondary":{"key":"read","secret":"secret","passphrase":"own"}}).to_string();
         let (signer, ids) =
@@ -1409,7 +1410,7 @@ mod tests {
         );
         assert!(!format!("{request:?}{result:?}").contains("public-identifier"));
         signer.remove(&key);
-        assert_eq!(signer.sign_now(&request), Err(SignError::Unavailable));
+        assert_eq!(signer.sign_now(&request), Err(SignError::MissingKey));
     }
     #[test]
     fn composite_digest_and_secret_suffix_stay_inside_one_batch() {
@@ -1560,6 +1561,45 @@ mod tests {
         assert_eq!(signer.key(&primary.signing).unwrap(), b"YXBleC1zZWNyZXQ=");
     }
 
+    fn sha512_request(key: KeyRef) -> SignRequest {
+        SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::HmacSha512,
+                key,
+                payload: vec![PayloadPart::Bytes {
+                    bytes: b"1700000000000GET/api/v3/account".to_vec(),
+                }],
+            }],
+        }
+    }
+
+    #[cfg(feature = "hmac-sha512")]
+    #[test]
+    fn hmac_sha512_matches_an_independent_vector_with_its_arm() {
+        // Python: hmac.new(b'YXBleC1zZWNyZXQ=', payload, hashlib.sha512).hexdigest().
+        let (seed, _, _) = zklink_case();
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let request = sha512_request(ids.primary.unwrap().signing);
+        assert_eq!(
+            crate::hex(&signer.sign_now(&request).unwrap().values[0]),
+            "689ec455eb6b1b55d05a2a3662bfe2faabed0c3445180e4efa855216f53f7c5d\
+             4834312e08472f0e16d0aadb826ca0819b10cba7eac09f7dfbb8c4fd7eb57104"
+        );
+    }
+
+    #[cfg(not(feature = "hmac-sha512"))]
+    #[test]
+    fn hmac_sha512_is_unsupported_without_its_arm() {
+        let (seed, _, _) = zklink_case();
+        let (signer, ids) =
+            LocalSigner::from_json_with_policy(zklink_setup(&seed), zklink_policy()).unwrap();
+        let request = sha512_request(ids.primary.unwrap().signing);
+        assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
+    }
+
     #[test]
     fn zklink_extra_ref_is_installed_only_where_declared_and_redacted() {
         let (seed, _, _) = zklink_case();
@@ -1688,17 +1728,18 @@ mod tests {
         } else {
             Capability::Unsupported
         };
+        let sha512 = if cfg!(feature = "hmac-sha512") {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        };
         for (key, algorithm, expected) in [
             (
                 &primary.signing,
                 Algorithm::HmacSha256,
                 Capability::Supported,
             ),
-            (
-                &primary.signing,
-                Algorithm::HmacSha512,
-                Capability::Supported,
-            ),
+            (&primary.signing, Algorithm::HmacSha512, sha512),
             (
                 &primary.signing,
                 Algorithm::Sha256SecretSuffix,

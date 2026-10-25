@@ -43,6 +43,7 @@ impl ContextRegistry {
                 intent: Some(crate::classify::Intent::Setting),
                 leg_intents: Vec::new(),
                 credentialed: false,
+                inherited_uncertain: false,
             },
         );
         assert!(previous.is_none());
@@ -86,19 +87,21 @@ impl<P> Cx<'_, P> {
         result: String,
         project: impl FnOnce(&mut crate::Store),
     ) -> Result<(), CommandEntryError> {
-        if self.io.http_owner_poison || !self.io.fresh_command_entry() {
+        if self.io.core.http_owner_poison || !self.io.fresh_command_entry() {
             return Err(CommandEntryError::Revoked);
         }
         let command = self.io.command_entry_id().expect("fresh command entry");
-        if self.io.request_contexts.dispatch != Some((command, crate::classify::Intent::Setting)) {
+        if self.io.core.request_contexts.dispatch
+            != Some((command, crate::classify::Intent::Setting))
+        {
             return Err(CommandEntryError::Revoked);
         }
         #[cfg(feature = "http-plans")]
-        if self.io.http_plan_ready.is_some() || self.io.http_plan_expiring.is_some() {
+        if self.io.core.http_plan_ready.is_some() || self.io.core.http_plan_expiring.is_some() {
             return Err(CommandEntryError::Revoked);
         }
         #[cfg(feature = "order-locks")]
-        if self.io.order_locks.contains(command) {
+        if self.io.core.order_locks.contains(command) {
             return Err(CommandEntryError::Revoked);
         }
         let receipt = self.io.command_receipt();
@@ -115,11 +118,15 @@ impl<P> Cx<'_, P> {
         };
         self.with_command_entry(Operation::Mutation, |cx, command| {
             readiness?;
-            if !cx.io.next_id.available(1) {
+            if !cx.io.core.next_id.available(1) {
                 return Err(Error::Capacity);
             }
-            cx.io.request_contexts.reserve_local_setting(command)?;
-            cx.io.actions.try_reserve(1).map_err(|_| Error::Capacity)?;
+            cx.io.core.request_contexts.reserve_local_setting(command)?;
+            cx.io
+                .core
+                .actions
+                .try_reserve(1)
+                .map_err(|_| Error::Capacity)?;
             let generation = cx
                 .io
                 .reserve_ids(1)
@@ -127,16 +134,17 @@ impl<P> Cx<'_, P> {
                 .start;
             let prepared = cx
                 .io
+                .core
                 .request_contexts
                 .issue_local_setting(command, generation, cx.now);
             // No owned HTTP, read-root timer or order lock exists for this
             // exact Fresh generation; common cleanup needs only one notice.
-            cx.io.http_owner_poison = true;
+            cx.io.core.http_owner_poison = true;
             project(cx.store);
-            let (command, seal) = cx.io.request_contexts.commit_local_setting(prepared);
+            let (command, seal) = cx.io.core.request_contexts.commit_local_setting(prepared);
             cx.finish_sealed_command(command, Some(result), seal)
                 .expect("prepared local Setting terminal");
-            cx.io.http_owner_poison = false;
+            cx.io.core.http_owner_poison = false;
             Ok(())
         })
     }
@@ -150,14 +158,14 @@ mod boundary_tests {
 
     fn fresh(deadline: Option<f64>) -> Io<()> {
         let mut io = Io::default();
-        io.command_waits.receive(7, deadline);
+        io.core.command_waits.receive(7, deadline);
         io.begin_command_entry(Some(7));
-        io.request_contexts.dispatch = Some((7, crate::classify::Intent::Setting));
+        io.core.request_contexts.dispatch = Some((7, crate::classify::Intent::Setting));
         io
     }
 
     fn refusal(io: &mut Io<()>, now: f64, expected: Error) {
-        let before = io.next_id;
+        let before = io.core.next_id;
         let mut store = Store::default();
         store.set_hedged(true);
         let result = Cx {
@@ -168,10 +176,10 @@ mod boundary_tests {
         .done_local_setting("[]".into(), |s| s.set_hedged(false));
         assert_eq!(result, Err(CommandEntryError::Rejected(expected)));
         assert!(store.hedged());
-        assert_eq!(io.next_id, before);
-        assert!(io.request_contexts.commands.is_empty());
+        assert_eq!(io.core.next_id, before);
+        assert!(io.core.request_contexts.commands.is_empty());
         assert!(
-            matches!(io.actions.as_slice(), [Action::Notice(Notice::CommandFailed { command: 7, error })] if error == &expected.venue_error() && error.outcome == Some(Outcome::NotSent))
+            matches!(io.core.actions.as_slice(), [Action::Notice(Notice::CommandFailed { command: 7, error })] if error == &expected.venue_error() && error.outcome == Some(Outcome::NotSent))
         );
     }
 
@@ -194,17 +202,17 @@ mod boundary_tests {
     #[test]
     fn exhausted_receipt_has_capacity_cause() {
         let mut io = Io::default();
-        io.command_waits.exhaust_receipts();
-        io.command_waits.receive(7, Some(1000.));
+        io.core.command_waits.exhaust_receipts();
+        io.core.command_waits.receive(7, Some(1000.));
         io.begin_command_entry(Some(7));
-        io.request_contexts.dispatch = Some((7, crate::classify::Intent::Setting));
+        io.core.request_contexts.dispatch = Some((7, crate::classify::Intent::Setting));
         refusal(&mut io, 0., Error::Capacity);
     }
     #[test]
     fn exhausted_generation_allocator_refuses_without_ghost_owner() {
         let mut io = fresh(Some(1000.));
         io.end_command_entry();
-        io.next_id =
+        io.core.next_id =
             crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
         io.begin_command_entry(Some(7));
         refusal(&mut io, 0., Error::Capacity);
@@ -213,7 +221,7 @@ mod boundary_tests {
     fn last_generation_id_completes_without_allocating_cleanup_ids() {
         let mut io = fresh(Some(1000.));
         io.end_command_entry();
-        io.next_id =
+        io.core.next_id =
             crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID);
         io.begin_command_entry(Some(7));
         let mut store = Store::default();
@@ -226,28 +234,28 @@ mod boundary_tests {
             .done_local_setting("[]".into(), |_| {}),
             Ok(())
         );
-        assert!(!io.next_id.available(1));
-        assert!(!io.next_id.failed());
-        assert!(io.request_contexts.commands.is_empty());
+        assert!(!io.core.next_id.available(1));
+        assert!(!io.core.next_id.failed());
+        assert!(io.core.request_contexts.commands.is_empty());
         assert!(
-            matches!(io.actions.as_slice(), [Action::Notice(Notice::CommandDone { command: 7, result })] if result == "[]")
+            matches!(io.core.actions.as_slice(), [Action::Notice(Notice::CommandDone { command: 7, result })] if result == "[]")
         );
     }
     #[test]
     fn original_duplicate_stamp_survives_rejection() {
         let mut io = fresh(Some(1000.));
-        let stamp = io.command_waits.stamp(7);
+        let stamp = io.core.command_waits.stamp(7);
         io.end_command_entry();
-        io.command_waits.receive(7, Some(2000.));
+        io.core.command_waits.receive(7, Some(2000.));
         io.begin_command_entry(Some(7));
         refusal(&mut io, 1., Error::Revoked);
-        assert_eq!(io.command_waits.stamp(7), stamp);
+        assert_eq!(io.core.command_waits.stamp(7), stamp);
     }
     #[test]
     fn foreign_dispatch_cannot_borrow_the_fresh_entry() {
         let mut io = fresh(Some(1000.));
-        io.request_contexts.dispatch = Some((8, crate::classify::Intent::Setting));
-        let before = io.next_id;
+        io.core.request_contexts.dispatch = Some((8, crate::classify::Intent::Setting));
+        let before = io.core.next_id;
         let mut store = Store::default();
         assert_eq!(
             Cx {
@@ -258,8 +266,8 @@ mod boundary_tests {
             .done_local_setting("[]".into(), |_| panic!("foreign projection")),
             Err(CommandEntryError::Revoked)
         );
-        assert_eq!(io.next_id, before);
-        assert!(io.actions.is_empty());
+        assert_eq!(io.core.next_id, before);
+        assert!(io.core.actions.is_empty());
     }
     #[test]
     fn spent_entry_cannot_project_or_emit_twice() {
@@ -275,6 +283,6 @@ mod boundary_tests {
             cx.done_local_setting("[]".into(), |_| panic!("second projection")),
             Err(CommandEntryError::Revoked)
         );
-        assert_eq!(io.actions.len(), 1);
+        assert_eq!(io.core.actions.len(), 1);
     }
 }

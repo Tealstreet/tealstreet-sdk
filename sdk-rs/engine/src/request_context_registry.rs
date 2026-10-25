@@ -10,7 +10,6 @@ use crate::request_context::{
 use crate::request_context::{
     HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
 };
-use std::collections::HashMap;
 #[cfg(feature = "http-plans")]
 use std::collections::VecDeque;
 
@@ -70,6 +69,9 @@ struct CommandOwner {
     /// Some Context or declared policy of this owner named a credential; only
     /// then can its auth-kind failure be credential-health evidence.
     credentialed: bool,
+    /// An earlier attempt of this intent may have reached the venue. Every
+    /// journal this owner creates projects its failure at least Unknown.
+    inherited_uncertain: bool,
 }
 
 enum CommandPhase {
@@ -163,10 +165,15 @@ mod owned_call;
 mod preflight;
 #[cfg(feature = "http-plans")]
 pub(super) use owned_call::Admission as OwnedAdmission;
+#[cfg(feature = "http-plans")]
+pub(super) use owned_call::ReleasedReadFailure;
 
 #[cfg(feature = "http-plans")]
 #[path = "request_context_planned.rs"]
 mod planned;
+#[cfg(feature = "http-plans")]
+#[cfg(feature = "http-mutation-barriers")]
+pub(in crate::engine) use planned::MutationGroupKey;
 
 #[cfg(not(feature = "http-plans"))]
 #[path = "request_context_without_plans.rs"]
@@ -196,9 +203,14 @@ pub(super) enum Seal {
 #[derive(Default)]
 pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
-    contexts: HashMap<u64, Context>,
-    commands: HashMap<CommandId, CommandOwner>,
+    contexts: crate::IdMap<u64, Context>,
+    commands: std::collections::HashMap<CommandId, CommandOwner>,
     sessions: session::Sessions,
+    /// (leg, Session generation) for each Bearer-bound leg; same-leg retries
+    /// and resends inherit it. Leg identities are never reused. Bounded by
+    /// CAPACITY, so a scan avoids another map type in every build.
+    #[cfg(feature = "session-bearer")]
+    bearer_legs: Vec<(u64, u64)>,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
     executions: execution::Executions,
@@ -208,6 +220,9 @@ pub(super) struct ContextRegistry {
     preflight_ready: VecDeque<Preflight>,
     #[cfg(feature = "http-plans")]
     preflight_initial: Vec<Preflight>,
+    /// Engine-bounded Preflight condition waits, by timer.
+    #[cfg(feature = "condition-waits")]
+    condition_preflights: Vec<(crate::TimerId, Preflight)>,
     /// Scoped delivery loans outlive temporary marker removal and even owner
     /// cleanup. Readiness may run only after the true outermost scope exits.
     #[cfg(feature = "http-plans")]
@@ -221,13 +236,59 @@ pub(super) struct ContextRegistry {
     /// Plan-backed executions' physical owners, keyed by execution identity.
     /// They hold the Plan, its slots and journal; no command observes them.
     #[cfg(feature = "http-plans")]
-    physical: HashMap<u64, CommandOwner>,
+    physical: PhysicalOwners,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
     read_marks: Vec<(Owner, u64)>,
+}
+
+/// Plan-backed executions' physical owners. Few live at once, so a vector
+/// keeps the map shape without another hash table instantiation.
+#[cfg(feature = "http-plans")]
+#[derive(Default)]
+struct PhysicalOwners(Vec<(u64, CommandOwner)>);
+
+#[cfg(feature = "http-plans")]
+impl PhysicalOwners {
+    fn get(&self, identity: &u64) -> Option<&CommandOwner> {
+        self.0
+            .iter()
+            .find(|(held, _)| held == identity)
+            .map(|(_, owner)| owner)
+    }
+    fn get_mut(&mut self, identity: &u64) -> Option<&mut CommandOwner> {
+        self.0
+            .iter_mut()
+            .find(|(held, _)| held == identity)
+            .map(|(_, owner)| owner)
+    }
+    fn contains_key(&self, identity: &u64) -> bool {
+        self.0.iter().any(|(held, _)| held == identity)
+    }
+    /// Identities are engine-issued and unique, so this never replaces.
+    fn insert(&mut self, identity: u64, owner: CommandOwner) {
+        debug_assert!(!self.contains_key(&identity));
+        self.0.push((identity, owner));
+    }
+    fn remove(&mut self, identity: &u64) -> Option<CommandOwner> {
+        let index = self.0.iter().position(|(held, _)| held == identity)?;
+        Some(self.0.swap_remove(index).1)
+    }
+    fn try_reserve(&mut self, additional: usize) -> Result<(), std::collections::TryReserveError> {
+        self.0.try_reserve(additional)
+    }
+    fn values(&self) -> impl Iterator<Item = &CommandOwner> {
+        self.0.iter().map(|(_, owner)| owner)
+    }
+    fn iter(&self) -> impl Iterator<Item = (&u64, &CommandOwner)> {
+        self.0.iter().map(|(identity, owner)| (identity, owner))
+    }
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl ContextRegistry {
@@ -580,6 +641,7 @@ impl ContextRegistry {
                         .map(|(_, intent)| intent),
                     leg_intents: Vec::new(),
                     credentialed: context.credential().is_some(),
+                    inherited_uncertain: false,
                 });
         }
         self.contexts.insert(identity, context.clone());
@@ -694,6 +756,34 @@ impl ContextRegistry {
             .get(&id)
             .and_then(|owner| owner.writes.as_ref())
             .is_some_and(|writes| writes.superseded(context.leg()))
+    }
+
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn leg_bearer(&self, context: &Context) -> Option<u64> {
+        let leg = context.leg();
+        self.bearer_legs
+            .iter()
+            .find(|(bound, _)| *bound == leg)
+            .map(|(_, generation)| *generation)
+    }
+
+    /// Prune bindings of retired legs, then reserve one slot before any effect.
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn reserve_leg_bearer(&mut self) -> Result<(), Error> {
+        if self.bearer_legs.len() >= CAPACITY {
+            let contexts = &self.contexts;
+            self.bearer_legs
+                .retain(|(leg, _)| contexts.contains_key(leg));
+        }
+        self.bearer_legs.try_reserve(1).map_err(|_| Error::Capacity)
+    }
+
+    #[cfg(feature = "session-bearer")]
+    pub(super) fn bind_leg_bearer(&mut self, leg: u64, generation: u64) {
+        match self.bearer_legs.iter_mut().find(|(bound, _)| *bound == leg) {
+            Some((_, bound)) => *bound = generation,
+            None => self.bearer_legs.push((leg, generation)),
+        }
     }
 
     pub(super) fn validate(&self, context: &Context, now: f64) -> Result<(), Error> {
@@ -844,7 +934,8 @@ impl ContextRegistry {
                     writes.register(request, context.leg())?;
                 }
             } else {
-                let mut writes = CommandWrites::new(CAPACITY)?;
+                let mut writes =
+                    CommandWrites::new(CAPACITY)?.inheriting(owner.inherited_uncertain);
                 writes.register(request, context.leg())?;
                 owner.writes = Some(writes);
             }
@@ -1201,19 +1292,18 @@ impl ContextRegistry {
         {
             return Seal::Stale;
         }
-        let declared = self
-            .commands
-            .get(&command)
-            .is_some_and(|owner| owner.mutation_declared);
+        let (declared, inherited) = self.commands.get(&command).map_or((false, false), |owner| {
+            (owner.mutation_declared, owner.inherited_uncertain)
+        });
         let mut writes = match self
             .commands
             .get_mut(&command)
             .and_then(|owner| owner.writes.take())
         {
             Some(writes) => writes,
-            None if declared => {
-                CommandWrites::new(CAPACITY).expect("fixed positive journal capacity")
-            }
+            None if declared => CommandWrites::new(CAPACITY)
+                .expect("fixed positive journal capacity")
+                .inheriting(inherited),
             None => return Seal::Legacy(error),
         };
         if error.is_none() && writes.succeed().is_ok() {
@@ -1451,14 +1541,20 @@ impl<P> Cx<'_, P> {
         parent: &Context,
         policies: &[Policy],
     ) -> Result<Vec<Context>, Error> {
-        self.io.request_contexts.validate_legacy(parent)?;
+        self.io.core.request_contexts.validate_legacy(parent)?;
         if policies.is_empty() {
             return Err(Error::Invalid);
         }
         if policies.len() > CAPACITY {
             return Err(Error::Capacity);
         }
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?.clone();
+        let delivery = self
+            .io
+            .core
+            .http_delivery
+            .as_ref()
+            .ok_or(Error::State)?
+            .clone();
         // Reserve the complete child range before registry/journal mutation.
         // Failed admission may leave monotonic gaps, never reused identities.
         let first = self
@@ -1467,6 +1563,7 @@ impl<P> Cx<'_, P> {
             .ok_or(Error::Capacity)?
             .start;
         self.io
+            .core
             .request_contexts
             .replace(parent, &delivery, first, policies, self.now)
     }
@@ -1483,8 +1580,8 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id, .. } = root.owner() else {
             return Err(Error::Invalid);
         };
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
-        let seal = self.io.request_contexts.seal_replacement_failure(
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
+        let seal = self.io.core.request_contexts.seal_replacement_failure(
             root,
             child,
             delivery,
@@ -1517,23 +1614,18 @@ impl<P> Cx<'_, P> {
 
     /// A new physical leg under the same logical authority. Preserve its exact
     /// raw deadline; integer timeout recomputation cannot round the bound up.
+    /// Session legs use `session_leg_context`, so families without Sessions
+    /// never link Session issuance.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
-        self.io.request_contexts.validate_legacy(parent)?;
-        self.io.request_contexts.validate_send(parent, self.now)?;
+        self.io.core.request_contexts.validate_legacy(parent)?;
+        self.io
+            .core
+            .request_contexts
+            .validate_send(parent, self.now)?;
         let scope = match parent.owner() {
             Owner::Command { id, .. } => Scope::Command(id),
             Owner::Background { .. } => Scope::Background,
-            Owner::Session { generation } => {
-                self.session_scope()?;
-                let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-                return self.io.request_contexts.issue_session(
-                    identity,
-                    generation,
-                    policy,
-                    self.now,
-                    Some(parent),
-                );
-            }
+            Owner::Session { .. } => return Err(Error::Invalid),
             Owner::Execution { .. } => Scope::Execution,
         };
         self.make_http_context(scope, policy, Some(parent), None)
@@ -1547,7 +1639,7 @@ impl<P> Cx<'_, P> {
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
         #[cfg(feature = "http-plans")]
-        if self.io.http_preflight_ready.is_some() {
+        if self.io.core.http_preflight_ready.is_some() {
             return Err(Error::Revoked);
         }
         if !self.io.entry_context_allowed(scope) {
@@ -1555,20 +1647,21 @@ impl<P> Cx<'_, P> {
         }
         // A tracked caller-wait root stays plain Read: refused before any spend.
         if policy.operation == Operation::Mutation
-            && matches!(scope, Scope::Command(id) if self.io.request_contexts.tracked(id))
+            && matches!(scope, Scope::Command(id) if self.io.core.request_contexts.tracked(id))
         {
             return Err(Error::Invalid);
         }
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = self
             .io
+            .core
             .request_contexts
             .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
         #[cfg(feature = "order-locks")]
         if context.operation() == Operation::Mutation
             && let Owner::Command { id, .. } = context.owner()
         {
-            self.io.order_locks.manage(id);
+            self.io.core.order_locks.manage(id);
         }
         Ok(context)
     }
@@ -1581,19 +1674,22 @@ impl<P> Cx<'_, P> {
         context: &Context,
         evidence: RetryEvidence,
     ) -> Result<Context, Error> {
-        self.io.request_contexts.validate_legacy(context)?;
+        self.io.core.request_contexts.validate_legacy(context)?;
         if evidence == RetryEvidence::DefinitiveRefusal {
             return Err(Error::RetryForbidden);
         }
-        self.io.request_contexts.validate_send(context, self.now)?;
+        self.io
+            .core
+            .request_contexts
+            .validate_send(context, self.now)?;
         context.retry(evidence, self.now)
     }
 
     /// Check live issuance before presenting progress for already reserved work.
     /// This allocates nothing and grants no send, retry or completion rights.
     pub fn validate_http_context(&self, context: &Context) -> Result<(), Error> {
-        self.io.request_contexts.validate_legacy(context)?;
-        self.io.request_contexts.validate(context, self.now)
+        self.io.core.request_contexts.validate_legacy(context)?;
+        self.io.core.request_contexts.validate(context, self.now)
     }
 
     /// Read-only companion-event authority. A Read handle cannot publish a
@@ -1606,6 +1702,7 @@ impl<P> Cx<'_, P> {
         };
         let owner = self
             .io
+            .core
             .request_contexts
             .commands
             .get(&id)
@@ -1629,6 +1726,7 @@ impl<P> Cx<'_, P> {
         };
         if self
             .io
+            .core
             .request_contexts
             .commands
             .get(&id)
@@ -1653,6 +1751,7 @@ impl<P> Cx<'_, P> {
         }
         if self
             .io
+            .core
             .http_delivery
             .as_ref()
             .is_none_or(|delivery| delivery.context != *context)
@@ -1673,7 +1772,7 @@ impl<P> Cx<'_, P> {
         if leg.operation() != Operation::Read {
             return Err(Error::Invalid);
         }
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
         let Owner::Command { id, .. } = root.owner() else {
             return Err(Error::Invalid);
         };
@@ -1682,6 +1781,7 @@ impl<P> Cx<'_, P> {
             || leg.deadline() > root.deadline()
             || self
                 .io
+                .core
                 .request_contexts
                 .commands
                 .get(&id)
@@ -1701,6 +1801,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<Attempt, Error> {
         self.validate_read_http_delivery(root, leg)?;
         self.io
+            .core
             .http_delivery
             .as_ref()
             .map(|delivery| delivery.attempt)
@@ -1715,9 +1816,9 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id, .. } = context.owner() else {
             return Err(Error::Invalid);
         };
-        self.io.request_contexts.validate_completion(
+        self.io.core.request_contexts.validate_completion(
             id,
-            super::completion_delivery(&self.io.http_delivery),
+            super::completion_delivery(&self.io.core.http_delivery),
             Some(context),
         )
     }
@@ -1768,19 +1869,20 @@ impl<P> Cx<'_, P> {
     ) -> Result<(), Error> {
         let delivery = self
             .io
+            .core
             .managed_http
             .get(&attempt.request)
             .ok_or(Error::Revoked)?
             .delivery();
         if delivery.attempt != attempt
             || delivery.context != *context
-            || !context.issued_by(&self.io.request_contexts.issuer)
+            || !context.issued_by(&self.io.core.request_contexts.issuer)
         {
             return Err(Error::Revoked);
         }
-        let previous = self.io.http_delivery.replace(delivery);
+        let previous = self.io.core.http_delivery.replace(delivery);
         let result = self.fail_context(context, error);
-        self.io.http_delivery = previous;
+        self.io.core.http_delivery = previous;
         result
     }
 
@@ -1793,11 +1895,12 @@ impl<P> Cx<'_, P> {
         context: &Context,
         result: WriteResult,
     ) -> Result<(), Error> {
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
-        if delivery.context != *context || !context.issued_by(&self.io.request_contexts.issuer) {
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.core.request_contexts.issuer)
+        {
             return Err(Error::Revoked);
         }
-        self.io.request_contexts.result(delivery, result)
+        self.io.core.request_contexts.result(delivery, result)
     }
 
     /// Retain bounded native diagnostics/IDs when a delivered write ACK cannot
@@ -1809,11 +1912,12 @@ impl<P> Cx<'_, P> {
         capture: impl FnOnce(&mut crate::request_context::UnprovenEvidence),
     ) -> Result<(), Error> {
         self.validate_write_delivery_phase(context)?;
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
         if delivery.context != *context {
             return Err(Error::Revoked);
         }
         self.io
+            .core
             .request_contexts
             .unproven_writes(delivery)?
             .unproven_native_result(delivery.attempt.request, capture)
@@ -1838,7 +1942,7 @@ impl<P> Cx<'_, P> {
 
     fn validate_write_delivery_phase(&self, context: &Context) -> Result<(), Error> {
         #[cfg(feature = "http-plans")]
-        if let Some(plan) = self.io.request_contexts.plan_from_context(context) {
+        if let Some(plan) = self.io.core.request_contexts.plan_from_context(context) {
             return self.validate_plan_delivery(&plan, context);
         }
         self.validate_http_context(context)
@@ -1852,17 +1956,22 @@ impl<P> Cx<'_, P> {
         if context.operation() != Operation::Mutation {
             return Err(Error::Invalid);
         }
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
         if delivery.context != *context {
             return Err(Error::Revoked);
         }
         if !matches!(context.owner(), Owner::Command { .. })
-            && !self.io.request_contexts.physical_owner(context.owner())
+            && !self
+                .io
+                .core
+                .request_contexts
+                .physical_owner(context.owner())
         {
             return Err(Error::Invalid);
         }
         let writes = self
             .io
+            .core
             .request_contexts
             .owner_entry(context.owner())
             .and_then(|owner| owner.writes.as_ref())
@@ -1880,11 +1989,13 @@ impl<P> Cx<'_, P> {
         result: WriteResult,
         reports: RejectionReports,
     ) -> Result<(), Error> {
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
-        if delivery.context != *context || !context.issued_by(&self.io.request_contexts.issuer) {
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.core.request_contexts.issuer)
+        {
             return Err(Error::Revoked);
         }
         self.io
+            .core
             .request_contexts
             .result_with_reports(delivery, result, reports)
     }
@@ -1898,7 +2009,7 @@ impl<P> Cx<'_, P> {
         native: Option<&crate::classify::Native<'_>>,
         message: impl Into<String>,
     ) -> Result<crate::classify::Fact, Error> {
-        let (status, headers) = self.io.http_write_reply.as_ref().ok_or(Error::State)?;
+        let (status, headers) = self.io.core.http_write_reply.as_ref().ok_or(Error::State)?;
         let response = crate::Response {
             status: *status,
             headers,
@@ -1955,7 +2066,7 @@ impl<P> Cx<'_, P> {
         if !resendable || matches!(context.owner(), Owner::Session { .. }) {
             return Ok(None);
         }
-        match self.io.request_contexts.grant_resend(&delivery) {
+        match self.io.core.request_contexts.grant_resend(&delivery) {
             Ok(()) => Ok(Some(ResendGrant {
                 attempt: delivery.attempt.request,
             })),
@@ -2009,7 +2120,7 @@ impl<P> Cx<'_, P> {
         reports: Option<RejectionReports>,
     ) -> Result<WriteResult, Error> {
         let delivery = self.current_write_delivery(context)?;
-        let (status, headers) = self.io.http_write_reply.as_ref().ok_or(Error::State)?;
+        let (status, headers) = self.io.core.http_write_reply.as_ref().ok_or(Error::State)?;
         let response = crate::Response {
             status: *status,
             headers,
@@ -2040,11 +2151,12 @@ impl<P> Cx<'_, P> {
                 Owner::Command { id, .. } => Some(id),
                 _ => None,
             };
-            let scope = command.and_then(|id| self.io.order_locks.reconcile_scope(id).flatten());
-            self.io.order_locks.fence(scope.as_deref());
+            let scope =
+                command.and_then(|id| self.io.core.order_locks.reconcile_scope(id).flatten());
+            self.io.core.order_locks.fence(scope.as_deref());
             // A held placing scope would make a read now unable to clear the
             // fence; finish queues it instead.
-            if !command.is_some_and(|id| self.io.order_locks.defer_absent(id)) {
+            if !command.is_some_and(|id| self.io.core.order_locks.defer_absent(id)) {
                 self.io.queue_reconcile(scope, self.now);
             }
         }
@@ -2061,12 +2173,17 @@ impl<P> Cx<'_, P> {
             return Ok(crate::classify::Intent::Setting);
         }
         if !matches!(context.owner(), Owner::Command { .. })
-            && !self.io.request_contexts.physical_owner(context.owner())
+            && !self
+                .io
+                .core
+                .request_contexts
+                .physical_owner(context.owner())
         {
             return Ok(crate::classify::Intent::Place);
         }
         let owner = self
             .io
+            .core
             .request_contexts
             .owner_entry(context.owner())
             .ok_or(Error::Revoked)?;
@@ -2095,7 +2212,8 @@ impl<P> Cx<'_, P> {
     /// The one declared exception for an amend's cancel leg: the old order of a
     /// cancel-then-recreate whose replacement is position-bound protection
     /// (reduce-only / close-on-trigger), so an absent old order is safe to
-    /// replace. Never declare it for any other replacement.
+    /// replace. Never declare it for any other replacement. Plan legs use it on
+    /// the leg Context before its first request.
     pub fn http_write_protection_cancel_leg(&mut self, context: &Context) -> Result<(), Error> {
         self.narrow_leg(context, crate::classify::Intent::Cancel, true)
     }
@@ -2107,12 +2225,13 @@ impl<P> Cx<'_, P> {
         protection_cancel: bool,
     ) -> Result<(), Error> {
         self.validate_preflight_ready_owner(context.owner())?;
-        self.io.request_contexts.validate(context, self.now)?;
+        self.io.core.request_contexts.validate(context, self.now)?;
         let Owner::Command { id, generation } = context.owner() else {
             return Err(Error::Invalid);
         };
         let owner = self
             .io
+            .core
             .request_contexts
             .commands
             .get_mut(&id)
@@ -2131,16 +2250,20 @@ impl<P> Cx<'_, P> {
         context: &Context,
         grant: ResendGrant,
     ) -> Result<Context, Error> {
-        self.io.request_contexts.validate_send(context, self.now)?;
-        if self.io.request_contexts.latest_write(context)? != Some(grant.attempt) {
+        self.io
+            .core
+            .request_contexts
+            .validate_send(context, self.now)?;
+        if self.io.core.request_contexts.latest_write(context)? != Some(grant.attempt) {
             return Err(Error::Revoked);
         }
         context.retry(RetryEvidence::DefinitiveRefusal, self.now)
     }
 
     fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
-        let delivery = self.io.http_delivery.as_ref().ok_or(Error::State)?;
-        if delivery.context != *context || !context.issued_by(&self.io.request_contexts.issuer) {
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.core.request_contexts.issuer)
+        {
             return Err(Error::Revoked);
         }
         Ok(delivery.clone())
@@ -2155,9 +2278,10 @@ impl<P> Cx<'_, P> {
         match reports {
             Some(reports) => self
                 .io
+                .core
                 .request_contexts
                 .result_with_reports(delivery, result, reports),
-            None => self.io.request_contexts.result(delivery, result),
+            None => self.io.core.request_contexts.result(delivery, result),
         }
     }
 
@@ -2167,10 +2291,14 @@ impl<P> Cx<'_, P> {
     /// Expired current handles may retire; this grants no send/retry permission.
     pub fn finish_http_context(&mut self, context: &Context) -> Result<(), Error> {
         self.validate_preflight_ready_owner(context.owner())?;
-        self.io.request_contexts.validate_legacy(context)?;
-        self.io.request_contexts.validate_handle(context)?;
+        self.io.core.request_contexts.validate_legacy(context)?;
+        self.io.core.request_contexts.validate_handle(context)?;
         self.io.retire_http_leg(context);
-        self.io.request_contexts.contexts.remove(&context.leg());
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
         Ok(())
     }
 }
@@ -2199,17 +2327,19 @@ mod tests {
                 .unwrap();
             let request = RequestId(99);
             cx.io
+                .core
                 .request_contexts
                 .register_attempt(&context, request, 0.)
                 .unwrap();
             if case != 1 {
                 *cx.io
+                    .core
                     .request_contexts
                     .release_flag(&context, request)
                     .unwrap()
                     .unwrap() = true;
             }
-            cx.io.http_delivery = Some(Delivery {
+            cx.io.core.http_delivery = Some(Delivery {
                 context: context.clone(),
                 attempt: Attempt {
                     request,
@@ -2220,7 +2350,7 @@ mod tests {
             match case {
                 0 | 1 => {}
                 2 => {
-                    cx.io.http_delivery = None;
+                    cx.io.core.http_delivery = None;
                 }
                 3 => {
                     argument = cx.http_leg_context(&context, mutation.clone()).unwrap();
@@ -2237,10 +2367,11 @@ mod tests {
                     cx.now = f64::NAN;
                 }
                 7 => {
-                    cx.io.request_contexts.contexts.remove(&context.leg());
+                    cx.io.core.request_contexts.contexts.remove(&context.leg());
                 }
                 8 => {
                     cx.io
+                        .core
                         .request_contexts
                         .commands
                         .get_mut(&7)
@@ -2269,8 +2400,8 @@ mod tests {
             assert_eq!(result.is_ok(), case == 0, "case {case}");
             assert_eq!(captures, usize::from(case == 0), "case {case}");
             assert!(cx.io.pending.is_empty());
-            assert!(cx.io.actions.is_empty());
-            assert!(cx.io.timers.is_empty());
+            assert!(cx.io.core.actions.is_empty());
+            assert!(cx.io.core.timers.is_empty());
         }
     }
 
@@ -2292,15 +2423,17 @@ mod tests {
                 .unwrap();
             let request = RequestId(99);
             cx.io
+                .core
                 .request_contexts
                 .register_attempt(&context, request, 0.)
                 .unwrap();
             *cx.io
+                .core
                 .request_contexts
                 .release_flag(&context, request)
                 .unwrap()
                 .unwrap() = true;
-            cx.io.http_delivery = Some(Delivery {
+            cx.io.core.http_delivery = Some(Delivery {
                 context: context.clone(),
                 attempt: Attempt {
                     request,
@@ -2313,7 +2446,7 @@ mod tests {
             match case {
                 0 => {}
                 1 => {
-                    cx.io.http_delivery = None;
+                    cx.io.core.http_delivery = None;
                 }
                 2 => {
                     argument = cx.http_leg_context(&context, mutation.clone()).unwrap();
@@ -2330,10 +2463,11 @@ mod tests {
                     cx.now = f64::NAN;
                 }
                 6 => {
-                    cx.io.request_contexts.contexts.remove(&context.leg());
+                    cx.io.core.request_contexts.contexts.remove(&context.leg());
                 }
                 7 => {
                     cx.io
+                        .core
                         .request_contexts
                         .commands
                         .get_mut(&7)
@@ -2341,7 +2475,7 @@ mod tests {
                         .generation += 1;
                 }
                 8 => {
-                    cx.io.http_delivery.as_mut().unwrap().attempt.request = RequestId(100);
+                    cx.io.core.http_delivery.as_mut().unwrap().attempt.request = RequestId(100);
                 }
                 9 => {
                     cx.done_context(&context, "done".into()).unwrap();
@@ -2349,11 +2483,11 @@ mod tests {
                 _ => unreachable!(),
             }
             let counts = (
-                cx.io.actions.len(),
+                cx.io.core.actions.len(),
                 cx.io.pending.len(),
-                cx.io.timers.len(),
-                cx.io.request_contexts.contexts.len(),
-                cx.io.request_contexts.commands.len(),
+                cx.io.core.timers.len(),
+                cx.io.core.request_contexts.contexts.len(),
+                cx.io.core.request_contexts.commands.len(),
             );
             for _ in 0..2 {
                 assert_eq!(
@@ -2368,11 +2502,11 @@ mod tests {
                 );
                 assert_eq!(
                     (
-                        cx.io.actions.len(),
+                        cx.io.core.actions.len(),
                         cx.io.pending.len(),
-                        cx.io.timers.len(),
-                        cx.io.request_contexts.contexts.len(),
-                        cx.io.request_contexts.commands.len()
+                        cx.io.core.timers.len(),
+                        cx.io.core.request_contexts.contexts.len(),
+                        cx.io.core.request_contexts.commands.len()
                     ),
                     counts
                 );
@@ -2401,12 +2535,12 @@ mod tests {
             assert_eq!(grandchild.deadline(), parent.deadline());
             assert_eq!(grandchild.owner(), parent.owner());
             assert!(cx.io.pending.is_empty());
-            assert!(cx.io.timers.is_empty());
-            assert!(cx.io.actions.is_empty());
-            let count = cx.io.request_contexts.contexts.len();
+            assert!(cx.io.core.timers.is_empty());
+            assert!(cx.io.core.actions.is_empty());
+            let count = cx.io.core.request_contexts.contexts.len();
             cx.now = parent.deadline();
             assert_eq!(cx.http_leg_context(&parent, policy()), Err(Error::TimedOut));
-            assert_eq!(cx.io.request_contexts.contexts.len(), count);
+            assert_eq!(cx.io.core.request_contexts.contexts.len(), count);
         }
     }
 
@@ -2432,13 +2566,13 @@ mod tests {
         assert_eq!(cx.http_leg_context(&foreign, policy()), Err(Error::Revoked));
         cx.finish_http_context(&parent).unwrap();
         assert_eq!(cx.http_leg_context(&parent, policy()), Err(Error::Revoked));
-        assert_eq!(cx.io.request_contexts.validate(&child, cx.now), Ok(()));
+        assert_eq!(cx.io.core.request_contexts.validate(&child, cx.now), Ok(()));
         cx.done_context(&child, "[]".into()).unwrap();
         let replacement = cx.http_context(Scope::Command(7), policy()).unwrap();
         assert_ne!(replacement.owner(), child.owner());
         assert_eq!(cx.http_leg_context(&child, policy()), Err(Error::Revoked));
         assert!(cx.io.pending.is_empty());
-        assert!(cx.io.timers.is_empty());
+        assert!(cx.io.core.timers.is_empty());
     }
 
     #[test]
@@ -2462,11 +2596,11 @@ mod tests {
             cx.http_context(Scope::Background, mutation),
             Err(Error::Invalid)
         );
-        assert_eq!(cx.io.request_contexts.contexts.len(), 1);
-        assert_eq!(cx.io.request_contexts.commands.len(), 1);
+        assert_eq!(cx.io.core.request_contexts.contexts.len(), 1);
+        assert_eq!(cx.io.core.request_contexts.commands.len(), 1);
         assert!(cx.io.pending.is_empty());
-        assert!(cx.io.actions.is_empty());
-        assert!(cx.io.timers.is_empty());
+        assert!(cx.io.core.actions.is_empty());
+        assert!(cx.io.core.timers.is_empty());
     }
 
     #[test]
@@ -2491,18 +2625,18 @@ mod tests {
             cx.command_error_context(&foreign, "foreign"),
             Err(Error::Revoked)
         );
-        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.core.actions.is_empty());
         cx.done_context(&original, "[]".into()).unwrap();
-        cx.io.actions.clear();
+        cx.io.core.actions.clear();
         let current = cx.http_context(Scope::Command(7), policy()).unwrap();
         assert_eq!(
             cx.command_error_context(&original, "old"),
             Err(Error::Revoked)
         );
-        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.core.actions.is_empty());
         cx.command_error_context(&current, "current").unwrap();
         assert!(
-            matches!(cx.io.actions.as_slice(), [crate::Action::Notice(crate::Notice::CommandError {command:7,message})] if message == "current")
+            matches!(cx.io.core.actions.as_slice(), [crate::Action::Notice(crate::Notice::CommandError {command:7,message})] if message == "current")
         );
     }
 
@@ -2535,8 +2669,8 @@ mod tests {
             cx.http_retry_context(&context, RetryEvidence::ReadFailure),
             Err(Error::TimedOut)
         );
-        assert!(cx.io.actions.is_empty());
-        assert!(cx.io.timers.is_empty());
+        assert!(cx.io.core.actions.is_empty());
+        assert!(cx.io.core.timers.is_empty());
         cx.done_context(&context, "[]".into()).unwrap();
         assert_eq!(
             cx.validate_completion_context(&context),
@@ -2548,7 +2682,7 @@ mod tests {
             Err(Error::Revoked)
         );
         assert_eq!(cx.validate_completion_context(&replacement), Ok(()));
-        assert_eq!(cx.io.actions.len(), 1);
+        assert_eq!(cx.io.core.actions.len(), 1);
     }
 
     #[test]
@@ -2564,9 +2698,9 @@ mod tests {
         assert_eq!(cx.validate_completion_context(&root), Ok(()));
         cx.now = root.deadline();
         assert_eq!(cx.validate_http_context(&root), Err(Error::TimedOut));
-        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.core.actions.is_empty());
         assert!(cx.io.pending.is_empty());
-        assert!(cx.io.timers.is_empty());
+        assert!(cx.io.core.timers.is_empty());
     }
 
     #[test]
@@ -2593,6 +2727,7 @@ mod tests {
                 .unwrap();
             if install_attempt {
                 cx.io
+                    .core
                     .request_contexts
                     .register_attempt(&mutation, RequestId(99), cx.now)
                     .unwrap();
@@ -2601,10 +2736,10 @@ mod tests {
                 cx.validate_read_completion_context(&root),
                 Err(Error::Invalid)
             );
-            assert!(cx.io.actions.is_empty());
+            assert!(cx.io.core.actions.is_empty());
             assert!(cx.io.pending.is_empty());
-            assert!(cx.io.timers.is_empty());
-            assert!(cx.io.request_contexts.commands.contains_key(&7));
+            assert!(cx.io.core.timers.is_empty());
+            assert!(cx.io.core.request_contexts.commands.contains_key(&7));
         }
     }
 
@@ -2694,7 +2829,11 @@ mod tests {
         assert_eq!(keyless.routing_intent(), RoutingIntent::Primary);
         assert_eq!(keyless.route(), None);
         assert!(keyless.credential().is_none());
-        cx.io.request_contexts.validate(&keyless, cx.now).unwrap();
+        cx.io
+            .core
+            .request_contexts
+            .validate(&keyless, cx.now)
+            .unwrap();
         // Retries clone it; legs inherit it and may not change or widen it.
         let retry = cx
             .http_retry_context(&keyless, RetryEvidence::ReadFailure)
@@ -2784,7 +2923,11 @@ mod tests {
         let retry = cx
             .http_retry_context(&root, RetryEvidence::ReadFailure)
             .unwrap();
-        cx.io.request_contexts.validate(&retry, cx.now).unwrap();
+        cx.io
+            .core
+            .request_contexts
+            .validate(&retry, cx.now)
+            .unwrap();
         assert_eq!(retry, root);
         // No declaration keeps the credential-derived intent and host routing.
         let plain = cx.http_context(Scope::Background, policy()).unwrap();
@@ -2796,17 +2939,19 @@ mod tests {
         for signed in [false, true] {
             let mut io = super::super::Io::<()>::default();
             let founder = io
+                .core
                 .request_contexts
                 .issue(1, Scope::Command(7), policy(), 0.)
                 .unwrap();
-            io.request_contexts.retain_command_entry(&founder);
-            assert!(!io.request_contexts.owner_credentialed(7));
+            io.core.request_contexts.retain_command_entry(&founder);
+            assert!(!io.core.request_contexts.owner_credentialed(7));
             let mut execution = policy();
             execution.credential = signed.then(|| crate::request_context::Credential {
                 slot: crate::CredentialSlot::Primary,
                 reference: crate::signing::KeyRef("fixture".into()),
             });
-            io.request_contexts
+            io.core
+                .request_contexts
                 .begin_execution(
                     100,
                     &founder,
@@ -2816,7 +2961,7 @@ mod tests {
                     0.,
                 )
                 .unwrap();
-            assert_eq!(io.request_contexts.owner_credentialed(7), signed);
+            assert_eq!(io.core.request_contexts.owner_credentialed(7), signed);
         }
     }
 
@@ -2856,7 +3001,7 @@ mod tests {
             let error = VenueError::new("route refused").kind(ErrorKind::AuthInvalid);
             cx.fail_preflight(&preflight, error).unwrap();
             assert_eq!(
-                cx.io.health.auth_failures, counted,
+                cx.io.core.health.auth_failures, counted,
                 "read={read} write={write}"
             );
         }
@@ -2907,11 +3052,11 @@ mod tests {
                     .venue_code("route");
                 cx.fail_context(&failed, error).unwrap();
                 assert_eq!(
-                    cx.io.health.auth_failures, counted,
+                    cx.io.core.health.auth_failures, counted,
                     "{kind:?} root={root} leg={leg:?}"
                 );
                 // The typed terminal keeps its metadata either way.
-                assert!(cx.io.actions.iter().any(|action| matches!(action,
+                assert!(cx.io.core.actions.iter().any(|action| matches!(action,
                     crate::Action::Notice(Notice::CommandFailed { command: 7, error })
                         if error.kind == Some(kind) && error.venue_code.as_deref() == Some("route"))));
             }
@@ -2935,11 +3080,11 @@ mod tests {
         assert_ne!(first.leg(), background.leg());
         assert_eq!(first.deadline(), 600.);
         assert!(cx.io.pending.is_empty());
-        assert!(cx.io.actions.is_empty());
-        assert!(cx.io.timers.is_empty());
+        assert!(cx.io.core.actions.is_empty());
+        assert!(cx.io.core.timers.is_empty());
         cx.done(7, "null".into());
         assert!(matches!(
-            cx.io.actions.as_slice(),
+            cx.io.core.actions.as_slice(),
             [crate::Action::Notice(Notice::CommandDone {
                 command: 7,
                 ..
@@ -3109,7 +3254,7 @@ mod tests {
             assert_eq!(cx.finish_http_context(&foreign_handle), Err(Error::Revoked));
             cx.finish_http_context(&context).unwrap();
             assert_eq!(cx.finish_http_context(&context), Err(Error::Revoked));
-            assert!(cx.io.request_contexts.contexts.is_empty());
+            assert!(cx.io.core.request_contexts.contexts.is_empty());
         }
         let old = cx.http_context(Scope::Command(7), policy()).unwrap();
         cx.now = old.deadline();
@@ -3118,6 +3263,7 @@ mod tests {
         assert_eq!(cx.finish_http_context(&old), Err(Error::Revoked));
         assert!(
             cx.io
+                .core
                 .request_contexts
                 .validate(&replacement, cx.now)
                 .is_ok()
@@ -3143,12 +3289,12 @@ mod tests {
         );
         cx.finish_http_context(&contexts.remove(0)).unwrap();
         let replacement = cx.http_context(Scope::Background, policy()).unwrap();
-        assert_eq!(cx.io.request_contexts.contexts.len(), CAPACITY);
+        assert_eq!(cx.io.core.request_contexts.contexts.len(), CAPACITY);
         cx.finish_http_context(&replacement).unwrap();
         for context in contexts {
             cx.finish_http_context(&context).unwrap();
         }
-        assert!(cx.io.request_contexts.contexts.is_empty());
+        assert!(cx.io.core.request_contexts.contexts.is_empty());
     }
 
     #[test]
@@ -3169,10 +3315,10 @@ mod tests {
                 Err(Error::Revoked)
             );
         }
-        assert!(cx.io.request_contexts.contexts.is_empty());
-        assert!(cx.io.request_contexts.commands.is_empty());
+        assert!(cx.io.core.request_contexts.contexts.is_empty());
+        assert!(cx.io.core.request_contexts.commands.is_empty());
         assert!(cx.io.pending.is_empty());
-        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.core.actions.is_empty());
     }
 
     #[test]
@@ -3256,23 +3402,26 @@ mod write_tests {
         };
         let released = |intent: Option<Intent>| {
             let mut io = super::super::Io::<()>::default();
-            io.request_contexts.dispatch = intent.map(|intent| (7, intent));
+            io.core.request_contexts.dispatch = intent.map(|intent| (7, intent));
             let context = io
+                .core
                 .request_contexts
                 .issue(1, Scope::Command(7), policy(), 0.)
                 .unwrap();
-            io.request_contexts.dispatch = None;
+            io.core.request_contexts.dispatch = None;
             for id in [11, 12] {
                 let _ = io
+                    .core
                     .request_contexts
                     .register_attempt(&context, RequestId(id), 0.);
             }
-            *io.request_contexts
+            *io.core
+                .request_contexts
                 .release_flag(&context, RequestId(11))
                 .unwrap()
                 .unwrap() = true;
-            io.http_delivery = Some(delivery(&context, 11));
-            io.http_write_reply = Some((400, String::new()));
+            io.core.http_delivery = Some(delivery(&context, 11));
+            io.core.http_write_reply = Some((400, String::new()));
             (io, context)
         };
 
@@ -3287,7 +3436,7 @@ mod write_tests {
         let fact = cx
             .classify_write(&context, &REFUSE, Some(&native), "x")
             .unwrap();
-        cx.io.http_delivery = Some(delivery(&context, 12));
+        cx.io.core.http_delivery = Some(delivery(&context, 12));
         let failed = WriteFact::Failed {
             fact: fact.clone(),
             known_effects: false,
@@ -3297,7 +3446,7 @@ mod write_tests {
             Error::Revoked
         );
         // An attempt-free fact may only be an unproven answer.
-        cx.io.http_delivery = Some(delivery(&context, 11));
+        cx.io.core.http_delivery = Some(delivery(&context, 11));
         let (_, error) = classify::write(
             &REFUSE,
             Intent::Place,
@@ -3330,7 +3479,7 @@ mod write_tests {
             order_ids: Vec::new(),
         };
         cx.http_write_fact(&context, empty, None).unwrap();
-        let Seal::Failure(error, _) = cx.io.request_contexts.seal(
+        let Seal::Failure(error, _) = cx.io.core.request_contexts.seal(
             7,
             Some(&delivery(&context, 11)),
             Some(&context),
@@ -3372,12 +3521,13 @@ mod write_tests {
         ] {
             let mut io = super::super::Io::<()>::default();
             let mut store = Store::default();
-            io.request_contexts.dispatch = Some((7, commanded));
+            io.core.request_contexts.dispatch = Some((7, commanded));
             let context = io
+                .core
                 .request_contexts
                 .issue(1, Scope::Command(7), policy(), 0.)
                 .unwrap();
-            io.request_contexts.dispatch = None;
+            io.core.request_contexts.dispatch = None;
             let mut cx = Cx {
                 now: 1.,
                 store: &mut store,
@@ -3398,13 +3548,15 @@ mod write_tests {
         // The command's own intent is a no-op; nothing narrows after a send.
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
-        io.request_contexts.dispatch = Some((7, Intent::Place));
+        io.core.request_contexts.dispatch = Some((7, Intent::Place));
         let context = io
+            .core
             .request_contexts
             .issue(1, Scope::Command(7), policy(), 0.)
             .unwrap();
-        io.request_contexts.dispatch = None;
-        io.request_contexts
+        io.core.request_contexts.dispatch = None;
+        io.core
+            .request_contexts
             .register_attempt(&context, RequestId(11), 0.)
             .unwrap();
         let mut cx = Cx {
@@ -3432,12 +3584,13 @@ mod write_tests {
         ] {
             let mut io = super::super::Io::<()>::default();
             let mut store = Store::default();
-            io.request_contexts.dispatch = Some((7, commanded));
+            io.core.request_contexts.dispatch = Some((7, commanded));
             let context = io
+                .core
                 .request_contexts
                 .issue(1, Scope::Command(7), policy(), 0.)
                 .unwrap();
-            io.request_contexts.dispatch = None;
+            io.core.request_contexts.dispatch = None;
             let mut cx = Cx {
                 now: 1.,
                 store: &mut store,
@@ -3489,13 +3642,14 @@ mod write_tests {
         ] {
             let mut io = super::super::Io::<()>::default();
             let mut store = Store::default();
-            io.request_contexts.dispatch = intent.map(|intent| (7, intent));
+            io.core.request_contexts.dispatch = intent.map(|intent| (7, intent));
             let context = io
+                .core
                 .request_contexts
                 .issue(1, Scope::Command(7), policy(), 0.)
                 .unwrap();
-            io.request_contexts.dispatch = None;
-            io.http_delivery = Some(delivery(&context, 11));
+            io.core.request_contexts.dispatch = None;
+            io.core.http_delivery = Some(delivery(&context, 11));
             let cx = Cx {
                 now: 1.,
                 store: &mut store,
@@ -3506,12 +3660,12 @@ mod write_tests {
                 Err(Error::State),
                 "no delivered reply"
             );
-            cx.io.http_write_reply = Some((400, String::new()));
+            cx.io.core.http_write_reply = Some((400, String::new()));
             let fact = cx
                 .classify_write(&context, &GONE, Some(&native), "x")
                 .unwrap();
             assert_eq!(fact.verdict(), expected, "{intent:?}");
-            cx.io.http_write_reply = Some((503, String::new()));
+            cx.io.core.http_write_reply = Some((503, String::new()));
             let fact = cx
                 .classify_write(&context, &GONE, Some(&native), "x")
                 .unwrap();
@@ -3524,10 +3678,12 @@ mod write_tests {
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
         let first = io
+            .core
             .request_contexts
             .issue(1, Scope::Command(7), policy(), 0.)
             .unwrap();
         let second = io
+            .core
             .request_contexts
             .issue(2, Scope::Command(7), policy(), 0.)
             .unwrap();
@@ -3535,15 +3691,17 @@ mod write_tests {
             .issue(1, Scope::Command(7), policy(), 0.)
             .unwrap();
         for (context, id) in [(&first, 11), (&second, 12)] {
-            io.request_contexts
+            io.core
+                .request_contexts
                 .register_attempt(context, RequestId(id), 0.)
                 .unwrap();
-            *io.request_contexts
+            *io.core
+                .request_contexts
                 .release_flag(context, RequestId(id))
                 .unwrap()
                 .unwrap() = true;
         }
-        io.http_delivery = Some(delivery(&second, 12));
+        io.core.http_delivery = Some(delivery(&second, 12));
         let mut cx = Cx {
             now: 1.,
             store: &mut store,
@@ -3573,7 +3731,7 @@ mod write_tests {
             ),
             Err(Error::State)
         );
-        cx.io.http_delivery = Some(delivery(&first, 11));
+        cx.io.core.http_delivery = Some(delivery(&first, 11));
         cx.http_write_result_with_reports(
             &first,
             rejected(),
@@ -3584,6 +3742,7 @@ mod write_tests {
         assert_eq!(cx.fail_context(&first, "duplicate"), Err(Error::Revoked));
         let messages: Vec<_> = cx
             .io
+            .core
             .actions
             .iter()
             .filter_map(|a| match a {
@@ -3594,7 +3753,7 @@ mod write_tests {
             })
             .collect();
         assert_eq!(messages, ["A1", "A2", "B1", "B2"]);
-        assert_eq!(cx.io.actions.iter().filter(|a| matches!(a,
+        assert_eq!(cx.io.core.actions.iter().filter(|a| matches!(a,
             crate::Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(Outcome::Rejected))).count(), 1);
     }
 
@@ -3604,20 +3763,24 @@ mod write_tests {
             let mut io = super::super::Io::<()>::default();
             let mut store = Store::default();
             let first = io
+                .core
                 .request_contexts
                 .issue(1, Scope::Command(7), policy(), 0.)
                 .unwrap();
-            io.request_contexts
+            io.core
+                .request_contexts
                 .register_attempt(&first, RequestId(11), 0.)
                 .unwrap();
             if state != 0 {
-                *io.request_contexts
+                *io.core
+                    .request_contexts
                     .release_flag(&first, RequestId(11))
                     .unwrap()
                     .unwrap() = true;
             }
             if state >= 2 {
-                io.request_contexts
+                io.core
+                    .request_contexts
                     .result(
                         &delivery(&first, 11),
                         if state == 2 { rejected() } else { accepted() },
@@ -3626,28 +3789,32 @@ mod write_tests {
             }
             if state == 4 {
                 let second = io
+                    .core
                     .request_contexts
                     .issue(2, Scope::Command(7), policy(), 0.)
                     .unwrap();
-                io.request_contexts
+                io.core
+                    .request_contexts
                     .register_attempt(&second, RequestId(12), 0.)
                     .unwrap();
-                *io.request_contexts
+                *io.core
+                    .request_contexts
                     .release_flag(&second, RequestId(12))
                     .unwrap()
                     .unwrap() = true;
-                io.request_contexts
+                io.core
+                    .request_contexts
                     .result(&delivery(&second, 12), rejected())
                     .unwrap();
             }
-            io.http_delivery = Some(delivery(&first, 11));
+            io.core.http_delivery = Some(delivery(&first, 11));
             let mut cx = Cx {
                 now: 1.,
                 store: &mut store,
                 io: &mut io,
             };
             cx.done_context(&first, "[]".into()).unwrap();
-            cx.io.http_delivery = None;
+            cx.io.core.http_delivery = None;
             assert_eq!(
                 cx.done_context(&first, "duplicate".into()),
                 Err(Error::Revoked)
@@ -3655,12 +3822,14 @@ mod write_tests {
             assert_eq!(cx.fail_context(&first, "late timer"), Err(Error::Revoked));
             let done = cx
                 .io
+                .core
                 .actions
                 .iter()
                 .filter(|a| matches!(a, crate::Action::Notice(Notice::CommandDone { .. })))
                 .count();
             let failed = cx
                 .io
+                .core
                 .actions
                 .iter()
                 .filter_map(|a| match a {
@@ -3769,18 +3938,21 @@ mod write_tests {
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
         let old = io
+            .core
             .request_contexts
             .issue(1, Scope::Command(7), policy(), 0.)
             .unwrap();
-        io.request_contexts.finish(7);
+        io.core.request_contexts.finish(7);
         let current = io
+            .core
             .request_contexts
             .issue(2, Scope::Command(7), policy(), 0.)
             .unwrap();
-        io.request_contexts
+        io.core
+            .request_contexts
             .register_attempt(&current, RequestId(12), 0.)
             .unwrap();
-        io.http_delivery = Some(delivery(&old, 11));
+        io.core.http_delivery = Some(delivery(&old, 11));
         let mut cx = Cx {
             now: 1.,
             store: &mut store,
@@ -3788,12 +3960,12 @@ mod write_tests {
         };
         cx.done(7, "old success".into());
         cx.fail(7, "old failure");
-        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.core.actions.is_empty());
         assert_eq!(
             cx.http_write_result(&current, accepted()),
             Err(Error::Revoked)
         );
-        assert!(cx.io.request_contexts.validate(&current, 1.).is_ok());
+        assert!(cx.io.core.request_contexts.validate(&current, 1.).is_ok());
     }
 
     #[test]
@@ -3828,27 +4000,33 @@ mod write_tests {
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
         let first = io
+            .core
             .request_contexts
             .issue(1, Scope::Command(7), policy(), 0.)
             .unwrap();
         let second = io
+            .core
             .request_contexts
             .issue(2, Scope::Command(8), policy(), 0.)
             .unwrap();
-        io.request_contexts
+        io.core
+            .request_contexts
             .register_attempt(&first, RequestId(11), 0.)
             .unwrap();
-        io.request_contexts
+        io.core
+            .request_contexts
             .register_attempt(&second, RequestId(12), 0.)
             .unwrap();
-        *io.request_contexts
+        *io.core
+            .request_contexts
             .release_flag(&second, RequestId(12))
             .unwrap()
             .unwrap() = true;
-        io.request_contexts
+        io.core
+            .request_contexts
             .result(&delivery(&second, 12), accepted())
             .unwrap();
-        io.http_delivery = Some(delivery(&first, 11));
+        io.core.http_delivery = Some(delivery(&first, 11));
         let mut cx = Cx {
             now: 1.,
             store: &mut store,
@@ -3863,23 +4041,23 @@ mod write_tests {
             cx.fail_context(&second, "wrong delivery"),
             Err(Error::Revoked)
         );
-        assert!(cx.io.actions.is_empty());
-        cx.io.http_delivery = None;
+        assert!(cx.io.core.actions.is_empty());
+        cx.io.core.http_delivery = None;
         cx.done(8, "unqualified".into());
         cx.fail(8, "unqualified");
         assert!(
-            cx.io.actions.is_empty(),
+            cx.io.core.actions.is_empty(),
             "numeric finalizers cannot bypass an active managed journal"
         );
         cx.done_context(&second, "accepted".into()).unwrap();
         assert!(matches!(
-            cx.io.actions.as_slice(),
+            cx.io.core.actions.as_slice(),
             [crate::Action::Notice(Notice::CommandDone {
                 command: 8,
                 ..
             })]
         ));
-        assert!(cx.io.request_contexts.validate(&first, 1.).is_ok());
+        assert!(cx.io.core.request_contexts.validate(&first, 1.).is_ok());
     }
 
     #[test]
@@ -3887,26 +4065,32 @@ mod write_tests {
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
         let context = io
+            .core
             .request_contexts
             .issue(1, Scope::Command(7), policy(), 0.)
             .unwrap();
-        io.request_contexts
+        io.core
+            .request_contexts
             .register_attempt(&context, RequestId(11), 0.)
             .unwrap();
-        *io.request_contexts
+        *io.core
+            .request_contexts
             .release_flag(&context, RequestId(11))
             .unwrap()
             .unwrap() = true;
-        io.request_contexts
+        io.core
+            .request_contexts
             .result(&delivery(&context, 11), rejected())
             .unwrap();
-        io.request_contexts
+        io.core
+            .request_contexts
             .grant_resend(&delivery(&context, 11))
             .unwrap();
-        io.request_contexts
+        io.core
+            .request_contexts
             .register_attempt(&context, RequestId(12), 1.)
             .unwrap();
-        io.http_delivery = Some(delivery(&context, 11));
+        io.core.http_delivery = Some(delivery(&context, 11));
         let mut cx = Cx {
             now: 2.,
             store: &mut store,
@@ -3920,11 +4104,11 @@ mod write_tests {
             cx.fail_context(&context, "late old failure"),
             Err(Error::Revoked)
         );
-        assert!(cx.io.actions.is_empty());
-        cx.io.http_delivery = Some(delivery(&context, 12));
+        assert!(cx.io.core.actions.is_empty());
+        cx.io.core.http_delivery = Some(delivery(&context, 12));
         cx.fail_context(&context, "new signer failed").unwrap();
         assert!(
-            matches!(cx.io.actions.last(), Some(crate::Action::Notice(Notice::CommandFailed { error, .. })) if error.outcome == Some(Outcome::Unknown))
+            matches!(cx.io.core.actions.last(), Some(crate::Action::Notice(Notice::CommandFailed { error, .. })) if error.outcome == Some(Outcome::Unknown))
         );
     }
 
@@ -3933,10 +4117,12 @@ mod write_tests {
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
         let context = io
+            .core
             .request_contexts
             .issue(1, Scope::Command(7), policy(), 0.)
             .unwrap();
-        io.request_contexts
+        io.core
+            .request_contexts
             .register_attempt(&context, RequestId(11), 0.)
             .unwrap();
         let mut cx = Cx {
@@ -3955,6 +4141,7 @@ mod write_tests {
         );
         let current = cx
             .io
+            .core
             .request_contexts
             .issue(2, Scope::Command(7), policy(), 1.)
             .unwrap();
@@ -3962,8 +4149,8 @@ mod write_tests {
             cx.done_context(&context, "old reused id".into()),
             Err(Error::Revoked)
         );
-        assert!(cx.io.request_contexts.validate(&current, 2.).is_ok());
-        assert_eq!(cx.io.actions.len(), 1);
+        assert!(cx.io.core.request_contexts.validate(&current, 2.).is_ok());
+        assert_eq!(cx.io.core.actions.len(), 1);
     }
 
     #[test]
@@ -3971,17 +4158,19 @@ mod write_tests {
         let mut io = super::super::Io::<()>::default();
         let mut store = Store::default();
         let context = io
+            .core
             .request_contexts
             .issue(1, Scope::Command(7), policy(), 0.)
             .unwrap();
         assert!(
-            io.request_contexts.commands[&7].writes.is_none(),
+            io.core.request_contexts.commands[&7].writes.is_none(),
             "no phantom physical attempt"
         );
         let mut read = policy();
         read.operation = Operation::Read;
         read.retry = crate::request_context::RetryPolicy::Never;
         let read = io
+            .core
             .request_contexts
             .issue(2, Scope::Command(7), read, 0.)
             .unwrap();
@@ -3991,11 +4180,11 @@ mod write_tests {
             io: &mut io,
         };
         cx.done(7, "unqualified".into());
-        assert!(cx.io.actions.is_empty());
+        assert!(cx.io.core.actions.is_empty());
         cx.fail_context(&read, "recipe refused before registration")
             .unwrap();
         assert!(
-            matches!(cx.io.actions.as_slice(), [crate::Action::Notice(Notice::CommandFailed { error, .. })] if error.outcome == Some(Outcome::NotSent))
+            matches!(cx.io.core.actions.as_slice(), [crate::Action::Notice(Notice::CommandFailed { error, .. })] if error.outcome == Some(Outcome::NotSent))
         );
         assert_eq!(
             cx.done_context(&context, "duplicate".into()),

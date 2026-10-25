@@ -396,7 +396,7 @@ impl Venue for ManagedProbe {
         );
         let (url, _, body) = recipe.unsigned();
         assert!(
-            cx.request_signed_managed(context, Method::Get, url, body, Box::new(recipe), ())
+            cx.request_signed_managed(context, None, Method::Get, url, body, Box::new(recipe), ())
                 .is_ok()
         );
     }

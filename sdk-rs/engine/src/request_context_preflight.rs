@@ -8,6 +8,9 @@ pub(super) use call::State;
 #[path = "request_context_preflight_ready.rs"]
 mod ready;
 
+#[path = "request_context_preflight_session.rs"]
+mod session_wait;
+
 impl ContextRegistry {
     fn prepare_preflight(
         &mut self,
@@ -71,6 +74,7 @@ impl ContextRegistry {
                     .map(|(_, intent)| intent),
                 leg_intents: Vec::new(),
                 credentialed,
+                inherited_uncertain: false,
             },
         );
         let handle = Preflight::new(&self.issuer, command, generation);
@@ -110,13 +114,33 @@ impl ContextRegistry {
         match (state.policy.purpose, error) {
             (PreflightPurpose::ReadOnly, error) => Ok(Seal::Legacy(error)),
             (PreflightPurpose::WriteAfterReads, Some(error)) => {
-                // The same empty-journal projection as a Context mutation
-                // refused before registration bounds text/IDs and proves NotSent.
-                let error = CommandWrites::new(CAPACITY)?.fail(error)?;
+                // The same empty-journal projection as a Context mutation refused
+                // before registration bounds text/IDs; NotSent unless inherited.
+                let error = CommandWrites::new(CAPACITY)?
+                    .inheriting(owner.inherited_uncertain)
+                    .fail(error)?;
                 Ok(Seal::Failure(error, Vec::new()))
             }
             (PreflightPurpose::WriteAfterReads, None) => Err(Error::State),
         }
+    }
+
+    fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
+        let owner = self.preflight_owner(preflight)?;
+        let CommandPhase::Preflight(state) = &owner.phase else {
+            unreachable!()
+        };
+        if state.policy.purpose != PreflightPurpose::WriteAfterReads {
+            return Err(Error::Invalid);
+        }
+        let Owner::Command { id, .. } = preflight.owner() else {
+            unreachable!()
+        };
+        self.commands
+            .get_mut(&id)
+            .expect("validated preflight owner")
+            .inherited_uncertain = true;
+        Ok(())
     }
 
     pub(crate) fn has_retirements(&self) -> bool {
@@ -194,7 +218,7 @@ impl<P> Cx<'_, P> {
         }
         let cap = match self.io.command_receipt() {
             Ok(cap) => cap,
-            Err(reason) => return self.with_command_entry(Operation::Read, |_, _| Err(reason)),
+            Err(reason) => return Err(self.reject_command_entry(Operation::Read, reason)),
         };
         if !self.now.is_finite() || cap.1 - self.now < 1. {
             return Err(CommandEntryError::Revoked);
@@ -202,6 +226,7 @@ impl<P> Cx<'_, P> {
         self.with_command_entry(Operation::Read, |cx, command| {
             let preflight = cx.issue_preflight(command, policy)?;
             cx.io
+                .core
                 .request_contexts
                 .bind_preflight_receipt(&preflight, cap)
                 .expect("newly issued preflight");
@@ -216,27 +241,30 @@ impl<P> Cx<'_, P> {
         command: CommandId,
         policy: PreflightPolicy,
     ) -> Result<Preflight, Error> {
-        if self.io.http_delivery.is_some() {
+        if self.io.core.http_delivery.is_some() {
             return Err(Error::Revoked);
         }
         #[cfg(feature = "order-locks")]
-        if (policy.purpose == PreflightPurpose::ReadOnly && self.io.order_locks.contains(command))
-            || !self.io.order_locks.can_manage_unsent(command)
+        if (policy.purpose == PreflightPurpose::ReadOnly
+            && self.io.core.order_locks.contains(command))
+            || !self.io.core.order_locks.can_manage_unsent(command)
         {
             return Err(Error::State);
         }
         self.io
+            .core
             .request_contexts
             .prepare_preflight(command, &policy, self.now)?;
         let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let writes = policy.purpose == PreflightPurpose::WriteAfterReads;
         let preflight = self
             .io
+            .core
             .request_contexts
             .begin_preflight(command, generation, policy, self.now);
         #[cfg(feature = "order-locks")]
         if writes {
-            self.io.order_locks.manage(command);
+            self.io.core.order_locks.manage(command);
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = writes;
@@ -247,10 +275,10 @@ impl<P> Cx<'_, P> {
     /// completion use their own authority operations; they cannot bypass this.
     pub fn done_preflight(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
         self.validate_preflight_activation(preflight)?;
-        let seal = self.io.request_contexts.seal_preflight(
+        let seal = self.io.core.request_contexts.seal_preflight(
             preflight,
             self.now,
-            self.io.http_delivery.as_ref(),
+            self.io.core.http_delivery.as_ref(),
             None,
         )?;
         let Owner::Command { id, .. } = preflight.owner() else {
@@ -259,18 +287,34 @@ impl<P> Cx<'_, P> {
         self.finish_sealed_command(id, Some(result), seal)
     }
 
-    /// Failure before any plan was admitted proves no write reached the venue.
+    /// Record that an earlier attempt of this intent may have reached the venue.
+    /// Monotonic: every later failure of this command projects at least Unknown.
+    /// It grants no send, resend, renewal, import or success authority; the
+    /// resulting Unknown follows the existing Unknown reconciliation.
+    pub fn inherit_preflight_uncertainty(&mut self, preflight: &Preflight) -> Result<(), Error> {
+        self.io
+            .core
+            .request_contexts
+            .inherit_preflight_uncertainty(preflight)
+    }
+
+    /// Failure before any plan was admitted proves this command sent no write;
+    /// an inherited maybe-sent fact still projects Unknown.
     /// Expiry cannot turn this handle into success, retry or send authority.
     pub fn fail_preflight(
         &mut self,
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        #[cfg(feature = "condition-waits")]
+        let seal = self.seal_condition_preflight(preflight, error.into())?;
+        #[cfg(not(feature = "condition-waits"))]
         self.validate_preflight_failure_custody(preflight)?;
-        let seal = self.io.request_contexts.seal_preflight(
+        #[cfg(not(feature = "condition-waits"))]
+        let seal = self.io.core.request_contexts.seal_preflight(
             preflight,
             self.now,
-            self.io.http_delivery.as_ref(),
+            self.io.core.http_delivery.as_ref(),
             Some(error.into()),
         )?;
         let Owner::Command { id, .. } = preflight.owner() else {

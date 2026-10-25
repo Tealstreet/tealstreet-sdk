@@ -7,6 +7,7 @@ import { createExchange } from '../index';
 import { RustEngineExchange, setRustEngineTransport } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderType } from '../types';
+import { prepareRecordedHttp } from './support/managedHttp';
 
 const aliases: ExchangeName[] = ['tealstreet-dex', 'kodiakfi', 'woofi', 'mode', 'salsadex', 'what'];
 const tags = ['TEALSTREET', 'TEALKODIAK', 'TEALSTREET', 'TEALMODE', 'TEALSALSA', 'TEALWHAT'];
@@ -15,6 +16,7 @@ const transport = (validation = 200) => {
   const writes: Array<{ method: string; url: string; headers: Record<string, string>; body?: string }> = [];
   const sockets: string[] = [];
   const native: Transport = {
+    prepareHttp: prepareRecordedHttp,
     now: () => Date.now(),
     connect(url, handlers) {
       sockets.push(url);
