@@ -315,3 +315,18 @@ never above1,482,752. CI is authoritative for family size. Since Backpack socket
 lifecycle landed asde1e2383410 during measurement, its plain merge needs a fresh
 local combined record before READY; the older7da combined number is not relabeled.
 No new Bitget source change is needed, and the PR head is intended to freeze.
+
+## CI family record and actual landing composition
+
+Exact-head PR Rust run40237876322 records Bitget and BitgetUSDC web/node
+1,478,522 bytes (artifact SHA256 acc4677a92bc6ac48bf70896d957f2339db7dafd924dd757769184a7d2786d9f).
+The ruled CI rounding therefore sets both caps to1,478,656 (1444KiB), replacing
+the provisional local1445KiB envelope above; Bybit and all other caps/profiles
+are unchanged. The cap remains below the overseer1448KiB ceiling.
+
+The 61bde79e161 composition on actual035948b564a measured local combined
+13,946,091 bytes, web=node, SHA256
+9be9c9f1f960f473c3cedb6851ee7140a7c17c5bbfca106b6b6a75e7a3afc924.
+Repair core2151 and Hyperliquid originals2167 then landed; the PR plain-merges
+actual49a5b54f362 before its READY-time local combined record. The0359 result
+is retained under that pin, never relabeled as the subsequent composition.
