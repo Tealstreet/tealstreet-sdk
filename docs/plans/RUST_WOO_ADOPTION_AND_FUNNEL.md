@@ -206,3 +206,45 @@ existing contract rather than changing runtime behavior.
 Paired current-tip sizes, committed preservation carry and qualifying PR CI
 remain pending. Earlier bare de1 WOO and bare035 combined numbers are scoped
 baseline evidence only and do not certify this composition.
+
+
+## Frozen source and first-source paired sizes
+
+Hcm's committed carry is CLEAR at `22a297a9b311` on actual `6fb44235f3e`,
+and the later composition carry is CLEAR at `a8cf061694d` on actual
+`74db4cd0768`. The latter has 17 own paths and 6,026 incoming unowned paths
+preserved exactly. Only README/CALLERS require manual composition, each the
+entire incoming file plus the exact unchanged WOO suffix once. Every owned
+non-doc blob remains byte-identical to the reviewed source. Incoming AsterDEX
+plan whitespace is retained as its exact blob, without foreign cleanup.
+
+The first-source paired measurements are specifically `6fb44235f3e` bare
+versus `22a297a9b311` composed, not a relabelled later-tip pair:
+
+| Optimized local artifact | Bare bytes | Composed bytes | Delta | Fixed budget | Composed headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| WOO | 1,230,915 | 1,321,677 | +90,762 | 1,343,488 | 21,811 |
+| Combined | 13,938,106 | 13,955,074 | +16,968 | 14,155,776 | 200,702 |
+
+Both targets' Node/Web outputs are byte-identical. The four preserved source
+archives independently match all 6,030 bare / 6,035 composed tracked blobs;
+all four scratch target directories are deleted. The unmodified commands are
+`bash sdk-rs/harness/build.sh --venue woo` and `bash sdk-rs/harness/build.sh`,
+with Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132, Node 24.20.0,
+CARGO_BUILD_JOBS=4, BINARYEN_CORES=4 and SAFE_CEX_WASM_OPT=required.
+No Rust/build/profile/optimizer overrides are introduced.
+
+The later GRVT recipe and AsterDEX signed-read landings change combined inputs,
+so their new composition needs its own local combined measurement before READY.
+The first-source paired delta above remains scoped to its original pins. The
+current absolute combined result will be recorded in the PR with its exact pin;
+CI is the family-size record. Current combined measurement and the single
+frozen-head PR run may proceed concurrently; both must pass before READY.
+
+The new counterbalanced Bitget CPU gate is merged through actual
+`0a54e37b1e8`, automatically, with no WOO or build-script input change. The
+final composed scoped qualification at `0c2b49bf051` is 232 native tests across
+14 targets, zero failures/ignores/filters, plus strict all-target WOO Clippy.
+Formatting and inventory checks are recorded separately at their exact pins.
+No old Bitget gate exception is used. Immutable freeze carry, current combined
+proof, full green CI/family record and auditor exact-tree GO remain required.
