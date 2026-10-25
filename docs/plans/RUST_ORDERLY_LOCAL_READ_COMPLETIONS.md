@@ -177,3 +177,11 @@ assertion proofs and both size artifacts are outside Git under
 /tmp/codex-orderly-local-read-refresh. The first bans check sees a newer foreign
 Backpack inventory shrink on origin; merge actual tip before freeze and rerun.
 No source review, CI or landing clearance is implied by these owner results.
+
+The freeze preparation plain-merges actual Backpack landing c6a5c4bb0a4 at
+25946e19d9e. Only the index needed manual resolution, retaining full incoming
+bytes plus the exact own row once. No Orderly/shared dependency or Cargo source
+changed in the incoming landing, so the paired size and scoped runtime evidence
+carry by exact blobs. Fresh full bans and ratchets pass; the stale foreign
+inventory failure is closed without changing any foreign key. Six own paths
+remain versus the actual tip; all 5,959 unowned paths are incoming-exact.
