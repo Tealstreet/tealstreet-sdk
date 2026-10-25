@@ -1532,10 +1532,10 @@ impl BybitLinear {
     /// Drop the in-flight snapshots, releasing their read authority.
     fn drop_account_reads(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(join) = self.account.orders.take() {
-            Self::finish_read_root(cx, join.root, join.legs);
+            Self::finish_read_root(cx, join.root, &join.legs);
         }
         if let Some(join) = self.account.positions.take() {
-            Self::finish_read_root(cx, join.root, join.legs);
+            Self::finish_read_root(cx, join.root, &join.legs);
         }
     }
 
@@ -1544,10 +1544,10 @@ impl BybitLinear {
     fn finish_read_root(
         cx: &mut Cx<'_, Pending>,
         root: Option<safe_cex_engine::request_context::Context>,
-        legs: Vec<safe_cex_engine::request_context::Context>,
+        legs: &[safe_cex_engine::request_context::Context],
     ) {
         for leg in legs {
-            let _ = cx.finish_http_context(&leg);
+            let _ = cx.finish_http_context(leg);
         }
         if let Some(root) = root {
             let _ = cx.finish_http_context(&root);
@@ -1558,7 +1558,7 @@ impl BybitLinear {
     /// still out predates the write, so it is abandoned rather than joined.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(old) = self.account.orders.take() {
-            Self::finish_read_root(cx, old.root, old.legs);
+            Self::finish_read_root(cx, old.root, &old.legs);
         }
         self.account.orders_follow_up = false;
         self.fetch_orders(cx);
@@ -2699,7 +2699,7 @@ impl BybitLinear {
             return;
         }
         let mut join = self.account.orders.take().expect("checked above");
-        Self::finish_read_root(cx, join.root.take(), std::mem::take(&mut join.legs));
+        Self::finish_read_root(cx, join.root.take(), &join.legs);
         if std::mem::take(&mut self.account.orders_follow_up) {
             self.fetch_orders(cx);
         }
@@ -2877,7 +2877,7 @@ impl BybitLinear {
             return;
         }
         let mut join = self.account.positions.take().expect("checked above");
-        Self::finish_read_root(cx, join.root.take(), std::mem::take(&mut join.legs));
+        Self::finish_read_root(cx, join.root.take(), &join.legs);
         if std::mem::take(&mut self.account.positions_follow_up) {
             self.fetch_positions(cx);
         }
