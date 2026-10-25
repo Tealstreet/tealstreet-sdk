@@ -2132,6 +2132,8 @@ mod tests {
     include!("request_context_plan_expiry_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_independence_tests.rs");
+    #[cfg(feature = "serial-plans")]
+    include!("request_context_serial_plan_tests.rs");
 
     /// Bearer bundle attach and Bind-admission units (`session-bearer` only).
     #[cfg(feature = "session-bearer")]

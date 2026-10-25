@@ -29,6 +29,11 @@ def modes():
     grouped[('metadata-freshness', 'test-support')] = ['metadata-only CI control']
     grouped[('http-plans', 'metadata-freshness', 'order-locks', 'test-support')] = [
         'metadata Plan CI control']
+    # Seeded serial-plans OFF control: never add serial-plans here. Once a family
+    # adopts, workspace tests unify it on, so this row alone proves the off build.
+    grouped[('http-plans', 'order-locks', 'test-support')] = ['serial plans OFF control']
+    # No family enables serial Plans before adoption; keep them compiled and tested.
+    grouped[('http-plans', 'order-locks', 'serial-plans', 'test-support')] = ['serial Plan control']
     # No family links session-bearer yet; its tests run only here.
     grouped[('http-mutation-barriers', 'http-plans', 'session-bearer', 'test-support')] = [
         'session-bearer control']
