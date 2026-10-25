@@ -30,11 +30,13 @@ class CredentialOnlyBans(unittest.TestCase):
         self.assertEqual(check.violations('engine/src/signing.rs', text), [])
         self.assertEqual(len(check.violations('registry/src/lib.rs', text)), 2)
 
-    def test_a_gated_field_hides_only_that_field(self):
-        text = ('struct S {\n    #[cfg(test)]\n    probe: u8,\n    real: u8,\n}\n'
-                'impl S { fn f(i: &Identity) { i.signing_opt(); } }\n'
-                'fn g() -> S { S {\n    #[cfg(test)]\n    probe: 0,\n    real: 1 } }\n')
-        self.assertEqual(len(check.violations('venues/x/src/lib.rs', text)), 1)
+    def test_gated_fields_statements_and_macros_are_still_scanned(self):
+        for gated in ('struct S {\n    #[cfg(test)]\n    probe: u8,\n}\n',
+                      'fn f() {\n    #[cfg(test)]\n    { let _x = 1; }\n}\n',
+                      'fn f() -> u8 {\n    #[cfg(test)]\n    if let Some(x) = y() { return x; }\n    0\n}\n',
+                      '#[cfg(test)]\nthread_local! { static T: u8 = 0; }\n'):
+            text = gated + 'fn g(i: &Identity) { i.signing_opt(); }\n'
+            self.assertEqual(len(check.violations('venues/x/src/lib.rs', text)), 1, gated)
 
     def test_raw_strings_do_not_unbalance_a_test_module(self):
         text = ('#[cfg(test)]\nmod tests {\n    const J: &str = r#"{\"a\":1}"#;\n}\n'

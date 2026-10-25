@@ -2,8 +2,8 @@
 """Credential-only setup bans (docs/plans/RUST_CREDENTIAL_ONLY_SETUP.md, D1/D2).
 
 No consumer may rebuild an empty signing ref or reach the absent/optional
-forms of `Identity`. Only `#[cfg(test)]`-gated items are skipped: a `mod x;`
-declaration or the brace-matched item that follows the attribute.
+forms of `Identity`. Only `#[cfg(test)]` modules (a `mod x;` declaration or a
+brace-matched inline module) and `*_tests.rs` files are skipped.
 """
 import pathlib
 import re
@@ -30,60 +30,60 @@ RULES = [
 TEST_ATTR = re.compile(r'^[ \t]*#\[cfg\(test\)\][ \t]*\n', re.M)
 
 
-ITEM = re.compile(r'(?:pub(?:\([^)]*\))?\s+)?(?:mod|fn|impl|use|struct|enum|const|static|type|trait|macro_rules!|unsafe|async|extern)\b')
 RAW_STRING = re.compile(r'r(#*)"')
+TEST_MODULE = re.compile(r'(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*([;{])')
 
 
 def skip_literal(text, j):
     """Offset just past a string or raw-string literal starting at `j`."""
     raw = RAW_STRING.match(text, j)
     if raw:
-        close = '"' + raw.group(1)
-        return text.find(close, raw.end()) + len(close)
+        close = text.find('"' + raw.group(1), raw.end())
+        return len(text) if close < 0 else close + 1 + len(raw.group(1))
     j += 1
     while j < len(text) and text[j] != '"':
         j += 2 if text[j] == '\\' else 1
     return j + 1
 
 
-def item_end(text, start):
-    """End offset of the item, field or field initializer after `start`."""
+def module_end(text, start):
+    """End of the `#[cfg(test)]` module at `start`, or None if it gates anything else."""
     i = start
-    while True:
-        line_end = text.find('\n', i)
-        line = text[i:line_end if line_end >= 0 else len(text)].strip()
-        if line.startswith('#['):
-            i = line_end + 1
-            continue
-        break
-    item = ITEM.match(text[i:].lstrip())
-    depth, j = 0, i
+    while text[i:].lstrip().startswith('#['):
+        i = text.index('\n', i) + 1
+    module = TEST_MODULE.match(text[i:].lstrip())
+    if not module:
+        return None
+    i += len(text[i:]) - len(text[i:].lstrip())
+    if module.group(1) == ';':
+        return i + module.end()
+    depth, j = 0, i + module.end() - 1
     while j < len(text):
         c = text[j]
         if c == '"' or RAW_STRING.match(text, j):
             j = skip_literal(text, j)
             continue
-        if c in '([{':
+        if c == '{':
             depth += 1
-        elif c in ')]}':
-            if depth == 0:
-                return j
+        elif c == '}':
             depth -= 1
-            if depth == 0 and c == '}' and item:
+            if depth == 0:
                 return j + 1
-        elif depth == 0 and (c == ';' or (c == ',' and not item)):
-            return j + 1
         j += 1
     return len(text)
 
 
 def production(text):
-    """`text` with every `#[cfg(test)]` item blanked, line numbers kept."""
+    """`text` with every `#[cfg(test)]` module blanked, line numbers kept.
+    Other gated items are scanned: tests needing banned forms belong in test
+    modules or `*_tests.rs` files."""
     out, pos = [], 0
     for match in TEST_ATTR.finditer(text):
         if match.start() < pos:
             continue
-        end = item_end(text, match.end())
+        end = module_end(text, match.end())
+        if end is None:
+            continue
         out.append(text[pos:match.start()])
         out.append(re.sub(r'[^\n]', ' ', text[match.start():end]))
         pos = end
