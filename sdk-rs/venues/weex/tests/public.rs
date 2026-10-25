@@ -3,6 +3,7 @@
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId, TimerId};
 mod support;
 use safe_cex_venue_weex::WeexFutures;
+use support::PreparedActions;
 use support::setup::Options;
 fn engine() -> Engine<WeexFutures> {
     support::setup::engine(Options {
@@ -38,10 +39,13 @@ fn request(actions: Vec<Action>, path: &str) -> RequestId {
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"contractVal":0.000001,"minOrderSize":0.0001,"maxOrderSize":10000,"maxLeverage":408}]}"#;
 fn started() -> (Engine<WeexFutures>, SocketId) {
     let mut e = engine();
-    e.start(0.0);
-    let id = request(e.drain_actions().collect(), "exchangeInfo");
+    e.start(1_773_295_700_000.0);
+    let id = request(
+        e.prepared_actions(1_773_295_700_000.0).collect(),
+        "exchangeInfo",
+    );
     response(&mut e, id, INFO);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(1_773_295_700_000.0).collect();
     let daily = request(actions.clone(), "24hr");
     let book = request(actions, "bookTicker");
     response(
@@ -139,7 +143,7 @@ fn depth_ignores_old_frames_and_heals_gaps_with_buffered_diffs() {
 fn truncated_stream_does_not_load_markets() {
     let mut e = engine();
     e.start(0.0);
-    let id = request(e.drain_actions().collect(), "exchangeInfo");
+    let id = request(e.prepared_actions(0.0).collect(), "exchangeInfo");
     e.handle(
         1.0,
         Event::HttpStart {
@@ -194,10 +198,13 @@ fn websocket_candles_allow_two_hours_but_rest_rejects_it() {
 #[test]
 fn silent_socket_is_closed_and_scheduled_for_reconnect() {
     let mut e = engine();
-    e.start(0.0);
-    let id = request(e.drain_actions().collect(), "exchangeInfo");
+    e.start(1_773_295_700_000.0);
+    let id = request(
+        e.prepared_actions(1_773_295_700_000.0).collect(),
+        "exchangeInfo",
+    );
     response(&mut e, id, INFO);
-    let reqs: Vec<_> = e.drain_actions().collect();
+    let reqs: Vec<_> = e.prepared_actions(1_773_295_700_000.0).collect();
     response(
         &mut e,
         request(reqs.clone(), "24hr"),
@@ -316,8 +323,11 @@ fn malformed_envelopes_cannot_commit_streamed_markets() {
         format!("{INFO} garbage"),
     ] {
         let mut e = engine();
-        e.start(0.0);
-        let id = request(e.drain_actions().collect(), "exchangeInfo");
+        e.start(1_773_295_700_000.0);
+        let id = request(
+            e.prepared_actions(1_773_295_700_000.0).collect(),
+            "exchangeInfo",
+        );
         response(&mut e, id, &body);
         assert!(!e.store().loaded().markets, "{body}");
     }
@@ -448,14 +458,17 @@ fn public_candle_reads_wait_for_the_shared_ip_ban() {
 #[test]
 fn null_or_malformed_public_rows_are_skipped_without_stopping_startup() {
     let mut e = engine();
-    e.start(0.0);
-    let id = request(e.drain_actions().collect(), "exchangeInfo");
+    e.start(1_773_295_700_000.0);
+    let id = request(
+        e.prepared_actions(1_773_295_700_000.0).collect(),
+        "exchangeInfo",
+    );
     let info = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6,"makerFeeRate":null,"takerFeeRate":"0.0006"},{"symbol":"ETHUSDT","baseAsset":"ETH","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":2,"quantityPrecision":3},{"symbol":"BADUSDT","baseAsset":null,"quoteAsset":"USDT","marginAsset":"USDT"}]}"#;
     response(&mut e, id, info);
     assert!(e.store().loaded().markets);
     assert_eq!(e.store().markets().len(), 2);
     assert_eq!(e.store().market("BTCUSDT").unwrap().maker_fee, Some(0.0));
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = e.prepared_actions(1_773_295_700_000.0).collect();
     let warnings: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
@@ -496,8 +509,11 @@ fn null_or_malformed_public_rows_are_skipped_without_stopping_startup() {
 #[test]
 fn exchange_info_with_only_malformed_rows_retries_startup() {
     let mut e = engine();
-    e.start(0.0);
-    let id = request(e.drain_actions().collect(), "exchangeInfo");
+    e.start(1_773_295_700_000.0);
+    let id = request(
+        e.prepared_actions(1_773_295_700_000.0).collect(),
+        "exchangeInfo",
+    );
     response(
         &mut e,
         id,
@@ -512,7 +528,10 @@ fn exchange_info_with_only_malformed_rows_retries_startup() {
         })
         .expect("startup retry");
     e.handle(1_773_295_710_000.0, Event::TimerFired { timer });
-    request(e.drain_actions().collect(), "exchangeInfo");
+    request(
+        e.prepared_actions(1_773_295_710_000.0).collect(),
+        "exchangeInfo",
+    );
 }
 
 #[test]
@@ -523,8 +542,11 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         r#""pricePrecision":400,"quantityPrecision":3"#,
     ] {
         let mut e = engine();
-        e.start(0.0);
-        let id = request(e.drain_actions().collect(), "exchangeInfo");
+        e.start(1_773_295_700_000.0);
+        let id = request(
+            e.prepared_actions(1_773_295_700_000.0).collect(),
+            "exchangeInfo",
+        );
         let info = format!(
             r#"{{"symbols":[{{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":6}},{{"symbol":"ETHUSDT","baseAsset":"ETH","quoteAsset":"USDT","marginAsset":"USDT",{bad}}}]}}"#
         );
