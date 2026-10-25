@@ -923,7 +923,8 @@ impl BinanceFutures {
         error: VenueError,
         strict: bool,
     ) {
-        // A failed delivery is not a body delivery; its root's owner decides custody.
+        // A failure carries no body, so its root's owner decides custody. One leg per
+        // query is in flight, so a failed leg of this root is the current one.
         let current = self
             .history
             .reads
