@@ -8,6 +8,7 @@ use crate::trading::ordinary::Ordinary;
 use crate::wire::{OrderRow, present};
 use crate::{BybitLinear, Pending, Rest, venue_error};
 use safe_cex_engine::model::{Order, OrderIdentityKind, OrderIdentityReceipt, PlaceOrderOpts};
+use safe_cex_engine::request_context::Preflight;
 use safe_cex_engine::{CommandId, Cx, Response, VenueError};
 use serde::Deserialize;
 use std::cell::RefCell;
@@ -22,6 +23,17 @@ pub(crate) struct State {
     pub(crate) intents: HashMap<String, Intent>,
     /// Late create ACKs (link, order id) left by the immutable late codec.
     late: RefCell<Vec<(String, String)>>,
+    /// Identical callers parked while a founder re-reads (legacy waiters).
+    pub(crate) waiters: Vec<Waiter>,
+    /// Each sealed founding's outcome (ids, or a failure), until its waiters settle.
+    outcomes: HashMap<u64, Result<String, VenueError>>,
+    foundings: u64,
+}
+
+/// A parked identical caller of one founding; it never sends.
+pub(crate) struct Waiter {
+    founding: u64,
+    preflight: Preflight,
 }
 
 /// One caller intent (its canonical orders), retained across calls.
@@ -30,6 +42,8 @@ pub(crate) struct Intent {
     pub(crate) digest: String,
     pub(crate) lots: Vec<Lot>,
     pub(crate) phase: Phase,
+    /// The founder call this intent's waiters belong to; a new one per founder.
+    pub(crate) founding: u64,
 }
 
 pub(crate) enum Phase {
@@ -326,24 +340,127 @@ impl BybitLinear {
             .collect()
     }
 
-    /// After a call: a success retires the intent; one that placed nothing
-    /// that could exist is forgotten, so the next call plans afresh.
-    pub(crate) fn settle_hyro(&mut self, key: &str, success: bool) {
+    /// After a call: a success (its ids) retires the intent; one that placed
+    /// nothing that could exist is forgotten, so the next call plans afresh.
+    /// The founding's waiters take this outcome when next woken.
+    pub(crate) fn settle_hyro(&mut self, key: &str, ids: Option<String>) {
         let Some(intent) = self.trading.hyro.intents.get(key) else {
             return;
         };
         if !matches!(intent.phase, Phase::Idle) {
             return;
         }
-        if success || !intent.placed() {
-            self.trading.hyro.intents.remove(key);
+        let (founding, placed, success) = (intent.founding, intent.placed(), ids.is_some());
+        let state = &mut self.trading.hyro;
+        if state
+            .waiters
+            .iter()
+            .any(|waiter| waiter.founding == founding)
+        {
+            state
+                .outcomes
+                .insert(founding, ids.ok_or_else(waited_failure));
         }
+        if success || !placed {
+            state.intents.remove(key);
+        }
+    }
+
+    /// The next founding of `key`'s intent, as its founder starts reading.
+    pub(crate) fn found_hyro(&mut self, key: &str, founder: CommandId) {
+        let state = &mut self.trading.hyro;
+        if let Some(intent) = state.intents.get_mut(key) {
+            state.foundings += 1;
+            intent.founding = state.foundings;
+            intent.phase = Phase::Reading(founder);
+        }
+    }
+
+    /// Park an identical caller of a reading founder. The founder re-reads
+    /// because a lot may exist, so the waiter inherits that uncertainty first.
+    pub(crate) fn wait_for_hyro_founder(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: CommandId,
+        key: &str,
+        preflight: Preflight,
+    ) {
+        let Some(intent) = self.trading.hyro.intents.get(key) else {
+            return;
+        };
+        let (founding, receipts) = (intent.founding, intent.receipts());
+        let _ = cx.inherit_preflight_uncertainty(&preflight);
+        if let Err(error) = cx.park_preflight(&preflight) {
+            let _ = cx.fail_preflight(&preflight, error.venue_error());
+            return;
+        }
+        if !receipts.is_empty() {
+            cx.command_progress(id, receipts);
+        }
+        self.trading.hyro.waiters.push(Waiter {
+            founding,
+            preflight,
+        });
+    }
+
+    /// Wake each waiter whose founding has sealed; only a stored outcome wakes one.
+    pub(crate) fn wake_hyro_waiters(&self, cx: &mut Cx<'_, Pending>) {
+        let state = &self.trading.hyro;
+        for waiter in &state.waiters {
+            if state.outcomes.contains_key(&waiter.founding) {
+                let _ = cx.request_preflight_ready(&waiter.preflight);
+            }
+        }
+    }
+
+    /// A woken waiter settles with its own founding's outcome.
+    pub(crate) fn hyro_waiter_ready(&mut self, cx: &mut Cx<'_, Pending>, preflight: &Preflight) {
+        let state = &mut self.trading.hyro;
+        let Some(index) = state
+            .waiters
+            .iter()
+            .position(|waiter| waiter.preflight.owner() == preflight.owner())
+        else {
+            return;
+        };
+        let founding = state.waiters.remove(index).founding;
+        let outcome = state.outcomes.get(&founding).cloned();
+        if !state
+            .waiters
+            .iter()
+            .any(|waiter| waiter.founding == founding)
+        {
+            state.outcomes.remove(&founding);
+        }
+        // A ready callback cannot re-park, and only a stored outcome wakes a
+        // waiter; were one missing, its inherited uncertainty projects Unknown.
+        let _ = match outcome {
+            Some(Ok(ids)) => cx.done_empty_plan(preflight, ids),
+            Some(Err(error)) => cx.fail_preflight(preflight, error),
+            None => cx.fail_preflight(preflight, waited_failure()),
+        };
+    }
+
+    /// The engine retired a parked waiter at its own deadline.
+    pub(crate) fn retire_hyro_waiters(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        let state = &mut self.trading.hyro;
+        state
+            .waiters
+            .retain(|waiter| !owner.matches_preflight(&waiter.preflight));
+        let waiters = &state.waiters;
+        state
+            .outcomes
+            .retain(|founding, _| waiters.iter().any(|waiter| waiter.founding == *founding));
     }
 
     /// One link read per lost ACK, issued once its call has sealed.
     pub(crate) fn reconcile_hyro_links(&mut self, cx: &mut Cx<'_, Pending>) {
         self.drain_hyro_late();
         self.retire_sealed_hyro(cx);
+        self.wake_hyro_waiters(cx);
         let boundary = self.hyro_boundary();
         let mut reads = Vec::new();
         for (key, intent) in &mut self.trading.hyro.intents {
@@ -520,4 +637,10 @@ impl BybitLinear {
             );
         }
     }
+}
+
+/// The founder this caller waited on did not succeed; the waiter's inherited
+/// uncertainty projects it Unknown, since that founder's lots may exist.
+fn waited_failure() -> VenueError {
+    VenueError::new("the identical HyroTrader call this command waited on did not succeed")
 }

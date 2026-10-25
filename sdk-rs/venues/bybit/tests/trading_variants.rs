@@ -3343,10 +3343,10 @@ fn hyro_lost_ack_is_unknown_and_one_link_read_recovers_for_the_retry() {
     assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
 }
 
-/// H2 (Q5): an identical intent arriving while a resume is still re-reading
-/// is refused before any I/O, not joined or sent in parallel.
+/// H2 (Q5), M2: an identical intent arriving while a resume is still
+/// re-reading waits for it; nothing is sent in parallel.
 #[test]
-fn hyro_identical_intent_during_a_resume_read_is_refused_not_sent() {
+fn hyro_identical_intent_during_a_resume_read_waits_and_sends_nothing() {
     let mut h = ready(Variant::Hyrotrader);
     place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
     let create = h.take("/v5/order/create");
@@ -3362,15 +3362,7 @@ fn hyro_identical_intent_during_a_resume_read_is_refused_not_sent() {
         "the resume re-reads"
     );
     place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
-    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::NotSent));
-    // The retryable kind follows G1 (#1955); the text is pinned here.
-    assert!(
-        h.result(3)
-            .unwrap()
-            .as_ref()
-            .unwrap_err()
-            .contains("being reconciled")
-    );
+    assert_eq!(outcome(&h, 3), None, "the identical caller waits");
     assert!(!h.has_request("/v5/order/create"));
 }
 

@@ -2286,6 +2286,14 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.hyro_waiter_ready(cx, preflight);
+    }
+
     fn on_http_plan_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,

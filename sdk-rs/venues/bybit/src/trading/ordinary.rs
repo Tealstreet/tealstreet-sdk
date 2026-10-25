@@ -567,12 +567,13 @@ impl BybitLinear {
                 };
                 let sealed = match run.error.take() {
                     Some(error) => cx.fail_plan(&run.plan, error).map(|()| false),
-                    None => cx.done_plan(&run.plan, ids).map(|()| true),
+                    None => cx.done_plan(&run.plan, ids.clone()).map(|()| true),
                 };
                 match sealed {
                     Ok(true) => {
                         if let Some(call) = &entry.hyro {
-                            self.settle_hyro(&call.key, true);
+                            self.settle_hyro(&call.key, Some(ids));
+                            self.wake_hyro_waiters(cx);
                         }
                     }
                     Ok(false) => {}
@@ -683,7 +684,7 @@ impl BybitLinear {
         }
         if let Some((key, id, entry)) = self.take_hyro_plan(plan) {
             self.continue_ordinary(cx, id, entry);
-            self.after_hyro(&key, id);
+            self.after_hyro(cx, &key, id);
         }
     }
 
@@ -743,7 +744,7 @@ impl BybitLinear {
             _ => self.park(request.command, entry),
         }
         if let Some(key) = hyro {
-            self.after_hyro(&key, request.command);
+            self.after_hyro(cx, &key, request.command);
         }
     }
 
@@ -1001,7 +1002,7 @@ impl BybitLinear {
         if let Some(call) = &entry.hyro {
             let key = call.key.clone();
             self.on_hyro_leg_failed(cx, &request, entry, error);
-            self.after_hyro(&key, request.command);
+            self.after_hyro(cx, &key, request.command);
             return;
         }
         let Stage::Plan(run) = &mut entry.stage else {
