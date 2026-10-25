@@ -31,7 +31,11 @@ fn prepared(actions: &[Action], path: &str) -> Vec<HttpRequest> {
 
 /// One managed Prepare for `path` and no legacy request for it.
 fn managed(actions: &[Action], path: &str) -> HttpRequest {
-    assert_eq!(legacy(actions, path), 0, "{path} must not go out as legacy HTTP");
+    assert_eq!(
+        legacy(actions, path),
+        0,
+        "{path} must not go out as legacy HTTP"
+    );
     let mut requests = prepared(actions, path);
     assert_eq!(requests.len(), 1, "one managed preparation for {path}");
     requests.remove(0)
@@ -90,7 +94,7 @@ fn an_income_page_is_a_managed_read() {
         &mut h,
         Query::Income {
             symbol: Some("BTCUSDT".into()),
-            income_type: None,
+            kind: None,
             from_ms: None,
             to_ms: None,
             limit: None,
@@ -137,7 +141,10 @@ fn the_account_refresh_tick_reads_positions_balances_and_orders_as_managed_reads
 fn a_retried_startup_setting_read_is_a_managed_read() {
     let mut h = Harness::new();
     // A failed margin-mode read schedules the native startup retry.
-    h.reply("margin-mode", r#"{"code":"50001","msg":"busy","data":null}"#);
+    h.reply(
+        "margin-mode",
+        r#"{"code":"50001","msg":"busy","data":null}"#,
+    );
     let retry = h
         .actions
         .iter()
@@ -210,5 +217,9 @@ fn a_superseded_account_leg_publishes_nothing_and_holds_no_capacity() {
     };
     let completed = run(false);
     assert!(completed > 0, "the probe reaches owner capacity");
-    assert_eq!(run(true), completed, "the dropped leg must not hold capacity");
+    assert_eq!(
+        run(true),
+        completed,
+        "the dropped leg must not hold capacity"
+    );
 }
