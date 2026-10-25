@@ -52,3 +52,8 @@ test('landing push uses the authenticated actual first parent and exact landing 
   const result = await selectBitgetPair(x.context);
   assert.equal(result.baseline, A); assert.equal(result.candidate, H);
 });
+
+test('master pushes cannot obtain a Rust paired certificate', async () => {
+  const x = fixture(); x.run.event = 'push'; x.run.head_branch = 'master';
+  await assert.rejects(selectBitgetPair(x.context), /Rust landing branch/);
+});

@@ -68,6 +68,9 @@ adjusted and no run was retried.
 The empirical noise envelope plus tolerance implies a detection floor around
 (T-1)+E = 4.12%. Smaller regressions may pass. Four calibration jobs and one
 holdout do not establish a statistical tail guarantee across future runners.
+Because each PR compares with its own landing base, accepted small relative
+regressions can compound. Readiness reporting exposes cumulative movement;
+it is not an absolute per-PR floor under the approved policy.
 
 Frozen calibration bundle SHA256:
 ee6b8fd762184969b2eacf7a5ef030bc8872acfbc474ca229377f1b181e99b62.

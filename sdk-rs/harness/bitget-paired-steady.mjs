@@ -30,8 +30,9 @@ const exactCase = report => report?.venue === 'bitget' && report.private === fal
 export function bitgetPairedAuthority({ run, pull, landing, job, checkoutSha, checkoutTree, mergeTree }) {
   insist(run?.repository?.full_name === 'Tealstreet/tealstreet-sdk' && positive(run.id) &&
     run.run_attempt === 1 && ['pull_request', 'workflow_dispatch', 'push'].includes(run.event), 'original repository run required');
+  insist(run.event !== 'push' || run.head_branch === 'feat/rust-rewrite', 'push must be the Rust landing branch');
   let baseline, pullNumber = null;
-  if (run.event === 'push' && ['feat/rust-rewrite', 'master'].includes(run.head_branch)) {
+  if (run.event === 'push' && run.head_branch === 'feat/rust-rewrite') {
     insist(landing?.sha === run.head_sha && checkoutSha === landing.sha && landing.tree?.sha === checkoutTree &&
       oid(landing.parents?.[0]?.sha), 'landing baseline must be the authenticated actual first parent');
     baseline = landing.parents[0].sha;
