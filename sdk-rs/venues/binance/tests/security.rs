@@ -20,12 +20,12 @@ fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
         context: Default::default(),
         operations: vec![Operation::Sign {
             algorithm: Algorithm::HmacSha256,
-            key: identity.signing.clone(),
+            key: identity.signing_ref().unwrap().clone(),
             payload: vec![PayloadPart::Bytes { bytes: vec![] }],
         }],
     };
     assert!(signer.sign_now(&request).is_ok());
-    signer.remove(&identity.signing);
+    signer.remove(identity.signing_ref().unwrap());
     assert_eq!(signer.sign_now(&request), Err(SignError::Unavailable));
     signer.remove(&identity.credential);
     let request = SignRequest {

@@ -10,7 +10,7 @@ use safe_cex_engine::request_context::{
     plan::{CallBound, RetryWindow, Slot, StepBound},
 };
 use safe_cex_engine::signing::{
-    KeyRef, Operation as SignOperation, SignError, SignFuture, SignReceipt, SignRequest,
+    Identity, KeyRef, Operation as SignOperation, SignError, SignFuture, SignReceipt, SignRequest,
     SignResult, Signer,
 };
 use safe_cex_engine::test_support::prepared_actions;
@@ -21,9 +21,9 @@ use safe_cex_engine::{
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Stands in for `Identity::signing_ref()` on an absent ref; GREEN swaps in the
-/// accessor. `None` refuses in preparation, before any provider work.
-struct Recipe(Option<KeyRef>);
+/// Takes its key through `Identity::signing_ref()`: an absent ref refuses in
+/// preparation, before any provider work.
+struct Recipe(Identity);
 impl SignStep for Recipe {
     fn freshness_ms(&self) -> f64 {
         3_000.
@@ -33,7 +33,7 @@ impl SignStep for Recipe {
         _: &mut Action,
         cx: &DispatchContext<'_>,
     ) -> Result<SignRequest, SignError> {
-        let key = self.0.clone().ok_or(SignError::InvalidRequest)?;
+        let key = self.0.signing_ref()?.clone();
         Ok(SignRequest {
             receipt: SignReceipt {
                 stamp_ms: Some(cx.stamp_ms()),
@@ -60,8 +60,11 @@ fn credential() -> Credential {
         reference: KeyRef("primary.credential".into()),
     }
 }
-fn signing(signed: bool) -> Option<KeyRef> {
-    signed.then(|| KeyRef("primary.signing".into()))
+fn signing(signed: bool) -> Identity {
+    Identity::new(
+        KeyRef("primary.credential".into()),
+        signed.then(|| KeyRef("primary.signing".into())),
+    )
 }
 
 #[derive(Default)]

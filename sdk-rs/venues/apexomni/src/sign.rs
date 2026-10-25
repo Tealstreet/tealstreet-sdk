@@ -690,7 +690,7 @@ fn work(
         Operation::Present { key: passphrase },
         Operation::Sign {
             algorithm: Algorithm::HmacSha256,
-            key: identity.signing.clone(),
+            key: identity.signing_ref()?.clone(),
             payload,
         },
     ]);

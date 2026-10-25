@@ -106,7 +106,7 @@ impl SignStep for Http {
                 path: path.into(),
             },
             receipt,
-        );
+        )?;
         self.receipt = Some(receipt);
         Ok(work)
     }

@@ -121,7 +121,7 @@ impl SignStep for Envelope {
                 stamp_ms: Some(stamp),
                 expiry_ms: None,
             },
-        );
+        )?;
         work.validate()?;
         self.unsigned = Some(outbound.clone());
         self.prepared = Some(work.clone());

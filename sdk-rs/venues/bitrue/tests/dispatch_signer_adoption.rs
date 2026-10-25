@@ -255,7 +255,7 @@ fn batch(h: &Harness, identity: &Identity, method: Method, canonical: &str, stam
     );
     assert!(
         matches!(&request.operations[1], Operation::Sign { algorithm:Algorithm::HmacSha256, key, .. }
-        if key == &identity.signing)
+        if key == identity.signing_ref().unwrap())
     );
 }
 
@@ -507,7 +507,8 @@ fn recording_provider_independently_signs_the_expected_atomic_work() {
             stamp_ms: Some(1234.),
             expiry_ms: None,
         },
-    );
+    )
+    .unwrap();
     let result = h.provider.sign_ready(&request).unwrap().unwrap();
     assert_eq!(result.values.len(), 2);
     assert_eq!(result.values[0], b"fixture-primary-key");

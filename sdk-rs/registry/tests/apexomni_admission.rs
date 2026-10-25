@@ -48,7 +48,7 @@ fn registry_installs_the_provider_identities_and_zklink_role() {
     .unwrap();
     assert!(signer.is_some(), "provider installed");
     let primary = identities.primary.expect("primary identity registered");
-    assert!(!primary.credential.0.is_empty() && !primary.signing.0.is_empty());
+    assert!(!primary.credential.0.is_empty() && primary.signing_opt().is_some());
     assert!(primary.passphrase.is_some());
     assert!(primary.extra.contains_key(&ExtraKey::ZklinkSeed));
 }

@@ -62,3 +62,31 @@ fn k4_non_validating_crates_without_dispatch_signing_refuse_injected_identities(
         }
     }
 }
+
+/// K5: construction resolution treats an absent signing ref exactly like
+/// today's empty one, for `Input::Secret` (and `AsterLocalAuth`).
+#[test]
+fn k5_construction_resolves_absent_and_empty_signing_identically() {
+    use safe_cex_engine::signing::KeyRef;
+    for venue in ["binance", "bybit", "asterdex", "okx"] {
+        let base = r#"{"publicMode":{"requested":false},"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}}}"#;
+        let construction = |signing: Option<KeyRef>| {
+            let mut options: EngineOptions = serde_json::from_str(base).unwrap();
+            options
+                .signing
+                .as_mut()
+                .unwrap()
+                .primary
+                .as_mut()
+                .unwrap()
+                .set_signing(signing);
+            let c = options.construction(venue);
+            (c.can_sign, c.public_data_only)
+        };
+        assert_eq!(
+            construction(None),
+            construction(Some(KeyRef(String::new()))),
+            "{venue}"
+        );
+    }
+}

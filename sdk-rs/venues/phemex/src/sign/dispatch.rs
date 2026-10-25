@@ -128,7 +128,7 @@ impl SignStep for Http {
                 path: self.path.clone(),
             },
             prepared.receipt,
-        );
+        )?;
         self.prepared = Some(prepared);
         Ok(work)
     }
@@ -207,7 +207,7 @@ impl SignStep for WsAuth {
                 path: "user.auth".into(),
             },
             prepared.receipt,
-        );
+        )?;
         self.prepared = Some(prepared);
         Ok(work)
     }

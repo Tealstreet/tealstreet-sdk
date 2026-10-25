@@ -64,7 +64,12 @@ fn signatures(
             },
             Operation::Sign {
                 algorithm,
-                key: identity.signing.clone(),
+                // An absent ref still reaches the provider here, so both paths
+                // must refuse it identically.
+                key: identity
+                    .signing_opt()
+                    .cloned()
+                    .unwrap_or_else(|| safe_cex_engine::signing::KeyRef(String::new())),
                 payload: vec![PayloadPart::Bytes {
                     bytes: vec![0x5a; 32],
                 }],
@@ -147,7 +152,7 @@ fn native_setup_matches_the_ts_mapping_golden() {
             );
             let signs = golden["secret"].is_string() || golden["signingFromPrimary"] == true;
             assert_eq!(
-                !identity.signing.0.is_empty(),
+                identity.signing_opt().is_some(),
                 signs,
                 "{name}: {slot} secret"
             );

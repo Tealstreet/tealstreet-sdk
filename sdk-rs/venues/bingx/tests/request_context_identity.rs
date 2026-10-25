@@ -110,18 +110,15 @@ const BRANCHES: [Branch; 5] = [
     Branch::Remote,
 ];
 fn identity(slot: &str) -> Identity {
-    Identity {
-        credential: KeyRef(format!("opaque:{slot}:credential")),
-        signing: KeyRef(format!("opaque:{slot}:signing")),
-        passphrase: None,
-        stable_id: None,
-        extra: Default::default(),
-    }
+    Identity::new(
+        KeyRef(format!("opaque:{slot}:credential")),
+        Some(KeyRef(format!("opaque:{slot}:signing"))),
+    )
 }
 fn options(branch: Branch) -> Options {
     let mut read = identity("secondary");
     if matches!(branch, Branch::Invalid) {
-        read.signing = KeyRef(String::new());
+        read.set_signing(Some(KeyRef(String::new())));
     }
     Options {
         credentials: (!matches!(branch, Branch::Missing | Branch::SecondaryOnly))

@@ -215,7 +215,7 @@ fn work(
         }],
         context,
         receipt,
-    );
+    )?;
     request
         .operations
         .push(Operation::Present { key: passphrase });

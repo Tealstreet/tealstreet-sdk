@@ -1860,7 +1860,7 @@ impl<P> Cx<'_, P> {
         let keys = needs
             .iter()
             .map(|need| match need.key {
-                KeyUse::Signing => Some(&identity.signing),
+                KeyUse::Signing => identity.signing_ref().ok(),
                 KeyUse::Extra(extra) => identity.extra.get(&extra),
             })
             .collect::<Option<Vec<_>>>()

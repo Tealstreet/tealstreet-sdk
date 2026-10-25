@@ -639,7 +639,7 @@ impl SignStep for TxRecipe {
             payload.extend_from_slice(&input.preimage);
             operations.push(Operation::Sign {
                 algorithm: Algorithm::SchnorrDigest,
-                key: self.identity.signing.clone(),
+                key: self.identity.signing_ref()?.clone(),
                 payload: vec![PayloadPart::Bytes { bytes: payload }],
             });
             self.prepared.push(input);

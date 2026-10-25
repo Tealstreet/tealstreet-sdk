@@ -2,7 +2,7 @@
 //! these same builders; this module owns no credentials or crypto execution.
 use safe_cex_engine::num;
 use safe_cex_engine::signing::{
-    Context, Identity, PayloadPart, SignReceipt, SignRequest, hmac_sha256_work,
+    Context, Identity, PayloadPart, SignError, SignReceipt, SignRequest, hmac_sha256_work,
 };
 
 /// The window and payload are already serialized by the caller. Preserve their
@@ -15,7 +15,7 @@ pub fn http_work(
     stamp_ms: f64,
     recv_window: String,
     context: Context,
-) -> SignRequest {
+) -> Result<SignRequest, SignError> {
     let expiry_ms = recv_window
         .parse::<std::num::NonZeroU32>()
         .ok()
@@ -47,7 +47,11 @@ pub fn http_work(
 
 /// Legacy WS replies carry only the MAC, so sign the original caller preimage
 /// without replacing its expiry. There is no locally generated time receipt.
-pub fn ws_work(identity: &Identity, exact_preimage: String, context: Context) -> SignRequest {
+pub fn ws_work(
+    identity: &Identity,
+    exact_preimage: String,
+    context: Context,
+) -> Result<SignRequest, SignError> {
     hmac_sha256_work(
         identity,
         vec![PayloadPart::Bytes {
@@ -65,13 +69,10 @@ mod tests {
     use safe_cex_engine::signing::{Algorithm, KeyRef, Operation};
 
     fn identity() -> Identity {
-        Identity {
-            credential: KeyRef("primary.credential".into()),
-            signing: KeyRef("primary.signing".into()),
-            passphrase: None,
-            stable_id: None,
-            extra: Default::default(),
-        }
+        Identity::new(
+            KeyRef("primary.credential".into()),
+            Some(KeyRef("primary.signing".into())),
+        )
     }
 
     fn mac(work: &SignRequest) -> String {
@@ -100,7 +101,8 @@ mod tests {
             1_709_209_849_123.,
             "05000".into(),
             context.clone(),
-        );
+        )
+        .unwrap();
         assert_eq!(work.context, context);
         // Bybit refuses a request once server time passes stamp + recv_window.
         assert_eq!(
@@ -118,7 +120,7 @@ mod tests {
                 },
                 Operation::Sign {
                     algorithm: Algorithm::HmacSha256,
-                    key: id.signing,
+                    key: id.signing_ref().unwrap().clone(),
                     payload: vec![
                         PayloadPart::Bytes {
                             bytes: b"1709209849123".to_vec()
@@ -149,7 +151,8 @@ mod tests {
             1_709_209_849_123.,
             "20000".into(),
             Context::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             mac(&work),
             "943d19ca5f9f956a4845e517c50b7b25ffa943ae055852de5d43ef7f290074c4"
@@ -162,6 +165,7 @@ mod tests {
                 "5000".into(),
                 Context::default()
             )
+            .unwrap()
             .validate()
             .is_err()
         );
@@ -170,15 +174,17 @@ mod tests {
     #[test]
     fn ws_grammar_signs_original_expiry_without_fabricated_timestamp_or_expiry_receipt() {
         let id = identity();
-        let work = ws_work(&id, "GET/realtime1709209800000".into(), Context::default());
+        let work = ws_work(&id, "GET/realtime1709209800000".into(), Context::default()).unwrap();
         assert_eq!(work.receipt, SignReceipt::default());
         assert_eq!(
             work.operations,
             vec![
-                Operation::Present { key: id.credential },
+                Operation::Present {
+                    key: id.credential.clone(),
+                },
                 Operation::Sign {
                     algorithm: Algorithm::HmacSha256,
-                    key: id.signing,
+                    key: id.signing_ref().unwrap().clone(),
                     payload: vec![PayloadPart::Bytes {
                         bytes: b"GET/realtime1709209800000".to_vec()
                     }],

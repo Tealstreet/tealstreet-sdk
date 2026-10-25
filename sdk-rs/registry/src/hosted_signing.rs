@@ -181,7 +181,7 @@ fn http_work(
         }],
         context,
         receipt,
-    );
+    )?;
     if policy.passphrase_header.is_some() {
         work.operations.push(Operation::Present {
             key: identity.passphrase.clone().ok_or(SignError::Unavailable)?,
@@ -282,7 +282,7 @@ pub fn prepare(
                     }],
                     context,
                     SignReceipt::default(),
-                ),
+                )?,
                 OutputKind::WsAuth(output_format),
             ))
         }
@@ -365,16 +365,17 @@ mod presentation_tests {
     const MAC: &str = "SL/xd+lRj5sirx9sxjcCAiy6l78Q3WwR8844XzqxcNs=";
 
     fn fixture() -> (Identity, LocalSigner) {
-        let identity = Identity {
-            credential: KeyRef("ref:owned-primary-public".into()),
-            signing: KeyRef("ref:owned-primary-signing".into()),
-            passphrase: Some(KeyRef("ref:owned-primary-presentation".into())),
-            stable_id: None,
-            extra: Default::default(),
-        };
+        let identity = Identity::new(
+            KeyRef("ref:owned-primary-public".into()),
+            Some(KeyRef("ref:owned-primary-signing".into())),
+        )
+        .with_passphrase(Some(KeyRef("ref:owned-primary-presentation".into())));
         let mut signer = LocalSigner::new();
         signer.insert(identity.credential.clone(), b"public-identity".to_vec());
-        signer.insert(identity.signing.clone(), b"fixture-only-provider".to_vec());
+        signer.insert(
+            identity.signing_ref().unwrap().clone(),
+            b"fixture-only-provider".to_vec(),
+        );
         signer.insert(
             identity.passphrase.clone().unwrap(),
             b"fixture-presentation".to_vec(),
@@ -444,25 +445,19 @@ mod presentation_tests {
     #[test]
     fn missing_explicit_refs_do_not_fall_back_but_setup_resolved_aliases_work() {
         let (identity, mut signer) = fixture();
-        let secondary = Identity {
-            credential: KeyRef("ref:owned-secondary-public".into()),
-            signing: KeyRef("ref:owned-secondary-signing".into()),
-            passphrase: None,
-            stable_id: None,
-            extra: Default::default(),
-        };
+        let secondary = Identity::new(
+            KeyRef("ref:owned-secondary-public".into()),
+            Some(KeyRef("ref:owned-secondary-signing".into())),
+        );
         signer.insert(secondary.credential.clone(), b"secondary-public".to_vec());
         signer.insert(
-            secondary.signing.clone(),
+            secondary.signing_ref().unwrap().clone(),
             b"secondary-fixture-provider".to_vec(),
         );
         for (venue, _) in families() {
             let policy = crate::remote_signing_policy(venue);
             for missing in [None, Some(KeyRef(String::new()))] {
-                let bad = Identity {
-                    passphrase: missing,
-                    ..identity.clone()
-                };
+                let bad = identity.clone().with_passphrase(missing);
                 assert!(
                     http_work(
                         &bad,

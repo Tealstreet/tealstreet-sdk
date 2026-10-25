@@ -36,23 +36,23 @@ fn families() -> Vec<&'static str> {
 
 fn fixture() -> (LocalSigner, Identities) {
     let mut signer = LocalSigner::new();
-    let identity = |slot| Identity {
-        credential: KeyRef(format!("owned/{slot}/presentation")),
-        signing: KeyRef(format!("owned/{slot}/mac")),
-        passphrase: None,
-        stable_id: Some(format!("fixture/{slot}")),
-        extra: Default::default(),
+    let identity = |slot| {
+        Identity::new(
+            KeyRef(format!("owned/{slot}/presentation")),
+            Some(KeyRef(format!("owned/{slot}/mac"))),
+        )
+        .with_stable_id(Some(format!("fixture/{slot}")))
     };
     let primary = identity("primary");
     let secondary = identity("read");
     signer.insert(primary.credential.clone(), b"hosted-primary".to_vec());
     signer.insert(
-        primary.signing.clone(),
+        primary.signing_ref().unwrap().clone(),
         b"fixture-only-primary-secret".to_vec(),
     );
     signer.insert(secondary.credential.clone(), b"hosted-read".to_vec());
     signer.insert(
-        secondary.signing.clone(),
+        secondary.signing_ref().unwrap().clone(),
         b"fixture-only-read-secret".to_vec(),
     );
     (
@@ -126,7 +126,7 @@ fn every_compiled_alias_uses_the_owned_primary_refs_for_exact_complete_http_prei
                     },
                     Operation::Sign {
                         algorithm: Algorithm::HmacSha256,
-                        key: ids.primary.as_ref().unwrap().signing.clone(),
+                        key: ids.primary.as_ref().unwrap().signing_ref().unwrap().clone(),
                         payload: vec![PayloadPart::Bytes {
                             bytes: payload.as_bytes().to_vec()
                         }],
@@ -191,7 +191,7 @@ fn no_primary_never_selects_secondary_and_removed_material_fails_atomically() {
     let prepared = captures.prepare(work, kind, 100., STAMP, 7, 500).unwrap();
     // Revocation removes the provider-owned signing buffer. It must not fall
     // back to the still-available secondary secret or publish partial Present.
-    signer.remove(&primary.signing);
+    signer.remove(primary.signing_ref().unwrap());
     let failed = signer.sign_now(&prepared.work);
     assert!(matches!(failed, Err(SignError::Unavailable)));
     assert!(matches!(

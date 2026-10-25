@@ -12,6 +12,8 @@ export type SigningAlgorithm = 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkD
 export type IdentitySetupPolicy = {
   trimCredential?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
   signingAlgorithm?: SigningAlgorithm;
+  /** Credential-only primaries (no signing ref); omitted means required, today's behaviour. */
+  signing?: 'optional';
 };
 export type CredentialSetupPolicy = { primary?: IdentitySetupPolicy; secondary?: IdentitySetupPolicy };
 /** Trusted setup's view: the slot policy plus the family's declared read-key policy. */

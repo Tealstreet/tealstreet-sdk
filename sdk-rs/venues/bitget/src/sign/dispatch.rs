@@ -25,7 +25,7 @@ fn work(
             stamp_ms: Some(stamp_ms),
             expiry_ms: None,
         },
-    );
+    )?;
     work.operations.push(Operation::Present { key: passphrase });
     Ok(work)
 }

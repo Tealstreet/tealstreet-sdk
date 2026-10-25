@@ -81,7 +81,7 @@ impl SignStep for Http {
                     stamp_ms: Some(stamp),
                     expiry_ms: None,
                 },
-            );
+            )?;
             self.prepared = Some(params);
             Ok(work)
         } else {

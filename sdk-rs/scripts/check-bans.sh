@@ -60,6 +60,40 @@ then
   status=1
 fi
 
+# Credential-only setup (docs/plans/RUST_CREDENTIAL_ONLY_SETUP.md, D1/D2): no
+# consumer may rebuild an empty signing ref or reach the absent/optional forms.
+if ! python3 - <<'PY'
+import pathlib, re
+rules = [
+    ('empty KeyRef outside setup validation metadata',
+     r'KeyRef\((?:String::new\(\)|""\.(?:into|to_string|to_owned)\(\)|String::from\(""\))\)|KeyRef::from\(""\)',
+     {'crypto/src/signer.rs'}),
+    ('Identity::signing_opt or set_signing outside setup and construction',
+     r'\.(?:signing_opt|set_signing)\(',
+     {'crypto/src/signer.rs', 'engine/src/signing.rs', 'registry/src/construction.rs', 'registry/src/lib.rs'}),
+    ('validate_credential outside the declared signing policy',
+     r'\bvalidate_credential\(',
+     {'engine/src/signing.rs'}),
+]
+hits = []
+for path in sorted(pathlib.Path('.').glob('**/src/**/*.rs')):
+    if 'target' in path.parts or path.name.endswith('_tests.rs'):
+        continue
+    text = path.read_text()
+    test_module = re.search(r'^#\[cfg\(test\)\]\s*\n\s*mod \w+', text, re.M)
+    source = text[:test_module.start()] if test_module else text
+    for description, pattern, allowed in rules:
+        if path.as_posix() in allowed:
+            continue
+        for match in re.finditer(pattern, source):
+            hits.append(f'BANNED: {description}: {path}:{source.count(chr(10), 0, match.start()) + 1}')
+print('\n'.join(hits)) if hits else None
+raise SystemExit(bool(hits))
+PY
+then
+  status=1
+fi
+
 if ! python3 scripts/check-signing.test.py || ! python3 scripts/check-signing.py; then
   status=1
 fi

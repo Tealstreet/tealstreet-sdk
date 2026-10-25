@@ -182,7 +182,7 @@ impl safe_cex_engine::SignStep for Http {
                 },
                 Operation::Sign {
                     algorithm: Algorithm::Ed25519,
-                    key: self.identity.signing.clone(),
+                    key: self.identity.signing_ref()?.clone(),
                     payload: vec![PayloadPart::Bytes {
                         bytes: text.into_bytes(),
                     }],

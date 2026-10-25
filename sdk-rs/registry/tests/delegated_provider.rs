@@ -288,9 +288,7 @@ fn payload_admission_requires_both_an_injected_provider_and_valid_owned_primary_
                         .primary
                         .as_mut()
                         .unwrap()
-                        .signing
-                        .0
-                        .clear();
+                        .set_signing(Some(safe_cex_engine::signing::KeyRef(String::new())));
                 }
                 let error = build_with_signer(
                     name,

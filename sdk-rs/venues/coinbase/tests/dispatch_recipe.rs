@@ -7,8 +7,8 @@ use p256::pkcs8::EncodePrivateKey;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
 use safe_cex_engine::signing::{
-    CredentialSetupPolicy, Identities, Identity, IdentitySetupPolicy, KeyEncoding, KeyRef,
-    SignFuture, SignRequest, Signer,
+    CredentialSetupPolicy, Identities, IdentitySetupPolicy, KeyEncoding, KeyRef, SignFuture,
+    SignRequest, Signer,
 };
 use safe_cex_engine::test_support::{prepared_actions, seeded_entropy};
 use safe_cex_engine::{
@@ -394,9 +394,10 @@ fn wrong_request_key_slot_or_algorithm_never_releases() {
         (
             "credential".into(),
             Box::new(sign::Http::new(
-                Identity {
-                    credential: KeyRef(read.credential.0.clone()),
-                    ..trading.clone()
+                {
+                    let mut forged = trading.clone();
+                    forged.credential = KeyRef(read.credential.0.clone());
+                    forged
                 },
                 KEY,
                 JwtAlgorithm::Es256,

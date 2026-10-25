@@ -1704,13 +1704,10 @@ impl crate::signing::Signer for Declares {
 fn capability_identities() -> crate::signing::Identities {
     let key = |name: &str| crate::signing::KeyRef(name.into());
     crate::signing::Identities {
-        primary: Some(crate::signing::Identity {
-            credential: key("api"),
-            signing: key("hmac"),
-            passphrase: None,
-            stable_id: None,
-            extra: [(crate::signing::ExtraKey::ZklinkSeed, key("seed"))].into(),
-        }),
+        primary: Some(
+            crate::signing::Identity::new(key("api"), Some(key("hmac")))
+                .with_extra([(crate::signing::ExtraKey::ZklinkSeed, key("seed"))].into()),
+        ),
         secondary: None,
     }
 }
@@ -1973,15 +1970,13 @@ fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
         }),
         ..Default::default()
     });
-    let identity = |extra: bool| Identity {
-        credential: KeyRef("credential".into()),
-        signing: KeyRef("signing".into()),
-        passphrase: None,
-        stable_id: None,
-        extra: extra
-            .then(|| (ExtraKey::L1Wallet, KeyRef("wallet".into())))
-            .into_iter()
-            .collect(),
+    let identity = |extra: bool| {
+        Identity::new(KeyRef("credential".into()), Some(KeyRef("signing".into()))).with_extra(
+            extra
+                .then(|| (ExtraKey::L1Wallet, KeyRef("wallet".into())))
+                .into_iter()
+                .collect(),
+        )
     };
     // The role's one algorithm is the L1 digest signature.
     assert_eq!(ExtraKey::L1Wallet.algorithm(), Algorithm::Secp256k1Digest);

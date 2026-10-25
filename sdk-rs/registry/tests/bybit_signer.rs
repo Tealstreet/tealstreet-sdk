@@ -150,7 +150,7 @@ fn trusted_construction_registers_the_venue_identities_for_capability_admission(
     .unwrap();
     let primary = registered.primary.expect("primary refs registered");
     let secondary = registered.secondary.expect("secondary refs registered");
-    assert_ne!(primary.signing, secondary.signing);
+    assert_ne!(primary.signing_opt(), secondary.signing_opt());
     // Refs only: no key material is registered with the engine.
     let serialized = serde_json::to_string(&(primary, secondary)).unwrap();
     assert!(!serialized.contains("primary-secret") && !serialized.contains("secondary-secret"));

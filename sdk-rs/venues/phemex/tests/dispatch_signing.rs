@@ -502,7 +502,8 @@ fn existing_local_provider_is_an_independent_working_hmac_control() {
             ..Default::default()
         },
         receipt,
-    );
+    )
+    .unwrap();
     let result = local.sign_ready(&work).unwrap().unwrap();
     assert_eq!(result.values.len(), 2);
     assert_eq!(result.values[0], b"key");

@@ -102,3 +102,30 @@ fn c5_credential_only_primary_selects_for_mutation_and_session_auth() {
         );
     }
 }
+
+/// C7 (acceptance half): only an Optional family's setup yields a slot that
+/// `validate_credential()` accepts; Required installs the same slot unchanged.
+#[test]
+fn c7_optional_family_accepts_the_credential_only_slot() {
+    for (json, accepted) in [
+        (r#"{"primary":{"signing":"optional"}}"#, true),
+        ("{}", false),
+    ] {
+        let (_, identities) = LocalSigner::from_json_with_policy_and_mode(
+            r#"{"primary":{"key":"api-key"}}"#.into(),
+            policy(json),
+            false,
+        )
+        .unwrap();
+        let primary = identities.primary.unwrap();
+        assert!(primary.signing_opt().is_none(), "{json}");
+        assert!(primary.validate().is_err(), "{json}");
+        assert!(primary.validate_credential().is_ok(), "{json}");
+        assert_eq!(
+            policy(json)
+                .primary
+                .is_some_and(|p| !p.signing.is_required()),
+            accepted
+        );
+    }
+}
