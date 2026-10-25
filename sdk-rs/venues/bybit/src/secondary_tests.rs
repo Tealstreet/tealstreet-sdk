@@ -103,7 +103,7 @@ fn invalid_secondary_identity_stops_startup_before_io() {
     opts.read_credentials
         .as_mut()
         .unwrap()
-        .set_signing(Some(safe_cex_engine::signing::KeyRef(String::new())));
+        .set_signing_ref(Some(safe_cex_engine::signing::KeyRef(String::new())));
     let mut engine = safe_cex_engine::test_support::seeded_engine(BybitLinear::new(opts));
     engine.start(1700000000000.0);
     assert!(

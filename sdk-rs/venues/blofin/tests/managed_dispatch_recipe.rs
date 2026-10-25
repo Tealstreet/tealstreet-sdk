@@ -599,7 +599,7 @@ fn missing_passphrase_ref_and_invalid_identity_refuse_before_entropy_or_provider
                 let mut p = probe(ids, CredentialSlot::Primary);
                 if invalid {
                     p.identity
-                        .set_signing(Some(safe_cex_engine::signing::KeyRef(String::new())));
+                        .set_signing_ref(Some(safe_cex_engine::signing::KeyRef(String::new())));
                 } else {
                     p.identity.passphrase = None;
                 }

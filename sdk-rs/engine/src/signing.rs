@@ -220,20 +220,17 @@ impl CredentialSetupPolicy {
                 .expect("existing secondary")
                 .passphrase = passphrase;
         }
-        // An Optional family accepts only a credential-only slot that is
-        // otherwise valid; Required leaves every slot exactly as today.
-        for (identity, policy) in [
-            (identities.primary.as_ref(), self.primary),
-            (identities.secondary.as_ref(), self.secondary),
-        ] {
-            if let Some(identity) = identity
-                && identity.signing.is_none()
-                && !identity.credential.0.is_empty()
-                && policy.is_some_and(|policy| !policy.signing.is_required())
-                && identity.validate_credential().is_err()
-            {
-                return Err(SignError::InvalidRequest);
-            }
+        // An Optional family accepts only a primary credential-only slot that
+        // is otherwise valid; Required (and every secondary) is exactly today.
+        if let Some(identity) = identities.primary.as_ref()
+            && identity.signing.is_none()
+            && !identity.credential.0.is_empty()
+            && self
+                .primary
+                .is_some_and(|policy| !policy.signing.is_required())
+            && identity.validate_credential().is_err()
+        {
+            return Err(SignError::InvalidRequest);
         }
         Ok(())
     }
@@ -300,7 +297,7 @@ impl Identity {
     }
 
     /// Setup only (bans-scoped): the aliased secondary signs with the primary's ref.
-    pub fn set_signing(&mut self, signing: Option<KeyRef>) {
+    pub fn set_signing_ref(&mut self, signing: Option<KeyRef>) {
         self.signing = signing;
     }
 

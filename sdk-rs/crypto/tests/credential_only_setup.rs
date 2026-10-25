@@ -129,3 +129,28 @@ fn c7_optional_family_accepts_the_credential_only_slot() {
         );
     }
 }
+
+/// C7 (policy refusal): Optional refuses a credential-only slot that is
+/// otherwise invalid (an explicit empty passphrase), which Required installs
+/// exactly as today.
+#[test]
+fn c7_optional_refuses_an_invalid_credential_only_slot_that_required_keeps() {
+    let setup = r#"{"primary":{"key":"api-key","passphrase":""}}"#;
+    assert!(matches!(
+        LocalSigner::from_json_with_policy_and_mode(
+            setup.into(),
+            policy(r#"{"primary":{"signing":"optional"}}"#),
+            false,
+        ),
+        Err(safe_cex_engine::signing::SignError::InvalidRequest)
+    ));
+    let (_, identities) = LocalSigner::from_json_with_policy_and_mode(
+        setup.into(),
+        CredentialSetupPolicy::default(),
+        false,
+    )
+    .unwrap();
+    let primary = identities.primary.unwrap();
+    assert!(primary.signing_opt().is_none());
+    assert_eq!(primary.passphrase.unwrap().0, "primary.passphrase");
+}

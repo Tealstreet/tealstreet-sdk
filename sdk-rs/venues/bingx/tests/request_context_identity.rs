@@ -118,7 +118,7 @@ fn identity(slot: &str) -> Identity {
 fn options(branch: Branch) -> Options {
     let mut read = identity("secondary");
     if matches!(branch, Branch::Invalid) {
-        read.set_signing(Some(KeyRef(String::new())));
+        read.set_signing_ref(Some(KeyRef(String::new())));
     }
     Options {
         credentials: (!matches!(branch, Branch::Missing | Branch::SecondaryOnly))

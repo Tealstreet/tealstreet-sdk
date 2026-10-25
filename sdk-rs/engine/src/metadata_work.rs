@@ -164,7 +164,9 @@ mod tests {
         different!(intent, RoutingIntent::Secondary);
         different!(operation, Operation::Mutation);
         let mut other = original.clone();
-        other.identity.set_signing(Some(KeyRef("ref:other".into())));
+        other
+            .identity
+            .set_signing_ref(Some(KeyRef("ref:other".into())));
         alternatives.push(other);
         let mut other = original.clone();
         let CredentialSubject::ConfiguredPrimary(subject) = &mut other.subject;

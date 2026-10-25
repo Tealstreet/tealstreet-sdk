@@ -142,7 +142,7 @@ fn malformed_complete_primary_is_refused_instead_of_made_anonymous() {
         if invalid_stable_id {
             primary.stable_id = Some("\n".into());
         } else {
-            primary.set_signing(Some(safe_cex_engine::signing::KeyRef("x".repeat(257))));
+            primary.set_signing_ref(Some(safe_cex_engine::signing::KeyRef("x".repeat(257))));
         }
         let mut options: EngineOptions =
             serde_json::from_str(r#"{"publicDataOnly":true}"#).unwrap();

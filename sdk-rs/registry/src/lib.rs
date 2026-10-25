@@ -128,6 +128,25 @@ pub struct Construction {
 }
 
 impl EngineOptions {
+    /// Refuses an injected identity without a signing ref while options are
+    /// parsed, so the host keeps its existing "Invalid engine options" terminal.
+    fn injected_identities<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<safe_cex_engine::signing::Identities>, D::Error> {
+        let identities = Option::<safe_cex_engine::signing::Identities>::deserialize(deserializer)?;
+        if identities.as_ref().is_some_and(|ids| {
+            [ids.primary.as_ref(), ids.secondary.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|id| id.signing_ref().is_err())
+        }) {
+            return Err(serde::de::Error::custom(
+                "injected identity without a signing ref",
+            ));
+        }
+        Ok(identities)
+    }
+
     pub fn construction(&self, venue: &str) -> Construction {
         let asterdex_api_version = None;
         #[cfg(feature = "asterdex")]
@@ -362,10 +381,7 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
             context: Default::default(),
             operations: vec![Operation::Sign {
                 algorithm: Algorithm::Ed25519,
-                key: primary
-                    .signing_ref()
-                    .map_err(|_| invalid("Invalid local signer setup"))?
-                    .clone(),
+                key: primary.signing_ref().map_err(|_| wrong_width())?.clone(),
                 payload: vec![PayloadPart::Bytes { bytes: Vec::new() }],
             }],
         };
@@ -2000,61 +2016,12 @@ pub struct KucoinExtra {
     feature = "lighter",
     feature = "okx"
 ))]
-/// Refuses an injected identity without a signing ref while options are parsed,
-/// so the host keeps its existing "Invalid engine options" terminal.
-fn injected_identities<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<safe_cex_engine::signing::Identities>, D::Error> {
-    let identities = Option::<safe_cex_engine::signing::Identities>::deserialize(deserializer)?;
-    if identities.as_ref().is_some_and(|ids| {
-        [ids.primary.as_ref(), ids.secondary.as_ref()]
-            .into_iter()
-            .flatten()
-            .any(|id| id.signing_opt().is_none())
-    }) {
-        return Err(serde::de::Error::custom(
-            "injected identity without a signing ref",
-        ));
-    }
-    Ok(identities)
-}
-
-#[cfg(any(
-    feature = "coinbase",
-    feature = "paradex",
-    feature = "binance",
-    feature = "bitunix",
-    feature = "apexomni",
-    feature = "asterdex",
-    feature = "breakoutprop",
-    feature = "kucoin",
-    feature = "kucoinspot",
-    feature = "polymarket",
-    feature = "blofin",
-    feature = "bybit",
-    feature = "woo",
-    feature = "cryptocom",
-    feature = "bingx",
-    feature = "mexc",
-    feature = "bitget",
-    feature = "grvt",
-    feature = "bitrue",
-    feature = "backpack",
-    feature = "phemex",
-    feature = "weex",
-    feature = "hyperliquid",
-    feature = "kraken",
-    feature = "txflow",
-    feature = "orderly",
-    feature = "lighter",
-    feature = "okx"
-))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineOptions {
     /// Injected (remote, delegated or hosted) refs always carry a signing ref;
     /// credential-only slots come only from trusted local setup.
-    #[serde(default, deserialize_with = "injected_identities")]
+    #[serde(default, deserialize_with = "EngineOptions::injected_identities")]
     pub signing: Option<safe_cex_engine::signing::Identities>,
     #[serde(default)]
     pub private_only: bool,

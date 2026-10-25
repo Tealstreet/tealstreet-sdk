@@ -302,7 +302,7 @@ impl LocalSigner {
             else {
                 return Err(SignError::InvalidRequest);
             };
-            secondary.set_signing(Some(signing));
+            secondary.set_signing_ref(Some(signing));
         }
         // The same policy validates bytes and opaque refs. Empty decoded material
         // is represented only in temporary validation metadata as an invalid ref.

@@ -152,7 +152,7 @@ fn native_setup_matches_the_ts_mapping_golden() {
             );
             let signs = golden["secret"].is_string() || golden["signingFromPrimary"] == true;
             assert_eq!(
-                identity.signing_opt().is_some(),
+                identity.signing_opt().is_some_and(|key| !key.0.is_empty()),
                 signs,
                 "{name}: {slot} secret"
             );
