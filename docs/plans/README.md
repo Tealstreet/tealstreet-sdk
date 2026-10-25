@@ -25,6 +25,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | BingX history paging custody | Implementation under native/source review | Before moving native fill/range pages and signature resends onto one caller-wait Read root. | [RUST_BINGX_HISTORY_CONTEXT.md](RUST_BINGX_HISTORY_CONTEXT.md) |
 | WEEX public depth-query custody | Original assertions reviewed; production conversion | Before managing command-owned unsigned order-book snapshots and their four numeric terminals. | [RUST_WEEX_DEPTH_QUERY_CONTEXT.md](RUST_WEEX_DEPTH_QUERY_CONTEXT.md) |
 | Polymarket public read custody | Draft adoption; local checks pass | Before adopting public books/candles and local completion or pruning their inventory. | [RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md](RUST_POLYMARKET_PUBLIC_READ_CONTEXT.md) |
+| Kraken whole-family socket lifecycle | Plan; native/API review pending | Before adopting all four Futures/Spot feeds, pruning nine socket references or changing challenge/token retirement. | [RUST_KRAKEN_SOCKET_LIFECYCLE.md](RUST_KRAKEN_SOCKET_LIFECYCLE.md) |
 | Kraken public discovery and local custody | Draft adoption; local checks and independent reviews clear | Before managing unsigned discovery reads or local command terminals in Futures/Spot. | [RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md](RUST_KRAKEN_PUBLIC_LOCAL_CONTEXT.md) |
 
 | WEEX caller-root history paging | Source checkpoint; actual #1983 integrated | Before converting WEEX list/income pages, paced windows or their history completion. | [RUST_WEEX_HISTORY_CONTEXT.md](RUST_WEEX_HISTORY_CONTEXT.md) |
@@ -466,3 +467,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Backpack public and private socket lifecycle | Source/API/native CLEAR; D1 local gates and combined size green; family record/CI pending | Before adopting Backpack feed epochs/interests, native private auth lifecycle, or enabling managed-sockets. | [RUST_BACKPACK_SOCKET_LIFECYCLE.md](RUST_BACKPACK_SOCKET_LIFECYCLE.md) |
 
 | Hyperliquid trading ownership and EIP-712 dispatch | Plan first; 15 frozen entries, actual-agent nonce/setup/pacing gates OPEN | Before adopting the shared trading FIFO, signed /exchange, amendment or journal terminals. | [RUST_HYPERLIQUID_TRADING_CONTEXT.md](RUST_HYPERLIQUID_TRADING_CONTEXT.md) |
+
+| GRVT serial write funnel | Plan/originals CLEAR; shared serial resend and Session support landed; native cutover held on G3/G6 | Before changing the five trading terminals, FIFO custody, signing or cached-session headers. | [RUST_GRVT_WRITE_FUNNEL.md](RUST_GRVT_WRITE_FUNNEL.md) |
+
+| GRVT EIP712 provider recipe and installed construction | Local recipe source CLEAR; D1 carry review; installed construction held on G3/G6 | Before installing the minimal hosted/local signing inputs, removing raw GRVT keys, or composing serial resend with Session headers. | [RUST_GRVT_PROVIDER_RECIPE.md](RUST_GRVT_PROVIDER_RECIPE.md) |
