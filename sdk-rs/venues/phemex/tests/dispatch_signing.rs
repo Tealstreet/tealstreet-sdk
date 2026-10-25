@@ -518,8 +518,10 @@ fn existing_local_provider_is_an_independent_working_hmac_control() {
         stamp_ms: Some(NOW),
         expiry_ms: Some(NOW + 60_000.),
     };
+    let primary = refs.primary.as_ref().unwrap();
     let work = hmac_sha256_work(
-        refs.primary.as_ref().unwrap(),
+        &primary.credential,
+        primary.signing_ref().unwrap(),
         vec![PayloadPart::Bytes {
             bytes: b"/g-accounts/accountPositionscurrency=USDT1700000060".to_vec(),
         }],

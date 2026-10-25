@@ -84,7 +84,7 @@ fn registry_installs_the_provider_and_identity_from_the_configured_seed() {
             },
             Operation::Sign {
                 algorithm: Algorithm::Ed25519,
-                key: primary.signing.clone(),
+                key: primary.signing_ref().unwrap().clone(),
                 payload: vec![PayloadPart::Bytes { bytes: vec![] }],
             },
         ],
@@ -119,7 +119,7 @@ fn the_backpack_seed_is_declared_ed25519() {
     let public = signer
         .sign_ready(&request(Operation::PublicKey {
             algorithm: Algorithm::Ed25519,
-            key: primary.signing.clone(),
+            key: primary.signing_ref().unwrap().clone(),
         }))
         .unwrap()
         .map(|result| result.values.clone());
@@ -127,7 +127,7 @@ fn the_backpack_seed_is_declared_ed25519() {
     let mac = signer
         .sign_ready(&request(Operation::Sign {
             algorithm: Algorithm::HmacSha256,
-            key: primary.signing,
+            key: primary.signing_ref().unwrap().clone(),
             payload: vec![PayloadPart::Bytes { bytes: vec![] }],
         }))
         .unwrap();
@@ -167,18 +167,21 @@ fn assert_read_provider(identities: Identities, signer: Option<Provider>, primar
         .expect("actual secondary identity registered");
     if let Some(primary) = identities.primary {
         assert_ne!(primary.credential, read.credential);
-        assert_ne!(primary.signing, read.signing);
+        assert_ne!(
+            primary.signing_ref().unwrap().clone(),
+            read.signing_ref().unwrap().clone()
+        );
     }
     let request = SignRequest {
         receipt: Default::default(),
         context: Default::default(),
         operations: vec![
             Operation::Present {
-                key: read.credential,
+                key: read.credential.clone(),
             },
             Operation::Sign {
                 algorithm: Algorithm::Ed25519,
-                key: read.signing,
+                key: read.signing_ref().unwrap().clone(),
                 payload: vec![PayloadPart::Bytes { bytes: vec![] }],
             },
         ],
@@ -274,11 +277,11 @@ fn malformed_secondary_does_not_change_existing_primary_setup() {
             context: Default::default(),
             operations: vec![
                 Operation::Present {
-                    key: primary.credential,
+                    key: primary.credential.clone(),
                 },
                 Operation::Sign {
                     algorithm: Algorithm::Ed25519,
-                    key: primary.signing,
+                    key: primary.signing_ref().unwrap().clone(),
                     payload: vec![PayloadPart::Bytes { bytes: vec![] }],
                 },
             ],
@@ -330,7 +333,7 @@ fn dual_read_setup_keeps_mutation_on_the_primary_provider() {
             },
             Operation::Sign {
                 algorithm: Algorithm::Ed25519,
-                key: identity.signing.clone(),
+                key: identity.signing_ref().unwrap().clone(),
                 payload: vec![PayloadPart::Bytes { bytes: vec![] }],
             },
         ],
@@ -423,7 +426,7 @@ fn native_valid_base64_read_seeds_always_construct_and_sign_in_the_provider() {
             context: Default::default(),
             operations: vec![Operation::Sign {
                 algorithm: Algorithm::Ed25519,
-                key: read.signing,
+                key: read.signing_ref().unwrap().clone(),
                 payload: vec![PayloadPart::Bytes { bytes: vec![] }],
             }],
         };

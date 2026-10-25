@@ -28,6 +28,24 @@ pub struct IdentitySetupPolicy {
     /// Declares the signing ref an asymmetric key of this algorithm; only a
     /// declared ref answers public operations, so no secret is fingerprinted.
     pub signing_algorithm: Option<Algorithm>,
+    /// Whether a credential-only slot (no signing ref) is accepted.
+    #[serde(skip_serializing_if = "SigningPolicy::is_required")]
+    pub signing: SigningPolicy,
+}
+
+/// `Required` keeps today's behaviour exactly; only `Optional` families accept
+/// a credential-only slot (docs/plans/RUST_CREDENTIAL_ONLY_SETUP.md, D2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SigningPolicy {
+    #[default]
+    Required,
+    Optional,
+}
+impl SigningPolicy {
+    pub fn is_required(&self) -> bool {
+        *self == Self::Required
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -117,7 +135,11 @@ impl CredentialSetupPolicy {
         public_data_only: bool,
     ) -> Result<(), SignError> {
         let complete = |identity: &Identity| {
-            !identity.credential.0.is_empty() && !identity.signing.0.is_empty()
+            !identity.credential.0.is_empty()
+                && identity
+                    .signing
+                    .as_ref()
+                    .is_some_and(|key| !key.0.is_empty())
         };
         // Extra refs exist only where declared. They never fall back across slots.
         for (identity, policy, primary) in [
@@ -163,7 +185,7 @@ impl CredentialSetupPolicy {
         if let Some(primary) = identities.primary.as_ref().filter(|id| complete(id))
             && required(self.primary, true)
             && (!valid_key_ref(&primary.credential)
-                || !valid_key_ref(&primary.signing)
+                || !primary.signing.as_ref().is_some_and(valid_key_ref)
                 || primary
                     .passphrase
                     .as_ref()
@@ -185,7 +207,7 @@ impl CredentialSetupPolicy {
                 .flatten()
             });
             if !valid_key_ref(&secondary.credential)
-                || !valid_key_ref(&secondary.signing)
+                || !secondary.signing.as_ref().is_some_and(valid_key_ref)
                 || passphrase.is_none_or(|key| !valid_key_ref(key))
             {
                 return Err(SignError::InvalidRequest);
@@ -197,6 +219,18 @@ impl CredentialSetupPolicy {
                 .as_mut()
                 .expect("existing secondary")
                 .passphrase = passphrase;
+        }
+        // An Optional family accepts only a primary credential-only slot that
+        // is otherwise valid; Required (and every secondary) is exactly today.
+        if let Some(identity) = identities.primary.as_ref()
+            && identity.signing.is_none()
+            && !identity.credential.0.is_empty()
+            && self
+                .primary
+                .is_some_and(|policy| !policy.signing.is_required())
+            && identity.validate_credential().is_err()
+        {
+            return Err(SignError::InvalidRequest);
         }
         Ok(())
     }
@@ -212,7 +246,10 @@ pub struct KeyRef(pub String);
 #[serde(rename_all = "camelCase")]
 pub struct Identity {
     pub credential: KeyRef,
-    pub signing: KeyRef,
+    /// Private so no consumer can substitute an empty ref; `None` is an
+    /// explicit absence (a credential-only slot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signing: Option<KeyRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passphrase: Option<KeyRef>,
     /// Caller-assigned, non-secret identity/nonce namespace. Never a key hash.
@@ -223,6 +260,54 @@ pub struct Identity {
     pub extra: std::collections::BTreeMap<ExtraKey, KeyRef>,
 }
 impl Identity {
+    #[inline]
+    pub fn new(credential: KeyRef, signing: Option<KeyRef>) -> Self {
+        Self {
+            credential,
+            signing,
+            passphrase: None,
+            stable_id: None,
+            extra: Default::default(),
+        }
+    }
+
+    #[inline]
+    pub fn with_passphrase(mut self, passphrase: Option<KeyRef>) -> Self {
+        self.passphrase = passphrase;
+        self
+    }
+
+    #[inline]
+    pub fn with_stable_id(mut self, stable_id: Option<String>) -> Self {
+        self.stable_id = stable_id;
+        self
+    }
+
+    #[inline]
+    pub fn with_extra(mut self, extra: std::collections::BTreeMap<ExtraKey, KeyRef>) -> Self {
+        self.extra = extra;
+        self
+    }
+
+    /// The signing ref an operation that signs must use; absent is refused
+    /// before any provider work.
+    #[inline]
+    pub fn signing_ref(&self) -> Result<&KeyRef, SignError> {
+        self.signing.as_ref().ok_or(SignError::MissingKey)
+    }
+
+    /// Setup, construction resolution and the alias check only (bans-scoped).
+    #[inline]
+    pub fn signing_opt(&self) -> Option<&KeyRef> {
+        self.signing.as_ref()
+    }
+
+    /// Setup only (bans-scoped): the aliased secondary signs with the primary's ref.
+    #[inline]
+    pub fn set_signing_ref(&mut self, signing: Option<KeyRef>) {
+        self.signing = signing;
+    }
+
     pub fn require_stable_id(&self) -> Result<&str, SignError> {
         self.stable_id
             .as_deref()
@@ -233,14 +318,29 @@ impl Identity {
     /// Whether `key` is one of this slot's refs.
     pub fn owns(&self, key: &KeyRef) -> bool {
         self.credential == *key
-            || self.signing == *key
+            || self.signing.as_ref() == Some(key)
             || self.passphrase.as_ref() == Some(key)
             || self.extra.values().any(|extra| extra == key)
     }
 
+    #[inline]
     pub fn validate(&self) -> Result<(), &'static str> {
+        self.checked(true)
+    }
+
+    /// `validate` without the signing requirement: a credential-only slot of an
+    /// Optional family. A present signing ref must still be valid.
+    #[inline]
+    pub fn validate_credential(&self) -> Result<(), &'static str> {
+        self.checked(false)
+    }
+
+    fn checked(&self, signing_required: bool) -> Result<(), &'static str> {
         if !valid_key_ref(&self.credential)
-            || !valid_key_ref(&self.signing)
+            || self
+                .signing
+                .as_ref()
+                .map_or(signing_required, |key| !valid_key_ref(key))
             || self
                 .passphrase
                 .as_ref()
@@ -274,6 +374,14 @@ impl Identities {
                 .primary
                 .as_ref()
                 .is_some_and(|primary| work.any_key_ref(&|key| primary.owns(key)))
+    }
+
+    /// Setup requires a secondary's signing ref, so a step refused for an
+    /// absent one (`signing_ref()`) is primary material.
+    pub fn primary_lacks_signing(&self) -> bool {
+        self.primary
+            .as_ref()
+            .is_some_and(|primary| primary.signing.is_none())
     }
 }
 
@@ -421,9 +529,10 @@ pub struct SignRequest {
 
 /// One credential presentation and exact HMAC preimage. Native recipes and
 /// signing-only compatibility adapters use the same atomic primitive shape;
-/// only the trusted recipe chooses the identity and canonical payload parts.
+/// the trusted recipe passes both refs from one `Identity` (`signing_ref()?`).
 pub fn hmac_sha256_work(
-    identity: &Identity,
+    credential: &KeyRef,
+    signing: &KeyRef,
     payload: Vec<PayloadPart>,
     context: Context,
     receipt: SignReceipt,
@@ -432,11 +541,11 @@ pub fn hmac_sha256_work(
         receipt,
         operations: vec![
             Operation::Present {
-                key: identity.credential.clone(),
+                key: credential.clone(),
             },
             Operation::Sign {
                 algorithm: Algorithm::HmacSha256,
-                key: identity.signing.clone(),
+                key: signing.clone(),
                 payload,
             },
         ],
@@ -781,7 +890,7 @@ mod setup_field_policy_tests {
     fn identity(slot: &str, passphrase: Option<&str>) -> Identity {
         Identity {
             credential: KeyRef(format!("{slot}.credential")),
-            signing: KeyRef(format!("{slot}.signing")),
+            signing: Some(KeyRef(format!("{slot}.signing"))),
             passphrase: passphrase.map(|p| KeyRef(p.into())),
             stable_id: None,
             extra: Default::default(),
@@ -832,7 +941,7 @@ mod setup_field_policy_tests {
         let mut ids = Identities {
             primary: Some(Identity {
                 credential: KeyRef(String::new()),
-                signing: KeyRef(String::new()),
+                signing: None,
                 passphrase: Some(KeyRef("primary.passphrase".into())),
                 stable_id: None,
                 extra: Default::default(),
@@ -849,7 +958,7 @@ mod setup_field_policy_tests {
             primary: None,
             secondary: Some(Identity {
                 credential: KeyRef("secondary.credential".into()),
-                signing: KeyRef(String::new()),
+                signing: None,
                 passphrase: None,
                 stable_id: None,
                 extra: Default::default(),
