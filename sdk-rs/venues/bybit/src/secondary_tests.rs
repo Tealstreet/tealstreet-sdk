@@ -1,7 +1,7 @@
 use super::*;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-use safe_cex_engine::Action;
-use safe_cex_engine::test_support::{ProbeVenue, http_requests};
+use safe_cex_engine::test_support::{ProbeVenue, prepared_actions};
+use safe_cex_engine::{Action, CredentialSlot};
 const PRIMARY_SECRET: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 const READ_SECRET: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
 fn setup() -> (Options, safe_cex_engine::signing::Provider) {
@@ -32,9 +32,9 @@ fn probe(
     venue: BybitLinear,
 ) -> ProbeVenue<BybitLinear, impl FnMut(&mut BybitLinear, &mut Cx<'_, Pending>)> {
     ProbeVenue::new(venue, |venue, cx| {
+        use safe_cex_engine::request_context::{Credential, Policy, Scope};
         for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
             let rest = Rest {
-                method,
                 path: "/secondary-test",
                 payload: if method == Method::Get {
                     "category=linear&symbol=BTC%26USDT".into()
@@ -45,7 +45,42 @@ fn probe(
                 signed: true,
                 resent: false,
             };
-            venue.send(cx, rest, Then::Tickers(vec![]));
+            if method == Method::Get {
+                venue.send_read(cx, rest, Then::Tickers(vec![]));
+                continue;
+            }
+            // Bybit writes sign on a command plan; drive that recipe on a Background leg.
+            let identity = venue.signing_identity(method).cloned().unwrap();
+            let policy = Policy {
+                credential: Some(Credential {
+                    slot: safe_cex_engine::CredentialSlot::Primary,
+                    reference: identity.credential.clone(),
+                }),
+                ..venue.read_policy(false, 20_000).unwrap()
+            };
+            let context = cx.http_context(Scope::Background, policy).unwrap();
+            let step = sign::Http::new(identity, rest.payload.clone(), venue.recv_window)
+                .with_header_policy(venue.signing_policy.header_policy());
+            let url = format!("{}{}", venue.paths.rest, rest.path);
+            let body = Some(rest.payload.clone());
+            let pending = Pending {
+                category: venue.category,
+                rest,
+                then: Then::Tickers(vec![]),
+                read: Some(context.clone()),
+            };
+            assert!(
+                cx.request_signed_managed(
+                    context,
+                    None,
+                    method,
+                    url,
+                    body,
+                    Box::new(step),
+                    pending
+                )
+                .is_ok()
+            );
         }
     })
 }
@@ -55,10 +90,12 @@ fn secondary_get_keeps_primary_mutations() {
     let mut engine = safe_cex_engine::test_support::seeded_engine(probe(BybitLinear::new(options)));
     engine.set_signer(Some(signer)).unwrap();
     engine.start(1700000000000.0);
-    engine.prepare_dispatch(1700000001234.75);
-    let requests: Vec<_> = http_requests(&mut engine)
+    let requests: Vec<_> = prepared_actions(&mut engine, 1700000001234.75)
         .into_iter()
-        .filter(|r| r.url.contains("secondary-test"))
+        .filter_map(|action| match action {
+            Action::Http(request) if request.url.contains("secondary-test") => Some(request),
+            _ => None,
+        })
         .collect();
     assert_eq!(requests.len(), 4);
     for request in requests {
@@ -84,15 +121,14 @@ fn secondary_get_keeps_primary_mutations() {
                 request.body.as_deref().unwrap()
             },
         );
-        assert_eq!(request.headers, expected_headers);
+        let headers = &request.headers;
+        assert_eq!(*headers, expected_headers);
         assert!(
-            request
-                .headers
+            headers
                 .iter()
                 .any(|(name, value)| name.eq_ignore_ascii_case("X-BAPI-API-KEY")
                     && value == expected),
-            "{:?}",
-            request
+            "{headers:?}"
         );
     }
 }
@@ -111,4 +147,106 @@ fn invalid_secondary_identity_stops_startup_before_io() {
             .drain_actions()
             .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
     );
+}
+
+/// One venue per key configuration: (primary, read key).
+fn keyed(primary: bool, read: bool) -> BybitLinear {
+    let (mut options, _) = setup();
+    if !primary {
+        options.credentials = None;
+    }
+    if !read {
+        options.read_credentials = None;
+    }
+    BybitLinear::new(options)
+}
+
+fn chosen(
+    venue: &BybitLinear,
+    key: KeyUse,
+) -> Option<safe_cex_engine::request_context::Credential> {
+    venue
+        .select_key(key)
+        .map(|(selection, identity)| selection.credential(identity.credential.clone()))
+}
+
+fn slot_of(
+    credential: Option<safe_cex_engine::request_context::Credential>,
+) -> Option<CredentialSlot> {
+    credential.map(|credential| credential.slot)
+}
+
+#[test]
+fn each_key_use_takes_the_engine_slot_rule() {
+    use CredentialSlot::{Primary, Secondary};
+    // (primary, read key) -> (Read, AccountRead, Write)
+    let table = [
+        (
+            (true, true),
+            (Some(Secondary), Some(Secondary), Some(Primary)),
+        ),
+        ((true, false), (Some(Primary), Some(Primary), Some(Primary))),
+        ((false, true), (Some(Secondary), None, None)),
+        ((false, false), (None, None, None)),
+    ];
+    for ((primary, read), (reads, account_reads, writes)) in table {
+        let venue = keyed(primary, read);
+        let case = (primary, read);
+        assert_eq!(slot_of(chosen(&venue, KeyUse::Read)), reads, "{case:?}");
+        assert_eq!(
+            slot_of(chosen(&venue, KeyUse::AccountRead)),
+            account_reads,
+            "{case:?}"
+        );
+        assert_eq!(slot_of(chosen(&venue, KeyUse::Write)), writes, "{case:?}");
+    }
+}
+
+#[test]
+fn every_signed_call_site_pins_its_key_use() {
+    for (primary, read) in [(true, true), (true, false), (false, true), (false, false)] {
+        let venue = keyed(primary, read);
+        let case = (primary, read);
+        let reads = chosen(&venue, KeyUse::Read);
+        let account_reads = chosen(&venue, KeyUse::AccountRead);
+        let writes = chosen(&venue, KeyUse::Write);
+        // Signed reads, the environment probe and the GET signer: any key, read key first.
+        assert_eq!(
+            venue
+                .read_policy(true, 20_000)
+                .and_then(|policy| policy.credential),
+            reads,
+            "{case:?}"
+        );
+        let signer = |method| {
+            venue
+                .signing_identity(method)
+                .map(|identity| identity.credential.clone())
+        };
+        assert_eq!(
+            signer(Method::Get),
+            reads.clone().map(|c| c.reference),
+            "{case:?}"
+        );
+        // Writes: the primary only.
+        for method in [Method::Post, Method::Put, Method::Delete] {
+            assert_eq!(
+                signer(method),
+                writes.clone().map(|c| c.reference),
+                "{case:?}"
+            );
+        }
+        // Option Greeks and the ordinary Plan's reads: the read key only beside a primary.
+        let greeks = venue
+            .greeks_credentials()
+            .map(|(slot, identity)| (slot, identity.credential));
+        assert_eq!(
+            greeks,
+            account_reads.clone().map(|c| (c.slot, c.reference)),
+            "{case:?}"
+        );
+        let (_, plan_read, plan_write) = venue.ordinary_preflight();
+        assert_eq!(plan_read, account_reads, "{case:?}");
+        assert_eq!(plan_write, writes, "{case:?}");
+    }
 }
