@@ -23,20 +23,17 @@ about +16 KB. These buckets/symbols are not an additive shipped-byte budget:
 inlining and collection ownership overlap, and Binaryen changes reachability.
 The baseline and adoption comparisons above are distinct experiments.
 
-Reported baseline sizes, **pending source-tree confirmation**: 55ao7t supplied
-these as the base side of the #2127 pair, but has not independently confirmed
-that its source tree is exactly c6a5. A fresh c6a5 comparison is in progress:
+**Superseded baseline rows:** 55ao7t withdrew all five previously reported
+Bybit-ms/OKX/Phemex/Bitget/combined baseline sizes. Their source tree was not
+confirmed as c6a5, or their environment differed. None is an active baseline
+for this plan's estimates or a before/after comparison.
 
-| Local family composition | Shipped bytes |
-| --- | ---: |
-| Bybit with managed-sockets linked, without adoption | 1,451,162 |
-| OKX | 1,123,368 |
-| Phemex | 1,139,332 |
-| Bitget | 1,360,487 |
-| Combined | 13,908,609 |
-
-Do not subtract the earlier prototype size from this newer baseline. A new
-paired prototype build on the exact common composition is required.
+55ao7t's fresh c6a5 combined build is **13,907,484 B**, 1,125 B below the
+withdrawn combined value. This is owner-reported baseline-only evidence, not a
+measured (a) result or independent execution here. Fresh family rows and the
+paired (a) measurements are pending. Do not subtract the earlier prototype size
+from this baseline; a new paired prototype build on the exact common composition
+and toolchain is required.
 
 ## Ownership and existing work
 
@@ -177,8 +174,13 @@ A deferred vector of timer commands would change those semantics and is rejected
 Retirement cancels runtime work, revokes ownership, cancels signing/transports,
 and completes native invalidation in the existing order before replacement.
 
-Verify S1's actual landed operations and visibility before selecting exact
-signatures. Keep this work separate from generic engine
+S1 point B has CoreCx { now, io: CoreIo { core: &mut IoCore,
+pending: &mut dyn PendingDiscard } }; Store exists there only with the
+metadata-freshness feature. Read-only queries use CoreRef/CoreIoRef via
+core_ref(). Keep Store-dependent decisions in the Engine<V> shell, independent
+of that feature. Verify actual landed operations and visibility before choosing
+signatures; do not move socket bodies before S1 lands and finishes regeneration.
+Keep this work separate from generic engine
 HTTP/Plan internals and from replace_with_repair. Combined may benefit strongly;
 Bybit alone is likely neutral or slightly larger without reachability reduction.
 
