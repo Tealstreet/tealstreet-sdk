@@ -147,12 +147,12 @@ core #2151. All WOO runtime blobs still equal reviewed `124ab3074fd`; no repair
 consumer is enabled here. Hcm cleared plan/API direction, historical carry and
 exact current socket-map union `de9a627a` for qualification, not source freeze.
 
-Current-source P2: the old adapter returns Err for asynchronous Capacity, which
-makes the core stop the feed permanently, unlike its synchronous Closed/backoff
-path. The overseer approved the narrow public-async correction and the explicit
-matrix below. The unapplied exact source artifact is SHA256
-`f91ab8be2191563119eaa2db514ed2f4c465f5f03ac9e1faa5063e987ac7fea9`.
-Application waits for valid-key pressure originals and hcm's exact review.
+The original current-source P2 was the old adapter returning Err for asynchronous
+Capacity, permanently stopping the feed. The overseer approved the narrow
+public-async correction and matrix below. Hcm cleared the originals and exact
+source artifact SHA256
+`f91ab8be2191563119eaa2db514ed2f4c465f5f03ac9e1faa5063e987ac7fea9`
+at original checkpoint `0109a5acdfab`; the artifact is now applied unchanged.
 
 | Managed outcome | Native behavior and approved presentation |
 | --- | --- |
@@ -178,3 +178,29 @@ New additive first-open/reconnect A/B demand controls keep the entire old18
 managed-socket bodies unchanged, capture the actual cleanup/rearmed timers,
 prove all superseded wakes inert, and issue exactly the surviving ETH seed
 before independent BTC resubscription. No old financial fixture is changed.
+
+
+## Source qualification on actual 49a5
+
+After the exact async-Capacity correction, the unfiltered WOO all-target native
+suite passes 230 tests across 14 targets, with zero failures, ignores or filters.
+This executes all five pressure controls and the formerly gated 600-pair recovery
+suffix, including retained refs, one genuine backoff and the live private peer.
+All 19 managed controls pass, including first-open/reconnect A/B demand.
+Strict all-target WOO Clippy and workspace formatting pass. The first formatting
+attempts failed to locate Cargo/rustfmt through the shell PATH; the successful
+check uses the installed 1.99.0 toolchain path. These are command-setup failures,
+not test failures or counted assertion REDs.
+
+Two additive source-stage controls preserve the entire original19 prefix:
+nonfinite NaN/+Infinity/-Infinity public/private ingress cannot emit any action
+or change the complete Store wire frame, and the same epoch accepts a subsequent
+finite observation; retired socket Opened/payload/malformed/duplicate-close
+observations have no actions or complete Store changes. An initial new-control
+expectation incorrectly required retirement on nonfinite ingress; source tracing
+confirmed shared InvalidTime denial is inert, and the control now pins that
+existing contract rather than changing runtime behavior.
+
+Paired current-tip sizes, committed preservation carry and qualifying PR CI
+remain pending. Earlier bare de1 WOO and bare035 combined numbers are scoped
+baseline evidence only and do not certify this composition.

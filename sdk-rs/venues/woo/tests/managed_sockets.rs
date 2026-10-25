@@ -748,3 +748,81 @@ fn first_open_and_reconnect_rebase_two_book_demand_before_unsubscribe_wakes() {
         assert!(http[0].url.ends_with("/orderbook/PERP_BTC_USDT"));
     }
 }
+
+fn full_store_frame(engine: &TestEngine) -> Vec<u8> {
+    let store = engine.store();
+    let mut writer = safe_cex_engine::wire::FrameWriter::new(vec![], 0.);
+    store.write(&store.everything(), &mut writer);
+    writer.finish()
+}
+
+#[test]
+fn nonfinite_socket_observations_cannot_publish_or_schedule_work() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for private in [false, true] {
+            let (mut engine, socket) = if private {
+                private_open()
+            } else {
+                support::started()
+            };
+            engine.drain_actions().for_each(drop);
+            let before = full_store_frame(&engine);
+            engine.handle(
+                now,
+                Event::WsMessage {
+                    socket,
+                    text: if private { ACCEPTED } else { TICKER },
+                },
+            );
+            let actions: Vec<_> = engine.drain_actions().collect();
+            assert_eq!(full_store_frame(&engine), before);
+            assert!(
+                actions.is_empty(),
+                "nonfinite ingress has no effects: {actions:?}"
+            );
+            engine.handle(
+                32.,
+                Event::WsMessage {
+                    socket,
+                    text: if private { ACCEPTED } else { TICKER },
+                },
+            );
+            if private {
+                assert_eq!(frames(&mut engine, socket).len(), 3);
+            } else {
+                assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 61_000.);
+                assert!(engine.drain_actions().next().is_none());
+            }
+        }
+    }
+}
+
+#[test]
+fn retired_socket_payload_and_duplicate_close_have_no_effects() {
+    let (mut engine, socket) = support::started();
+    engine.drain_actions().for_each(drop);
+    engine.handle(40., Event::WsClosed { socket, code: 1006 });
+    let cleanup: Vec<_> = engine.drain_actions().collect();
+    let before = full_store_frame(&engine);
+    assert!(
+        cleanup
+            .iter()
+            .any(|action| matches!(action, Action::SetTimer { .. }))
+    );
+    for event in [
+        Event::WsOpened { socket },
+        Event::WsMessage {
+            socket,
+            text: TICKER,
+        },
+        Event::WsMessage {
+            socket,
+            text: "not-json",
+        },
+        Event::WsClosed { socket, code: 1006 },
+    ] {
+        engine.handle(41., event);
+        assert!(engine.drain_actions().next().is_none());
+        assert_eq!(full_store_frame(&engine), before);
+    }
+}

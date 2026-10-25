@@ -294,6 +294,20 @@ impl Woo {
             LifecycleEvent::Reconnect(feed) => {
                 self.managed_connect(cx, self.private_feed(feed)?)?
             }
+            LifecycleEvent::InterestsRefused {
+                feed,
+                error: SocketError::Capacity,
+                ..
+            } if self.public.feed == Some(feed) => {
+                cx.notice(
+                    Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    "WOO socket admission failed: Capacity",
+                );
+                if cx.socket_epoch(feed).is_some() {
+                    cx.retire_socket(feed, RetireReason::Closed);
+                }
+            }
             LifecycleEvent::InterestsRefused { error, .. } => return Err(error),
             _ => (),
         }
