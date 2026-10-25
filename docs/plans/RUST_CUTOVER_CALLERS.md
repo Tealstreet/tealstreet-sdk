@@ -8741,3 +8741,26 @@ until their own slices.
 Follow-up (engine owner): a shared ReadFailure backoff. The engine grants read
 resends but has no delay policy, so AsterDEX keeps its own 1/2/3 s timer, as
 other families do. That timer goes away when the shared backoff lands.
+
+## AsterDEX managed signed reads
+
+AsterDEX's signed reads now go through engine read Contexts (remaining-funnel
+slice 2, [RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md)).
+This covers FetchAccount, the account snapshots (balance, positions, open
+orders, position mode), the private leverage brackets, and every history read:
+fills, order history, income and keyless public trades. Signed writes, the STP
+read and the listenKey session keep their current paths until slice 3.
+
+- **Signing at release.** Each attempt is signed when the engine releases it,
+  after any clock sync. Nothing signs while waiting for the clock.
+- **Read bound.** Each signed attempt has a 20 s bound that starts at release.
+  A command's whole read, including clock waits and history pages, stays within
+  the caller's own wait. Today a signed read has no venue bound.
+- **Retries.** Transport loss and retryable 429/5xx still retry up to three
+  times after 1, 2 and 3 s. V1 signature rejection (-1022) still resends once,
+  and the -1021 timestamp rejection still resyncs once. Each resend needs
+  engine permission and is signed again.
+- **Typed errors.** FetchAccount and history failures keep the engine's error
+  kind (`network`, `timeout`, `internal`). Native messages are unchanged.
+- **Completion.** FetchAccount and history commands complete once, through the
+  caller's read root. A late page or duplicate response completes nothing.
