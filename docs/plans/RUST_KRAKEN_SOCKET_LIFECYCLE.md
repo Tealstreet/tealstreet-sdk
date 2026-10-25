@@ -105,6 +105,11 @@ traffic can remain connected indefinitely. No age-based private resubscription.
 
 ## Shared API dispositions required before source
 
+Overseer ruling: native parity is mandatory for all three cases below. Managed
+sockets owner claude-55ao7t decides which are already expressible by the engine;
+for any gap, that owner names the smallest shared change and the overseer assigns
+it separately. No venue-local Supervisor, watchdog or policy approximation.
+
 AuthEvidence::Progress is already present at the baseline; do not rebuild that
 seam. Two native timing/traffic requirements do not fit a blind policy mapping:
 
@@ -124,8 +129,9 @@ seam. Two native timing/traffic requirements do not fit a blind policy mapping:
 
 Also pin stable-reset anchoring: native Futures supervision becomes Ready at
 OPEN, while managed Required auth's authenticated transition resets Supervisor's
-since at final ACK. Preserve native OPEN-based 30-second stability/reset behavior
-or obtain an explicit owner ruling; do not silently extend it by auth latency.
+since at final ACK. Preserve native OPEN-based 30-second stability/reset behavior; the managed-sockets
+owner identifies the existing expression or smallest shared change. Auth latency
+must not extend that anchor.
 These are review/source gates, not approved new APIs. No generic implementation
 belongs in this docs checkpoint. Any required shared seam gets its own plan,
 originals and owner review before the whole-family activation.
