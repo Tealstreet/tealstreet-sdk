@@ -83,6 +83,14 @@ enum Condition {
     Detection,
     Positions,
 }
+impl Condition {
+    fn unmet(self) -> &'static str {
+        match self {
+            Self::Detection => DETECTION,
+            Self::Positions => "Bitget position snapshot did not complete",
+        }
+    }
+}
 
 enum Parked {
     Preflight(Condition),
@@ -709,7 +717,7 @@ impl BitgetFutures {
                         }
                     }
                     // A released condition is issued in this same flush; it cannot park again.
-                    At::Ready(_) => self.end(cx, job, None, not_sent(DETECTION)),
+                    At::Ready(_) => self.end(cx, job, None, not_sent(condition.unmet())),
                 }
             }
             Step::Fail(error) => self.end(cx, job, current, error),
@@ -800,6 +808,13 @@ impl BitgetFutures {
         current: Option<(&Slot, &Context)>,
         mut error: VenueError,
     ) {
+        // A rollback that cannot finish, whatever stops it, keeps the original
+        // refusal and the protection note.
+        if job.error.is_some() {
+            let (original, note) = with_rollback(job.error.take(), error);
+            error = original;
+            job.note = note;
+        }
         if (job.effective || !job.ids.is_empty())
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
         {
@@ -810,17 +825,20 @@ impl BitgetFutures {
                 if let Some(note) = note {
                     error.message = format!("{}; {note}", error.message);
                 }
-                let _ = cx.fail_preflight(&job.preflight, error);
+                let failed = cx.fail_preflight(&job.preflight, error);
+                debug_assert!(failed.is_ok(), "Preflight terminal stranded");
             }
             (Some(plan), note) => {
                 if let Some((slot, context)) = current {
-                    let _ = cx.finish_plan_call(plan, slot, context);
+                    let finished = cx.finish_plan_call(plan, slot, context);
+                    debug_assert!(finished.is_ok(), "Plan call seal stranded");
                 }
                 // The rollback note is safety text: a protection order may remain.
-                let _ = match note {
+                let failed = match note {
                     Some(note) => cx.fail_plan_noted(plan, error, &note),
                     None => cx.fail_plan(plan, error),
                 };
+                debug_assert!(failed.is_ok(), "Plan terminal stranded");
             }
         }
         self.next_job(cx);
@@ -839,15 +857,18 @@ impl BitgetFutures {
         let ids = serde_json::to_string(&job.ids).expect("order ids");
         match &job.plan {
             None => {
-                let _ = cx.done_empty_plan(&job.preflight, ids);
+                let done = cx.done_empty_plan(&job.preflight, ids);
+                debug_assert!(done.is_ok(), "empty Plan terminal stranded");
             }
             Some(plan) => {
                 if let Some((slot, context)) = current {
-                    let _ = cx.finish_plan_call(plan, slot, context);
+                    let finished = cx.finish_plan_call(plan, slot, context);
+                    debug_assert!(finished.is_ok(), "Plan call seal stranded");
                 }
                 if cx.done_plan(plan, ids).is_err() {
-                    let _ =
+                    let failed =
                         cx.fail_plan(plan, VenueError::new("Bitget job ended without its call"));
+                    debug_assert!(failed.is_ok(), "Plan terminal stranded");
                 }
             }
         }
@@ -2293,8 +2314,6 @@ impl BitgetFutures {
                 job.calls.push_back(rollback);
                 return self.drive(cx, job, At::Data(&request.slot, &request.context));
             }
-            let (error, note) = with_rollback(job.error.take(), error);
-            job.note = note;
             self.end(cx, job, current, error);
             self.refresh_orders(cx, false);
             return;
@@ -2766,8 +2785,6 @@ impl BitgetFutures {
         if released && request.call.is_place() {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
         }
-        let (error, note) = with_rollback(job.error.take(), error);
-        job.note = note;
         let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
         self.end(cx, job, None, error);
         if released {

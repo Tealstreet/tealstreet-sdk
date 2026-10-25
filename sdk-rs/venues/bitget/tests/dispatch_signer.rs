@@ -336,8 +336,11 @@ fn rollback_provider_refusal_preserves_original_native_rejection_details() {
     assert_eq!(error.venue_code.as_deref(), Some("40017"));
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Rejected));
     assert_eq!(error.outcome, None);
-    assert!(error.message.contains("replace rejected"));
-    assert!(error.message.contains("protection rollback failed"));
+    // The note now comes from `end`, which every unfinished rollback reaches.
+    assert_eq!(
+        error.message,
+        "Bitget 40017: replace rejected (HTTP 200); protection rollback failed: Signing provider refused the request"
+    );
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
 }
 
@@ -371,6 +374,7 @@ fn managed_mutation_signs_the_exact_body_and_client_id_at_release() {
             safe_cex_crypto::Encoding::Base64
         )
     );
+    assert_eq!(http.route, None);
 }
 #[test]
 fn private_login_blocks_ping_and_late_signature_after_retirement_is_inert() {
