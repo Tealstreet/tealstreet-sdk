@@ -396,3 +396,7 @@ The overseer has approved G6: intentional Optional signing absence refuses
 only the signed operation, typed NotSent, with no account latch; unsigned
 operations remain usable. Required-family MissingKey latching remains #2109.
 m26ps4 records the shared revision and kuhwxi reviews its source before adoption.
+The command terminal still follows the Plan journal, including earlier settled
+effects; an unissued final operation does not make the whole command NotSent.
+The provider plan adds a serial prior-settlement/absent-ref control for this.
+fe7lgm's current resend plan is CLEAR at 6208560a514; REDs/source remain open.

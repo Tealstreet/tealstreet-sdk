@@ -265,7 +265,10 @@ its dependency will explicitly enable them after exact consumer composition
 checks. No global or unrelated-family opt-in. The GRVT registry family also
 opts into shared dispatch-signing; local crypto uses existing secp256k1.
 Seeded serial auth resend and the parsed-status exemption are not present in
-this actual tree and remain separate fe7lgm source gates.
+this actual tree and remain separate fe7lgm source gates. His CLEARed plan is
+6208560a514; REDs and source are not written yet. The status_exempt_refusal
+hook is consulted only for Unproven status, and GRVT returns true only for
+a parsed full JSON envelope with code == 1000, never a partial/text match.
 
 condition-waits is required specifically for a woken front command that must
 re-park from on_http_preflight_ready when the native builder/prerequisite is
@@ -393,8 +396,10 @@ before GRVT source, and he accepted them as plan fit, not source clearance.
   reviewed signature criterion, not a key-only callback bypass.
 - **G6, Optional-family latch:** an intentionally absent Optional signing ref
   is a per-operation limitation, not an account-wide missing credential.
-  The overseer approved the operation-scoped distinction: that owner gets
-  a typed NotSent refusal without poisoning later login Present/refresh,
+  The overseer approved the operation-scoped distinction: the operation
+  refuses with a typed NotSent failure; the command terminal follows the
+  Plan journal. Earlier settled effects cannot be relabeled NotSent by this
+  later refusal. It does not poison later login Present/refresh,
   unsigned Session work, secondary operations or startup. Admission normally
   refuses placement earlier, but a late absence must also be safe. Required
   families and an actual MissingKey for a ref declared installed keep #2109's
@@ -406,9 +411,20 @@ G6 controls deliberately reach absent-ref prepare past G2, then prove real
 login Present and unsigned cancel/leverage still succeed, with no account
 latch/StartupFailed caused by intentional Optional absence. Keep Required-
 family and declared-installed-ref missing-key latch controls as positives.
+Add a serial case: an unsigned call settles, then an absent-ref placement
+refuses at preparation. Pin both the operation's NotSent and the command's
+journal terminal: earlier Accepted effects yield outcome None, definitive
+refusal history yields Rejected under the common projection. Neither becomes
+a whole-command NotSent merely because the final operation was unissued.
+Assert no account latch and retain a working subsequent unsigned operation.
 m26ps4 records the approved G6 disposition in revision 4 of
 RUST_CREDENTIAL_ONLY_SETUP.md after phase-2/D1 lands; kuhwxi reviews its source.
 The behavior ruling is closed, while shared plan/source and consumer controls
 still gate GRVT adoption. G2-G6 answers do not bypass those gates. Any generic
-engine PR measures Bybit and Bitget on its composed tree. No build, source authorization or push
-is inferred from resuming this plan.
+engine PR measures Bybit and Bitget on its composed tree. No build, source
+authorization or push is inferred from resuming this plan.
+
+fe7lgm's exact 4e6c4f4f3bd re-review is plan-level CLEAR for custody and resend
+fit. The operation-versus-command precision above folds his follow-up; this
+remains a plan and future control specification, not source or constructor
+certification. The original bf61 controls are not changed by this wording.
