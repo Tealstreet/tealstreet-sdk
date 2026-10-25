@@ -1,5 +1,5 @@
 //! Native option terms, quote queries and account Greeks.
-use crate::candles::{entry_policy, read_policy};
+use crate::policy::{entry_policy, read_policy};
 use crate::sign::{self, Query};
 use crate::trading::codes::BYBIT;
 use crate::wire::*;
