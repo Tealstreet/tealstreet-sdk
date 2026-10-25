@@ -1,5 +1,6 @@
 //! Preflighted sequential writes. A cancellation ACK alone never permits replacement.
 use crate::account::{BUILDER_MAINNET, BUILDER_TESTNET, BuilderState, decode_order};
+use crate::provider::{Create, Leg, Metadata, Placement, Signature, Trigger, TriggerDetails};
 use crate::sign;
 use crate::wire::{Number, Str, Text};
 use crate::{Grvt, Job, Pending};
@@ -198,60 +199,6 @@ struct Identity<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     co: Option<&'a str>,
 }
-#[derive(Serialize)]
-struct Create {
-    o: Placement,
-}
-#[derive(Serialize)]
-struct Placement {
-    sa: String,
-    im: bool,
-    ti: &'static str,
-    po: bool,
-    ro: bool,
-    l: [Leg; 1],
-    s: Signature,
-    m: Metadata,
-    b: &'static str,
-    bf: &'static str,
-}
-#[derive(Serialize)]
-struct Leg {
-    i: String,
-    s: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    lp: Option<String>,
-    ib: bool,
-}
-#[derive(Serialize)]
-struct Signature {
-    s: String,
-    r: String,
-    s1: String,
-    v: u8,
-    e: String,
-    n: u32,
-    ci: &'static str,
-}
-#[derive(Serialize)]
-struct Metadata {
-    co: String,
-    ct: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    t: Option<Trigger>,
-}
-#[derive(Serialize)]
-struct Trigger {
-    tt: &'static str,
-    t: TriggerDetails,
-}
-#[derive(Serialize)]
-struct TriggerDetails {
-    tb: &'static str,
-    tp: String,
-    cp: bool,
-    is: bool,
-}
 #[derive(Deserialize)]
 struct Reply<'a> {
     #[serde(borrow, rename = "r", alias = "result")]
@@ -339,7 +286,7 @@ fn positive(value: f64, name: &str) -> Result<(), String> {
         Err(format!("Invalid GRVT {name}"))
     }
 }
-fn valid_client(value: &str) -> bool {
+pub(crate) fn valid_client(value: &str) -> bool {
     !value.starts_with('0')
         && value.bytes().all(|b| b.is_ascii_digit())
         && value

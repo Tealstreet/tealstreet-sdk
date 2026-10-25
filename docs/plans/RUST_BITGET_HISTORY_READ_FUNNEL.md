@@ -330,3 +330,5 @@ The 61bde79e161 composition on actual035948b564a measured local combined
 Repair core2151 and Hyperliquid originals2167 then landed; the PR plain-merges
 actual49a5b54f362 before its READY-time local combined record. The0359 result
 is retained under that pin, never relabeled as the subsequent composition.
+
+Current-gate composition: plain merge of 0a54e37b1e8 adopts #2162 exactly. Bitget public steady CPU now requires pooled q <= 1.023110 against both the tip and anchor 518d3953c09; all old-gate exceptions are superseded. The approved 1,478,656 Bitget/USDC history allowance uses the 2,108 bytes banked by #2142/#2145. It preserves the incoming AsterDEX and Bybit allowances. READY requires exact-head CI family/CPU qualification plus a local combined build on this current-tip composition.

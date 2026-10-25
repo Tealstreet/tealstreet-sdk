@@ -92,7 +92,7 @@ export const archiveCiWasm = ({ root = process.cwd(), venue, destination, env = 
   writeFileSync(resolve(destination, 'build.json'), `${JSON.stringify(metadata, null, 2)}\n`);
   return metadata;
 };
-export const validateCiWasm = ({ root = process.cwd(), directory, venue }) => {
+const validatePackage = ({ root, directory, venue, fingerprint, sourceHead, runId }) => {
   if (typeof directory !== 'string' || !directory.trim())
     throw new Error('CI wasm directory must be nonempty; refusing reuse (no fallback)');
   const metadata = JSON.parse(readFileSync(resolve(directory, 'build.json'), 'utf8'));
@@ -100,15 +100,31 @@ export const validateCiWasm = ({ root = process.cwd(), directory, venue }) => {
       !/^[a-f0-9]{40}$/.test(metadata.sourceHead ?? '') || !/^\d+$/.test(metadata.runId ?? '') ||
       metadata.family !== venueFamily(venue) || metadata.family !== venueFamily(metadata.venue))
     throw new Error('Invalid CI wasm build contract or venue family');
+  if ((sourceHead !== undefined && metadata.sourceHead !== sourceHead) ||
+      (runId !== undefined && metadata.runId !== runId)) throw new Error('CI wasm source/run differs from paired selection');
   assertFlags(metadata.buildFlags);
   assertTools(root, metadata.tools);
-  if (metadata.inputsSha256 !== buildInputFingerprint(root))
+  if (metadata.inputsSha256 !== fingerprint())
     throw new Error('CI wasm git-tree fingerprint differs from HEAD; refusing reuse (no fallback)');
   for (const name of FILES) {
     if (metadata.hashes?.[name] !== sha256(readFileSync(resolve(directory, name))))
       throw new Error(`CI wasm package hash mismatch: ${name}`);
   }
   return { path: resolve(directory, 'safe_cex_wasm.js'), metadata };
+};
+export const validateCiWasm = ({ root = process.cwd(), directory, venue }) =>
+  validatePackage({ root, directory, venue, fingerprint: () => buildInputFingerprint(root) });
+
+// Measurement-only source contract; final paired certification separately
+// authenticates the selected landing/anchor and every physical observation.
+export const validatePairedCiWasm = ({ root = process.cwd(), directory, venue, sourceHead, env = process.env }) => {
+  if (venue !== 'bitget' || env.GITHUB_ACTIONS !== 'true' || env.GITHUB_RUN_ATTEMPT !== '1' ||
+      !/^\d+$/.test(env.GITHUB_RUN_ID ?? '') || !/^[a-f0-9]{40}$/.test(sourceHead ?? ''))
+    throw new Error('Paired module selection requires original CI public Bitget evidence');
+  buildInputFingerprint(root);
+  git(root, 'merge-base', '--is-ancestor', sourceHead, 'HEAD');
+  const inputsSha256 = sha256(git(root, 'ls-tree', '-r', '-z', sourceHead, '--', ...INPUTS));
+  return validatePackage({ root, directory, venue, fingerprint: () => inputsSha256, sourceHead, runId: env.GITHUB_RUN_ID });
 };
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { values } = parseArgs({ options: {

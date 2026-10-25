@@ -291,7 +291,6 @@ test('reader caches only immutable Git/ZIP/completed log bytes; mutable authorit
 });
 
 
-
 test('runtime response admits the authentic 743167768-byte Bybit archive within the existing 4 GiB ZIP bound', () => {
   assert.doesNotThrow(() => requireGithubResponseSize(743_167_768, 'runtime-artifact'));
   assert.doesNotThrow(() => requireGithubResponseSize(4 * 1024 ** 3, 'runtime-artifact'));
@@ -367,4 +366,54 @@ test('artifact callers cannot request metadata or arbitrary response kinds', asy
   for (const kind of ['metadata', 'log', 'unbounded', 4 * 1024 ** 3])
     await assert.rejects(async () => reader.getArtifactBytes(700, kind), /invalid artifact response kind/);
   assert.equal(calls, 0);
+});
+
+test('paired baseline PR reads are live, exact and completely paginated', async () => {
+  const calls = [], commit = git('paired head');
+  const reader = createGithubReader({ repository: 'org/repo', fetch: async url => {
+    calls.push(url);
+    if (url.includes('/pulls/20')) return jsonResponse({ number: 20, base: { sha: git(String(calls.length)) } });
+    return jsonResponse(url.endsWith('page=1') ? Array.from({ length: 100 }, (_, index) => ({ id: index + 1 })) : [{ id: 101 }]);
+  } });
+  assert.notDeepEqual(await reader.getPull(20), await reader.getPull(20), 'base selection must not cache mutable PR state');
+  assert.equal((await reader.listCommitPulls(commit)).length, 101);
+  assert.equal(calls.filter(url => url.includes('/commits/')).length, 2);
+  await assert.rejects(async () => reader.getPull('../20'));
+  await assert.rejects(async () => reader.listCommitPulls('HEAD'));
+  const duplicate = createGithubReader({ repository: 'org/repo', fetch: async () => jsonResponse([{ id: 1 }, { id: 1 }]) });
+  await assert.rejects(duplicate.listCommitPulls(commit), /duplicate/);
+});
+
+test('Rust landing authority reads only the fixed ref and never caches its moving tip', async () => {
+  const calls = [];
+  const reader = createGithubReader({ repository: 'Tealstreet/tealstreet-sdk', fetch: async url => {
+    calls.push(url);
+    assert.equal(new URL(url).pathname, '/repos/Tealstreet/tealstreet-sdk/git/ref/heads/feat/rust-rewrite');
+    return jsonResponse({ ref: 'refs/heads/feat/rust-rewrite', object: { type: 'commit', sha: git(String(calls.length)) } });
+  } });
+  assert.notDeepEqual(await reader.getRustLanding(), await reader.getRustLanding());
+  assert.equal(calls.length, 2);
+});
+
+test('Rust landing ref cannot be read from a head or fork repository', async () => {
+  const reader = createGithubReader({ repository: 'fork/repo', fetch: async () => {
+    assert.fail('foreign repository must refuse before the network');
+  } });
+  await assert.rejects(async () => reader.getRustLanding(), /base repository/);
+});
+
+test('GraphQL baseRefOid is logged from the fixed base repository and never cached', async () => {
+  const calls = [];
+  const reader = createGithubReader({ repository: 'Tealstreet/tealstreet-sdk', fetch: async (url, options) => {
+    assert.equal(url, 'https://api.github.com/graphql'); assert.equal(options.method, 'POST');
+    assert.equal(JSON.parse(options.body).query,
+      'query { repository(owner: "Tealstreet", name: "tealstreet-sdk") { pullRequest(number: 2162) { baseRefOid } } }');
+    calls.push(options);
+    return jsonResponse({ data: { repository: { pullRequest: { baseRefOid: calls.length === 1 ? 'stale' : null } } } });
+  } });
+  assert.equal(await reader.getPullBaseOid(2162), 'stale');
+  assert.equal(await reader.getPullBaseOid(2162), null);
+  await assert.rejects(async () => reader.getPullBaseOid('2162) { injected }'), /invalid/);
+  assert.equal(calls.length, 2);
+  assert.equal(reader.snapshots().responses.length, 2);
 });
