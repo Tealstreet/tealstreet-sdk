@@ -41,9 +41,9 @@ impl Venue for Consumer {
             retry: RetryPolicy::Never,
         };
         let before = (
-            cx.io.next_id,
-            cx.io.actions.len(),
-            cx.io.request_contexts.plan_context_storage(),
+            cx.io.core.next_id,
+            cx.io.core.actions.len(),
+            cx.io.core.request_contexts.plan_context_storage(),
         );
         for physical in [false, true] {
             let result = cx.admit_plan_owned(
@@ -59,9 +59,9 @@ impl Venue for Consumer {
             assert!(matches!(result, Err(Error::Invalid)));
             assert_eq!(
                 (
-                    cx.io.next_id,
-                    cx.io.actions.len(),
-                    cx.io.request_contexts.plan_context_storage()
+                    cx.io.core.next_id,
+                    cx.io.core.actions.len(),
+                    cx.io.core.request_contexts.plan_context_storage()
                 ),
                 before
             );
