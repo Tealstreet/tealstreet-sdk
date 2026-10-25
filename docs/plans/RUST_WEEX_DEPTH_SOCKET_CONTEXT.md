@@ -323,3 +323,13 @@ These numbers do not certify the subsequent correction. The complete native
 qualification is428PASS/2FAIL/0ignored: two command-only trading fixtures have
 not initialized feeds through genuine Engine.start. Their narrow initialization
 preview requires reviewer disposition before application; source stays local.
+
+The exact trading initialization preview is approved for
+`fill_only_socket_event_during_cancel_blocks_replacement_before_order_update`
+and `fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliation`.
+Only these two post-start private-fill fixtures add genuine Engine.start1000
+and its actual prepared drain before the unchanged importer. Both already keep
+their original first Opened1002; all234 trading assertions,23 raw payloads,
+financial events and old command/response clocks remain exact. The initial
+catalogue read remains independently unanswered. This introduces neither global
+autostart nor a new command-before-start support contract.

@@ -8787,3 +8787,11 @@ shared helpers and dedicated delayed/equality expiry controls remain intact.
 On refused required public invalidation, exact native Depth cleanup precedes
 failure propagation and public replacement is denied; sibling feeds/read owners
 remain independent. Expanded custody, quota and native qualification remain gates.
+
+Two post-start private-fill trading oracles add only Engine.start1000 and its
+genuine prepared drain before their unchanged account importer:
+fill_only_socket_event_during_cancel_blocks_replacement_before_order_update and
+fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliation.
+Their first Opened1002, all prior assertions/payloads and financial/event clocks
+stay exact; the new initial catalogue read is unanswered. No global autostart
+or new command-before-start compatibility is implied.
