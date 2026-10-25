@@ -1,8 +1,8 @@
 # Backpack public and private socket lifecycle
 
-Status: plan/originals and bounded runtime SOURCE/API CLEAR; applied for scoped
-qualification complete, including paired sizes. Frozen-head CI and auditor GO
-remain gates.
+Status: source/API/native/fixture preservation CLEAR; scoped qualification and
+local combined measurement pass on the D1 composition. Frozen-head CI is the
+record for family sizes; green CI and auditor GO remain gates.
 Original baseline is actual landing tip34999f973f9ac9581cd4342d5cf23e4fa06c0142,
 which includes account-read #2139 at3f2c90991c26cbf639a5001095bea962c9e1e295.
 Owner codex-mxb4mq; native/API reviewer codex-hcmq3f. Runtime, Cargo features, inventories and CI remain unchanged at the original
@@ -359,3 +359,47 @@ source/tree pins, tool versions, web/Node artifact SHA256s and cleanup proof.
 Native/strict/bans receipt: /tmp/codex-backpack-socket-composed-qualification.json.
 No generic engine source is changed, so this slice requires Backpack/combined,
 not additional Bybit/Bitget measurements. Frozen-head CI and auditor GO remain.
+
+## Post-S1 and D1 composition evidence
+
+Intermediate c66ed62c945 on actual3d30b88713d passed377 native tests,
+0failed,1existing ignored; strict Clippy, owned formatting and full bans/ratchets
+passed. Its completed local pair is retained only for those pins:
+
+| Bundle | Bare bytes | Composed bytes | Delta | Budget | Composed headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Backpack | 1,094,410 | 1,161,783 | +67,373 | 1,343,488 | 181,705 |
+| Combined | 13,889,731 | 13,907,572 | +17,841 | 14,155,776 | 248,204 |
+
+Receipt: /tmp/codex-backpack-socket-s1-measurement.json. All eight artifacts
+were hash-checked and all four measurement targets are absent. This pair does
+not certify the later D1/OKX composition.
+
+Actual D1 and OKX landings composed automatically outside README/CALLERS at
+9199ee739573 on702afdffef3. hcm source/API/fixture/map carry is CLEAR.
+The sole changed owned fixture combines incoming D1 Identity constructors and
+accessors with the cleared two-line first-open/drain; all534 prior assertions
+and raw literals remain exact. Subsequent f567d9ac91c merges shrink-only Bitget
+budget-check landing bebaa2cc36f automatically. Rust source and Backpack/combined
+budgets are unchanged. No authored generic engine or signer change is present.
+
+On9199:377 native PASS,0FAIL,1existing ignored across27targets; all-target
+strict Clippy, owned formatting and full bans/ratchets PASS. These Rust gates
+carry across the two incoming Bitget budget-check files. Qualification receipt:
+/tmp/codex-backpack-socket-d1-qualification.json.
+
+Fresh local builds compare bare bebaa2cc36f with f567d9ac91c using the same
+Rust1.99.0/wasm-bindgen0.2.129/wasm-opt132 and unchanged harness commands,
+CARGO_BUILD_JOBS=4, BINARYEN_CORES=4, SAFE_CEX_WASM_OPT=required:
+
+| Bundle | Bare bytes | Composed bytes | Delta | Budget | Composed headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Backpack | 1,094,881 | 1,162,253 | +67,372 | 1,343,488 | 181,235 |
+| Combined | 13,908,680 | 13,926,452 | +17,772 | 14,155,776 | 229,324 |
+
+Web and Node are byte- and SHA256-identical in each row. All four measurement
+targets were deleted immediately after their build; sources, logs and artifacts
+remain outside Git. Receipt: /tmp/codex-backpack-socket-d1-measurement.json.
+The combined row is the required local combined record, independent of CI.
+The local Backpack pair is qualification evidence; under the overseer correction,
+CI records the family size. Frozen-head CI and exact-tree auditor GO remain.
