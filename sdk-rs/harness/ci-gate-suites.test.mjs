@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { expectedGateCases, gateCaseKey, GATE_SUITES, validateGateCoverage, replayMatrix } from './ci-gate-suites.mjs';
-import { venueFamily } from '../hosts/wasm/js/venues.mjs';
+import { expectedGateCases, gateCaseKey, GATE_SUITES, validateGateCoverage } from './ci-gate-suites.mjs';
 
 const copy = (suite) => structuredClone(expectedGateCases(suite));
 
@@ -104,8 +103,15 @@ const workflowCases = (source) => {
   const matrixStart = job.indexOf('      matrix:\n');
   const matrixEnd = job.indexOf('\n    env:', matrixStart);
   assert(matrixStart >= 0 && matrixEnd > matrixStart, 'matrix include table exists');
-  assert.match(job.slice(matrixStart, matrixEnd), /include: \$\{\{ fromJSON\(needs\.selection\.outputs\.replay\) \}\}/);
-  const rows = replayMatrix(GATE_SUITES, venueFamily);
+  const rows = job.slice(matrixStart, matrixEnd).split(/^          - venue: /m).slice(1).map((block) => {
+    const [venue, ...lines] = block.split('\n');
+    const fields = { venue: venue.trim() };
+    for (const line of lines) {
+      const match = /^            ([a-z_]+): (.*)$/.exec(line);
+      if (match) fields[match[1]] = match[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+    }
+    return fields;
+  });
   const steps = job.split(/^      - /m).slice(1);
   const selected = (condition, suite) => !condition || condition.split(/\s*\|\|\s*/).some((part) =>
     part.split(/\s*&&\s*/).every((clause) => {

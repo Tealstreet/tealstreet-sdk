@@ -9,14 +9,10 @@ import { resolve } from 'node:path';
 const directory = resolve('sdk-rs/harness/out/ci');
 mkdirSync(directory, { recursive: true });
 const reportPath = `${directory}/gate-${process.pid}.json`;
-const correctnessOnly = process.env.RUST_REPLAY_CORRECTNESS_ONLY === 'true';
-if (correctnessOnly && process.env.CPU_COLLECTION_STATE) throw new Error('Correctness-only replay cannot enter CPU collection');
 const context = process.env.CPU_COLLECTION_STATE ? beforeCpuCase({ state: process.env.CPU_COLLECTION_STATE, args: process.argv.slice(2) }) : null;
 if (context) console.log(formatMeasurementMarker('BEGIN', context.key, context.startedAt));
 const capsule = context ? JSON.parse(readFileSync(context.statePath, 'utf8')).destination : null;
 const child = spawnSync(context?.nodePath ?? process.execPath, ['sdk-rs/harness/gate.mjs', ...process.argv.slice(2),
-  ...(correctnessOnly ? ['--correctness-only'] : []),
-  ...(process.env.RUST_REPLAY_CI_WASM ? ['--ci-wasm', process.env.RUST_REPLAY_CI_WASM] : []),
   ...(capsule ? ['--runtime-capsule', capsule] : []), '--report', reportPath],
   { stdio: 'inherit', env: { ...process.env, ...context?.env } });
 const measured = context && [0, 1].includes(child.status) ? afterCpuCase({ context, reportPath, exitCode: child.status }) : null;

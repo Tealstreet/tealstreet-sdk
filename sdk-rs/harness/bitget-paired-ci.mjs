@@ -25,7 +25,7 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
   insist(candidates.length === 1, 'missing/duplicate paired physical producer');
   const checkoutSha = gitRead('rev-parse', 'HEAD'), checkoutTree = gitRead('rev-parse', 'HEAD^{tree}');
   let pull, landing, mergeTree;
-  if (['push', 'workflow_dispatch'].includes(run.event) && run.head_branch === 'feat/rust-rewrite') {
+  if (run.event === 'push' && run.head_branch === 'feat/rust-rewrite') {
     landing = await reader.getCommit(run.head_sha); mergeTree = checkoutTree;
   } else {
     const associated = await reader.listCommitPulls(run.head_sha);
@@ -100,7 +100,6 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
     try {
       const child = spawnSync('python3', [script, '--baseline', selected.baseline,
         '--candidate', selected.candidate, '--authority', authorityPath, '--out', resolve(directory, 'records'),
-        ...(name === 'anchor' ? ['--candidate-cache', resolve(destination, 'tip/records/candidate')] : []),
         '--module-path', resolve(destination, 'active-module')], { cwd: root, env, stdio: 'inherit' });
       insist(child.status === 0 && !child.error && !child.signal, `${name} fixed measurement did not complete; no retry`);
     } finally {
