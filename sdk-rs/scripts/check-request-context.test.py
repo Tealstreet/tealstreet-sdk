@@ -93,6 +93,70 @@ class RequestContextBan(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ban.manifest(text)
 
+    def test_parent_inventory_union_uses_maximum_counts_not_sum(self):
+        path = 'venues/reference/src/lib.rs'
+        first, second = 'a' * 64, 'b' * 64
+        parents = [{path: {first: 2}}, {path: {first: 3, second: 1}}]
+        inherited = ban.maximum_manifest(parents)
+        self.assertEqual(inherited, {path: {first: 3, second: 1}})
+        self.assertFalse(ban.check(inherited, inherited, [('merge parents', inherited)]))
+        added = {path: {first: 4, second: 1}}
+        self.assertTrue(ban.check(added, added, [('merge parents', inherited)]))
+
+    def test_branch_merging_tip_inherits_reviewed_inventory_from_either_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = pathlib.Path(directory)
+            root = repo / 'sdk-rs'
+            source = root / 'venues/reference/src/lib.rs'
+            source.parent.mkdir(parents=True)
+            inventory = root / ban.MANIFEST
+            inventory.parent.mkdir(parents=True)
+
+            def command(*args):
+                return subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Ratchet',
+                                       '-c', 'user.email=ratchet@example.invalid', *args],
+                                      check=True, capture_output=True, text=True).stdout.strip()
+
+            def commit():
+                command('add', '.')
+                command('commit', '-m', 'fixture')
+
+            command('init', '-b', 'master')
+            source.write_text('cx.request(1);')
+            first = {source.relative_to(root).as_posix(): dict(ban.fingerprints(source.read_text()))}
+            inventory.write_text(json.dumps(first))
+            commit()
+            command('switch', '-c', 'topic')
+            (repo / 'topic.txt').write_text('independent branch work')
+            commit()
+            command('switch', 'master')
+            source.write_text('cx.request(1); cx.request(2);')
+            inherited = {source.relative_to(root).as_posix(): dict(ban.fingerprints(source.read_text()))}
+            inventory.write_text(json.dumps(inherited))
+            commit()
+            tip = command('rev-parse', 'HEAD')
+            command('update-ref', 'refs/remotes/origin/feat/rust-rewrite', tip)
+            command('switch', 'topic')
+            command('merge', '--no-ff', '--no-edit', 'master')
+            event = repo / 'event.json'
+            event.write_text(json.dumps({'pull_request': {'base': {'sha': tip}}}))
+            with mock.patch.object(ban, 'ROOT', root), mock.patch.dict(
+                    os.environ, {'GITHUB_EVENT_PATH': str(event)}, clear=True):
+                previous = ban.previous_manifests(merge_parents=True)
+                self.assertFalse(ban.check(inherited, inherited, previous))
+                self.assertIn(('merge parents', inherited), previous)
+                self.assertIn((tip, inherited), previous)
+                self.assertIn(('refs/remotes/origin/feat/rust-rewrite', inherited), previous)
+                # Current source must still match exactly; independent base
+                # limits and growth beyond every parent remain enforced.
+                self.assertTrue(ban.check(first, inherited, previous))
+                self.assertTrue(ban.check(inherited, inherited, [('older base', first)]))
+                # Socket inventories use another schema and retain the old
+                # per-ref interface without invoking the request-map reducer.
+                with mock.patch.object(ban, 'maximum_manifest', side_effect=AssertionError):
+                    independent = ban.previous_manifests()
+                self.assertTrue(ban.check(inherited, inherited, independent))
+
     def test_base_ref_and_exact_event_commit_are_required(self):
         sha = '1' * 40
         calls = []
