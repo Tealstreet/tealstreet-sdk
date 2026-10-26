@@ -363,6 +363,37 @@ unknown-op behavior keeps its existing batch-tail completion semantics. Exact
 provider hooks, token/Action cloning, host integration and genuine join proofs
 remain source-review gates, not approved runtime code.
 
+The provider/host direction uses a dormant owned execution with separate result
+and actual-join completion. Snapshot the original handle, methods and promises
+once; attach observers to BOTH promises before start, including already-rejected
+promises. Never re-read getters to substitute ownership. A binding needs both
+the exact valid20-byte result and genuine cleanup join within the original20s.
+Start, abort and report exceptions cannot skip independent cleanup or cause a
+second report. Existing raced timeout/abort wrappers are not join evidence.
+
+The public Signer trait's owned_public_address_capability and
+create_public_address_setup methods have unconditional Unsupported/None
+defaults and unconditional supporting public types. Only engine use and task
+construction are feature-gated. Pin a downstream overriding provider compiled
+with features unified both ways. The factory independently refuses malformed
+input with None and zero emission: accept only one PublicAddress on its own
+installed Secp256k1Digest ref, an empty receipt and no extra operation/payload.
+Direct LocalSigner hostile-input originals must prove this without relying on
+engine validation. Arc-wrapped retirement payloads are credential-acceptable
+only with one-shot acceptance decided by the retained Retiring record; fe7's
+exact public Action/Clone disposition remains a separate source gate.
+
+Host originals must cover wrapper settlement before real callback/cleanup,
+result-only and join-only completion, already-rejected promises, getter-based
+owner substitution, thrown start/abort/report, and disposal while cleanup is
+held. Missing negotiated support allocates no task/signing ID; ordinary unknown
+actions retain their existing behavior. GRVT's claim-free setup is a new source
+choice requiring actual originals, not evidence from its earlier builder Read.
+The shared hosted-envelope owner separately proposes authenticated setup-owner
+join evidence, exact correlation/capability and retained-state bounds. Ordinary
+sign-res/error/disconnect, timeout, reconnect or a new engine cannot prove old
+owner cleanup; missing acknowledgement keeps join pending and activation held.
+
 Proposed non-default engine feature:
 `address-nonce = ["dispatch-nonce", "sign-meta"]`. Gate runtime carrier fields,
 subject strategy, declaration capture and setup handling. Public retirement
