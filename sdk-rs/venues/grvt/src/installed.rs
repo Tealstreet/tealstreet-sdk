@@ -17,7 +17,8 @@ impl Installed {
         let primary = identities.primary.filter(|identity| {
             !public_data_only
                 && if facts.is_some() {
-                    identity.validate_credential().is_ok()
+                    identity.validate().is_ok()
+                        || identity.signing_ref() == Err(SignError::SigningNotConfigured)
                 } else {
                     identity.validate().is_ok() && identity.signing_ref().is_ok()
                 }

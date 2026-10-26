@@ -199,11 +199,10 @@ impl CreateOrder {
         binding: Arc<SignerBinding>,
         order: Arc<FrozenOrder>,
     ) -> Result<Self, SignError> {
-        identity
-            .validate_credential()
-            .map_err(|_| SignError::InvalidRequest)?;
+        let signing = identity.signing_ref()?.clone();
+        identity.validate().map_err(|_| SignError::InvalidRequest)?;
         Ok(Self {
-            signing: identity.signing_ref()?.clone(),
+            signing,
             binding,
             order,
             prepared: None,
