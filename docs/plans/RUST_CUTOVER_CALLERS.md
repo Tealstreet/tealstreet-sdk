@@ -9178,6 +9178,27 @@ Follow-up (engine owner, fe7lgm): a granted plan resend can only be
 released from plan custody. A venue whose resend must wait on a venue
 condition therefore needs a serial-plan condition wait, as AsterDEX does here.
 A custody-preserving parked resend would remove that need.
+## AsterDEX managed sockets
+
+Both AsterDEX streams are engine-managed
+([RUST_ASTERDEX_SOCKET_ADOPTION.md](RUST_ASTERDEX_SOCKET_ADOPTION.md)).
+Callers see the same topics, opening order, ping cadence, idle and connect
+bounds, and book clearing on disconnect.
+
+Stricter than before:
+- Frames before open, after the idle deadline, or from a retired epoch are
+  dropped.
+- A duplicate open does not resubscribe or refresh again.
+- A late pong cannot revive an expired private stream.
+
+Interim, until Phase C: the venue owns listen-key acquisition. A create has a
+10 s deadline, and a failed create retries with the venue's 1 s to 30 s
+backoff, so the private stream reconnects instead of stalling. Phase C moves
+this into the engine.
+
+A refused public topic set raises a notice and keeps the feed serving its
+other topics.
+
 ## WOO engine-owned socket lifecycle
 
 WOO public and private feeds use the shared Engine epoch, supervision, auth and
@@ -9230,6 +9251,30 @@ and sibling liveness. The injected Ready Capacity is a boundary control, not
 proof of normal pressure reachability. Any normally reachable fail-closed row
 goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
 supervision constants are unchanged; no generic coexistence/recovery seam.
+
+## Lighter Schnorr auth recipe and public key (P3 parts 2+3)
+
+Shared prerequisites for the Lighter venue cutover (owner codex-ih35js). Nothing
+calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
+`cfg!(feature = "schnorr")` and declares Lighter's signing ref
+`signingAlgorithm: schnorrDigest` in the same change as the eager-holder removal.
+
+- **Auth token deadline from the signing stamp.** `AuthRecipe` derives the
+  60-second deadline from the dispatch `stamp_ms` (the preparation moment), where
+  legacy `account_auth` uses `cx.now` at issue. The stamp is equal or later, so a
+  parked request's token is valid for 60 s from signing rather than from
+  queueing. Pinned by `re_preparation_replaces_entropy_and_deadline`.
+- **WS subscribe escaping.** The private subscribe frame is serialized, so it is
+  byte-equal to legacy for the real `account_all_orders/{account}` channel but
+  escapes a hostile channel instead of splicing it into JSON.
+- **Canonical public keys.** `lighter::public_key` reduces each little-endian
+  limb below the Goldilocks prime. The field could hold a limb as an unreduced
+  p (it did for the scalar n-1), where Go always reduces; all Go fixture keys
+  are canonical. Pinned by `lighter_public_keys_are_canonically_encoded`.
+- **Declared keys refused at setup.** A ref declared `schnorrDigest` with a
+  non-canonical, zero or wrong-width scalar is refused at trusted setup
+  (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
+  ref is declared at the cutover.
 
 ## Bitrue reads and listen-key sessions leave the legacy funnel (B1, #2173)
 

@@ -65,10 +65,12 @@ impl H {
         h.reply("/openOrders", open_orders);
         h
     }
+    /// The latest private socket: a reconnect opens a new one.
     fn socket(&self) -> SocketId {
         self.sockets
             .iter()
-            .find(|(_, u)| u.contains("/ws/private-contract"))
+            .rev()
+            .find(|(_, u)| u.contains("/ws/"))
             .unwrap()
             .0
     }
@@ -132,7 +134,13 @@ impl H {
         });
     }
     fn fire_after(&mut self, delay: f64) {
-        self.now += delay;
+        // A live stream answers its pings: a pong lands inside every idle window.
+        let until = self.now + delay;
+        while self.now + 15_000.0 < until {
+            self.now += 15_000.0;
+            self.ws(json!({"id":42,"result":[]}));
+        }
+        self.now = until;
         self.ws(json!({"id":42,"result":[]}));
         let due = self
             .timers
@@ -1183,6 +1191,15 @@ fn hedge_amend_keeps_the_order_rows_position_side() {
 #[test]
 fn rest_ahead_of_stream_does_not_consume_no_id_execution() {
     let mut h = H::new();
+    // A genuine reconnect: the new epoch's open refreshes orders.
+    h.event(Event::WsClosed {
+        socket: h.socket(),
+        code: 1006,
+    });
+    let (timer, at) = *h.timers.last().unwrap();
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    h.reply("/listenKey", r#"{"listenKey":"private-contract"}"#);
     h.event(Event::WsOpened { socket: h.socket() });
     h.reply("/openOrders", r#"[{"symbol":"BTCUSDT","orderId":123,"price":"100","origQty":"2","executedQty":"0.5","status":"PARTIALLY_FILLED","side":"BUY","type":"LIMIT","time":10}]"#);
     assert_eq!(h.engine.store().order("123").unwrap().filled, 0.5);

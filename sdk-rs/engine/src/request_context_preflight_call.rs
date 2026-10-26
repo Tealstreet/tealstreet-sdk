@@ -720,6 +720,11 @@ impl crate::engine::CoreCx<'_> {
         terms: CallTerms,
         parked: bool,
     ) -> Result<Context, Error> {
+        #[cfg(feature = "release-domains")]
+        let policy = Policy {
+            pacing: self.io.core.domain_pacing(Operation::Read, policy.pacing)?,
+            ..policy
+        };
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         let session_egress = self
             .io
@@ -889,6 +894,10 @@ impl crate::engine::CoreRef<'_> {
         {
             return Err(Error::Invalid);
         }
+        #[cfg(feature = "release-domains")]
+        let pacing = self.io.core.domain_pacing(Operation::Read, policy.pacing)?;
+        #[cfg(not(feature = "release-domains"))]
+        let pacing = policy.pacing;
         let window = terms.window(self.now, state.read_bound(parked))?;
         Context::new(
             handle.owner(),
@@ -897,7 +906,7 @@ impl crate::engine::CoreRef<'_> {
             policy.credential.clone(),
             self.now,
             window.deadline(),
-            policy.pacing,
+            pacing,
         )?
         .with_retry(policy.retry)?;
         Ok(())

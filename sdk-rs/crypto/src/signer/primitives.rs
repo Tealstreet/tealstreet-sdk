@@ -171,6 +171,24 @@ pub(super) fn secp256k1_address(key: &[u8]) -> Result<Vec<u8>, SignError> {
     }
 }
 
+/// Same key form and refusals as `schnorr_digest`; the 40-byte compressed point.
+pub(super) fn schnorr_public(key: &[u8]) -> Result<Vec<u8>, SignError> {
+    #[cfg(feature = "schnorr")]
+    {
+        if !crate::lighter::canonical_scalar(key).map_err(|_| SignError::InvalidRequest)? {
+            return Err(SignError::InvalidRequest);
+        }
+        crate::lighter::public_key(key)
+            .map(|public| public.to_vec())
+            .map_err(|_| SignError::InvalidRequest)
+    }
+    #[cfg(not(feature = "schnorr"))]
+    {
+        let _ = key;
+        Err(SignError::Unsupported)
+    }
+}
+
 /// Same key form as `ed25519`; the 32-byte public key.
 pub(super) fn ed25519_public(key: &[u8]) -> Result<Vec<u8>, SignError> {
     #[cfg(feature = "ed25519")]
