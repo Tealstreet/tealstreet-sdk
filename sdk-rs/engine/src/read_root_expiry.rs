@@ -86,16 +86,23 @@ impl<V: Venue> Engine<V> {
                 index += 1;
                 continue;
             }
-            self.io.core.write_preflight_waits.swap_remove(index);
-            self.io.core.actions.push(Action::ClearTimer { timer });
+            // Seal first: the cap leaves the index only once the owner has its
+            // terminal, so a refused seal can never strand a parked caller.
             if waiting {
-                let _ = Cx {
+                let sealed = Cx {
                     now,
                     store: &mut self.store,
                     io: &mut self.io,
                 }
                 .fail_preflight(&preflight, Error::TimedOut.venue_error());
+                if sealed.is_err() {
+                    debug_assert!(false, "a due write Preflight cap must seal: {sealed:?}");
+                    index += 1;
+                    continue;
+                }
             }
+            self.io.core.write_preflight_waits.swap_remove(index);
+            self.io.core.actions.push(Action::ClearTimer { timer });
         }
     }
 

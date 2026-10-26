@@ -35,6 +35,8 @@ struct Probe {
     inherit: bool,
     /// Exhaust resource IDs just before parking.
     exhaust_before_park: bool,
+    /// Placements take an order-lock scope (engine guard_pending_placements).
+    guard_placements: bool,
     park_results: Vec<Result<(), crate::request_context::Error>>,
     /// Admit a serial Plan from the ready callback.
     #[cfg(feature = "serial-plans")]
@@ -47,6 +49,12 @@ struct Probe {
 
 impl Venue for Probe {
     type Pending = ();
+    fn guard_pending_placements(&self) -> bool {
+        self.guard_placements
+    }
+    fn guard_order_mutations(&self) -> bool {
+        self.guard_placements
+    }
     fn start(&mut self, _: &mut Cx<'_, ()>) {}
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
         if self.ahead.is_none() {
@@ -136,12 +144,15 @@ impl Venue for Probe {
 }
 
 fn place(command: u32) -> Command {
+    // The job ahead (command 1) trades another symbol, so lock controls on
+    // BTCUSD see only the capped command's scope.
+    let symbol = if command == 1 { "ETHUSD" } else { "BTCUSD" };
     Command::PlaceOrders {
         command,
         orders: vec![
-            serde_json::from_str(
-                r#"{"symbol":"BTCUSD","type":"limit","side":"buy","amount":1,"price":1}"#,
-            )
+            serde_json::from_str(&format!(
+                r#"{{"symbol":"{symbol}","type":"limit","side":"buy","amount":1,"price":1}}"#
+            ))
             .unwrap(),
         ],
     }
@@ -323,7 +334,14 @@ fn cap_expiry_keeps_the_owner_aware_mutation_seal() {
 #[cfg(feature = "order-locks")]
 #[test]
 fn cap_expiry_releases_the_order_lock_for_the_next_command_on_the_symbol() {
-    let (mut engine, actions) = queued(Probe::default());
+    let (mut engine, actions) = queued(Probe {
+        guard_placements: true,
+        ..Probe::default()
+    });
+    assert!(
+        engine.io.core.order_locks.contains(2),
+        "the parked placement holds its BTCUSD scope"
+    );
     let at = 10. + f64::from(WAIT_MS);
     engine.handle(
         at,
@@ -332,13 +350,24 @@ fn cap_expiry_releases_the_order_lock_for_the_next_command_on_the_symbol() {
         },
     );
     engine.drain_actions().for_each(drop);
+    assert!(
+        !engine.io.core.order_locks.contains(2),
+        "cap expiry releases it, with no fence for an unsent command"
+    );
     engine
-        .handle_command(at + 1., place(3), Some(WAIT_MS))
+        .handle_command(
+            at + 1.,
+            Command::CancelSymbolOrders {
+                command: 3,
+                symbol: "BTCUSD".into(),
+            },
+            Some(WAIT_MS),
+        )
         .unwrap();
     assert_eq!(
         engine.venue.entries,
         vec![Ok(()), Ok(())],
-        "an unsent expired command leaves no fence on BTCUSD"
+        "a cancel-all on the same symbol is not refused as a conflict"
     );
 }
 
