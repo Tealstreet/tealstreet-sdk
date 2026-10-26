@@ -2,8 +2,9 @@
 //! This module alone owns key material; engine/venue state receives opaque refs.
 use hmac::{Hmac, Mac};
 use safe_cex_engine::signing::{
-    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity, KeyRef,
-    Operation, PayloadPart, SignError, SignFuture, SignRequest, SignResult, Signer,
+    Algorithm, Capability, CredentialSetupPolicy, Encoding, ExtraKey, Identities, Identity,
+    KeyPresence, KeyRef, Operation, PayloadPart, SetupFacts, SignError, SignFuture, SignRequest,
+    SignResult, Signer,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -19,12 +20,14 @@ pub struct LocalSetup {
     pub primary: Option<LocalIdentity>,
     pub secondary: Option<LocalIdentity>,
 }
-#[derive(Default, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalIdentity {
-    #[serde(default)]
+    /// Omitted or `null` is Absent; `""` is Empty (D3).
+    #[serde(default = "Secret::absent", deserialize_with = "Secret::nullable")]
     pub key: Secret,
-    #[serde(default)]
+    /// Never absent: omitted is a present empty secret; `null` is refused.
+    #[serde(default = "Secret::empty")]
     pub secret: Secret,
     pub passphrase: Option<Secret>,
     /// Explicit caller account/credential mapping; no key-derived fallback.
@@ -39,6 +42,22 @@ pub struct LocalIdentity {
     /// Secondary only: sign with the primary's ref instead of own material.
     #[serde(default)]
     pub signing_from_primary: bool,
+}
+impl Default for LocalIdentity {
+    /// An absent key with a present empty secret: material is never absent
+    /// except the key, whose presence is the D3 fact.
+    fn default() -> Self {
+        Self {
+            key: Secret::absent(),
+            secret: Secret::empty(),
+            passphrase: None,
+            stable_id: None,
+            secret_encoding: KeyEncoding::default(),
+            trim_credential: false,
+            extra: LocalExtras::default(),
+            signing_from_primary: false,
+        }
+    }
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -74,14 +93,42 @@ impl<'de> serde::Deserialize<'de> for LocalExtras {
         deserializer.deserialize_map(Visitor)
     }
 }
-#[derive(Default)]
-pub struct Secret(Zeroizing<String>);
+/// Setup material. Only this module can build the absent form (a key's
+/// presence fact); absent reads as empty bytes.
+pub struct Secret(Option<Zeroizing<String>>);
 impl Secret {
+    fn absent() -> Self {
+        Self(None)
+    }
     pub fn new(value: String) -> Self {
-        Self(Zeroizing::new(value))
+        Self(Some(Zeroizing::new(value)))
+    }
+    /// Supplied but empty: the only empty form for a secret or passphrase.
+    pub fn empty() -> Self {
+        Self::new(String::new())
     }
     fn into_bytes(mut self) -> Vec<u8> {
-        std::mem::take(&mut *self.0).into_bytes()
+        self.0
+            .as_mut()
+            .map(|value| std::mem::take(&mut **value).into_bytes())
+            .unwrap_or_default()
+    }
+    fn is_empty(&self) -> bool {
+        self.0.as_deref().is_none_or(|value| value.is_empty())
+    }
+    /// Classified from the raw borrow with `str::trim`, before any trim policy.
+    fn presence(&self) -> KeyPresence {
+        match self.0.as_deref() {
+            None => KeyPresence::Absent,
+            Some(value) if value.is_empty() => KeyPresence::Empty,
+            Some(value) if value.trim().is_empty() => KeyPresence::Blank,
+            Some(_) => KeyPresence::Nonblank,
+        }
+    }
+    /// The key field alone reads `null` as absent.
+    fn nullable<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        <Option<String> as serde::Deserialize>::deserialize(deserializer)
+            .map(|value| Self(value.map(Zeroizing::new)))
     }
 }
 impl<'de> serde::Deserialize<'de> for Secret {
@@ -269,9 +316,9 @@ impl LocalSigner {
                 && (setup
                     .secondary
                     .as_ref()
-                    .is_some_and(|id| !id.secret.0.is_empty())
+                    .is_some_and(|id| !id.secret.is_empty())
                     || setup.primary.as_ref().is_none_or(|primary| {
-                        primary.secret.0.is_empty()
+                        primary.secret.is_empty()
                             || setup.secondary.as_ref().map(|id| id.secret_encoding)
                                 != Some(primary.secret_encoding)
                     }))
@@ -397,6 +444,36 @@ impl LocalSigner {
         let setup: LocalSetup =
             serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
         Self::from_setup_with_policy_and_mode(setup, policy, public_data_only)
+    }
+    /// Trusted setup plus its non-secret facts (D3): the primary key's raw
+    /// presence, read before the setup is consumed.
+    pub fn from_setup_with_facts(
+        setup: LocalSetup,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        let facts = SetupFacts::new(
+            setup
+                .primary
+                .as_ref()
+                .map_or(KeyPresence::Absent, |primary| primary.key.presence()),
+        );
+        let (signer, identities) =
+            Self::from_setup_with_policy_and_mode(setup, policy, public_data_only)?;
+        Ok((signer, identities, facts))
+    }
+    pub fn from_json_with_facts(
+        input: String,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        let input = Zeroizing::new(input);
+        if input.len() > 4 * 1024 * 1024 {
+            return Err(SignError::InvalidRequest);
+        }
+        let setup: LocalSetup =
+            serde_json::from_str(&input).map_err(|_| SignError::InvalidRequest)?;
+        Self::from_setup_with_facts(setup, policy, public_data_only)
     }
     pub fn remove(&mut self, reference: &KeyRef) {
         self.keys.remove(reference);
@@ -718,6 +795,56 @@ impl Signer for LocalSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D3 condition 2: secret and passphrase are never absent material.
+    /// Omitted secret is present-empty; `null` secret is refused; a `null`
+    /// passphrase is no passphrase, never a present-absent one.
+    #[test]
+    fn d3_secret_and_passphrase_are_never_absent() {
+        assert!(LocalIdentity::default().secret.0.is_some());
+        assert!(LocalIdentity::default().key.0.is_none());
+        let omitted: LocalIdentity = serde_json::from_str(r#"{"key":"k"}"#).unwrap();
+        assert!(omitted.secret.0.is_some());
+        assert!(serde_json::from_str::<LocalIdentity>(r#"{"key":"k","secret":null}"#).is_err());
+        let none: LocalIdentity = serde_json::from_str(r#"{"key":"k","passphrase":null}"#).unwrap();
+        assert!(none.passphrase.is_none());
+        let empty: LocalIdentity = serde_json::from_str(r#"{"key":"k","passphrase":""}"#).unwrap();
+        assert!(empty.passphrase.unwrap().0.is_some());
+    }
+
+    /// D3 condition 1: absent material is never installed, so no signer can
+    /// read bytes from it; every signing path refuses before byte access.
+    #[test]
+    fn d3_absent_material_is_never_installed_or_read() {
+        let (signer, ids) = LocalSigner::from_json_with_policy_and_mode(
+            r#"{"primary":{}}"#.into(),
+            CredentialSetupPolicy::default(),
+            false,
+        )
+        .unwrap();
+        assert!(
+            signer.keys.is_empty(),
+            "nothing installed from absent material"
+        );
+        assert_eq!(
+            ids.primary.unwrap().signing_ref(),
+            Err(SignError::MissingKey)
+        );
+        for reference in ["primary.credential", "primary.signing"] {
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![Operation::Present {
+                    key: KeyRef(reference.into()),
+                }],
+            };
+            assert!(signer.sign_now(&request).is_err(), "{reference}");
+            assert!(
+                signer.key(&KeyRef(reference.into())).is_err(),
+                "{reference}"
+            );
+        }
+    }
 
     #[test]
     fn setup_policy_overrides_only_declared_trim_fields_before_present_and_hmac() {
