@@ -114,3 +114,6 @@ ea5ec84ee69b5a6e4f7f90322f9afd285a718a0f:sdk-rs/venues/blofin/tests/hmac_dispatc
 # Public Git commit SHA in the Lighter principal plan, beside reviewer prose.
 # Exact historical documentation fingerprint only; no credential bytes.
 25b7d8a4edf1fb1bb7c839783f458b252db6e937:docs/plans/RUST_LIGHTER_SETUP_PRINCIPAL.md:generic-api-key:4
+
+# Deterministic public Kraken replay fixture, replaced by encoding replay-secret.
+5453dc4802960a9b5e19c7f60b027438d46331c8:sdk-rs/harness/kraken-beta-errors.integration.mts:generic-api-key:6
