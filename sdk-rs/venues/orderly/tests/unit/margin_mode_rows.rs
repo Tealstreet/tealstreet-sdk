@@ -41,8 +41,6 @@ fn pending(defaults: &[(&str, MarginType)]) -> (Engine<Orderly>, HttpRequest) {
     )
     .unwrap();
     let mut venue = Orderly::new(crate::Options {
-        key: Some(format!("ed25519:{}", bs58::encode([0; 32]).into_string())),
-        secret: Some(bs58::encode([7; 32]).into_string()),
         application_id: Some("test-account".into()),
         identities: identities.clone(),
         ..Default::default()
@@ -234,8 +232,9 @@ fn late_modes_read_cannot_overwrite_a_newer_margin_write() {
             isolated: true,
         }),
     );
-    let write = e
-        .drain_actions()
+    // The write is released through the provider's dispatch.
+    let write = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) if r.url.ends_with("/v1/client/margin_mode") => Some(r),
             _ => None,

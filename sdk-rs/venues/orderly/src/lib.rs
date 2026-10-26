@@ -45,8 +45,6 @@ pub struct Options {
     pub broker: Broker,
     pub public_data_only: bool,
     pub testnet: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
     pub application_id: Option<String>,
     pub tick_interval: Option<f64>,
     /// Opaque refs installed by trusted setup; the provider signs every
@@ -54,21 +52,12 @@ pub struct Options {
     pub identities: safe_cex_engine::signing::Identities,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-    }
-}
 
-/// Whether `key` and `secret` are base58 Ed25519 keys this venue can sign with.
-pub fn signing_keys_valid(key: &str, secret: &str) -> bool {
-    sign::Credentials::new(key, secret, "account").is_ok()
-}
+pub use sign::keys_valid as signing_keys_valid;
 
 pub enum Pending {
     History(history::Request),
-    Trade(trading::Request),
+    Trade(Box<trading::Request>),
     Account(
         safe_cex_engine::selected_read::AdmittedRead,
         account::Request,
@@ -146,7 +135,7 @@ enum Seed {
 }
 
 pub struct Orderly {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     public: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), u32>,
@@ -227,7 +216,6 @@ impl Orderly {
         }
     }
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             public: Connection::new(None),
@@ -711,6 +699,51 @@ fn interval_valid(i: Interval) -> bool {
 }
 
 impl Venue for Orderly {
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => trading::trade_reconciliation(request),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trading_preflight_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_condition_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::ConditionOwner,
+        _: VenueError,
+    ) {
+        self.trading_condition_expired(cx, owner);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trading_retired(owner)
+    }
+    /// An uncertain seal: the native account snapshot reconciles.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.settle_retired(cx);
+        self.account_after_uncertain_write(cx);
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -990,7 +1023,7 @@ impl Venue for Orderly {
             return;
         }
         if let Pending::Trade(request) = pending {
-            self.trade_response(cx, request, response);
+            self.trade_response(cx, *request, response);
             return;
         }
         if let Pending::History(request) = pending {
@@ -1112,6 +1145,8 @@ impl Venue for Orderly {
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::History(request) => self.history_failed(cx, request, error),
+            // A lost write keeps the engine's typed kind and is Unknown.
+            Pending::Trade(request) => self.trade_call_failed(cx, *request, error, true),
             pending => match Self::candle_context(&pending) {
                 Some(context) => {
                     let _ = cx.fail_context(context, error);
@@ -1125,6 +1160,7 @@ impl Venue for Orderly {
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::History(request) => self.history_refused(cx, request, error),
+            Pending::Trade(request) => self.trade_call_failed(cx, *request, error, false),
             pending => self.on_sign_failed(cx, pending, &error.message),
         }
     }
@@ -1181,17 +1217,8 @@ impl Venue for Orderly {
                 }
             }
             Pending::Trade(request) => {
-                let error = safe_cex_engine::VenueError::new(error)
-                    .kind(safe_cex_engine::ErrorKind::Network);
-                if request.is_read() {
-                    self.trade_failed(cx, request, error)
-                } else {
-                    self.trade_lost(
-                        cx,
-                        request,
-                        error.outcome(safe_cex_engine::Outcome::Unknown),
-                    )
-                }
+                let error = VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network);
+                self.trade_call_failed(cx, *request, error, true);
             }
             Pending::History(request) => self.history_failed(cx, request, VenueError::new(error)),
             Pending::Markets { .. } | Pending::Tickers { .. } => unreachable!(),
@@ -1205,9 +1232,6 @@ impl Venue for Orderly {
             return;
         }
         if self.history_timer(cx, timer) {
-            return;
-        }
-        if self.trade_timer(cx, timer) {
             return;
         }
         if self.account_timer(cx, timer) {

@@ -1,4 +1,4 @@
-//! The exported Orderly dispatch recipe reproduces the legacy signed headers
+//! The exported Orderly dispatch recipe reproduces native's signed headers
 //! byte for byte through the real engine dispatcher, with the seed installed
 //! by trusted setup as declared base58 and signed only by the provider.
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
@@ -104,11 +104,37 @@ fn run(requests: Vec<Signed>) -> Vec<HttpRequest> {
         .collect()
 }
 
+/// Native's header names, order and bytes, built independently of the recipe.
+fn native_headers(method: Method, path: &str, body: Option<&str>) -> Vec<(&'static str, String)> {
+    use base64::Engine as _;
+    let timestamp = (NOW as u64).to_string();
+    let text = format!("{timestamp}{}{path}{}", method.as_str(), body.unwrap_or(""));
+    let signature = safe_cex_crypto::ed25519::sign(text.as_bytes(), &SEED).unwrap();
+    vec![
+        ("orderly-key", format!("ed25519:{}", public_b58())),
+        ("orderly-account-id", ACCOUNT.into()),
+        ("orderly-timestamp", timestamp),
+        (
+            "orderly-signature",
+            base64::engine::general_purpose::URL_SAFE.encode(signature),
+        ),
+        ("orderly-textsign", text),
+        (
+            "Content-Type",
+            if matches!(method, Method::Get | Method::Delete) {
+                "application/x-www-form-urlencoded"
+            } else {
+                "application/json"
+            }
+            .into(),
+        ),
+        ("Accept", "*/*".into()),
+    ]
+}
+
 #[test]
-fn dispatch_recipe_headers_equal_the_legacy_signer_for_every_method() {
+fn dispatch_recipe_headers_are_native_exact_for_every_method() {
     let (_, identity) = provider();
-    let legacy =
-        sign::Credentials::new(&public_b58(), &bs58::encode(SEED).into_string(), ACCOUNT).unwrap();
     let cases = [
         (Method::Get, "/v1/positions", None),
         (
@@ -158,8 +184,7 @@ fn dispatch_recipe_headers_equal_the_legacy_signer_for_every_method() {
     );
     assert_eq!(released.len(), cases.len());
     for ((method, path, body), http) in cases.iter().zip(&released) {
-        let expected = legacy.headers(*method, path, *body, NOW).unwrap();
-        assert_eq!(http.headers, expected, "{method:?} {path}");
+        assert_eq!(http.headers, native_headers(*method, path, *body), "{method:?} {path}");
         assert_eq!(http.body.as_deref(), *body);
         // Independent check: the released signature verifies under the public key.
         let header = |name: &str| &http.headers.iter().find(|(k, _)| *k == name).unwrap().1;

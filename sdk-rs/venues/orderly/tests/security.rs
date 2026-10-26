@@ -1,15 +1,18 @@
-use safe_cex_crypto::secrets::EraseSecrets;
-use safe_cex_venue_orderly::Options;
+//! The venue holds only opaque refs from trusted setup; no signing material.
+mod support;
+use support::*;
 
 #[test]
-fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
-    let mut options = Options {
-        key: Some("audit-secret-sentinel".into()),
-        secret: Some("audit-secret-sentinel".into()),
-        ..Options::default()
-    };
-    assert!(!format!("{options:?}").contains("audit-secret-sentinel"));
-    options.erase_secrets();
-    assert!(options.key.as_ref().is_none_or(String::is_empty));
-    assert!(options.secret.as_ref().is_none_or(String::is_empty));
+fn options_hold_only_opaque_refs_from_trusted_setup() {
+    let (signer, options) = trusted(options());
+    assert!(signer.is_some(), "the provider holds the seed");
+    let primary = options.identities.primary.as_ref().expect("Primary refs");
+    let seed = bs58::encode(SEED).into_string();
+    for text in [
+        format!("{options:?}"),
+        format!("{primary:?}"),
+        format!("{:?}", primary.credential),
+    ] {
+        assert!(!text.contains(&seed), "no seed text: {text}");
+    }
 }

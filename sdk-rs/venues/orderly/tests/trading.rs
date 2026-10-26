@@ -285,7 +285,84 @@ fn brackets_follow_entry_and_accept_documented_root_id_shape() {
         s,
         r#"{"topic":"algoexecutionreportv2","ts":3001,"data":{"algoOrderId":511,"rootAlgoOrderId":51,"symbol":"PERP_BTC_USDC","algoType":"TAKE_PROFIT","algoStatus":"NEW","triggerPrice":55000,"side":"SELL","quantity":0,"seq":2}}"#,
     );
-    assert_eq!(done(actions(&mut e), 1).unwrap(), r#"["50","51"]"#);
+    // Better than TS (D1): the stream's confirmation of the final pair is
+    // checked against one Primary-signed open-algo snapshot before the terminal.
+    let out = settled(&mut e, 2000.0);
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 1, .. })))
+    );
+    let verify = out
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("/v1/algo/orders?") => Some(r),
+            _ => None,
+        })
+        .expect("the verification read");
+    assert_eq!(verify.method, safe_cex_engine::Method::Get);
+    assert!(
+        verify
+            .url
+            .ends_with("/v1/algo/orders?symbol=PERP_BTC_USDC&status=INCOMPLETE&page=1&size=500")
+    );
+    assert!(
+        verify
+            .headers
+            .iter()
+            .any(|(k, v)| *k == "orderly-key" && v == KEY)
+    );
+    reply(
+        &mut e,
+        &verify,
+        200,
+        r#"{"success":true,"data":{"rows":[{"algo_order_id":51,"child_orders":[{"algo_order_id":510},{"algo_order_id":511}]}]}}"#,
+    );
+    assert_eq!(done(settled(&mut e, 2000.0), 1).unwrap(), r#"["50","51"]"#);
+}
+
+/// D1's other side: a snapshot that does not list the confirmed pair ends the
+/// job Unknown with native's text, never a success and never NotSent.
+#[test]
+fn an_unlisted_final_pair_ends_unknown_after_the_verification_read() {
+    let (mut e, s) = ready();
+    requests(&mut e);
+    place(
+        &mut e,
+        1,
+        r#"[{"symbol":"BTCUSDC","type":"market","side":"buy","amount":1,"stopLoss":49000,"takeProfit":55000}]"#,
+    );
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, 200, r#"{"success":true,"data":{"order_id":50}}"#);
+    let r = requests(&mut e).pop().unwrap();
+    reply(&mut e, &r, 200, r#"{"success":true,"data":{"order_id":51}}"#);
+    for (id, kind, seq) in [(510, "STOP_LOSS", 1), (511, "TAKE_PROFIT", 2)] {
+        ws(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"topic":"algoexecutionreportv2","ts":3000,"data":{{"algoOrderId":{id},"rootAlgoOrderId":51,"symbol":"PERP_BTC_USDC","algoType":"{kind}","algoStatus":"NEW","triggerPrice":49000,"side":"SELL","quantity":0,"seq":{seq}}}}}"#
+            ),
+        );
+    }
+    let verify = settled_requests(&mut e, 2000.0)
+        .into_iter()
+        .find(|r| r.url.contains("/v1/algo/orders?"))
+        .expect("the verification read");
+    reply(&mut e, &verify, 200, r#"{"success":true,"data":{"rows":[]}}"#);
+    let out = settled(&mut e, 2000.0);
+    let error = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error.clone()),
+            _ => None,
+        })
+        .expect("one terminal");
+    assert_eq!(
+        error.message,
+        "Orderly protective state is unconfirmed; no subsequent write was sent"
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)));
 }
 
 #[test]
@@ -307,7 +384,7 @@ fn replacing_one_stop_preserves_opposite_sibling_once_after_confirmed_cancel() {
         r#"{"success":true,"data":{"status":"CANCEL_SENT"}}"#,
     );
     assert!(
-        !requests(&mut e)
+        !settled_requests(&mut e, 2000.0)
             .iter()
             .any(|r| r.method == safe_cex_engine::Method::Post)
     );
@@ -316,7 +393,8 @@ fn replacing_one_stop_preserves_opposite_sibling_once_after_confirmed_cancel() {
         s,
         r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":100,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"POSITIONAL_TP_SL","algoStatus":"CANCELLED","seq":5}}"#,
     );
-    let writes: Vec<_> = requests(&mut e)
+    // The confirmed cancel releases the Plan's pause; its wake issues the pair.
+    let writes: Vec<_> = settled_requests(&mut e, 2000.0)
         .into_iter()
         .filter(|r| r.method == safe_cex_engine::Method::Post)
         .collect();

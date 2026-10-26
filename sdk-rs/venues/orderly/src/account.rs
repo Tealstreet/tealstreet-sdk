@@ -217,7 +217,6 @@ fn order_lineages<'r, 'a>(
 }
 
 pub struct Account {
-    pub credentials: Option<sign::Credentials>,
     pub socket: Connection,
     pub defaults: HashMap<String, MarginType>,
     pub leverage: HashMap<(String, bool), f64>,
@@ -250,7 +249,6 @@ pub struct Account {
 impl Default for Account {
     fn default() -> Self {
         Self {
-            credentials: None,
             socket: Connection::new(Some(10_000.0)),
             defaults: HashMap::new(),
             leverage: HashMap::new(),
@@ -415,21 +413,24 @@ impl Orderly {
             self.seed(cx, Seed::Markets);
             return;
         }
-        let credentials = sign::Credentials::new(
-            self.options.key.as_deref().unwrap_or(""),
-            self.options.secret.as_deref().unwrap_or(""),
-            self.options.application_id.as_deref().unwrap_or(""),
-        );
-        match credentials {
-            Ok(c) => {
-                self.account.credentials = Some(c);
-                self.account_read(cx, Request::Info);
-            }
-            Err(e) => cx.notice(Level::Error, code::CONFIG_INVALID, e),
+        // The account id names the private stream and every signed request.
+        let account = self.options.application_id.as_deref().unwrap_or_default();
+        if account.is_empty()
+            || account
+                .bytes()
+                .any(|c| c.is_ascii_control() || matches!(c, b'/' | b'?' | b'#'))
+        {
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "Orderly key and applicationId are required",
+            );
+            return;
         }
+        self.account_read(cx, Request::Info);
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.credentials.is_none() {
+        if !self.signed() {
             cx.store.set_orders(vec![]);
             cx.store.set_positions(vec![]);
             cx.store.set_balance(Default::default());

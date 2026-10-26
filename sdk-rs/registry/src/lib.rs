@@ -1584,8 +1584,6 @@ pub fn build_with_signer<T: Visit>(
                     },
                     public_data_only: options.public_data_only,
                     testnet: options.testnet,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                     application_id: options.application_id.take(),
                     tick_interval: options
                         .tick_interval

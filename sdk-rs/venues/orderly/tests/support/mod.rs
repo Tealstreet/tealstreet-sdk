@@ -6,8 +6,10 @@ pub const MARKETS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC
 pub const TICKERS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","24h_open":50000,"24h_close":51000,"index_price":50999,"mark_price":51000,"24h_volume":10,"24h_amount":500000},{"symbol":"PERP_ETH_USDC","24h_open":2000,"24h_close":2100,"mark_price":2100}]}}"#;
 pub const ORDER: &str = r#"{"order_id":9007199254740993,"symbol":"PERP_BTC_USDC","type":"LIMIT","side":"BUY","status":"NEW","price":50000,"quantity":1,"total_executed_quantity":0,"executed":0,"visible_quantity":1,"reduce_only":false,"margin_mode":"CROSS","client_order_id":"caller-42"}"#;
 pub const POSITIONS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","position_qty":1,"average_open_price":50000,"mark_price":51000,"margin_mode":"CROSS","leverage":10},{"symbol":"PERP_BTC_USDC","position_qty":-0.5,"average_open_price":52000,"mark_price":51000,"margin_mode":"ISOLATED","leverage":5,"margin":6000}],"total_collateral_value":10000,"free_collateral":7000}}"#;
+/// Prepared actions, firing engine wakes (a released Plan pause or a woken
+/// Preflight) already due by the fixtures' 2000 ms event clock.
 pub fn actions(e: &mut Driver) -> Vec<Action> {
-    safe_cex_engine::test_support::prepared_actions(e, 1000.0)
+    settled(e, 2000.0)
 }
 /// Tracks armed timers so tests can advance time instead of firing timer IDs.
 pub struct Clock {
@@ -75,6 +77,38 @@ pub fn requests(e: &mut Driver) -> Vec<HttpRequest> {
         })
         .collect()
 }
+/// Prepared actions at `now`, firing every timer already due by `now` (an
+/// engine Plan wake after a released pause), until none is left.
+pub fn settled(e: &mut Driver, now: f64) -> Vec<Action> {
+    let mut all = vec![];
+    loop {
+        let out = safe_cex_engine::test_support::prepared_actions(e, now);
+        let due: Vec<_> = out
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms <= now => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        all.extend(out);
+        if due.is_empty() {
+            return all;
+        }
+        for timer in due {
+            e.handle(now, Event::TimerFired { timer });
+        }
+    }
+}
+/// The HTTP requests among `settled(e, now)`.
+pub fn settled_requests(e: &mut Driver, now: f64) -> Vec<HttpRequest> {
+    settled(e, now)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .collect()
+}
 pub fn reply(e: &mut Driver, r: &HttpRequest, status: u16, body: &str) {
     e.handle(
         1000.0,
@@ -91,10 +125,11 @@ pub fn reply(e: &mut Driver, r: &HttpRequest, status: u16, body: &str) {
 pub fn ws(e: &mut Driver, socket: SocketId, text: &str) {
     e.handle(2000.0, Event::WsMessage { socket, text });
 }
+/// The fixture account's presented key and Ed25519 seed.
+pub const KEY: &str = "ed25519:11111111111111111111111111111111";
+pub const SEED: [u8; 32] = [7; 32];
 pub fn options() -> Options {
     Options {
-        key: Some("ed25519:11111111111111111111111111111111".into()),
-        secret: Some(bs58::encode([7; 32]).into_string()),
         application_id: Some("test-account".into()),
         ..Default::default()
     }
@@ -111,19 +146,15 @@ pub fn trusted(
     use safe_cex_engine::signing::{
         Algorithm, CredentialSetupPolicy, IdentitySetupPolicy, KeyEncoding,
     };
-    let unprefixed = |value: &Option<String>| {
-        let value = value.as_deref().unwrap_or_default();
-        value.strip_prefix("ed25519:").unwrap_or(value).to_owned()
-    };
-    let key = unprefixed(&options.key);
-    if options.public_data_only || key.is_empty() {
+    // The fixture account: a keyed one names its applicationId.
+    if options.public_data_only || options.application_id.is_none() {
         return (None, options);
     }
     let (signer, identities) = LocalSigner::from_setup_with_policy(
         LocalSetup {
             primary: Some(LocalIdentity {
-                key: Secret::new(format!("ed25519:{key}")),
-                secret: Secret::new(unprefixed(&options.secret)),
+                key: Secret::new(KEY.into()),
+                secret: Secret::new(bs58::encode(SEED).into_string()),
                 ..Default::default()
             }),
             secondary: None,
