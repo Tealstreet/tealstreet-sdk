@@ -32,6 +32,7 @@ mod serial_session {
             operation,
             timeout_ms: 20_000,
             attempts,
+            pacing: None,
         }
     }
     fn code(response: Response<'_>) -> Option<i64> {

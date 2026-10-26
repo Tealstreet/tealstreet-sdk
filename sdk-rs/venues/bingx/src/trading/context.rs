@@ -12,6 +12,7 @@ pub(super) const SERIAL: SerialCall = SerialCall {
     operation: Operation::Mutation,
     timeout_ms: 20_000,
     attempts: 2,
+    pacing: None,
 };
 
 // BingX Swap V2 common error codes: https://bingx-api.github.io/docs/#/en-us/swapV2/base-info.html

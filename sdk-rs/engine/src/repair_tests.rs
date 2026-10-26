@@ -401,6 +401,7 @@ mod repair {
                             operation: Operation::Mutation,
                             timeout_ms: 20_000,
                             attempts: 1,
+                            pacing: None,
                         },
                         crate::request_context::plan::SerialPolicy {
                             credential: Some(primary()),

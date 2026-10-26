@@ -53,6 +53,7 @@ impl Probe {
             operation: Operation::Mutation,
             timeout_ms: 20_000,
             attempts: 1,
+            pacing: None,
         };
         let admitted = if self.origin == Origin::Planned {
             Some(

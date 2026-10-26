@@ -30,6 +30,7 @@ mod serial_plans {
             operation: Operation::Mutation,
             timeout_ms: 20_000,
             attempts: 1,
+            pacing: None,
         }
     }
     fn read() -> SerialCall {
@@ -37,6 +38,7 @@ mod serial_plans {
             operation: Operation::Read,
             timeout_ms: 20_000,
             attempts: 1,
+            pacing: None,
         }
     }
     fn refused(message: &str) -> VenueError {
@@ -148,6 +150,7 @@ mod serial_plans {
         refusal_spent_nothing: Option<bool>,
         read_requests: Vec<RequestId>,
         journal_at_done: Option<(bool, usize)>,
+        leg_pacings: Vec<Option<crate::request_context::Pacing>>,
     }
 
     fn queue(cx: &mut Cx<'_, Context>, context: Context, signed: bool) {
@@ -268,6 +271,7 @@ mod serial_plans {
             let slot = self.slot.clone().unwrap();
             let context = cx.plan_leg_context(&plan, &slot).unwrap();
             self.context = Some(context.clone());
+            self.leg_pacings.push(context.pacing());
             self.current = Some(call);
             self.ids_per_step.push(cx.io.core.next_id);
             self.storage
@@ -1200,6 +1204,27 @@ mod serial_plans {
                 }),
                 ..Default::default()
             },
+            // A call names only a zero-gap group outside a release domain.
+            Serial {
+                first: Some(SerialCall {
+                    pacing: Some(crate::request_context::Pacing {
+                        group: 1,
+                        minimum_gap_ms: 50.,
+                    }),
+                    ..mutation()
+                }),
+                ..Default::default()
+            },
+            Serial {
+                first: Some(SerialCall {
+                    pacing: Some(crate::request_context::Pacing {
+                        group: 2,
+                        minimum_gap_ms: 0.,
+                    }),
+                    ..mutation()
+                }),
+                ..Default::default()
+            },
         ] {
             let mut e = engine(Serial { total: 1, ..venue });
             command(&mut e, 0., None);
@@ -1281,6 +1306,63 @@ mod serial_plans {
         assert!(e.venue.continued[0].is_err());
         assert_eq!(e.venue.terminal, Some(Ok(())));
         assert_eq!(done(&actions).as_deref(), Some("[a]"));
+    }
+
+    #[test]
+    fn serial_10_a_continuation_naming_a_nonzero_gap_is_refused_and_settleable() {
+        let mut e = engine(Serial {
+            total: 3,
+            on_refused: OnRefusedContinue::FinishThenDone,
+            next: VecDeque::from([SerialCall {
+                pacing: Some(crate::request_context::Pacing {
+                    group: 1,
+                    minimum_gap_ms: 50.,
+                }),
+                ..mutation()
+            }]),
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let (actions, _) = drive(&mut e, 0., ["ok:a"]);
+        assert_eq!(e.venue.continued, [Err(Error::Invalid)]);
+        assert_eq!(done(&actions).as_deref(), Some("[a]"));
+    }
+
+    #[test]
+    fn serial_21_each_leg_carries_its_own_call_pacing() {
+        let zero = crate::request_context::Pacing {
+            group: 1,
+            minimum_gap_ms: 0.,
+        };
+        // An unpaced root: only the call naming the group carries it.
+        let mut e = engine(Serial {
+            total: 3,
+            first: Some(mutation()),
+            next: VecDeque::from([
+                SerialCall {
+                    pacing: Some(zero),
+                    ..read()
+                },
+                mutation(),
+            ]),
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let (actions, _) = drive(&mut e, 0., ["ok:a", "read", "ok:b"]);
+        assert_eq!(done(&actions).as_deref(), Some("[a,b]"));
+        assert_eq!(e.venue.leg_pacings, [None, Some(zero), None]);
+        let mut e = engine(Serial {
+            total: 2,
+            pacing: Some(zero),
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let (actions, _) = drive(&mut e, 0., ["ok:a", "ok:b"]);
+        assert_eq!(done(&actions).as_deref(), Some("[a,b]"));
+        assert_eq!(e.venue.leg_pacings, [Some(zero), Some(zero)], "None inherits the root");
     }
 
     #[cfg(feature = "order-locks")]

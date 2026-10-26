@@ -85,6 +85,7 @@ fn serial_call() -> SerialCall {
         operation: Operation::Mutation,
         timeout_ms: 20_000,
         attempts: 1,
+        pacing: None,
     }
 }
 const REFUSALS: CodeTable = CodeTable {

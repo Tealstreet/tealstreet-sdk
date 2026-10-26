@@ -62,6 +62,12 @@ impl IoCore {
         }
     }
 
+    /// Whether `pacing` is one this domain paces its members by.
+    pub(super) fn domain_paces(&self, pacing: Pacing) -> bool {
+        self.release_domain
+            .is_some_and(|domain| domain.pacing == pacing)
+    }
+
     /// The pacing a member Context carries: the domain's own. A member naming
     /// any other pacing would bypass or split the domain, so it is refused.
     pub(super) fn domain_pacing(

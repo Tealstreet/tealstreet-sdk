@@ -3143,6 +3143,7 @@ fn serial(operation: Operation) -> SerialCall {
         } else {
             1
         },
+        pacing: None,
     }
 }
 

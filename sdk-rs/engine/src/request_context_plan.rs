@@ -307,7 +307,7 @@ mod tests;
 /// One call of a streamed serial Plan. It is admitted only from the previous
 /// call's exact DATA custody, or its delayed-continuation callback.
 #[cfg(feature = "serial-plans")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SerialCall {
     /// Read or Mutation, under the Plan's admitted credential.
     pub operation: super::Operation,
@@ -315,6 +315,9 @@ pub struct SerialCall {
     pub timeout_ms: u32,
     /// 1, or 2 for a native single resend of a proven refusal.
     pub attempts: u8,
+    /// This call's pacing; `None` inherits the root's. Inside a release domain
+    /// a member names only a domain pacing; elsewhere only a zero-gap group.
+    pub pacing: Option<super::Pacing>,
 }
 
 /// Admission terms of a streamed serial Plan; there is no declared length.

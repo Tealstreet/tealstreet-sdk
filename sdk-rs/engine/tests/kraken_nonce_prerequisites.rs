@@ -263,6 +263,7 @@ mod serial {
             operation: Operation::Mutation,
             timeout_ms: 20_000,
             attempts: 1,
+            pacing: None,
         }
     }
     fn original() -> Order {
