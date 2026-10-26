@@ -2454,3 +2454,26 @@ fn the_missing_key_notice_is_the_formatted_text() {
         )
     );
 }
+
+/// SchnorrDigest has a public form: a lone PublicKey validates and its answer
+/// is exactly 40 bytes.
+#[test]
+fn schnorr_public_key_requests_validate_with_a_forty_byte_answer() {
+    let request = SignRequest {
+        receipt: Default::default(),
+        operations: vec![Operation::PublicKey {
+            algorithm: Algorithm::SchnorrDigest,
+            key: KeyRef("primary.signing".into()),
+        }],
+        context: Default::default(),
+    };
+    assert_eq!(request.validate(), Ok(()));
+    let answer = |width| SignResult::new(vec![vec![1; width]], Default::default());
+    assert_eq!(request.validate_result(&answer(40)), Ok(()));
+    for width in [32, 39, 41, 80] {
+        assert_eq!(
+            request.validate_result(&answer(width)),
+            Err(SignError::InvalidResult)
+        );
+    }
+}

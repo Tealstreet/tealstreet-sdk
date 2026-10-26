@@ -1555,8 +1555,13 @@ impl<V: Venue> Engine<V> {
                     permit,
                     request,
                 }));
+                // Const-folded: an undeclared venue compiles the domain hold out.
                 #[cfg(feature = "release-domains")]
-                let bind = self.io.core.domain_bind(token.attempt().request, bind);
+                let bind = if V::http_release_domain().is_some() {
+                    self.io.core.domain_bind(token.attempt().request, bind)
+                } else {
+                    Some(bind)
+                };
                 #[cfg(not(feature = "release-domains"))]
                 let bind = Some(bind);
                 if let Some(bind) = bind {
@@ -1843,7 +1848,11 @@ impl<V: Venue> Engine<V> {
                     request: packet,
                 }));
                 #[cfg(feature = "release-domains")]
-                let bind = self.io.core.domain_bind(request, bind);
+                let bind = if V::http_release_domain().is_some() {
+                    self.io.core.domain_bind(request, bind)
+                } else {
+                    Some(bind)
+                };
                 #[cfg(not(feature = "release-domains"))]
                 let bind = Some(bind);
                 if let Some(bind) = bind {
@@ -2370,7 +2379,7 @@ impl<V: Venue> Engine<V> {
             self.http_preparation_failed(now, preparation, error, VenueError::new(message));
         }
         #[cfg(feature = "release-domains")]
-        if matches!(result, Ok(Claim::Released(_))) {
+        if V::http_release_domain().is_some() && matches!(result, Ok(Claim::Released(_))) {
             self.io.core.domain_advance(request);
         }
         result

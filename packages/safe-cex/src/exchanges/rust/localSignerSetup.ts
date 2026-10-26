@@ -50,8 +50,12 @@ const credentialPresent = (key: string | undefined, trim: boolean): boolean =>
 export const effectiveIdentityMetadata = (
   metadata: LocalIdentityMetadata | undefined,
   policy: IdentitySetupPolicy | undefined,
-): LocalIdentityMetadata | undefined =>
-  policy?.trimCredential === undefined ? metadata : { ...metadata, trimCredential: policy.trimCredential };
+): LocalIdentityMetadata | undefined => {
+  let effective = metadata;
+  if (policy?.trimCredential !== undefined) effective = { ...effective, trimCredential: policy.trimCredential };
+  if (policy?.trimSigning !== undefined) effective = { ...effective, trimSigning: policy.trimSigning };
+  return effective;
+};
 
 /** One required-field/fallback policy for trusted local and callback setup.
  * Local setup validates but retains the original absent input for Rust's ref
@@ -105,14 +109,15 @@ export class LocalSignerSetup {
       options.secondary_passphrase !== undefined ||
       setupMetadata.secondary !== undefined);
     if (secondary && (!credentialPresent(options.secondary_key, secondaryMetadata?.trimCredential === true)
-      || (!secondarySigningFromPrimary && !options.secondary_secret))) {
+      || (!secondarySigningFromPrimary
+        && !credentialPresent(options.secondary_secret, secondaryMetadata?.trimSigning === true)))) {
       const message = 'Rust engine secondary signing keys require a nonempty key and secret';
       throw new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
     }
     this.hasSecondary = secondary;
     this.credentialPresence = Object.freeze({
       key: credentialPresent(options.key, primaryMetadata?.trimCredential === true),
-      secret: Boolean(options.secret),
+      secret: credentialPresent(options.secret, primaryMetadata?.trimSigning === true),
     });
     this.primaryComplete = this.credentialPresence.key && this.credentialPresence.secret;
     resolveSetupPassphrase('primary', this.primaryComplete, options.passphrase, options.passphrase, policy.primary, options.publicDataOnly === true);
