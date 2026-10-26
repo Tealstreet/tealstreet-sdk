@@ -2,8 +2,8 @@
 
 Status: reviewed shared source, composed qualification in progress. Owner:
 codex-ih35js. Credential reviewer: claude-m26ps4; core reviewer:
-codex-uufub4. Scope: Lighter-only. Depends on #2204; the PR records the exact
-composition and qualification receipts.
+codex-uufub4. Scope: Lighter-only. Consumes the actual #2204 landing
+23b9a236e7b; the PR records the exact composition and qualification receipts.
 
 ## Purpose and dependency
 
@@ -139,4 +139,6 @@ needs the ruled Bybit/Bitget pair and a separate reviewed scope change.
 
 Wait for #2204's actual landing, plain-merge the landing tip, then publish one
 small shared PR with exact review and one qualifying PR-triggered run. No job
-rerun, force push, capability activation, venue migration or budget change here.
+rerun, force push, capability activation or venue migration. The incoming Kraken
+cap is rounded from CI 1,399,905 to 1,400,832 under the standing allowance;
+its constants and boundary tests are the only budget changes.
