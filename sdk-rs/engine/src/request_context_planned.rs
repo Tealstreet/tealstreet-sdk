@@ -2134,6 +2134,34 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Raise a live Mutation Plan's failure projection to Unknown, for an
+    /// effect the venue can no longer prove (such as a failed protective
+    /// census after an accepted placement). Monotonic; it grants no send,
+    /// retry or success authority and records no write fact.
+    pub fn inherit_plan_uncertainty(&mut self, plan: &Plan) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        let owner = self
+            .io
+            .core
+            .request_contexts
+            .owner_entry_mut(plan.owner())
+            .ok_or(Error::Revoked)?;
+        owner
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .inherit_uncertain();
+        owner.inherited_uncertain = true;
+        Ok(())
+    }
+
     /// Retire the current unissued call of an independent complete Plan that
     /// the venue decides not to send. No journal fact; its reservations return.
     /// Admitted only where the call could have been issued; every check

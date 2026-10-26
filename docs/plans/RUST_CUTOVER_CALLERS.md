@@ -9374,3 +9374,35 @@ issued epoch and its native socket reference exist before fallible interest
 staging, so a refusal retires that exact epoch and takes shared exponential
 backoff instead of permanently failing the feed. Controls saturate resources at
 the captured real retry and prove subsequent demand replay and private liveness.
+
+
+## Backpack snapshot-issued trigger repair
+
+Accepted managed account Orders snapshots publish under live Background DATA,
+then mint the existing cancel-then-place authority before retiring that Read.
+Discovery may use the installed Secondary; repair always uses the genuine
+installed native-ready Primary. Streams never mint. A missing Primary produces
+one local typed NoPrimary Warn per accepted snapshot, with no mint call or write;
+public-only or native-unready account state cannot start repair.
+
+Each physical cancel/place leg has its own 20-second Never policy, with no
+aggregate clock, fake Command or borrowed Read mutation authority. The placement
+successor is issued only inside the accepted cancel DATA delivery. Explicit
+finite zero baseline and cumulative fill are required for the full frozen size;
+partial, missing, invalid, decreasing, contradictory or later fill evidence
+suppresses replacement and prompts manual reconciliation. No remainder math is
+introduced. Raw per-ID evidence is independent of candidate eligibility and
+survives retained rows and Store rollback. These are intentional safety
+improvements over native automatic full-size replacement.
+
+Unsafe current stream or accepted REST evidence retires the exact held successor
+Context before any early return. Held Prepare/Bind then settles Some(NotSent),
+while released work remains Unknown. A successor never issued is place=None;
+the accepted cancel remains factual. Cleanup settles once and independent
+account observations and real command owners keep their own custody. Unknown
+subjects cannot be retired merely by a terminal-looking Store row.
+
+An accepted placement with a malformed financial row retains the original Store
+identity and publishes no fabricated replacement. It still fences older Orders
+reads before reconciliation. Existing native financial formatting and private
+socket authentication remain unchanged.
