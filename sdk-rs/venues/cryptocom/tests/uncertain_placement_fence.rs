@@ -75,6 +75,15 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
         request: write.id,
         error: "response lost after acceptance",
     });
+    // The command finishes Unknown on its next pacing turn, which seals the mark.
+    advance(&mut h, 50.0);
+    assert!(
+        h.failures
+            .iter()
+            .any(|e| e.outcome == Some(safe_cex_engine::Outcome::Unknown)),
+        "the lost write finishes Unknown"
+    );
+    h.failures.clear();
 
     // Retry on the same symbol: refused NotSent, nothing posted.
     place(&mut h, 2, "retry");
