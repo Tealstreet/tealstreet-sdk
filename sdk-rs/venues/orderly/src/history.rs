@@ -6,11 +6,16 @@
 //! the venue's COMPLETED shortcut omits REJECTED orders.
 use crate::wire::{Id, N, checked};
 use crate::{Orderly, Pending, symbol};
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{
+    CommandEntryError, Context, Error as RequestError, Operation, Policy, RetryPolicy,
+};
+use safe_cex_engine::selected_read::{
+    CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
+};
 use safe_cex_engine::{CommandId, CommandWait, Cx, Method, Query, Response, TimerId, VenueError};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::borrow::Cow;
@@ -25,6 +30,30 @@ const MAX_TIME: f64 = 253402300799000.0;
 // treating both ends of a sixty-second window as twenty-one starts.
 const FUNDING_SPACING: f64 = 3001.0;
 
+const READ_POLICY: Policy = Policy {
+    operation: Operation::Read,
+    credential: None,
+    timeout_ms: 20_000,
+    pacing: None,
+    retry: RetryPolicy::Never,
+};
+
+/// The caller's wait bounds the whole walk: an expired or unstamped receipt is
+/// the shared typed refusal, never a defaulted root.
+fn command_waits(cx: &mut Cx<'_, Pending>) -> bool {
+    match cx.command_wait() {
+        Some(CommandWait::Remaining(_)) => true,
+        Some(CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Read);
+            false
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Read);
+            false
+        }
+    }
+}
+
 fn reject_local_history(cx: &mut Cx<'_, Pending>, error: impl Into<VenueError>) {
     match cx.command_wait() {
         Some(CommandWait::Remaining(_)) => {}
@@ -37,13 +66,7 @@ fn reject_local_history(cx: &mut Cx<'_, Pending>, error: impl Into<VenueError>) 
             return;
         }
     }
-    let Ok(context) = cx.admit_http_command(Policy {
-        operation: Operation::Read,
-        credential: None,
-        timeout_ms: 20_000,
-        pacing: None,
-        retry: RetryPolicy::Never,
-    }) else {
+    let Ok(context) = cx.admit_http_command(READ_POLICY) else {
         return;
     };
     let _ = cx.fail_context(&context, error);
@@ -64,7 +87,13 @@ enum Kind {
     Trades,
 }
 pub struct Request {
-    owner: Box<CursorHistory<Row>>,
+    owner: Box<ReadCursorHistory<Row>>,
+    /// The signed root; public trades read under the command Context itself.
+    root: Option<ReadRoot>,
+    leg: Option<ReadLeg>,
+    /// Mapped rows of the page in flight, staged only after its delivery
+    /// validates at the response.
+    page_rows: Vec<(String, Row)>,
     kind: Kind,
     symbol: Option<String>,
     native: Option<String>,
@@ -304,6 +333,10 @@ fn side(raw: &str) -> Result<&'static str, String> {
     }
 }
 impl Request {
+    fn reject_owner(mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        self.release(cx);
+        let _ = self.owner.reject(cx, error);
+    }
     fn accepts(&self, symbol: &str, timestamp: f64) -> bool {
         self.symbol.as_ref().is_none_or(|s| s == symbol)
             && self.from.is_none_or(|t| timestamp >= t)
@@ -315,10 +348,49 @@ impl Request {
         }
     }
     fn append(&mut self, key: String, row: Row) {
-        if self.owner.fresh(key) && self.stage_count < self.limit {
-            self.stage_count += 1;
-            self.owner.stage(row);
+        self.page_rows.push((key, row));
+    }
+    /// The Context this page was delivered under.
+    fn delivery(&self) -> Option<&Context> {
+        match &self.root {
+            Some(_) => self.leg.as_ref().map(ReadLeg::context),
+            None => Some(self.owner.root()),
         }
+    }
+    pub(crate) fn valid_delivery(&self, cx: &Cx<'_, Pending>) -> bool {
+        let root = match (&self.root, &self.leg) {
+            (Some(root), Some(leg)) => root.validate_delivery(cx, leg).is_ok(),
+            (Some(_), None) => false,
+            (None, _) => true,
+        };
+        root && self
+            .delivery()
+            .is_some_and(|leg| self.owner.validate_delivery(cx, leg).is_ok())
+    }
+    pub(crate) fn release(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = self.leg.take() {
+            let _ = cx.finish_http_context(leg.context());
+        }
+    }
+    /// Stage the validated page's rows in native order, under the limit.
+    fn stage_page(&mut self, cx: &Cx<'_, Pending>) -> Result<(), RequestError> {
+        let leg = self.delivery().ok_or(RequestError::Revoked)?.clone();
+        let mut page = self.owner.admit(cx, &leg)?;
+        for (key, row) in self.page_rows.drain(..) {
+            if page.fresh(key) && self.stage_count < self.limit {
+                self.stage_count += 1;
+                page.stage(row);
+            }
+        }
+        Ok(())
+    }
+    fn advance(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        page: CursorPage,
+    ) -> Result<CursorStep, RequestError> {
+        let leg = self.delivery().ok_or(RequestError::Revoked)?.clone();
+        Ok(self.owner.admit(cx, &leg)?.advance(page))
     }
     fn unpaged(&self) -> bool {
         self.kind == Kind::Trades || (self.kind == Kind::Fills && self.order_id.is_some())
@@ -407,7 +479,7 @@ impl Orderly {
             if let Some(id) = &order_id {
                 native_id(id)?;
             }
-            if kind != Kind::Trades && self.account.credentials.is_none() {
+            if kind != Kind::Trades && !self.signed() {
                 return Err("Orderly private history requires credentials".into());
             }
             symbol
@@ -427,15 +499,54 @@ impl Orderly {
                 return;
             }
         };
+        if !command_waits(cx) {
+            return;
+        }
+        let root = if kind == Kind::Trades {
+            None
+        } else {
+            match SelectedRead::command_root(
+                cx,
+                self.read_selection(),
+                LocalRefusal {
+                    diagnostic: None,
+                    error: VenueError::new("Orderly private history requires credentials"),
+                },
+            ) {
+                Ok(root) => Some(root),
+                Err(CommandReadError::Entry(CommandEntryError::Revoked)) => {
+                    let _ = cx.reject_expired_command(Operation::Read);
+                    return;
+                }
+                Err(_) => return,
+            }
+        };
+        let context = match &root {
+            Some(root) => root.context().clone(),
+            None => match cx.admit_http_command(READ_POLICY) {
+                Ok(context) => context,
+                Err(_) => return,
+            },
+        };
+        let completion = match ReadCompletion::from_context(cx, command, context.clone()) {
+            Ok(completion) => completion,
+            Err(reason) => {
+                let _ = cx.fail_context(&context, reason.read_venue_error());
+                return;
+            }
+        };
         self.history_request(
             cx,
             Request {
-                owner: Box::new(CursorHistory::new(
-                    Completion::new(command),
+                owner: Box::new(ReadCursorHistory::new(
+                    completion,
                     CursorWalk::starting_at(MAX_PAGES, "regular:1".into()),
                     |_| "Orderly incomplete or repeated history pagination".into(),
                     |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
                 )),
+                root,
+                leg: None,
+                page_rows: Vec::new(),
                 kind,
                 symbol,
                 native,
@@ -461,7 +572,11 @@ impl Orderly {
     fn history_request(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         if request.kind == Kind::Funding {
             if self.history.delayed.len() >= 100 {
-                self.history_failed(cx, request, "funding history queue is full");
+                self.history_failed(
+                    cx,
+                    request,
+                    VenueError::new("funding history queue is full"),
+                );
                 return;
             }
             let at = self.history.next_funding_at.max(cx.now);
@@ -474,76 +589,111 @@ impl Orderly {
         }
         self.history_send(cx, request);
     }
-    fn history_send(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
-        if request.kind == Kind::Funding {
+    fn history_send(&mut self, cx: &mut Cx<'_, Pending>, mut read: Request) {
+        if read.kind == Kind::Funding {
             if let Some(earliest) = self.history.last_funding_start.map(|t| t + FUNDING_SPACING)
                 && cx.now < earliest
             {
                 let at = earliest.max(self.history.next_funding_at);
                 self.history.next_funding_at = at + FUNDING_SPACING;
                 let timer = cx.set_timer(at - cx.now);
-                self.history.delayed.insert(timer, request);
+                self.history.delayed.insert(timer, read);
                 return;
             }
             self.history.last_funding_start = Some(cx.now);
         }
-        let mut path = match request.kind {
-            Kind::Fills if request.order_id.is_some() => {
-                format!("/v1/order/{}/trades", request.order_id.as_ref().unwrap())
+        let mut path = match read.kind {
+            Kind::Fills if read.order_id.is_some() => {
+                format!("/v1/order/{}/trades", read.order_id.as_ref().unwrap())
             }
             Kind::Fills => "/v1/trades".into(),
-            Kind::Orders => format!("/v1/{}orders", if request.algo { "algo/" } else { "" }),
+            Kind::Orders => format!("/v1/{}orders", if read.algo { "algo/" } else { "" }),
             Kind::Funding => "/v1/funding_fee/history".into(),
             Kind::Trades => "/v1/public/market_trades".into(),
         };
-        if !request.unpaged() || request.kind == Kind::Trades {
+        if !read.unpaged() || read.kind == Kind::Trades {
             let mut params = vec![];
-            if let Some(native) = &request.native {
+            if let Some(native) = &read.native {
                 params.push(format!("symbol={native}"));
             }
-            if let Some(from) = request.from {
+            if let Some(from) = read.from {
                 params.push(format!("start_t={from:.0}"));
             }
-            if let Some(to) = request.to {
+            if let Some(to) = read.to {
                 params.push(format!("end_t={to:.0}"));
             }
-            if request.kind == Kind::Trades {
-                params.push(format!("limit={}", request.limit));
+            if read.kind == Kind::Trades {
+                params.push(format!("limit={}", read.limit));
             } else {
-                params.push(format!("page={}", request.page));
+                params.push(format!("page={}", read.page));
                 params.push(format!("size={PAGE_SIZE}"));
             }
             path.push('?');
             path.push_str(&params.join("&"));
         }
-        let headers = if request.kind == Kind::Trades {
-            Ok(vec![])
-        } else {
-            self.account
-                .credentials
-                .as_ref()
-                .ok_or_else(|| "Orderly credentials unavailable".to_owned())
-                .and_then(|c| c.headers(Method::Get, &path, None, cx.now))
-        };
-        match headers {
-            Ok(headers) => {
-                cx.request_streamed(
-                    Method::Get,
-                    format!("{}{path}", self.rest()),
-                    headers,
-                    ArrayAt::Path(&["data", "rows"]),
-                    Pending::History(request),
-                );
+        let origin = self.rest();
+        let url = format!("{origin}{path}");
+        let rows = ArrayAt::Path(&["data", "rows"]);
+        let Some(root) = &read.root else {
+            let context = read.owner.root().clone();
+            match cx.request_managed(
+                context,
+                None,
+                Method::Get,
+                url,
+                None,
+                Pending::History(read),
+            ) {
+                Ok(id) => cx.stream_response(id, rows),
+                Err((Pending::History(read), reason)) => {
+                    let _ = read.owner.reject(cx, reason.venue_error());
+                }
+                Err(_) => unreachable!(),
             }
-            Err(e) => request.owner.reject(cx, VenueError::new(e)),
+            return;
+        };
+        let leg = match root.leg(
+            cx,
+            ReadLegPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+            },
+        ) {
+            Ok(leg) => leg,
+            // An expired or retired root already has the engine's terminal.
+            Err(RequestError::Revoked) => return,
+            Err(reason) => return read.reject_owner(cx, reason.read_venue_error()),
+        };
+        let account = self.options.application_id.clone().unwrap_or_default();
+        if let Err((Pending::History(read), reason)) = leg.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url,
+                body: None,
+                stream: Some(rows),
+            },
+            |identity| {
+                Box::new(crate::sign::Http::new(
+                    identity.clone(),
+                    &account,
+                    Method::Get,
+                    origin,
+                    &path,
+                ))
+            },
+            |leg| {
+                read.leg = Some(leg);
+                Pending::History(read)
+            },
+        ) {
+            read.reject_owner(cx, reason.read_venue_error());
         }
     }
-    pub(crate) fn history_item(
-        &self,
-        _cx: &mut Cx<'_, Pending>,
-        request: &mut Request,
-        item: &str,
-    ) {
+    pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
+        if !request.valid_delivery(cx) {
+            return;
+        }
         request.page_count += 1;
         if request.invalid.is_some() {
             return;
@@ -752,11 +902,11 @@ impl Orderly {
     }
     fn history_order(
         &self,
-        request: &mut Request,
+        read: &mut Request,
         row: &OrderWire<'_>,
         context: OrderContext<'_>,
     ) -> Result<(), String> {
-        let id = if request.algo {
+        let id = if read.algo {
             &row.algo_order_id.0
         } else {
             &row.order_id.0
@@ -773,7 +923,7 @@ impl Orderly {
         )?;
         let updated = context.updated.map(|n| time(n.0)).transpose()?;
         let status = crate::account::status(context.status)?;
-        if status == OrderStatus::Open || !request.accepts(&symbol, timestamp) {
+        if status == OrderStatus::Open || !read.accepts(&symbol, timestamp) {
             return Ok(());
         }
         let protective = matches!(
@@ -781,7 +931,7 @@ impl Orderly {
             "STOP_LOSS" | "TAKE_PROFIT" | "TRAILING_STOP"
         ) || row.kind == "CLOSE_POSITION";
         let reduce_only = context.reduce_only.unwrap_or(protective);
-        let kind = match if request.algo && row.algo_type != "BRACKET" {
+        let kind = match if read.algo && row.algo_type != "BRACKET" {
             row.algo_type.as_ref()
         } else {
             row.kind.as_ref()
@@ -803,7 +953,7 @@ impl Orderly {
             .total_executed_quantity
             .or(row.executed)
             .map_or(0.0, |n| n.0);
-        if amount < 0.0 || filled < 0.0 || (!request.algo && filled > amount) {
+        if amount < 0.0 || filled < 0.0 || (!read.algo && filled > amount) {
             return Err("Orderly invalid history order quantity".into());
         }
         let price = row.trigger_price.or(row.price).map(|n| n.0);
@@ -812,8 +962,8 @@ impl Orderly {
             return Err("Orderly invalid historical order price".into());
         }
         let side = side(context.side)?;
-        request.append(
-            format!("{}:{id}", request.algo),
+        read.append(
+            format!("{}:{id}", read.algo),
             Row::Order(HistoricalOrder {
                 id: id.clone(),
                 symbol,
@@ -837,21 +987,31 @@ impl Orderly {
         mut request: Request,
         response: Response<'_>,
     ) {
+        if !request.valid_delivery(cx) {
+            // A stale or mismatched delivery still closes its own leg.
+            request.release(cx);
+            return;
+        }
         let result = checked(response).and_then(|r| {
             let data = r.data.ok_or("Orderly history response missing data")?;
             serde_json::from_str::<Page>(data.get()).map_err(|e| e.to_string())
         });
         if let Some(error) = request.invalid.take() {
-            self.history_failed(cx, request, &error);
+            self.history_failed(cx, request, VenueError::new(error));
             return;
         }
         let page = match result {
             Ok(page) => page,
             Err(e) => {
-                self.history_failed(cx, request, &e);
+                self.history_failed(cx, request, VenueError::new(e));
                 return;
             }
         };
+        match request.stage_page(cx) {
+            Ok(()) => {}
+            Err(RequestError::Revoked) => return request.release(cx),
+            Err(reason) => return request.reject_owner(cx, reason.read_venue_error()),
+        }
         if let Some(meta) = &page.meta
             && (meta.current_page.is_some_and(|p| p != request.page)
                 || meta
@@ -890,13 +1050,23 @@ impl Orderly {
         } else {
             None
         };
-        match request.owner.advance(CursorPage {
-            want_more: next.is_some(),
-            next,
-            rows: request.page_count,
-            fresh: request.page_new,
-        }) {
+        let step = match request.advance(
+            cx,
+            CursorPage {
+                want_more: next.is_some(),
+                next,
+                rows: request.page_count,
+                fresh: request.page_new,
+            },
+        ) {
+            Ok(step) => step,
+            // A retired root already has the engine's terminal; anything else is strict.
+            Err(RequestError::Revoked) => return request.release(cx),
+            Err(reason) => return request.reject_owner(cx, reason.read_venue_error()),
+        };
+        match step {
             CursorStep::More(_) => {
+                request.release(cx);
                 if next_stage {
                     request.algo = true;
                     request.page = 1;
@@ -924,11 +1094,12 @@ impl Orderly {
     fn history_finish(
         &self,
         cx: &mut Cx<'_, Pending>,
-        request: Request,
+        mut request: Request,
         result: Result<(), VenueError>,
     ) {
+        request.release(cx);
         let limit = request.limit;
-        request.owner.finish_with(cx, result, |mut rows| {
+        let _ = request.owner.finish_with(cx, result, |mut rows| {
             rows.sort_by(|a, b| {
                 b.time()
                     .total_cmp(&a.time())
@@ -939,19 +1110,29 @@ impl Orderly {
         });
     }
     fn history_rejected(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        request.owner.reject(
+        request.reject_owner(
             cx,
             VenueError::new(format!("Orderly history read failed: {error}")),
         );
     }
-    pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        self.history_finish(
-            cx,
-            request,
-            Err(VenueError::new(format!(
-                "Orderly history read failed: {error}"
-            ))),
-        );
+    /// A failed page keeps accepted rows with one INCOMPLETE; a typed kind is kept.
+    pub(crate) fn history_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+    ) {
+        error.message = format!("Orderly history read failed: {}", error.message);
+        self.history_finish(cx, request, Err(error));
+    }
+    /// A signing refusal is strict even after accepted rows, as native headers were.
+    pub(crate) fn history_refused(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
+        request.reject_owner(cx, error);
     }
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if let Some(request) = self.history.delayed.remove(&timer) {

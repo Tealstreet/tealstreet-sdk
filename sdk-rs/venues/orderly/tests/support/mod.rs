@@ -99,6 +99,59 @@ pub fn options() -> Options {
         ..Default::default()
     }
 }
+/// Trusted setup as the registry does it: the provider holds the declared
+/// base58 seed and the venue receives only the refs.
+pub fn trusted(
+    mut options: Options,
+) -> (
+    Option<std::sync::Arc<safe_cex_crypto::signer::LocalSigner>>,
+    Options,
+) {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{
+        Algorithm, CredentialSetupPolicy, IdentitySetupPolicy, KeyEncoding,
+    };
+    let unprefixed = |value: &Option<String>| {
+        let value = value.as_deref().unwrap_or_default();
+        value.strip_prefix("ed25519:").unwrap_or(value).to_owned()
+    };
+    let key = unprefixed(&options.key);
+    if options.public_data_only || key.is_empty() {
+        return (None, options);
+    }
+    let (signer, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new(format!("ed25519:{key}")),
+                secret: Secret::new(unprefixed(&options.secret)),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                secret_encoding: Some(KeyEncoding::Base58),
+                signing_algorithm: Some(Algorithm::Ed25519),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
+    .unwrap();
+    options.identities = identities;
+    (Some(std::sync::Arc::new(signer)), options)
+}
+/// A seeded engine over `options`, with the provider installed when keyed.
+pub fn engine(options: Options) -> Driver {
+    let (signer, options) = trusted(options);
+    let identities = options.identities.clone();
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options));
+    if let Some(signer) = signer {
+        e.set_signer(Some(signer)).unwrap();
+        e.set_identities(identities).unwrap();
+    }
+    e
+}
 pub fn ready() -> (Driver, SocketId) {
     ready_with(ORDER, "[]", POSITIONS)
 }
@@ -120,12 +173,71 @@ pub fn ready_ticking(order: &str, algos: &str, positions: &str) -> (Driver, Sock
     let (e, socket, tick, _) = ready_full(order, algos, positions);
     (e, socket, tick.unwrap())
 }
+/// The local provider behind a switch: once set, every signature is refused.
+pub struct Refusable {
+    inner: std::sync::Arc<safe_cex_crypto::signer::LocalSigner>,
+    pub refuse: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+impl safe_cex_engine::signing::Signer for Refusable {
+    fn sign(
+        &self,
+        request: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        self.inner.sign(request)
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(
+        &self,
+        request: &safe_cex_engine::signing::SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
+        if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+            return Some(Err(safe_cex_engine::signing::SignError::Refused));
+        }
+        self.inner.sign_ready(request)
+    }
+    fn can_sign(
+        &self,
+        key: &safe_cex_engine::signing::KeyRef,
+        algorithm: safe_cex_engine::signing::Algorithm,
+    ) -> safe_cex_engine::signing::Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+}
+/// `ready()` over a provider that a test can switch to refusing.
+pub fn ready_refusable() -> (
+    Driver,
+    SocketId,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let (signer, options) = trusted(options());
+    let refuse = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let identities = options.identities.clone();
+    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options));
+    e.set_signer(Some(std::sync::Arc::new(Refusable {
+        inner: signer.unwrap(),
+        refuse: refuse.clone(),
+    })))
+    .unwrap();
+    e.set_identities(identities).unwrap();
+    let (e, socket, _, _) = bootstrap(e, ORDER, "[]", POSITIONS);
+    (e, socket, refuse)
+}
 fn ready_full(
     order: &str,
     algos: &str,
     positions: &str,
 ) -> (Driver, SocketId, Option<TimerId>, Vec<String>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options()));
+    bootstrap(engine(options()), order, algos, positions)
+}
+fn bootstrap(
+    mut e: Driver,
+    order: &str,
+    algos: &str,
+    positions: &str,
+) -> (Driver, SocketId, Option<TimerId>, Vec<String>) {
     e.start(1000.0);
     let mut private = None;
     let mut logs = vec![];

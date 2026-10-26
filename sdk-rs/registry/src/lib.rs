@@ -452,6 +452,53 @@ fn blofin_signer(
     Ok((Some(std::sync::Arc::new(signer)), identities))
 }
 
+/// Orderly's one provider setup: the Ed25519 seed is installed as declared
+/// base58 and signs every private read and the socket auth. The presented key
+/// is native's `ed25519:`-prefixed public key; either string may carry the prefix.
+#[cfg(feature = "orderly")]
+fn orderly_signer(
+    options: &EngineOptions,
+) -> Result<
+    (
+        Option<safe_cex_engine::signing::Provider>,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::signing::{
+        Algorithm, CredentialSetupPolicy, IdentitySetupPolicy, KeyEncoding,
+    };
+    let unprefixed = |value: &Option<String>| {
+        let value = value.as_deref().unwrap_or_default();
+        value.strip_prefix("ed25519:").unwrap_or(value).to_owned()
+    };
+    let key = unprefixed(&options.key);
+    if options.public_data_only || key.is_empty() {
+        return Ok((None, Default::default()));
+    }
+    let (signer, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new(format!("ed25519:{key}")),
+                secret: Secret::new(unprefixed(&options.secret)),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                secret_encoding: Some(KeyEncoding::Base58),
+                signing_algorithm: Some(Algorithm::Ed25519),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
+    .map_err(|_| invalid("Invalid Orderly signer setup"))?;
+    Ok((Some(std::sync::Arc::new(signer)), identities))
+}
+
 /// Whether this build constructs `venue`.
 pub fn supported(venue: &str) -> bool {
     match venue {
@@ -1524,33 +1571,33 @@ pub fn build_with_signer<T: Visit>(
         #[cfg(feature = "orderly")]
         "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
             orderly_rules(&options)?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    Orderly::new(OrderlyOptions {
-                        broker: match venue {
-                            "kodiakfi" => OrderlyBroker::KodiakFi,
-                            "mode" => OrderlyBroker::Mode,
-                            "salsadex" => OrderlyBroker::SalsaDex,
-                            "what" => OrderlyBroker::What,
-                            "woofi" => OrderlyBroker::WooFi,
-                            _ => OrderlyBroker::Tealstreet,
-                        },
-                        public_data_only: options.public_data_only,
-                        testnet: options.testnet,
-                        key: options.key.take(),
-                        secret: options.secret.take(),
-                        application_id: options.application_id.take(),
-                        tick_interval: options
-                            .tick_interval
-                            .take()
-                            .map(safe_cex_engine::engine::bounded_tick_interval),
-                    }),
-                    entropy,
-                )?,
-            )
+            let (provider, identities) = orderly_signer(&options)?;
+            let mut engine = Engine::new(
+                Orderly::new(OrderlyOptions {
+                    broker: match venue {
+                        "kodiakfi" => OrderlyBroker::KodiakFi,
+                        "mode" => OrderlyBroker::Mode,
+                        "salsadex" => OrderlyBroker::SalsaDex,
+                        "what" => OrderlyBroker::What,
+                        "woofi" => OrderlyBroker::WooFi,
+                        _ => OrderlyBroker::Tealstreet,
+                    },
+                    public_data_only: options.public_data_only,
+                    testnet: options.testnet,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    application_id: options.application_id.take(),
+                    tick_interval: options
+                        .tick_interval
+                        .take()
+                        .map(safe_cex_engine::engine::bounded_tick_interval),
+                    identities: identities.clone(),
+                }),
+                entropy,
+            )?;
+            engine.set_signer(provider)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "lighter")]
         "lighter" | "lighter-robinhood" => finish(
