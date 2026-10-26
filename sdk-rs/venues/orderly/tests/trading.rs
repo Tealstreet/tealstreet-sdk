@@ -286,7 +286,7 @@ fn brackets_follow_entry_and_accept_documented_root_id_shape() {
         r#"{"topic":"algoexecutionreportv2","ts":3001,"data":{"algoOrderId":511,"rootAlgoOrderId":51,"symbol":"PERP_BTC_USDC","algoType":"TAKE_PROFIT","algoStatus":"NEW","triggerPrice":55000,"side":"SELL","quantity":0,"seq":2}}"#,
     );
     // Better than TS (D1): the stream's confirmation of the final pair is
-    // checked against one Primary-signed open-algo snapshot before the terminal.
+    // checked against one Primary-signed open-algo listing before the terminal.
     let out = settled(&mut e, 2000.0);
     assert!(
         !out.iter()
@@ -303,7 +303,7 @@ fn brackets_follow_entry_and_accept_documented_root_id_shape() {
     assert!(
         verify
             .url
-            .ends_with("/v1/algo/orders?symbol=PERP_BTC_USDC&status=INCOMPLETE&page=1&size=500")
+            .ends_with("/v1/algo/orders?status=INCOMPLETE&page=1&size=500")
     );
     assert!(
         verify

@@ -1171,10 +1171,16 @@ impl Orderly {
             Some(CommandWait::Remaining(ms)) => Some(cx.now + f64::from(ms)),
             None => None,
         };
+        // FetchLeverage keeps its native FIFO place, as a read.
+        let read = matches!(command, Command::FetchLeverage { .. });
         let policy = PreflightPolicy {
-            purpose: PreflightPurpose::WriteAfterReads,
+            purpose: if read {
+                PreflightPurpose::ReadOnly
+            } else {
+                PreflightPurpose::WriteAfterReads
+            },
             read_credential: Some(credential.clone()),
-            write_credential: Some(credential),
+            write_credential: (!read).then_some(credential),
         };
         let Ok(preflight) = cx.begin_preflight(policy) else {
             return;
@@ -1796,7 +1802,7 @@ impl Orderly {
             return self.drive(cx, active, At::Data(&request.slot, &request.context));
         }
         if active.job.steps.is_empty()
-            && let Some(verify) = self.verify_step(cx, &request.step, &waiting)
+            && let Some(verify) = self.verify_step(&request.step, &waiting)
         {
             active.job.steps.push_back(verify);
         }
@@ -1846,18 +1852,15 @@ impl Orderly {
         .outcome(Outcome::Unknown);
         self.end(cx, active, current, error);
     }
-    /// The open-algo snapshot of the pair's symbol, read under the Plan.
-    fn verify_step(&self, cx: &Cx<'_, Pending>, step: &Step, waiting: &Waiting) -> Option<Step> {
-        let symbol = match &step.effect {
-            Effect::Pair { symbol, .. } => symbol.clone(),
-            Effect::Cancel { orders, .. } => orders.first()?.symbol.clone(),
-            _ => return None,
-        };
-        let native = self.native.get(&symbol)?;
-        let _ = cx;
+    /// The account's open-algo listing (the native poll's own read), read
+    /// under the Plan after a pair write or a pair's parent cancel.
+    fn verify_step(&self, step: &Step, waiting: &Waiting) -> Option<Step> {
+        if !matches!(step.effect, Effect::Pair { .. } | Effect::Cancel { .. }) {
+            return None;
+        }
         Some(Step {
             method: Method::Get,
-            path: format!("/v1/algo/orders?symbol={native}&status=INCOMPLETE&page=1&size=500"),
+            path: "/v1/algo/orders?status=INCOMPLETE&page=1&size=500".into(),
             body: None,
             effect: Effect::Verify(waiting.clone()),
         })
@@ -2218,18 +2221,13 @@ impl Orderly {
                     }
                     Answer::Wait(waiting) => self.pause(cx, active, &request, waiting),
                     Answer::Done(result) => {
+                        // The read's call is sealed, completing the schedule.
                         let plan = active.plan.clone().expect("live Plan");
-                        let done = cx.done_read_plan_after_data(
-                            &plan,
-                            &request.slot,
-                            &request.context,
-                            result,
-                        );
-                        if done.is_err() {
+                        let sealed = cx.finish_plan_call(&plan, &request.slot, &request.context);
+                        if sealed.and_then(|()| cx.done_plan(&plan, result)).is_err() {
                             let error = VenueError::new("Orderly leverage read could not complete");
-                            return self.end(cx, active, current, error);
+                            let _ = cx.fail_plan(&plan, error);
                         }
-                        let _ = cx.finish_plan_call(&plan, &request.slot, &request.context);
                         self.next_job(cx);
                     }
                 }
