@@ -6,6 +6,7 @@ publish.workspace = true
 
 [features]
 spot = []
+private-adoption-originals = []
 
 [dependencies]
 safe-cex-engine = { workspace = true, features = ["order-locks"] }
