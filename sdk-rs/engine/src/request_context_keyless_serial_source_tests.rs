@@ -194,7 +194,7 @@ fn installed_secondary_does_not_sign_or_route_a_keyless_read() {
             .validate_session(session)
             .unwrap();
     assert!(
-        matches!(e.io.core.request_contexts.keyless_session_egress(context).unwrap(), Some(crate::request_context::Egress::Session(egress)) if egress.generation() == generation)
+        matches!(e.io.core.request_contexts.keyless_session_egress(context, &e.io.core.identities).unwrap(), Some(crate::request_context::Egress::Session(egress)) if egress.generation() == generation)
     );
     let actions = e.drain_actions().collect();
     let request = drive(&mut e, actions, 1.).pop().unwrap();
@@ -285,7 +285,7 @@ fn a_secondary_selection_cannot_authorize_signing_a_keyless_root() {
 }
 
 #[test]
-fn session_entry_cannot_mix_in_a_write_credential() {
+fn empty_session_entry_cannot_mix_in_a_write_credential() {
     let mut e = ready(Mode::MixedAtEntry);
     enter(&mut e);
     assert_eq!(e.venue.entry, Some(Err(Error::Invalid)));
@@ -300,7 +300,7 @@ fn ordinary_signed_staging_is_a_working_control_before_any_session_refusal() {
 }
 
 #[test]
-fn keyless_entry_requires_a_declared_credential_free_session_egress() {
+fn session_entry_requires_egress_or_an_installed_matching_identity() {
     for mode in [Mode::NoSessionEgress, Mode::CredentialSession] {
         let mut e = ready(mode);
         enter(&mut e);
