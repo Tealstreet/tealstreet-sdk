@@ -308,6 +308,30 @@ fn inverse_contracts_positions_coin_margin_and_usd_balance_are_distinct() {
     assert_eq!((o.amount, o.filled, o.remaining), (5.0, 2.0, 3.0));
     assert_eq!(o.extra.as_ref().unwrap().remaining_native, Some(3.0));
     assert_eq!(h.engine.store().coin_balances().unwrap()[0].amount, 1.0);
+    assert_eq!(
+        h.engine.store().currency_balances().unwrap(),
+        [CurrencyBalance {
+            currency: "BTC".into(),
+            balance: Balance {
+                total: 1.0,
+                free: 0.8,
+                used: 0.1,
+                upnl: 0.01,
+            },
+        }]
+    );
+}
+#[test]
+fn inverse_balance_info_marks_coin_margined_like_ts() {
+    let mut h = inverse();
+    h.event(Event::Command(safe_cex_engine::Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::FetchBalanceInfo,
+    }));
+    assert!(h.requests.is_empty());
+    let info: serde_json::Value =
+        serde_json::from_str(h.result(90).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(info, serde_json::json!({ "coinMargined": true }));
 }
 #[test]
 fn inverse_order_failures_and_stale_reads_preserve_stream_state() {
