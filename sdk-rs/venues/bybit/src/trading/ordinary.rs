@@ -1550,7 +1550,7 @@ impl BybitLinear {
     }
 
     /// Reconcile unknown or absent-order writes with one fresh order read per
-    /// product; an in-flight read predates the write, so it is not joined.
+    /// product; an in-flight read predates a new seal, so it is not joined.
     pub(crate) fn reconcile_ordinary(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.credentials.is_none() {
             return;
@@ -1561,10 +1561,17 @@ impl BybitLinear {
             self.reconcile_hyro_snapshot(cx);
             return;
         }
+        // An engine re-ask joins the post-mark reads already out; a new seal
+        // replaces older ones.
+        let reask = cx.reconcile_reask();
         let selected = self.category;
         for category in self.categories() {
             self.select_category(category);
-            self.reconcile_orders(cx);
+            if reask {
+                self.fetch_orders(cx);
+            } else {
+                self.reconcile_orders(cx);
+            }
         }
         self.select_category(selected);
     }
