@@ -1633,6 +1633,9 @@ struct IoCore {
     nonce_unscheduled: bool,
     #[cfg(feature = "dispatch-nonce")]
     nonce_enabled: bool,
+    /// `V::http_mutation_barriers()`, copied by `Engine::new` for admission in `Cx`.
+    #[cfg(feature = "http-mutation-barriers")]
+    mutation_barriers_declared: bool,
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     #[cfg(feature = "http-plans")]
@@ -1792,6 +1795,8 @@ impl Default for IoCore {
             nonce_unscheduled: false,
             #[cfg(feature = "dispatch-nonce")]
             nonce_enabled: false,
+            #[cfg(feature = "http-mutation-barriers")]
+            mutation_barriers_declared: false,
             request_contexts: Default::default(),
             http_delivery: None,
             #[cfg(feature = "http-plans")]
@@ -3248,6 +3253,16 @@ pub trait Venue {
         &[]
     }
 
+    /// Whether this venue uses HTTP mutation barrier groups. Engine<V> reads it
+    /// statically, so a venue that does not declare it compiles group paths out.
+    #[inline]
+    fn http_mutation_barriers() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+
     /// The venue's one FIFO release domain, if any. Its group must be registered
     /// in `http_pacing`; the engine stamps it onto every member Context.
     #[cfg(feature = "release-domains")]
@@ -3710,6 +3725,8 @@ impl<V: Venue> Engine<V> {
                     nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
                     #[cfg(feature = "dispatch-nonce")]
                     nonce_enabled: V::dispatch_nonce(),
+                    #[cfg(feature = "http-mutation-barriers")]
+                    mutation_barriers_declared: V::http_mutation_barriers(),
                     #[cfg(feature = "managed-sockets")]
                     socket_capabilities: V::socket_capabilities(),
                     ..IoCore::default()
