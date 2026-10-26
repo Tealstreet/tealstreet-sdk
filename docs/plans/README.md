@@ -473,3 +473,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | GRVT serial write funnel | Plan/originals CLEAR; shared serial resend and Session support landed; native cutover held on G3/G6 | Before changing the five trading terminals, FIFO custody, signing or cached-session headers. | [RUST_GRVT_WRITE_FUNNEL.md](RUST_GRVT_WRITE_FUNNEL.md) |
 
 | GRVT EIP712 provider recipe and installed construction | Local recipe source CLEAR; D1 carry review; installed construction held on G3/G6 | Before installing the minimal hosted/local signing inputs, removing raw GRVT keys, or composing serial resend with Session headers. | [RUST_GRVT_PROVIDER_RECIPE.md](RUST_GRVT_PROVIDER_RECIPE.md) |
+| Engine signing metadata | Source CLEAR (m26ps4, 9czdjh); sizes and CI pending | Before exporting signing-task metadata or carrying a CredentialRole into managed admission. | [RUST_ENGINE_SIGN_META.md](RUST_ENGINE_SIGN_META.md) |
