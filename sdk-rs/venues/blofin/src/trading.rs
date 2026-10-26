@@ -1892,14 +1892,9 @@ impl Blofin {
             .is_some_and(|active| owner.matches_preflight(&active.preflight))
         {
             let active = self.trading.active.take().expect("retired job");
-            // A join refreshes the account only if a leg reached the venue.
-            let released = active
-                .join
-                .as_ref()
-                .is_none_or(|join| join.settled.iter().any(|settled| *settled));
-            let mut job = active.job;
-            job.join &= released;
-            self.trading.retired = Some(job);
+            // Retirement carries no release bit: a retired join always refreshes
+            // (a missed refresh can leave leverage drifted; an extra one is harmless).
+            self.trading.retired = Some(active.job);
         }
         if self.trading.active.is_some() {
             return None;

@@ -483,6 +483,7 @@ fn unanswered_legs_end_at_the_call_bound_with_one_timeout() {
     let mut h = hedged(Arc::new(AtomicUsize::new(UNLIMITED)));
     set_leverage(&mut h);
     assert!(matches!(legs(&h), (Some(_), Some(_))));
+    let positions = count(&h, "account/positions");
     let deadline = h.now + 20_000.0;
     let timers: Vec<_> = h
         .actions
@@ -501,6 +502,13 @@ fn unanswered_legs_end_at_the_call_bound_with_one_timeout() {
     let error = failure(&h, 7);
     assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Timeout));
     assert_ne!(leverage(&h), 30.0);
+    // dazzy3 M1: both legs were released through the group claim, so the
+    // join refreshes even though neither answered.
+    assert_eq!(
+        count(&h, "account/positions"),
+        positions + 1,
+        "released join refresh"
+    );
 }
 
 #[test]
