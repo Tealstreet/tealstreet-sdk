@@ -14,6 +14,9 @@ pub enum OutputFormat {
     Base64,
     #[serde(rename = "hex-base64")]
     Base64Hex,
+    /// Bitunix: `hex(sha256(hex(sha256(toSign)) ‖ material))`, never an HMAC.
+    #[serde(rename = "bitunix-double-sha256")]
+    BitunixDoubleSha256,
 }
 
 pub enum Input {
@@ -140,14 +143,28 @@ impl<'de> Deserialize<'de> for Input {
 pub enum OutputKind {
     Credential,
     Http(RemoteSigningPolicy),
+    /// Bitunix HTTP: the double-SHA256 work, with the MAC as its last value.
+    DoubleSha256Http(RemoteSigningPolicy),
     WsAuth(OutputFormat),
 }
 
 impl OutputKind {
     pub fn header_policy(self) -> safe_cex_engine::signing_headers::ResultHeaderPolicy {
         match self {
-            Self::Http(policy) => policy.header_policy(),
+            Self::Http(policy) | Self::DoubleSha256Http(policy) => policy.header_policy(),
             _ => Default::default(),
+        }
+    }
+
+    /// Value count and MAC position of the captured work's result.
+    fn layout(self) -> (usize, Option<usize>) {
+        match self {
+            Self::Credential => (1, None),
+            Self::Http(policy) if policy.passphrase_header.is_some() => (3, Some(1)),
+            Self::DoubleSha256Http(_) | Self::WsAuth(OutputFormat::BitunixDoubleSha256) => {
+                (3, Some(2))
+            }
+            _ => (2, Some(1)),
         }
     }
 }
@@ -193,6 +210,45 @@ fn http_work(
     Ok((work, OutputKind::Http(policy)))
 }
 
+/// `[Present, Sha256(toSign), Sign Sha256SecretSuffix(hex of that digest)]`:
+/// the engine's Bitunix recipe over a caller-built preimage, so the browser
+/// returns the same bytes as a local-key account.
+fn double_sha256_work(
+    identity: &Identity,
+    to_sign: String,
+    context: Context,
+    receipt: SignReceipt,
+) -> Result<SignRequest, SignError> {
+    use safe_cex_engine::signing::{Algorithm, Encoding, PayloadPart};
+    receipt.validate()?;
+    Ok(SignRequest {
+        receipt,
+        context,
+        operations: vec![
+            Operation::Present {
+                key: identity.credential.clone(),
+            },
+            Operation::Sha256 {
+                payload: vec![PayloadPart::Bytes {
+                    bytes: to_sign.into_bytes(),
+                }],
+            },
+            Operation::Sign {
+                algorithm: Algorithm::Sha256SecretSuffix,
+                key: identity.signing_ref()?.clone(),
+                payload: vec![PayloadPart::Result {
+                    index: 1,
+                    encoding: Encoding::Hex,
+                }],
+            },
+        ],
+    })
+}
+
+fn double_sha256(venue: &str) -> bool {
+    cfg!(feature = "bitunix") && venue == "bitunix"
+}
+
 /// Families with a hosted request codec. AsterDEX V3 signs with a wallet key,
 /// which must never become an HMAC key. Only an explicit setup-resolved V1
 /// qualifies: inference from options cannot see material held by the setup.
@@ -221,7 +277,12 @@ fn family(venue: &str) -> bool {
     let okx = cfg!(feature = "okx") && matches!(venue, "okx" | "okxeu" | "okxdemo" | "okxeudemo");
     let bitget =
         cfg!(feature = "bitget") && matches!(venue, "bitget" | "bitgetusdc" | "bitgetinverse");
-    binance || bybit || okx || bitget || (cfg!(feature = "asterdex") && venue == "asterdex")
+    binance
+        || bybit
+        || okx
+        || bitget
+        || double_sha256(venue)
+        || (cfg!(feature = "asterdex") && venue == "asterdex")
 }
 
 pub fn prepare(
@@ -260,6 +321,13 @@ pub fn prepare(
                 stamp_ms: Some(stamp_ms),
                 expiry_ms: None,
             };
+            if double_sha256(venue) {
+                let policy = crate::remote_signing_policy(venue);
+                return Ok((
+                    double_sha256_work(identity, payload, context, receipt)?,
+                    OutputKind::DoubleSha256Http(policy),
+                ));
+            }
             http_work(
                 identity,
                 payload,
@@ -275,6 +343,17 @@ pub fn prepare(
             // AsterDEX authenticates its private socket with a listen key.
             if to_sign.is_empty() || venue == "asterdex" {
                 return Err(SignError::InvalidRequest);
+            }
+            // The output format names the scheme, so it must match the family's.
+            let fused = matches!(output_format, OutputFormat::BitunixDoubleSha256);
+            if fused != double_sha256(venue) {
+                return Err(SignError::InvalidRequest);
+            }
+            if fused {
+                return Ok((
+                    double_sha256_work(identity, to_sign, context, SignReceipt::default())?,
+                    OutputKind::WsAuth(output_format),
+                ));
             }
             Ok((
                 safe_cex_engine::signing::hmac_sha256_work(
@@ -293,11 +372,7 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
-    let expected = match kind {
-        OutputKind::Credential => 1,
-        OutputKind::Http(policy) if policy.passphrase_header.is_some() => 3,
-        _ => 2,
-    };
+    let (expected, mac_index) = kind.layout();
     if result.values.len() != expected {
         return Err(SignError::InvalidResult);
     }
@@ -328,19 +403,24 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
             headers: None,
         });
     }
-    let mac = result
-        .values
-        .get(1)
+    let mac = mac_index
+        .and_then(|index| result.values.get(index))
         .filter(|mac| mac.len() == 32)
         .ok_or(SignError::InvalidResult)?;
+    // The double-SHA256 inner digest is a 32-byte value of its own.
+    if mac_index == Some(2) && result.values[1].len() != 32 {
+        return Err(SignError::InvalidResult);
+    }
     let signature = match kind {
         OutputKind::Credential => unreachable!(),
-        OutputKind::Http(policy) => match policy.signature_encoding {
-            SignatureEncoding::Hex => safe_cex_crypto::hex(mac),
-            SignatureEncoding::Base64 => {
-                safe_cex_crypto::encode(mac, safe_cex_crypto::Encoding::Base64)
+        OutputKind::Http(policy) | OutputKind::DoubleSha256Http(policy) => {
+            match policy.signature_encoding {
+                SignatureEncoding::Hex => safe_cex_crypto::hex(mac),
+                SignatureEncoding::Base64 => {
+                    safe_cex_crypto::encode(mac, safe_cex_crypto::Encoding::Base64)
+                }
             }
-        },
+        }
         OutputKind::WsAuth(OutputFormat::Hex) => safe_cex_crypto::hex(mac),
         OutputKind::WsAuth(OutputFormat::Base64) => {
             safe_cex_crypto::encode(mac, safe_cex_crypto::Encoding::Base64)
@@ -349,9 +429,11 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
             safe_cex_crypto::hex(mac).as_bytes(),
             safe_cex_crypto::Encoding::Base64,
         ),
+        OutputKind::WsAuth(OutputFormat::BitunixDoubleSha256) => safe_cex_crypto::hex(mac),
     };
     Ok(Output {
-        credential: matches!(kind, OutputKind::Http(_)).then(|| key.into()),
+        credential: matches!(kind, OutputKind::Http(_) | OutputKind::DoubleSha256Http(_))
+            .then(|| key.into()),
         signature: Some(signature),
         headers: (!headers.is_empty()).then_some(headers),
     })
@@ -613,6 +695,58 @@ mod presentation_tests {
             assert!(captures.is_empty());
         }
     }
+
+    #[test]
+    fn double_sha256_layout_publishes_its_last_value_and_hmac_layouts_are_unchanged() {
+        let (identity, signer) = fixture();
+        let to_sign = "nonce-abc1700000000api-key-xyz";
+        let work = double_sha256_work(
+            &identity,
+            to_sign.into(),
+            Context::default(),
+            SignReceipt::default(),
+        )
+        .unwrap();
+        let result = signer.sign_now(&work).unwrap();
+        work.validate_result(&result).unwrap();
+        let http = OutputKind::DoubleSha256Http(crate::remote_signing_policy("bitunix"));
+        let ws = OutputKind::WsAuth(OutputFormat::BitunixDoubleSha256);
+        for kind in [http, ws] {
+            let output = finish(kind, &result).unwrap();
+            // Independent Python hashlib vector: hex(sha256(hex(sha256(m)) ‖ k)).
+            assert_eq!(
+                output.signature.as_deref(),
+                Some("4dc47f49a21a0e908e7746858f98e4c3fdcad5f248f37944878380d174aaf38f")
+            );
+            assert_eq!(
+                output.credential.as_deref(),
+                matches!(kind, OutputKind::DoubleSha256Http(_)).then_some("public-identity")
+            );
+            assert!(output.headers.is_none());
+            for count in [0, 1, 2, 4] {
+                let short = SignResult::new(vec![vec![0x37; 32]; count], work.receipt);
+                assert!(matches!(
+                    finish(kind, &short),
+                    Err(SignError::InvalidResult)
+                ));
+            }
+            for index in [1, 2] {
+                let mut bad = result.clone();
+                bad.values[index].pop();
+                assert!(matches!(finish(kind, &bad), Err(SignError::InvalidResult)));
+            }
+        }
+        // A three-value result never publishes through an HMAC layout.
+        for kind in [
+            OutputKind::Http(crate::remote_signing_policy("binance")),
+            OutputKind::WsAuth(OutputFormat::Hex),
+        ] {
+            assert!(matches!(
+                finish(kind, &result),
+                Err(SignError::InvalidResult)
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -657,6 +791,14 @@ mod input_parse_tests {
                 r#"{"kind":"wsAuth","toSign":"x","outputFormat":"base64"}"#,
             ),
             ("hex-base64", r#"["wsAuth","x","hex-base64"]"#),
+            (
+                "bitunix-double-sha256",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"bitunix-double-sha256"}"#,
+            ),
+            (
+                "bitunix-double-sha256",
+                r#"["wsAuth","x","bitunix-double-sha256"]"#,
+            ),
         ] {
             let Ok(Input::WsAuth {
                 to_sign,
@@ -672,6 +814,7 @@ mod input_parse_tests {
                     OutputFormat::Hex => "hex",
                     OutputFormat::Base64 => "base64",
                     OutputFormat::Base64Hex => "hex-base64",
+                    OutputFormat::BitunixDoubleSha256 => "bitunix-double-sha256",
                 }
             );
         }
@@ -703,6 +846,9 @@ mod input_parse_tests {
             r#"{"kind":0}"#,
             r#"{"kind":"http","payload":"p","stampMs":1,"revision":7}"#,
             r#"{"kind":"wsAuth","toSign":"x","outputFormat":"raw"}"#,
+            r#"{"kind":"wsAuth","toSign":"x","outputFormat":"Bitunix-Double-Sha256"}"#,
+            r#"{"kind":"wsAuth","toSign":"x","outputFormat":"bitunixDoubleSha256"}"#,
+            r#"{"kind":"wsAuth","toSign":"x","outputFormat":"double-sha256"}"#,
             // Missing required fields, extra sequence elements, non-objects.
             r#"{}"#,
             r#"{"payload":"p","stampMs":1,"revision":"7"}"#,
