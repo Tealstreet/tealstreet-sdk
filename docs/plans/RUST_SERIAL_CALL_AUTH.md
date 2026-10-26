@@ -154,3 +154,18 @@ The first-adopter combined measurement additionally enables serial-plans and
 session-bearer as GRVT will. Report its cost separately; growth above 30K needs
 the overseer. Release-domain pacing, if composed later, keeps its stamping at
 plan_leg_context and its managed-boundary checks for Session calls too.
+
+### Workspace corrections
+
+The mechanical tag commit is not independently workspace-buildable: two native
+constant SerialCall declarations in BingX and OKX need explicit Preflight enum
+values, rather than Default::default(). Commit 1b8ae5f881c fixes both without
+changing assertions or policy. That commit also moves Session credential matching
+into the existing Identity policy file, as required by the credential-only bans.
+No checker or inventory allowance is widened.
+
+The source checkpoint 250ba475edf actually merged 923246ecf96, the CI fast-path
+revert. Later composition 931d35faee5 merges actual 3e5ccf01acb, preserving the
+incoming repair source automatically and docs as incoming plus own suffix once.
+Full correctness CI remains required. Workspace all-targets passes after the
+constant fixes. Shipping sizes are measured against the actual composed tip.
