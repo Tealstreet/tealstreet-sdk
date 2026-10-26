@@ -9974,6 +9974,12 @@ their reconcile; any other end drops the mark. Amend roots are marked too, so an
 Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
 same-ID amend fence stays as is.
 
+A census that pages under several contexts records `Cx::order_read_epoch()`
+before its first page and reports through `orders_reconciled_since`, so its
+last page cannot release a mark its first page never saw. OKX adopts it (its
+census already restarts on every mark's immediate reconcile); a venue whose
+census spans contexts should do the same.
+
 ## Lighter public beta data
 
 Market snapshots seed last price and start ticker hydration before socket Open.
