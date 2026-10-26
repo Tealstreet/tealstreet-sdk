@@ -4,11 +4,18 @@ use crate::wire::*;
 use crate::{BitunixFutures, Feed, Pending, REST};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
-use safe_cex_engine::credential_selection::CredentialRole;
+use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
 use safe_cex_engine::execution::{Arithmetic, Cursor, ExecutionRounding};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::plan::{CallAuth, CallTerms, RetryWindow, SerialCall, Slot};
+use safe_cex_engine::request_context::{
+    Context, Operation, Plan, Policy, Preflight, RetryPolicy, Scope,
+};
+use safe_cex_engine::selected_read::{
+    AdmittedRead, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, Method, Response, TimerId};
 use std::collections::{HashMap, HashSet};
@@ -46,7 +53,34 @@ pub struct PositionAdmission {
     route: String,
     mode: PositionMode,
 }
+/// The engine authority a released account read answers under.
+pub enum ReadCustody {
+    /// A Background read on the read key (else Primary).
+    Background(AdmittedRead),
+    /// A placement's prerequisite read before its Plan exists (Primary).
+    Preflight(Preflight, Context),
+    /// A prerequisite read as the job's own serial Read call (Primary).
+    Plan(Plan, Slot, Context),
+}
+impl ReadCustody {
+    pub(crate) fn context(&self) -> &Context {
+        match self {
+            Self::Background(read) => read.context(),
+            Self::Preflight(_, context) | Self::Plan(_, _, context) => context,
+        }
+    }
+    pub(crate) fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        match self {
+            Self::Background(read) => cx.validate_http_context(read.context()).is_ok(),
+            Self::Preflight(preflight, context) => {
+                cx.validate_preflight_delivery(preflight, context).is_ok()
+            }
+            Self::Plan(plan, _, context) => cx.validate_plan_delivery(plan, context).is_ok(),
+        }
+    }
+}
 pub struct Read {
+    pub custody: Option<ReadCustody>,
     pub axis: Axis,
     pub generation: u64,
     pub balance_write_revision: u64,
@@ -65,6 +99,8 @@ pub struct Read {
     pub native: Vec<(String, NativeOrder)>,
     pub invalid: bool,
     pub baselines: Vec<(String, (f64, f64))>,
+    /// A Primary order snapshot after an uncertain write.
+    pub reconcile: bool,
 }
 impl Read {
     pub(crate) fn orders_current(&self, store: &safe_cex_engine::Store) -> bool {
@@ -153,6 +189,10 @@ pub struct OrderReadProgress {
 #[derive(Default)]
 pub struct AccountState {
     pub(crate) recovery: crate::recovery::State,
+    /// The next order snapshots reconcile an uncertain write: Primary-signed.
+    pub reconcile: bool,
+    /// Regular and TP/SL order snapshots committed since that reconcile.
+    pub reconciled: [bool; 2],
     /// Symbols whose leverage/margin mode were read on first candle interest.
     pub symbol_settings: std::collections::HashSet<String>,
     /// Serial of the last balance read that was answered (reply or failure).
@@ -279,44 +319,160 @@ impl BitunixFutures {
         self.read_axis(cx, Axis::Orders);
         self.account.tick = Some(cx.set_timer(TICK_MS));
     }
+    /// An account or settings read: a placement's prerequisite reads run
+    /// under its command, everything else is a managed Background read.
     pub(crate) fn signed_request(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        method: Method,
         path: &str,
         params: Params,
-        body: Option<String>,
         pending: Pending,
     ) {
-        // By role, not method: a GET inside a trading job signs Primary.
-        let role = match &pending {
-            Pending::Private(read) => CredentialRole::Read {
-                scope: Some(match read.axis {
-                    Axis::Balance => safe_cex_engine::AccountReadScope::Balance,
-                    Axis::Positions => safe_cex_engine::AccountReadScope::Positions,
-                    Axis::Orders | Axis::Tpsl => safe_cex_engine::AccountReadScope::Orders,
-                }),
-            },
-            Pending::SymbolSettings { .. } => CredentialRole::Read {
-                scope: Some(safe_cex_engine::AccountReadScope::Settings),
-            },
-            Pending::Trade(_) => CredentialRole::Mutation,
-            _ => CredentialRole::Read { scope: None },
-        };
-        let Ok((selection, identity)) = self.slots.select(role) else {
-            self.fail_private(cx, pending, "Bitunix credentials required");
-            return;
-        };
-        let identity = identity.clone();
-        let testnet = self.options.testnet;
-        let headers = if testnet {
-            sign::dispatch::TESTNET_HEADERS
-        } else {
-            sign::dispatch::HEADERS
+        match pending {
+            Pending::Private(read) if read.after.is_some() => {
+                self.issue_prerequisite(cx, path, params, read)
+            }
+            pending => self.issue_read(cx, path, params, pending),
         }
-        .iter()
-        .map(|(name, value)| (*name, (*value).to_owned()))
-        .collect();
+    }
+    /// An account or settings read as a managed Background read on the read
+    /// key (else Primary). Native recovery owns retries: the engine sends once.
+    fn issue_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        params: Params,
+        pending: Pending,
+    ) {
+        let scope = match &pending {
+            Pending::Private(read) => match read.axis {
+                Axis::Balance => safe_cex_engine::AccountReadScope::Balance,
+                Axis::Positions => safe_cex_engine::AccountReadScope::Positions,
+                Axis::Orders | Axis::Tpsl => safe_cex_engine::AccountReadScope::Orders,
+            },
+            _ => safe_cex_engine::AccountReadScope::Settings,
+        };
+        let stream = matches!(&pending, Pending::Private(read) if read.axis != Axis::Balance)
+            .then_some(crate::recovery::LIST);
+        // After an uncertain write the order census signs Primary.
+        let role = match &pending {
+            Pending::Private(read) if read.reconcile => ReadRole::Primary {
+                reason: PrimaryReason::PostUnknownOrderRead,
+                scope: Some(scope),
+            },
+            _ => ReadRole::Read { scope: Some(scope) },
+        };
+        let selected = SelectedRead::select(&self.slots, role);
+        let policy = ReadPolicy {
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        let read = match SelectedRead::scoped(cx, selected, Scope::Background, policy) {
+            Ok(read) => read,
+            Err(_) => {
+                return self.fail_private(
+                    cx,
+                    pending,
+                    "Bitunix managed read lifecycle is unavailable",
+                );
+            }
+        };
+        let query = params.query();
+        let url = format!(
+            "{REST}{path}{}{}",
+            if query.is_empty() { "" } else { "?" },
+            query
+        );
+        let signing = params.signing();
+        let testnet = self.options.testnet;
+        let recipe_url = url.clone();
+        let queued = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url,
+                body: None,
+                stream,
+            },
+            |identity| {
+                Box::new(sign::dispatch::Http::new(
+                    identity.clone(),
+                    Method::Get,
+                    recipe_url,
+                    signing,
+                    None,
+                    testnet,
+                ))
+            },
+            |read| pending.with_custody(ReadCustody::Background(read)),
+        );
+        if let Err((pending, error)) = queued {
+            self.fail_private(cx, pending, &error.venue_error().message);
+        }
+    }
+    /// A placement's prerequisite read under its command: a Preflight read
+    /// before the Plan exists, else the Plan's next serial Read call. Both sign
+    /// Primary. Any refusal fails the prerequisite NotSent before a write.
+    fn issue_prerequisite(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        params: Params,
+        mut read: Read,
+    ) {
+        let command = read.after.expect("a prerequisite read");
+        let Some((credential, identity)) = self.trade_identity() else {
+            return self.prepared(cx, command, false, None);
+        };
+        if !self.trading.live(command) {
+            return;
+        }
+        let custody = match self.trading.plan(command).cloned() {
+            None => {
+                let preflight = self.trading.preflight(command).expect("live job").clone();
+                let context = cx.preflight_read_context(
+                    &preflight,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: Some(credential),
+                        timeout_ms: crate::trading::CALL_MS,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                    CallTerms {
+                        wait_ms: 0,
+                        timeout_ms: crate::trading::CALL_MS,
+                        attempts: 1,
+                        retry_window: RetryWindow::FreshAttempt,
+                    },
+                );
+                context.map(|context| ReadCustody::Preflight(preflight, context))
+            }
+            Some(plan) => match self.trading.take_current(command) {
+                Some((slot, current)) => cx
+                    .continue_serial_plan(
+                        &plan,
+                        &slot,
+                        &current,
+                        SerialCall {
+                            // Signed with the Preflight's Primary, like every job call.
+                            auth: CallAuth::Preflight,
+                            operation: Operation::Read,
+                            timeout_ms: crate::trading::CALL_MS,
+                            attempts: 1,
+                        },
+                    )
+                    .and_then(|slot| {
+                        cx.plan_leg_context(&plan, &slot)
+                            .map(|context| ReadCustody::Plan(plan, slot, context))
+                    }),
+                None => Err(safe_cex_engine::request_context::Error::Revoked),
+            },
+        };
+        let Ok(custody) = custody else {
+            return self.prepared(cx, command, false, None);
+        };
         let query = params.query();
         let url = format!(
             "{REST}{path}{}{}",
@@ -325,20 +481,31 @@ impl BitunixFutures {
         );
         let recipe = sign::dispatch::Http::new(
             identity,
-            method,
+            Method::Get,
             url.clone(),
             params.signing(),
-            body.clone(),
-            testnet,
+            None,
+            self.options.testnet,
         );
-        let id = if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance)
-            || matches!(&pending, Pending::History(_))
-        {
-            cx.request_streamed(method, url, headers, crate::recovery::LIST, pending)
-        } else {
-            cx.request(method, url, headers, body, pending)
-        };
-        selection.sign(cx, id, Box::new(recipe));
+        let context = custody.context().clone();
+        let stream = read.axis != Axis::Balance;
+        read.custody = Some(custody);
+        match cx.request_signed_managed(
+            context,
+            None,
+            Method::Get,
+            url,
+            None,
+            Box::new(recipe),
+            Pending::Private(read),
+        ) {
+            Ok(id) => {
+                if stream {
+                    cx.stream_response(id, crate::recovery::LIST);
+                }
+            }
+            Err(_) => self.prepared(cx, command, false, None),
+        }
     }
     pub(crate) fn read_axis(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
         self.read_axis_for(cx, axis, None);
@@ -358,7 +525,7 @@ impl BitunixFutures {
             .blocked(cx, &crate::recovery::Key::Axis(axis))
         {
             if let Some(command) = after {
-                self.prepared(cx, command, false);
+                self.prepared(cx, command, false, None);
             }
             return;
         }
@@ -379,7 +546,7 @@ impl BitunixFutures {
                     "Bitunix order snapshot admission exhausted",
                 );
                 if let Some(command) = after {
-                    self.prepared(cx, command, false);
+                    self.prepared(cx, command, false, None);
                 }
                 return;
             };
@@ -444,6 +611,7 @@ impl BitunixFutures {
             self.account.balance_polled_at = cx.now;
         }
         let read = Read {
+            custody: None,
             after,
             serial: self.account.serials[slot],
             axis,
@@ -462,6 +630,7 @@ impl BitunixFutures {
             native: vec![],
             invalid: false,
             baselines: vec![],
+            reconcile: self.account.reconcile && axis.order_slot().is_some(),
         };
         if let Some(slot) = axis.order_slot() {
             self.account.order_reads[slot] = Some(OrderReadProgress {
@@ -478,7 +647,7 @@ impl BitunixFutures {
             self.account.position_dirty = false;
             self.account.timers[1] = Some(cx.set_timer(POSITION_STALL_MS));
         }
-        self.signed_request(cx, Method::Get, path, params, None, Pending::Private(read));
+        self.signed_request(cx, path, params, Pending::Private(read));
     }
     /// Like TS listenOHLCV: read a symbol's leverage and margin mode once,
     /// so a flat symbol reports its real settings instead of defaults.
@@ -502,8 +671,9 @@ impl BitunixFutures {
             symbol: symbol.into(),
             write_revision: self.account.position_write_revision,
             serial,
+            custody: None,
         };
-        self.signed_request(cx, Method::Get, SYMBOL_SETTINGS, params, None, pending);
+        self.signed_request(cx, SYMBOL_SETTINGS, params, pending);
     }
     pub(crate) fn symbol_settings_response(
         &mut self,
@@ -548,6 +718,8 @@ impl BitunixFutures {
                 p.margin_type = Some(margin);
             }
         });
+        self.trading
+            .settings_observed(&format!("symbol:{symbol}"), serial);
     }
     pub(crate) fn fail_private(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
@@ -562,12 +734,12 @@ impl BitunixFutures {
                 };
                 self.trade_error(cx, request, crate::error::not_sent(error, kind));
             }
-            Pending::History(read) => self.history_sign_failed(cx, read, error),
             Pending::Private(read) => self.account_failed(cx, read, None),
             Pending::SymbolSettings {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => self.settings_failed(cx, &symbol, write_revision, serial, None),
             _ => cx.retried_failure("bitunix.account:2", error),
         }
@@ -711,6 +883,7 @@ impl BitunixFutures {
             return true;
         }
         if self.account.tick == Some(timer) {
+            self.restore_retired(cx);
             self.account
                 .terminal
                 .retain(|_, at| cx.now - *at < 300_000.0);
@@ -901,7 +1074,7 @@ impl BitunixFutures {
             crate::recovery::notice(cx, response);
         }
         if let Some(command) = read.after {
-            self.prepared(cx, command, false);
+            self.prepared(cx, command, false, None);
         }
     }
     pub(crate) fn settings_failed(
@@ -915,6 +1088,7 @@ impl BitunixFutures {
         if !self.account.recovery.settings_current(symbol, serial) {
             return;
         }
+        self.trading.settings_unread(&format!("symbol:{symbol}"));
         self.account.symbol_settings.remove(symbol);
         let key = crate::recovery::Key::Settings(symbol.into());
         if write_revision != self.account.position_write_revision {
@@ -961,6 +1135,7 @@ impl BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } if *write_revision == self.account.position_write_revision
                 && self.account.recovery.settings_current(symbol, *serial) =>
             {
@@ -1052,6 +1227,7 @@ impl BitunixFutures {
                     extract_account(body, 0).ok_or_else(|| "missing Bitunix account".to_string());
                 match result {
                     Ok(a) => {
+                        self.trading.settings_observed("mode", read.serial);
                         let previous = cx.store.hedged();
                         let hedged = !a.position_mode.eq_ignore_ascii_case("ONE_WAY");
                         cx.store.set_hedged(hedged);
@@ -1161,11 +1337,25 @@ impl BitunixFutures {
         let Some(token) = read.order_token.take() else {
             return;
         };
+        let (reconcile, slot, partial) = (
+            read.reconcile,
+            usize::from(read.axis == Axis::Tpsl),
+            read.partial_orders(),
+        );
         if !cx
             .store
             .commit_orders_snapshot([token], |current| self.apply_orders_snapshot(current, read))
         {
             self.debounce(cx, Axis::Orders);
+            return;
+        }
+        // Both complete Primary snapshots postdate the uncertain write.
+        if reconcile && !partial {
+            self.account.reconciled[slot] = true;
+            if self.account.reconciled == [true, true] {
+                self.account.reconciled = [false, false];
+                cx.orders_reconciled(None);
+            }
         }
     }
     fn apply_orders_snapshot(&mut self, current: &[Order], mut read: Read) -> Vec<Order> {
