@@ -117,3 +117,7 @@ ea5ec84ee69b5a6e4f7f90322f9afd285a718a0f:sdk-rs/venues/blofin/tests/hmac_dispatc
 
 # Deterministic public Kraken replay fixture, replaced by encoding replay-secret.
 5453dc4802960a9b5e19c7f60b027438d46331c8:sdk-rs/harness/kraken-beta-errors.integration.mts:generic-api-key:6
+
+# Bitunix hosted login golden: a public double-SHA256 vector over fixture inputs,
+# shared with base.ws-auth-signing.test.ts. Exact fingerprint only; no credential bytes.
+c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-regressions/rust.bitunix-hosted-provider.wasm.test.ts:generic-api-key:61
