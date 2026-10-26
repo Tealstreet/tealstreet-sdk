@@ -619,7 +619,15 @@ class DataMacroProvenance(unittest.TestCase):
         for body in ['let request = cx; matches!(request.kind, Kind::Normal);',
                      'match other() { request => { matches!(request.kind, Kind::Normal); } }',
                      'rows().for_each(|request| { matches!(request.kind, Kind::Normal); });',
-                     'let seen = matches!(request.kind, Kind::Normal); cx.request(1);']:
+                     'let seen = matches!(request.kind, Kind::Normal); cx.request(1);',
+                     # Block items are visible across the whole block, before or after.
+                     'let seen = matches!(request.side, Side::Buy); const request: Order = ORDER;',
+                     'let seen = matches!(request.side, Side::Buy); static request: Order = ORDER;',
+                     'let seen = matches!(request.side, Side::Buy); static mut request: Order = ORDER;',
+                     'let seen = matches!(request.side, Side::Buy); use crate::Order as request;',
+                     'let seen = matches!(request.side, Side::Buy); use crate::orders::request;',
+                     'let seen = matches!(request.side, Side::Buy); struct request;',
+                     'const request: Order = ORDER; let seen = matches!(request.side, Side::Buy);']:
             with self.subTest(body=body):
                 self.assertTrue(self.prod(self.source(body)))
 

@@ -1092,8 +1092,21 @@ def data_macro_proof(stream, index, end, imports):
         return False
 
     def rebound(name):
-        # Bindings scope forward: only a construct that starts before the macro
-        # can rebind the name the macro reads.
+        # Block items are visible across their whole block, so an item or
+        # import binding the name refuses wherever it sits in the body.
+        for i in range(body + 1, body_end - 1):
+            if stream[i] in {'const', 'static', 'struct'}:
+                k = i + 1 + (stream[i + 1] == 'mut')
+                if stream[k].removeprefix('r#') == name:
+                    return True
+            if stream[i] == 'use':
+                stop = i
+                while stop < body_end and stream[stop] != ';':
+                    stop += 1
+                if name in [token.removeprefix('r#') for token in stream[i + 1:stop]]:
+                    return True
+        # Other bindings scope forward: only a construct that starts before the
+        # macro can rebind the name the macro reads.
         if any(bound == name and body <= start < index and (start, stop) != (body, body_end)
                for bound, _, start, stop in found):
             return True
