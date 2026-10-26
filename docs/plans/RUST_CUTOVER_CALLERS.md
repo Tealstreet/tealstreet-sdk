@@ -868,6 +868,17 @@ rejection may enter the existing recovery-write path; no automatic caller retry
 is introduced. This extends B9's field-based integration to Bitunix, with no
 new application method or error shape.
 
+#### Late-cancel repair beside a foreground cancel-all (#2181)
+
+An automatic late-cancel repair and a user cancel-all on the same symbol now run
+side by side, as native venues do; only an explicit-ID cancel of the same order
+still conflicts. No order IDs are captured from a cancel-all. If a newer
+cancel-all and an in-flight repair cancel the same order, the loser gets the
+provider's refusal: the repair settles Rejected and the venue emits its usual
+manual-cancel error, exactly as native. A repair whose send is refused before
+release now settles once as NotSent and releases its lock, instead of stalling the
+venue's late-cancel queue. No caller method, event or error shape changes.
+
 #### Events and worker protocol
 
 | Change | tealstreet-next file:line | Old usage | New usage | Impact |
@@ -3572,12 +3583,16 @@ projects every outcome.
 - **Store effects.** Creating rows, Canceling marks and the order revision bump
   now apply per call, after admission and before release, rather than all at job
   start. Commit effects still apply only after a successful terminal.
-- **W1-to-W2 interim (hedged isolated leverage).** The long leg goes first and the
-  short leg only after long is Accepted, at the cost of one extra round trip. A
-  long 503 or refusal means short is never sent. A short refusal or 503 after
-  long keeps long's effect (outcome None, or Unknown for the 503), applies no
-  commit and refreshes the account as before. W2's barrier restores native
-  parallel release.
+- **Hedged isolated leverage: serial, permanent (overseer ruling (b),
+  2026-10-26).** The long leg goes first and the short leg only after long is
+  Accepted, at the cost of one extra round trip. A long 503 or refusal means
+  short is never sent. A short refusal or 503 after long keeps long's effect
+  (outcome None, or Unknown for the 503), applies no commit and refreshes the
+  account as before. This replaces native's parallel release for good. The W2
+  barrier join (#2179, closed) linked `http-mutation-barriers` into every
+  monomorphized `Engine<V>` of the combined bundle (+395,294 combined, over
+  budget). Parallel release returns only if the per-venue feature-runtime
+  investigation produces a per-venue gate.
 - **Unchanged.** Paths, bodies, batch sizes (20/10/1), the 1000-lot split, the
   350/1000 ms pauses, client-ID rules, broker attribution, receipts and result
   JSON.
@@ -6846,6 +6861,24 @@ and keep the demo header. The EEA account catalogue is signed with the read key
 when one is configured, otherwise the primary key. An unanswered read ends at
 20 s and startup discovery retries on its native backoff. URLs, row decoding,
 partial-catalogue rules, the seeded ticker count and the 429 pause are unchanged.
+
+## BingX trading and request funnel (#2159, supersedes #1954)
+
+codex-uufub4's reviewed #1954 source is adopted and its native controls are kept. What changes:
+
+- **Ordered writes stream.** PlaceOrders (split lots and protection legs), AmendOrder, CancelSymbolOrders, SetLeverage, SetMarginType and SetPositionMode run on one streamed serial Plan behind a WriteAfterReads Preflight. Each next call is admitted from the previous call's accepted DATA (`continue_serial_plan`), so native `split()`'s 10,000-lot maximum is no longer refused for request capacity. Each call keeps its native 20 s bound. A parsed numeric 100001 still permits one fresh-signature resend, with the same client order ID.
+- **Independent cancels stay complete.** CancelOrders, the only native `continue_on_error` job, keeps #1954's complete Plan with `independent_calls`. A sibling continues past any failure, Unknown included, with no retry.
+- **cancelReplace refusal is outcome None.** Under STOP_ON_FAILURE the cancel may already have taken effect, so a refused `/trade/cancelReplace` is recorded with known effects. It projects outcome None, keeps its kind, grants no resend (100001 included) and makes no further call. The original order stays until a read proves otherwise.
+- **Unchanged from #1954:**
+  - 80016 is absence, not cancellation. It is satisfied only for a plain Cancel leg.
+  - The symbol stays fenced until `orders_reconciled`. An older snapshot can neither clear the fence nor overwrite a newer read.
+  - Unknown, system and malformed replies are explicit Unknown, with native messages and accepted-prefix IDs kept.
+  - A trigger replace whose cancel answers 80016 prepares no replacement.
+- **Primary-signed reconcile snapshot.** The order snapshot that `reconcile_uncertain` issues selects `PrimaryRead { PostUnknownOrderRead }`. A configured read key never signs the read that clears an unknown-write fence.
+- **No cancel-all fence after a lost create (known gap).** BingX keeps native concurrency (no `guard_pending_placements`), per overseer ruling. A lost create therefore reconciles on the primary key but does not fence cancel-all. Venues with placement guards close this gap.
+- **Keyless reads are managed.** Without a key, the tickers and lists are managed unsigned Background reads and klines is a command Read. Both complete and fail through their Context, with the native public headers. `stage()`, `issue()`, the legacy signed resend and the numeric candle `done`/`fail` are deleted. A candle read whose admission is refused fails through a fresh command Context.
+
+`account.rs`'s remaining legacy sites are a later slice.
 
 ## Lighter synchronous history Read custody
 

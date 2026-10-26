@@ -6,17 +6,27 @@ use safe_cex_venue_bingx::Bingx;
 mod support;
 use support::Options;
 
-fn respond(engine: &mut Engine<Bingx>, now: f64, body: &str) {
-    let request = engine
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r.id)
-            } else {
-                None
-            }
+/// Managed reads are released only through engine preparation.
+fn drain(engine: &mut Engine<Bingx>, now: f64) -> std::vec::IntoIter<Action> {
+    safe_cex_engine::test_support::prepared_actions(engine, now).into_iter()
+}
+/// The next released request, and the public socket if it connected meanwhile.
+fn next_request(engine: &mut Engine<Bingx>, now: f64) -> (RequestId, Option<SocketId>) {
+    let actions: Vec<_> = drain(engine, now).collect();
+    let socket = actions.iter().find_map(|a| match a {
+        Action::WsConnect { socket, .. } => Some(*socket),
+        _ => None,
+    });
+    let request = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r.id),
+            _ => None,
         })
         .expect("request");
+    (request, socket)
+}
+fn reply(engine: &mut Engine<Bingx>, now: f64, request: RequestId, body: &str) {
     engine.handle(
         now,
         Event::HttpResponse {
@@ -29,28 +39,37 @@ fn respond(engine: &mut Engine<Bingx>, now: f64, body: &str) {
         },
     );
 }
+fn respond(engine: &mut Engine<Bingx>, now: f64, body: &str) -> Option<SocketId> {
+    let (request, socket) = next_request(engine, now);
+    reply(engine, now, request, body);
+    socket
+}
 fn seeded() -> Engine<Bingx> {
+    seeded_with_socket().0
+}
+/// The seeded engine and its public socket, connected once markets load.
+fn seeded_with_socket() -> (Engine<Bingx>, SocketId) {
     let mut engine = support::engine(Options {
         public_data_only: true,
         ..Options::default()
     });
     engine.start(0.);
-    respond(
+    let mut socket = respond(
         &mut engine,
         1.,
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#,
     );
-    respond(
+    socket = socket.or(respond(
         &mut engine,
         2.,
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#,
-    );
-    respond(
+    ));
+    socket = socket.or(respond(
         &mut engine,
         3.,
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#,
-    );
-    engine
+    ));
+    (engine, socket.expect("public socket"))
 }
 #[test]
 fn seeds_decimal_precision_and_merges_ticker_sources() {
@@ -66,37 +85,31 @@ fn seeds_decimal_precision_and_merges_ticker_sources() {
 }
 #[test]
 fn full_depth_replaces_previous_snapshot_and_watchdog_reconnects() {
-    let mut e = seeded();
+    let (mut e, socket) = seeded_with_socket();
     e.handle(
         4.,
         Event::Command(Command::SubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
     );
-    // The first socket is allocated after the markets HTTP request.
-    e.handle(
-        5.,
-        Event::WsOpened {
-            socket: SocketId(2),
-        },
-    );
-    e.drain_actions().for_each(drop);
+    e.handle(5., Event::WsOpened { socket });
+    drain(&mut e, 5.).for_each(drop);
     let frame = r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[{"price":"59999","volume":"1"},{"price":"59998","volume":"2"}],"asks":[{"price":"60000","volume":"3"}]}}"#;
     e.handle(
         6.,
         Event::WsMessage {
-            socket: SocketId(2),
+            socket,
             text: frame,
         },
     );
     assert_eq!(e.book("BTCUSDT").unwrap().bids().len(), 2);
-    e.handle(7.,Event::WsMessage{socket:SocketId(2),text:r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[{"price":"59997","volume":"4"}],"asks":[]}}"#});
+    e.handle(7.,Event::WsMessage{socket,text:r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{"bids":[{"price":"59997","volume":"4"}],"asks":[]}}"#});
     assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(59997., 4.)]);
     assert!(e.book("BTCUSDT").unwrap().asks().is_empty());
     e.handle(
         7.5,
         Event::WsMessage {
-            socket: SocketId(2),
+            socket,
             text: r#"{"dataType":"market.depth.BTC-USDT.step0.level100","data":{}}"#,
         },
     );
@@ -104,14 +117,11 @@ fn full_depth_replaces_previous_snapshot_and_watchdog_reconnects() {
     e.handle(
         8.,
         Event::WsMessage {
-            socket: SocketId(2),
+            socket,
             text: "Ping",
         },
     );
-    assert!(
-        e.drain_actions()
-            .any(|a| matches!(a,Action::WsSend{text,..} if text=="Pong"))
-    );
+    assert!(drain(&mut e, 8.).any(|a| matches!(a,Action::WsSend{text,..} if text=="Pong")));
 }
 #[test]
 fn error_envelope_after_streamed_array_does_not_publish_markets() {
@@ -140,8 +150,7 @@ fn candle_rows_sort_by_time_and_use_seconds() {
         11.,
         r#"{"code":0,"data":[{"time":120000,"open":"2","high":"3","low":"1","close":"2.5","volume":"4"},{"time":60000,"open":"1","high":"2","low":"0.5","close":"1.5","volume":"3"}]}"#,
     );
-    let out = e
-        .drain_actions()
+    let out = drain(&mut e, 11.)
         .find_map(|a| match a {
             Action::Notice(safe_cex_engine::Notice::CommandDone { result, .. }) => Some(result),
             _ => None,
@@ -164,7 +173,7 @@ fn invalid_unicode_interval_returns_error_without_trapping() {
             to_ms: None,
         }),
     );
-    assert!(e.drain_actions().any(|a| matches!(
+    assert!(drain(&mut e, 10.).any(|a| matches!(
         a,
         Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 77, .. })
     )));
@@ -175,8 +184,7 @@ fn startup_failure_retries_the_read_without_loading_empty_markets() {
     e.start(0.);
     respond(&mut e, 1., r#"{"code":100004,"msg":"temporary","data":[]}"#);
     assert!(!e.store().loaded().markets);
-    let timer = e
-        .drain_actions()
+    let timer = drain(&mut e, 1.)
         .find_map(|a| match a {
             Action::SetTimer { timer, .. } => Some(timer),
             _ => None,
@@ -184,8 +192,7 @@ fn startup_failure_retries_the_read_without_loading_empty_markets() {
         .unwrap();
     e.handle(1001., Event::TimerFired { timer });
     assert!(
-        e.drain_actions()
-            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/contracts")))
+        drain(&mut e, 1001.).any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/contracts")))
     );
 }
 
@@ -196,22 +203,21 @@ fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
         ..Options::default()
     });
     e.start(0.);
-    respond(
+    let (markets, _) = next_request(&mut e, 0.);
+    reply(
         &mut e,
         1.,
+        markets,
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":3,"pricePrecision":1,"tradeMinLimit":"0.001"},{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":3,"pricePrecision":2,"tradeMinLimit":"0.001"}]}"#,
     );
+    let (daily, socket) = next_request(&mut e, 1.);
+    let socket = socket.expect("public socket");
     let update = r#"{"dataType":"market.contracts","data":{"contracts":[{"symbol":"BTC-USDT","tradePrice":"90","fairPrice":"91","indexPrice":"92","fundingRate":"0.01"},{"symbol":"ETH-USDT","tradePrice":"101","fairPrice":"102","indexPrice":"103","fundingRate":"0.01"}]}}"#;
-    e.handle(
-        1.1,
-        Event::WsOpened {
-            socket: SocketId(2),
-        },
-    );
+    e.handle(1.1, Event::WsOpened { socket });
     e.handle(
         1.2,
         Event::WsMessage {
-            socket: SocketId(2),
+            socket,
             text: update,
         },
     );
@@ -220,15 +226,16 @@ fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
     assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 90.);
     assert_eq!(e.store().ticker("ETHUSDT").unwrap().last, 101.);
     // Daily order differs from market order, and Premium removes the leading daily row.
-    respond(
+    reply(
         &mut e,
         2.,
+        daily,
         r#"{"code":0,"data":[{"symbol":"ETH-USDT","lastPrice":"100","priceChangePercent":"1","volume":"1","quoteVolume":"100"},{"symbol":"BTC-USDT","lastPrice":"80","priceChangePercent":"1","volume":"1","quoteVolume":"80"}]}"#,
     );
     e.handle(
         2.1,
         Event::WsMessage {
-            socket: SocketId(2),
+            socket,
             text: update,
         },
     );
@@ -252,7 +259,7 @@ fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
     e.handle(
         4.,
         Event::WsMessage {
-            socket: SocketId(2),
+            socket,
             text: update,
         },
     );
@@ -263,24 +270,16 @@ fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
         e.store().ticker("ETHUSDT").is_none(),
         "live frames after the seed cannot recreate a market TS omits"
     );
-    e.drain_actions().for_each(drop);
-    e.handle(
-        5.,
-        Event::WsClosed {
-            socket: SocketId(2),
-            code: 1006,
-        },
-    );
-    let timer = e
-        .drain_actions()
+    drain(&mut e, 4.).for_each(drop);
+    e.handle(5., Event::WsClosed { socket, code: 1006 });
+    let timer = drain(&mut e, 5.)
         .find_map(|action| match action {
             Action::SetTimer { timer, .. } => Some(timer),
             _ => None,
         })
         .unwrap();
     e.handle(1005., Event::TimerFired { timer });
-    let socket = e
-        .drain_actions()
+    let socket = drain(&mut e, 1005.)
         .find_map(|action| match action {
             Action::WsConnect { socket, .. } => Some(socket),
             _ => None,
@@ -300,18 +299,15 @@ fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
 
 #[test]
 fn supervisor_retains_backoff_across_open_flaps_and_bounds_connecting() {
-    let mut e = seeded();
-    // The seed helper consumes connect actions while answering subsequent REST seeds.
-    let mut socket = SocketId(2);
-    e.drain_actions().for_each(drop);
+    let (mut e, mut socket) = seeded_with_socket();
+    drain(&mut e, 3.).for_each(drop);
     let mut now = 10.0;
     e.handle(now, Event::WsOpened { socket });
-    e.drain_actions().for_each(drop);
+    drain(&mut e, now).for_each(drop);
     let mut previous = 0.0;
     for nominal in [1000.0, 2000.0, 4000.0] {
         e.handle(now, Event::WsClosed { socket, code: 1006 });
-        let (timer, at) = e
-            .drain_actions()
+        let (timer, at) = drain(&mut e, now)
             .find_map(|a| match a {
                 Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
                 _ => None,
@@ -322,7 +318,7 @@ fn supervisor_retains_backoff_across_open_flaps_and_bounds_connecting() {
         previous = at - now;
         now = at;
         e.handle(now, Event::TimerFired { timer });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = drain(&mut e, now).collect();
         socket = actions
             .iter()
             .find_map(|a| match a {
@@ -332,7 +328,7 @@ fn supervisor_retains_backoff_across_open_flaps_and_bounds_connecting() {
             .unwrap();
         if nominal < 4000.0 {
             e.handle(now, Event::WsOpened { socket });
-            e.drain_actions().for_each(drop);
+            drain(&mut e, now).for_each(drop);
         } else {
             let timer = actions
                 .iter()
@@ -343,7 +339,7 @@ fn supervisor_retains_backoff_across_open_flaps_and_bounds_connecting() {
                 .unwrap();
             e.handle(now + 10_000.0, Event::TimerFired { timer });
             assert!(
-                e.drain_actions()
+                drain(&mut e, now + 10_000.0)
                     .any(|a| matches!(a,Action::WsClose{socket:s} if s==socket))
             );
         }
@@ -359,8 +355,8 @@ struct Suppressed {
 }
 
 impl Suppressed {
-    fn collect(&mut self, e: &mut Engine<Bingx>) {
-        for action in e.drain_actions() {
+    fn collect(&mut self, e: &mut Engine<Bingx>, now: f64) {
+        for action in drain(e, now) {
             match action {
                 Action::Http(r) => self.requests.push(r.id),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
@@ -382,7 +378,7 @@ fn suppressed_public_feed_is_not_supervised() {
     e.set_public_feed_policy(PublicFeedPolicy::Shared).unwrap();
     e.start(0.);
     let mut h = Suppressed::default();
-    h.collect(&mut e);
+    h.collect(&mut e, 0.);
     for body in [
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#,
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#,
@@ -395,7 +391,7 @@ fn suppressed_public_feed_is_not_supervised() {
             body,
         };
         e.handle(1., Event::HttpResponse { request, response });
-        h.collect(&mut e);
+        h.collect(&mut e, 1.);
     }
     assert_eq!(e.store().markets().len(), 1, "public startup completed");
     let mut fired = 0;
@@ -407,7 +403,7 @@ fn suppressed_public_feed_is_not_supervised() {
     {
         h.timers.retain(|(t, _)| *t != timer);
         e.handle(at, Event::TimerFired { timer });
-        h.collect(&mut e);
+        h.collect(&mut e, at);
         fired += 1;
     }
     assert_eq!(

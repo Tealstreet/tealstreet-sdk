@@ -1217,3 +1217,7 @@ fn cancel_legs_combine_outcomes_without_overclaiming() {
         }
     }
 }
+
+#[cfg(feature = "private-adoption-originals")]
+#[path = "support/trading_context.rs"]
+mod trading_context;
