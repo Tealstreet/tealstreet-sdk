@@ -150,7 +150,7 @@ Source-stage additive control: refused_repair_admission_emits_one_manual_cancel_
 
 The local consumer migrates all four request holdouts without editing generic engine code. Its 19 reviewed originals remain a byte-exact full-file prefix; five additive source-stage controls cover the manual admission-refusal diagnostic, no empty grants, Secondary-only/public-only refusal, and typed provider preparation failure. The shared fixture now registers the genuine LocalSigner-issued identities after its signer, as production trusted setup does. Re-execute the unchanged native runtime with only this fixture registration to retain the original 4 RED / 15 GREEN baseline.
 
-Blocked native contract: tests/trading.rs::open_order_read_started_before_a_later_failure_cannot_settle_it must keep its body byte-exact and send the late DELETE immediately while command 133's unrelated-ID CancelSymbolOrders call remains active. The current core refuses this CancelOnly repair on symbol overlap. Per fe7's ruling, a separate core PR adds cancel_only scope semantics: repair/foreground CancelOnly pairs conflict only on explicit order-ID intersection; every other scope pair retains existing overlap rules. No consumer deferral, re-queue, early terminal, lock bypass or engine edit is introduced. Landing waits for that core PR and this native control passing unchanged.
+Blocked native contract: tests/trading.rs::open_order_read_started_before_a_later_failure_cannot_settle_it must keep its body byte-exact and send the late DELETE immediately while command 133's unrelated-ID CancelSymbolOrders call remains active. The old core refuses this CancelOnly repair on symbol overlap. Per the overseer's #2181 ruling, a repair cancel and foreground cancel-all on the same symbol do not lock-conflict, with no send-time capture of cancel-all IDs. Explicit-ID CancelOrders still conflicts on the same ID; repair-vs-repair, foreground-vs-foreground and every placing/amend overlap retain their existing rules. No consumer deferral, re-queue, early terminal, lock bypass or engine edit is introduced. Landing waits for the core PR and this native control passing unchanged.
 
 Orphan helper removal also deletes one Phemex lib.rs read_credentials lexical reference; prune that single credential inventory count. Shared read Slots, every other credential site, and the signing/socket inventories remain unchanged.
 
@@ -163,3 +163,17 @@ F1 remains a separate fe7 core prerequisite: synchronous managed-send refusal mu
 F2 retains nonzero envelope codes and decoded row code/bizError/Rejected causes in the native batch classifier, keeping typed results. Missing or mismatched rows remain unproven. The additive documented_repair_refusals_keep_envelope_and_row_causes control pins both envelope and row 11001 to Rejected. F3 routes a post-admission Primary ownership mismatch into typed AuthInvalid/NotSent failure through the same settlement path. F4 restores native account_refresh after refused repair admission. F5 emits one manual-cancel diagnostic for non-Capacity mint refusal; Capacity keeps the core's existing diagnostic/Warn. F6 asserts the two dead Repair response arms are unreachable after the early dispatch.
 
 F8: retry reads may now issue before the old Read context retires. This temporarily needs one additional Context at the capacity edge, retaining the exact DATA needed by snapshot publication; admission refusal still follows native read-failure handling.
+
+## Core #2181 consumer review
+
+The overseer accepts native parity for a newer cancel-all racing an in-flight
+repair: the losing repair's definitive native refusal settles Rejected and
+emits the existing manual-cancel error. There is no gone/Satisfied row in the
+Phemex classifier and no new absence proof or mapping is authorized. Core head
+8e527df19e3 records this in CALLERS and adds
+a_newer_cancel_all_race_settles_the_repair_as_native_rejected. The existing
+Phemex documented envelope/row refusal control separately pins typed Rejected.
+Required consumer proof is the unchanged synchronous send-refusal/FIFO control
+and unchanged open_order_read_started_before_a_later_failure_cannot_settle_it
+on the composed core/consumer tree. Review execution and source clearance are
+separate from the engine PR's CI and its actual landing.
