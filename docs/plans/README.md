@@ -481,3 +481,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | WOO managed socket adoption | Native codec over shared lifecycle | Before modifying WOO epoch, auth, interest replay, retirement or supervision. | [RUST_WOO_MANAGED_SOCKETS.md](RUST_WOO_MANAGED_SOCKETS.md) |
 | WOO socket adoption and request funnel | Source/API/native/map carry CLEAR; first-source paired sizes fit, current combined and CI pending | Before importing reviewed WOO sockets or converting its 30 request / 20 signing sites. | [RUST_WOO_ADOPTION_AND_FUNNEL.md](RUST_WOO_ADOPTION_AND_FUNNEL.md) |
+
+- [KuCoin request and signing funnel](RUST_KUCOIN_FUNNEL.md): predecessor preservation, native refusal resend and compiling custody originals; production adoption remains local.
