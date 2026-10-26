@@ -1,0 +1,5 @@
+2026-10-12T14:24:26.392Z WARN  [icu_provider_export] Filter applied to domain 'collator' multiple times; ignoring all but the last filter
+2026-10-12T14:24:26.393Z WARN  [icu_provider_export] Filter applied to domain 'segmenter' multiple times; ignoring all but the last filter
+2026-10-12T14:24:26.393Z INFO  [icu_provider_export::export_impl] Datagen configured with no deduplication, and these locales: ["und"]
+2026-10-12T14:24:47.400Z INFO  [icu_provider_export::export_impl] Generated marker CollationRootV1 (21.006s, flushed in 38.413ms)
+2026-10-12T14:24:47.400Z INFO  [icu_provider_baked::export] Writing macros module...

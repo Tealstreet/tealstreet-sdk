@@ -1,0 +1,140 @@
+{
+  "MarginType": [
+    {
+      "name": "Isolated",
+      "value": "isolated"
+    },
+    {
+      "name": "Cross",
+      "value": "cross"
+    }
+  ],
+  "OrderRejectReason": [
+    {
+      "name": "PostOnly",
+      "value": "PostOnly"
+    },
+    {
+      "name": "InsufficientBalance",
+      "value": "InsufficientBalance"
+    },
+    {
+      "name": "ReduceOnly",
+      "value": "ReduceOnly"
+    }
+  ],
+  "OrderSide": [
+    {
+      "name": "Buy",
+      "value": "buy"
+    },
+    {
+      "name": "Sell",
+      "value": "sell"
+    }
+  ],
+  "OrderStatus": [
+    {
+      "name": "Open",
+      "value": "open"
+    },
+    {
+      "name": "Closed",
+      "value": "closed"
+    },
+    {
+      "name": "Canceled",
+      "value": "canceled"
+    },
+    {
+      "name": "Creating",
+      "value": "creating"
+    },
+    {
+      "name": "Updating",
+      "value": "updating"
+    },
+    {
+      "name": "Canceling",
+      "value": "canceling"
+    }
+  ],
+  "OrderStopTriggerType": [
+    {
+      "name": "MarkPrice",
+      "value": "mark_price"
+    },
+    {
+      "name": "LastPrice",
+      "value": "last_price"
+    },
+    {
+      "name": "IndexPrice",
+      "value": "index_price"
+    }
+  ],
+  "OrderTimeInForce": [
+    {
+      "name": "GoodTillCancel",
+      "value": "GoodTillCancel"
+    },
+    {
+      "name": "ImmediateOrCancel",
+      "value": "ImmediateOrCancel"
+    },
+    {
+      "name": "FillOrKill",
+      "value": "FillOrKill"
+    },
+    {
+      "name": "PostOnly",
+      "value": "PostOnly"
+    }
+  ],
+  "OrderType": [
+    {
+      "name": "Market",
+      "value": "market"
+    },
+    {
+      "name": "Limit",
+      "value": "limit"
+    },
+    {
+      "name": "Conditional",
+      "value": "conditional"
+    },
+    {
+      "name": "StopLoss",
+      "value": "stop_market"
+    },
+    {
+      "name": "TakeProfit",
+      "value": "take_profit_market"
+    },
+    {
+      "name": "TrailingStopLoss",
+      "value": "trailing_stop_market"
+    }
+  ],
+  "PositionMode": [
+    {
+      "name": "Hedged",
+      "value": "hedged"
+    },
+    {
+      "name": "OneWay",
+      "value": "oneway"
+    }
+  ],
+  "PositionSide": [
+    {
+      "name": "Long",
+      "value": "long"
+    },
+    {
+      "name": "Short",
+      "value": "short"
+    }
+  ]
+}
