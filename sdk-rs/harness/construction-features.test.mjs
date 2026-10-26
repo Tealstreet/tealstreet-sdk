@@ -13,6 +13,7 @@ const features = JSON.parse(execFileSync('python3', ['-c',
 const setupFeatures = {
   apexomni: ['dispatch-signing'],
   mexc: ['dispatch-signing'],
+  lighter: ['dispatch-signing'],
   asterdex: ['dispatch-signing', 'address-nonce', 'sign-meta'],
 };
 
@@ -55,6 +56,7 @@ test('feature guard rejects missing bootstrap, address setup and signing metadat
     assert.throws(() => checkFeatures(graph, 'wallet', { setupMapping: 'asterdex' }), new RegExp(required));
   }
   assert.throws(() => checkFeatures({ family: [] }, 'family', { bridge: { dispatchSigning: true } }), /dispatch-signing/);
+  assert.throws(() => checkFeatures({ family: [] }, 'family', { setupMapping: 'lighter' }), /dispatch-signing/);
   assert.throws(() => requiredFeatures({ setupMapping: 'new-mapping' }), /Unspecified setup mapping/);
 });
 
