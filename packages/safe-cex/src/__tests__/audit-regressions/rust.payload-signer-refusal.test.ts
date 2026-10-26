@@ -98,7 +98,7 @@ it.each([
   expect(payloadSigner).not.toHaveBeenCalled();
 });
 
-it('keeps Paradex delegated signing and explicitly public-only accounts', async () => {
+it('leaves Paradex and explicitly public-only payload signers to native construction policy', async () => {
   for (const [name, options] of [
     ['paradex', { payloadSigner, paradexAddress: '0x1', subkeyAddress: '0x2' }],
     ['bybit', { payloadSigner, publicDataOnly: true }],

@@ -198,15 +198,24 @@ it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lig
   },
 );
 
-it('compiled construction retains public payload bypass and Paradex delegation without I/O', async () => {
+it('compiled construction retains the public payload bypass and refuses hosted Paradex without I/O', async () => {
   const { WasmEngine } = await loadNodeEngine();
-  for (const [venue, options] of [
-    ['binance', { publicDataOnly: true, payloadSigner: true }],
-    ['paradex', { key: 'public-subkey', paradexAddress: '0x1', subkeyAddress: '0x2', payloadSigner: true }],
-  ] as const) {
-    const engine = new WasmEngine(venue, JSON.stringify(options));
-    (engine as unknown as { free(): void }).free();
+  const engine = new WasmEngine('binance', JSON.stringify({ publicDataOnly: true, payloadSigner: true }));
+  (engine as unknown as { free(): void }).free();
+  let failure: unknown;
+  try {
+    new WasmEngine(
+      'paradex',
+      JSON.stringify({ key: 'public-subkey', paradexAddress: '0x1', subkeyAddress: '0x2', payloadSigner: true }),
+    );
+  } catch (error) {
+    failure = error;
   }
+  expect(failure).toBeInstanceOf(Error);
+  expect(JSON.parse((failure as { venueError: string }).venueError)).toMatchObject({
+    message: expect.stringContaining('Rust paradex delegated signing is unsupported in this build'),
+    kind: 'unsupported', outcome: 'notSent',
+  });
 });
 
 it('compiled constructor exposes structured native failure detail', async () => {

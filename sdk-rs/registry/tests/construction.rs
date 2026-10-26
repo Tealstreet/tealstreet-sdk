@@ -551,7 +551,16 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             assert_eq!(error.message, expected);
         }
     }
-    construct("paradex", r#"{"key":"public-subkey","paradexAddress":"0x1","subkeyAddress":"0x2","payloadSigner":true}"#).unwrap();
+    // Hosted (device-key) Paradex has no Rust route in this release: refuse
+    // typed before any signing, never a legacy digest-only delegate.
+    let error = construct("paradex", r#"{"key":"public-subkey","paradexAddress":"0x1","subkeyAddress":"0x2","payloadSigner":true}"#).unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Rust paradex delegated signing is unsupported in this build; configure the account's local Stark key or remove payloadSigner"
+    );
+    construct("paradex", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
     construct("binance", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
     for venue in ["binance", "binancepm", "binanceinverse", "binancespot"] {
         // Explicit shared intent overrides the legacy boolean in either direction.
