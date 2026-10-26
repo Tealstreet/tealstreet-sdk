@@ -150,15 +150,15 @@ impl Harness {
             encoder_failure: encoder_failure.clone(),
         });
         engine.start(0.);
-        let request = engine
-            .drain_actions()
+        let request = support::prepared_seed_actions(&mut engine, 0.)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
             })
             .unwrap();
         response(&mut engine, &request, 10., support::MARKETS);
-        let actions: Vec<_> = engine.drain_actions().collect();
+        let actions = support::prepared_seed_actions(&mut engine, 10.);
         let private = actions
             .iter()
             .find_map(|a| match a {

@@ -701,9 +701,9 @@ fn mode_readback_retries_reads_only_and_never_invents_confirmation() {
 fn positional_engine() -> TestEngine {
     let mut e = engine();
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let mut early = e.drain_actions().collect::<Vec<_>>();
+    let mut early = prepared_seed_actions(&mut e, 10.);
     let ticker = early
         .iter()
         .find_map(|a| match a {

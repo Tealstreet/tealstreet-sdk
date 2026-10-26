@@ -15,9 +15,9 @@ fn private_open() -> (TestEngine, SocketId) {
         ..Default::default()
     }));
     engine.start(0.);
-    let market = requests(&mut engine).remove(0);
+    let market = support::prepared_seed_requests(&mut engine, 0.).remove(0);
     response(&mut engine, &market, 10., MARKETS);
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = support::prepared_seed_actions(&mut engine, 10.);
     let socket = actions
         .iter()
         .find_map(|action| match action {
