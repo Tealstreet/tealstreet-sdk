@@ -34,7 +34,10 @@ For an Empty credential-free Session, retain the existing explicit private
 egress and refuse any Some write credential. For a credential-bearing login
 Session, compare its exact issuer, generation, Primary slot and credential ref
 against the engine's OWN immutable installed Primary identity. A Some write
-credential must name that same slot and one of that identity's declared refs.
+credential must be the exact Selection::credential for that slot: its reference
+equals the installed identity's credential KeyRef. A signing ref, passphrase or
+extra-role ref cannot stand in as the root credential. Signed calls also require
+that identity's signing ref.
 Foreign refs, accounts, slots, stale or retired Sessions refuse before IDs.
 Never trust a venue-supplied Identity or Selection as this comparison's source.
 The one real Present-only login Session suffices; no dummy header Session exists.
@@ -84,7 +87,7 @@ login Session is accepted; a foreign/mismatched one stays refused.
    work. Same root credential throughout; exact DATA and Prepare/Bind/Claim.
 2. Installed unsigned-only cancel then leverage under write None; no provider
    work after login, explicit Session egress, never Secondary.
-3. Cross-engine equal-generation, foreign ref, mismatched write and cross-slot
+3. Cross-engine equal-generation, foreign ref, mismatched write/ref-kind and cross-slot
    Sessions refuse before IDs; real matching identity is accepted.
 4. Empty Session cannot carry Some write. A write-None root refuses every
    Preflight declaration. Session without a retained Session or with feature off
