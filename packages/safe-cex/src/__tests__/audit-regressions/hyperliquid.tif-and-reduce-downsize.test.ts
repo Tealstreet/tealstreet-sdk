@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 import { parseHyperliquidOrderTimeInForce } from '../../exchanges/hyperliquid/hyperliquid.order-inference';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../../types';

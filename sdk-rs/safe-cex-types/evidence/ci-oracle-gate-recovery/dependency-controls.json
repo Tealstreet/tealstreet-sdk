@@ -1,0 +1,50 @@
+[
+  {
+    "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+    "mutation": "omit maintained direct dependency @noble/hashes",
+    "call_site": "sdk-rs/safe-cex-types/ci-deps.cjs::dependencies",
+    "command": [
+      "node",
+      "--test",
+      "sdk-rs/safe-cex-types/tests/ci-deps.test.cjs"
+    ],
+    "mutant_exit": 1,
+    "named_assertion": "isolated model oracle declares the maintained @noble/hashes selector",
+    "named_assertion_failed": true,
+    "restored_exit": 0,
+    "original_sha256": "05fba833933302b067b8fa0549c5ab21100b5e54b77eafde9386cbdbe42b74f4",
+    "restored_sha256": "05fba833933302b067b8fa0549c5ab21100b5e54b77eafde9386cbdbe42b74f4"
+  },
+  {
+    "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+    "mutation": "omit maintained direct dependency bignumber.js",
+    "call_site": "sdk-rs/safe-cex-types/ci-deps.cjs::dependencies",
+    "command": [
+      "node",
+      "--test",
+      "sdk-rs/safe-cex-types/tests/ci-deps.test.cjs"
+    ],
+    "mutant_exit": 1,
+    "named_assertion": "isolated model oracle declares the maintained bignumber.js selector",
+    "named_assertion_failed": true,
+    "restored_exit": 0,
+    "original_sha256": "05fba833933302b067b8fa0549c5ab21100b5e54b77eafde9386cbdbe42b74f4",
+    "restored_sha256": "05fba833933302b067b8fa0549c5ab21100b5e54b77eafde9386cbdbe42b74f4"
+  },
+  {
+    "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+    "mutation": "omit maintained direct dependency @ethersproject/bignumber",
+    "call_site": "sdk-rs/safe-cex-types/ci-deps.cjs::dependencies",
+    "command": [
+      "node",
+      "--test",
+      "sdk-rs/safe-cex-types/tests/ci-deps.test.cjs"
+    ],
+    "mutant_exit": 1,
+    "named_assertion": "isolated model oracle declares the maintained @ethersproject/bignumber selector",
+    "named_assertion_failed": true,
+    "restored_exit": 0,
+    "original_sha256": "05fba833933302b067b8fa0549c5ab21100b5e54b77eafde9386cbdbe42b74f4",
+    "restored_sha256": "05fba833933302b067b8fa0549c5ab21100b5e54b77eafde9386cbdbe42b74f4"
+  }
+]

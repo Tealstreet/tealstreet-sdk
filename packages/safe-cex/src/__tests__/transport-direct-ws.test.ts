@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BitgetExchange } from '../exchanges/bitget/bitget.exchange';
-import { GrvtExchange } from '../exchanges/grvt/grvt.exchange';
-import { LighterExchange } from '../exchanges/lighter/lighter.exchange';
+import { BitgetExchange } from './reference/bitget/bitget.exchange';
+import { GrvtExchange } from './reference/grvt/grvt.exchange';
+import { LighterExchange } from './reference/lighter/lighter.exchange';
 import { DefaultStore } from '../store/store.base';
 import { directTransport } from '../transport/direct';
 

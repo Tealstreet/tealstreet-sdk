@@ -4,7 +4,7 @@ import { getPublicKey, verify } from '@noble/ed25519';
 import bs58 from 'bs58';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import '../../exchanges/orderly/orderly.encryption';
+import '../reference/orderly/orderly.encryption';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';

@@ -1,0 +1,23 @@
+   Compiling safe-cex-num v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-num)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.58s
+     Running tests/js_collation.rs (sdk-rs/target/debug/deps/js_collation-933e25d7a077e862)
+
+running 1 test
+{"node":"v26.7.0","icu":"78.3","cldr":"48.0","cases":165422}
+
+
+thread 'root_collation_matches_live_node' (1948644928) panicked at safe-cex-num/tests/js_collation.rs:20:9:
+assertion `left == right` failed: {"a":"\u000010","b":"_","expected":1}
+  left: -1
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test root_collation_matches_live_node ... FAILED
+
+failures:
+
+failures:
+    root_collation_matches_live_node
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.74s
+
+error: test failed, to rerun pass `-p safe-cex-num --test js_collation`

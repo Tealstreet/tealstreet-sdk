@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import type { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import type { OKXExchange } from '../reference/okx/okx.exchange';
 import type { OrderBook } from '../../types';
-import { OKXPublicWebsocket } from '../../exchanges/okx/okx.ws-public';
+import { OKXPublicWebsocket } from '../reference/okx/okx.ws-public';
 
 afterEach(() => vi.unstubAllGlobals());
 

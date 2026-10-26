@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AsterDEXExchange } from '../exchanges/asterdex/asterdex.exchange';
+import { AsterDEXExchange } from './reference/asterdex/asterdex.exchange';
 import { OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../types';
 
 const createAPIInstancesMock = vi.fn();
@@ -9,14 +9,14 @@ vi.mock('../exchanges/asterdex/asterdex.api', () => ({
   createAPIInstances: (...args: any[]) => createAPIInstancesMock(...args),
 }));
 
-vi.mock('../exchanges/asterdex/asterdex.ws-public', () => ({
+vi.mock('./reference/asterdex/asterdex.ws-public', () => ({
   AsterDEXPublicWebsocket: class {
     connectAndSubscribe = vi.fn();
     dispose = vi.fn();
   },
 }));
 
-vi.mock('../exchanges/asterdex/asterdex.ws-private', () => ({
+vi.mock('./reference/asterdex/asterdex.ws-private', () => ({
   AsterDEXPrivateWebsocket: class {
     connectAndSubscribe = vi.fn();
     dispose = vi.fn();

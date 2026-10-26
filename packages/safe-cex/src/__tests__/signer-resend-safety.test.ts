@@ -5,13 +5,13 @@ import createHmac from 'create-hmac';
 import qs from 'qs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI as createBingxAPI } from '../exchanges/bingx/bingx.api';
-import { createAPI as createBitgetAPI } from '../exchanges/bitget/bitget.api';
-import { createAPI as createBlofinAPI } from '../exchanges/blofin/blofin.api';
-import { createAPI as createKucoinAPI } from '../exchanges/kucoin/kucoin.api';
-import { ENDPOINTS as KUCOIN } from '../exchanges/kucoin/kucoin.types';
-import { createAPI as createKrakenSpotAPI } from '../exchanges/kraken/krakenspot.api';
-import { createAPI as createWeexAPI } from '../exchanges/weex/weex.api';
+import { createAPI as createBingxAPI } from './reference/bingx/bingx.api';
+import { createAPI as createBitgetAPI } from './reference/bitget/bitget.api';
+import { createAPI as createBlofinAPI } from './reference/blofin/blofin.api';
+import { createAPI as createKucoinAPI } from './reference/kucoin/kucoin.api';
+import { ENDPOINTS as KUCOIN } from './reference/kucoin/kucoin.types';
+import { createAPI as createKrakenSpotAPI } from './reference/kraken/krakenspot.api';
+import { createAPI as createWeexAPI } from './reference/weex/weex.api';
 import { virtualClock } from '../utils/virtualClock';
 
 // A retry — axios-retry, or a venue's resend on a signature rejection — replays the

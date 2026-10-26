@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { reverseWsSymbol } from '../exchanges/bitrue/bitrue.utils';
+import { reverseWsSymbol } from './reference/bitrue/bitrue.utils';
 
 describe('Bitrue symbol normalization', () => {
   it('normalizes websocket symbols with USDT/USDC/USD quotes', () => {
