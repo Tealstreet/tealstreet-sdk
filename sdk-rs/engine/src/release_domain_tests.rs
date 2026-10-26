@@ -44,7 +44,9 @@ const ALGO_ORDER: Pacing = Pacing {
     group: 12,
     minimum_gap_ms: 0.,
 };
-// MEXC: one submit clock at a 450 ms base, and a 1500 ms multi-order job gap.
+// Two entries on one clock (a 450 ms base and a 1500 ms outer gap). MEXC needs
+// this charging too, but only with Declared membership (the defer_pacing slice):
+// under AllRest or Mutations its cancels would queue behind a 1500 ms head.
 const SUBMIT: Pacing = Pacing {
     group: 20,
     minimum_gap_ms: 450.,
@@ -60,7 +62,8 @@ const SUBMIT_JOB: Pacing = Pacing {
 
 /// `D`: 0 no domain, 1 an all-REST domain on the registered group, 2 a domain
 /// naming an unregistered group, 3 a Mutations domain, 4 a Mutations domain
-/// on the registered zero-gap group, 5 WOO's admissible set, 6 MEXC's.
+/// on the registered zero-gap group, 5 WOO's admissible set, 6 two entries
+/// sharing one clock.
 #[derive(Default)]
 struct Fifo<const D: u8>;
 
@@ -812,7 +815,7 @@ fn an_inadmissible_pacing_is_invalid_and_spends_nothing() {
 }
 
 #[test]
-fn mexc_job_gap_and_base_gap_share_one_submit_clock() {
+fn two_entries_on_one_clock_charge_their_own_gaps() {
     let mut e = engine::<6>();
     release(&mut e, SUBMIT_JOB, 0, 0.);
     assert_eq!(

@@ -270,7 +270,7 @@ and the 256 bound, Hyperliquid's builder prerequisites.
   - clippy in every mode, wasm32 clippy and bans;
   - one PR run on a frozen head.
 
-## Admissible pacing sets (WOO, MEXC)
+## Admissible pacing sets (WOO)
 
 A domain declares `pacings: &'static [Pacing]` instead of one pacing. The FIFO
 is unchanged: one head, in acceptance order. What changes is which pacing a
@@ -282,8 +282,12 @@ member may carry and so which floors its Claim waits on.
   `release + max(registered gap, the entry's gap)`, and the next head waits on
   its own entry's constraints. So WOO's PUT `{GLOBAL, 200}` charges the shared
   100 ms clock at 200, an algo `{ALGO_SET}` charges both GLOBAL and the 500 ms
-  algo clock, and ordinary writes never touch the algo clock. MEXC's
-  `{SUBMIT, 0}` and `{SUBMIT, 1500}` share one 450 ms submit clock.
+  algo clock, and ordinary writes never touch the algo clock.
+- **Not yet MEXC.** MEXC's `{SUBMIT, 0}` and `{SUBMIT, 1500}` would charge
+  correctly, but native MEXC queues only submit and batch. `AllRest` or
+  `Mutations` would stamp its cancels and hold them behind a 1500 ms job head
+  (fe7lgm F1). MEXC adopts with a `Declared` membership mode, where only a
+  request naming an admissible pacing is a member, in the defer_pacing slice.
 - **Validation.** Engine construction resolves every entry against the
   registered groups and sets (finite gap of 0 or more), with 1 to 16 entries.
 - **Per-call choice** within a serial Plan is #2224's `SerialCall.pacing`,
