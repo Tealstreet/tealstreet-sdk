@@ -397,6 +397,16 @@ impl KrakenSpot {
     }
 }
 impl Venue for KrakenSpot {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_orders(cx);
+    }
+
     #[inline]
     fn dispatch_nonce() -> bool {
         true

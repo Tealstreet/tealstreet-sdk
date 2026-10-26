@@ -31,6 +31,27 @@ fn result(e: &mut Driver) -> Result<String, String> {
 fn request(e: &mut Driver) -> HttpRequest {
     requests(e).pop().expect("history request")
 }
+/// The provider signs at release, so a delayed page is prepared at its clock.
+fn request_at(e: &mut Driver, now: f64) -> HttpRequest {
+    safe_cex_engine::test_support::prepared_actions(e, now)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .next_back()
+        .expect("history request")
+}
+/// The venue's spacing timer: command roots also arm their own deadlines.
+fn earliest_timer(out: Vec<Action>) -> (safe_cex_engine::TimerId, f64) {
+    out.into_iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap()
+}
 fn page(rows: &str, total: usize, number: u32) -> String {
     format!(
         r#"{{"success":true,"data":{{"rows":[{rows}],"meta":{{"total":{total},"current_page":{number},"records_per_page":500}}}}}}"#
@@ -103,7 +124,7 @@ fn fills_preserve_large_ids_filters_seconds_and_fee_details() {
     assert!(
         signed
             .1
-            .starts_with("2000GET/v1/trades?symbol=PERP_BTC_USDC&")
+            .starts_with("1000GET/v1/trades?symbol=PERP_BTC_USDC&")
     );
     let outside = FILL
         .replace("9007199254740993", "9007199254740994")
@@ -586,24 +607,12 @@ fn funding_commands_and_page_continuations_share_account_rate_slots() {
     ask_with_id(&mut e, 78, income());
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    let (second_timer, second_at) = out
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
-            _ => None,
-        })
-        .unwrap();
+    let (second_timer, second_at) = earliest_timer(out);
     assert_eq!(second_at, 5001.0);
     reply(&mut e, &first, 200, &page(FUNDING, 2, 1));
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    let (page_timer, page_at) = out
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
-            _ => None,
-        })
-        .unwrap();
+    let (page_timer, page_at) = earliest_timer(out);
     assert_eq!(page_at, 8002.0);
     e.handle(
         second_at,
@@ -611,7 +620,7 @@ fn funding_commands_and_page_continuations_share_account_rate_slots() {
             timer: second_timer,
         },
     );
-    let second = request(&mut e);
+    let second = request_at(&mut e, second_at);
     assert!(second.url.contains("page=1"));
     assert_eq!(
         second
@@ -623,7 +632,7 @@ fn funding_commands_and_page_continuations_share_account_rate_slots() {
         "5001"
     );
     e.handle(page_at, Event::TimerFired { timer: page_timer });
-    let continuation = request(&mut e);
+    let continuation = request_at(&mut e, page_at);
     assert!(continuation.url.contains("page=2"));
     assert_eq!(
         continuation
@@ -652,13 +661,10 @@ fn funding_timers_delayed_by_host_throttling_cannot_dispatch_together() {
     let mut timers = vec![];
     for command in 78..80 {
         ask_with_id(&mut e, command, income());
-        timers.extend(actions(&mut e).into_iter().filter_map(|a| match a {
-            Action::SetTimer { timer, .. } => Some(timer),
-            _ => None,
-        }));
+        timers.push(earliest_timer(actions(&mut e)).0);
     }
     e.handle(10000.0, Event::TimerFired { timer: timers[0] });
-    let dispatched = request(&mut e);
+    let dispatched = request_at(&mut e, 10000.0);
     assert_eq!(
         dispatched
             .headers
@@ -671,16 +677,10 @@ fn funding_timers_delayed_by_host_throttling_cannot_dispatch_together() {
     e.handle(10000.0, Event::TimerFired { timer: timers[1] });
     let out = actions(&mut e);
     assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    let (timer, at) = out
-        .into_iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
-            _ => None,
-        })
-        .unwrap();
+    let (timer, at) = earliest_timer(out);
     assert!(at >= 13001.0);
     e.handle(at, Event::TimerFired { timer });
-    let dispatched = request(&mut e);
+    let dispatched = request_at(&mut e, at);
     assert_eq!(
         dispatched
             .headers
@@ -762,7 +762,13 @@ fn owned_first_failures_are_typed_and_filtered_rows_cannot_authorize_partial() {
                 ),
             }
             let error = owned_terminal(&mut e, 77, false).unwrap_err();
-            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+            // A lost request is typed Network; a delivered failure stays Internal.
+            let kind = if failure == 2 {
+                safe_cex_engine::ErrorKind::Network
+            } else {
+                safe_cex_engine::ErrorKind::Internal
+            };
+            assert_eq!(error.kind, Some(kind));
         }
     }
 }
@@ -937,25 +943,14 @@ fn owned_concurrent_reads_do_not_share_rows_or_markers() {
 
 #[test]
 fn owned_signing_refusal_after_accepted_page_is_strict() {
-    let (mut e, _) = ready();
+    let (mut e, _, refuse) = ready_refusable();
     actions(&mut e);
     ask(&mut e, fills(None, None, 100));
     let r = request(&mut e);
-    let body = page(FILL, 2, 1);
-    // A bad host clock makes native header preparation refuse the continuation.
-    // It must never turn accepted output into a partial signing success.
-    e.handle(
-        -1.0,
-        Event::HttpResponse {
-            request: r.id,
-            response: safe_cex_engine::Response {
-                status: 200,
-                headers: "",
-                body: &body,
-            },
-        },
-    );
+    // The provider refuses to sign the continuation. That must never turn
+    // accepted output into a partial signing success.
+    refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+    reply(&mut e, &r, 200, &page(FILL, 2, 1));
     let error = owned_terminal(&mut e, 77, false).unwrap_err();
-    assert!(error.message.contains("invalid clock"));
-    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
 }
