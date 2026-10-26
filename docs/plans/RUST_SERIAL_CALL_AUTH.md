@@ -114,3 +114,17 @@ serial adopter and local combined on the landing tip, jobs 4 and one Cargo at a
 time; delete each scratch target after measurement. Report exact deltas without
 inferring zero from enum layout. Existing caps hold; auditor exact-tree GO is
 required for this engine PR. No venue activation or hosted allowlist widening.
+
+## Original qualification
+
+The inert declaration checkpoint compiles the genuine login/command controls:
+with serial-plans, session-bearer, condition-waits, http-mutation-barriers and
+sign-meta, twelve controls execute: seven assertion REDs and five GREENs. Five
+REDs stop at matching credential-Session entry; their later custody, mismatch,
+retirement and provider-count suffixes are source-stage obligations. Two REDs
+pin ignored Session/no-root and Preflight/keyless declarations. With serial-plans
+without session-bearer, the additional control is an assertion RED because the
+Session tag is ignored. An initial Option<bool> fixture compile error is excluded.
+The original credential-Session negative is deliberately amended at source:
+matching installed credentials become valid; foreign or absent installed refs
+remain refused. No old financial or signed-adopter assertion is removed.

@@ -1158,6 +1158,22 @@ mod serial_plans {
         assert_eq!(done(&actions).as_deref(), Some("[]"));
     }
 
+    #[cfg(not(feature = "session-bearer"))]
+    #[test]
+    fn session_auth_without_the_feature_refuses_before_ids() {
+        let mut e = engine(Serial {
+            total: 1,
+            first: Some(SerialCall {
+                auth: crate::request_context::plan::CallAuth::Session,
+                ..mutation()
+            }),
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        assert_eq!(e.venue.admitted, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.refusal_spent_nothing, Some(true));
+    }
+
     #[test]
     fn serial_08_admission_refusals_spend_nothing() {
         for venue in [
