@@ -351,15 +351,11 @@ settlement hooks are removed, then GREEN when restored. The composed tree still
 requires its registry, bridge, inventory, replay and shipping-size qualification
 before READY; the PR records the exact heads and receipts.
 
-The request map retains three unchanged opaque observations: trading's
-0bc3151ddc1e8889eb3a752d5431f3ab5643750a38409c18c5e239d38dcfc4b2
-(matches!(&request, Request::Submit(_))), and history's
-5b3fa60c35b90d7d54c1c78a6208717da15fe27f3581b790ac0bc0f5cc640ca1 and
-2cb4373904a9bd645f5f03689ee4a667afacb9de41ec48ddb42d1b05efe59004
-(matches!(request.read, Read::Trades / Read::Income(IncomeKind::All))). They
-are inherited checker false positives, not sends. Seventeen observations are
-removed; every actual remaining send is managed. No source rewrite hides these
-payloads; the checker owner receives the shapes for its separate precision work.
+The request map has no remaining Lighter rows. The source removes seventeen
+legacy observations; landed checker precision #2227 proves the three unchanged
+matches! payloads, removing their false positives without a venue rewrite or
+exemption. Every remaining send is managed. The signing map also has no Lighter
+rows after removing its thirteen legacy observations.
 
 Expired Background preparations and physical reads release their own inflight
 state from the engine failure callback even when the Context is past its clock.
