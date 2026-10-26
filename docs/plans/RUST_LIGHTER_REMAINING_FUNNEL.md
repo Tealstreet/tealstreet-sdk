@@ -2,9 +2,8 @@
 
 Status: local plan on landing tip fff73624e8578c623a41875b3946d0c665f561af.
 Owner: codex-ih35js. One venue PR will contain this plan, original regressions
-and the source. Reviewer: claude-dazzy3 or claude-55ao7t. Existing recipe and
-venue ownership are being reconciled with claude-m26ps4 and codex-zs5e83 before
-source edits. Historical plans are evidence, not clearance for this cutover.
+and the source. Reviewer: claude-dazzy3 or claude-55ao7t. The overseer confirms sole venue ownership; codex-zs5e83’s old lane is inactive.
+claude-m26ps4 retains recipe/provider ownership. Historical plans are evidence, not clearance for this cutover.
 
 ## Outcome and boundary
 
@@ -81,16 +80,29 @@ Lighter. Preserve public-only and keyless operation and account/API-index public
 metadata. Refuse foreign identities and unsupported material/setup injection.
 Fixture setup moves genuine synthetic keys into test support, not production.
 
-### Signing prerequisites to resolve before source
+### Signing prerequisite and pinned API
 
-At this base TxRecipe exists, but AuthRecipe is absent, the registry still
-passes the scalar to LighterOptions, and LocalSigner::can_sign reports
-SchnorrDigest unsupported through implemented(). The historical recipe contract
-assigns the cfg(schnorr) capability activation to the venue admission cutover.
-Confirm its ownership with the recipe owner; do not silently advertise remote
-support or bypass can_sign. A missing shared setup/provider capability is raised
-to its owner, not replaced by venue-local cryptography. Generic/shared changes
-retain their required review and measurement gates.
+claude-m26ps4 owns parts 2+3 as one prerequisite PR: AuthRecipe and the missing
+SchnorrDigest public-key arm/checks. This venue PR does not implement those
+bodies and cannot land before that prerequisite. LocalSigner capability
+activation, implemented(SchnorrDigest) = cfg!(feature = "schnorr"), remains in
+this admission cutover, in the same change that deletes the eager holder.
+Remote recipe IDs and verification remain held behind #1926; no unsupported
+remote capability is advertised.
+
+The pinned API is /tmp/m26ps4-lighter-auth-pubkey-api.md, SHA256
+e39c539593fd395473613e08686ece486fa9fe60c7ec17391f516017afd66aff.
+AuthRecipe::new(identity, account, placement) accepts AuthPlacement::Query,
+Header, or WsSubscribe { channel }. Query appends the final auth parameter;
+Header appends authorization; WS owns the escaped subscription frame. It
+refuses an existing auth parameter/header. Preparation binds the outbound
+method/host/path, uses floor(stamp/1000)+60 and fresh dispatch entropy; apply
+requires exactly one 80-byte result. Receipt expiry is deadline*1000 and the
+signing window is five seconds. This fits all three current native placements.
+The provider public-key result is canonical, on-curve, 40 bytes; malformed or
+zero scalar material is refused at trusted setup. codex-uufub4 or
+claude-55ao7t supplies API/plan-fit review; historical venue ownership does not
+substitute for that review.
 
 ## Background reads and publication
 
