@@ -1153,6 +1153,149 @@ mod tests {
         (signer, ids.primary.unwrap().signing_ref().unwrap().clone())
     }
 
+    /// A declared Schnorr ref installed without setup's key check.
+    fn installed_schnorr(key: &[u8]) -> (LocalSigner, KeyRef) {
+        let mut signer = LocalSigner::new();
+        let reference = KeyRef("installed.schnorr".into());
+        signer
+            .insert_declared(reference.clone(), key.to_vec(), Algorithm::SchnorrDigest)
+            .unwrap();
+        (signer, reference)
+    }
+
+    fn schnorr_public_request(key: KeyRef) -> (Operation, SignRequest) {
+        let operation = Operation::PublicKey {
+            algorithm: Algorithm::SchnorrDigest,
+            key,
+        };
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![operation.clone()],
+        };
+        (operation, request)
+    }
+
+    /// R6: the provider's public key is Lighter's derivation, passes the
+    /// semantic check and verifies a signature from the same declared ref.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_key_matches_derivation_and_verifies_its_signature() {
+        use goldilocks_crypto::ScalarField;
+        let key = ScalarField::NEG_ONE.to_bytes_le();
+        let (signer, signing) = schnorr_signer(&key);
+        let (operation, request) = schnorr_public_request(signing.clone());
+        let mut result = signer.sign_now(&request).unwrap();
+        let public = result.values.remove(0);
+        assert_eq!(public, crate::lighter::public_key(&key).unwrap().to_vec());
+        assert!(valid_public_value(&operation, &public));
+        let input = [7u8; 16];
+        let mut payload = vec![0x22; 32];
+        payload.extend_from_slice(&input);
+        let signature = signer
+            .sign_now(&schnorr_request(signing, payload))
+            .unwrap()
+            .values
+            .remove(0);
+        assert!(crate::lighter::schnorr_verify(&input, &public, &signature).unwrap());
+    }
+
+    /// The derived public key is always canonical (each limb below p), as Go
+    /// emits it; this scalar's point once encoded a limb as an unreduced p.
+    #[test]
+    fn lighter_public_keys_are_canonically_encoded() {
+        use goldilocks_crypto::ScalarField;
+        const P: u64 = 0xFFFF_FFFF_0000_0001;
+        let public = crate::lighter::public_key(&ScalarField::NEG_ONE.to_bytes_le()).unwrap();
+        assert!(
+            public
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .all(|limb| u64::from_le_bytes(*limb) < P)
+        );
+        assert!(crate::lighter::is_public_key(&public));
+    }
+
+    /// R6: off-curve, non-canonical, neutral and wrong-width public values fail
+    /// the setup-boundary check.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_values_must_be_canonical_on_curve_points() {
+        use goldilocks_crypto::ScalarField;
+        let (operation, _) = schnorr_public_request(KeyRef("k".into()));
+        let good = crate::lighter::public_key(&ScalarField::NEG_ONE.to_bytes_le()).unwrap();
+        assert!(valid_public_value(&operation, &good));
+        // A flipped bit is no negative here: about half of all field elements
+        // encode some valid point. Non-canonical limbs, the neutral point and
+        // wrong widths are refused deterministically.
+        // The first little-endian limb at u64::MAX is at or above the
+        // Goldilocks prime, so this encoding is never canonical.
+        let mut noncanonical = good;
+        noncanonical[..8].fill(0xff);
+        for value in [
+            noncanonical.to_vec(),
+            [0u8; 40].to_vec(),
+            [0xff; 40].to_vec(),
+            good[..39].to_vec(),
+            [good.to_vec(), vec![0]].concat(),
+        ] {
+            assert!(!valid_public_value(&operation, &value), "{value:?}");
+        }
+    }
+
+    /// R6: the public-key arm applies the sign arm's key rule.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_key_refuses_noncanonical_and_zero_keys() {
+        use goldilocks_crypto::ScalarField;
+        for key in [
+            [0u8; 40].to_vec(),
+            ScalarField::N.to_bytes_le().to_vec(),
+            [0xff; 40].to_vec(),
+            vec![1; 39],
+        ] {
+            let (signer, signing) = installed_schnorr(&key);
+            let (_, request) = schnorr_public_request(signing);
+            assert_eq!(signer.sign_now(&request), Err(SignError::InvalidRequest));
+        }
+    }
+
+    /// R6: trusted setup refuses a declared Schnorr key the arms would refuse
+    /// (refused, never reduced), and accepts a canonical one.
+    #[test]
+    fn schnorr_setup_refuses_noncanonical_declared_keys() {
+        use goldilocks_crypto::ScalarField;
+        let setup = |key: &[u8]| {
+            let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+            try_public_setup(
+                serde_json::json!({"primary":{"signingAlgorithm":"schnorrDigest"}}),
+                serde_json::json!({"primary":{"key":"k","secret":hex,"secretEncoding":"hex"}}),
+            )
+            .map(drop)
+        };
+        for key in [
+            [0u8; 40].to_vec(),
+            ScalarField::N.to_bytes_le().to_vec(),
+            [0xff; 40].to_vec(),
+            vec![1; 39],
+        ] {
+            assert_eq!(setup(&key), Err(SignError::InvalidRequest), "{}", key.len());
+        }
+        assert_eq!(setup(&ScalarField::NEG_ONE.to_bytes_le()), Ok(()));
+    }
+
+    /// Without the schnorr feature the public-key arm refuses as Unsupported.
+    #[cfg(not(feature = "schnorr"))]
+    #[test]
+    fn schnorr_public_key_is_unsupported_without_the_feature() {
+        let mut key = [0u8; 40];
+        key[0] = 1;
+        let (signer, signing) = installed_schnorr(&key);
+        let (_, request) = schnorr_public_request(signing);
+        assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
+    }
+
     /// R1: payloads without full entropy, or without whole input words, are refused.
     #[cfg(feature = "schnorr")]
     #[test]
@@ -1240,7 +1383,10 @@ mod tests {
             short,
             long,
         ] {
-            let (signer, signing) = schnorr_signer(&key);
+            // Installed directly: declared setup now refuses these keys first
+            // (schnorr_setup_refuses_noncanonical_declared_keys), so this
+            // pins the sign arm's own refusal.
+            let (signer, signing) = installed_schnorr(&key);
             assert_eq!(
                 signer.sign_now(&schnorr_request(signing, payload.clone())),
                 Err(SignError::InvalidRequest),

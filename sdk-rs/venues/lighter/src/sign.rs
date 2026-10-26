@@ -320,13 +320,7 @@ impl Signer {
         schnorr_nonce: Option<SchnorrNonce>,
         fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
     ) -> Result<String, String> {
-        bounded(deadline_seconds, MAX_ORDER_VALUE, "authentication deadline")?;
-        let message = format!(
-            "{deadline_seconds}:{}:{}",
-            self.account.account_index, self.account.api_key_index
-        );
-        let mut data = message.as_bytes().to_vec();
-        data.resize(data.len().div_ceil(8) * 8, 0);
+        let (message, data) = auth_message(&self.account, deadline_seconds)?;
         let signature = match schnorr_nonce {
             Some(nonce) => schnorr_sign(&data, self.key.as_ref(), nonce)?,
             None => hedged_sign_with_entropy(&data, self.key.as_ref(), fill)?,
@@ -684,6 +678,109 @@ impl SignStep for TxRecipe {
             .collect::<Result<Vec<_>, _>>()?;
         http.body = Some(send_body(&signed).1);
         Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
+/// The one auth-token canonicalization: `"{deadline}:{account}:{api_key}"`,
+/// and its signed form zero-padded to whole 8-byte words.
+fn auth_message(account: &Account, deadline_seconds: u64) -> Result<(String, Vec<u8>), String> {
+    bounded(deadline_seconds, MAX_ORDER_VALUE, "authentication deadline")?;
+    let message = format!(
+        "{deadline_seconds}:{}:{}",
+        account.account_index, account.api_key_index
+    );
+    let mut data = message.as_bytes().to_vec();
+    data.resize(data.len().div_ceil(8) * 8, 0);
+    Ok((message, data))
+}
+
+/// Where a signed auth token goes, exactly as Lighter's private reads use it.
+pub enum AuthPlacement {
+    /// Appended as the final `auth=` query parameter.
+    Query,
+    /// The `authorization` request header.
+    Header,
+    /// The private subscribe frame on this socket.
+    WsSubscribe {
+        socket: safe_cex_engine::SocketId,
+        channel: String,
+    },
+}
+
+/// Dispatch recipe for one auth token. Each preparation stamps a fresh
+/// 60-second deadline and draws fresh entropy; apply places the token.
+pub struct AuthRecipe {
+    identity: Identity,
+    account: Account,
+    origin: String,
+    placement: AuthPlacement,
+    message: Option<String>,
+}
+impl AuthRecipe {
+    pub fn new(
+        identity: Identity,
+        account: Account,
+        origin: String,
+        placement: AuthPlacement,
+    ) -> Self {
+        Self {
+            identity,
+            account,
+            origin,
+            placement,
+            message: None,
+        }
+    }
+    /// The outbound this recipe is bound to: an HTTP request under this
+    /// origin's API, or a send on its own socket.
+    fn target(&self, outbound: &Action) -> Result<(String, String, String), SignError> {
+        let host = self
+            .origin
+            .split_once("://")
+            .map(|(_, host)| host)
+            .filter(|host| !host.is_empty() && !host.contains('/'))
+            .ok_or(SignError::InvalidRequest)?;
+        match (&self.placement, outbound) {
+            (AuthPlacement::Query | AuthPlacement::Header, Action::Http(http)) => {
+                let path = http
+                    .url
+                    .strip_prefix(self.origin.as_str())
+                    .filter(|path| path.starts_with("/api/v1/"))
+                    .ok_or(SignError::InvalidRequest)?;
+                let path = path.split_once('?').map_or(path, |(path, _)| path);
+                Ok((http.method.as_str().into(), host.into(), path.into()))
+            }
+            (AuthPlacement::WsSubscribe { socket, .. }, Action::WsSend { socket: actual, .. })
+                if socket == actual =>
+            {
+                Ok(("WS".into(), host.into(), "/stream".into()))
+            }
+            _ => Err(SignError::InvalidRequest),
+        }
+    }
+}
+impl SignStep for AuthRecipe {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        // RED stub: refuses before signing.
+        let _ = (
+            &self.identity,
+            &self.account,
+            &self.message,
+            dispatch,
+            self.target(outbound),
+        );
+        Err(SignError::InvalidRequest)
+    }
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        let _ = (outbound, result);
+        Err(SignError::InvalidResult)
     }
     fn freshness_ms(&self) -> f64 {
         5000.

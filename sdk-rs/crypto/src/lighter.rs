@@ -42,6 +42,10 @@ pub fn public_key(key: &[u8]) -> Result<[u8; 40], String> {
     let key = ScalarField::from_bytes_le(&scalar(key)?)?;
     Ok(Point::generator().mul(&key).encode().to_bytes_le())
 }
+/// RED stub: replaced by the canonical point check.
+pub fn is_public_key(_value: &[u8]) -> bool {
+    false
+}
 /// A canonical, nonzero secret nonce, consumed by signing and never Clone/Copy.
 /// Hosts must supply fresh CSPRNG output; construction rejects broken all-zero entropy.
 /// ```compile_fail
