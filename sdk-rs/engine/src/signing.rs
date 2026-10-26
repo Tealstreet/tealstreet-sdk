@@ -82,6 +82,8 @@ pub enum KeyEncoding {
     Base64Text,
     /// Bitcoin-alphabet base58 (Orderly ed25519 seeds); no prefix is stripped.
     Base58,
+    /// URL-safe or standard base64, padding optional (Polymarket API secrets).
+    Base64Url,
 }
 
 /// Closed vocabulary of additional per-identity signing material. These refs
@@ -490,6 +492,9 @@ pub enum Encoding {
     Base64,
     /// BloFin's base64(ASCII lowercase hex(MAC)).
     Base64Hex,
+    /// Lowercase hex of a Secp256k1Digest `r || s || recovery` with the
+    /// recovery id rendered as 27 or 28 (EVM `v`). Any other shape refuses.
+    EvmHex,
 }
 
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
