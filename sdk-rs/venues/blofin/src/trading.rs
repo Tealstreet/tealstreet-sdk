@@ -7,9 +7,12 @@ use safe_cex_engine::classify::{
 };
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::model::*;
-use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
+use safe_cex_engine::request_context::plan::{
+    CallBound, MutationBarrierBound, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound,
+};
 use safe_cex_engine::request_context::{
-    HttpOwnerRetirement, Plan, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData,
+    HttpOwnerRetirement, Plan, PlanPolicy, Preflight, PreflightPolicy, PreflightPurpose,
+    ReconciliationData, RetryPolicy,
 };
 use safe_cex_engine::{CommandWait, ErrorKind, Outcome, VenueError};
 use serde::{Deserialize, Serialize};
@@ -114,12 +117,27 @@ struct Active {
     preflight: Preflight,
     plan: Option<Plan>,
     job: Job,
+    /// The hedged leverage barrier join (W2): both legs in flight at once.
+    join: Option<Join>,
+}
+/// Each leg settles exactly once; the terminal follows both (native wait-both).
+struct Join {
+    settled: [bool; 2],
+    error: Option<VenueError>,
 }
 pub struct Request {
     command: CommandId,
     slot: Slot,
     context: Context,
     step: Step,
+    /// The barrier join leg (0 long, 1 short); serial calls carry none.
+    leg: Option<usize>,
+}
+impl Request {
+    /// A hedged leverage barrier leg: the only group the release hook admits.
+    pub(crate) fn is_join_leg(&self) -> bool {
+        self.leg.is_some() && matches!(self.step.effect, Effect::Setting)
+    }
 }
 /// Where the active job is driven from: entry custody, the current call's
 /// DATA, or a Plan-ready callback holding the next slot.
@@ -377,6 +395,18 @@ impl Job {
             commit: Commit::None,
             join: false,
         }
+    }
+}
+impl Job {
+    /// Exactly the two hedged isolated set-leverage legs, planned at dequeue.
+    fn is_hedged_join(&self) -> bool {
+        self.join
+            && self.steps.len() == 2
+            && self.steps.iter().all(|step| {
+                matches!(step.effect, Effect::Setting)
+                    && step.path == "/api/v1/account/set-leverage"
+                    && step.delay == 0.0
+            })
     }
 }
 impl Step {
@@ -1377,8 +1407,141 @@ impl Blofin {
             preflight,
             plan: None,
             job,
+            join: None,
         };
+        if active.job.is_hedged_join() {
+            return self.start_join(cx, active);
+        }
         self.drive(cx, active, At::Entry);
+    }
+    /// W2: both hedged legs prepare and sign before either is released
+    /// (`MutationBarrierBound`); `independent_calls` lets each settle alone.
+    fn start_join(&mut self, cx: &mut Cx<'_, Pending>, mut active: Active) {
+        let Some((credential, identity)) = self.trade_identity(CredentialRole::Mutation) else {
+            return self.end(
+                cx,
+                active,
+                None,
+                not_sent("BloFin requires API credentials"),
+            );
+        };
+        let call = || CallBound {
+            timeout_ms: CALL_MS,
+            attempts: 1,
+            retry_window: RetryWindow::FreshAttempt,
+            after_refusal: &[],
+        };
+        let calls = [call(), call()];
+        let steps = [StepBound {
+            wait_ms: 0,
+            calls: &calls,
+        }];
+        let policy = PlanPolicy {
+            independent_calls: true,
+            operation: Operation::Mutation,
+            credential: Some(credential),
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        let barrier = [MutationBarrierBound { step: 0 }];
+        let plan = match cx.admit_plan_with_barriers(&active.preflight, &steps, policy, &barrier) {
+            Ok(plan) => plan,
+            Err(reason) => {
+                let error = not_sent(reason.venue_error().message);
+                return self.end(cx, active, None, error);
+            }
+        };
+        active.plan = Some(plan.clone());
+        active.join = Some(Join {
+            settled: [false; 2],
+            error: None,
+        });
+        // Slots are in declaration order: long, then short.
+        let slots = cx.plan_slots(&plan).unwrap_or_default();
+        if slots.len() != 2 {
+            let error = VenueError::new("BloFin hedged leverage Plan did not admit two legs");
+            return self.end(cx, active, None, error);
+        }
+        let mut legs = Vec::with_capacity(2);
+        for (leg, (slot, step)) in slots
+            .into_iter()
+            .zip(active.job.steps.drain(..))
+            .enumerate()
+        {
+            legs.push((leg, slot, step));
+        }
+        let mut queued = Vec::with_capacity(2);
+        for (leg, slot, step) in legs {
+            match cx.plan_leg_context(&plan, &slot) {
+                Ok(context) => queued.push((leg, slot, context, step)),
+                Err(reason) => {
+                    let error = VenueError::new(reason.venue_error().message);
+                    return self.end(cx, active, None, error);
+                }
+            }
+        }
+        let command = active.job.command;
+        self.trading.active = Some(active);
+        for (leg, slot, context, step) in queued {
+            let path = step.path.to_owned();
+            let body = Some(step.body.clone());
+            let recipe = crate::dispatch_signing::Http::new(
+                identity.clone(),
+                self.options.testnet,
+                Method::Post,
+                path.clone(),
+                body.clone(),
+            );
+            let request = Request {
+                command,
+                slot,
+                context: context.clone(),
+                step,
+                leg: Some(leg),
+            };
+            if let Err((pending, reason)) = cx.request_signed_managed(
+                context,
+                None,
+                Method::Post,
+                format!("{}{path}", self.host()),
+                body,
+                Box::new(recipe),
+                Pending::Trade(Box::new(request)),
+            ) && let Pending::Trade(request) = pending
+            {
+                // A synchronous refusal ends the Plan once; nothing was released.
+                return self.trade_call_failed(cx, *request, reason.venue_error(), false);
+            }
+        }
+    }
+    /// One join leg settled (its fact is already recorded). The terminal and
+    /// any commit follow only once both legs have settled.
+    fn settle_join_leg(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut active: Active,
+        leg: usize,
+        error: Option<VenueError>,
+    ) {
+        let join = active.join.as_mut().expect("join job");
+        if join.settled[leg] {
+            self.trading.active = Some(active);
+            return;
+        }
+        join.settled[leg] = true;
+        if let Some(error) = error {
+            // Native kept the last failure; the journal selects the terminal text.
+            join.error = Some(error);
+        }
+        if !join.settled.iter().all(|settled| *settled) {
+            self.trading.active = Some(active);
+            return;
+        }
+        let error = join.error.take();
+        match error {
+            Some(error) => self.end(cx, active, None, error),
+            None => self.finish(cx, active, None),
+        }
     }
     /// Advances the active job from `at`: abort on execution progress, admit
     /// or continue the next call, or settle.
@@ -1518,6 +1681,7 @@ impl Blofin {
             slot,
             context: context.clone(),
             step,
+            leg: None,
         };
         self.trading.active = Some(active);
         if let Err((pending, reason)) = cx.request_signed_managed(
@@ -1771,6 +1935,11 @@ impl Blofin {
             }
             let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
         }
+        // A released join leg's failure is engine-recorded; it settles that leg.
+        // An unreleased one is a pre-barrier abort and ends the Plan once.
+        if released && let Some(leg) = request.leg.filter(|_| active.join.is_some()) {
+            return self.settle_join_leg(cx, active, leg, Some(error));
+        }
         self.end(cx, active, None, error);
     }
     pub(crate) fn trade_response(
@@ -1820,6 +1989,15 @@ impl Blofin {
                 let error = VenueError::new("BloFin replacement final order verification failed");
                 self.end(cx, active, current, error)
             };
+        }
+        if let Some(leg) = request.leg.filter(|_| active.join.is_some()) {
+            let error = self
+                .write_answer(cx, &mut active.job, &request, &response)
+                .err();
+            let plan = active.plan.clone().expect("join Plan");
+            let finished = cx.finish_plan_call(&plan, &request.slot, &request.context);
+            debug_assert!(finished.is_ok(), "join leg seal stranded");
+            return self.settle_join_leg(cx, active, leg, error);
         }
         if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
             if request.step.is_place() {

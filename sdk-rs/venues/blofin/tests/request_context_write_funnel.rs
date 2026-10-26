@@ -15,8 +15,6 @@ const ACCEPTED_CANCEL: &str = r#"{"code":"0","data":[{"orderId":"12","code":"0"}
 const GONE_CANCEL: &str =
     r#"{"code":"0","data":[{"orderId":"12","code":"1000","msg":"The order has been canceled"}]}"#;
 const CANCELED_DETAIL: &str = r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"0"}}"#;
-const LEVERAGE_OK: &str = r#"{"code":"0","data":{"leverage":"30"}}"#;
-const LEVERAGE_REFUSED: &str = r#"{"code":"110006","msg":"Leverage cannot be adjusted"}"#;
 
 /// Releases pending managed work at `h.now`, recording each Prepare's routing
 /// intent; legacy requests pass through with none.
@@ -236,15 +234,6 @@ fn mode(id: u32, hedged: bool) -> Command {
     }
 }
 
-fn leverage(id: u32) -> Command {
-    Command::SetLeverage {
-        command: id,
-        symbol: "BTCUSDT".into(),
-        leverage: 30.0,
-        side: None,
-    }
-}
-
 fn seeded() -> Harness {
     let mut h = Harness::new();
     h.seed();
@@ -253,61 +242,6 @@ fn seeded() -> Harness {
 
 fn seed_order(h: &mut Harness, id: &str, extra: &str) {
     h.ws(&format!(r#"{{"arg":{{"channel":"orders"}},"data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"{id}","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"{extra}}}]}}"#));
-}
-
-/// A flat account switched to isolated margin and hedge mode.
-fn hedged_isolated() -> Harness {
-    let mut h = Harness::new();
-    h.modes();
-    h.reply("account/positions", r#"{"code":"0","data":[]}"#);
-    h.reply(
-        "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
-    );
-    for path in [
-        "orders-pending",
-        "orders-tpsl-pending",
-        "orders-algo-pending",
-    ] {
-        h.reply(path, r#"{"code":"0","data":[]}"#);
-    }
-    command(&mut h, margin(80, true));
-    reply(
-        &mut h,
-        "set-margin-mode",
-        200,
-        r#"{"code":"0","data":{"marginMode":"isolated"}}"#,
-    );
-    // Settle the margin commit's account refresh, so a join refresh can issue.
-    reply(
-        &mut h,
-        "account/positions",
-        200,
-        r#"{"code":"0","data":[]}"#,
-    );
-    if count(&h, "balances") == 1 {
-        reply(
-            &mut h,
-            "balances",
-            200,
-            r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
-        );
-    }
-    command(&mut h, mode(81, true));
-    reply(
-        &mut h,
-        "set-position-mode",
-        200,
-        r#"{"code":"0","data":{"positionMode":"long_short_mode"}}"#,
-    );
-    h
-}
-
-fn leg(h: &Harness, side: &str) -> usize {
-    h.pending
-        .iter()
-        .filter(|r| r.url.ends_with("set-leverage") && r.body.as_deref().unwrap().contains(side))
-        .count()
 }
 
 // ---- Managed requests ----
@@ -773,108 +707,6 @@ fn a_late_or_duplicate_response_after_a_terminal_changes_nothing() {
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. }))),
     );
     assert!(h.e.store().orders().is_empty());
-}
-
-// ---- W1 serial hedged join (interim until W2's barrier) ----
-
-#[test]
-fn the_hedged_join_sends_short_only_after_long_is_accepted() {
-    let mut h = hedged_isolated();
-    let intents = command(&mut h, leverage(7));
-    assert_eq!((leg(&h, "\"long\""), leg(&h, "\"short\"")), (1, 0));
-    assert_eq!(
-        managed(&h, &intents, "set-leverage").1,
-        RoutingIntent::Primary
-    );
-    let intents = reply(&mut h, "set-leverage", 200, LEVERAGE_OK);
-    assert_eq!((leg(&h, "\"long\""), leg(&h, "\"short\"")), (0, 1));
-    managed(&h, &intents, "set-leverage");
-    assert_ne!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
-    reply(&mut h, "set-leverage", 200, LEVERAGE_OK);
-    succeeded(&h, 7);
-    assert_eq!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
-}
-
-#[test]
-fn a_long_503_never_prepares_short_and_seals_unknown() {
-    let mut h = hedged_isolated();
-    command(&mut h, leverage(7));
-    reply(&mut h, "set-leverage", 503, "Service Unavailable");
-    assert_eq!(count(&h, "set-leverage"), 0, "short is never prepared");
-    assert_eq!(failure(&h, 7).outcome, Some(Outcome::Unknown));
-    assert_ne!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
-}
-
-#[test]
-fn a_long_refusal_never_prepares_short_and_is_rejected() {
-    let mut h = hedged_isolated();
-    command(&mut h, leverage(7));
-    reply(&mut h, "set-leverage", 200, LEVERAGE_REFUSED);
-    assert_eq!(count(&h, "set-leverage"), 0, "short is never prepared");
-    assert_eq!(failure(&h, 7).outcome, Some(Outcome::Rejected));
-}
-
-#[test]
-fn a_short_refusal_after_long_keeps_its_effect_without_commit() {
-    let mut h = hedged_isolated();
-    command(&mut h, leverage(7));
-    reply(&mut h, "set-leverage", 200, LEVERAGE_OK);
-    let positions = count(&h, "account/positions");
-    reply(&mut h, "set-leverage", 200, LEVERAGE_REFUSED);
-    let error = failure(&h, 7);
-    assert_eq!(error.outcome, None, "long took effect: {error:?}");
-    assert_ne!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
-    assert_eq!(
-        count(&h, "account/positions"),
-        positions + 1,
-        "native join refresh"
-    );
-}
-
-#[test]
-fn a_short_503_after_long_is_unknown_without_commit() {
-    let mut h = hedged_isolated();
-    command(&mut h, leverage(7));
-    reply(&mut h, "set-leverage", 200, LEVERAGE_OK);
-    let positions = count(&h, "account/positions");
-    reply(&mut h, "set-leverage", 503, "Service Unavailable");
-    assert_eq!(failure(&h, 7).outcome, Some(Outcome::Unknown));
-    assert_ne!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
-    assert_eq!(
-        count(&h, "account/positions"),
-        positions + 1,
-        "native join refresh"
-    );
-}
-
-#[test]
-fn a_queued_leverage_is_planned_against_the_state_at_its_wake() {
-    let mut h = seeded();
-    command(&mut h, place(7, 1.0));
-    command(&mut h, margin(8, true));
-    command(&mut h, mode(9, true));
-    // Planned at entry this would be one net leg; at its wake it is the join.
-    command(&mut h, leverage(10));
-    reply(
-        &mut h,
-        "batch-orders",
-        200,
-        r#"{"code":"0","data":[{"orderId":"1","code":"0","msg":"success"}]}"#,
-    );
-    reply(
-        &mut h,
-        "set-margin-mode",
-        200,
-        r#"{"code":"0","data":{"marginMode":"isolated"}}"#,
-    );
-    let intents = reply(
-        &mut h,
-        "set-position-mode",
-        200,
-        r#"{"code":"0","data":{"positionMode":"long_short_mode"}}"#,
-    );
-    assert_eq!((leg(&h, "\"long\""), leg(&h, "\"short\"")), (1, 0));
-    managed(&h, &intents, "set-leverage");
 }
 
 // ---- Review pins (dazzy3, 4yjlw0, fe7lgm) ----

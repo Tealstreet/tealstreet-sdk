@@ -663,6 +663,21 @@ impl Venue for Blofin {
             _ => Err(safe_cex_engine::request_context::Error::Invalid),
         }
     }
+    /// Pure group admission for the hedged leverage barrier: only its two
+    /// set-leverage legs, Unscheduled. No state, I/O or interior mutation.
+    fn prepare_group_http_release(
+        &self,
+        pending: &Pending,
+        _release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<safe_cex_engine::request_context::Admission, safe_cex_engine::request_context::Error>
+    {
+        match pending {
+            Pending::Trade(request) if request.is_join_leg() => {
+                Ok(safe_cex_engine::request_context::Admission::Unscheduled)
+            }
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
     fn on_http_preflight_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,

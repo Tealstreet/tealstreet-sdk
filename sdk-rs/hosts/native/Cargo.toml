@@ -12,7 +12,8 @@ default = ["venues"]
 http-plans = ["safe-cex-engine/http-plans"]
 http-mutation-barriers = ["http-plans", "safe-cex-engine/http-mutation-barriers"]
 # Construct any registered venue by name (`FrameServer::add_venue`).
-venues = ["dep:safe-cex-venues", "safe-cex-venues/default"]
+# BloFin (in the default venue set) releases its hedged leverage as a barrier group.
+venues = ["dep:safe-cex-venues", "safe-cex-venues/default", "http-mutation-barriers"]
 
 [dependencies]
 safe-cex-crypto.workspace = true

@@ -139,7 +139,7 @@ fn count(h: &Harness, path: &str) -> usize {
 /// A flat cross/net account whose signing entropy follows `draws`
 /// (UNLIMITED until armed).
 fn flat(draws: Arc<AtomicUsize>) -> Harness {
-    let fill: safe_cex_engine::entropy::Fill = Box::new(move |bytes| {
+    flat_with(Box::new(move |bytes| {
         let left = draws.load(Ordering::SeqCst);
         if left == 0 {
             return Err("signing entropy refused".into());
@@ -149,7 +149,10 @@ fn flat(draws: Arc<AtomicUsize>) -> Harness {
         }
         bytes.fill(7);
         Ok(())
-    });
+    }))
+}
+
+fn flat_with(fill: safe_cex_engine::entropy::Fill) -> Harness {
     let mut h = Harness::with_signing_entropy(fill);
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
@@ -169,7 +172,10 @@ fn flat(draws: Arc<AtomicUsize>) -> Harness {
 
 /// `flat`, switched to isolated margin and hedge mode.
 fn hedged(draws: Arc<AtomicUsize>) -> Harness {
-    let mut h = flat(draws);
+    hedge(flat(draws))
+}
+
+fn hedge(mut h: Harness) -> Harness {
     event(
         &mut h,
         Event::Command(Command::SetMarginType {
@@ -566,4 +572,209 @@ fn root_expiry_retires_the_join_once_and_the_fifo_proceeds() {
         1,
         "the queued command proceeds"
     );
+}
+
+// ---- Held-preparation controls (hcmq3f, 4yjlw0 4) ----
+
+/// Draws after arming fill with 1, 2, ... so a leg's nonce names its draw:
+/// `URL_ALPHABET[1]` is 's' and `[2]` is 'e'.
+fn counted() -> (Harness, Arc<AtomicUsize>) {
+    let next = Arc::new(AtomicUsize::new(0));
+    let draws = next.clone();
+    let h = hedge(flat_with(Box::new(move |bytes| {
+        let value = draws.load(Ordering::SeqCst);
+        if value == 0 {
+            bytes.fill(7);
+        } else {
+            bytes.fill(value as u8);
+            draws.store(value + 1, Ordering::SeqCst);
+        }
+        Ok(())
+    })));
+    (h, next)
+}
+
+/// Every action the engine emits now, without completing any preparation.
+fn pump(h: &mut Harness) -> Vec<Action> {
+    let now = h.now;
+    h.e.prepare_dispatch(now);
+    let mut all = Vec::new();
+    loop {
+        let batch: Vec<_> = h.e.drain_actions().collect();
+        if batch.is_empty() {
+            return all;
+        }
+        all.extend(batch);
+    }
+}
+
+fn is_leverage(request: &HttpRequest) -> bool {
+    request.url.ends_with("set-leverage")
+}
+
+fn prepares(
+    actions: &[Action],
+) -> Vec<(safe_cex_engine::request_context::Preparation, HttpRequest)> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(m) => match m.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if is_leverage(request) => Some((*preparation, request.clone())),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+fn escaped(actions: &[Action]) -> bool {
+    actions.iter().any(|a| match a {
+        Action::Http(request) => is_leverage(request),
+        Action::ManagedHttp(m) => {
+            matches!(m.as_ref(), HttpAction::Bind { request, .. } if is_leverage(request))
+        }
+        _ => false,
+    })
+}
+
+fn complete(h: &mut Harness, preparation: safe_cex_engine::request_context::Preparation, id: u64) {
+    let now = h.now;
+    h.e.http_prepared(
+        now,
+        preparation,
+        Prepared {
+            id,
+            expires_at: None,
+        },
+    );
+}
+
+#[test]
+fn both_preparations_are_held_and_released_as_one_group_in_declaration_order() {
+    let (mut h, next) = counted();
+    next.store(1, Ordering::SeqCst);
+    h.now = h.now.max(1.0);
+    let now = h.now;
+    h.e.handle(
+        now,
+        Event::Command(Command::SetLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+            side: None,
+        }),
+    );
+    let actions = pump(&mut h);
+    let held = prepares(&actions);
+    assert_eq!(held.len(), 2, "two genuine Prepares");
+    assert!(!escaped(&actions), "no early HTTP or individual Bind");
+    let side = |r: &HttpRequest, s: &str| r.body.as_deref().unwrap().contains(s);
+    let long = held
+        .iter()
+        .find(|(_, r)| side(r, "\"long\""))
+        .unwrap()
+        .clone();
+    let short = held
+        .iter()
+        .find(|(_, r)| side(r, "\"short\""))
+        .unwrap()
+        .clone();
+    // Routes complete in reverse; nothing is released until both are ready.
+    complete(&mut h, short.0, short.1.id.0);
+    let actions = pump(&mut h);
+    assert!(!escaped(&actions));
+    assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(m) if matches!(m.as_ref(), HttpAction::BindGroup { .. }))));
+    complete(&mut h, long.0, long.1.id.0);
+    let actions = pump(&mut h);
+    assert!(!escaped(&actions), "still no individual release");
+    let mut groups: Vec<_> = actions
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(m) => match *m {
+                HttpAction::BindGroup { permit, members } => Some((permit, members)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(groups.len(), 1, "exactly one BindGroup");
+    let (permit, members) = groups.remove(0);
+    let packets: Vec<HttpRequest> = members
+        .into_iter()
+        .filter_map(|mut member| member.request.take())
+        .collect();
+    assert_eq!(packets.len(), 2);
+    assert!(side(&packets[0], "\"long\"") && side(&packets[1], "\"short\""));
+    // Signing entropy was drawn in declaration order despite reverse routes.
+    let nonce = |r: &HttpRequest| {
+        r.headers
+            .iter()
+            .find(|(name, _)| *name == "ACCESS-NONCE")
+            .map(|(_, value)| value.clone())
+            .unwrap()
+    };
+    assert_eq!(nonce(&packets[0]), "s".repeat(21), "long signs first");
+    assert_eq!(nonce(&packets[1]), "e".repeat(21));
+    let now = h.now;
+    assert!(matches!(
+        h.e.claim_http_group(now, permit),
+        Ok(GroupClaim::Released(_))
+    ));
+}
+
+#[test]
+fn a_deadline_before_short_is_prepared_sends_nothing_and_refreshes_nothing() {
+    let (mut h, _) = counted();
+    h.now = h.now.max(1.0);
+    let now = h.now;
+    h.e.handle(
+        now,
+        Event::Command(Command::SetLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+            side: None,
+        }),
+    );
+    let actions = pump(&mut h);
+    let held = prepares(&actions);
+    let long = held
+        .iter()
+        .find(|(_, r)| r.body.as_deref().unwrap().contains("\"long\""))
+        .unwrap()
+        .clone();
+    complete(&mut h, long.0, long.1.id.0);
+    let mut actions = actions;
+    actions.extend(pump(&mut h));
+    assert!(!escaped(&actions));
+    let positions = count(&h, "account/positions");
+    // Fire every armed timer through the call bound; short is never prepared.
+    let deadline = h.now + 20_001.0;
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms <= deadline => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at) in timers {
+        h.now = h.now.max(at);
+        let now = h.now;
+        h.e.handle(now, Event::TimerFired { timer });
+        let more = pump(&mut h);
+        assert!(!escaped(&more), "zero HTTP from the step");
+        let notices: Vec<_> = more
+            .into_iter()
+            .filter(|a| !matches!(a, Action::ManagedHttp(_)))
+            .collect();
+        h.collect_actions(notices);
+    }
+    let error = failure(&h, 7);
+    assert!(matches!(error.outcome, Some(Outcome::NotSent)), "{error:?}");
+    assert_eq!(count(&h, "account/positions"), positions, "no join refresh");
+    assert_ne!(leverage(&h), 30.0);
 }

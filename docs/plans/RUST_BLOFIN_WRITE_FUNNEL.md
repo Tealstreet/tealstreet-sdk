@@ -168,6 +168,9 @@ successful terminal.
 
 ## W2 shape (barrier join)
 
+Status: source on `feat/rust-blofin-barrier-join` after W1 landed as #2157
+(`74d16434356`).
+
 W2 restores native parallel release for hedged isolated leverage, replacing
 W1's serial interim. Every other job keeps W1's serial Plan unchanged.
 

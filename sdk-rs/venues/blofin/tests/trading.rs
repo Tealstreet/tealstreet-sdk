@@ -510,9 +510,7 @@ fn margin_default_change_preserves_live_position_margin() {
     );
 }
 #[test]
-/// W1 interim (RUST_BLOFIN_WRITE_FUNNEL.md): short follows long's Accepted;
-/// W2's barrier restores native parallel release.
-fn isolated_hedge_leverage_sends_short_after_long_is_accepted() {
+fn isolated_hedge_leverage_sends_both_sides_before_either_response() {
     let mut h = Harness::new();
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
@@ -563,18 +561,23 @@ fn isolated_hedge_leverage_sends_short_after_long_is_accepted() {
         }),
     );
     h.collect();
-    let leg = |h: &Harness| {
-        let requests = h
-            .pending
+    let requests = h
+        .pending
+        .iter()
+        .filter(|r| r.url.ends_with("set-leverage"))
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests
             .iter()
-            .filter(|r| r.url.ends_with("set-leverage"))
-            .collect::<Vec<_>>();
-        assert_eq!(requests.len(), 1);
-        requests[0].body.clone().unwrap()
-    };
-    assert!(leg(&h).contains("\"long\""));
+            .any(|r| r.body.as_ref().unwrap().contains("\"long\""))
+    );
+    assert!(
+        requests
+            .iter()
+            .any(|r| r.body.as_ref().unwrap().contains("\"short\""))
+    );
     h.reply("set-leverage", r#"{"code":"0","data":{"leverage":"30"}}"#);
-    assert!(leg(&h).contains("\"short\""));
     assert_ne!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
     h.reply("set-leverage", r#"{"code":"0","data":{"leverage":"30"}}"#);
     assert_eq!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
