@@ -251,13 +251,11 @@ fn synchronous_balance_signing_failure_releases_before_the_normal_repair() {
     };
     let unavailable = Arc::new(AtomicBool::new(false));
     let toggle = unavailable.clone();
-    let mut e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
-            key: Some("replay-key".into()),
-            secret: Some("replay-secret".into()),
-            ..Default::default()
-        }),
-    );
+    let mut e = support::engine(support::Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        ..Default::default()
+    });
     e.set_signing_entropy(Box::new(move |bytes| {
         if toggle.load(Ordering::SeqCst) {
             Err("controlled signing unavailable".into())
