@@ -1860,6 +1860,20 @@ fn non_success_write_keeps_typed_native_diagnostics_without_proving_rejection() 
             Some("11001"),
             Some("insufficient balance"),
         ),
+        (
+            500,
+            "<html>upstream unavailable</html>",
+            Some(ErrorKind::VenueUnavailable),
+            None,
+            None,
+        ),
+        (
+            400,
+            r#"{"code":11001,"msg":"insufficient balance","data":{"orderID":"unproven-id"}}"#,
+            Some(ErrorKind::Rejected),
+            Some("11001"),
+            Some("insufficient balance"),
+        ),
     ] {
         let mut e = rejection_engine(vec![live_row("old-live")]);
         let a = command(
@@ -1892,6 +1906,7 @@ fn non_success_write_keeps_typed_native_diagnostics_without_proving_rejection() 
         assert_eq!(error.outcome, Some(Outcome::Unknown), "HTTP {status}");
         assert_eq!(error.retry_after_ms, (status == 429).then_some(2000.));
         assert!(writes(&a).is_empty());
+        assert!(e.store().order("unproven-id").is_none());
         assert_eq!(
             a.iter()
                 .filter(|a| matches!(

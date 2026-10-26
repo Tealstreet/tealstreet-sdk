@@ -192,7 +192,7 @@ pub(crate) fn unproven_diagnostics(
     response: Response<'_>,
     evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
 ) {
-    if let Ok(envelope) = serde_json::from_str::<Envelope>(response.body) {
+    if let Ok(envelope) = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body) {
         if let Some(code) = envelope.code {
             evidence.venue_code(&code.to_string());
         }
@@ -1611,7 +1611,7 @@ impl PhemexPerpetuals {
         let mut refusal_code = None;
         let mut known_effects = false;
         let http_failure = (!(200..300).contains(&response.status))
-            .then(|| serde_json::from_str::<Envelope>(response.body).ok())
+            .then(|| serde_json::from_str::<crate::wire::Envelope<'_>>(response.body).ok())
             .flatten();
         let mut classified_http_error = None;
         let result = (|| {
