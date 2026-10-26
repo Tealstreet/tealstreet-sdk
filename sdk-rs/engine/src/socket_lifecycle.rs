@@ -65,6 +65,8 @@ pub enum AuthRecovery {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrafficPolicy {
+    #[cfg(feature = "socket-native-timing")]
+    Declared,
     PongOnly,
     AnyText,
     TextAfterFirstPong,
@@ -93,6 +95,21 @@ pub struct SocketCapabilities {
 }
 impl SocketCapabilities {
     pub const FULL: Self = Self { handoff: true };
+}
+
+#[cfg(feature = "socket-native-timing")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StableAnchor {
+    #[default]
+    Ready,
+    Open,
+}
+
+#[cfg(feature = "socket-native-timing")]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NativeTiming {
+    pub initial_payload_timeout_ms: Option<f64>,
+    pub stable_anchor: StableAnchor,
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +160,8 @@ pub enum AuthEvidence {
 }
 #[derive(Clone, Debug)]
 pub enum Control {
+    #[cfg(feature = "socket-native-timing")]
+    Traffic,
     Other,
     Pong,
     Auth(AuthEvidence),
@@ -715,6 +734,8 @@ impl Lifecycle {
         }
         f.pong_seen |= pong;
         match f.policy.traffic {
+            #[cfg(feature = "socket-native-timing")]
+            TrafficPolicy::Declared => pong,
             TrafficPolicy::PongOnly => pong,
             TrafficPolicy::AnyText => text,
             TrafficPolicy::TextAfterFirstPong => text && f.pong_seen,
