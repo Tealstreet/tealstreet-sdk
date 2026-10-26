@@ -407,3 +407,37 @@ fn engine_reasks_join_a_slow_post_write_read_that_still_releases() {
     place(&mut h, variant, 82);
     assert_eq!(posts(&h, variant), 1, "the retry places after release");
 }
+
+/// A two-read census (regular plus algo/conditional) pins a read token per
+/// request. One begun before the Unknown write never releases it, even when its
+/// last half answers after the write; the owed census that follows does.
+#[test]
+fn a_two_read_census_begun_before_the_unknown_write_does_not_release_it() {
+    for variant in [Variant::UsdM, Variant::PortfolioMargin] {
+        let mut h = ready(variant);
+        let mut stale = pre_mark_reads(&mut h, variant);
+        let last = stale.pop().expect("algo half");
+        // The first half is read before the write; the write then seals Unknown.
+        answer(&mut h, stale, "[]");
+        unknown_placement(&mut h, variant, 90);
+        answer(&mut h, vec![last], "[]");
+        place(&mut h, variant, 91);
+        assert_eq!(
+            posts(&h, variant),
+            0,
+            "{variant:?} stale census sends nothing"
+        );
+        assert!(
+            refused_uncertain(&h, 91),
+            "{variant:?} still refused after the stale census"
+        );
+        let fresh = take_reads(&mut h, variant);
+        answer(&mut h, fresh, "[]");
+        place(&mut h, variant, 92);
+        assert_eq!(
+            posts(&h, variant),
+            1,
+            "{variant:?} the follow-up census releases"
+        );
+    }
+}

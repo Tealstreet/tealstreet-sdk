@@ -452,10 +452,11 @@ impl BinanceFutures {
     }
 
     /// Fresh open-orders read after an uncertain placement. Joins an in-flight
-    /// snapshot by owing a new one behind it, since that read predates the mark.
+    /// snapshot by owing a new one behind it, since that read predates the mark;
+    /// a re-ask (no new uncertain write) joins without owing another.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.orders.is_some() {
-            self.account.orders_owed = true;
+            self.account.orders_owed |= !cx.reconcile_reask();
         } else {
             self.fetch_orders(cx);
         }
@@ -1493,8 +1494,10 @@ impl BinanceFutures {
         {
             self.account.orders_stale = true;
             self.schedule_orders_refresh(cx);
-        } else if clean {
+        } else if clean && !(self.account.orders_owed && !(self.is_spot() || self.is_inverse())) {
             // Published and fully mapped: this read may resolve an uncertain placement.
+            // Each half of a two-read census pins its own read token, so one owed a
+            // successor may have begun before the write and leaves release to it.
             cx.orders_reconciled(None);
         }
     }
