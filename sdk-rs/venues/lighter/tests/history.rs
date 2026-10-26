@@ -7,14 +7,17 @@ use serde_json::{Value, json};
 use support::*;
 
 fn query(e: &mut Engine<Lighter>, read: Query) -> HttpRequest {
-    e.handle(
+    e.handle_command(
         NOW,
-        Event::Command(Command::Query {
+        Command::Query {
             command: 91,
             query: read,
-        }),
-    );
-    e.drain_actions()
+        },
+        Some(120_000),
+    )
+    .unwrap();
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -22,7 +25,8 @@ fn query(e: &mut Engine<Lighter>, read: Query) -> HttpRequest {
         .expect("history read")
 }
 fn result(e: &mut Engine<Lighter>) -> Result<Value, String> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 command: 91,
@@ -106,7 +110,7 @@ fn fail_page(e: &mut Engine<Lighter>, r: &HttpRequest, mode: u8) {
         _ => unreachable!(),
     }
 }
-fn typed_failure(actions: &[Action], not_sent: bool) {
+fn typed_failure_kind(actions: &[Action], not_sent: bool, kind: safe_cex_engine::ErrorKind) {
     let failures: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
@@ -115,7 +119,7 @@ fn typed_failure(actions: &[Action], not_sent: bool) {
         })
         .collect();
     assert_eq!(failures.len(), 1, "one typed terminal error");
-    assert_eq!(failures[0].kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert_eq!(failures[0].kind, Some(kind));
     if not_sent {
         assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
     }
@@ -125,6 +129,9 @@ fn typed_failure(actions: &[Action], not_sent: bool) {
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 91, .. })))
     );
     assert!(!actions.iter().any(|a| matches!(a,Action::Notice(Notice::Event(v)) if v.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+}
+fn typed_failure(actions: &[Action], not_sent: bool) {
+    typed_failure_kind(actions, not_sent, safe_cex_engine::ErrorKind::Internal);
 }
 fn owned_partial(actions: &[Action], count: usize) -> Value {
     let markers: Vec<_> = actions
@@ -184,7 +191,17 @@ fn owned_first_page_failure_is_typed_and_never_complete() {
         let (mut e, _) = ready();
         let r = query(&mut e, fills(None));
         fail_page(&mut e, &r, mode);
-        typed_failure(&e.drain_actions().collect::<Vec<_>>(), false);
+        typed_failure_kind(
+            &safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            false,
+            if mode == 0 {
+                safe_cex_engine::ErrorKind::Network
+            } else {
+                safe_cex_engine::ErrorKind::Internal
+            },
+        );
     }
 }
 #[test]
@@ -196,7 +213,12 @@ fn owned_later_failure_returns_only_accepted_rows_and_its_command_marker() {
         answer(&mut e, &r, vec![trade("accepted", NOW as u64)], Some("p2"));
         let next = requests(&mut e).remove(0);
         fail_page(&mut e, &next, mode);
-        let rows = owned_partial(&e.drain_actions().collect::<Vec<_>>(), 1);
+        let rows = owned_partial(
+            &safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            1,
+        );
         assert_eq!(rows[0]["id"], "accepted");
         assert_eq!(e.store().orders().len(), 1);
     }
@@ -216,7 +238,13 @@ fn owned_empty_or_filtered_pages_do_not_authorize_partial_success() {
         );
         let next = requests(&mut e).remove(0);
         fail_page(&mut e, &next, 0);
-        typed_failure(&e.drain_actions().collect::<Vec<_>>(), false);
+        typed_failure_kind(
+            &safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            false,
+            safe_cex_engine::ErrorKind::Network,
+        );
     }
 }
 #[test]
@@ -234,7 +262,9 @@ fn owned_income_preserves_trade_and_prior_funding_stages_on_failure() {
         }
         fail_page(&mut e, &r, 0);
         let rows = owned_partial(
-            &e.drain_actions().collect::<Vec<_>>(),
+            &safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+                .into_iter()
+                .collect::<Vec<_>>(),
             if funding_page { 3 } else { 2 },
         );
         assert!(
@@ -275,7 +305,12 @@ fn owned_malformed_funding_prefix_cannot_enter_an_accepted_prior_stage() {
     answer(&mut e, &r, vec![trade("1", NOW as u64)], None);
     let r = requests(&mut e).remove(0);
     reply(&mut e, &r, 200, &json!({"code":200,"position_fundings":[{"funding_id":"failed-prefix","market_id":1,"timestamp":NOW/1000.0,"change":"-0.25"},{"funding_id":"bad"}]}).to_string());
-    owned_partial(&e.drain_actions().collect::<Vec<_>>(), 2);
+    owned_partial(
+        &safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .collect::<Vec<_>>(),
+        2,
+    );
 }
 
 #[test]
@@ -307,11 +342,13 @@ fn owned_order_and_public_trade_pages_share_the_completion_contract() {
                 r = requests(&mut e).remove(0);
             }
             fail_page(&mut e, &r, 0);
-            let actions = e.drain_actions().collect::<Vec<_>>();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+                .into_iter()
+                .collect::<Vec<_>>();
             if later {
                 owned_partial(&actions, 1);
             } else {
-                typed_failure(&actions, false);
+                typed_failure_kind(&actions, false, safe_cex_engine::ErrorKind::Network);
             }
         }
     }
@@ -332,7 +369,9 @@ fn owned_partial_does_not_complete_or_mark_a_neighbour() {
     );
     let neighbour = requests(&mut e).remove(0);
     fail_page(&mut e, &r, 0);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     owned_partial(&actions, 1);
     assert!(!actions.iter().any(|a| matches!(
         a,
@@ -341,7 +380,9 @@ fn owned_partial_does_not_complete_or_mark_a_neighbour() {
         )
     )));
     answer(&mut e, &neighbour, vec![], None);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(actions.iter().any(
         |a| matches!(a,Action::Notice(Notice::CommandDone{command:92,result}) if result=="[]")
     ));
@@ -355,7 +396,7 @@ fn owned_auth_preparation_refusal_is_strict_after_accepted_rows() {
     };
     let refused = Arc::new(AtomicBool::new(false));
     let control = refused.clone();
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(options()));
+    let mut e = support::engine(options());
     e.set_signing_entropy(Box::new(move |bytes| {
         if control.load(Ordering::SeqCst) {
             Err("signing source unavailable".into())
@@ -369,7 +410,9 @@ fn owned_auth_preparation_refusal_is_strict_after_accepted_rows() {
     let r = query(&mut e, fills(None));
     refused.store(true, Ordering::SeqCst);
     answer(&mut e, &r, vec![trade("accepted", NOW as u64)], Some("p2"));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     typed_failure(&actions, true);
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
@@ -508,7 +551,12 @@ fn repeated_cursor_stays_strict_after_accepted_rows() {
     answer(&mut e, &r, vec![trade("1", NOW as u64)], Some("same"));
     let next = requests(&mut e).into_iter().next().unwrap();
     answer(&mut e, &next, vec![trade("2", NOW as u64)], Some("same"));
-    typed_failure(&e.drain_actions().collect::<Vec<_>>(), false);
+    typed_failure(
+        &safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .collect::<Vec<_>>(),
+        false,
+    );
     assert_eq!(e.store().orders().len(), 1);
 }
 
@@ -524,7 +572,9 @@ fn saturated_page_without_cursor_fails_if_requested_history_is_incomplete() {
             .collect(),
         None,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     typed_failure(&actions, false);
     assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.message.contains("saturated"))));
 }
@@ -652,7 +702,9 @@ fn caller_id_lookup_and_invalid_ranges_fail_before_http() {
                 query: read,
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions

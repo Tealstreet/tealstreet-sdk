@@ -1,6 +1,9 @@
-//! This corpus was captured from the TS adapter and real Go-WASM before this port.
+#[path = "support/reference_signer.rs"]
+mod reference_signer;
+use reference_signer::Signer;
+// This corpus was captured from the TS adapter and real Go-WASM before this port.
 use safe_cex_crypto::lighter::SchnorrNonce;
-use safe_cex_venue_lighter::sign::{Builder, Order, Signer, Transaction};
+use safe_cex_venue_lighter::sign::{Builder, Order, Transaction};
 use serde_json::Value;
 
 const CORPUS: &str =
