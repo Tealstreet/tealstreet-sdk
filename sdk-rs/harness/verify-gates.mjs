@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
-import { assessGateReport, assessCorrectnessReport } from './known-failure-policy.mjs';
+import { assessGateReport } from './known-failure-policy.mjs';
 import { validateGateCoverage } from './ci-gate-suites.mjs';
 import { assessEligibility } from './cpu-remeasure.mjs';
 import { cpuRemeasureEnabled } from './cpu-rollout.mjs';
@@ -14,7 +14,7 @@ import { pendingBitgetSteady } from './bitget-paired-steady.mjs';
 /** Strict remains the default. Collection may retain an eligible unresolved
  * CPU miss, but cannot label it PASS or supply final certification. */
 export function verifyGateSuite({ suite, entries, manifest, mode = 'strict' }) {
-  if (!['strict', 'collect', 'correctness'].includes(mode)) throw new Error('unknown gate verifier mode');
+  if (!['strict', 'collect'].includes(mode)) throw new Error('unknown gate verifier mode');
   const errors = [], cases = [], rows = [], pending = [], seen = new Set();
   let passes = 0, strictFailures = 0, knownFailures = 0;
   if (!Array.isArray(entries) || entries.length === 0) return { errors: ['missing gate ledger'], rows, pending, passes, strictFailures, knownFailures };
@@ -29,7 +29,7 @@ export function verifyGateSuite({ suite, entries, manifest, mode = 'strict' }) {
     seen.add(identity);
     const ledgerMismatch = (exitCode === 0) !== (report.status === 'PASS');
     if (ledgerMismatch) errors.push(`Invalid ledger exit code: ${identity}`);
-    const assessment = (mode === 'correctness' ? assessCorrectnessReport : assessGateReport)(report, manifest);
+    const assessment = assessGateReport(report, manifest);
     const eligible = mode === 'collect' && cpuRemeasureEnabled(suite) && !ledgerMismatch && assessment.errors.length > 0 &&
       (assessEligibility({ report, raw: entry.raw }).eligible || suite === 'bitget' && pendingBitgetSteady(entry, manifest));
     if (eligible) pending.push({ venue: report.venue, tape: report.tape, books: report.books, tapeSha256: report.tapeSha256 });
