@@ -1815,6 +1815,113 @@ fn non_success_http_cannot_prove_create_rejection() {
 }
 
 #[test]
+fn non_success_write_keeps_typed_native_diagnostics_without_proving_rejection() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (status, body, kind, native_code, native_message) in [
+        (
+            400,
+            r#"{"code":11001,"msg":"insufficient balance","data":null}"#,
+            Some(ErrorKind::Rejected),
+            Some("11001"),
+            Some("insufficient balance"),
+        ),
+        (
+            401,
+            r#"{"msg":"invalid credentials"}"#,
+            Some(ErrorKind::AuthInvalid),
+            None,
+            Some("invalid credentials"),
+        ),
+        (
+            403,
+            "<html>forbidden</html>",
+            Some(ErrorKind::AuthPermission),
+            None,
+            None,
+        ),
+        (
+            429,
+            r#"{"msg":"slow down"}"#,
+            Some(ErrorKind::RateLimited),
+            None,
+            Some("slow down"),
+        ),
+        (
+            408,
+            r#"{"code":11001,"msg":"insufficient balance"}"#,
+            Some(ErrorKind::Timeout),
+            Some("11001"),
+            Some("insufficient balance"),
+        ),
+        (
+            500,
+            r#"{"code":11001,"msg":"insufficient balance"}"#,
+            Some(ErrorKind::VenueUnavailable),
+            Some("11001"),
+            Some("insufficient balance"),
+        ),
+        (
+            500,
+            "<html>upstream unavailable</html>",
+            Some(ErrorKind::VenueUnavailable),
+            None,
+            None,
+        ),
+        (
+            400,
+            r#"{"code":11001,"msg":"insufficient balance","data":{"orderID":"unproven-id"}}"#,
+            Some(ErrorKind::Rejected),
+            Some("11001"),
+            Some("insufficient balance"),
+        ),
+    ] {
+        let mut e = rejection_engine(vec![live_row("old-live")]);
+        let a = command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 101,
+                orders: vec![opts("caller")],
+            },
+        );
+        e.handle(
+            1001.,
+            Event::HttpResponse {
+                request: writes(&a)[0].id,
+                response: Response {
+                    status,
+                    headers: "retry-after: 2\r\n",
+                    body,
+                },
+            },
+        );
+        let a: Vec<_> = e.drain_actions().collect();
+        let error = failure(&a);
+        assert_eq!(error.kind, kind, "HTTP {status}: {error:?}");
+        assert_eq!(error.venue_code.as_deref(), native_code, "HTTP {status}");
+        assert_eq!(
+            error.venue_message.as_deref(),
+            native_message,
+            "HTTP {status}"
+        );
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "HTTP {status}");
+        assert_eq!(error.retry_after_ms, (status == 429).then_some(2000.));
+        assert!(writes(&a).is_empty());
+        assert!(e.store().order("unproven-id").is_none());
+        assert_eq!(
+            a.iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 101, .. })
+                ))
+                .count(),
+            1
+        );
+        let serialized = serde_json::to_value(error).unwrap();
+        assert_eq!(serialized["outcome"], "unknown");
+    }
+}
+
+#[test]
 fn queued_cancel_all_continues_after_proven_rejection() {
     let mut e = rejection_engine(vec![live_row("old-live")]);
     let a = command(
