@@ -321,6 +321,8 @@ after the settle, `continue_serial_plan`, `serial_plan_condition_wait`,
 on a non-serial (Read-policy) Plan. A release after expiry or completion is
 Revoked. The caller wait never completes it, as for other parked Plans.
 
+After a settle release, the venue's on_http_plan_ready must end the Plan (done_plan or fail_plan); a released settled Plan has no remaining bound.
+
 ## Feature gate (overseer ruling)
 
 The condition wait is linked only by adopting families, behind the

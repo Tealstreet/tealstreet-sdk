@@ -480,6 +480,25 @@ impl OrderRowError {
         Self::Invalid(error.to_string())
     }
 }
+/// A stream row's own client order index (top level or nested `order`).
+fn client_order_index(raw: &RawValue) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Nested<'a> {
+        #[serde(default, borrow)]
+        order: Option<&'a RawValue>,
+    }
+    #[derive(Deserialize)]
+    struct Client<'a> {
+        #[serde(default, borrow, alias = "clientOrderIndex")]
+        client_order_index: Option<Atom<'a>>,
+    }
+    let nested: Nested<'_> = serde_json::from_str(raw.get()).ok()?;
+    let row: Client<'_> = serde_json::from_str(nested.order.unwrap_or(raw).get()).ok()?;
+    row.client_order_index
+        .and_then(|a| index(&a.0))
+        .filter(|n| *n > 0)
+        .map(|n| n.to_string())
+}
 fn index(text: &str) -> Option<u64> {
     let n = text.parse::<u64>().ok()?;
     (n <= i64::MAX as u64).then_some(n)
@@ -1016,6 +1035,7 @@ impl Lighter {
         self.arm_outage(connection.last_payload.unwrap_or(connection.connected_at));
         let minimum = if code == 1013 { 30_000.0 } else { 0.0 };
         self.account.connection.supervisor.retry_after(cx, minimum);
+        self.trade_stream_lost(cx);
         true
     }
     // Payload staleness is checked on the same 10s cadence as the heartbeat.
@@ -1451,7 +1471,7 @@ impl Lighter {
     }
     /// Maps one active-order snapshot row into `orders` or records it as skipped.
     fn snapshot_order(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         raw: &RawValue,
         market_hint: Option<&str>,
@@ -1459,7 +1479,15 @@ impl Lighter {
         coverage: &mut SnapshotCoverage<String>,
     ) {
         match self.map_order_row(cx, raw, market_hint, true) {
-            Ok(order) => return orders.extend(order),
+            Ok(order) => {
+                // A snapshot row proves a grouped leg by its own client order index.
+                if order.is_some()
+                    && let Some(client_index) = client_order_index(raw)
+                {
+                    self.trade_group_observed(cx, &client_index);
+                }
+                return orders.extend(order);
+            }
             Err(OrderRowError::Unmapped(id)) => {
                 cx.notice(
                     Level::Warn,
@@ -2291,7 +2319,14 @@ impl Lighter {
                     self.account
                         .order_source
                         .insert(order.id.clone(), order.last_update);
-                    self.trade_order_observed(&order.id, order.filled, order.status);
+                    let client_index = client_order_index(row);
+                    self.trade_order_observed(
+                        cx,
+                        &order.id,
+                        client_index.as_deref(),
+                        order.filled,
+                        order.status,
+                    );
                     if self.account.suppressed.contains(&order.id) {
                         return;
                     }

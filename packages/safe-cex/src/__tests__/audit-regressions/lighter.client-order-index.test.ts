@@ -63,10 +63,11 @@ const setup = (maxSize = 100) => {
   });
   const createOrder = vi.fn().mockResolvedValue('accepted');
   const createOrders = vi.fn().mockResolvedValue(['accepted']);
-  vi.spyOn(exchange as any, 'ensureSignerAdapter').mockResolvedValue({ createOrder, createOrders });
+  const createGroupedOrders = vi.fn().mockResolvedValue('accepted');
+  vi.spyOn(exchange as any, 'ensureSignerAdapter').mockResolvedValue({ createOrder, createOrders, createGroupedOrders });
   vi.spyOn(exchange as any, 'ensurePartnerAttributionTierEligible').mockResolvedValue(undefined);
   vi.spyOn(exchange as any, 'ensurePartnerAttributionApproved').mockResolvedValue(undefined);
-  return { exchange, createOrder, createOrders };
+  return { exchange, createOrder, createOrders, createGroupedOrders };
 };
 const assertUnique = (ids: bigint[]) => {
   expect(new Set(ids).size).toBe(ids.length);
@@ -84,16 +85,21 @@ afterEach(() => {
 
 describe('Lighter generated clientOrderIndex reservation', () => {
   it('gives the entry, stop-loss and take-profit distinct IDs in the same millisecond', async () => {
-    const { exchange, createOrder } = setup();
+    // Since d94e9d744f1 a limit with TP/SL is one grouped (OTOCO) transaction.
+    const { exchange, createOrder, createGroupedOrders } = setup();
     const ids = await exchange.placeOrder({ ...order, stopLoss: 80, takeProfit: 120 });
-    expect(createOrder).toHaveBeenCalledTimes(3);
-    expect(createOrder.mock.calls.map(([request]) => request.orderType).sort()).toEqual([
+    expect(createOrder).not.toHaveBeenCalled();
+    expect(createGroupedOrders).toHaveBeenCalledTimes(1);
+    const [request] = createGroupedOrders.mock.calls[0];
+    expect(request.groupingType).toBe(3);
+    expect(request.orders.map((leg: { orderType: string }) => leg.orderType)).toEqual([
       'limit',
       'stop_loss',
       'take_profit',
     ]);
-    assertUnique(createOrder.mock.calls.map(([request]) => request.orderId));
-    expect(ids).toEqual(createOrder.mock.calls.map(([request]) => request.orderId.toString()));
+    const orderIds = request.orders.map((leg: { orderId: bigint }) => leg.orderId);
+    assertUnique(orderIds);
+    expect(ids).toEqual(orderIds.map((id: bigint) => id.toString()));
   });
 
   it('reserves split legs independently when another order runs during a send', async () => {
