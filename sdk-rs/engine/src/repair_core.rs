@@ -748,6 +748,21 @@ impl<P> Io<P> {
         }
     }
 
+    /// A venue finished a repair leg outside any delivery (such as a refused
+    /// send): end the root once it holds no live leg, so `Settled` still comes.
+    /// Terminal by contract: a later leg exists only as `repair_successor`
+    /// inside its predecessor's delivery, never from a timer or ready callback.
+    pub(super) fn repair_leg_finished(&mut self, context: &Context, now: f64) {
+        let Owner::Repair { generation } = context.owner() else {
+            return;
+        };
+        if self.core.http_delivery.is_none()
+            && self.core.request_contexts.repair_live_legs(generation) == 0
+        {
+            self.end_repair_root(generation, now);
+        }
+    }
+
     /// End a root whose last leg was delivered: release its scope, reconcile
     /// any uncertainty and queue its notice. Spent subjects stay spent.
     fn end_repair_root(&mut self, generation: u64, now: f64) {

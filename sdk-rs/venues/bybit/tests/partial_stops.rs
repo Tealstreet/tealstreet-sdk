@@ -140,6 +140,15 @@ fn ready(profile: Profile) -> Harness {
                 ),
             );
         }
+    } else {
+        // Managed sockets deliver nothing on an unopened socket; Bybit's own auth ACK then
+        // marks the private session live, as in a real session.
+        let socket = h.socket("/v5/private").unwrap();
+        h.event(Event::WsOpened { socket });
+        h.message(
+            "/v5/private",
+            r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"cejreaspqfh3sjdnldmg-p"}"#,
+        );
     }
     while h.has_request("/v5/order/realtime") {
         h.respond("/v5/order/realtime", 200, EMPTY);
