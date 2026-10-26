@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Per-venue engine feature gating | Plan; Phase 1 managed-sockets, Phase 2 barriers; no source | Before adding a per-venue engine feature, or changing how Engine<V> reaches managed-socket or barrier code. | [RUST_ENGINE_FEATURE_GATING.md](RUST_ENGINE_FEATURE_GATING.md) |
 | WEEX depth and socket custody | Plan/native/API CLEAR; first19 originals13RED/6GREEN local; source held | Remaining Depth observations and both native socket lifecycles; truthful inventory residue disposition and fixed size gates | [RUST_WEEX_DEPTH_SOCKET_CONTEXT.md](RUST_WEEX_DEPTH_SOCKET_CONTEXT.md) |
 | Request macro provenance precision | Plan only; overseer-approved WEEX false-positive correction | Before pruning pure data macro rows while preserving raw sender and cross-venue gate coverage | [RUST_REQUEST_MACRO_PROVENANCE.md](RUST_REQUEST_MACRO_PROVENANCE.md) |
 | Shared repair Mutation authority | Joint plan; engine direction CLEAR, originals/source separate | Before Phemex late-cancel or Backpack trigger-repair migration, snapshot-origin authority, subject lifecycle or joint cancel batching. | [RUST_REPAIR_MUTATION_AUTHORITY.md](RUST_REPAIR_MUTATION_AUTHORITY.md) |
@@ -397,6 +398,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Receipt-bound stamp floor | Focused gates/reviews clear; full CI pending | Before monotonic per-request signature or transport reissues; floor grants no resend authority. | [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md) |
 
 | Bitrue dispatch signing | Production candidate; original REDs green, review and CI pending | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
+| Bitrue request funnel and trading writes | Plan under review | Before converting Bitrue's HTTP funnel, account reads, listen key, lookup/leverage joins or trading writes. | [RUST_BITRUE_REQUEST_FUNNEL.md](RUST_BITRUE_REQUEST_FUNNEL.md) |
 
 | GRVT unsigned candle Read Plan | Managed adoption under review | Before changing candle caller limits, streaming or the six-attempt transport budget. | [RUST_GRVT_CANDLE_CONTEXT.md](RUST_GRVT_CANDLE_CONTEXT.md) |
 
@@ -485,3 +487,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | WOO socket adoption and request funnel | Source/API/native/map carry CLEAR; first-source paired sizes fit, current combined and CI pending | Before importing reviewed WOO sockets or converting its 30 request / 20 signing sites. | [RUST_WOO_ADOPTION_AND_FUNNEL.md](RUST_WOO_ADOPTION_AND_FUNNEL.md) |
 
 - [KuCoin request and signing funnel](RUST_KUCOIN_FUNNEL.md): predecessor preservation, native refusal resend and compiling custody originals; production adoption remains local.
+| Retire an unissued independent Plan call | Plan/originals CLEAR (dazzy3, 4yjlw0); source review pending | Before a venue skips a declared complete-Plan call it decides not to send (Bitrue B2 cancel batches). | [RUST_PLAN_RETIRE_UNISSUED.md](RUST_PLAN_RETIRE_UNISSUED.md) |
