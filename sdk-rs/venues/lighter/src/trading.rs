@@ -1672,7 +1672,7 @@ impl Lighter {
                 &job.preflight,
                 serial_call(operation),
                 SerialPolicy {
-                    credential,
+                    credential: Some(credential),
                     pacing: None,
                     refusals_complete: true,
                 },
@@ -1719,7 +1719,11 @@ impl Lighter {
             .as_ref()
             .is_some_and(|job| job.plan.is_none())
         {
-            let _ = cx.finish_http_context(context);
+            let preflight = &self.trading.active.as_ref().unwrap().preflight;
+            if let Err(error) = cx.finish_preflight_call(preflight, context) {
+                self.trade_finish(cx, error.venue_error());
+                return;
+            }
             self.trading.active.as_mut().unwrap().live = None;
         }
     }

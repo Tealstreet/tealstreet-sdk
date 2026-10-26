@@ -229,7 +229,7 @@ impl Lighter {
                     &preflight,
                     super::trading::serial_call(Operation::Mutation),
                     safe_cex_engine::request_context::plan::SerialPolicy {
-                        credential,
+                        credential: Some(credential),
                         pacing: None,
                         refusals_complete: false,
                     },

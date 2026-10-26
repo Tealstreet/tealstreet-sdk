@@ -100,7 +100,7 @@ fn fail_page(e: &mut Engine<Lighter>, r: &HttpRequest, mode: u8) {
         _ => unreachable!(),
     }
 }
-fn typed_failure(actions: &[Action], not_sent: bool) {
+fn typed_failure_kind(actions: &[Action], not_sent: bool, kind: safe_cex_engine::ErrorKind) {
     let failures: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
@@ -109,7 +109,7 @@ fn typed_failure(actions: &[Action], not_sent: bool) {
         })
         .collect();
     assert_eq!(failures.len(), 1, "one typed terminal error");
-    assert_eq!(failures[0].kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert_eq!(failures[0].kind, Some(kind));
     if not_sent {
         assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
     }
@@ -119,6 +119,9 @@ fn typed_failure(actions: &[Action], not_sent: bool) {
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 91, .. })))
     );
     assert!(!actions.iter().any(|a| matches!(a,Action::Notice(Notice::Event(v)) if v.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE)));
+}
+fn typed_failure(actions: &[Action], not_sent: bool) {
+    typed_failure_kind(actions, not_sent, safe_cex_engine::ErrorKind::Internal);
 }
 fn owned_partial(actions: &[Action], count: usize) -> Value {
     let markers: Vec<_> = actions
@@ -178,7 +181,7 @@ fn owned_first_page_failure_is_typed_and_never_complete() {
         let (mut e, _) = ready();
         let r = query(&mut e, fills(None));
         fail_page(&mut e, &r, mode);
-        typed_failure(&safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>(), false);
+        typed_failure_kind(&safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>(), false, if mode == 0 { safe_cex_engine::ErrorKind::Network } else { safe_cex_engine::ErrorKind::Internal });
     }
 }
 #[test]
@@ -210,7 +213,7 @@ fn owned_empty_or_filtered_pages_do_not_authorize_partial_success() {
         );
         let next = requests(&mut e).remove(0);
         fail_page(&mut e, &next, 0);
-        typed_failure(&safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>(), false);
+        typed_failure_kind(&safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>(), false, safe_cex_engine::ErrorKind::Network);
     }
 }
 #[test]
@@ -305,7 +308,7 @@ fn owned_order_and_public_trade_pages_share_the_completion_contract() {
             if later {
                 owned_partial(&actions, 1);
             } else {
-                typed_failure(&actions, false);
+                typed_failure_kind(&actions, false, safe_cex_engine::ErrorKind::Network);
             }
         }
     }

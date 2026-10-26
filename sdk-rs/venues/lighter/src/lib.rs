@@ -1479,7 +1479,7 @@ impl Venue for Lighter {
         match pending {
             Pending::Identity(request) => self.identity_failed(cx, request, error),
             Pending::Trade(request) => self.trade_error(cx, request, error),
-            Pending::History(request) => self.history_rejected(cx, request, error),
+            Pending::History(request) => self.history_transport_failed(cx, request, error),
             Pending::Tier { plan, .. } => {
                 let _ = cx.fail_plan(&plan, error);
             }

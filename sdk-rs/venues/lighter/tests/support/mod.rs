@@ -33,7 +33,10 @@ pub fn message(e: &mut Engine<Lighter>, socket: SocketId, now: f64, text: &str) 
     e.handle(now, Event::WsMessage { socket, text });
 }
 pub fn requests(e: &mut Engine<Lighter>) -> Vec<HttpRequest> {
-    safe_cex_engine::test_support::prepared_actions(e, NOW)
+    requests_at(e, NOW)
+}
+pub fn requests_at(e: &mut Engine<Lighter>, now: f64) -> Vec<HttpRequest> {
+    safe_cex_engine::test_support::prepared_actions(e, now)
         .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
@@ -63,7 +66,10 @@ pub fn track(timers: &mut Timers, action: &Action) {
     }
 }
 pub fn drain(e: &mut Engine<Lighter>, timers: &mut Timers) -> Vec<Action> {
-    let actions = safe_cex_engine::test_support::prepared_actions(e, NOW);
+    drain_at(e, timers, NOW)
+}
+pub fn drain_at(e: &mut Engine<Lighter>, timers: &mut Timers, now: f64) -> Vec<Action> {
+    let actions = safe_cex_engine::test_support::prepared_actions(e, now);
     actions.iter().for_each(|a| track(timers, a));
     actions
 }
@@ -77,7 +83,7 @@ pub fn advance(e: &mut Engine<Lighter>, timers: &mut Timers, until: f64) -> Vec<
     {
         timers.retain(|(t, _)| *t != timer);
         e.handle(at, Event::TimerFired { timer });
-        out.extend(drain(e, timers));
+        out.extend(drain_at(e, timers, at));
     }
     out
 }

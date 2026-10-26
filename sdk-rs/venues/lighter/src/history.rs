@@ -976,6 +976,22 @@ impl Lighter {
         if let Some(leg) = request.leg.take() {
             let _ = cx.finish_http_context(&leg);
         }
+        let _ = request.owner.reject(cx, error);
+    }
+
+    pub(crate) fn history_transport_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        error: VenueError,
+    ) {
+        if cx.validate_read_root_context(request.owner.root()).is_err() {
+            return;
+        }
+        let _ = request.owner.discard_staged_page();
+        if let Some(leg) = request.leg.take() {
+            let _ = cx.finish_http_context(&leg);
+        }
         finish(cx, request, Err(error));
     }
 }
