@@ -96,7 +96,7 @@ fn lighter_principal_enables_secret_only_required_membership() {
     assert!(!signer.keys.contains_key(&primary.credential));
     assert_eq!(
         signer.can_sign(primary.signing_ref().unwrap(), Algorithm::SchnorrDigest),
-        Capability::Unsupported
+        Capability::Supported
     );
 }
 

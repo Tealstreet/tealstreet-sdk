@@ -1,6 +1,7 @@
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, PublicFeedPolicy, SocketChannel, SocketId};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use support::*;
 
 struct Rig {
@@ -43,10 +44,10 @@ impl Rig {
         Self::with_policy(PublicFeedPolicy::Direct).0
     }
     fn with_policy(policy: PublicFeedPolicy) -> (Self, Vec<Action>) {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+        let mut engine = support::engine(Options {
             public_data_only: true,
             ..Options::default()
-        }));
+        });
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(NOW);
         let mut timers = Timers::new();
