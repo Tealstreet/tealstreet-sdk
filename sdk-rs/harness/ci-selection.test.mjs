@@ -34,6 +34,19 @@ test('checkout outputs are literal SHAs while matrices remain JSON', () => {
     `checkoutSha=${sha}\nfull=false\nnative=[{"check":"fmt"}]\n`);
 });
 
+test('hosted-operation inputs and full landing coverage include the Kraken proof family', () => {
+  for (const path of ['sdk-rs/hosts/wasm/js/hosted-operations.mjs',
+    'sdk-rs/hosts/wasm/js/kraken-operation-codec.mjs', 'sdk-rs/hosts/wasm/src/lib.rs',
+    'sdk-rs/venues/kraken/src/sign/hosted.rs']) {
+    const result = select(path);
+    assert.equal(result.sizeRequired, true, path);
+    assert(result.families.includes('kraken'), path);
+  }
+  const landing = selectCi({ paths: [], manifests, full: true });
+  assert.equal(landing.sizeRequired, true);
+  assert(landing.families.includes('kraken'));
+});
+
 test('venue feature declarations retain complete engine combinations and wasm checks', () => {
   const result = select('sdk-rs/venues/bitget/Cargo.toml');
   assert.equal(result.nativeFull, true);
