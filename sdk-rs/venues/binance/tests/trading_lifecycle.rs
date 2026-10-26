@@ -184,7 +184,7 @@ fn missing_rejected_mismatched_or_unknown_cancel_never_places_a_replacement() {
             amend(&mut h, variant);
             let cancel = h.take(path(variant));
             h.reply(cancel.id, 200, "", &body);
-            assert!(h.requests.is_empty(), "{variant:?} {body}");
+            assert!(h.only_reconcile_reads(), "{variant:?} {body}");
             assert!(h.result(91).unwrap().is_err(), "{variant:?} {body}");
             assert_eq!(
                 h.engine.store().order(id(variant)).unwrap().status,
@@ -236,7 +236,7 @@ fn inverse_batch_cancel_marks_only_confirmed_rows_and_reports_short_or_mixed_res
             OrderStatus::Open
         );
         assert!(h.result(92).unwrap().is_err());
-        assert!(h.requests.is_empty());
+        assert!(h.only_reconcile_reads());
     }
 }
 #[test]
@@ -330,7 +330,7 @@ fn reused_spot_client_id_is_not_canceled_or_amended_by_an_old_native_ack() {
     let cancel = h.take("/api/v3/order");
     reuse_spot_id(&mut h);
     h.reply(cancel.id, 200, "", &ack(Variant::Spot, 12, "3", "CANCELED"));
-    assert!(h.requests.is_empty());
+    assert!(h.only_reconcile_reads());
     assert!(h.result(91).unwrap().is_err());
     let order = h.engine.store().order("maker").unwrap();
     assert_eq!(
@@ -478,7 +478,7 @@ fn malformed_nested_spot_cancel_all_reply_cannot_partially_mutate_a_flat_row() {
             h.engine.store().order("second").unwrap().status,
             OrderStatus::Open
         );
-        assert!(h.requests.is_empty());
+        assert!(h.only_reconcile_reads());
     }
 }
 

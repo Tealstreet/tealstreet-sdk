@@ -10074,3 +10074,61 @@ beta safety; it does not enable hosted signing. Native engine controls prove
 retry/amend refusal, stale/fresh release, held reads across three engine re-asks,
 503 recovery and rejected-row refusal. Browser readiness remains a separate
 JS/WASM host gate.
+
+## Hyperliquid uncertain-placement reconciliation
+
+Hyperliquid and HyperliquidSpot reconcile uncertain placements through their
+existing complete `frontendOpenOrders` read. Repeated engine requests join the
+in-flight DEX scope and owe at most one successor read. After Store publication,
+only a clean snapshot with zero rejected rows reports that scope reconciled;
+duplicate or malformed rows cannot release it. The engine's dispatch token
+keeps a pre-write read from releasing a newer uncertainty fence.
+
+Both products opt into `fence_uncertain_placements` on the engine's generic
+legacy-write Phase B. An Unknown placement or amend refuses overlapping new
+placements and amends as NotSent until a fresh clean read reconciles them.
+Cancel by ID remains available. The perps and Spot four-step controls were RED
+at the retry assertion before Phase B and now execute through stale-read
+refusal, fresh Store publication and a successful retry. Duplicate rows keep
+the fence standing. This slice adds no venue retry loop or write resend.
+Multi-DEX reads release symbol-scoped marks only; an unknown-ID amend is refused
+NotSent before dispatch and cannot create an all-symbol mark on this venue.
+
+### Lighter: an Unknown placement fences its symbol
+
+Lighter opts into `guard_pending_placements` and `fence_uncertain_placements`.
+After a placement whose outcome is Unknown (a lost or 5xx `sendTx`), on that
+symbol:
+- `placeOrders` and `amendOrder` fail NotSent with "Placement outcome is
+  uncertain; reconcile before placing or amending" and send nothing;
+- `cancelSymbolOrders` fails with "Placement outcome is uncertain; reconcile
+  before cancel-all" and sends nothing: Lighter composes cancel-all from known
+  ids, so it would miss the uncertain order. Cancelling a known order by id is
+  still admitted.
+The Unknown starts an active-orders read at once. The fence clears on the first
+complete orders snapshot requested after the write: a read already in flight
+when the write went out, a failed read, or a snapshot with an unmappable row
+does not clear it. If a read was in flight, another follows as soon as it
+settles, and a failed read is followed at once by a fresh one, so the fence
+normally lasts about one orders round trip. The engine's reconcile re-asks
+(1 s doubling to 30 s) join an outstanding read rather than restarting it.
+
+### Binance: an Unknown placement fences its symbol
+
+All four Binance products (USD-M, Portfolio Margin, Spot, COIN-M) opt into
+`fence_uncertain_placements` and link the engine `order-locks` feature. After a
+placement whose outcome is Unknown (a lost or 5xx order POST), on that symbol:
+- `placeOrders` and `amendOrder` fail NotSent with "Placement outcome is
+  uncertain; reconcile before placing or amending" and send nothing;
+- cancelling a known order by id is still admitted;
+- `cancelSymbolOrders` keeps the engine default `fence_uncertain_cancel_all`:
+  it is refused until reconcile. Binance's cancel-all is a native per-symbol
+  DELETE, but opting out would oblige the venue to cancel a late-landing order
+  itself once its fresh read proves it, which Binance does not do.
+The Unknown starts a fresh open-orders read at once (regular plus the variant's
+algo or conditional orders). The fence clears on the first clean, complete
+snapshot requested after the write: a snapshot already in flight when the write
+went out (another is owed behind it), a failed read, or one with an unmappable
+row does not clear it. Binance writes are single managed Contexts with no
+placement scope, so the mark comes from the Unknown write fact itself (engine
+Phase B); until Phase B lands the fence does not engage for Binance.

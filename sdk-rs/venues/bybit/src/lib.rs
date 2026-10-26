@@ -2466,6 +2466,13 @@ impl Venue for BybitLinear {
         self.reconcile_ordinary(cx);
     }
 
+    // reconcile_uncertain reads every product's orders at once; the engine
+    // re-asks until a clean fresh read clears the fence. HyroTrader keeps its
+    // own same-intent retry, which recovers identity through link reads.
+    fn fence_uncertain_placements(&self) -> bool {
+        !self.variant.is_hyro()
+    }
+
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }

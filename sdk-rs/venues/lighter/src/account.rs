@@ -128,6 +128,9 @@ pub struct Account {
     pub snapshot_inflight: bool,
     snapshot_serial: u64,
     orders_inflight: bool,
+    /// An uncertainty reconcile arrived while a read was in flight; that read may
+    /// predate the write, so another follows once it settles.
+    orders_again: bool,
     batch: Option<OrderBatch>,
     sync: Option<TimerId>,
     heal: Option<TimerId>,
@@ -846,6 +849,19 @@ impl Lighter {
         }
         self.account.orders_inflight = true;
         self.request_orders(cx, None, self.account.revision, SnapshotCoverage::default());
+    }
+    /// An uncertainty reconcile needs a read requested after the write: one
+    /// already in flight may predate it, so another follows once it settles.
+    /// A re-ask (no new uncertain write) joins the running read instead.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.orders_again |= self.account.orders_inflight && !cx.reconcile_reask();
+        self.refresh_orders(cx);
+    }
+    fn orders_settled(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.orders_inflight = false;
+        if std::mem::take(&mut self.account.orders_again) {
+            self.refresh_orders(cx);
+        }
     }
     fn request_orders(
         &mut self,
@@ -1914,6 +1930,7 @@ impl Lighter {
         revision: u64,
         orders: Vec<Order>,
         coverage: &SnapshotCoverage<String>,
+        paged: bool,
     ) {
         let mut ids = HashSet::new();
         let mut merged = orders
@@ -1940,7 +1957,12 @@ impl Lighter {
             .records
             .retain(|id, _| active.contains(id.as_str()));
         cx.store.set_orders(merged);
-        if !coverage.any() && revision == self.account.revision {
+        // Each per-market page carries its own read token, so the last one cannot
+        // vouch for the first: a paged census owed a successor may predate the write.
+        if !coverage.any()
+            && revision == self.account.revision
+            && !(paged && self.account.orders_again)
+        {
             cx.orders_reconciled(None);
         }
     }
@@ -2081,12 +2103,12 @@ impl Lighter {
                             self.request_orders(cx, Some(market), revision, coverage);
                         } else {
                             let batch = self.account.batch.take().unwrap();
-                            self.account.orders_inflight = false;
-                            self.commit_orders(cx, batch.revision, batch.orders, &coverage);
+                            self.commit_orders(cx, batch.revision, batch.orders, &coverage, true);
+                            self.orders_settled(cx);
                         }
                     } else {
-                        self.account.orders_inflight = false;
-                        self.commit_orders(cx, revision, orders, &coverage);
+                        self.commit_orders(cx, revision, orders, &coverage, false);
+                        self.orders_settled(cx);
                     }
                 } else if market.is_none()
                     && (status.as_ref().is_some_and(|s| {
@@ -2113,11 +2135,11 @@ impl Lighter {
                             SnapshotCoverage::default(),
                         );
                     } else {
-                        self.account.orders_inflight = false;
+                        self.orders_settled(cx);
                     }
                 } else {
-                    self.account.orders_inflight = false;
                     self.account.batch = None;
+                    self.orders_settled(cx);
                     cx.notice(
                         Level::Warn,
                         code::SNAPSHOT_DISCARDED,
@@ -2179,8 +2201,8 @@ impl Lighter {
                 );
             }
             Request::Orders { .. } => {
-                self.account.orders_inflight = false;
                 self.account.batch = None;
+                self.orders_settled(cx);
                 cx.notice(
                     Level::Warn,
                     code::REQUEST_FAILED,

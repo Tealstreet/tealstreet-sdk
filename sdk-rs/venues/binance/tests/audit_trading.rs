@@ -235,7 +235,7 @@ fn malformed_or_mismatched_cancellation_fences_amendment() {
             amend(&mut h, variant, 91, None);
             let cancel = h.take(&format!("{}/order", root(variant)));
             h.reply(cancel.id, 200, "", &body);
-            assert!(h.requests.is_empty(), "{variant:?} {body}");
+            assert!(h.only_reconcile_reads(), "{variant:?} {body}");
             assert!(h.result(91).unwrap().is_err(), "{variant:?} {body}");
         }
     }
@@ -325,7 +325,7 @@ fn malformed_unknown_or_mismatched_conditional_cancellation_never_replaces() {
             amend_conditional(&mut h, variant);
             let cancel = h.take(conditional_path(variant));
             h.reply(cancel.id, 200, "", body);
-            assert!(h.requests.is_empty(), "{variant:?} {body}");
+            assert!(h.only_reconcile_reads(), "{variant:?} {body}");
             assert!(h.result(93).unwrap().is_err(), "{variant:?} {body}");
         }
     }
@@ -355,7 +355,7 @@ fn pm_reused_client_id_is_not_changed_by_an_old_incarnations_cancel_ack() {
             };
             h.reply(cancel.id, if unknown { 400 } else { 200 }, "", &reply);
             assert_eq!(h.engine.store().order("maker"), Some(&before));
-            assert!(h.requests.is_empty());
+            assert!(h.only_reconcile_reads());
             if amend_order || !unknown {
                 assert!(h.result(91).unwrap().is_err());
             }
@@ -386,7 +386,7 @@ fn pm_reused_strategy_id_is_not_changed_by_an_old_cancellation() {
                 r#"{"symbol":"BTCUSDT","strategyId":42,"newClientStrategyId":"stop","strategyStatus":"CANCELED","origQty":"7"}"#
             });
             assert_eq!(h.engine.store().order("stop"), Some(&before));
-            assert!(h.requests.is_empty());
+            assert!(h.only_reconcile_reads());
             if amend_order || !unknown {
                 assert!(h.result(93).unwrap().is_err());
             }
