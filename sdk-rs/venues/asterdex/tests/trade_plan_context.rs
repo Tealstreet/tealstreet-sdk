@@ -506,3 +506,68 @@ fn a_v3_stp_read_signs_as_the_read_agent_and_a_write_as_the_primary() {
         Some(primary_address.as_str())
     );
 }
+
+/// Declares the fixture's capabilities but refuses every signature.
+struct Refusing(std::sync::Arc<dyn safe_cex_engine::signing::Signer>, bool);
+impl safe_cex_engine::signing::Signer for Refusing {
+    fn immediate(&self) -> bool {
+        self.1
+    }
+    fn sign(&self, _: safe_cex_engine::signing::SignRequest) -> safe_cex_engine::signing::SignFuture {
+        Box::pin(std::future::ready(Err(safe_cex_engine::signing::SignError::Refused)))
+    }
+    fn sign_ready(
+        &self,
+        _: &safe_cex_engine::signing::SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>> {
+        Some(Err(safe_cex_engine::signing::SignError::Refused))
+    }
+    fn can_sign(
+        &self,
+        key: &safe_cex_engine::signing::KeyRef,
+        algorithm: safe_cex_engine::signing::Algorithm,
+    ) -> safe_cex_engine::signing::Capability {
+        self.0.can_sign(key, algorithm)
+    }
+}
+
+/// A signer refusal happens before release, so the write is provably not sent.
+#[test]
+fn a_refused_write_signature_is_not_sent() {
+    for options in [
+        Options {
+            key: Some("synthetic-key".into()),
+            secret: Some("synthetic-secret".into()),
+            ..Options::default()
+        },
+        Options::v3_wallet(),
+    ] {
+        let (venue, provider, identities) = options.build_installed();
+        let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+        e.set_signer(Some(provider.clone())).unwrap();
+        e.set_identities(identities).unwrap();
+        e.initialize_address_nonce(0.0).unwrap();
+        e.set_signer(Some(std::sync::Arc::new(Refusing(provider, IMMEDIATE))))
+            .unwrap();
+        e.store_mut().set_markets(vec![market()]);
+        let failed = command(&mut e, place());
+        assert!(failed.requests.is_empty());
+        let error = terminal(&failed).expect("one terminal").unwrap_err();
+        assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
+    }
+}
+
+/// A gateway throttle answers without Aster's JSON envelope; the status alone
+/// still names the kind.
+#[test]
+fn a_non_json_throttle_on_a_write_is_rate_limited() {
+    for status in [429, 418] {
+        let mut e = engine();
+        let sent = command(&mut e, place());
+        let order = write(&sent, Method::Post, "/order").clone();
+        let failed = answer(&mut e, &order, status, "Too Many Requests");
+        assert!(failed.requests.is_empty());
+        let error = terminal(&failed).expect("one terminal").unwrap_err();
+        assert_eq!(error.kind, Some(ErrorKind::RateLimited), "{status}: {error:?}");
+    }
+}
