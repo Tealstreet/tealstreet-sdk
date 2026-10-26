@@ -50,6 +50,7 @@ enum Reason {
     DegradedRead,
     Catalog,
     History,
+    KeyPermissions,
 }
 impl Reason {
     fn native(self) -> PrimaryReason {
@@ -59,6 +60,7 @@ impl Reason {
             Self::DegradedRead => PrimaryReason::DegradedRead,
             Self::Catalog => PrimaryReason::Catalog,
             Self::History => PrimaryReason::History,
+            Self::KeyPermissions => PrimaryReason::KeyPermissions,
         }
     }
 }

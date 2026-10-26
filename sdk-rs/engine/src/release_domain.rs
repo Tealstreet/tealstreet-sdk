@@ -8,13 +8,22 @@ use crate::request_context::{DomainMembers, Error, Operation, Pacing, ReleaseDom
 /// the held Binds; both are reserved once at construction.
 pub(super) const CAPACITY: usize = 256;
 
-/// A domain must name a registered group at exactly its registered gap.
-pub(super) fn validate(domain: ReleaseDomain, registered: &[Pacing]) -> Result<(), Error> {
-    if registered.contains(&domain.pacing) {
-        Ok(())
-    } else {
-        Err(Error::Invalid)
+/// At most this many admissible pacings, as for a pacing set's constraints.
+const PACINGS: usize = 16;
+
+/// Every admissible pacing must resolve against the venue's registered groups
+/// and sets, with a finite nonnegative gap; the list is nonempty and bounded.
+pub(super) fn validate(
+    domain: ReleaseDomain,
+    registered: &crate::request_context::SendPacing,
+) -> Result<(), Error> {
+    if domain.pacings.is_empty() || domain.pacings.len() > PACINGS {
+        return Err(Error::Invalid);
     }
+    for pacing in domain.pacings {
+        registered.check(Some(*pacing), 0.)?;
+    }
+    Ok(())
 }
 
 /// A non-head member's latest Bind. It may carry signed headers, a body or a
@@ -58,14 +67,24 @@ impl IoCore {
     #[inline(never)]
     pub(super) fn domain_member(&self, operation: Operation) -> Option<Pacing> {
         let domain = self.release_domain?;
+        let default = domain.pacings[0];
         match domain.members {
-            DomainMembers::AllRest => Some(domain.pacing),
-            DomainMembers::Mutations => (operation == Operation::Mutation).then_some(domain.pacing),
+            DomainMembers::AllRest => Some(default),
+            DomainMembers::Mutations => (operation == Operation::Mutation).then_some(default),
         }
     }
 
-    /// The pacing a member Context carries: the domain's own. A member naming
-    /// any other pacing would bypass or split the domain, so it is refused.
+    /// Whether `pacing` is one of the domain's admissible pacings, exactly.
+    #[inline(never)]
+    pub(super) fn domain_paces(&self, pacing: Option<Pacing>) -> bool {
+        self.release_domain
+            .zip(pacing)
+            .is_some_and(|(domain, pacing)| domain.pacings.contains(&pacing))
+    }
+
+    /// The pacing a member Context carries: its own admissible pacing, else the
+    /// domain default. A member naming any other pacing would bypass or split
+    /// the domain, so it is refused.
     #[inline(never)]
     pub(super) fn domain_pacing(
         &self,
@@ -74,14 +93,14 @@ impl IoCore {
     ) -> Result<Option<Pacing>, Error> {
         match (self.domain_member(operation), pacing) {
             (None, pacing) => Ok(pacing),
-            (Some(domain), None) => Ok(Some(domain)),
-            (Some(domain), Some(own)) if own == domain => Ok(Some(own)),
+            (Some(default), None) => Ok(Some(default)),
+            (Some(_), Some(own)) if self.domain_paces(Some(own)) => Ok(Some(own)),
             (Some(_), Some(_)) => Err(Error::Invalid),
         }
     }
 
     /// The managed boundary's check, before any ID is spent. A member must
-    /// already carry the domain pacing from whichever path built its Context,
+    /// already carry an admissible pacing from whichever path built its Context,
     /// must not be an atomic group member (a group releases together, so it
     /// cannot take one FIFO turn per member), and must fit the queue.
     #[inline(never)]
@@ -91,10 +110,10 @@ impl IoCore {
         pacing: Option<Pacing>,
         grouped: bool,
     ) -> Result<(), Error> {
-        let Some(domain) = self.domain_member(operation) else {
+        if self.domain_member(operation).is_none() {
             return Ok(());
-        };
-        if pacing != Some(domain) || grouped {
+        }
+        if !self.domain_paces(pacing) || grouped {
             return Err(Error::Invalid);
         }
         if self.domain_queue.len() >= CAPACITY {
@@ -113,10 +132,7 @@ impl IoCore {
         operation: Operation,
         pacing: Option<Pacing>,
     ) {
-        if self
-            .domain_member(operation)
-            .is_some_and(|domain| pacing == Some(domain))
-        {
+        if self.domain_member(operation).is_some() && self.domain_paces(pacing) {
             debug_assert!(self.domain_queue.len() < CAPACITY);
             self.domain_queue.push_back(request);
         }

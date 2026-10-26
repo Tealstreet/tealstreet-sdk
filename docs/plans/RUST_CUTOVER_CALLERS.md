@@ -9605,6 +9605,14 @@ unproven released send. Their resend freezes codec bytes while refreshing the
 bundle at Bind; Preflight signed calls repeat their existing provider work.
 No current venue enables a new auth mode in this engine slice.
 
+### Primary key-permission verification reads
+
+`PrimaryReason::KeyPermissions` (`keyPermissions` in signMeta) names a primary
+read that verifies the trading key's own capabilities before private startup,
+such as Coinbase `GET /api/v3/brokerage/key_permissions`. It is primary-only,
+like every `PrimaryRead`. A secondary read-key verification stays an ordinary
+`Read`. No existing reason was reused, because none describes it truthfully.
+
 ### Binance request refusals: typed command terminals
 
 Binance's local pre-admission refusals (unsupported commands, Spot derivative settings, stop-limit amend, keyless trading, invalid plans, bad candle intervals or ranges) are now each the command's own typed engine terminal, with native text, kind and NotSent, and no I/O ([RUST_BINANCE_REQUEST_REFUSALS.md](RUST_BINANCE_REQUEST_REFUSALS.md)). An unsupported candle interval is now typed `Unsupported`; it was a bare message.
