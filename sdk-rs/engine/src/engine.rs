@@ -880,6 +880,9 @@ mod pending_drop_tests;
 #[cfg(test)]
 #[path = "read_root_expiry_tests.rs"]
 mod read_root_expiry_tests;
+#[cfg(all(test, feature = "release-domains"))]
+#[path = "release_domain_tests.rs"]
+mod release_domain_tests;
 
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
@@ -3104,6 +3107,16 @@ pub trait Venue {
         &[]
     }
 
+    /// The venue's one FIFO release domain, if any. Its group must be registered
+    /// in `http_pacing`; the engine stamps it onto every member Context.
+    #[cfg(feature = "release-domains")]
+    #[inline]
+    fn http_release_domain() -> Option<crate::request_context::ReleaseDomain>
+    where
+        Self: Sized,
+    {
+        None
+    }
     /// Immutable nonce capability; the engine captures its permission at construction.
     /// This selector grants no claim or release authority.
     #[inline]

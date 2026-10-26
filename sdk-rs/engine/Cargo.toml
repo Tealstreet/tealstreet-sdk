@@ -15,6 +15,8 @@ http-mutation-barriers = ["http-plans"]
 serial-plans = ["http-plans"]
 # Venue-condition waits for Preflights and serial Plans, linked only by adopters.
 condition-waits = ["serial-plans"]
+# One venue-declared FIFO, release-paced REST domain (Hyperliquid, Coinbase); adopters only.
+release-domains = ["serial-plans"]
 # Session-bound managed requests (venue session headers just in time); only
 # adopting venues link it.
 session-bearer = []
