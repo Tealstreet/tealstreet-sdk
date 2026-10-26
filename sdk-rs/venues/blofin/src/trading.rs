@@ -1530,16 +1530,21 @@ impl Blofin {
         }
         join.settled[leg] = true;
         if let Some(error) = error {
-            // Native kept the last failure; the journal selects the terminal text.
+            // Only fail_plan's factless fallback: the journal selects the terminal
+            // text (the earliest logical failing leg, ruling (a)), not this one.
             join.error = Some(error);
         }
         if !join.settled.iter().all(|settled| *settled) {
             self.trading.active = Some(active);
             return;
         }
-        let error = join.error.take();
-        match error {
-            Some(error) => self.end(cx, active, None, error),
+        // The journal selects the terminal text (ruling (a)); fail_plan gets a
+        // fixed placeholder so nothing implies a venue-selected error.
+        match join.error.take() {
+            Some(_) => {
+                let placeholder = VenueError::new("BloFin hedged leverage failed");
+                self.end(cx, active, None, placeholder);
+            }
             None => self.finish(cx, active, None),
         }
     }
@@ -1733,7 +1738,13 @@ impl Blofin {
                 }
                 let failed = cx.fail_plan(plan, error);
                 debug_assert!(failed.is_ok(), "Plan terminal stranded");
-                if active.job.join {
+                // Native refreshed after a join that reached the venue; a
+                // pre-barrier abort released nothing, so there is nothing to refresh.
+                let released = active
+                    .join
+                    .as_ref()
+                    .is_some_and(|join| join.settled.iter().any(|settled| *settled));
+                if active.job.join && released {
                     self.refresh_account(cx);
                 }
             }
@@ -1758,6 +1769,10 @@ impl Blofin {
         } else {
             let failed = cx.fail_plan(plan, VenueError::new("BloFin job ended without its call"));
             debug_assert!(failed.is_ok(), "Plan terminal stranded");
+            // Both join legs reached the venue: refresh as any join failure does.
+            if active.job.join {
+                self.refresh_account(cx);
+            }
         }
         self.next_job(cx);
     }
@@ -1877,7 +1892,14 @@ impl Blofin {
             .is_some_and(|active| owner.matches_preflight(&active.preflight))
         {
             let active = self.trading.active.take().expect("retired job");
-            self.trading.retired = Some(active.job);
+            // A join refreshes the account only if a leg reached the venue.
+            let released = active
+                .join
+                .as_ref()
+                .is_none_or(|join| join.settled.iter().any(|settled| *settled));
+            let mut job = active.job;
+            job.join &= released;
+            self.trading.retired = Some(job);
         }
         if self.trading.active.is_some() {
             return None;

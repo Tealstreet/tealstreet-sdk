@@ -202,8 +202,13 @@ after_refusal: []}`.
   settles once, and the terminal follows both. Commit only after `done_plan`
   returns Ok, with native's `refresh_account` on any failure. The venue
   carries no error choice of its own (see "Which error is reported").
-- **Retirement.** Unchanged from W1: the engine-sealed join moves to
-  `retired`, restores, reconciles and refreshes the account.
+- **Retirement and refresh (fe7lgm S1/S2 ruling).** The engine-sealed join moves
+  to `retired`, restores and reconciles as in W1. The account refresh runs only
+  if at least one leg reached the venue (a delivered answer or a released
+  failure). A pre-barrier abort (a signing or queue refusal, or a deadline
+  before release) is NotSent with zero HTTP and no refresh, on both the `end`
+  and retirement paths. A `done_plan` refusal after both legs were Accepted
+  refreshes, as any released join failure does.
 - **Join versus seal (dazzy3 P1, fe7lgm P1, 4yjlw0 2, hcmq3f P2).** Under
   `independent_calls`, an engine-recorded failed delivery (released 408 or 5xx,
   transport or deadline) reaches the venue as typed `on_http_failed`. The venue

@@ -239,11 +239,34 @@ fn a_short_signing_refusal_after_long_prepared_sends_nothing() {
     let mut h = hedged(draws.clone());
     // Long's signature draws; short's is refused.
     draws.store(1, Ordering::SeqCst);
-    set_leverage(&mut h);
-    assert_eq!(count(&h, "set-leverage"), 0, "zero HTTP from the step");
-    if let (Some(long), _) = legs(&h) {
-        answer(&mut h, &long, 200, OK);
+    h.now = h.now.max(1.0);
+    let now = h.now;
+    h.e.handle(
+        now,
+        Event::Command(Command::SetLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+            side: None,
+        }),
+    );
+    let mut trace = pump(&mut h);
+    for (preparation, request) in prepares(&trace) {
+        complete(&mut h, preparation, request.id.0);
     }
+    trace.extend(pump(&mut h));
+    assert!(!escaped(&trace), "zero HTTP from the step");
+    assert!(
+        !trace.iter().any(|a| matches!(a, Action::ManagedHttp(m)
+            if matches!(m.as_ref(), HttpAction::Prepare { request, .. }
+                if is_refresh(request)))),
+        "no refresh is prepared for a command that sent nothing"
+    );
+    let notices: Vec<_> = trace
+        .into_iter()
+        .filter(|a| !matches!(a, Action::ManagedHttp(_)))
+        .collect();
+    h.collect_actions(notices);
     assert_eq!(failure(&h, 7).outcome, Some(Outcome::NotSent));
     assert_ne!(leverage(&h), 30.0);
 }
@@ -608,6 +631,11 @@ fn pump(h: &mut Harness) -> Vec<Action> {
     }
 }
 
+/// The native join refresh: the positions read (and its balance follow-up).
+fn is_refresh(request: &HttpRequest) -> bool {
+    request.url.contains("/api/v1/account/positions") || request.url.contains("/balances")
+}
+
 fn is_leverage(request: &HttpRequest) -> bool {
     request.url.ends_with("set-leverage")
 }
@@ -751,7 +779,6 @@ fn a_deadline_before_short_is_prepared_sends_nothing_and_refreshes_nothing() {
     let mut actions = actions;
     actions.extend(pump(&mut h));
     assert!(!escaped(&actions));
-    let positions = count(&h, "account/positions");
     // Fire every armed timer through the call bound; short is never prepared.
     let deadline = h.now + 20_001.0;
     let timers: Vec<_> = actions
@@ -761,20 +788,34 @@ fn a_deadline_before_short_is_prepared_sends_nothing_and_refreshes_nothing() {
             _ => None,
         })
         .collect();
+    let mut trace = Vec::new();
     for (timer, at) in timers {
         h.now = h.now.max(at);
         let now = h.now;
         h.e.handle(now, Event::TimerFired { timer });
-        let more = pump(&mut h);
-        assert!(!escaped(&more), "zero HTTP from the step");
-        let notices: Vec<_> = more
-            .into_iter()
-            .filter(|a| !matches!(a, Action::ManagedHttp(_)))
-            .collect();
-        h.collect_actions(notices);
+        trace.extend(pump(&mut h));
     }
+    assert!(!escaped(&trace), "zero HTTP from the step");
+    // The full managed trace: no account refresh is prepared, bound or sent.
+    let refresh = is_refresh;
+    assert!(
+        !trace.iter().any(|a| match a {
+            Action::Http(r) => refresh(r),
+            Action::ManagedHttp(m) => match m.as_ref() {
+                HttpAction::Prepare { request, .. } | HttpAction::Bind { request, .. } =>
+                    refresh(request),
+                _ => false,
+            },
+            _ => false,
+        }),
+        "no join refresh after a pre-barrier abort"
+    );
+    let notices: Vec<_> = trace
+        .into_iter()
+        .filter(|a| !matches!(a, Action::ManagedHttp(_)))
+        .collect();
+    h.collect_actions(notices);
     let error = failure(&h, 7);
     assert!(matches!(error.outcome, Some(Outcome::NotSent)), "{error:?}");
-    assert_eq!(count(&h, "account/positions"), positions, "no join refresh");
     assert_ne!(leverage(&h), 30.0);
 }
