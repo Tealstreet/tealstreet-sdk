@@ -1,4 +1,4 @@
-import type { Signer, SigningIdentities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { SignAlgorithm, Signer, SigningIdentities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { CredentialPresence } from './construction';
 
@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 
 import { derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupPolicy } from './construction';
 import { effectiveIdentityMetadata, parseLocalSignerMetadata, resolveSetupPassphrase, withoutSigningCredentials } from './localSignerSetup';
-import { createRemoteSignerProvider, REMOTE_SIGNER_ALGORITHMS } from './remoteSignerProvider';
+import { createRemoteSignerProvider, remoteSignerAlgorithms } from './remoteSignerProvider';
 
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
 const invalid = (message = 'Invalid delegated signer setup'): never => {
@@ -43,8 +43,10 @@ export class DelegatedSignerSetup {
   readonly hasSecondary: boolean;
   readonly primaryComplete: boolean;
   readonly credentialPresence: CredentialPresence;
+  readonly signerAlgorithms: readonly SignAlgorithm[];
 
   constructor(name: ExchangeName, options: ExchangeOptions) {
+    this.signerAlgorithms = remoteSignerAlgorithms(name);
     const metadata = parseLocalSignerMetadata(options.localSigner);
     const setupPolicy = deriveSignerSetupPolicy(name);
     const primaryMetadata = effectiveIdentityMetadata(metadata.primary, setupPolicy.primary);
@@ -108,8 +110,6 @@ export class DelegatedSignerSetup {
 
   /** This stable wrapper owns no callbacks itself. A host may retain it after
    * disposal without retaining authority or admitting another provider call. */
-  readonly signerAlgorithms = REMOTE_SIGNER_ALGORITHMS;
-
   readonly signer: Signer = async (request, { signal }) => {
     const provider = this.#provider;
     if (!provider || this.#abort.signal.aborted || signal.aborted) return invalid('Delegated signer setup is disposed or canceled');
