@@ -6,6 +6,8 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_binance::BinanceFutures;
 mod config;
+#[allow(unused_imports)]
+pub use config::keyed;
 pub use config::{Options, engine};
 
 pub const EXCHANGE_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"#;

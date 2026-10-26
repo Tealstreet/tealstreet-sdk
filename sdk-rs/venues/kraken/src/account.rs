@@ -92,6 +92,7 @@ pub struct Account {
     positions_revision: u64,
     terminal: RecentIds<16384>,
     inflight: HashSet<u8>,
+    orders_reconcile: bool,
     started: bool,
     pub(super) feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     socket: Option<SocketId>,
@@ -606,6 +607,10 @@ impl Kraken {
             self.socket_error(cx, true, error);
         }
     }
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.orders_reconcile = true;
+        self.account_refresh(cx);
+    }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.signer.is_none() {
             return;
@@ -631,6 +636,9 @@ impl Kraken {
             let key = scope as u8;
             if !self.account.inflight.insert(key) {
                 continue;
+            }
+            if scope == Scope::Orders {
+                self.account.orders_reconcile = false;
             }
             let revision = match scope {
                 Scope::Orders => self.account.orders_revision,
@@ -1377,6 +1385,9 @@ impl Kraken {
         response: Response<'_>,
     ) {
         self.account.inflight.remove(&(request.scope as u8));
+        if request.scope == Scope::Orders && self.account.orders_reconcile {
+            self.account_refresh(cx);
+        }
         let field = match request.scope {
             Scope::Orders => Some("openOrders"),
             Scope::Positions => Some("openPositions"),
@@ -1406,12 +1417,16 @@ impl Kraken {
             Scope::Orders => {
                 if request.revision == self.account.orders_revision {
                     let orders = request.orders;
+                    let clean = orders.rejected() == 0;
                     let mapped = recovered(&orders, |o| (&o.id, &o.id));
                     self.account
                         .rearm_skips("order:", orders.rejected() == 0, mapped);
                     // Rejected rows keep their stored copies.
                     let orders = orders.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                     self.account_commit_orders(cx, orders, 0);
+                    if clean {
+                        cx.orders_reconciled(None);
+                    }
                 }
             }
             Scope::Positions => {
@@ -1482,6 +1497,9 @@ impl Kraken {
         _error: &str,
     ) {
         self.account.inflight.remove(&(request.scope as u8));
+        if request.scope == Scope::Orders && self.account.orders_reconcile {
+            self.account_refresh(cx);
+        }
         self.account.read_failures = self.account.read_failures.saturating_add(1);
         cx.retried_failure(
             "kraken.account:1343",
