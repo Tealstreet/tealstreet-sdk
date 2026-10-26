@@ -539,10 +539,10 @@ impl SignStep for Recipe {
             },
             context: Default::default(),
             operations: vec![Operation::Sign {
-                algorithm: Algorithm::HmacSha256,
+                algorithm: Algorithm::Secp256k1Digest,
                 key: KeyRef("signing".into()),
                 payload: vec![PayloadPart::Bytes {
-                    bytes: nonce.to_be_bytes().to_vec(),
+                    bytes: [vec![0; 24], nonce.to_be_bytes().to_vec()].concat(),
                 }],
             }],
         })
@@ -622,7 +622,7 @@ fn genuine_address_claim_prepares_binds_and_releases_exact_nonce_with_calibrated
                 202.,
                 Event::Signed {
                     attempt: sign.0,
-                    result: Ok(SignResult::new(vec![vec![7; 32]], sign.1.receipt)),
+                    result: Ok(SignResult::new(vec![vec![0; 65]], sign.1.receipt)),
                 },
             );
             let permit = e
@@ -643,7 +643,11 @@ fn genuine_address_claim_prepares_binds_and_releases_exact_nonce_with_calibrated
             assert!(matches!(e.claim_http(203., permit), Ok(Claim::Released(_))));
             assert!(e.claim_http(203., permit).is_err());
         }
-        assert!(nonces[1] > nonces[0]);
+        if *domain == safe_cex_engine::nonce::ASTERDEX_V3 {
+            assert_eq!(nonces, [9_001_000, 9_001_001]);
+        } else {
+            assert_eq!(nonces, [201, 202]);
+        }
     }
 }
 
