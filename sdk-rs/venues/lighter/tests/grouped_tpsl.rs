@@ -98,6 +98,11 @@ fn ack(e: &mut Engine<Lighter>, t: &mut Timers, r: &HttpRequest) -> Vec<Action> 
     reply(e, r, 200, r#"{"code":200,"tx_hash":"transaction-hash"}"#);
     drain(e, t)
 }
+/// A distinct native order index for leg `i`; our minted index rides in
+/// `client_order_index` only, as Lighter reports it.
+fn native(i: usize) -> String {
+    (900_001 + i).to_string()
+}
 /// One private-stream frame carrying `rows` (each `(order_index, client_index, status)`).
 fn stream(e: &mut Engine<Lighter>, s: SocketId, now: f64, rows: &[(&str, Option<&str>, &str)]) {
     let rows: Vec<Value> = rows
@@ -113,10 +118,11 @@ fn stream(e: &mut Engine<Lighter>, s: SocketId, now: f64, rows: &[(&str, Option<
     let frame = json!({"channel":"account_all_orders:718895","orders":{"1":rows}});
     message(e, s, now, &frame.to_string());
 }
-fn snapshot(ids: &[&str]) -> String {
-    let rows: Vec<Value> = ids
+/// A complete active-orders answer; each row is `(order_index, client_order_index)`.
+fn snapshot(rows: &[(String, &str)]) -> String {
+    let rows: Vec<Value> = rows
         .iter()
-        .map(|id| json!({"order_index":id,"market_id":1,"status":"open","type":"limit","time_in_force":1,"is_ask":false,"initial_base_amount":"0.2","filled_base_amount":"0","remaining_base_amount":"0.2","price":"90"}))
+        .map(|(id, client)| json!({"order_index":id,"client_order_index":client,"market_id":1,"status":"open","type":"limit","time_in_force":1,"is_ask":false,"initial_base_amount":"0.2","filled_base_amount":"0","remaining_base_amount":"0.2","price":"90"}))
         .collect();
     json!({"code":200,"orders":rows}).to_string()
 }
@@ -201,15 +207,14 @@ fn every_leg_proven_by_the_stream_completes_with_all_ids_parent_first() {
         terminals(&ack(&mut e, &mut t, &send), 7).is_empty(),
         "an ACK alone is not Done"
     );
-    // Parent and SL by order index, TP by its own client order index.
     stream(
         &mut e,
         s,
         NOW + 1.0,
         &[
-            (&legs[0], None, "open"),
-            (&legs[1], None, "pending"),
-            ("999999", Some(&legs[2]), "pending"),
+            (&native(0), Some(&legs[0]), "open"),
+            (&native(1), Some(&legs[1]), "pending"),
+            (&native(2), Some(&legs[2]), "pending"),
         ],
     );
     let out = advance(&mut e, &mut t, NOW + 2.0);
@@ -231,7 +236,10 @@ fn two_of_three_legs_never_release_and_the_bound_reports_unknown_with_every_id()
         &mut e,
         s,
         NOW + 1.0,
-        &[(&legs[0], None, "open"), (&legs[1], None, "pending")],
+        &[
+            (&native(0), Some(&legs[0]), "open"),
+            (&native(1), Some(&legs[1]), "pending"),
+        ],
     );
     out.extend(advance(&mut e, &mut t, NOW + BOUND - 100.0));
     assert!(
@@ -258,7 +266,12 @@ fn ready_handler_seals_an_unproven_settled_group_as_unknown_with_every_id() {
     let send = submit(&mut e, &mut t, vec![grouped()]);
     let legs = ids(&send);
     let mut out = ack(&mut e, &mut t, &send);
-    stream(&mut e, s, NOW + 1.0, &[(&legs[0], None, "open")]);
+    stream(
+        &mut e,
+        s,
+        NOW + 1.0,
+        &[(&native(0), Some(&legs[0]), "open")],
+    );
     e.handle(
         NOW + 2.0,
         Event::WsClosed {
@@ -349,14 +362,13 @@ fn a_later_complete_snapshot_reconciles_an_unknown_group_into_the_store() {
     let read = find(&out, "accountActiveOrders")
         .or_else(|| find(&advance(&mut e, &mut t, now), "accountActiveOrders"))
         .expect("the Unknown group schedules a reconciling orders snapshot");
-    let rows: Vec<&str> = legs.iter().map(String::as_str).collect();
+    let rows: Vec<(String, &str)> = (0..3).map(|i| (native(i), legs[i].as_str())).collect();
     reply_at(&mut e, now, &read, 200, &snapshot(&rows));
     let mut stored: Vec<String> = e.store().orders().iter().map(|o| o.id.clone()).collect();
-    let mut expected = legs.clone();
     stored.sort();
-    expected.sort();
     assert_eq!(
-        stored, expected,
+        stored,
+        vec![native(0), native(1), native(2)],
         "the store is exactly the reconciling snapshot"
     );
     let next = advance(&mut e, &mut t, now + BOUND);
@@ -377,10 +389,16 @@ fn a_snapshot_missing_one_leg_reports_it_missing_and_never_done() {
     let read = find(&out, "accountActiveOrders")
         .or_else(|| find(&advance(&mut e, &mut t, now), "accountActiveOrders"))
         .expect("reconciling orders snapshot");
-    reply_at(&mut e, now, &read, 200, &snapshot(&[&legs[0], &legs[1]]));
-    assert!(e.store().order(&legs[0]).is_some());
+    reply_at(
+        &mut e,
+        now,
+        &read,
+        200,
+        &snapshot(&[(native(0), &legs[0]), (native(1), &legs[1])]),
+    );
+    assert!(e.store().order(&native(0)).is_some());
     assert!(
-        e.store().order(&legs[2]).is_none(),
+        e.store().order(&native(2)).is_none() && e.store().order(&legs[2]).is_none(),
         "the missing take profit is not invented"
     );
     let later = advance(&mut e, &mut t, now + BOUND);
@@ -389,5 +407,91 @@ fn a_snapshot_missing_one_leg_reports_it_missing_and_never_done() {
         terminals(&out, 7)
             .iter()
             .all(|n| matches!(n, Notice::CommandFailed { error, .. } if error.outcome == Some(Outcome::Unknown)))
+    );
+}
+
+#[test]
+fn known_engine_gap_place_after_unknown_placement_is_admitted() {
+    // Documents the engine gap: order_locks acquire checks 'uncertain' only for
+    // CancelSymbolOrders, so a placement after an Unknown one is admitted. fe7lgm's fix
+    // flips this to a refusal (Lighter must also opt into guard_pending_placements).
+    let (mut e, _, mut t) = ready_grouped();
+    let plain =
+        || order(json!({"symbol":"ETH","type":"limit","side":"buy","amount":0.2,"price":90}));
+    let send = submit(&mut e, &mut t, vec![plain()]);
+    reply(
+        &mut e,
+        &send,
+        503,
+        r#"{"code":500,"message":"unavailable"}"#,
+    );
+    let out = drain(&mut e, &mut t);
+    assert!(
+        matches!(&terminals(&out, 7)[..], [Notice::CommandFailed { error, .. }] if error.outcome == Some(Outcome::Unknown)),
+        "precondition: the sealed placement terminal is Unknown"
+    );
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 8,
+            orders: vec![plain()],
+        }),
+    );
+    let next = drain(&mut e, &mut t);
+    assert!(terminals(&next, 8).is_empty(), "today: not refused");
+    let nonce = find(&next, "nextNonce").expect("today: the second placement proceeds");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":11}"#);
+    let second = find(&drain(&mut e, &mut t), "sendTx").expect("today: it is signed and sent");
+    assert_eq!(
+        param(&second, "tx_type"),
+        "14",
+        "a native create-order transaction"
+    );
+}
+
+#[test]
+fn a_native_index_equal_to_a_leg_client_index_never_proves_it() {
+    // dazzy3: native order indexes and minted client indexes share the u64 space.
+    let (mut e, s, mut t) = ready_grouped();
+    let send = submit(&mut e, &mut t, vec![grouped()]);
+    let legs = ids(&send);
+    let mut out = ack(&mut e, &mut t, &send);
+    stream(
+        &mut e,
+        s,
+        NOW + 1.0,
+        &[
+            (&native(0), Some(&legs[0]), "open"),
+            (&native(1), Some(&legs[1]), "pending"),
+            // An unrelated order whose NATIVE index coincides with the TP's client index.
+            (&legs[2], Some("123"), "open"),
+        ],
+    );
+    out.extend(advance(&mut e, &mut t, NOW + BOUND - 100.0));
+    assert!(
+        terminals(&out, 7).is_empty(),
+        "a coincident native index never releases"
+    );
+    out.extend(advance(&mut e, &mut t, NOW + BOUND + 1_000.0));
+    assert!(
+        matches!(&terminals(&out, 7)[..], [Notice::CommandFailed { error, .. }] if error.outcome == Some(Outcome::Unknown)),
+        "{:?}",
+        terminals(&out, 7)
+    );
+}
+
+#[test]
+fn a_complete_snapshot_with_client_indexes_proves_the_group() {
+    let (mut e, _, mut t) = ready_grouped();
+    let send = submit(&mut e, &mut t, vec![grouped()]);
+    let legs = ids(&send);
+    let out = ack(&mut e, &mut t, &send);
+    let read = find(&out, "accountActiveOrders").expect("the ACK refreshes active orders");
+    let rows: Vec<(String, &str)> = (0..3).map(|i| (native(i), legs[i].as_str())).collect();
+    reply_at(&mut e, NOW + 1.0, &read, 200, &snapshot(&rows));
+    let done = terminals(&advance(&mut e, &mut t, NOW + 2.0), 7);
+    assert!(
+        matches!(&done[..], [Notice::CommandDone { result, .. }] if serde_json::from_str::<Vec<String>>(result).unwrap() == legs),
+        "{done:?}"
     );
 }

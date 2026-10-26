@@ -1455,7 +1455,7 @@ impl Lighter {
     }
     /// Maps one active-order snapshot row into `orders` or records it as skipped.
     fn snapshot_order(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         raw: &RawValue,
         market_hint: Option<&str>,
@@ -1463,7 +1463,15 @@ impl Lighter {
         coverage: &mut SnapshotCoverage<String>,
     ) {
         match self.map_order_row(cx, raw, market_hint, true) {
-            Ok(order) => return orders.extend(order),
+            Ok(order) => {
+                // A snapshot row proves a grouped leg by its own client order index.
+                if order.is_some()
+                    && let Some(client_index) = client_order_index(raw)
+                {
+                    self.trade_group_observed(cx, &client_index);
+                }
+                return orders.extend(order);
+            }
             Err(OrderRowError::Unmapped(id)) => {
                 cx.notice(
                     Level::Warn,
@@ -1935,9 +1943,6 @@ impl Lighter {
         orders: Vec<Order>,
         coverage: &SnapshotCoverage<String>,
     ) {
-        for order in &orders {
-            self.trade_order_observed(cx, &order.id, None, order.filled, order.status);
-        }
         let mut ids = HashSet::new();
         let mut merged = orders
             .into_iter()

@@ -403,9 +403,10 @@ several native lots, or an invalid trigger, is refused NotSent before any
 request. Market entries keep their separate protective transactions.
 
 - Proof (ruling (c)): an acknowledgement is not Done. Every leg must be seen by
-  its own id, the row's order index or its own `client_order_index`, in the
-  private stream or a complete active-orders snapshot; any status counts as
-  existence. Counts or partial sightings never release. After the last step the
+  its own `client_order_index` in the private stream or an active-orders
+  snapshot row; any status counts as existence. A row's native order index is
+  never compared with our minted indexes (the two share the u64 space). Counts
+  or partial sightings never release. After the last step the
   Plan parks in `serial_plan_settle_wait` (engine #2274), released by that
   proof, and the ready handler always ends the Plan: `done_plan` with every id,
   parent first, or Unknown.

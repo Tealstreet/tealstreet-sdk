@@ -907,3 +907,58 @@ mod security_hedging {
         assert!(safe_cex_crypto::lighter::schnorr_verify(&[2; 8], &public, &second).unwrap());
     }
 }
+
+#[cfg(test)]
+mod grouped_shape_tests {
+    use super::*;
+
+    fn leg(order_id: u64, order_type: u8) -> Order {
+        // Protection legs are always reduce-only in our construction (trading.rs).
+        Order {
+            order_id,
+            market_id: 1,
+            is_buy: order_type == 0,
+            price: 310_000,
+            amount: if order_type == 0 { 1_000 } else { 0 },
+            order_type,
+            time_in_force: if order_type == 0 { 1 } else { 0 },
+            reduce_only: order_type != 0,
+            trigger_price: if order_type == 0 { 0 } else { 300_000 },
+            order_expiry: None,
+        }
+    }
+
+    fn grouped(grouping: u8, orders: Vec<Order>) -> Result<TxInput, String> {
+        let account = Account::new(304, 42, 3).unwrap();
+        let tx = Transaction::Grouped {
+            grouping,
+            orders,
+            builder: None,
+        };
+        tx_input(&account, &tx, 7, 1_700_000_000_000)
+    }
+
+    #[test]
+    fn grouped_shapes_outside_oto_oco_otoco_are_refused_before_signing() {
+        assert!(
+            grouped(2, vec![leg(1, 0), leg(2, 2), leg(3, 4)]).is_err(),
+            "OCO carries two orders"
+        );
+        assert!(
+            grouped(4, vec![leg(1, 0), leg(2, 2)]).is_err(),
+            "grouping 4 is undefined"
+        );
+        assert!(
+            grouped(0, vec![leg(1, 0), leg(2, 2)]).is_err(),
+            "grouping 0 is undefined"
+        );
+        assert!(
+            grouped(1, vec![leg(1, 0), leg(2, 2)]).is_ok(),
+            "control: OTO"
+        );
+        assert!(
+            grouped(3, vec![leg(1, 0), leg(2, 2), leg(3, 4)]).is_ok(),
+            "control: OTOCO"
+        );
+    }
+}

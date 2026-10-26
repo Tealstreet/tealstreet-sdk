@@ -182,8 +182,8 @@ struct Integrator {
 }
 
 impl Lighter {
-    /// An authoritative stream or snapshot row. `client_index` is the row's own
-    /// client order index when present; either identity proves a grouped leg.
+    /// An authoritative stream row. `client_index` is the row's own client order
+    /// index when present; only it can prove a grouped leg.
     pub(crate) fn trade_order_observed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -203,10 +203,23 @@ impl Lighter {
             }) {
                 job.amend_filled = true;
             }
-            for leg in [Some(id), client_index].into_iter().flatten() {
-                if job.group_legs.iter().any(|own| own == leg) {
-                    job.group_seen.insert(leg.to_string());
-                }
+        }
+        if let Some(client_index) = client_index {
+            self.trade_group_observed(cx, client_index);
+        }
+    }
+
+    /// Group legs are proven only in their own namespace: a row's client order
+    /// index. Native order indexes can coincide with our minted indexes.
+    pub(crate) fn trade_group_observed(&mut self, cx: &mut Cx<'_, Pending>, client_index: &str) {
+        for job in self
+            .trading
+            .active
+            .iter_mut()
+            .chain(self.trading.queue.iter_mut())
+        {
+            if job.group_legs.iter().any(|own| own == client_index) {
+                job.group_seen.insert(client_index.to_string());
             }
         }
         if let Some(job) = self.trading.active.as_ref()
