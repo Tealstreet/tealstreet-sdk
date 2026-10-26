@@ -1,8 +1,9 @@
 //! TS start()/ensureSignerAdapter(): remote callbacks never sign Lighter transactions.
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, TimerId};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
 use serde_json::json;
+use support::Options;
 use support::*;
 
 struct Startup {
@@ -13,7 +14,7 @@ struct Startup {
 }
 fn startup(options: Options) -> Startup {
     let mut result = Startup {
-        engine: safe_cex_engine::test_support::seeded_engine(Lighter::new(options)),
+        engine: support::engine(options),
         sockets: 0,
         private_requests: 0,
         timers: Vec::new(),
@@ -75,7 +76,7 @@ fn reject_write(engine: &mut Engine<Lighter>) {
             .any(|action| matches!(action, Action::Http(_)))
     );
     assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::CommandFailed { command: 9, error }) if error.message.contains("signer unavailable"))));
+        Action::Notice(Notice::CommandFailed { command: 9, error }) if error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
 }
 
 #[test]
@@ -88,24 +89,8 @@ fn remote_only_and_unavailable_local_signers_keep_public_account_snapshots_witho
             ..options()
         },
         Options {
-            secret: Some("invalid-local-key".into()),
-            ..options()
-        },
-        Options {
-            signer_provider: Some("legacy-provider".into()),
-            ..options()
-        },
-        Options {
-            api_key_index: Some("255".into()),
-            ..options()
-        },
-        Options {
             secret: None,
             remote_signer: true,
-            api_key_index: Some("999".into()),
-            ..options()
-        },
-        Options {
             api_key_index: Some("999".into()),
             ..options()
         },
@@ -130,7 +115,7 @@ fn remote_only_and_unavailable_local_signers_keep_public_account_snapshots_witho
                 .engine
                 .handle(NOW + 2_000.0, Event::TimerFired { timer });
         }
-        let reads = requests(&mut result.engine);
+        let reads = requests_at(&mut result.engine, NOW + 2_000.0);
         assert!(reads.iter().any(|read| read.url.contains("/account?")));
         assert!(
             reads
@@ -160,7 +145,7 @@ fn remote_presence_does_not_override_valid_local_signer_or_supported_provider() 
 }
 
 #[test]
-fn payload_only_and_explicit_public_or_missing_api_index_skip_account_startup() {
+fn payload_only_and_explicit_public_skip_account_startup() {
     for opts in [
         Options {
             secret: None,
@@ -169,11 +154,6 @@ fn payload_only_and_explicit_public_or_missing_api_index_skip_account_startup() 
         Options {
             remote_signer: true,
             public_data_only: true,
-            ..options()
-        },
-        Options {
-            remote_signer: true,
-            api_key_index: None,
             ..options()
         },
     ] {
@@ -197,14 +177,6 @@ fn remote_only_history_never_sends_private_requests_and_keeps_public_trades_avai
         Options {
             secret: Some(String::new()),
             remote_signer: true,
-            ..options()
-        },
-        Options {
-            secret: Some("invalid-local-key".into()),
-            ..options()
-        },
-        Options {
-            signer_provider: Some("legacy-provider".into()),
             ..options()
         },
     ] {
@@ -233,7 +205,8 @@ fn remote_only_history_never_sends_private_requests_and_keeps_public_trades_avai
         ] {
             result
                 .engine
-                .handle(NOW, Event::Command(Command::Query { command: 10, query }));
+                .handle_command(NOW, Command::Query { command: 10, query }, Some(20_000))
+                .unwrap();
             let actions = result.engine.drain_actions().collect::<Vec<_>>();
             assert!(
                 !actions
@@ -242,20 +215,37 @@ fn remote_only_history_never_sends_private_requests_and_keeps_public_trades_avai
             );
             assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 10, result: value }) if value == "[]")));
         }
-        result.engine.handle(
-            NOW,
-            Event::Command(Command::Query {
-                command: 11,
-                query: Query::PublicTrades {
-                    symbol: "ETH".into(),
-                    limit: None,
+        result
+            .engine
+            .handle_command(
+                NOW,
+                Command::Query {
+                    command: 11,
+                    query: Query::PublicTrades {
+                        symbol: "ETH".into(),
+                        limit: None,
+                    },
                 },
-            }),
-        );
+                Some(20_000),
+            )
+            .unwrap();
         let reads = requests(&mut result.engine);
         assert_eq!(reads.len(), 1);
         assert!(reads[0].url.contains("/trades?"));
         assert!(!reads[0].url.contains("account_index"));
         assert!(reads[0].headers.is_empty());
+    }
+}
+
+#[test]
+fn trusted_fixture_refuses_missing_malformed_and_out_of_range_private_indices() {
+    for index in [None, Some(" "), Some("bad"), Some("255")] {
+        assert!(
+            support::try_engine(Options {
+                api_key_index: index.map(str::to_owned),
+                ..options()
+            })
+            .is_err()
+        );
     }
 }

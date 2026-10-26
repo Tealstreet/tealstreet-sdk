@@ -143,22 +143,22 @@ impl Lighter {
         let Some(account) = self.account.account_index else {
             return true;
         };
-        let Ok(auth) = self.account_auth(cx) else {
+        if self.account.identity.is_none() {
             self.limits.next_fetch_at = cx.now + RETRY_MS;
             return true;
-        };
+        }
         self.limits.in_flight = true;
-        cx.request(
-            Method::Get,
+        self.account_request(
+            cx,
             format!(
                 "{}/api/v1/accountLimits?account_index={account}",
                 self.host()
             ),
-            vec![("authorization", auth)],
             None,
-            Pending::Account(account::Request::Limits { started_at: cx.now }),
+            account::Request::Limits { started_at: cx.now },
+            Some(crate::sign::AuthPlacement::Header),
         );
-        false
+        !self.limits.in_flight
     }
     pub(crate) fn tier_action(
         &mut self,
@@ -185,31 +185,87 @@ impl Lighter {
                 let _ = cx.done_context(&context, tier);
             }
             VenueAction::SetAccountTier { tier } => {
+                let Ok(preflight) =
+                    cx.begin_preflight(safe_cex_engine::request_context::PreflightPolicy {
+                        purpose:
+                            safe_cex_engine::request_context::PreflightPurpose::WriteAfterReads,
+                        read_credential: None,
+                        write_credential: self
+                            .account
+                            .identity
+                            .as_ref()
+                            .map(crate::primary_credential),
+                    })
+                else {
+                    return;
+                };
                 let result = (|| {
                     if !matches!(tier.as_str(), "standard" | "premium" | "plus") {
-                        return Err("Lighter account tier must be standard, premium or plus".into());
+                        return Err(
+                            "Lighter account tier must be standard, premium or plus".to_owned()
+                        );
                     }
                     let account = self
                         .account
                         .account_index
                         .ok_or("Lighter account is not loaded yet")?;
-                    let auth = self.account_auth(cx)?;
-                    Ok::<_, String>((account, auth))
+                    let identity = self
+                        .account
+                        .identity
+                        .clone()
+                        .ok_or("Lighter signer unavailable")?;
+                    let recipe = self.auth_recipe(identity, crate::sign::AuthPlacement::Header)?;
+                    Ok((account, recipe))
                 })();
-                match result {
-                    Ok((account, auth)) => {
-                        cx.request(
-                            Method::Post,
-                            format!("{}/api/v1/changeAccountTier", self.host()),
-                            vec![
-                                ("Content-Type", "application/x-www-form-urlencoded".into()),
-                                ("authorization", auth),
-                            ],
-                            Some(format!("account_index={account}&new_tier={tier}")),
-                            Pending::Account(account::Request::ChangeTier { command }),
-                        );
+                let (account, recipe) = match result {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = cx.fail_preflight(&preflight, error);
+                        return;
                     }
-                    Err(error) => cx.fail(command, error),
+                };
+                let credential = crate::primary_credential(self.account.identity.as_ref().unwrap());
+                let (plan, slot) = match cx.admit_serial_plan(
+                    &preflight,
+                    super::trading::serial_call(Operation::Mutation),
+                    safe_cex_engine::request_context::plan::SerialPolicy {
+                        credential: Some(credential),
+                        pacing: None,
+                        refusals_complete: false,
+                    },
+                ) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = cx.fail_preflight(&preflight, error.venue_error());
+                        return;
+                    }
+                };
+                let context = match cx.plan_leg_context_with_intent(
+                    &plan,
+                    &slot,
+                    safe_cex_engine::classify::Intent::Setting,
+                ) {
+                    Ok(context) => context,
+                    Err(error) => {
+                        let _ = cx.fail_plan(&plan, error.venue_error());
+                        return;
+                    }
+                };
+                let pending = Pending::Tier {
+                    plan: plan.clone(),
+                    slot,
+                    context: context.clone(),
+                };
+                if let Err((_, error)) = cx.request_signed_managed(
+                    context,
+                    None,
+                    Method::Post,
+                    format!("{}/api/v1/changeAccountTier", self.host()),
+                    Some(format!("account_index={account}&new_tier={tier}")),
+                    recipe,
+                    pending,
+                ) {
+                    let _ = cx.fail_plan(&plan, error.venue_error());
                 }
             }
             #[allow(unreachable_patterns)]
@@ -219,27 +275,58 @@ impl Lighter {
     pub(crate) fn tier_changed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        plan: safe_cex_engine::request_context::Plan,
+        slot: safe_cex_engine::request_context::plan::Slot,
+        context: safe_cex_engine::request_context::Context,
         response: Response<'_>,
     ) {
+        if cx.validate_plan_delivery(&plan, &context).is_err() {
+            return;
+        }
         let envelope = serde_json::from_str::<Envelope>(response.body).ok();
         if (200..300).contains(&response.status)
             && envelope.as_ref().is_some_and(|e| e.code == Some(200))
         {
+            if cx
+                .http_write_fact(
+                    &context,
+                    safe_cex_engine::classify::WriteFact::Accepted {
+                        order_ids: Vec::new(),
+                    },
+                    None,
+                )
+                .is_err()
+                || cx.validate_http_write_effects(&context).is_err()
+            {
+                let _ = cx.fail_plan(&plan, "Invalid Lighter tier acknowledgement");
+                return;
+            }
             // The next read reflects the new tier and its rate limits.
             self.limits.tier = None;
             self.limits.next_fetch_at = 0.0;
             self.refresh_limits(cx);
-            cx.done(command, "null".into());
+            let _ = cx.finish_plan_call(&plan, &slot, &context);
+            let _ = cx.done_plan(&plan, "null".into());
         } else {
             let message = envelope
-                .and_then(|e| e.message)
+                .as_ref()
+                .and_then(|e| e.message.as_deref())
                 .filter(|m| !m.is_empty())
+                .map(str::to_owned)
                 .unwrap_or_else(|| format!("HTTP {}", response.status));
-            cx.fail(
-                command,
-                format!("Lighter account tier change failed: {message}"),
-            );
+            let message = format!("Lighter account tier change failed: {message}");
+            if (200..300).contains(&response.status)
+                && let Some(code) = envelope.and_then(|e| e.code)
+            {
+                if let Err(error) = Self::record_refusal(cx, &context, u64::from(code), &message) {
+                    let _ = cx.fail_plan(&plan, error.venue_error());
+                    return;
+                }
+            } else {
+                let _ = cx.http_write_unproven(&context, &message);
+            }
+            let _ = cx.finish_plan_call(&plan, &slot, &context);
+            let _ = cx.fail_plan(&plan, message);
         }
     }
     pub(crate) fn limits_standard(&self) -> bool {

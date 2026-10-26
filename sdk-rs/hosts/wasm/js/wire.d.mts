@@ -60,8 +60,8 @@ export interface EngineCapabilities {
   closedPositions: boolean;
   balanceInfo: boolean;
   marketRefresh: boolean;
-  positionHistory: 'unsupported' | 'fillsAccount' | 'fillsSymbol' | 'bybit' | 'okx' | 'blofin' | 'wooOrders';
-  closedPositionFormat: 'unsupported' | 'bybit' | 'okx' | 'blofin';
+  positionHistory: 'unsupported' | 'fillsAccount' | 'fillsSymbol' | 'bybit' | 'okx' | 'blofin' | 'wooOrders' | 'bitunix';
+  closedPositionFormat: 'unsupported' | 'bybit' | 'okx' | 'blofin' | 'bitunix';
   fillHistoryTime: 'asProvided' | 'secondsOrMilliseconds' | 'nonnegativeSecondsOrMilliseconds';
   stpControls: boolean;
   bybitExecutionControls: boolean;
