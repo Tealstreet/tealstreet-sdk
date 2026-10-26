@@ -73,6 +73,14 @@ pub struct Account {
     pub order_rows: Option<SnapshotBuilder<String, Order>>,
     pub order_revision: u64,
     order_token: Option<OrderSnapshotToken>,
+    /// An uncertain placement asked for an order read dispatched after its mark.
+    reconcile_owed: bool,
+    /// The order read in flight started after every such ask, so it may release the fence.
+    order_read_fresh: bool,
+    /// Bumped at every write dispatch and end. A census whose count moved between its
+    /// Orders leg and its last leg may have read a page before a lost write: re-census.
+    pub(crate) writes: u64,
+    census_writes: u64,
     order_versions: HashMap<String, u64>,
     position_versions: HashMap<String, u64>,
     symbol_closures: HashMap<String, (u64, f64)>,
@@ -422,6 +430,18 @@ impl Cryptocom {
         self.connect(cx, 1);
         self.reconcile(cx);
     }
+    /// A new seal: a read already in flight may predate its mark, so it can no longer
+    /// release and a fresh read is owed. An engine re-ask (`Cx::reconcile_reask`, no
+    /// write turned uncertain since) joins the read in flight, or starts one when none is.
+    pub(crate) fn reconcile_uncertain_placement(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !cx.reconcile_reask() {
+            self.account.order_read_fresh = false;
+            self.account.reconcile_owed = true;
+        } else if !self.account.busy {
+            self.account.reconcile_owed = true;
+        }
+        self.reconcile(cx);
+    }
     pub(crate) fn reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.busy {
             return;
@@ -766,7 +786,7 @@ impl Cryptocom {
                         "missing balance summary",
                     );
                 }
-                if self.account.count.is_multiple_of(4) {
+                if self.account.count.is_multiple_of(4) || self.account.reconcile_owed {
                     let Some(token) = cx.store.begin_orders_snapshot() else {
                         cx.notice(
                             Level::Error,
@@ -778,6 +798,9 @@ impl Cryptocom {
                     };
                     self.account.order_token = Some(token);
                     self.account.order_revision = self.account.revision;
+                    self.account.order_read_fresh =
+                        std::mem::take(&mut self.account.reconcile_owed);
+                    self.account.census_writes = self.account.writes;
                     self.read_account(cx, Read::Orders, 0);
                 } else {
                     self.account.count += 1;
@@ -793,8 +816,9 @@ impl Cryptocom {
                         self.account.order_rows.take(),
                         self.account.order_token.take(),
                     ) {
-                        cx.store.commit_orders_snapshot([token], |current| {
-                            if regular.rejected() == 0 && rows.rejected() == 0 {
+                        let clean = regular.rejected() == 0 && rows.rejected() == 0;
+                        let committed = cx.store.commit_orders_snapshot([token], |current| {
+                            if clean {
                                 self.account.order_skips.clear();
                             }
                             // Each list keeps only the stored copies of its own family that its
@@ -845,9 +869,22 @@ impl Cryptocom {
                                 .retain(|id| regular.iter().any(|row| row.id == *id));
                             regular
                         });
+                        // Both lists published cleanly from a read started after the mark,
+                        // with no write dispatched or ended while either leg was out.
+                        if committed && clean && std::mem::take(&mut self.account.order_read_fresh)
+                        {
+                            if self.account.writes == self.account.census_writes {
+                                cx.orders_reconciled(None);
+                            } else {
+                                self.account.reconcile_owed = true;
+                            }
+                        }
                     }
                     self.account.count += 1;
                     self.schedule_reconcile(cx);
+                    if self.account.reconcile_owed {
+                        self.reconcile(cx);
+                    }
                 }
             }
         }

@@ -644,6 +644,7 @@ impl Cryptocom {
         );
     }
     fn queue_trade(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+        self.account.writes += 1;
         let path = request.step.path;
         let url = format!("{}/{path}", self.rest);
         let recipe = crate::sign::Envelope::http(
@@ -670,6 +671,7 @@ impl Cryptocom {
         request: Request,
         error: VenueError,
     ) {
+        self.account.writes += 1;
         match &request.physical {
             Physical::Prerequisite { preflight, .. } => {
                 let _ = cx.fail_preflight(preflight, error);
@@ -685,6 +687,7 @@ impl Cryptocom {
         request: Request,
         error: VenueError,
     ) {
+        self.account.writes += 1;
         let Physical::Write {
             plan,
             slot,
@@ -787,6 +790,7 @@ impl Cryptocom {
                 Some(Authority::Plan(own)) if retirement.matches_plan(own) => Some(*id),
                 _ => None,
             })?;
+        self.account.writes += 1;
         let active = self.trading.queue.front() == Some(&command);
         self.trading.jobs.remove(&command);
         self.trading.queue.retain(|id| *id != command);
@@ -811,6 +815,7 @@ impl Cryptocom {
         mut request: Request,
         response: Response<'_>,
     ) {
+        self.account.writes += 1;
         if !request.delivered(cx) {
             return;
         }

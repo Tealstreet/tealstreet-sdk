@@ -9978,6 +9978,28 @@ their reconcile; any other end drops the mark. Amend roots are marked too, so an
 Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
 same-ID amend fence stays as is.
 
+Crypto.com opts in with no lock scope, through Phase B. Both Crypto.com and ApeX
+tell a new seal from an engine re-ask with `Cx::reconcile_reask`. A new seal demotes a read in flight, which may predate its
+mark, and owes a fresh read. A re-ask joins the read in flight, or starts a fresh
+one when none is. Crypto.com's fresh read is Orders+AdvancedOrders, started at
+once when no account read is in flight, and `orders_reconciled` follows only when
+both lists commit cleanly. The two legs carry their own tokens, so a write
+dispatched or ended between them (a venue-local counter stamped at the Orders
+leg) skips the release and owes a re-census wholly after it. Cancel-all: store-composed (`EachOpenSymbol`) and
+fenced while uncertain (default `fence_uncertain_cancel_all`), since a composed
+cancel-all cannot reach a placement the store has not seen. Control:
+`an_unknown_placement_fences_its_symbol_until_a_fresh_order_read` in
+`venues/cryptocom/tests/uncertain_placement_fence.rs`.
+
+ApeX opts in the same way. `reconcile_uncertain` owes one fresh open-orders
+read, starting it at once unless one is pending, and a read in flight when asked
+can no longer release. Release follows publication of a clean orders leg
+(rejected 0): on the heal path, and on the joint snapshot path only when the
+orders response completes the snapshot, so the release token certifies the
+orders read itself. The census is one unpaginated `/v3/open-orders` request, so
+no earlier page can sit behind the token the release is judged on. Cancel-all: store-composed and fenced, as for Crypto.com. Its control is the
+same-named test in `venues/apexomni/tests/trading.rs`.
+
 A census that pages under several contexts records `Cx::order_read_epoch()`
 before its first page and reports through `orders_reconciled_since`, so its
 last page cannot release a mark its first page never saw. OKX adopts it (its
