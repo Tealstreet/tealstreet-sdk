@@ -169,7 +169,7 @@ mod condition_waits {
                 &preflight,
                 mutation(),
                 SerialPolicy {
-                    credential: credential(),
+                    credential: Some(credential()),
                     pacing: None,
                     refusals_complete: false,
                 },
