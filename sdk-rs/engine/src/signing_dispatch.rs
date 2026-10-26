@@ -485,6 +485,13 @@ impl Dispatch {
         p.route_ready = true;
         Ok(())
     }
+    /// A prepared task's HTTP request and absolute deadline.
+    #[cfg(feature = "sign-meta")]
+    pub(crate) fn prepared_task(&self, id: RequestId) -> Option<(RequestId, f64)> {
+        let pending = self.pending.get(&id).filter(|p| p.prepared_at.is_some())?;
+        Some((pending.request_id()?, pending.deadline))
+    }
+
     pub fn signature_pending(&self, id: RequestId) -> bool {
         self.pending
             .get(&id)

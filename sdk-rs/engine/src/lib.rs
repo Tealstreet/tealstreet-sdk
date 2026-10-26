@@ -36,6 +36,8 @@ pub mod repair;
 pub mod request_context;
 pub mod resource_ids;
 pub mod selected_read;
+#[cfg(feature = "sign-meta")]
+pub mod sign_meta;
 pub mod signing;
 pub mod signing_capture;
 mod signing_dispatch;
