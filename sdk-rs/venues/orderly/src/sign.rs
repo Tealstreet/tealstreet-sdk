@@ -233,6 +233,120 @@ impl safe_cex_engine::SignStep for Http {
     }
 }
 
+/// Dispatch recipe for the private socket's `auth` frame: the provider presents
+/// the `ed25519:` public key and signs the whole-millisecond stamp's decimal text,
+/// exactly as native does.
+pub struct WsAuth {
+    identity: safe_cex_engine::signing::Identity,
+    host: String,
+    stamp: Option<u64>,
+}
+impl WsAuth {
+    pub fn new(identity: safe_cex_engine::signing::Identity, url: &str) -> Self {
+        let host = url
+            .split_once("://")
+            .map_or("", |(_, rest)| rest.split('/').next().unwrap_or(""))
+            .into();
+        Self {
+            identity,
+            host,
+            stamp: None,
+        }
+    }
+}
+impl safe_cex_engine::SignStep for WsAuth {
+    fn prepare(
+        &mut self,
+        outbound: &mut safe_cex_engine::Action,
+        dispatch: &safe_cex_engine::DispatchContext<'_>,
+    ) -> Result<safe_cex_engine::signing::SignRequest, safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::{
+            Algorithm, Context, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
+        };
+        self.stamp = None;
+        if !matches!(outbound, safe_cex_engine::Action::WsSend { .. }) {
+            return Err(SignError::InvalidRequest);
+        }
+        let stamp_ms = dispatch.stamp_ms().floor();
+        let receipt = SignReceipt {
+            nonce: None,
+            stamp_ms: Some(stamp_ms),
+            expiry_ms: None,
+        };
+        receipt.validate()?;
+        let stamp = stamp_ms as u64;
+        let request = SignRequest {
+            receipt,
+            operations: vec![
+                Operation::Present {
+                    key: self.identity.credential.clone(),
+                },
+                Operation::Sign {
+                    algorithm: Algorithm::Ed25519,
+                    key: self.identity.signing_ref()?.clone(),
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: stamp.to_string().into_bytes(),
+                    }],
+                },
+            ],
+            context: Context {
+                venue: "orderly".into(),
+                method: "WS".into(),
+                host: self.host.clone(),
+                path: "auth".into(),
+            },
+        };
+        self.stamp = Some(stamp);
+        Ok(request)
+    }
+    fn apply(
+        &mut self,
+        outbound: &mut safe_cex_engine::Action,
+        result: &safe_cex_engine::signing::SignResult,
+    ) -> Result<(), safe_cex_engine::signing::SignError> {
+        use safe_cex_engine::signing::SignError;
+        let timestamp = self.stamp.take().ok_or(SignError::InvalidRequest)?;
+        let key = result
+            .values
+            .first()
+            .and_then(|key| std::str::from_utf8(key).ok())
+            .filter(|key| key.starts_with("ed25519:"))
+            .ok_or(SignError::InvalidResult)?;
+        let signature = result
+            .values
+            .get(1)
+            .filter(|signature| signature.len() == 64)
+            .ok_or(SignError::InvalidResult)?;
+        let safe_cex_engine::Action::WsSend { text, .. } = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        #[derive(serde::Serialize)]
+        struct Params<'a> {
+            orderly_key: &'a str,
+            sign: String,
+            timestamp: u64,
+        }
+        #[derive(serde::Serialize)]
+        struct Auth<'a> {
+            event: &'a str,
+            params: Params<'a>,
+        }
+        *text = serde_json::to_string(&Auth {
+            event: "auth",
+            params: Params {
+                orderly_key: key,
+                sign: URL_SAFE.encode(signature),
+                timestamp,
+            },
+        })
+        .map_err(|_| SignError::InvalidResult)?;
+        Ok(())
+    }
+    fn freshness_ms(&self) -> f64 {
+        5000.
+    }
+}
+
 impl safe_cex_crypto::secrets::EraseSecrets for Credentials {
     fn erase_secrets(&mut self) {
         self.seed.zeroize();
