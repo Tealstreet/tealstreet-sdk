@@ -9657,3 +9657,7 @@ clock; payload financial timestamps/values stay. Paused capacity uses254 depth
 peers then two independent candle peers after genuine429. Exact completion
 Cancel is captured/checked once. The secondary helper is test support with real
 installed providers and genuine test command entry; native assertions retained.
+
+### Bitunix closed positions and journal on Rust
+
+Bitunix on the Rust engine now serves the journal (historical positions) and closed PnL from the venue's reported position history, mapped by TypeScript's own Bitunix mappers, as TypeScript does ([RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md)). The journal previously threw "no journal records path declared", and closed PnL was always empty. Capability records gain `positionHistory: "bitunix"` and `closedPositionFormat: "bitunix"`. A failed journal read throws, as on every other reported-closed venue; a failed closed-PnL read yields `[]`.
