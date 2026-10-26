@@ -22,6 +22,8 @@ pub(crate) struct ClaimAuthority {
     pub(crate) selection: Selection,
     pub(crate) credential: Credential,
     pub(crate) signing: KeyRef,
+    /// From the trusted identity's `credential_absent()`: nothing is presented.
+    pub(crate) signing_only: bool,
     bound: AtomicBool,
     #[cfg(feature = "address-nonce")]
     address: Option<crate::engine::address_nonce_setup::VerifiedAddress>,
@@ -100,7 +102,8 @@ impl NonceClaim {
                 #[cfg(feature = "address-nonce")]
                 address,
                 selection,
-                credential: selection.credential(identity.credential.clone()),
+                credential: selection.authority(identity),
+                signing_only: identity.credential_absent(),
                 signing: identity
                     .signing_ref()
                     .map_err(|_| NonceSelectionError::InvalidSubject)?
@@ -126,7 +129,8 @@ impl ClaimAuthority {
 
     pub(crate) fn matches_identity(&self, identity: &Identity) -> bool {
         if identity.validate().is_err()
-            || self.credential.reference != identity.credential
+            || self.credential.reference != *identity.authority_ref()
+            || self.signing_only != identity.credential_absent()
             || !identity.signing_ref().is_ok_and(|key| *key == self.signing)
         {
             return false;
