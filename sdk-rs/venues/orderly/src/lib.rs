@@ -1171,8 +1171,14 @@ impl Venue for Orderly {
         }
         match pending {
             Pending::Account(read, request) => {
+                // A superseded read's failure only closes its own leg.
+                let current = cx
+                    .validate_background_read_http_delivery(read.context())
+                    .is_ok();
                 let _ = cx.finish_http_context(read.context());
-                self.account_failed(cx, request, error);
+                if current {
+                    self.account_failed(cx, request, error);
+                }
             }
             Pending::Trade(request) => {
                 let error = safe_cex_engine::VenueError::new(error)

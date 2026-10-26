@@ -30,7 +30,7 @@ In `account.rs`, the two `matches!(request, Request::Info)` checks become the `R
 - **Provider.** `orderly_signer` installs the seed as declared base58 with `Algorithm::Ed25519`. The presented key is native's `ed25519:`-prefixed public key, and either string may carry the prefix, as natively. A public-data-only or keyless account installs nothing. `Options.identities` carries the refs.
 - **Account reads.** Info, margin modes, positions and the open-order pages are Background `SelectedRead`s with the Primary role (Orderly has one key), 20 s each, with no retry policy. The native revision and inflight joins, the startup retry and the 4xx Info deactivation are unchanged.
   - Each delivery validates its Background custody before any row or Store effect. A stale leg only closes its Context.
-  - A malformed stream is checked the same way before `account_failed`.
+  - A malformed stream, a transport failure and a signing refusal are checked the same way before `account_failed`, so a superseded read never clears a newer read's inflight flag or re-arms the startup retry (dazzy3 F1).
 - **History.** One command Read root per query, admitted after native validation, and an expired or unstamped receipt is the shared typed refusal.
   - One signed leg is issued per page. The rows of a page are mapped as they stream and staged through the `ReadCursorHistory` admission only after the delivery validates at the response, in native order and under the same limit.
   - The funding spacing timers park the root between pages, and the caller's wait bounds the whole walk.
@@ -45,7 +45,7 @@ Each trading command opens `begin_preflight(WriteAfterReads)`, and native's queu
 
 Write facts come from a cited Orderly CodeTable. Unknown seals reconcile through `reconcile_uncertain` with a Primary snapshot. Retirement goes through `on_http_owner_retired_preflight` plus `capture_http_reconciliation`.
 
-Open for O2: the local provider's advisory `can_sign` reports Ed25519 as unimplemented for every venue. If write admission consults it, O2 needs that answered in core before the source lands.
+O2 control (dazzy3): the local provider's advisory `can_sign` reports Ed25519 as unimplemented. Preflight and Plan admission don't consult it today (`Cx::can_sign` is an opt-in multi-release check), and O2 pins with a control that writes are admitted under the installed provider.
 
 ## Controls (O1)
 
