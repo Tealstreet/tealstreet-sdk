@@ -281,3 +281,11 @@ coalesced_snapshot_only_wakes_its_matching_waiter; owner_retirement_releases_
 active_fifo_once; auth_recipe_reprepare_retains_the_reserved_transaction_nonce;
 raw_scalar_never_reaches_venue_or_bridge_options. Existing independent
 financial/signing/coverage assertions remain required alongside these additions.
+
+Original-review pins: the reseed control selects exactly reply-time + 150 ms
+and checks the successful result is the original ClientOrderIndex, not merely
+a Done notice. Its strengthened native-GREEN body will be re-executed before
+source publication. Source-stage gates explicitly include typed provider
+refusal kind/no write retry, scalar absence from options/serialized bridge/Debug,
+FIFO/coalesced tier/approval/exposure waits, tier success/refusal/Unknown once,
+and the second-21104 explicit failure/no third send.

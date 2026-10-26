@@ -383,7 +383,7 @@ fn proven_21104_reseed_then_acceptance_is_plain_success() {
     let (timer, at): (TimerId, f64) = actions
         .iter()
         .find_map(|action| match action {
-            Action::SetTimer { timer, at_ms } if *at_ms <= NOW + 150.0 => Some((*timer, *at_ms)),
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 150.0 => Some((*timer, *at_ms)),
             _ => None,
         })
         .expect("bounded native reseed wait");
@@ -404,8 +404,8 @@ fn proven_21104_reseed_then_acceptance_is_plain_success() {
         r#"{"code":200,"tx_hash":"accepted"}"#,
     );
     let actions = engine.drain_actions().collect::<Vec<_>>();
-    assert!(matches!(
-        terminal(&actions).as_slice(),
-        [Notice::CommandDone { .. }]
-    ));
+    assert!(matches!(terminal(&actions).as_slice(),
+        [Notice::CommandDone { result, .. }]
+            if serde_json::from_str::<Vec<String>>(result).unwrap()
+                == vec![first_tx["ClientOrderIndex"].as_u64().unwrap().to_string()]));
 }
