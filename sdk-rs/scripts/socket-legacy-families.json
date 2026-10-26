@@ -12,7 +12,6 @@
     "coinbase": "venues/coinbase/src/",
     "cryptocom": "venues/cryptocom/src/",
     "grvt": "venues/grvt/src/",
-    "kraken": "venues/kraken/src/",
     "kucoin": "venues/kucoin/src/",
     "kucoinspot": "venues/kucoin/src/spot/",
     "lighter": "venues/lighter/src/",
