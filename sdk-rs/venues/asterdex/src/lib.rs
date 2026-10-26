@@ -854,8 +854,9 @@ impl Venue for AsterDex {
         true
     }
 
-    /// The engine asks once per uncertain seal; the accepted read reports
-    /// through `orders_reconciled`.
+    /// The engine asks at each uncertain seal and re-asks with backoff while
+    /// fenced; a call starts one read or joins the owed requery, and the clean
+    /// accepted read reports through `orders_reconciled`.
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_orders(cx);
     }
