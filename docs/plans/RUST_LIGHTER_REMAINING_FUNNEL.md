@@ -84,7 +84,9 @@ Fixture setup moves genuine synthetic keys into test support, not production.
 
 claude-m26ps4 owns parts 2+3 as one prerequisite PR: AuthRecipe and the missing
 SchnorrDigest public-key arm/checks. This venue PR does not implement those
-bodies and cannot land before that prerequisite. LocalSigner capability
+bodies and cannot land before that prerequisite. No source publication occurs
+until the recipe owner confirms the local and hosted SchnorrDigest activation
+contract; Required authentication has no unsigned fallback. LocalSigner capability
 activation, implemented(SchnorrDigest) = cfg!(feature = "schnorr"), remains in
 this admission cutover, in the same change that deletes the eager holder.
 Remote recipe IDs and verification remain held behind #1926; no unsupported
@@ -173,13 +175,26 @@ cancel/setting effects without IDs still count. done_plan/fail_plan own the only
 terminal and journal projection. Partial or unproven batch acceptance preserves
 proven IDs and uncertainty; do not invent individual batch acknowledgements.
 
-One venue-proven 21104 nonce refusal may reseed and rebuild the same unresolved
-step after the native delay. It requires definitive current-call DATA, settled
+Choose serial continuation (not a same-leg RefusedResend) for one venue-proven
+21104 nonce refusal: record the rejected Mutation, delay 150 ms on the Plan
+timer before an unsigned nextNonce Read, then issue a NEW Mutation for the
+same unresolved step. SerialPolicy.refusals_complete is true: a later Accepted
+step must finish as plain success, despite the retained refusal report. The
+original proven_21104_reseed_then_acceptance_is_plain_success pins that result. It requires definitive current-call DATA, settled
 refusal evidence, and the job's one-reseed budget. A transport/integrity failure,
 5xx, 405/429, ambiguous batch or unproven acknowledgement cannot trigger that
 resend. A subsequent nonce read is a fresh owned Read call; mutation continuation
-requires its exact successful DATA. Never seed VenueCounter from stale reads;
-re-preparation retains reserved transaction nonces and client indexes.
+requires its exact successful DATA. Only the fresh nonce Read’s exact DATA may call the engine counter seed API;
+never seed from stale reads, message text or a venue-local nonce assignment.
+Re-preparation retains reserved transaction nonces and client indexes.
+
+Nonce API fit is with the core owner before source: this base’s landed TxRecipe
+takes fixed transaction nonces and uses engine::nonce::VenueCounter with
+SeedTicket/seed/take/invalidate. Dispatch NonceClaim currently has only raw-
+or protocol-clock floors, no venue-seeded domain or reseed API. Do not replace
+a venue counter with a clock floor or reset the dispatch repair budget. If the
+core owner requires a new shared seeded-counter API, that is a prerequisite,
+not a second counter implementation in this venue.
 
 Preserve financial reducers, safe integer ranges, order expiry, amendment fill
 checks, builder fees and the unknown-setting reconciliation barrier. Optimistic
@@ -233,8 +248,30 @@ jobs 4 and default flags; delete each scratch target after measurement. No local
 family matrix. Venue-only growth up to 5% follows the standing allowance, with
 the CI-rounded KiB cap and combined still under its enforced ceiling. Any
 generic engine change additionally measures Bybit and Bitget on that same tree.
-Claim only measured bytes, not an estimate from the number of removed sites.
+Measure exactly the features enabled by this consumer; no unused dispatch-nonce
+feature is silently enabled. Combined growth above 30K is referred to the
+overseer, including possible Engine<V> monomorphization cost and 55ao7t’s
+per-venue gating work. Claim only measured bytes, not an estimate from site counts.
 
 One PR and one qualifying PR-triggered run; no job reruns or speculative CI
 dispatch. READY requires reviewed exact source, the required green gates,
 recorded family/combined evidence and the auditor's exact-tree landing GO.
+
+## Original execution ledger
+
+The first local original target is request_context_remaining_funnel.rs, 14
+controls on the unchanged fff73624e85 runtime. Execution is in progress; no RED
+or GREEN count is claimed yet. Preparation controls cover lookup, snapshot,
+orders, private history, limits, approval, nonce, submission and tier mutation.
+Separate controls cover unclaimed history and receipt equality. Native controls
+cover unsigned public history, exact transaction values/result IDs and successful
+21104 reseeding. Their assertion bodies are frozen after baseline execution.
+
+Explicit source-stage controls still to add and execute: backfill_waits_for_
+preparation; typed_provider_failure_does_not_retry_a_write; stale_nonce_read_
+cannot_seed_after_invalidation; second_21104_has_no_second_reseed; accepted_
+history_prefix_survives_a_failed_later_page; rejected_page_staging_is_discarded;
+coalesced_snapshot_only_wakes_its_matching_waiter; owner_retirement_releases_
+active_fifo_once; auth_recipe_reprepare_retains_the_reserved_transaction_nonce;
+raw_scalar_never_reaches_venue_or_bridge_options. Existing independent
+financial/signing/coverage assertions remain required alongside these additions.
