@@ -2,6 +2,7 @@
 // unknown unless the cited venue contract defines a quantity-only minimum.
 export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
   binance: 'https://developers.binance.com/docs/derivatives/usds-margined-futures/common-definition',
+  binancespot: 'https://developers.binance.com/docs/binance-spot-api-docs/filters',
   asterdex: 'https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md',
   bybit: 'https://bybit-exchange.github.io/docs/v5/market/instrument',
   bitget: 'https://www.bitget.com/docs/catalog/classic-contract-market/classic-contract-market',
@@ -29,6 +30,7 @@ export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
 export const LIVE_SMOKE_UNKNOWN_RULES = Object.freeze({
   phemex: 'PerpetualV2 qtyStepSize alone does not establish a minimum order value.',
   cryptocom: 'qty_tick_size alone does not establish a minimum order value.',
+  bitunix: 'trading_pairs basePrecision alone does not establish a minimum order value.',
   hyrotrader: 'No reviewed endpoint profile.',
   grvt: 'No reviewed endpoint profile or sizing contract.',
   kucoinspot: 'No reviewed Spot endpoint profile or sizing contract.',
@@ -63,6 +65,7 @@ const familyOf = (name) => {
 };
 const hosts = {
   binance: /^(?:demo-)?fapi\.binance\.com$/,
+  binancespot: /^(?:api\.binance\.com|testnet\.binance\.vision)$/,
   asterdex: /^fapi\.asterdex(?:-testnet)?\.com$/,
   bybit: /^api(?:-testnet|-demo)?\.bybit\.com$/,
   bitget: /^api\.bitget\.com$/,
@@ -134,6 +137,10 @@ export function venueMarketRules(venue, records, market) {
       case 'binance': case 'asterdex':
         if (method !== 'GET' || !(family === 'asterdex' ? ['/fapi/v1/exchangeInfo', '/fapi/v3/exchangeInfo'] :
           ['/fapi/v1/exchangeInfo']).includes(path)) continue;
+        rows = array(payload.symbols); rule = filtered; break;
+      case 'binancespot':
+        // Spot LOT_SIZE/NOTIONAL as futures; PERCENT_PRICE_BY_SIDE claims no lower bound here.
+        if (method !== 'GET' || path !== '/api/v3/exchangeInfo') continue;
         rows = array(payload.symbols); rule = filtered; break;
       case 'bybit': {
         if (method !== 'GET' || path !== '/v5/market/instruments-info' || !code(payload.retCode)) continue;
