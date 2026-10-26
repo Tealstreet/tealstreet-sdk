@@ -79,14 +79,6 @@ impl Harness {
         adjust(&mut identities);
         let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
             broker_attribution,
-            key: Some("key".into()),
-            secret: Some("secret".into()),
-            passphrase: Some("pass".into()),
-            read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
-                key: "read-key".into(),
-                secret: "read-secret".into(),
-                passphrase: Some("read-pass".into()),
-            }),
             identities: identities.clone(),
             ..Options::default()
         }));
@@ -118,7 +110,8 @@ impl Harness {
                 Action::WsConnect { socket, url, .. } if url.ends_with("/private") => Some(*socket),
                 _ => None,
             })
-            .unwrap();
+            // Identities decide private startup; without a usable Primary there is none.
+            .unwrap_or(SocketId(0));
         h.tick = h
             .actions
             .iter()
@@ -126,7 +119,8 @@ impl Harness {
                 Action::SetTimer { timer, at_ms } if *at_ms == now + 10_000.0 => Some(*timer),
                 _ => None,
             })
-            .unwrap();
+            // The account tick exists only with private startup.
+            .unwrap_or(TimerId(0));
         h
     }
     /// Handle an event at `now`; a later `collect` releases at that time.

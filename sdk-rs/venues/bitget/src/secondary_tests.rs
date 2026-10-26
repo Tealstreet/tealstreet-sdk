@@ -1,5 +1,6 @@
 use super::*;
 use safe_cex_engine::signing::Provider;
+use safe_cex_engine::{CredentialSlot, Query};
 
 pub(crate) fn setup() -> (BitgetFutures, Provider) {
     let (provider, ids) = safe_cex_crypto::signer::LocalSigner::from_json(r#"{"primary":{"key":"primary-key","secret":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","passphrase":"primary-pass"},"secondary":{"key":"read-key","secret":"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=","passphrase":"read-pass"}}"#.into()).unwrap();
@@ -25,40 +26,81 @@ pub(crate) fn headers(
         path: String,
     }
     impl Venue for Probe {
-        type Pending = Pending;
-        fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-            let context = cx
-                .http_context(
-                    safe_cex_engine::request_context::Scope::Background,
-                    Policy {
-                        operation: Operation::Read,
-                        credential: None,
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    },
-                )
-                .unwrap();
-            let pending = Pending::Discovery {
-                context,
-                rows: Discovered::Markets(vec![]),
+        type Pending = Context;
+        fn start(&mut self, _: &mut Cx<'_, Context>) {}
+        fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {
+            use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy};
+            use safe_cex_engine::request_context::{PreflightPolicy, PreflightPurpose};
+            let context = if self.method == Method::Get {
+                let (credential, _) = self.venue.read_selection(&self.path);
+                cx.admit_caller_read_root(credential, None).unwrap()
+            } else {
+                let credential = Credential {
+                    slot: CredentialSlot::Primary,
+                    reference: self
+                        .venue
+                        .options
+                        .credentials
+                        .as_ref()
+                        .unwrap()
+                        .credential
+                        .clone(),
+                };
+                let preflight = cx
+                    .begin_preflight(PreflightPolicy {
+                        purpose: PreflightPurpose::WriteAfterReads,
+                        read_credential: None,
+                        write_credential: Some(credential.clone()),
+                    })
+                    .unwrap();
+                let (plan, slot) = cx
+                    .admit_serial_plan(
+                        &preflight,
+                        SerialCall {
+                            operation: Operation::Mutation,
+                            timeout_ms: 20_000,
+                            attempts: 1,
+                        },
+                        SerialPolicy {
+                            credential,
+                            pacing: None,
+                            refusals_complete: false,
+                        },
+                    )
+                    .unwrap();
+                cx.plan_leg_context(&plan, &slot).unwrap()
             };
-            self.venue.send(
-                cx,
+            let identity = self
+                .venue
+                .signing_identity(self.method, &self.path)
+                .cloned();
+            let pending = context.clone();
+            cx.request_signed_managed(
+                context,
+                None,
                 self.method,
-                &self.path,
-                ArrayAt::Envelope(&[&["data"]]),
-                true,
+                format!("{}{}", paths::REST, self.path),
+                None,
+                Box::new(sign::Http::new(identity, self.path.clone())),
                 pending,
-            );
+            )
+            .unwrap_or_else(|(_, error)| panic!("managed header probe: {error:?}"));
         }
-        fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
-        fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
-        fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
-        fn on_response(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {}
-        fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {}
-        fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
-        fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
+        fn capture_http_reconciliation(
+            &self,
+            _: &Context,
+        ) -> Result<
+            safe_cex_engine::request_context::ReconciliationData,
+            safe_cex_engine::request_context::Error,
+        > {
+            safe_cex_engine::request_context::ReconciliationData::new(self.path.clone())
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, Context>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, Context>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, Context>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, Context>, _: Context, _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, Context>, _: Context, _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, Context>, _: TimerId) {}
         fn book(&self, _: &str) -> Option<&Book> {
             None
         }
@@ -73,13 +115,34 @@ pub(crate) fn headers(
     });
     engine.set_signer(Some(provider)).unwrap();
     engine.start(1_700_000_000_000.);
+    let command = if method == Method::Get {
+        Command::Query {
+            command: 1,
+            query: Query::Fills {
+                symbol: None,
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        }
+    } else {
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![],
+        }
+    };
     engine
-        .drain_actions()
+        .handle_command(1_700_000_000_000., command, Some(60_000))
+        .unwrap();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_700_000_000_000.);
+    actions
+        .iter()
         .find_map(|a| match a {
-            safe_cex_engine::Action::Http(http) => Some(http.headers),
+            safe_cex_engine::Action::Http(http) => Some(http.headers.clone()),
             _ => None,
         })
-        .unwrap()
+        .unwrap_or_else(|| panic!("no headers for {method:?}: {actions:?}"))
 }
 
 #[test]

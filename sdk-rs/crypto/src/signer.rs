@@ -20,6 +20,25 @@ pub struct LocalSetup {
     pub primary: Option<LocalIdentity>,
     pub secondary: Option<LocalIdentity>,
 }
+
+/// Trusted Lighter setup's public API-index principal, never wire material.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LighterPrincipal {
+    api_key_index: u8,
+}
+impl LighterPrincipal {
+    pub fn new(api_key_index: u64) -> Result<Self, SignError> {
+        if api_key_index > 254 {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(Self {
+            api_key_index: api_key_index as u8,
+        })
+    }
+    pub fn api_key_index(&self) -> u8 {
+        self.api_key_index
+    }
+}
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalIdentity {
@@ -233,6 +252,8 @@ impl DecodedIdentity {
 
 #[derive(Default)]
 pub struct LocalSigner {
+    #[cfg(feature = "schnorr")]
+    lighter_principal: Option<(KeyRef, LighterPrincipal)>,
     keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
     /// Extra refs are usable only by their own algorithm, never presented,
     /// interpolated or used as an ordinary MAC/digest key.
@@ -249,12 +270,59 @@ impl LocalSigner {
     pub fn new() -> Self {
         Self::default()
     }
+    pub fn from_setup_with_lighter_principal(
+        setup: LocalSetup,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+        principal: LighterPrincipal,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        #[cfg(feature = "schnorr")]
+        {
+            if setup.secondary.is_some()
+                || policy.primary.and_then(|policy| policy.signing_algorithm)
+                    != Some(Algorithm::SchnorrDigest)
+            {
+                return Err(SignError::InvalidRequest);
+            }
+            let (mut signer, mut identities, facts) =
+                Self::from_setup_with_facts(setup, policy, public_data_only)?;
+            if !public_data_only
+                && facts.primary_key() != KeyPresence::Nonblank
+                && let Some(primary) = identities.primary.as_mut()
+                && primary.signing_ref().is_ok()
+            {
+                if !primary.credential.0.is_empty() {
+                    signer.remove(&primary.credential);
+                }
+                let reference = KeyRef("primary.principal".into());
+                primary.credential = reference.clone();
+                signer.lighter_principal = Some((reference, principal));
+            }
+            Ok((signer, identities, facts))
+        }
+        #[cfg(not(feature = "schnorr"))]
+        {
+            let _ = (setup, policy, public_data_only, principal);
+            Err(SignError::Unsupported)
+        }
+    }
+    #[cfg(feature = "schnorr")]
+    fn is_lighter_principal(&self, reference: &KeyRef) -> bool {
+        self.lighter_principal
+            .as_ref()
+            .is_some_and(|(issued, _)| issued == reference)
+    }
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     /// Replaced material is undeclared: a declaration describes the bytes setup
     /// installed, never later ones. A role ref keeps its role, which is its
     /// declaration, and a ref an aliased slot shares keeps its slots' algorithm;
     /// neither's type changes this way.
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(&reference) {
+            drop(Zeroizing::new(bytes));
+            return;
+        }
         match self.shared.get(&reference) {
             Some(Some(algorithm)) => {
                 self.algorithms.insert(reference.clone(), *algorithm);
@@ -402,6 +470,18 @@ impl LocalSigner {
             if let (Some(identity), Some(algorithm)) = (identity, declared(rule))
                 && let Some(signing) = identity.signing_opt().filter(|key| !key.0.is_empty())
             {
+                // A declared Schnorr key is refused at setup, never reduced,
+                // with the same rule its sign and public-key arms apply. Only
+                // `schnorr` builds can sign one, so only they pay for the check.
+                #[cfg(feature = "schnorr")]
+                if algorithm == Algorithm::SchnorrDigest
+                    && !signer
+                        .keys
+                        .get(signing)
+                        .is_some_and(|key| crate::lighter::canonical_scalar(key).unwrap_or(false))
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 signer.algorithms.insert(signing.clone(), algorithm);
             }
         }
@@ -476,6 +556,10 @@ impl LocalSigner {
         Self::from_setup_with_facts(setup, policy, public_data_only)
     }
     pub fn remove(&mut self, reference: &KeyRef) {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(reference) {
+            self.lighter_principal = None;
+        }
         self.keys.remove(reference);
         self.roles.remove(reference);
         self.algorithms.remove(reference);
@@ -526,6 +610,11 @@ impl LocalSigner {
         bytes: Vec<u8>,
         algorithm: Algorithm,
     ) -> Result<(), SignError> {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(&reference) {
+            drop(Zeroizing::new(bytes));
+            return Err(SignError::InvalidRequest);
+        }
         if !asymmetric(algorithm)
             || self.roles.contains_key(&reference)
             || self
@@ -551,6 +640,10 @@ impl LocalSigner {
     }
     /// A local signer's missing ref never appears later.
     fn raw_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(reference) {
+            return Err(SignError::InvalidRequest);
+        }
         self.keys
             .get(reference)
             .map(|key| key.as_slice())
@@ -657,6 +750,7 @@ impl LocalSigner {
                     match algorithm {
                         Algorithm::Ed25519 => primitives::ed25519_public(key)?,
                         Algorithm::StarkDigest => primitives::stark_public(key)?,
+                        Algorithm::SchnorrDigest => primitives::schnorr_public(key)?,
                         _ => return Err(SignError::InvalidRequest),
                     }
                 }
@@ -714,6 +808,9 @@ impl LocalSigner {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod lighter_principal_tests;
 /// Semantic check of one provider's public answer at the trusted setup
 /// boundary; widths alone admit off-curve and non-canonical values.
 pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
@@ -733,6 +830,11 @@ pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
             algorithm: Algorithm::StarkDigest,
             ..
         } => crate::starknet::is_public_key(value),
+        #[cfg(feature = "schnorr")]
+        Operation::PublicKey {
+            algorithm: Algorithm::SchnorrDigest,
+            ..
+        } => crate::lighter::is_public_key(value),
         _ => false,
     }
 }
@@ -1153,6 +1255,150 @@ mod tests {
         (signer, ids.primary.unwrap().signing_ref().unwrap().clone())
     }
 
+    /// A declared Schnorr ref installed without setup's key check.
+    fn installed_schnorr(key: &[u8]) -> (LocalSigner, KeyRef) {
+        let mut signer = LocalSigner::new();
+        let reference = KeyRef("installed.schnorr".into());
+        signer
+            .insert_declared(reference.clone(), key.to_vec(), Algorithm::SchnorrDigest)
+            .unwrap();
+        (signer, reference)
+    }
+
+    fn schnorr_public_request(key: KeyRef) -> (Operation, SignRequest) {
+        let operation = Operation::PublicKey {
+            algorithm: Algorithm::SchnorrDigest,
+            key,
+        };
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![operation.clone()],
+        };
+        (operation, request)
+    }
+
+    /// R6: the provider's public key is Lighter's derivation, passes the
+    /// semantic check and verifies a signature from the same declared ref.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_key_matches_derivation_and_verifies_its_signature() {
+        use goldilocks_crypto::ScalarField;
+        let key = ScalarField::NEG_ONE.to_bytes_le();
+        let (signer, signing) = schnorr_signer(&key);
+        let (operation, request) = schnorr_public_request(signing.clone());
+        let mut result = signer.sign_now(&request).unwrap();
+        let public = result.values.remove(0);
+        assert_eq!(public, crate::lighter::public_key(&key).unwrap().to_vec());
+        assert!(valid_public_value(&operation, &public));
+        let input = [7u8; 16];
+        let mut payload = vec![0x22; 32];
+        payload.extend_from_slice(&input);
+        let signature = signer
+            .sign_now(&schnorr_request(signing, payload))
+            .unwrap()
+            .values
+            .remove(0);
+        assert!(crate::lighter::schnorr_verify(&input, &public, &signature).unwrap());
+    }
+
+    /// The derived public key is always canonical (each limb below p), as Go
+    /// emits it; this scalar's point once encoded a limb as an unreduced p.
+    #[test]
+    fn lighter_public_keys_are_canonically_encoded() {
+        use goldilocks_crypto::ScalarField;
+        const P: u64 = 0xFFFF_FFFF_0000_0001;
+        let public = crate::lighter::public_key(&ScalarField::NEG_ONE.to_bytes_le()).unwrap();
+        assert!(
+            public
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .all(|limb| u64::from_le_bytes(*limb) < P)
+        );
+        assert!(crate::lighter::is_public_key(&public));
+    }
+
+    /// R6: off-curve, non-canonical, neutral and wrong-width public values fail
+    /// the setup-boundary check.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_values_must_be_canonical_on_curve_points() {
+        use goldilocks_crypto::ScalarField;
+        let (operation, _) = schnorr_public_request(KeyRef("k".into()));
+        let good = crate::lighter::public_key(&ScalarField::NEG_ONE.to_bytes_le()).unwrap();
+        assert!(valid_public_value(&operation, &good));
+        // A flipped bit is no negative here: about half of all field elements
+        // encode some valid point. Non-canonical limbs, the neutral point and
+        // wrong widths are refused deterministically.
+        // The first little-endian limb at u64::MAX is at or above the
+        // Goldilocks prime, so this encoding is never canonical.
+        let mut noncanonical = good;
+        noncanonical[..8].fill(0xff);
+        for value in [
+            noncanonical.to_vec(),
+            [0u8; 40].to_vec(),
+            [0xff; 40].to_vec(),
+            good[..39].to_vec(),
+            [good.to_vec(), vec![0]].concat(),
+        ] {
+            assert!(!valid_public_value(&operation, &value), "{value:?}");
+        }
+    }
+
+    /// R6: the public-key arm applies the sign arm's key rule.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_key_refuses_noncanonical_and_zero_keys() {
+        use goldilocks_crypto::ScalarField;
+        for key in [
+            [0u8; 40].to_vec(),
+            ScalarField::N.to_bytes_le().to_vec(),
+            [0xff; 40].to_vec(),
+            vec![1; 39],
+        ] {
+            let (signer, signing) = installed_schnorr(&key);
+            let (_, request) = schnorr_public_request(signing);
+            assert_eq!(signer.sign_now(&request), Err(SignError::InvalidRequest));
+        }
+    }
+
+    /// R6: trusted setup refuses a declared Schnorr key the arms would refuse
+    /// (refused, never reduced), and accepts a canonical one.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_setup_refuses_noncanonical_declared_keys() {
+        use goldilocks_crypto::ScalarField;
+        let setup = |key: &[u8]| {
+            let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+            try_public_setup(
+                serde_json::json!({"primary":{"signingAlgorithm":"schnorrDigest"}}),
+                serde_json::json!({"primary":{"key":"k","secret":hex,"secretEncoding":"hex"}}),
+            )
+            .map(drop)
+        };
+        for key in [
+            [0u8; 40].to_vec(),
+            ScalarField::N.to_bytes_le().to_vec(),
+            [0xff; 40].to_vec(),
+            vec![1; 39],
+        ] {
+            assert_eq!(setup(&key), Err(SignError::InvalidRequest), "{}", key.len());
+        }
+        assert_eq!(setup(&ScalarField::NEG_ONE.to_bytes_le()), Ok(()));
+    }
+
+    /// Without the schnorr feature the public-key arm refuses as Unsupported.
+    #[cfg(not(feature = "schnorr"))]
+    #[test]
+    fn schnorr_public_key_is_unsupported_without_the_feature() {
+        let mut key = [0u8; 40];
+        key[0] = 1;
+        let (signer, signing) = installed_schnorr(&key);
+        let (_, request) = schnorr_public_request(signing);
+        assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
+    }
+
     /// R1: payloads without full entropy, or without whole input words, are refused.
     #[cfg(feature = "schnorr")]
     #[test]
@@ -1240,7 +1486,10 @@ mod tests {
             short,
             long,
         ] {
-            let (signer, signing) = schnorr_signer(&key);
+            // Installed directly: declared setup now refuses these keys first
+            // (schnorr_setup_refuses_noncanonical_declared_keys), so this
+            // pins the sign arm's own refusal.
+            let (signer, signing) = installed_schnorr(&key);
             assert_eq!(
                 signer.sign_now(&schnorr_request(signing, payload.clone())),
                 Err(SignError::InvalidRequest),
