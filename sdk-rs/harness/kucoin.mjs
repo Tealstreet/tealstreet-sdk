@@ -4,7 +4,7 @@ const privateTopics = ['/contractMarket/tradeOrders', '/contractMarket/advancedO
 const pendingReads = new WeakMap();
 export const kucoin = {
   rust: 'kucoin',
-  ts: { module: '../../packages/safe-cex/src/exchanges/kucoin/kucoin.exchange.ts', className: 'KucoinExchange', name: 'kucoin' },
+  ts: { module: '../../packages/safe-cex/src/__tests__/reference/kucoin/kucoin.exchange.ts', className: 'KucoinExchange', name: 'kucoin' },
   configureTs(exchange) {
     // Track before the 3 RPS queue: accelerated frames can finish while cached
     // depth recovery reads are still waiting to be issued.

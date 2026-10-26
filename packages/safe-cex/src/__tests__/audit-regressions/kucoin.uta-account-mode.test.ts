@@ -10,7 +10,7 @@ import {
   KUCOIN_UTA_RUNTIME_ACTIVATION_ENABLED,
   decideKucoinClassicRuntime,
   decodeKucoinAccountMode,
-} from '../../exchanges/kucoin/kucoin.uta-account-mode';
+} from '../reference/kucoin/kucoin.uta-account-mode';
 
 const response = (
   selfAccountMode: unknown,

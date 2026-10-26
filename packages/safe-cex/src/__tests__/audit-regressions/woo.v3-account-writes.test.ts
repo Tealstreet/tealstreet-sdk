@@ -1,8 +1,8 @@
 import type {
   WooV3AccountModeProvenance,
   WooV3CompletePositionModeEvidence,
-} from '../../exchanges/woo/woo.v3.account-writes';
-import type { WooV3AlgoOrder, WooV3FuturesPosition, WooV3RegularOrder } from '../../exchanges/woo/woo.v3.private';
+} from '../reference/woo/woo.v3.account-writes';
+import type { WooV3AlgoOrder, WooV3FuturesPosition, WooV3RegularOrder } from '../reference/woo/woo.v3.private';
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,9 +18,9 @@ import {
   decodeWooV3SetPositionModeResponse,
   WOO_V3_ACCOUNT_WRITE_PARITY,
   WooV3AccountConfigResponseError,
-} from '../../exchanges/woo/woo.v3.account-writes';
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
-import { prepareWooV3Request } from '../../exchanges/woo/woo.v3.request';
+} from '../reference/woo/woo.v3.account-writes';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
+import { prepareWooV3Request } from '../reference/woo/woo.v3.request';
 
 const auth = {
   apiKey: 'AbmyVJGUpN064ks5ELjLfA==',

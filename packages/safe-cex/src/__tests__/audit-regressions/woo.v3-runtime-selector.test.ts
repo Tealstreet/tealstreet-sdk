@@ -3,8 +3,8 @@ import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { WOO_V3_MIGRATION_GATES, WOO_V3_MIGRATION_ROUTES } from '../../exchanges/woo/woo.v3.contracts';
-import { compareWooV3ShadowRead, selectWooV3RuntimeRoute } from '../../exchanges/woo/woo.v3.runtime-selector';
+import { WOO_V3_MIGRATION_GATES, WOO_V3_MIGRATION_ROUTES } from '../reference/woo/woo.v3.contracts';
+import { compareWooV3ShadowRead, selectWooV3RuntimeRoute } from '../reference/woo/woo.v3.runtime-selector';
 
 describe('WOO V3 inert runtime route selector', () => {
   it('keeps legacy authoritative by default and exposes exact route provenance', () => {

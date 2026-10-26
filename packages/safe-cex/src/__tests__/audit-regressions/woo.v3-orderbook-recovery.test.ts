@@ -3,11 +3,11 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
 import {
   WOO_V3_ORDERBOOK_MAX_BUFFERED_UPDATES,
   WooV3OrderBookRecoveryCoordinator,
-} from '../../exchanges/woo/woo.v3.orderbook-recovery';
+} from '../reference/woo/woo.v3.orderbook-recovery';
 
 const snapshot = (timestamp = 100) => ({
   success: true,

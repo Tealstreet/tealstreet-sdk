@@ -4,10 +4,10 @@ import type { PayloadSignerRequest } from '../types';
 import createHmac from 'create-hmac';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAPI as createBinanceAPI } from '../exchanges/binance/binance.api';
-import { createPAPI as createBinancePmAPI } from '../exchanges/binance/binancepm.api';
-import { createAPI as createBinanceSpotAPI } from '../exchanges/binance/binancespot.api';
-import { createAPI as createBybitAPI } from '../exchanges/bybit/bybit.api';
+import { createAPI as createBinanceAPI } from './reference/binance/binance.api';
+import { createPAPI as createBinancePmAPI } from './reference/binance/binancepm.api';
+import { createAPI as createBinanceSpotAPI } from './reference/binance/binancespot.api';
+import { createAPI as createBybitAPI } from './reference/bybit/bybit.api';
 import { virtualClock } from '../utils/virtualClock';
 
 const stubExchange = (name: string) =>

@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
-import { GrvtPrivateWebSocket } from '../../exchanges/grvt/grvt.ws-private';
-import { GrvtPublicWebSocket } from '../../exchanges/grvt/grvt.ws-public';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
+import { GrvtPrivateWebSocket } from '../reference/grvt/grvt.ws-private';
+import { GrvtPublicWebSocket } from '../reference/grvt/grvt.ws-public';
 import { BaseWebSocket } from '../../exchanges/base.ws';
 import { DefaultStore } from '../../store/store.base';
 import { ChaserOrderInstance } from '../../webworker/chaserOrder/ChaserOrderInstance';

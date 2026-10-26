@@ -5,7 +5,7 @@ import bs58 from 'bs58';
 import { createHmac } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import '../../exchanges/orderly/orderly.encryption';
+import '../reference/orderly/orderly.encryption';
 import { hostedSigningVenues } from '../../exchanges/hostedSigningVenues';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { createExchange } from '../../index';

@@ -8,13 +8,13 @@ import {
   decodeWooV3CancelAllAfterResponse,
   WOO_V3_CANCEL_ALL_AFTER_LIMITS,
   WOO_V3_CANCEL_ALL_AFTER_PARITY,
-} from '../../exchanges/woo/woo.v3.cancel-all-after';
+} from '../reference/woo/woo.v3.cancel-all-after';
 import {
   WOO_V3_ENDPOINTS,
   WOO_V3_MIGRATION_GATES,
   WOO_V3_MIGRATION_ROUTES,
-} from '../../exchanges/woo/woo.v3.contracts';
-import { prepareWooV3Request } from '../../exchanges/woo/woo.v3.request';
+} from '../reference/woo/woo.v3.contracts';
+import { prepareWooV3Request } from '../reference/woo/woo.v3.request';
 import { wooV3CancelAllAfterFixtures } from './woo.v3-cancel-all-after.fixtures';
 
 const auth = {

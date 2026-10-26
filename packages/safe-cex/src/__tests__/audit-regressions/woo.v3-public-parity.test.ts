@@ -2,7 +2,7 @@ import type {
   WooV3FuturesStats,
   WooV3KlineRow,
   WooV3MappedOrderBookSnapshot,
-} from '../../exchanges/woo/woo.v3.public';
+} from '../reference/woo/woo.v3.public';
 import type { Candle, Market, OrderBook, Ticker } from '../../types';
 
 import { readFileSync } from 'node:fs';
@@ -10,7 +10,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
 import {
   canonicalizeWooLegacyCandles,
   canonicalizeWooLegacyTickerStats,
@@ -22,9 +22,9 @@ import {
   compareWooV3Markets,
   compareWooV3OrderBook,
   compareWooV3TickerStats,
-} from '../../exchanges/woo/woo.v3.public-parity';
-import { decodeWooV3OrderBook, mapWooV3OrderBook } from '../../exchanges/woo/woo.v3.public';
-import { compareWooV3ShadowRead, selectWooV3RuntimeRoute } from '../../exchanges/woo/woo.v3.runtime-selector';
+} from '../reference/woo/woo.v3.public-parity';
+import { decodeWooV3OrderBook, mapWooV3OrderBook } from '../reference/woo/woo.v3.public';
+import { compareWooV3ShadowRead, selectWooV3RuntimeRoute } from '../reference/woo/woo.v3.runtime-selector';
 
 const market = (symbol: string, overrides: Partial<Market> = {}): Market => {
   const base = symbol.replace('USDT', '');

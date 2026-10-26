@@ -14,10 +14,10 @@ import {
   decodeWooV3AlgoPlaceResponse,
   WOO_V3_ALGO_WRITE_PARITY,
   WooV3AlgoWriteResponseError,
-} from '../../exchanges/woo/woo.v3.algo-writes';
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
-import type { WooV3AlgoOrder } from '../../exchanges/woo/woo.v3.private';
-import { prepareWooV3Request } from '../../exchanges/woo/woo.v3.request';
+} from '../reference/woo/woo.v3.algo-writes';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
+import type { WooV3AlgoOrder } from '../reference/woo/woo.v3.private';
+import { prepareWooV3Request } from '../reference/woo/woo.v3.request';
 
 const auth = {
   apiKey: 'AbmyVJGUpN064ks5ELjLfA==',

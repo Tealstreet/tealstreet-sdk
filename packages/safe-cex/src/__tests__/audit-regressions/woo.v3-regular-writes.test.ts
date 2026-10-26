@@ -3,8 +3,8 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
-import type { WooV3RegularOrder } from '../../exchanges/woo/woo.v3.private';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
+import type { WooV3RegularOrder } from '../reference/woo/woo.v3.private';
 import {
   buildWooV3RegularAmendRequest,
   buildWooV3RegularCancelPendingRequest,
@@ -16,8 +16,8 @@ import {
   decodeWooV3RegularPlaceResponse,
   WOO_V3_REGULAR_WRITE_PARITY,
   WooV3WriteResponseError,
-} from '../../exchanges/woo/woo.v3.regular-writes';
-import { prepareWooV3Request } from '../../exchanges/woo/woo.v3.request';
+} from '../reference/woo/woo.v3.regular-writes';
+import { prepareWooV3Request } from '../reference/woo/woo.v3.request';
 
 const auth = {
   apiKey: 'AbmyVJGUpN064ks5ELjLfA==',

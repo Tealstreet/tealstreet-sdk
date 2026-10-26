@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapBitunixClosedPosition, mapBitunixTradeToIncomeRecords } from '../../exchanges/bitunix/bitunix.income';
+import { mapBitunixClosedPosition, mapBitunixTradeToIncomeRecords } from '../reference/bitunix/bitunix.income';
 import { mapBlofinClosedPosition, mapBlofinFillToIncomeRecords } from '../../exchanges/blofin/blofin.income';
 import { PositionSide } from '../../types';
 

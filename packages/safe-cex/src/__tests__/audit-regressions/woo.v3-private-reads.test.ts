@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
 import {
   decodeWooV3AccountInfo,
   decodeWooV3AssetBalances,
@@ -17,7 +17,7 @@ import {
   mapWooV3PendingAlgoOrders,
   mapWooV3PendingOrders,
   mapWooV3Transactions,
-} from '../../exchanges/woo/woo.v3.private';
+} from '../reference/woo/woo.v3.private';
 import {
   OrderSide,
   OrderStatus,
