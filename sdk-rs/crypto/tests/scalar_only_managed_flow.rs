@@ -7,7 +7,7 @@ use safe_cex_crypto::signer::LocalSigner;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::nonce::{HYPERLIQUID_AGENT, NonceClaim};
-use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy};
+use safe_cex_engine::request_context::plan::{CallAuth, SerialCall, SerialPolicy};
 use safe_cex_engine::request_context::{
     Claim, Context, HttpAction, Operation as RequestOperation, PreflightPolicy, PreflightPurpose,
     Prepared, ReconciliationData,
@@ -69,6 +69,7 @@ impl Venue for Probe {
             .admit_serial_plan(
                 &preflight,
                 SerialCall {
+                    auth: CallAuth::Preflight,
                     operation: RequestOperation::Mutation,
                     timeout_ms: 20_000,
                     attempts: 1,

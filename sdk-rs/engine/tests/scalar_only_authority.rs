@@ -8,7 +8,7 @@
 use safe_cex_engine::book::Book;
 use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::nonce::{HYPERLIQUID_AGENT, NonceClaim};
-use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy};
+use safe_cex_engine::request_context::plan::{CallAuth, SerialCall, SerialPolicy};
 use safe_cex_engine::request_context::{
     Claim, Context, Credential, HttpAction, Operation as RequestOperation, Policy, PreflightPolicy,
     PreflightPurpose, Prepared, ReconciliationData, RetryPolicy, Scope,
@@ -26,11 +26,14 @@ enum Mode {
     PlainPresent,
     /// A non-nonce signed request interpolates the signing ref.
     PlainInterpolate,
+    /// The serial call claims a login Session root the Preflight never had.
+    SessionCall,
 }
 
 struct Probe {
     mode: Mode,
     empty_credential_admitted: Option<bool>,
+    session_call_admitted: Option<bool>,
 }
 impl Venue for Probe {
     type Pending = Context;
@@ -77,21 +80,30 @@ impl Venue for Probe {
                 write_credential: Some(authority.clone()),
             })
             .unwrap();
-        let (plan, slot) = cx
-            .admit_serial_plan(
-                &preflight,
-                SerialCall {
-                    operation: RequestOperation::Mutation,
-                    timeout_ms: 20_000,
-                    attempts: 1,
-                },
-                SerialPolicy {
-                    credential: Some(authority),
-                    pacing: None,
-                    refusals_complete: false,
-                },
-            )
-            .unwrap();
+        let auth = if self.mode == Mode::SessionCall {
+            CallAuth::Session
+        } else {
+            CallAuth::Preflight
+        };
+        let admitted = cx.admit_serial_plan(
+            &preflight,
+            SerialCall {
+                auth,
+                operation: RequestOperation::Mutation,
+                timeout_ms: 20_000,
+                attempts: 1,
+            },
+            SerialPolicy {
+                credential: Some(authority),
+                pacing: None,
+                refusals_complete: false,
+            },
+        );
+        if self.mode == Mode::SessionCall {
+            self.session_call_admitted = Some(admitted.is_ok());
+            return;
+        }
+        let (plan, slot) = admitted.unwrap();
         let context = cx.plan_leg_context(&plan, &slot).unwrap();
         let claim = matches!(self.mode, Mode::Genuine | Mode::ClaimedPresent).then_some(claim);
         cx.request_signed_managed(
@@ -225,6 +237,7 @@ fn started(mode: Mode, identities: Identities) -> Engine<Probe> {
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
         mode,
         empty_credential_admitted: None,
+        session_call_admitted: None,
     });
     e.set_identities(identities).unwrap();
     e.set_address_setup_host_support(SetupHostSupport::OwnedPublicAddress1)
@@ -381,6 +394,12 @@ fn the_signing_only_ref_is_never_presented_or_interpolated_on_any_path() {
         let mut e = started(mode, ordinary);
         assert!(prepared_work(&mut e).is_some(), "ordinary control");
     }
+}
+
+#[test]
+fn the_signing_only_authority_never_borrows_a_session_root() {
+    let e = started(Mode::SessionCall, absent_identities());
+    assert_eq!(e.venue().session_call_admitted, Some(false));
 }
 
 #[test]
