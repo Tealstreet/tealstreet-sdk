@@ -66,7 +66,10 @@ const withoutComments = (source: string): string =>
  * would have hidden them behind a rule about where a file sits rather than
  * what it does.
  */
-const isVenueImplementation = (file: string): boolean => file.startsWith('packages/safe-cex/src/exchanges/');
+const isVenueImplementation = (file: string): boolean =>
+  file.startsWith('packages/safe-cex/src/exchanges/') ||
+  // Under the Rust engine the TS venue adapters move to a test-only oracle here.
+  file.startsWith('packages/safe-cex/src/__tests__/reference/');
 
 const isTest = (file: string): boolean => /\.(test|cy)\.tsx?$/.test(file);
 
