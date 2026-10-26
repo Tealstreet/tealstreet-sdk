@@ -423,6 +423,14 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
+        self.reconcile_uncertain_orders(cx);
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }

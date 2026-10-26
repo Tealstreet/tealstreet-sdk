@@ -385,6 +385,120 @@ fn reconciliation_response_at_deadline_cannot_reveal_an_order_without_timer() {
         "expired read cannot publish financial state"
     );
 }
+
+#[test]
+fn an_unknown_placement_stays_fenced_through_expiry_until_fresh_reconciliation() {
+    let (mut e, actions, socket) = started();
+    seed(&mut e, &actions);
+    authenticate(&mut e, socket);
+    e.handle(
+        NOW,
+        Event::WsMessage {
+            socket,
+            text: r#"{"type":"snapshot","orders_p":[]}"#,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW + 1000.,
+        Event::Command(Command::PlaceOrders {
+            command: 700,
+            orders: vec![opts("unknown-fenced")],
+        }),
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 1000.);
+    let create = request(&actions, "/g-orders/create");
+    e.handle(
+        NOW + 1500.,
+        Event::HttpFailed {
+            request: create.id,
+            error: "transport outcome unknown",
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 700, error })
+        if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+    assert!(
+        requests(&actions)
+            .iter()
+            .all(|r| !r.url.contains("activeList"))
+    );
+    let (timer, wake) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 66_000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("native signing-expiry plus skew remains authoritative");
+
+    let refused = |e: &mut Engine<PhemexPerpetuals>, now, command| {
+        e.handle(
+            now,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![opts("retry-fenced")],
+            }),
+        );
+        let out = safe_cex_engine::test_support::prepared_actions(e, now);
+        assert!(
+            requests(&out)
+                .iter()
+                .all(|r| !r.url.contains("/g-orders/create"))
+        );
+        assert!(out.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: id, error })
+            if *id == command && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.message.contains("uncertain"))));
+    };
+    refused(&mut e, NOW + 2000., 701);
+    e.handle(wake, Event::TimerFired { timer });
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, wake);
+    let old = request(&out, "activeList");
+    let expired_at = wake + 20_000.;
+    response(
+        &mut e,
+        expired_at,
+        old.id,
+        200,
+        r#"{"code":10002,"data":null}"#,
+    );
+    let out: Vec<_> = e.drain_actions().collect();
+    let (timer, at) = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > expired_at => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("expired reconciliation retains its bounded retry");
+    refused(&mut e, expired_at + 1., 702);
+    e.handle(at, Event::TimerFired { timer });
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, at);
+    let fresh = request(&out, "activeList");
+    response(
+        &mut e,
+        at + 1.,
+        fresh.id,
+        200,
+        r#"{"code":10002,"data":null}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        at + 2.,
+        Event::Command(Command::PlaceOrders {
+            command: 703,
+            orders: vec![opts("fresh-retry")],
+        }),
+    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, at + 2.);
+    assert_eq!(
+        requests(&out)
+            .iter()
+            .filter(|r| r.url.contains("/g-orders/create"))
+            .count(),
+        1
+    );
+}
 #[test]
 fn native_identity_secondary_exact_uid_and_no_account_publication() {
     let (mut e, actions) = identity(true);

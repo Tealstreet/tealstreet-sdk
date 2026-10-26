@@ -748,6 +748,48 @@ fn a_released_503_seals_unknown_restores_rows_and_wakes_the_next() {
 }
 
 #[test]
+fn an_unknown_placement_stays_fenced_until_a_fresh_complete_order_read() {
+    let mut h = seeded();
+    let tick = h.tick;
+    event(&mut h, 10_000., Event::TimerFired { timer: tick });
+    let stale = h.take("orders-pending?");
+    command(&mut h, place(700, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 700).outcome, Some(Outcome::Unknown));
+
+    let refused = |h: &mut Harness, id| {
+        command(h, place(id, 1.0));
+        assert_eq!(count(h, "batch-orders"), 0, "no retry POST while uncertain");
+        let error = failure(h, id);
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(error.message.contains("uncertain"));
+    };
+    refused(&mut h, 701);
+
+    answer(&mut h, &stale, 200, r#"{"code":"0","data":[]}"#);
+    for path in ["orders-tpsl-pending", "orders-algo-pending"] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    refused(&mut h, 702);
+    let retry_at = h.now + 1_000.;
+    fire_until(&mut h, retry_at);
+    assert_eq!(count(&h, "orders-pending?"), 1, "fresh reconcile is owed");
+    for path in [
+        "orders-pending?",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    command(&mut h, place(703, 1.0));
+    assert_eq!(
+        count(&h, "batch-orders"),
+        1,
+        "fresh read releases the fence"
+    );
+}
+
+#[test]
 fn a_late_or_duplicate_response_after_a_terminal_changes_nothing() {
     let mut h = seeded();
     let intents = command(&mut h, place(7, 1.0));

@@ -627,6 +627,10 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }

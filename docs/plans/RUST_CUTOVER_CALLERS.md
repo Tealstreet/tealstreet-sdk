@@ -9924,3 +9924,19 @@ off. OKX opts in. Not covered yet: venues with no placement scope
 (`guard_pending_placements` or `guard_order_mutations` false: Bybit, Crypto.com,
 BingX, ApeX, Lighter), and amend roots whose replacement places
 (the zs5e83 audit, /tmp/codex-beta-plan-fence-audit/report.md).
+
+### BloFin and Phemex uncertain-placement fences
+
+Both venues opt into the symbol fence from #2279: after an Unknown placement,
+a retry or amend is refused NotSent until a clean complete order read dispatched
+after the mark publishes and calls orders_reconciled. Older, incomplete or
+expired reads cannot release it. Cancels remain admitted; Phemex keeps its
+deliberate cancel-all fence opt-out.
+
+BloFin joins its existing Primary reconciliation snapshot, retaining the owed
+refresh and native backoff when an older snapshot is already in flight.
+Phemex settles retired trading custody, then joins its existing single read or
+scheduled reconciliation. Repeated hook calls preserve that scheduled timer.
+Its native signing-expiry plus five-second lower bound remains authoritative:
+an early empty snapshot cannot prove that a late placement will not arrive.
+The engine owns re-asking; the hooks add no retry loop or write resend.
