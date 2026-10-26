@@ -1332,6 +1332,7 @@ impl Venue for Lighter {
                 );
                 cx.store.set_markets(rows);
                 let _ = cx.finish_http_context(&context);
+                self.ticker_seed(cx);
                 self.account_start(cx);
                 self.connect(cx);
                 self.poll = Some(cx.set_timer(2_000.0));

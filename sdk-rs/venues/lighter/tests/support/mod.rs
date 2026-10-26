@@ -58,6 +58,28 @@ pub fn requests_at(e: &mut Engine<Lighter>, now: f64) -> Vec<HttpRequest> {
         })
         .collect()
 }
+// Finish unrelated startup hydration before a test holds or saturates its target requests.
+pub fn finish_startup_tickers<V: safe_cex_engine::Venue>(
+    engine: &mut Engine<V>,
+    now: f64,
+) -> Vec<Action> {
+    let mut actions = safe_cex_engine::test_support::prepared_actions(engine, now);
+    for action in &actions {
+        if let Action::Http(request) = action
+            && request.url.ends_with("/api/v1/exchangeStats")
+        {
+            reply_at(
+                engine,
+                now,
+                request,
+                200,
+                r#"{"code":200,"order_book_stats":[]}"#,
+            );
+        }
+    }
+    actions.extend(engine.drain_actions());
+    actions
+}
 pub fn ready() -> (Engine<Lighter>, SocketId) {
     ready_with(options())
 }

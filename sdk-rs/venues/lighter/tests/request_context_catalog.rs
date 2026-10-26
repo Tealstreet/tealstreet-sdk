@@ -533,7 +533,7 @@ fn saturated_registry_frees_each_catalog_root_before_fallback_retry_and_success(
         },
     );
     snapshot(&e);
-    e.drain_actions().for_each(drop);
+    support::finish_startup_tickers(&mut e, at);
     e.handle(
         at,
         Event::Command(Command::FetchOrderBook {

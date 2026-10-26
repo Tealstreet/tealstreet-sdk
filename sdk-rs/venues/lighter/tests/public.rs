@@ -696,3 +696,33 @@ fn stats_prefer_base_interest_independently_of_json_order_and_keep_usd_fallback(
     assert_eq!(e.store().ticker("ETH").unwrap().open_interest, 30.0);
     assert_eq!(e.store().ticker("ETH").unwrap().last, 100.0);
 }
+
+#[test]
+fn catalogue_starts_ticker_hydration_before_the_socket_opens() {
+    let mut e = support::engine(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    e.start(1_000.0);
+    let catalogue = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookDetails") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut e, catalogue.id, MARKETS);
+    let stats = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("exchangeStats") => Some(request),
+            _ => None,
+        })
+        .expect("ticker hydration must not depend on a socket Open");
+    reply(
+        &mut e,
+        stats.id,
+        r#"{"code":200,"order_book_stats":[{"symbol":"ETH","last_trade_price":"2333.21"}]}"#,
+    );
+    assert_eq!(e.store().ticker("ETH").unwrap().last, 2333.21);
+}

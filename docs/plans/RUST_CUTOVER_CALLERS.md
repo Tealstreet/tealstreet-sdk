@@ -9721,7 +9721,8 @@ managed HTTP recording; native unit results alone do not certify that path.
 
 ## Lighter public beta data
 
-Market snapshots seed last price before streaming starts. Stats decode base and
+Market snapshots seed last price and start ticker hydration before socket Open.
+The existing single-flight guard prevents duplicate pending reads. Stats decode base and
 USD open interest independently, preferring the base field when both exist.
 REST depth sums are rounded to the market's declared amount precision to remove
 binary addition residue. Public close requests a recovery snapshot immediately

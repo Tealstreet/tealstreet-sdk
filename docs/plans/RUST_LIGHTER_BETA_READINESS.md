@@ -12,7 +12,9 @@ qualification. The original tape and failing report remain in scratch.
 
 - Decode base and USD open interest separately. Prefer base open interest when
   both exist, regardless of JSON order, so the rest of the stats row survives.
-- Seed last price from the accepted market snapshot before socket stats arrive.
+- Seed last price from the accepted market snapshot and start ticker hydration
+  immediately, before socket Open. The existing single-flight guard prevents
+  duplicate reads if the socket opens while that read is pending.
 - Aggregate REST depth at the market's native amount precision, without binary
   addition residue. Deltas replace a complete parsed native size, without
   addition. Preserve price ordering, full depth and zero handling.

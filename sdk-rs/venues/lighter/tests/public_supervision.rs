@@ -62,15 +62,29 @@ impl Rig {
             })
             .unwrap();
         reply(&mut engine, &meta, 200, META);
-        let actions = drain(&mut engine, &mut timers);
+        let mut actions = drain(&mut engine, &mut timers);
         let socket = connected(&actions).unwrap_or(SocketId(0));
-        let rig = Self {
+        let mut rig = Self {
             engine,
             timers,
             socket,
             now: NOW,
             fired: 0,
         };
+        for action in &actions {
+            if let Action::Http(request) = action
+                && request.url.ends_with("exchangeStats")
+            {
+                reply_at(
+                    &mut rig.engine,
+                    NOW,
+                    request,
+                    200,
+                    r#"{"code":200,"order_book_stats":[]}"#,
+                );
+            }
+        }
+        actions.extend(rig.drain());
         (rig, actions)
     }
     fn handle(&mut self, event: Event<'_>) -> Vec<Action> {
