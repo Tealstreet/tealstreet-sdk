@@ -19,10 +19,10 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_385_472, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(1_385_473, 'venue', 'asterdex'), /exceeds 1385472/);
   for (const venue of ['bitget', 'bitgetusdc']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1446 * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1447 * 1024);
     assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1448 * 1024);
-    assert.equal(wasmBudgetError(1_480_704, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_480_705, 'venue', venue), /exceeds 1480704/);
+    assert.equal(wasmBudgetError(1_481_728, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_481_729, 'venue', venue), /exceeds 1481728/);
   }
   for (const venue of ['kraken', 'krakenspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], 1368 * 1024);
