@@ -76,7 +76,7 @@ fn install_with_facts(
             && identities
                 .primary
                 .as_ref()
-                .is_some_and(|primary| primary.signing_opt().is_some())
+                .is_some_and(|primary| primary.signing_ref().is_ok())
         {
             return Err(invalid("Lighter requires an API key index in 0..=254"));
         }
