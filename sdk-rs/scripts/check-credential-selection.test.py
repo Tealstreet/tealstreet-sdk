@@ -55,6 +55,9 @@ class CredentialSelectionBan(unittest.TestCase):
             'path_module_inside_crate': {'src/lib.rs': '#[path = "inner/wire.rs"] mod wire;\n' + P + FIELD + USE,
                                          'src/inner/wire.rs': '#[derive(Default)]\npub struct Wire { a: u8 }\n'},
             'std_default_import': 'use std::default::Default;\n' + P + FIELD + USE,
+            # A `'static` lifetime before a root path is not a `static` item.
+            'static_lifetime_root_path': P + FIELD + USE
+                + "fn d() -> Option<&'static safe_cex_engine::nonce::NonceDomain> { None }\n",
             'impl_only_workspace_macro': P + FIELD + 'safe_cex_crypto::redacted_debug!(Options);\n'
                 '#[derive(Clone, Debug, serde::Deserialize)]\n#[serde(default)]\npub struct Wire { a: u8 }\n'
                 'fn g() { assert!(true); format!("x"); }\n' + USE,
@@ -135,6 +138,7 @@ class CredentialSelectionBan(unittest.TestCase):
             'aliased_core_root': 'use foreign as core;\nuse core::default::Default;\n#[derive(Default)]\npub struct W;\n'
                                  + P + FIELD + USE,
             'local_std_module': 'mod std { pub mod default { pub use foreign::Default; } }\n' + P + FIELD + USE,
+            'static_item_binding_root': P + FIELD + USE + 'static safe_cex_engine: u8 = 0;\n',
         }
         with tempfile.TemporaryDirectory() as directory:
             try:

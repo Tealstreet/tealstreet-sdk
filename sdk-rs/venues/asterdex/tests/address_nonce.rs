@@ -91,7 +91,10 @@ impl H {
             .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
     }
     fn signers(&self) -> Vec<&str> {
-        self.signed.iter().filter_map(|r| Self::param(r, "signer")).collect()
+        self.signed
+            .iter()
+            .filter_map(|r| Self::param(r, "signer"))
+            .collect()
     }
     fn nonces(&self) -> Vec<u64> {
         self.signed
@@ -124,9 +127,9 @@ fn n1_mismatched_configured_signer_is_refused_at_startup_naming_both_addresses()
     });
     assert!(h.signed.is_empty(), "nothing signs: {:?}", h.signers());
     assert!(
-        h.logs
-            .iter()
-            .any(|log| log.contains(OTHER) && log.contains(WALLET) && log.contains("does not match")),
+        h.logs.iter().any(|log| log.contains(OTHER)
+            && log.contains(WALLET)
+            && log.contains("does not match")),
         "{:?}",
         h.logs
     );
@@ -146,9 +149,9 @@ fn n1_mismatched_read_agent_refuses_only_its_reads() {
     // The read slot claims the fixture wallet but its key signs for OTHER.
     assert!(!h.keys().contains(&WALLET), "no read signs: {:?}", h.keys());
     assert!(
-        h.logs
-            .iter()
-            .any(|log| log.contains(WALLET) && log.contains(OTHER) && log.contains("does not match")),
+        h.logs.iter().any(|log| log.contains(WALLET)
+            && log.contains(OTHER)
+            && log.contains("does not match")),
         "{:?}",
         h.logs
     );
@@ -172,16 +175,25 @@ fn wire_signer_is_the_checksummed_wallet_and_nonces_strictly_increase() {
         ..wallet()
     });
     assert!(!h.signed.is_empty());
-    assert!(h.signers().iter().all(|signer| *signer == WALLET), "{:?}", h.signers());
+    assert!(
+        h.signers().iter().all(|signer| *signer == WALLET),
+        "{:?}",
+        h.signers()
+    );
     let nonces = h.nonces();
-    assert!(nonces.windows(2).all(|pair| pair[0] < pair[1]), "{nonces:?}");
+    assert!(
+        nonces.windows(2).all(|pair| pair[0] < pair[1]),
+        "{nonces:?}"
+    );
     assert!(nonces.iter().all(|nonce| *nonce >= 1_700_000_000_000_000));
 }
 
 #[test]
 fn an_aliased_read_slot_shares_the_wallet_sequence() {
     let h = H::start(Options {
-        auth_private_key: Some("4fd0a42218f3eae43a6ce26d22544e986139a01e5b34a62db53757ffca81bae1".into()),
+        auth_private_key: Some(
+            "4fd0a42218f3eae43a6ce26d22544e986139a01e5b34a62db53757ffca81bae1".into(),
+        ),
         auth_signer_address: Some(WALLET.into()),
         read_key: Some("0x0000000000000000000000000000000000000001".into()),
         read_secret: Some("unused".into()),
@@ -190,7 +202,10 @@ fn an_aliased_read_slot_shares_the_wallet_sequence() {
     assert!(h.signed.len() >= 2);
     assert!(h.signers().iter().all(|signer| *signer == WALLET));
     let nonces = h.nonces();
-    assert!(nonces.windows(2).all(|pair| pair[0] < pair[1]), "{nonces:?}");
+    assert!(
+        nonces.windows(2).all(|pair| pair[0] < pair[1]),
+        "{nonces:?}"
+    );
 }
 
 #[test]

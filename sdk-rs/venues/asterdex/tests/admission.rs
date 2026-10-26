@@ -155,7 +155,10 @@ fn an_aliased_read_slot_naming_another_wallet_is_refused() {
             .any(|r| r.headers.iter().any(|(_, v)| v.contains("0x2222"))),
         "the mismatched read slot signs nothing"
     );
-    assert!(signed.iter().any(|r| r.url.contains("/fapi/v3/listenKey?")), "the primary still signs");
+    assert!(
+        signed.iter().any(|r| r.url.contains("/fapi/v3/listenKey?")),
+        "the primary still signs"
+    );
 }
 
 #[test]

@@ -359,6 +359,33 @@ deserialization and equality with the ordinary identity before testing claim
 refusal; a future unknown-field refusal cannot silently bypass the assertion.
 The earlier 8b0 qualification remains attributed to its original source.
 
+## AsterDEX V3 adoption (claude-19pt8s)
+
+AsterDEX is the first production consumer. These pieces have landed:
+- **Declarations:** `address_nonce_domain` (V3 only), `public_address_slots`
+  (`Both`, or `Secondary` when public-data-only), `dispatch_nonce`, and
+  `NonceUnscheduled`.
+- **Sealing:** `start` rebuilds the V3 slots from `Cx::address_nonce_identities`
+  and checks N1 per slot. Work issued before start seals on first use.
+- **Recipe:** it mints a claim with `select_with_nonce`, reserves once per
+  preparation, and echoes the nonce in the receipt. It takes the EIP-55 wire
+  signer from `verified_signing_address`.
+- **Registry:** the asterdex arm installs the identities and enables
+  `address-nonce`.
+- **Venue allocator:** deleted (`NONCES` x2 pruned).
+
+It depends on the host start-site calls (owned by codex-uufub4). Enabling
+`address-nonce` in the workspace grows every `Identity` by its inline address
+capability. The engine stores that capability boxed, so unified venue enums
+stay under clippy's large-variant bound.
+
+The parked-trade-versus-reads question is not reachable for AsterDEX:
+- A parked trade holds no nonce, and reserves above the reads when it wakes.
+- The local signer is immediate and unpaced.
+
+The 8-repair budget therefore applies only to a future asynchronous V3
+provider.
+
 ## Scope, feature costs and publication gates
 
 The shared public-address carrier also has a claim-free GRVT consumer. GRVT

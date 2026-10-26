@@ -128,21 +128,19 @@ impl Venue for IssueV3 {
                 .select_with_nonce(CredentialRole::Read { scope: None }, &ASTERDEX_V3)
                 .unwrap();
             // A non-finite clock admits no context, so nothing is released.
-            let Ok(context) = cx
-                .http_context(
-                    Scope::Background,
-                    Policy {
-                        operation: Operation::Read,
-                        credential: Some(Credential {
-                            slot: selection.slot(),
-                            reference: identity.credential.clone(),
-                        }),
-                        timeout_ms: 20_000,
-                        pacing: None,
-                        retry: RetryPolicy::Never,
-                    },
-                )
-            else {
+            let Ok(context) = cx.http_context(
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: Some(Credential {
+                        slot: selection.slot(),
+                        reference: identity.credential.clone(),
+                    }),
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+            ) else {
                 continue;
             };
             let recipe = build(identity.clone(), claim);
@@ -175,9 +173,20 @@ impl Venue for IssueV3 {
 
 /// Signs one V3 request with a wallet through address setup and an engine
 /// nonce claim; `None` when nothing is released.
-fn send_v3(wallet: &str, key: &str, now: f64, method: Method, path: &str, build: Build) -> Option<HttpRequest> {
+fn send_v3(
+    wallet: &str,
+    key: &str,
+    now: f64,
+    method: Method,
+    path: &str,
+    build: Build,
+) -> Option<HttpRequest> {
     let (signer, identity) = provider(wallet, key, KeyEncoding::Hex);
-    let mut engine = Engine::new(IssueV3(vec![(method, path.into(), build)]), Some(seeded_entropy(5))).unwrap();
+    let mut engine = Engine::new(
+        IssueV3(vec![(method, path.into(), build)]),
+        Some(seeded_entropy(5)),
+    )
+    .unwrap();
     engine.set_signer(Some(signer)).unwrap();
     engine
         .set_identities(Identities {
@@ -187,10 +196,12 @@ fn send_v3(wallet: &str, key: &str, now: f64, method: Method, path: &str, build:
         .unwrap();
     engine.initialize_address_nonce(0.0).unwrap();
     engine.start(now);
-    prepared_actions(&mut engine, now).into_iter().find_map(|action| match action {
-        Action::Http(http) => Some(http),
-        _ => None,
-    })
+    prepared_actions(&mut engine, now)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(http) => Some(http),
+            _ => None,
+        })
 }
 
 fn nonce_of(url: &str) -> u64 {
@@ -273,7 +284,10 @@ fn v1_v3_and_code_recipes_match_independent_vectors() {
         };
         assert_eq!(
             oracle(Method::Post),
-            format!("{ORIGIN}/fapi/v3/order?{}&signature={}", case.code_query, case.code_signature),
+            format!(
+                "{ORIGIN}/fapi/v3/order?{}&signature={}",
+                case.code_query, case.code_signature
+            ),
             "Code {}",
             case.name
         );
@@ -299,8 +313,16 @@ fn v1_v3_and_code_recipes_match_independent_vectors() {
                 method,
                 path,
                 Box::new(move |identity, claim| {
-                    Recipe::new(identity, Auth::V3 { user, claim }, method, ORIGIN, path, query, testnet)
-                        .unwrap()
+                    Recipe::new(
+                        identity,
+                        Auth::V3 { user, claim },
+                        method,
+                        ORIGIN,
+                        path,
+                        query,
+                        testnet,
+                    )
+                    .unwrap()
                 }),
             )
             .expect("signed request released");
@@ -341,8 +363,16 @@ fn engine_nonce_reserves_monotonically_at_each_preparation_and_methods_must_agre
             Method::Get,
             path,
             Box::new(move |identity, claim| {
-                Recipe::new(identity, Auth::V3 { user, claim }, Method::Get, ORIGIN, path, Query::new(), false)
-                    .unwrap()
+                Recipe::new(
+                    identity,
+                    Auth::V3 { user, claim },
+                    Method::Get,
+                    ORIGIN,
+                    path,
+                    Query::new(),
+                    false,
+                )
+                .unwrap()
             }),
         )
         .unwrap();
@@ -446,8 +476,16 @@ fn recipe_replaces_stale_unsigned_fields() {
         path,
         Box::new(move |identity, claim| {
             let user = "0x0000000000000000000000000000000000000333".into();
-            Recipe::new(identity, Auth::V3 { user, claim }, Method::Post, ORIGIN, path, query, false)
-                .unwrap()
+            Recipe::new(
+                identity,
+                Auth::V3 { user, claim },
+                Method::Post,
+                ORIGIN,
+                path,
+                query,
+                false,
+            )
+            .unwrap()
         }),
     )
     .unwrap();
@@ -479,8 +517,16 @@ fn owners_sharing_an_agent_share_its_nonce_sequence() {
             path,
             Box::new(move |identity, claim| {
                 let user = owner.into();
-                Recipe::new(identity, Auth::V3 { user, claim }, Method::Get, ORIGIN, path, Query::new(), false)
-                    .unwrap()
+                Recipe::new(
+                    identity,
+                    Auth::V3 { user, claim },
+                    Method::Get,
+                    ORIGIN,
+                    path,
+                    Query::new(),
+                    false,
+                )
+                .unwrap()
             }),
         )
         .unwrap();
@@ -499,8 +545,16 @@ fn non_finite_dispatch_clock_releases_no_signed_request() {
     let path = "/fapi/v3/account";
     for now in [f64::NAN, f64::INFINITY] {
         let (signer, identity) = provider(&agent, "fixture-only-v1-material", KeyEncoding::Utf8);
-        let recipe =
-            Recipe::new(identity, Auth::V1, Method::Get, ORIGIN, path, Query::new(), false).unwrap();
+        let recipe = Recipe::new(
+            identity,
+            Auth::V1,
+            Method::Get,
+            ORIGIN,
+            path,
+            Query::new(),
+            false,
+        )
+        .unwrap();
         let mut engine = Engine::new(
             Issue(vec![(Method::Get, path.into(), Box::new(recipe))]),
             Some(seeded_entropy(5)),
@@ -509,7 +563,10 @@ fn non_finite_dispatch_clock_releases_no_signed_request() {
         engine.set_signer(Some(signer)).unwrap();
         engine.start(now);
         let actions = prepared_actions(&mut engine, now);
-        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))), "V1 {now}");
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "V1 {now}"
+        );
         let released = send_v3(
             &agent,
             &wallet,
@@ -518,8 +575,16 @@ fn non_finite_dispatch_clock_releases_no_signed_request() {
             path,
             Box::new(move |identity, claim| {
                 let user = "0x0000000000000000000000000000000000000444".into();
-                Recipe::new(identity, Auth::V3 { user, claim }, Method::Get, ORIGIN, path, Query::new(), false)
-                    .unwrap()
+                Recipe::new(
+                    identity,
+                    Auth::V3 { user, claim },
+                    Method::Get,
+                    ORIGIN,
+                    path,
+                    Query::new(),
+                    false,
+                )
+                .unwrap()
             }),
         );
         assert!(released.is_none(), "V3 {now}");

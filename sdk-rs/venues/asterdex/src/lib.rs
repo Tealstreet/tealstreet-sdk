@@ -293,10 +293,12 @@ impl AsterDex {
     /// Checks a role's signing contract without reserving a nonce. A mismatch
     /// is a configuration refusal, never an authentication failure.
     fn check_signing(&self, role: CredentialRole) -> Result<(), (String, ErrorKind)> {
-        let (selection, _) = self
-            .credentials
-            .select(role)
-            .map_err(|_| ("Missing required Aster credentials".to_owned(), ErrorKind::AuthInvalid))?;
+        let (selection, _) = self.credentials.select(role).map_err(|_| {
+            (
+                "Missing required Aster credentials".to_owned(),
+                ErrorKind::AuthInvalid,
+            )
+        })?;
         if let Some(error) = &self.signer_mismatch[slot_index(selection.slot())] {
             return Err((error.clone(), ErrorKind::InvalidInput));
         }
@@ -332,12 +334,17 @@ impl AsterDex {
         }
         self.signing_sealed = true;
         let sealed = cx.address_nonce_identities().clone();
-        self.credentials = Self::slots(&self.options, sealed.primary.clone(), sealed.secondary.clone());
+        self.credentials = Self::slots(
+            &self.options,
+            sealed.primary.clone(),
+            sealed.secondary.clone(),
+        );
         for (slot, identity) in [
             (CredentialSlot::Primary, &sealed.primary),
             (CredentialSlot::Secondary, &sealed.secondary),
         ] {
-            let (Some(identity), Some(configured)) = (identity, self.configured_signer(slot)) else {
+            let (Some(identity), Some(configured)) = (identity, self.configured_signer(slot))
+            else {
                 continue;
             };
             let (Ok(configured), Ok(proved)) = (
@@ -346,9 +353,10 @@ impl AsterDex {
             ) else {
                 continue;
             };
-            let Ok(proved) =
-                safe_cex_crypto::ethereum::get_address(&format!("0x{}", safe_cex_crypto::hex(&proved)))
-            else {
+            let Ok(proved) = safe_cex_crypto::ethereum::get_address(&format!(
+                "0x{}",
+                safe_cex_crypto::hex(&proved)
+            )) else {
                 continue;
             };
             if configured != proved {

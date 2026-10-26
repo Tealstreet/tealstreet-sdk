@@ -358,7 +358,10 @@ impl Recipe {
                     .map_err(|error| error.to_string())?;
                 Resolved::V3 {
                     user: ethereum::get_address(&user)?,
-                    signer: ethereum::get_address(&format!("0x{}", safe_cex_crypto::hex(&address)))?,
+                    signer: ethereum::get_address(&format!(
+                        "0x{}",
+                        safe_cex_crypto::hex(&address)
+                    ))?,
                     claim,
                 }
             }

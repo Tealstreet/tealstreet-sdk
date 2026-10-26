@@ -541,10 +541,10 @@ impl AsterDex {
             })
             .and_then(|mut job| {
                 // Validate the shared auth shape before reserving any split step.
-                if let Some(step) = job.steps.front() {
-                    if let Err((error, kind)) = self.check_signing(step.call.role()) {
-                        return Err((VenueError::new(error).kind(kind), prune_on_refusal));
-                    }
+                if let Some(step) = job.steps.front()
+                    && let Err((error, kind)) = self.check_signing(step.call.role())
+                {
+                    return Err((VenueError::new(error).kind(kind), prune_on_refusal));
                 }
                 job.reserved_places = job
                     .steps
