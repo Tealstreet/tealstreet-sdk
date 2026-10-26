@@ -134,9 +134,17 @@ impl<V: Venue> Venue for Probe<V> {
 fn seeded(keyed: bool, public_only: bool) -> Engine<Probe<Blofin>> {
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
         inner: Blofin::new(Options {
-            key: keyed.then(|| "fixture-key".into()),
-            secret: keyed.then(|| "fixture-secret".into()),
-            passphrase: keyed.then(|| "fixture-passphrase".into()),
+            // Keyed means trusted setup produced refs; no provider is installed.
+            identities: if keyed {
+                safe_cex_crypto::signer::LocalSigner::from_json(
+                    r#"{"primary":{"key":"fixture-key","secret":"fixture-secret","passphrase":"fixture-passphrase"}}"#
+                        .into(),
+                )
+                .unwrap()
+                .1
+            } else {
+                Default::default()
+            },
             public_data_only: public_only,
             ..Options::default()
         }),

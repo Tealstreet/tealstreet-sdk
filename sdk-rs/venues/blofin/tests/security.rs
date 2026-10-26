@@ -1,17 +1,19 @@
-use safe_cex_crypto::secrets::EraseSecrets;
+//! Options carry only opaque refs: configured strings reach trusted setup,
+//! never the venue.
+use safe_cex_crypto::signer::LocalSigner;
 use safe_cex_venue_blofin::Options;
 
 #[test]
-fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
-    let mut options = Options {
-        key: Some("audit-secret-sentinel".into()),
-        secret: Some("audit-secret-sentinel".into()),
-        passphrase: Some("audit-secret-sentinel".into()),
+fn options_hold_only_opaque_refs_from_trusted_setup() {
+    let sentinel = "audit-sentinel-material";
+    let (_, identities) = LocalSigner::from_json(format!(
+        r#"{{"primary":{{"key":"{sentinel}","secret":"{sentinel}","passphrase":"{sentinel}"}}}}"#
+    ))
+    .unwrap();
+    let options = Options {
+        identities,
         ..Options::default()
     };
-    assert!(!format!("{options:?}").contains("audit-secret-sentinel"));
-    options.erase_secrets();
-    assert!(options.key.as_ref().is_none_or(String::is_empty));
-    assert!(options.secret.as_ref().is_none_or(String::is_empty));
-    assert!(options.passphrase.as_ref().is_none_or(String::is_empty));
+    assert!(options.identities.primary.is_some());
+    assert!(!format!("{options:?}").contains(sentinel));
 }
