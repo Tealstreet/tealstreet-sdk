@@ -66,6 +66,23 @@ fn trusted_presence_and_public_mode_control_login_and_identity_eligibility() {
                     installed.write_credential().is_some(),
                     installed.primary().is_some()
                 );
+                let policy = installed.session_policy();
+                match expected_login.filter(|_| !public) {
+                    Some(PrimaryLogin::Empty) => {
+                        let policy = policy.unwrap();
+                        assert!(policy.credential.is_none());
+                        assert!(policy.private_egress.is_some());
+                        assert!(!policy.repeat_safe);
+                    }
+                    Some(PrimaryLogin::Installed) => {
+                        let policy = policy.unwrap();
+                        assert_eq!(policy.credential, installed.write_credential());
+                        assert!(policy.credential.is_some());
+                        assert!(policy.private_egress.is_none());
+                        assert!(!policy.repeat_safe);
+                    }
+                    None => assert!(policy.is_err()),
+                }
                 assert!(installed.signer.address().is_none());
             }
         }

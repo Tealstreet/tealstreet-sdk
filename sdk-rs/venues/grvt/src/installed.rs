@@ -1,7 +1,7 @@
 //! Trusted setup facts and one engine's immutable provider references.
 use crate::provider::SignerBinding;
 use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
-use safe_cex_engine::request_context::Credential;
+use safe_cex_engine::request_context::{Credential, SessionPolicy};
 use safe_cex_engine::signing::{Identities, Identity, KeyPresence, PrimaryLogin, SetupFacts};
 use safe_cex_engine::{Command, signing::SignError};
 use std::sync::Arc;
@@ -35,6 +35,30 @@ impl Installed {
             facts,
             signer: Arc::new(SignerBinding::default()),
         }
+    }
+    pub fn session_policy(&self) -> Result<SessionPolicy, SignError> {
+        let (selection, login) = self
+            .login
+            .select(CredentialRole::SessionAuth)
+            .map_err(|_| SignError::MissingKey)?;
+        let (credential, private_egress) = match login {
+            PrimaryLogin::Empty => (None, selection.session_egress()),
+            PrimaryLogin::Installed => {
+                let (selection, identity) = self
+                    .credentials
+                    .select(CredentialRole::SessionAuth)
+                    .map_err(|_| SignError::MissingKey)?;
+                (
+                    Some(selection.credential(identity.credential.clone())),
+                    None,
+                )
+            }
+        };
+        Ok(SessionPolicy {
+            credential,
+            repeat_safe: false,
+            private_egress,
+        })
     }
     pub fn primary(&self) -> Option<&Identity> {
         self.credentials
