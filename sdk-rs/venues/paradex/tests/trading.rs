@@ -1295,3 +1295,60 @@ fn public_rest_book_refusal_does_not_invalidate_or_refresh_existing_jwt() {
         "9007199254740993"
     );
 }
+fn take_method(h: &mut Harness, method: Method, path: &str) -> safe_cex_engine::HttpRequest {
+    let i = h
+        .pending
+        .iter()
+        .position(|r| r.method == method && r.url.contains(path))
+        .unwrap_or_else(|| panic!("missing {method:?} {path}: {:?}", h.pending));
+    h.pending.remove(i)
+}
+#[test]
+fn an_unknown_placement_refuses_a_retry_until_a_fresh_order_read_reconciles_it() {
+    let mut h = private();
+    // An order read dispatched before the write cannot clear its fence.
+    h.timer(h.now + 10_000.);
+    h.reply("/positions", r#"{"results":[]}"#);
+    h.reply(
+        "/account",
+        r#"{"total_collateral":"1000","free_collateral":"1000"}"#,
+    );
+    let stale = take_method(&mut h, Method::Get, "/orders");
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let write = take_method(&mut h, Method::Post, "/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: write.id,
+            error: "response lost after acceptance",
+        },
+    );
+    h.collect();
+    assert!(h.result(8).is_err());
+
+    // 1. The retry is refused NotSent and never written.
+    place(&mut h, 9, vec![opts(OrderType::Limit)]);
+    assert!(
+        !h.pending.iter().any(|r| r.method == Method::Post),
+        "the retry was written while the first placement is uncertain"
+    );
+    assert!(h.result(9).unwrap_err().contains("uncertain"));
+    assert_eq!(
+        h.failures.last().and_then(|e| e.outcome),
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+
+    // 2. The read in flight before the write completes; the fence holds.
+    h.respond(stale, 200, r#"{"results":[]}"#);
+    place(&mut h, 10, vec![opts(OrderType::Limit)]);
+    assert!(h.result(10).unwrap_err().contains("uncertain"));
+    assert!(!h.pending.iter().any(|r| r.method == Method::Post));
+
+    // 3. The hook's owed read, dispatched after the write, releases it.
+    let fresh = take_method(&mut h, Method::Get, "/orders");
+    h.respond(fresh, 200, r#"{"results":[]}"#);
+
+    // 4. The retry now places.
+    place(&mut h, 11, vec![opts(OrderType::Limit)]);
+    take_method(&mut h, Method::Post, "/orders");
+}

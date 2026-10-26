@@ -105,6 +105,14 @@ impl Venue for Paradex {
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);
     }
+    // reconcile_uncertain starts an order read dispatched after the write.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.account.reconcile_orders(cx);
+        self.failures(cx);
+    }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.handles_socket(socket) {
             self.account.on_open(cx, socket);
