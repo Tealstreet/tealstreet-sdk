@@ -952,6 +952,24 @@ mod repair {
         assert!(e.venue.notices[0].contains("cancel: Accepted"), "{:?}", e.venue.notices);
     }
 
+    #[test]
+    fn a_newer_cancel_all_race_settles_the_repair_as_native_rejected() {
+        // Overseer ruling on #2181: no send-time ID capture. A foreground
+        // cancel-all beside an in-flight repair is admitted; when both cancel
+        // one order, the repair's provider refusal settles Rejected (native).
+        let (mut e, token) = one_root(&["c1"]);
+        release(&mut e, token, 2.);
+        let actions = cancel_all(&mut e, 9, 2.5);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. }))),
+            "the newer cancel-all is admitted"
+        );
+        e.venue.forced_result = Some(WriteResult::Rejected(VenueError::new("order not found")));
+        reply(&mut e, token, 3., 200, r#"{"code":0}"#);
+        assert_eq!(e.venue.notices.len(), 1, "{:?}", e.venue.notices);
+        assert!(e.venue.notices[0].contains("cancel: Rejected"), "{:?}", e.venue.notices);
+    }
+
     // Snapshot origin (cancel-then-place).
 
     fn snapshot(venue: Repairer) -> (Engine<Repairer>, Vec<Action>) {
