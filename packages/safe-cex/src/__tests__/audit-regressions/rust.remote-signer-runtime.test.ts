@@ -6,7 +6,6 @@ import { createHash, createHmac } from 'node:crypto';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import {
   runsOnRustEngine,
