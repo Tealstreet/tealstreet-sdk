@@ -543,6 +543,8 @@ def crate_refusals(sdk_root, streams, watched, allowed_use=None, definitions=Non
     for path, name, kind, detail in every_binder:
         if kind == 'variant':
             continue  # A variant binds only under its enum's path, or through a glob of it.
+        if kind in {'fn', 'const', 'static'}:
+            continue  # Value-namespace items never bind a type, module or macro name.
         if kind == 'unparsed use':
             reasons.append(f'{path.name}: unparsed use')
         elif kind in {'macro_rules', 'macro', 'extern crate'} and name in MACRO_NAMES:

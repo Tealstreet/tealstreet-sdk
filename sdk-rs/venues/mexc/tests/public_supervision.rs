@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, PublicFeedPolicy, Response, SocketChannel,
-    SocketId, TimerId,
+    Action, Command, Event, HttpRequest, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId,
 };
 use safe_cex_venue_mexc::{MexcFutures, Options};
 
@@ -11,7 +11,7 @@ const TICKER: &str =
     r#"{"channel":"push.tickers","data":[{"symbol":"BTC_USDT","lastPrice":61000}]}"#;
 
 struct Harness {
-    engine: Engine<MexcFutures>,
+    engine: support::TestEngine,
     now: f64,
     timers: Vec<(TimerId, f64)>,
     public: Vec<SocketId>,
@@ -26,10 +26,12 @@ impl Harness {
         Self::with_policy(PublicFeedPolicy::Direct)
     }
     fn with_policy(policy: PublicFeedPolicy) -> Self {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
-            public_data_only: true,
-            ..Default::default()
-        }));
+        let mut engine = support::TestEngine::from(safe_cex_engine::test_support::seeded_engine(
+            MexcFutures::new(Options {
+                public_data_only: true,
+                ..Default::default()
+            }),
+        ));
         engine.set_public_feed_policy(policy).unwrap();
         let mut h = Self {
             engine,

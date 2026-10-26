@@ -1401,6 +1401,7 @@ fn empty_order() -> PlaceOrderOpts {
 /// One native step: a Mutation with its one classified V1 -1022 resend.
 pub(crate) fn serial() -> SerialCall {
     SerialCall {
+        auth: Default::default(),
         operation: Operation::Mutation,
         timeout_ms: 20_000,
         attempts: 2,

@@ -1838,6 +1838,27 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "mexc", not(target_arch = "wasm32")))]
+    #[test]
+    fn mexc_family_bootstraps_raw_and_explicit_local_signer_setup() {
+        for (options, setup) in [
+            (r#"{"key":"replay-key","secret":"fixture-secret"}"#, None),
+            (
+                "{}",
+                Some(r#"{"primary":{"key":"replay-key","secret":"fixture-secret"}}"#.into()),
+            ),
+        ] {
+            let Ok(mut engine) = super::WasmEngine::new("mexc", options, setup) else {
+                panic!("MEXC local setup must construct the installed signer");
+            };
+            assert!(engine.dispatch_signing);
+            assert!(!engine.requires_external_signer());
+            let actions: Vec<serde_json::Value> =
+                serde_json::from_str(&engine.start(1000.)).unwrap();
+            assert!(actions.iter().any(|action| action["op"] == "managedHttp"));
+        }
+    }
+
     #[cfg(all(feature = "dispatch-signing", not(target_arch = "wasm32")))]
     mod shared_dispatch_provider {
         use super::super::ExternalSigner;
@@ -1879,7 +1900,7 @@ mod tests {
             ));
         }
 
-        // Unmigrated control family: MEXC (moved from Bitunix by #2190).
+        // Provider-enabled MEXC discovery still has no signing authority.
         #[cfg(feature = "mexc")]
         #[test]
         fn shared_provider_feature_keeps_managed_public_mexc_unsigned() {
@@ -1888,7 +1909,7 @@ mod tests {
             else {
                 panic!("public MEXC setup must remain native-safe and successful");
             };
-            assert!(!engine.dispatch_signing);
+            assert!(engine.dispatch_signing);
             assert!(!engine.requires_external_signer());
             #[derive(serde::Deserialize)]
             struct Packet {
