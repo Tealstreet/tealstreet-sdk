@@ -400,6 +400,9 @@ impl Venue for KrakenSpot {
     fn guard_pending_placements(&self) -> bool {
         true
     }
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
     fn guard_order_mutations(&self) -> bool {
         true
     }

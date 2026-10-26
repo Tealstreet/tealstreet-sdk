@@ -854,6 +854,18 @@ impl Venue for AsterDex {
         true
     }
 
+    // reconcile_uncertain starts a fresh open-orders read at once.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+
+    /// The engine asks at each uncertain seal and re-asks with backoff while
+    /// fenced; a call starts one read or joins the owed requery, and the clean
+    /// accepted read reports through `orders_reconciled`.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_orders(cx);
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {

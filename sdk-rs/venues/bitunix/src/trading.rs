@@ -1592,6 +1592,9 @@ impl BitunixFutures {
     /// stays held until a fresh read; any other ends with the job.
     fn take_live(&mut self, command: u32) -> Option<Live> {
         let live = self.trading.live.remove(&command)?;
+        // Every job exit (done, failed, engine-retired) may follow a new
+        // uncertain seal: never let a later request read as a re-ask.
+        self.account.writes_settled += 1;
         if let Some(key) = &live.settings {
             self.trading.settings.remove(key);
             if live.settings_released {
@@ -1709,10 +1712,20 @@ impl BitunixFutures {
     /// Native restore for sealed jobs, then Primary order snapshots.
     pub(crate) fn reconcile_trading(&mut self, cx: &mut Cx<'_, Pending>) {
         self.restore_retired(cx);
+        // The engine re-asks while fenced. With no write settled since the last
+        // request and a debt still owed, keep paid slots and in-flight censuses.
+        let reask = self.account.request_writes == Some(self.account.writes_settled)
+            && self.account.owed.iter().any(Option::is_some);
+        self.account.request_writes = Some(self.account.writes_settled);
         self.account.reconcile = true;
-        self.account.reconciled = [false, false];
-        self.read_axis(cx, Axis::Orders);
-        self.read_axis(cx, Axis::Tpsl);
+        if !reask {
+            self.account.reconciled = [false, false];
+        }
+        for (slot, axis) in [(0, Axis::Orders), (1, Axis::Tpsl)] {
+            if !reask || self.account.owed[slot].is_some() {
+                self.read_axis(cx, axis);
+            }
+        }
         self.account.reconcile = false;
     }
     /// A call failed in transport; a released write is Unknown.
@@ -1723,6 +1736,9 @@ impl BitunixFutures {
         message: &str,
     ) {
         let write = !request.step.read();
+        if write {
+            self.account.writes_settled += 1;
+        }
         if let Some(plan) = self.trading.plan(request.command).cloned() {
             let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
         }
@@ -1772,6 +1788,7 @@ impl BitunixFutures {
         if request.step.read() {
             return self.replacement_answer(cx, request, response);
         }
+        self.account.writes_settled += 1;
         // Fence before parsing: a partial ACK can apply accepted effects and
         // then stop on a rejected or malformed sibling.
         cx.store.invalidate_order_snapshots();

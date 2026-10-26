@@ -785,7 +785,7 @@ impl Venue for Lighter {
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
         self.settle_retired_trades(cx);
         self.refresh_account(cx);
-        self.refresh_orders(cx);
+        self.reconcile_orders(cx);
     }
     fn capture_http_reconciliation(
         &self,
@@ -815,6 +815,16 @@ impl Venue for Lighter {
         }
     }
     fn guard_order_mutations(&self) -> bool {
+        true
+    }
+    // An unproven (Unknown) placement may have rested; the engine fences its
+    // symbol until a complete orders snapshot reconciles it.
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    // reconcile_uncertain reads all active orders at once, so a placement or
+    // amend may wait for that read instead of duplicating an unproven one.
+    fn fence_uncertain_placements(&self) -> bool {
         true
     }
 

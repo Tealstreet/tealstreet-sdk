@@ -631,6 +631,14 @@ impl Venue for BitgetFutures {
     fn guard_order_mutations(&self) -> bool {
         true
     }
+    // reconcile_uncertain reads the orders at once; the engine re-asks until a
+    // fresh read clears the fence.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_orders(cx);
+    }
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,

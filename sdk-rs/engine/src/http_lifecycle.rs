@@ -5870,6 +5870,49 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn a_paged_census_releases_only_marks_its_first_page_saw() {
+        let (mut engine, _) = start(Probe::default());
+        let release = |engine: &mut Engine<Probe>, token: u64, epoch: Option<u64>| {
+            engine.io.core.order_response_token = Some(token);
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            match epoch {
+                Some(epoch) => cx.orders_reconciled_since(None, epoch),
+                None => cx.orders_reconciled(None),
+            }
+            engine.io.core.order_response_token = None;
+        };
+        let eth = || Some(vec!["ETHUSDT".to_owned()]);
+        // The census's first page leaves; then ETH turns uncertain; a later page
+        // (its own context) leaves after the mark and completes the census.
+        let first_page = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .order_read_epoch();
+        engine.io.core.order_locks.fence(eth().as_deref());
+        let last_page = engine.io.core.order_locks.token();
+        release(&mut engine, last_page, Some(first_page));
+        assert!(
+            engine.io.core.order_locks.uncertain("ETHUSDT"),
+            "the first page predates the mark"
+        );
+        // RED for the per-page token: the last page alone would release it.
+        release(&mut engine, last_page, None);
+        assert!(!engine.io.core.order_locks.uncertain("ETHUSDT"));
+        // A census begun after the mark releases it.
+        engine.io.core.order_locks.fence(eth().as_deref());
+        let begun = engine.io.core.order_locks.token();
+        release(&mut engine, begun, Some(begun));
+        assert!(!engine.io.core.order_locks.uncertain("ETHUSDT"));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn an_overflowing_reconcile_queue_never_cuts_a_wait_short() {
         let btc = || Some(vec!["BTCUSDT".to_owned()]);
         // 64 deferred entries with unequal waits, then one immediate entry.

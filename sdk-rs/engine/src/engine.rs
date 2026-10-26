@@ -2811,6 +2811,30 @@ impl<P> Cx<'_, P> {
         false
     }
 
+    /// The order-uncertainty epoch now. A read that spans several contexts (a
+    /// paged census) records it before its first page and reports through
+    /// `orders_reconciled_since`, so it clears only marks its first page saw.
+    pub fn order_read_epoch(&self) -> u64 {
+        #[cfg(feature = "order-locks")]
+        return self.io.core.order_locks.token();
+        #[cfg(not(feature = "order-locks"))]
+        0
+    }
+
+    /// `orders_reconciled` for a read that began at `epoch` (`order_read_epoch`):
+    /// a mark made after its first page was sent survives this answer.
+    pub fn orders_reconciled_since(&mut self, symbol: Option<&str>, epoch: u64) {
+        #[cfg(feature = "order-locks")]
+        if let Some(token) = self.io.core.order_response_token {
+            self.io
+                .core
+                .order_locks
+                .reconciled(symbol, token.min(epoch));
+        }
+        #[cfg(not(feature = "order-locks"))]
+        let _ = (symbol, epoch);
+    }
+
     /// Call only after accepting a complete, fresh authoritative order read.
     /// A read started before an uncertain placement cannot clear its fence.
     pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
