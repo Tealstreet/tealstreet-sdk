@@ -37,8 +37,8 @@ struct ManagedWrite {
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeOrder {
-    symbol: String,
-    side: &'static str,
+    pub(crate) symbol: String,
+    pub(crate) side: &'static str,
     order_type: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     price: Option<String>,
@@ -140,8 +140,12 @@ pub struct Request {
     leverage_revision: u64,
 }
 pub struct Repair {
-    old_id: String,
-    order: NativeOrder,
+    pub(crate) old_id: String,
+    pub(crate) order: NativeOrder,
+    pub(crate) amount: f64,
+    pub(crate) high_water: Option<f64>,
+    pub(crate) uncertain: bool,
+    pub(crate) terminal: bool,
 }
 struct Job {
     managed: Option<Plan>,
@@ -150,8 +154,6 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     collect_ids: bool,
-    internal: bool,
-    replaces: Option<String>,
     amendment: Option<f64>,
 }
 #[derive(Default)]
@@ -634,8 +636,6 @@ impl Backpack {
                         steps: steps.into(),
                         ids: vec![],
                         collect_ids,
-                        internal: false,
-                        replaces: None,
                         amendment,
                     },
                 );
@@ -765,7 +765,7 @@ impl Backpack {
         };
         let mut previous = None;
         let mut targets = vec![];
-        if !job.internal {
+        {
             let receipts = match &step {
                 Step::Place { order, .. } => order.identity(cx.store).into_iter().collect(),
                 Step::Pair(orders) => orders
@@ -870,32 +870,9 @@ impl Backpack {
                 leverage_revision: self.account.leverage_revision,
             };
             self.send_managed_trade(cx, delivery, method, path, vec![params], body);
-            return;
-        }
-        let result = self.signed(
-            cx,
-            method,
-            path,
-            params,
-            Some(body),
-            Pending::Trade(Request {
-                managed: None,
-                command,
-                step,
-                previous,
-                targets,
-                leverage_revision: self.account.leverage_revision,
-            }),
-        );
-        if let Err(error) = result {
-            if let Some(job) = self.trading.jobs.remove(&command) {
-                for id in job.cancel_latches {
-                    self.finish_cancel(&id);
-                }
-            }
-            cx.notice(Level::Warn, code::ORDER_REJECTED, error);
         }
     }
+
     fn send_managed_trade(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1005,15 +982,6 @@ impl Backpack {
                     cx.store.invalidate_order_snapshots();
                     if let Some(job) = self.trading.jobs.get_mut(&request.command) {
                         job.ids.push(row.id.into());
-                        if let Some(old_id) = job.replaces.as_deref() {
-                            let native: crate::wire::OrderRow<'_> =
-                                serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                            let mapped = crate::account::order(native, cx.store)?;
-                            cx.store.remove_orders(&[old_id]);
-                            if cx.store.order(&mapped.id).is_none() {
-                                cx.store.upsert_order(mapped);
-                            }
-                        }
                     }
                 }
                 Step::Pair(orders) => {
@@ -1388,7 +1356,14 @@ impl Backpack {
         &self,
         cx: &Cx<'_, Pending>,
         row: &crate::wire::OrderRow<'_>,
+        proof: Option<f64>,
     ) -> Result<Repair, String> {
+        if matches!(
+            crate::account::status(&row.status),
+            OrderStatus::Closed | OrderStatus::Canceled
+        ) {
+            return Err("Backpack repair order is already terminal".into());
+        }
         let market = cx
             .store
             .market(&row.symbol)
@@ -1410,6 +1385,10 @@ impl Backpack {
             None
         };
         Ok(Repair {
+            amount,
+            high_water: proof,
+            uncertain: proof.is_none(),
+            terminal: false,
             old_id: row.id.to_string(),
             order: NativeOrder {
                 symbol: row.symbol.to_string(),
@@ -1429,46 +1408,6 @@ impl Backpack {
                 ..Default::default()
             },
         })
-    }
-    pub(crate) fn start_repair(&mut self, cx: &mut Cx<'_, Pending>, repair: Repair) {
-        if self.account.credentials.is_none() {
-            cx.notice(
-                Level::Warn,
-                code::ORDER_REJECTED,
-                "Backpack automatic trigger repair awaits managed account signing",
-            );
-            return;
-        }
-        let command = (u64::from(u32::MAX) + 1..u64::MAX)
-            .rev()
-            .find(|id| !self.trading.jobs.contains_key(id))
-            .unwrap();
-        let steps = vec![
-            Step::Cancel {
-                symbol: repair.order.symbol.clone(),
-                id: repair.old_id.clone(),
-                optional: false,
-            },
-            Step::Place {
-                order: Box::new(repair.order),
-                optional: false,
-            },
-        ];
-        self.trading.jobs.insert(
-            command,
-            Job {
-                managed: None,
-                waiting: false,
-                cancel_latches: vec![],
-                steps: steps.into(),
-                ids: vec![],
-                collect_ids: false,
-                internal: true,
-                replaces: Some(repair.old_id),
-                amendment: None,
-            },
-        );
-        self.run_trade(cx, command);
     }
 }
 
@@ -1742,13 +1681,11 @@ mod managed_repair_gate_tests {
             ..Default::default()
         });
         let probe = ProbeVenue::new(venue, |venue: &mut Backpack, cx: &mut Cx<'_, Pending>| {
-            venue.start_repair(
-                cx,
-                Repair {
-                    old_id: "old".into(),
-                    order: NativeOrder::default(),
-                },
-            );
+            let reason = venue
+                .repair_primary()
+                .expect_err("installed identity is not native readiness");
+            venue.repair_local_refusal(cx, reason);
+            assert!(venue.repairs_is_empty());
             assert!(venue.trading.jobs.is_empty());
             assert!(venue.trading.cancels.is_empty());
         });
