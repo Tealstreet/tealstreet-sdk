@@ -9706,3 +9706,13 @@ clock; payload financial timestamps/values stay. Paused capacity uses254 depth
 peers then two independent candle peers after genuine429. Exact completion
 Cancel is captured/checked once. The secondary helper is test support with real
 installed providers and genuine test command entry; native assertions retained.
+
+## Lighter public beta data
+
+Market snapshots seed last price before streaming starts. Stats decode base and
+USD open interest independently, preferring the base field when both exist.
+REST depth sums are rounded to the market's declared amount precision to remove
+binary addition residue. Public close requests a recovery snapshot immediately
+when existing pacing permits; one inflight request per book remains the limit.
+A newer socket snapshot invalidates an older recovery reply. Grouped limit
+TP/SL remains a separately tested beta blocker, not part of this public slice.
