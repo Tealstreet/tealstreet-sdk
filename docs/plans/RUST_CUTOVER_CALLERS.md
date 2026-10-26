@@ -9927,9 +9927,18 @@ BingX, ApeX, Lighter), and amend roots whose replacement places
 
 ### Lighter: an Unknown placement fences its symbol
 
-Lighter now opts into `guard_pending_placements`. After a placement whose
-outcome is Unknown (a lost or 5xx `sendTx`), `CancelSymbolOrders` on that
-symbol fails with "Placement outcome is uncertain; reconcile before
-cancel-all" and sends nothing, until the next complete orders snapshot
-reconciles. A further placement on the symbol is still admitted until the
-engine's order-lock acquire also consults the uncertain scope for placements.
+Lighter opts into `guard_pending_placements` and `fence_uncertain_placements`.
+After a placement whose outcome is Unknown (a lost or 5xx `sendTx`), on that
+symbol:
+- `placeOrders` and `amendOrder` fail NotSent with "Placement outcome is
+  uncertain; reconcile before placing or amending" and send nothing;
+- `cancelSymbolOrders` fails with "Placement outcome is uncertain; reconcile
+  before cancel-all" and sends nothing; cancelling a known order by id is still
+  admitted.
+The Unknown starts an active-orders read at once. The fence clears on the first
+complete orders snapshot requested after the write: a read already in flight
+when the write went out, a failed read, or a snapshot with an unmappable row
+does not clear it. If a read was in flight, another follows as soon as it
+settles, so the fence normally lasts about one orders round trip; after a failed
+read it lasts until the next orders read (the engine's reconcile re-ask).
+
