@@ -965,6 +965,9 @@ mod pending_drop_tests;
 #[cfg(test)]
 #[path = "read_root_expiry_tests.rs"]
 mod read_root_expiry_tests;
+#[cfg(all(test, feature = "release-domains"))]
+#[path = "release_domain_tests.rs"]
+mod release_domain_tests;
 
 /// What a venue may do while handling an event.
 pub struct Cx<'a, P> {
@@ -1007,6 +1010,9 @@ struct PendingHttp<P> {
 
 #[path = "read_root_expiry.rs"]
 mod read_root_expiry;
+#[cfg(feature = "release-domains")]
+#[path = "release_domain.rs"]
+mod release_domain;
 #[cfg(feature = "repair-mutations")]
 #[path = "repair_core.rs"]
 mod repair_core;
@@ -1693,6 +1699,14 @@ struct IoCore {
     /// Preallocated to owner capacity so tracking never allocates.
     read_roots: Vec<(f64, CommandId, u64, TimerId)>,
     read_roots_expiring: bool,
+    /// The venue's FIFO release domain, its accepted members in order, and
+    /// the Bind each non-head member holds.
+    #[cfg(feature = "release-domains")]
+    release_domain: Option<crate::request_context::ReleaseDomain>,
+    #[cfg(feature = "release-domains")]
+    domain_queue: std::collections::VecDeque<RequestId>,
+    #[cfg(feature = "release-domains")]
+    domain_held: Vec<(RequestId, release_domain::Held)>,
     /// Parked WriteAfterReads Preflights bounded by their caller's receipt:
     /// (cap, owner, its timer).
     #[cfg(feature = "write-preflight-wait")]
@@ -1838,6 +1852,12 @@ impl Default for IoCore {
             #[cfg(feature = "write-preflight-wait")]
             write_preflight_waits: Vec::new(),
             read_roots_expiring: false,
+            #[cfg(feature = "release-domains")]
+            release_domain: None,
+            #[cfg(feature = "release-domains")]
+            domain_queue: std::collections::VecDeque::new(),
+            #[cfg(feature = "release-domains")]
+            domain_held: Vec::new(),
             #[cfg(test)]
             read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
@@ -3256,6 +3276,16 @@ pub trait Venue {
         false
     }
 
+    /// The venue's one FIFO release domain, if any. Its group must be registered
+    /// in `http_pacing`; the engine stamps it onto every member Context.
+    #[cfg(feature = "release-domains")]
+    #[inline]
+    fn http_release_domain() -> Option<crate::request_context::ReleaseDomain>
+    where
+        Self: Sized,
+    {
+        None
+    }
     /// Immutable nonce capability; the engine captures its permission at construction.
     /// This selector grants no claim or release authority.
     #[inline]
@@ -3680,6 +3710,17 @@ impl<V: Venue> Engine<V> {
         )
         .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
         let http_release = V::http_release();
+        #[cfg(feature = "release-domains")]
+        let release_domain = V::http_release_domain();
+        #[cfg(feature = "release-domains")]
+        if let Some(domain) = release_domain {
+            release_domain::validate(domain, venue.http_pacing()).map_err(|_| {
+                VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
+            })?;
+        }
+        #[cfg(feature = "release-domains")]
+        let (domain_queue, domain_held) = release_domain::reserve(release_domain.is_some())
+            .map_err(|_| VenueError::new("HTTP release domain capacity unavailable"))?;
         Ok(Self {
             venue,
             http_release,
@@ -3688,6 +3729,12 @@ impl<V: Venue> Engine<V> {
                 core: IoCore {
                     entropy: Some(entropy),
                     http_pacing,
+                    #[cfg(feature = "release-domains")]
+                    release_domain,
+                    #[cfg(feature = "release-domains")]
+                    domain_queue,
+                    #[cfg(feature = "release-domains")]
+                    domain_held,
                     nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
                     #[cfg(feature = "dispatch-nonce")]
                     nonce_enabled: V::dispatch_nonce(),
