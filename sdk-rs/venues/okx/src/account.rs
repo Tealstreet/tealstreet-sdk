@@ -214,6 +214,8 @@ pub struct AccountState {
     generation: u64,
     orders_in_flight: bool,
     orders_generation: u64,
+    /// The order read generation started for an uncertain write, while it runs.
+    uncertain_orders_generation: Option<u64>,
     risk: HashMap<String, RiskValues>,
     order_leverage: HashMap<String, (f64, String)>,
     equity: Vec<(String, f64)>,
@@ -243,11 +245,18 @@ impl AccountState {
 
 impl Okx {
     pub(crate) fn account_after_uncertain_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        // An engine re-ask joins the fresh read already running rather than restarting it.
+        if self.account.orders_in_flight
+            && self.account.uncertain_orders_generation == Some(self.account.orders_generation)
+        {
+            return;
+        }
         self.account.join = None;
         self.account.orders_generation += 1;
         self.account.orders_in_flight = false;
         self.account.revision += 1;
         self.account_refresh(cx);
+        self.account.uncertain_orders_generation = Some(self.account.orders_generation);
     }
 
     pub(crate) fn account_after_settings(&mut self, cx: &mut Cx<'_, Pending>) {

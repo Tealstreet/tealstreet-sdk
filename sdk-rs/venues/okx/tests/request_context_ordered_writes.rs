@@ -883,4 +883,142 @@ fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
         }),
         "the retry is refused NotSent with the reason"
     );
+    // The reconcile read itself fails: the fence holds and the retry is refused again.
+    let read = |output: &[Action]| {
+        output
+            .iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
+            .cloned()
+            .expect("a fresh open-orders read")
+    };
+    let first_read = read(&sealed);
+    refuse(
+        &mut engine,
+        &first_read,
+        503,
+        r#"{"code":"1","msg":"busy"}"#,
+        8.,
+    );
+    let after = prepared(&mut engine, 8.);
+    engine.handle(
+        9.,
+        Event::Command(Command::PlaceOrders {
+            command: OWNER + 2,
+            orders: vec![order(1)],
+        }),
+    );
+    let refused = prepared(&mut engine, 9.);
+    assert!(
+        !refused
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "a failed reconcile read does not release the fence"
+    );
+    assert!(
+        failures(&refused)
+            .iter()
+            .any(|error| error.outcome == Some(safe_cex_engine::Outcome::NotSent))
+    );
+    // The engine re-asks the venue 1 s after the seal; that fresh read releases the fence.
+    let timer = sealed
+        .iter()
+        .chain(&retry)
+        .chain(&after)
+        .chain(&refused)
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1_006. => Some(*timer),
+            _ => None,
+        })
+        .next_back()
+        .expect("the engine re-ask is armed 1 s after the seal");
+    engine.handle(1_006., Event::TimerFired { timer });
+    // Every order kind's page answers empty; the complete clean read releases.
+    let mut output = prepared(&mut engine, 1_006.);
+    while let Some(page) = output
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")))
+        .cloned()
+    {
+        reply(&mut engine, &page, &support::envelope(""), 1_007.);
+        output = prepared(&mut engine, 1_007.);
+    }
+    engine.handle(
+        1_008.,
+        Event::Command(Command::PlaceOrders {
+            command: OWNER + 3,
+            orders: vec![order(1)],
+        }),
+    );
+    let admitted = prepared(&mut engine, 1_008.);
+    post(&admitted);
+    assert!(failures(&admitted).is_empty(), "the placement is admitted");
+}
+
+#[test]
+fn engine_re_asks_join_the_running_fresh_read_until_it_releases() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    let Action::Http(write) = post(&first) else {
+        unreachable!()
+    };
+    engine.handle(
+        6.,
+        Event::HttpResponse {
+            request: write.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: r#"{"code":"1","msg":"busy"}"#,
+            },
+        },
+    );
+    let mut seen: Vec<Action> = prepared(&mut engine, 6.);
+    let reads = |output: &[Action]| {
+        output
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")))
+            .count()
+    };
+    assert_eq!(reads(&seen), 1, "the seal starts one fresh order read");
+    let held = seen
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")))
+        .cloned()
+        .unwrap();
+    // The read is slow: the engine's 1 s and 2 s re-asks join it instead of replacing it.
+    for at in [1_006., 3_006.] {
+        let timer = seen
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+                _ => None,
+            })
+            .next_back()
+            .expect("an engine re-ask is armed");
+        engine.handle(at, Event::TimerFired { timer });
+        let output = prepared(&mut engine, at);
+        assert_eq!(
+            reads(&output),
+            0,
+            "a re-ask does not restart the running read"
+        );
+        seen.extend(output);
+    }
+    // The held read completes clean, page by page, and releases the fence.
+    let mut page = Some(held);
+    while let Some(request) = page {
+        reply(&mut engine, &request, &support::envelope(""), 3_100.);
+        page = prepared(&mut engine, 3_100.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")));
+    }
+    engine.handle(
+        3_200.,
+        Event::Command(Command::PlaceOrders {
+            command: OWNER + 1,
+            orders: vec![order(1)],
+        }),
+    );
+    post(&prepared(&mut engine, 3_200.));
 }

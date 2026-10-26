@@ -102,6 +102,18 @@ impl OrderLocks {
         }
     }
 
+    /// The fresh read an opted-in fence still waits for: `None` when nothing is
+    /// fenced, `Some(None)` for every symbol, else the uncertain symbols.
+    pub fn fence_reread(&self) -> Option<Option<Vec<String>>> {
+        if !self.fence_placements || self.uncertain.is_empty() {
+            return None;
+        }
+        if self.uncertain.contains_key("") {
+            return Some(None);
+        }
+        Some(Some(self.uncertain.keys().cloned().collect()))
+    }
+
     pub fn contains(&self, command: CommandId) -> bool {
         self.active.iter().any(|(id, _)| *id == command)
             || self.waiting.iter().any(|(id, ..)| *id == command)
