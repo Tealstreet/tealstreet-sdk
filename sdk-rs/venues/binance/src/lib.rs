@@ -18,7 +18,7 @@ use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::Context;
+use safe_cex_engine::request_context::{Context, Operation};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Command, Cx, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num};
 use sign::{Credentials, Query};
@@ -1758,7 +1758,7 @@ impl Venue for BinanceFutures {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval,
                 limit,
@@ -1766,13 +1766,17 @@ impl Venue for BinanceFutures {
                 to_ms,
             } => {
                 if !self.supports(interval) {
-                    cx.fail(command, interval.unsupported("Binance"));
+                    // Typed Unsupported, never a bare message (better than TS).
+                    let error = safe_cex_engine::VenueError::new(interval.unsupported("Binance"))
+                        .kind(safe_cex_engine::ErrorKind::Unsupported)
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    cx.refuse_command(Operation::Read, error);
                     return;
                 }
                 let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
                     Ok(query) => query,
                     Err(error) => {
-                        cx.fail(command, error);
+                        cx.refuse_command(Operation::Read, error);
                         return;
                     }
                 };

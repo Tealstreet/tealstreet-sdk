@@ -9571,3 +9571,7 @@ Kraken's advisory SignRequest context retains the exact wire path instead of the
 stripped signing path; the native preimage builder still strips /derivatives at
 the same cryptographic boundary. HTTP bytes, financial fields and native MACs are
 unchanged. This foundation does not enable hosted Kraken or alter nonce issuers.
+
+### Binance request refusals: typed command terminals
+
+Binance's local pre-admission refusals (unsupported commands, Spot derivative settings, stop-limit amend, keyless trading, invalid plans, bad candle intervals or ranges) are now each the command's own typed engine terminal, with native text, kind and NotSent, and no I/O ([RUST_BINANCE_REQUEST_REFUSALS.md](RUST_BINANCE_REQUEST_REFUSALS.md)). An unsupported candle interval is now typed `Unsupported`; it was a bare message.
