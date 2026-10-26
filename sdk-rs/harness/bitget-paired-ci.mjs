@@ -100,6 +100,7 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
     try {
       const child = spawnSync('python3', [script, '--baseline', selected.baseline,
         '--candidate', selected.candidate, '--authority', authorityPath, '--out', resolve(directory, 'records'),
+        ...(name === 'anchor' ? ['--candidate-cache', resolve(destination, 'tip/records/candidate')] : []),
         '--module-path', resolve(destination, 'active-module')], { cwd: root, env, stdio: 'inherit' });
       insist(child.status === 0 && !child.error && !child.signal, `${name} fixed measurement did not complete; no retry`);
     } finally {

@@ -14,24 +14,24 @@ function verifyWorkflow(text) {
   assert.match(first, /^    name: Rust \/ replay measurement \(\$\{\{ matrix\.venue \}\}\)$/m);
   const prepare = first.slice(first.indexOf('      - name: Seal approved CPU measurement inputs'), first.indexOf('      - name: Public data'));
   assert.match(prepare, /--command prepare --suite '\$\{\{ matrix\.venue \}\}'/);
-  assert.doesNotMatch(prepare, /\n        if:/, 'every first suite must seal inputs');
+  assert.match(prepare, /if: github.event_name != 'pull_request'/, 'CPU inputs are sealed only after merge');
   const collect = first.slice(first.indexOf('      - name: Verify strict replay results'), first.indexOf('      - name: Retain CPU runtime capsule'));
-  assert.match(collect, /if: always\(\)/);
+  assert.match(collect, /if: always\(\) && github\.event_name != 'pull_request'/);
   assert.match(collect, /--command collect --suite '\$\{\{ matrix\.venue \}\}'/);
   assert.doesNotMatch(collect, /^          (?:if|else)\b|rust:gate:verify/m, 'no suite bypass of shared collection');
   assert.match(first, /name: Retain the eligible original runtime bytes\n        if: steps\.cpu_collect\.outputs\.has_eligible == 'true'/);
-  assert.match(plan, /needs: \[gate, bitget-paired\]\n    if: always\(\)/);
+  assert.match(plan, /needs: \[gate, bitget-paired\]\n    if: always\(\) && github\.event_name != 'pull_request'/);
   assert.match(plan, /matrix: \$\{\{ steps\.plan\.outputs\.matrix \}\}/);
   assert.match(plan, /--command plan --out /);
   assert.doesNotMatch(plan, /--suite /, 'planner covers the entire registered suite set');
-  assert.match(second, /needs: cpu-plan\n    if: needs\.cpu-plan\.result == 'success' && needs\.cpu-plan\.outputs\.has_eligible == 'true'/);
+  assert.match(second, /needs: cpu-plan\n    if: github\.event_name != 'pull_request' && needs\.cpu-plan\.result == 'success' && needs\.cpu-plan\.outputs\.has_eligible == 'true'/);
   assert.match(second, /matrix: \$\{\{ fromJSON\(needs\.cpu-plan\.outputs\.matrix\) \}\}/);
   assert.match(second, /name: Rust \/ CPU remeasurement \(\$\{\{ matrix\.suite \}\}\)/);
   assert.match(second, /--command second --suite '\$\{\{ matrix\.suite \}\}'/);
   assert.match(second, /name: cpu-second-\$\{\{ matrix\.suite \}\}/);
-  assert.match(final, /name: Rust \/ replay gate \(\$\{\{ matrix\.suite \}\}\)/);
-  assert.match(certify, /needs: \[gate, bitget-paired, cpu-plan, cpu-second\]\n    if: always\(\)/);
-  assert.match(final, /needs: cpu-certify\n    if: always\(\)/);
+  assert.match(final, /name: Rust \/ CPU gate \(\$\{\{ matrix\.suite \}\}\)/);
+  assert.match(certify, /needs: \[gate, bitget-paired, cpu-plan, cpu-second\]\n    if: always\(\) && github\.event_name != 'pull_request'/);
+  assert.match(final, /needs: cpu-certify\n    if: always\(\) && github\.event_name != 'pull_request'/);
   const suites = /suite: \[([^\]]+)\]/.exec(final);
   assert(suites);
   assert.deepEqual(suites[1].split(',').map(suite => suite.trim()).sort(), [...GATE_SUITES].sort());
@@ -72,7 +72,7 @@ test('Bitget paired producer is mandatory, bounded, source-selected and independ
   assert.match(paired, /Public counterbalanced Bitget steady CPU/);
   assert.match(paired, /bitget-paired-ci\.mjs --out/);
   assert.match(paired, /name: bitget-paired-steady/);
-  assert.match(paired, /name: Retain counterbalanced Bitget steady evidence\n        if: always\(\)/);
+  assert.match(paired, /name: Retain counterbalanced Bitget steady evidence\n        if: always\(\) && github\.event_name != 'pull_request'/);
   assert.doesNotMatch(paired, /--baseline|--candidate|--tolerance|--threshold|continue-on-error|workflow_dispatch:/);
   assert.match(job(source, 'cpu-plan'), /needs: \[gate, bitget-paired\]/);
   assert.match(job(source, 'cpu-certify'), /needs: \[gate, bitget-paired, cpu-plan, cpu-second\]/);
@@ -87,7 +87,7 @@ test('workflow controls reject skipped final checks, unconditional second jobs a
     text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('cache-key: ${{ steps.yarn.outputs.cache-key }}', 'cache-key: unbound')),
     text => text.replace(job(text, 'cpu-second'), job(text, 'cpu-second') + '      - uses: ./.github/actions/install-yarn\n'),
     text => text.replace(job(text, 'cpu-final'), job(text, 'cpu-final') + '      - uses: ./.github/actions/prepare-yarn\n'),
-    text => text.replace("needs: cpu-plan\n    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'", 'needs: cpu-plan\n    if: always()'),
+    text => text.replace("needs: cpu-plan\n    if: github.event_name != 'pull_request' && needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'", 'needs: cpu-plan\n    if: always()'),
     text => text.replace('needs: [gate, bitget-paired, cpu-plan, cpu-second]\n    if: always()', 'needs: [gate, bitget-paired, cpu-plan, cpu-second]\n    if: success()'),
     text => text.replace('needs: cpu-certify\n    if: always()', 'needs: cpu-certify\n    if: success()'),
     text => text.replace('timeout-minutes: 5\n    defaults:\n      run:\n        working-directory: .', 'timeout-minutes: 5'),

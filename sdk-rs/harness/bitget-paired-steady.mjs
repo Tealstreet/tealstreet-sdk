@@ -88,6 +88,23 @@ function checkArchive(archive, source, authority) {
     sha256(archive.metadataBytes) === archive.files['build.json'], 'archive metadata content differs');
 }
 
+export function identicalBitgetShipping(archives) {
+  const a = archives?.baseline?.shipped, b = archives?.candidate?.shipped;
+  if (!a && !b) return false;
+  for (const [archive, shipped] of [[archives.baseline, a], [archives.candidate, b]]) {
+    insist(shipped && same(Object.keys(shipped).sort(), ['node', 'web']), 'identity needs both node and web');
+    for (const target of ['node', 'web']) {
+      const names = ['safe_cex_wasm.d.ts', 'safe_cex_wasm.js', 'safe_cex_wasm_bg.wasm', 'safe_cex_wasm_bg.wasm.d.ts',
+        ...(target === 'node' ? ['package.json'] : [])].sort();
+      insist(same(Object.keys(shipped[target]).sort(), names) && Object.values(shipped[target]).every(hash),
+        'identity needs every shipped artifact file');
+    }
+    for (const [name, digest] of Object.entries(archive.metadata.hashes))
+      insist(shipped.node[name] === digest, 'shipped node bytes disagree with authenticated archive');
+  }
+  return same(a, b);
+}
+
 function assessContent(authority, evidence, manifest) {
   insist(authorities.has(authority), 'unissued baseline/producer authority');
   insist(validateKnownFailures(manifest).length === 0, 'invalid original known-failure policy');
@@ -163,6 +180,7 @@ function assessContent(authority, evidence, manifest) {
   }));
   const q = summary.candidate.rustTsRatio / summary.baseline.rustTsRatio;
   insist(Number.isFinite(q) && q > 0, 'nonfinite pooled contrast');
+  const identical = authority.witness === 'tip' && identicalBitgetShipping(evidence.archives);
   return { schema: 1, rule: 'bitget-public-steady-counterbalanced-pooled', scope: 'bitget:public:steadyCpuMs',
     canonicalModulePath: canonicalPath,
     measurementIdentity: { source: evidence.measurementSource, tree: evidence.measurementTree, files: evidence.measurementFiles },
@@ -170,7 +188,9 @@ function assessContent(authority, evidence, manifest) {
       imageVersion: evidence.imageVersion, nodeSha256: evidence.nodeSha256 },
     measurementWindow: { startedAt: evidence.cohorts[0].before.startedAt,
       completedAt: evidence.cohorts.at(-1).finishedAt },
-    steadyAccepted: q <= BITGET_PAIRED_TOLERANCE, q, tolerance: BITGET_PAIRED_TOLERANCE,
+    steadyAccepted: identical || q <= BITGET_PAIRED_TOLERANCE, q, tolerance: BITGET_PAIRED_TOLERANCE,
+    tipProof: identical ? { rule: 'identical-bytes PASS', timing: 'informational',
+      baseline: evidence.archives.baseline.shipped, candidate: evidence.archives.candidate.shipped } : { rule: 'paired-timing' },
     freezeSha256: BITGET_PAIRED_FREEZE_SHA256, authority, pooled: summary,
     readiness: { cpuModel: evidence.cpuModel, rustTsRatio: summary.candidate.rustTsRatio,
       limit: 1 - REQUIRED_IMPROVEMENT, ready: summary.candidate.rustTsRatio <= 1 - REQUIRED_IMPROVEMENT },

@@ -17,9 +17,15 @@ on:
         type: boolean
         default: false
   push:
-    branches: [master, feat/rust-rewrite]
+    branches: [feat/rust-rewrite]
     paths:
       - 'sdk-rs/**'
+      - 'package.json'
+      - 'yarn.lock'
+      - 'tsconfig*.json'
+      - 'thirdparty/**'
+      - '.cargo/**'
+      - 'rust-toolchain*'
       - 'packages/safe-cex/**'
       - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
@@ -29,6 +35,12 @@ on:
   pull_request:
     paths:
       - 'sdk-rs/**'
+      - 'package.json'
+      - 'yarn.lock'
+      - 'tsconfig*.json'
+      - 'thirdparty/**'
+      - '.cargo/**'
+      - 'rust-toolchain*'
       - 'packages/safe-cex/**'
       - 'packages/safe-cex-server/**'
       - '.github/workflows/rust.yml'
@@ -51,6 +63,7 @@ concurrency:
 # including the wasm stack size. Warnings are denied per command instead.
 env:
   CARGO_INCREMENTAL: 0
+  CARGO_BUILD_JOBS: 4
   # libgit2 has dropped git-dependency fetches on transient TLS errors; the git CLI
   # plus cargo's own retries ride those out.
   CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
@@ -61,6 +74,55 @@ defaults:
     working-directory: sdk-rs
 
 jobs:
+  selection:
+    name: Rust / affected coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.select.outputs.full }}
+      nativeFull: ${{ steps.select.outputs.nativeFull }}
+      nativeCrates: ${{ steps.select.outputs.nativeCrates }}
+      replay: ${{ steps.select.outputs.replay }}
+      families: ${{ steps.select.outputs.families }}
+      replayRequired: ${{ steps.select.outputs.replayRequired }}
+      sizeRequired: ${{ steps.select.outputs.sizeRequired }}
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Select coverage from the actual checkout composition
+        id: select
+        run: node sdk-rs/harness/ci-selection.mjs
+
+  harness:
+    name: Rust / replay harness tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - run: corepack yarn rust:test-harness
+
   bans:
     name: Rust / banned patterns
     runs-on: ubuntu-latest
@@ -76,6 +138,7 @@ jobs:
 
   native:
     name: Rust / native ${{ matrix.check }}
+    needs: selection
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout || 30 }}
     strategy:
@@ -91,9 +154,14 @@ jobs:
             command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
           # Workspace resolution unifies family features. Exercise each
           # standalone engine closure, including both Plan configurations.
-          - check: engine-feature-modes
-            timeout: 90
-            command: python3 scripts/test-http-plan-feature-modes.py
+          - check: engine-feature-modes-0
+            command: python3 scripts/test-http-plan-feature-modes.py --shard 0/4
+          - check: engine-feature-modes-1
+            command: python3 scripts/test-http-plan-feature-modes.py --shard 1/4
+          - check: engine-feature-modes-2
+            command: python3 scripts/test-http-plan-feature-modes.py --shard 2/4
+          - check: engine-feature-modes-3
+            command: python3 scripts/test-http-plan-feature-modes.py --shard 3/4
           - check: mutation-barriers
             command: |
               cargo clippy --locked -p safe-cex-engine --all-targets --no-default-features --features http-mutation-barriers,test-support,order-locks,managed-sockets -- -D warnings
@@ -118,14 +186,21 @@ jobs:
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
       - uses: actions/setup-node@v4
-        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers'
+        if: startsWith(matrix.check, 'engine-feature-modes') || matrix.check == 'mutation-barriers'
         with:
           node-version: 22
       - name: Run ${{ matrix.check }}
-        run: ${{ matrix.command }}
+        env:
+          NATIVE_FULL: ${{ needs.selection.outputs.nativeFull }}
+          NATIVE_CRATES: ${{ needs.selection.outputs.nativeCrates }}
+          NATIVE_CHECK: ${{ matrix.check }}
+          NATIVE_COMMAND: ${{ matrix.command }}
+        run: node harness/run-native-ci.mjs
 
   wasm:
     name: Rust / wasm32
+    needs: selection
+    if: needs.selection.outputs.nativeFull == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -235,7 +310,13 @@ jobs:
           retention-days: 3
 
   families:
-    name: Rust / wasm families
+    name: Rust / wasm family (${{ matrix.family }})
+    needs: selection
+    if: needs.selection.outputs.sizeRequired == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        family: ${{ fromJSON(needs.selection.outputs.families) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -259,9 +340,9 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin/wasm-bindgen
             sdk-rs/target
-          key: ${{ runner.os }}-cargo-families-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          key: ${{ runner.os }}-cargo-family-${{ matrix.family }}-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-families-
+            ${{ runner.os }}-cargo-family-${{ matrix.family }}-
             ${{ runner.os }}-cargo-gate-
       - name: Install pinned toolchain and wasm-bindgen
         run: |
@@ -277,28 +358,127 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
-      - name: Build every venue family package
-        run: corepack yarn rust:build-wasm --families
-      - name: Load every family and check venue isolation and size
+      - name: Build and lint the selected venue family
+        run: |
+          corepack yarn rust:build-wasm --venue '${{ matrix.family }}'
+          cargo clippy --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-wasm --no-default-features --features '${{ matrix.family }}' --target wasm32-unknown-unknown -- -D warnings
+          node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.family }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
+          mkdir -p 'sdk-rs/hosts/wasm/pkg/web/${{ matrix.family }}' 'sdk-rs/hosts/wasm/pkg/node/${{ matrix.family }}'
+          cp sdk-rs/hosts/wasm/pkg/web/*.* 'sdk-rs/hosts/wasm/pkg/web/${{ matrix.family }}/'
+          cp sdk-rs/hosts/wasm/pkg/node/*.* 'sdk-rs/hosts/wasm/pkg/node/${{ matrix.family }}/'
+      - name: Check family isolation, every alias and the shipped size
+        env:
+          RUST_TEST_FAMILY: ${{ matrix.family }}
         run: corepack yarn rust:test-families
-      - name: Archive same-run browser family assets
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')
-        run: corepack yarn -s rust:measure-browser --archive families --out sdk-rs/harness/out/browser-families
-      - name: Retain browser family inputs
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')
+      - name: Retain sealed same-run family build
         uses: actions/upload-artifact@v7
         with:
-          name: browser-wasm-families
-          path: sdk-rs/harness/out/browser-families/
-          retention-days: 14
+          name: wasm-family-${{ matrix.family }}
+          path: |
+            sdk-rs/hosts/wasm/pkg/node/
+            sdk-rs/hosts/wasm/pkg/web/
+            sdk-rs/hosts/wasm/pkg/ci-replay/
+          retention-days: 3
           if-no-files-found: error
 
-  # Measurements never lengthen PR CI and carry no timing-failure gate. Every
-  # sample uses fresh Chrome/profile + DedicatedWorker, with same-run web bytes.
+  combined:
+    name: Rust / combined consumers
+    needs: selection
+    if: github.event_name != 'pull_request' || needs.selection.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+            sdk-rs/target
+          key: ${{ runner.os }}-cargo-combined-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-combined-
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
+      - uses: ./.github/actions/prefetch-cargo
+      - name: Install pinned binaryen (wasm-opt)
+        run: bash sdk-rs/harness/install-binaryen.sh
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - name: Rust book delta wire through the JS decoder and SDK
+        run: corepack yarn rust:test-frame-wire
+      - name: Build the offline native session fixture
+        run: cargo build --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-native --example session-adapter-fixture
+      - name: Native frame session adapter through real WebSockets
+        run: corepack yarn rust:test-server-adapter
+      - name: Build the combined wasm engine
+        run: corepack yarn rust:build-wasm
+      - name: Combined capability command conformance
+        run: corepack yarn -s node --test sdk-rs/harness/capabilities-combined.integration.mjs
+      - name: Check the shipped combined wasm size budget
+        run: corepack yarn -s rust:wasm-budget --combined
+      # Capture web bytes BEFORE the standalone family build overwrites pkg/web.
+      - name: Archive same-run combined browser diagnostic
+        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite'))
+        run: corepack yarn -s rust:measure-browser --archive combined --out sdk-rs/harness/out/browser-combined
+      - name: Retain combined browser inputs
+        if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite'))
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-wasm-combined
+          path: sdk-rs/harness/out/browser-combined/
+          retention-days: 14
+          if-no-files-found: error
+      - name: The TS exchange on the wasm engine
+        run: corepack yarn workspace @tealstreet/safe-cex test-wasm
+      - name: Install pinned Bun for standalone CLI loader proof
+        run: |
+          corepack yarn -s global add bun@1.4.3
+          corepack yarn -s global bin >> "$GITHUB_PATH"
+      - name: Rust consumer startup and packaged loaders
+        run: |
+          corepack yarn workspace @tealstreet/safe-cex-server test-wasm
+          corepack yarn workspace @tealstreet/exchange-mcp test-wasm
+          corepack yarn workspace @tealstreet/cli test-wasm
+          corepack yarn workspace @tealstreet/safe-cex-react-native test-wasm
+          corepack yarn -s workspace @tealstreet/exchange-mcp build
+          corepack yarn -s workspace @tealstreet/exchange-mcp smoke
+      - name: Native product semantics through the real CLI preflight
+        run: corepack yarn rust:test-product-semantics
+      - name: The Cloudflare Workers host
+        run: corepack yarn workspace @tealstreet/safe-cex-wasm test
+      - name: Retain built combined module for reuse
+        uses: actions/upload-artifact@v7
+        with:
+          name: replay-combined-package
+          path: |
+            sdk-rs/hosts/wasm/pkg/node/
+            sdk-rs/hosts/wasm/pkg/web/
+          if-no-files-found: error
+          retention-days: 3
+
   browser:
     name: Rust / browser cold start
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')
-    needs: [families, gate]
+    needs: [families, combined]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -316,6 +496,13 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wasm-family-*
+          path: sdk-rs/hosts/wasm/pkg/
+          merge-multiple: true
+      - name: Archive reused same-run browser family assets
+        run: corepack yarn -s rust:measure-browser --archive families --out sdk-rs/harness/out/browser-inputs
       - uses: actions/download-artifact@v8
         with:
           pattern: browser-wasm-*
@@ -340,112 +527,18 @@ jobs:
     name: Rust / replay measurement (${{ matrix.venue }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [selection, families, combined]
+    if: always() && needs.selection.result == 'success' && needs.families.result == 'success' && (needs.combined.result == 'success' || needs.combined.result == 'skipped') && needs.selection.outputs.replayRequired == 'true'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Legacy DXtrade has no anonymous API; this public fixture is documented/scripted.
-          - venue: breakoutprop
-            books: BTCUSD,ETHUSD
-            private_script: rust:private-tape-breakoutprop
-          - venue: apexomni
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-apexomni
-          - venue: asterdex
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-asterdex
-          - venue: woo
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-woo
-          - venue: binance
-            books: BTCUSDT,ETHUSDT,SOLUSDT
-            private_script: rust:private-tape
-          - venue: bitunix
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-bitunix
-          - venue: orderly
-            books: BTCUSDC,ETHUSDC
-            private_script: rust:private-tape-orderly
-          - venue: coinbase
-            books: BTC-USD,ETH-USD
-            private_script: rust:private-tape-coinbase
-          - venue: bitget
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-bitget
-          - venue: bitgetusdc
-            books: BTCUSDC,ETHUSDC
-            private_script: rust:private-tape-bitgetusdc
-          - venue: backpack
-            books: SOL_USDC_PERP,BTC_USDC_PERP
-            private_script: rust:private-tape-backpack
-          - venue: blofin
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape:blofin
-          - venue: mexc
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-mexc
-          - venue: polymarket
-            books: xi-jinping-out-before-2027-Yes,will-gavin-newsom-win-the-2028-democratic-presidential-nomination-568-Yes
-            private_script: rust:private-tape-polymarket
-          - venue: kucoin
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-kucoin
-          - venue: kucoinspot
-            books: BTC-USDT,ETH-USDT
-            private_script: rust:private-tape-kucoinspot
-          - venue: bingx
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-bingx
-          - venue: bybit
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-bybit
-          - venue: okx
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-okx
-          - venue: cryptocom
-            books: BTCUSD-PERP,ETHUSD-PERP
-            private_script: rust:private-tape-cryptocom
-          - venue: weex
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape:weex
-          - venue: grvt
-            books: BTC_USDT_PERP,ETH_USDT_PERP
-            private_script: rust:private-tape-grvt
-          - venue: phemex
-            books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape:phemex
-          - venue: krakenspot
-            books: XBT/USD,ETH/USD
-            private_script: rust:private-tape-krakenspot
-          - venue: hyperliquidspot
-            books: PURR/USDC,HYPE/USDC
-            private_script: rust:private-tape-hyperliquidspot
-          - venue: kraken
-            books: PF_XBTUSD,PF_ETHUSD
-            private_script: rust:private-tape-kraken
-          - venue: lighter
-            books: ETH,BTC
-            private_script: rust:private-tape-lighter
-          - venue: lighter-robinhood
-            books: ETH,BTC
-            private_script: rust:private-tape-lighter-robinhood
-          - venue: bitrue
-            books: E-BTC-USDT,E-ETH-USDT
-            private_script: rust:private-tape-bitrue
-          - venue: hyperliquid
-            books: BTC-PERP,ETH-PERP
-            private_script: rust:private-tape-hyperliquid
-          - venue: paradex
-            books: BTC-USD-PERP,ETH-USD-PERP
-            private_script: rust:private-tape-paradex
-          - venue: txflow
-            books: BTC-USDC,ETH-USDC
-            private_script: rust:private-tape-txflow
+        include: ${{ fromJSON(needs.selection.outputs.replay) }}
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       SAFE_CEX_WASM_OPT: required
-      # Five pairs only for the venue's sweep; Bitget also covers its USDC suite.
-      PRIVATE_REPLAY_RUNS: ${{ ((github.head_ref || github.ref_name) == format('wip/harness-tape-time-{0}', matrix.venue) || (matrix.venue == 'bitgetusdc' && (github.head_ref || github.ref_name) == 'wip/harness-tape-time-bitget')) && '5' || '1' }}
+      RUST_REPLAY_CORRECTNESS_ONLY: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+      RUST_REPLAY_CI_WASM: ${{ github.event_name == 'pull_request' && 'sdk-rs/hosts/wasm/pkg/ci-replay' || '' }}
+      RUST_REPLAY_PUBLIC_RUNS: '9'
     defaults:
       run:
         working-directory: .
@@ -456,102 +549,40 @@ jobs:
           node-version: 22
       - uses: ./.github/actions/prepare-yarn
         id: yarn
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin/wasm-bindgen
-            sdk-rs/target
-          key: ${{ runner.os }}-cargo-gate-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
-          restore-keys: ${{ runner.os }}-cargo-gate-
-      - name: Install pinned toolchain and wasm-bindgen
-        run: |
-          (cd sdk-rs && rustup show)
-          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
-            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
-          fi
-      - uses: ./.github/actions/prefetch-cargo
-      - name: Install pinned binaryen (wasm-opt)
-        run: bash sdk-rs/harness/install-binaryen.sh
       - uses: ./.github/actions/install-yarn
         with:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
-      - name: Rust book delta wire through the JS decoder and SDK
-        if: matrix.venue == 'binance'
-        run: corepack yarn rust:test-frame-wire
-      - name: Build the offline native session fixture
-        if: matrix.venue == 'binance'
-        run: cargo build --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-native --example session-adapter-fixture
-      - name: Native frame session adapter through real WebSockets
-        if: matrix.venue == 'binance'
-        run: corepack yarn rust:test-server-adapter
-      - name: Build the combined wasm engine
-        if: matrix.venue == 'binance' || inputs.replay_artifact == 'combined'
-        run: corepack yarn rust:build-wasm
-      - name: Combined capability command conformance
-        if: matrix.venue == 'binance' || inputs.replay_artifact == 'combined'
-        run: corepack yarn -s node --test sdk-rs/harness/capabilities-combined.integration.mjs
-      - name: Check the shipped combined wasm size budget
-        if: matrix.venue == 'binance' || inputs.replay_artifact == 'combined'
-        run: corepack yarn -s rust:wasm-budget --combined
-      # Capture web bytes BEFORE the standalone family build overwrites pkg/web.
-      - name: Archive same-run combined browser diagnostic
-        if: matrix.venue == 'binance' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite'))
-        run: corepack yarn -s rust:measure-browser --archive combined --out sdk-rs/harness/out/browser-combined
-      - name: Retain combined browser inputs
-        if: matrix.venue == 'binance' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite'))
-        uses: actions/upload-artifact@v7
+      - uses: actions/download-artifact@v8
+        if: inputs.replay_artifact != 'combined'
         with:
-          name: browser-wasm-combined
-          path: sdk-rs/harness/out/browser-combined/
-          retention-days: 14
-          if-no-files-found: error
-      - name: The TS exchange on the wasm engine
-        if: matrix.venue == 'binance'
-        run: corepack yarn workspace @tealstreet/safe-cex test-wasm
-      - name: Install pinned Bun for standalone CLI loader proof
-        if: matrix.venue == 'binance'
-        run: |
-          corepack yarn -s global add bun@1.4.3
-          corepack yarn -s global bin >> "$GITHUB_PATH"
-      - name: Rust consumer startup and packaged loaders
-        if: matrix.venue == 'binance'
-        run: |
-          corepack yarn workspace @tealstreet/safe-cex-server test-wasm
-          corepack yarn workspace @tealstreet/exchange-mcp test-wasm
-          corepack yarn workspace @tealstreet/cli test-wasm
-          corepack yarn workspace @tealstreet/safe-cex-react-native test-wasm
-          corepack yarn -s workspace @tealstreet/exchange-mcp build
-          corepack yarn -s workspace @tealstreet/exchange-mcp smoke
-      - name: Native product semantics through the real CLI preflight
-        if: matrix.venue == 'binance'
-        run: corepack yarn rust:test-product-semantics
-      - name: The Cloudflare Workers host
-        if: matrix.venue == 'binance'
-        run: corepack yarn workspace @tealstreet/safe-cex-wasm test
-      # A dispatched combined run replays this exact module in every suite;
-      # never overwrite it with a family or archive it as a family-only build.
-      - name: Build the venue wasm engine
+          name: wasm-family-${{ matrix.family }}
+          path: sdk-rs/hosts/wasm/pkg/
+      - uses: actions/download-artifact@v8
+        if: inputs.replay_artifact == 'combined'
+        with:
+          name: replay-combined-package
+          path: sdk-rs/hosts/wasm/pkg/
+      - name: Verify the same-run matching family capsule
         if: inputs.replay_artifact != 'combined'
-        run: corepack yarn rust:build-wasm --venue ${{ matrix.venue }}
-      - name: Archive the matching CI replay engine
-        if: inputs.replay_artifact != 'combined'
-        run: corepack yarn -s node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --archive sdk-rs/hosts/wasm/pkg/ci-replay
-      - name: Check the wasm size budget
-        if: inputs.replay_artifact != 'combined'
-        run: corepack yarn -s rust:wasm-budget --venue '${{ matrix.venue }}'
-      - name: Replay request normalization
-        run: corepack yarn rust:test-harness
-      - name: Credentialed lifecycle runner (scripted transport only)
-        if: matrix.venue == 'binance'
-        run: corepack yarn rust:test-live-smoke
+        run: node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --verify sdk-rs/hosts/wasm/pkg/ci-replay
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sdk-rs/target
+          key: ${{ runner.os }}-cargo-replay-native-${{ matrix.family }}-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-family-${{ matrix.family }}-
+      - name: Install pinned toolchain for native contracts
+        run: (cd sdk-rs && rustup show)
+      - uses: ./.github/actions/prefetch-cargo
       - name: Scripted lifecycle financial parity (fixed sanitized capture)
         if: matrix.venue == 'binance'
-        run: corepack yarn -s rust:gate:record --venue binance --tape sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl --books BTCUSDT --runs "$PRIVATE_REPLAY_RUNS"
+        run: corepack yarn -s rust:gate:record --venue binance --tape sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl --books BTCUSDT
       - name: Seal approved CPU measurement inputs
+        if: github.event_name != 'pull_request'
         id: cpu_prepare
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -559,40 +590,40 @@ jobs:
           node sdk-rs/harness/cpu-ci.mjs --command prepare --suite '${{ matrix.venue }}'
           --out '${{ runner.temp }}/cpu-runtime-first' --mode '${{ inputs.replay_artifact == 'combined' && 'combined' || 'family' }}'
       - name: Public data (correctness, CPU and memory)
-        run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}' --runs 9
+        run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
       - name: OKX inverse public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okx --tape sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 9
+        run: corepack yarn -s rust:gate:record --venue okx --tape sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz --books BTCUSD,ETHUSD
       - name: OKX EEA X-Perps public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 9
+        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404
       - name: Account and trading (correctness)
         if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |
           corepack yarn ${{ matrix.private_script }}
-          corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
+          corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --books ''
       - name: Hyperliquid spot-enabled account and trading (correctness)
         if: matrix.venue == 'hyperliquid'
         run: |
           corepack yarn rust:private-tape-hyperliquid --spot --out sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl
-          corepack yarn -s rust:gate:record --venue hyperliquid --tape sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
+          corepack yarn -s rust:gate:record --venue hyperliquid --tape sdk-rs/harness/tapes/hyperliquid-spot-private.jsonl --books ''
       - name: Lighter testnet deployment signing and replay
         if: matrix.venue == 'lighter' || matrix.venue == 'lighter-robinhood'
         run: |
           corepack yarn rust:private-tape-lighter --venue '${{ matrix.venue }}' --testnet --out sdk-rs/harness/tapes/lighter-testnet-private.jsonl
-          corepack yarn -s rust:gate:record --venue '${{ matrix.venue }}' --tape sdk-rs/harness/tapes/lighter-testnet-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
+          corepack yarn -s rust:gate:record --venue '${{ matrix.venue }}' --tape sdk-rs/harness/tapes/lighter-testnet-private.jsonl --books ''
       - name: Binance Spot, COIN-M and portfolio margin public variants
         if: matrix.venue == 'binance'
         run: |
-          corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
-          corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP --runs 9
-          corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT --runs 9
+          corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT
+          corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP
+          corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT
       - name: Binance Spot, COIN-M and portfolio margin private variants
         if: matrix.venue == 'binance'
         run: |
           for venue in binancespot binanceinverse binancepm; do
             corepack yarn "rust:private-tape-$venue"
-            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
+            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --books ''
           done
       - name: MEXC missing command-feature negative control
         if: matrix.venue == 'mexc'
@@ -613,42 +644,42 @@ jobs:
         if: matrix.venue == 'asterdex'
         run: |
           corepack yarn rust:private-tape-asterdex-v3
-          corepack yarn -s rust:gate:record --venue asterdex --tape sdk-rs/harness/tapes/asterdex-v3-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
+          corepack yarn -s rust:gate:record --venue asterdex --tape sdk-rs/harness/tapes/asterdex-v3-private.jsonl --books ''
           corepack yarn rust:test-asterdex-parity
       - name: Bitget inverse account and native contract sizing
         if: matrix.venue == 'bitget'
         run: |
           corepack yarn rust:private-tape-bitgetinverse
-          corepack yarn -s rust:gate:record --venue bitgetinverse --tape sdk-rs/harness/tapes/bitgetinverse-private.jsonl --runs "$PRIVATE_REPLAY_RUNS" --books ''
+          corepack yarn -s rust:gate:record --venue bitgetinverse --tape sdk-rs/harness/tapes/bitgetinverse-private.jsonl --books ''
       - name: Bitget UTA ledger and Classic/UTA trailing native contracts
         if: matrix.venue == 'bitget'
         run: corepack yarn rust:test-bitget-parity
       - name: OKX EU X-Perp public products (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 9
+        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404
       - name: OKX account and trading variants (correctness)
         if: matrix.venue == 'okx'
         run: |
           for venue in okx okxeu okxdemo okxeudemo; do
             corepack yarn rust:private-tape-okx --venue "$venue"
-            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
+            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --books ''
           done
 
       - name: Bybit inverse/spot/demo public data (correctness, CPU and memory)
         if: matrix.venue == 'bybit'
         run: |
-          corepack yarn -s rust:gate:record --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 9
-          corepack yarn -s rust:gate:record --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
-          corepack yarn -s rust:gate:record --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
+          corepack yarn -s rust:gate:record --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD
+          corepack yarn -s rust:gate:record --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --books BTCUSDT,ETHUSDT
+          corepack yarn -s rust:gate:record --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --books BTCUSDT,ETHUSDT
       - name: Hyro documented public contract (live endpoints not configured)
         if: matrix.venue == 'bybit'
-        run: corepack yarn -s rust:gate:record --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
+        run: corepack yarn -s rust:gate:record --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT
       - name: Bybit variants account and trading (documented correctness)
         if: matrix.venue == 'bybit'
         run: |
           for venue in bybitinverse bybitspot bybitdemo hyrotrader; do
             corepack yarn "rust:private-tape-$venue"
-            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
+            corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --books ''
           done
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
@@ -659,7 +690,7 @@ jobs:
               suffix=''
               if [ "$network" = testnet ]; then extra+=(--testnet); suffix='-testnet'; fi
               corepack yarn rust:private-tape-orderly --venue "$venue" "${extra[@]}"
-              corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue$suffix-private.jsonl" --runs "$PRIVATE_REPLAY_RUNS" --books ''
+              corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue$suffix-private.jsonl" --books ''
             done
           done
       - name: Coinbase product and CDP algorithm variants (correctness)
@@ -669,25 +700,26 @@ jobs:
             for algorithm in ES256 EdDSA; do
               tape="sdk-rs/harness/tapes/coinbase-$profile-$algorithm-private.jsonl"
               corepack yarn rust:private-tape-coinbase --venue coinbase --profile "$profile" --algorithm "$algorithm" --out "$tape"
-              corepack yarn -s rust:gate:record --venue coinbase --tape "$tape" --runs "$PRIVATE_REPLAY_RUNS" --books ''
+              corepack yarn -s rust:gate:record --venue coinbase --tape "$tape" --books ''
             done
           done
           for algorithm in ES256 EdDSA; do
             tape="sdk-rs/harness/tapes/coinbasespot-spot-$algorithm-private.jsonl"
             corepack yarn rust:private-tape-coinbase --venue coinbasespot --profile spot --algorithm "$algorithm" --out "$tape"
-            corepack yarn -s rust:gate:record --venue coinbasespot --tape "$tape" --runs "$PRIVATE_REPLAY_RUNS" --books ''
+            corepack yarn -s rust:gate:record --venue coinbasespot --tape "$tape" --books ''
           done
-      # Collector steps retain strict FAIL reports so every product runs. Only
-      # this mandatory verifier can certify the job; unknown/missing gates fail.
       - name: Verify strict replay results and declared known failures
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         id: cpu_collect
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           node sdk-rs/harness/cpu-ci.mjs --command collect --suite '${{ matrix.venue }}'
+      - name: Verify complete PR correctness coverage
+        if: always() && github.event_name == 'pull_request'
+        run: node sdk-rs/harness/verify-gates.mjs --suite '${{ matrix.venue }}' --mode correctness
       - name: Retain CPU runtime capsule
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: cpu-cohort-${{ matrix.venue }}
@@ -730,8 +762,8 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-
   bitget-paired:
+    if: github.event_name != 'pull_request'
     name: Rust / Bitget counterbalanced steady CPU
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -790,7 +822,7 @@ jobs:
   cpu-plan:
     name: Rust / CPU remeasurement plan
     needs: [gate, bitget-paired]
-    if: always()
+    if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 32
     outputs:
@@ -830,7 +862,7 @@ jobs:
   cpu-second:
     name: Rust / CPU remeasurement (${{ matrix.suite }})
     needs: cpu-plan
-    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'
+    if: github.event_name != 'pull_request' && needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.cpu-plan.outputs.matrix) }}
@@ -863,7 +895,7 @@ jobs:
   cpu-certify:
     name: Rust / shared CPU certification
     needs: [gate, bitget-paired, cpu-plan, cpu-second]
-    if: always()
+    if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 42
     outputs:
@@ -900,9 +932,9 @@ jobs:
           if-no-files-found: error
 
   cpu-final:
-    name: Rust / replay gate (${{ matrix.suite }})
+    name: Rust / CPU gate (${{ matrix.suite }})
     needs: cpu-certify
-    if: always()
+    if: always() && github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -922,3 +954,4 @@ jobs:
           CPU_CERT_RESULT: ${{ needs.cpu-certify.result }}
           CPU_CERT_RESULTS: ${{ needs.cpu-certify.outputs.results }}
         run: node sdk-rs/harness/cpu-ci.mjs --command status --suite '${{ matrix.suite }}'
+

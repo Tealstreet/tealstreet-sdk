@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { archiveCiWasm, assertBuildEnvironment, buildInputFingerprint, validateCiWasm, validatePairedCiWasm } from './ci-wasm.mjs';
+import { archiveCiWasm, assertBuildEnvironment, buildInputFingerprint, validateCiWasm, validatePairedCiWasm, validateSameRunCiWasm } from './ci-wasm.mjs';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const fixture = (t) => {
@@ -58,6 +58,16 @@ test('matching clean build tree accepts a family alias without replacing install
   const f = fixture(t);
   assert.equal(f.validate().path, join(f.directory, 'safe_cex_wasm.js'));
   assert.deepEqual(f.validate().metadata, f.metadata);
+});
+
+test('cross-job family reuse requires both exact checkout and same workflow run', t => {
+  const f = fixture(t), env = { GITHUB_ACTIONS: 'true', GITHUB_RUN_ID: '123' };
+  const validate = () => validateSameRunCiWasm({ root: f.root, directory: f.directory, venue: 'binancepm', env });
+  assert.doesNotThrow(validate);
+  f.metadata.runId = '124'; f.save(); assert.throws(validate, /source\/run/);
+  f.metadata.runId = '123'; f.metadata.sourceHead = 'a'.repeat(40); f.save(); assert.throws(validate, /source\/run/);
+  f.metadata.sourceHead = f.git('rev-parse', 'HEAD'); f.save();
+  writeFileSync(join(f.directory, 'safe_cex_wasm.js'), '// substituted'); assert.throws(validate, /hash/);
 });
 for (const mode of ['unstaged', 'staged', 'untracked', 'committed']) {
   test(`refuses ${mode} build input changes with no fallback`, (t) => {
