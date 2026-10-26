@@ -14,6 +14,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = 'scripts/request-legacy-sites.json'
@@ -634,6 +635,24 @@ def use_items(stream):
     return result
 
 
+def without_own_crate_alias(stream, source_dir):
+    """`extern crate self as <this package>;` names only the crate itself and imports
+    no macro (`#[macro_use]` stays a hazard token), so it is no ancestor hazard."""
+    try:
+        package = tomllib.loads((source_dir.parent / 'Cargo.toml').read_text())['package']['name']
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return stream
+    alias = ['extern', 'crate', 'self', 'as', package.replace('-', '_'), ';']
+    kept, i = [], 0
+    while i < len(stream):
+        if stream[i:i + 6] == alias:
+            i += 6
+            continue
+        kept.append(stream[i])
+        i += 1
+    return kept
+
+
 def source_macro_hazard(stream, ancestor=False):
     if any(token in {'macro_rules', 'macro_use', 'macro_export', 'macro'} for token in stream):
         return True
@@ -798,7 +817,7 @@ class MacroImportProof:
         """An ancestor's top-level invocation may install textual macros, except a
         workspace macro proven to expand only to `impl` blocks, in a crate whose
         root proof shows `safe_cex_crypto` is the workspace dependency."""
-        stream = self.streams[parent]
+        stream = without_own_crate_alias(self.streams[parent], source_dir)
         if not source_macro_hazard(stream, True):
             return False
         if source_macro_hazard(stream):
