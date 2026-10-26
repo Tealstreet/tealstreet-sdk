@@ -57,6 +57,11 @@ ACK or malformed payload does not. This is distinct from authentication and
 idle. Once all initial payloads are accepted, a quiet account with native ping
 traffic can remain connected indefinitely. No age-based private resubscription.
 
+The shared initial-payload expiry reports RetireReason::Timeout(Timeout::Auth),
+including after Ready, as the existing snapshot bound does. This is a timeout
+retirement, not AuthFailure evidence or a definitive authentication refusal;
+the codec must not classify it as an invalid credential or grant a write resend.
+
 ## Ownership and codec mapping
 
 1. Keep engine-issued FeedId/Epoch references and native codec/account data.

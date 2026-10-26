@@ -93,6 +93,40 @@ impl<P> Cx<'_, P> {
         self.io.core.managed_sockets = true;
         Ok(feed)
     }
+    #[cfg(feature = "socket-native-timing")]
+    pub fn register_socket_feed_with_native_timing(
+        &mut self,
+        policy: FeedPolicy,
+        timing: crate::socket_lifecycle::NativeTiming,
+    ) -> Result<FeedId, SocketError> {
+        self.io.assert_actions_safe();
+        self.io.opaque_entry_activity();
+        if self.io.core.socket_failed {
+            return Err(SocketError::NotPermitted);
+        }
+        let feed = self
+            .io
+            .core
+            .socket_driver
+            .register_with_native_timing(policy, timing)?;
+        self.io.core.managed_sockets = true;
+        Ok(feed)
+    }
+    #[cfg(feature = "socket-native-timing")]
+    pub fn complete_socket_initial_payload(&mut self) -> Result<(), SocketError> {
+        self.io.assert_actions_safe();
+        self.io.opaque_entry_activity();
+        let (epoch, received_at) = self.io.core.socket_message.ok_or(SocketError::Stale)?;
+        if self.now != received_at {
+            return Err(SocketError::InvalidTime);
+        }
+        self.io
+            .core
+            .socket_driver
+            .complete_initial_payload(epoch, self.now)?;
+        self.io.core.socket_message = None;
+        Ok(())
+    }
     /// Keep login permission independent of a connect-origin native snapshot bound.
     pub fn register_socket_feed_with_snapshot(
         &mut self,
@@ -773,6 +807,8 @@ impl<V: Venue> Engine<V> {
                     control,
                     Control::Other | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
                 );
+                #[cfg(feature = "socket-native-timing")]
+                let other = other || matches!(control, Control::Traffic);
                 let ready = self.venue.socket_startup_ready(&self.store);
                 self.assert_live();
                 let work = self
@@ -2254,3 +2290,7 @@ mod handoff_tests;
 #[cfg(test)]
 #[path = "socket_capability_tests.rs"]
 mod capability_tests;
+
+#[cfg(all(test, feature = "socket-native-timing"))]
+#[path = "socket_native_timing_tests.rs"]
+mod native_timing_tests;
