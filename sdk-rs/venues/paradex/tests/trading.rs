@@ -1365,3 +1365,89 @@ fn an_unknown_placement_refuses_a_retry_until_a_fresh_order_read_reconciles_it()
     place(&mut h, 11, vec![opts(OrderType::Limit)]);
     take_method(&mut h, Method::Post, "/orders");
 }
+#[test]
+fn engine_reasks_join_a_slow_post_write_read_that_then_releases_the_fence() {
+    let mut h = private();
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let write = take_method(&mut h, Method::Post, "/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: write.id,
+            error: "response lost after acceptance",
+        },
+    );
+    h.collect();
+    // The hook's read, dispatched after the write, stays unanswered.
+    let slow = take_method(&mut h, Method::Get, "/orders");
+    let start = h.now;
+    let mut reasks = vec![];
+    for _ in 0..3 {
+        let (timer, at) = h
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .expect("engine re-ask");
+        reasks.push(at - start);
+        h.now = at;
+        h.e.handle(h.now, Event::TimerFired { timer });
+        h.collect();
+        // Each re-ask joins the slow read: no restart, no second read.
+        assert!(h.pending.is_empty(), "{:?}", h.pending);
+        place(&mut h, 9, vec![opts(OrderType::Limit)]);
+        assert!(h.result(9).unwrap_err().contains("uncertain"));
+    }
+    assert_eq!(reasks, vec![1_000., 3_000., 7_000.]);
+    h.respond(slow, 200, r#"{"results":[]}"#);
+    // The slow read releases on completion; at most the one owed read follows.
+    let reads = h.pending.iter().filter(|r| r.method == Method::Get).count();
+    assert!(reads <= 1, "{:?}", h.pending);
+    place(&mut h, 10, vec![opts(OrderType::Limit)]);
+    take_method(&mut h, Method::Post, "/orders");
+}
+#[test]
+fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_id_does_not() {
+    let mut h = private();
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let write = take_method(&mut h, Method::Post, "/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: write.id,
+            error: "response lost after acceptance",
+        },
+    );
+    h.collect();
+    let fresh = take_method(&mut h, Method::Get, "/orders");
+    // A late-landing order could survive a venue-side cancel-all, so the
+    // engine default refuses it NotSent before any DELETE.
+    h.command(Command::CancelSymbolOrders {
+        command: 9,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    assert!(
+        !h.pending.iter().any(|r| r.method == Method::Delete),
+        "cancel-all was sent while the placement is uncertain"
+    );
+    assert!(h.result(9).unwrap_err().contains("uncertain"));
+    assert_eq!(
+        h.failures.last().and_then(|e| e.outcome),
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    // Cancel by ID cannot place, so it stays admitted.
+    h.command(Command::CancelOrders {
+        command: 10,
+        ids: vec!["resting".into()],
+    });
+    assert!(!h.result(10).is_err_and(|e| e.contains("uncertain")));
+    h.respond(fresh, 200, r#"{"results":[]}"#);
+    h.command(Command::CancelSymbolOrders {
+        command: 11,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    take_method(&mut h, Method::Delete, "/orders?market=");
+}
