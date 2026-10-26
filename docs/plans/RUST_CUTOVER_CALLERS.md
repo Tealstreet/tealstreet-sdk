@@ -9629,3 +9629,10 @@ read that verifies the trading key's own capabilities before private startup,
 such as Coinbase `GET /api/v3/brokerage/key_permissions`. It is primary-only,
 like every `PrimaryRead`. A secondary read-key verification stays an ordinary
 `Read`. No existing reason was reused, because none describes it truthfully.
+
+### Binance Spot: reduceOnly and close are ignored, as in TypeScript
+
+Binance Spot placement no longer rejects `reduceOnly: true` or `close: true`.
+Spot has no position to reduce, so both flags are dropped and never sent; a
+sell beyond the balance fails at Binance. Spot `conditional` and trailing
+orders are still refused, exactly as TypeScript refuses them.
