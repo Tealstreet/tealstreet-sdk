@@ -259,27 +259,34 @@ fn venue_aware_legacy_setup_applies_compiled_mexc_slot_policy_and_consumes_optio
 fn venue_aware_json_overrides_opposite_metadata_with_rust_unicode_whitespace_semantics() {
     // NEL/EM SPACE/PARAGRAPH SEPARATOR trim; BOM and interior spaces survive.
     // Expected MACs were independently computed with Python stdlib hmac/hashlib.
-    for (input, expected, mac) in [
-        (" primary-key ", "primary-key", TRIMMED_PRIMARY_MAC),
+    for (input, expected, mac, stable) in [
+        (
+            " primary-key ",
+            "primary-key",
+            TRIMMED_PRIMARY_MAC,
+            "mexc:8103f888c531840bd2978455",
+        ),
         (
             "\u{0085}\u{2003}primary key\u{2029}",
             "primary key",
             "01c338aeb432927fb69864e80e7ed18d66da37558bddc3444fde7fbaf103b794",
+            "mexc:48b46201b873f564129f29ae",
         ),
         (
             "\u{feff} primary-key \u{feff}",
             "\u{feff} primary-key \u{feff}",
             "8584d88cb9f665449763f5b417f28b4de3ecc06c4b947d9ede214e914e077fd0",
+            "mexc:b9bd26040f5d07457fb2dca5",
         ),
     ] {
         let setup = serde_json::json!({
-            "primary": { "key": input, "secret": "primary-secret", "passphrase": "primary-pass", "stableId": "account/primary", "trimCredential": false },
+            "primary": { "key": input, "secret": "primary-secret", "passphrase": "primary-pass", "stableId": stable, "trimCredential": false },
             "secondary": { "key": " secondary-key ", "secret": "secondary-secret", "passphrase": "secondary-pass", "stableId": "account/secondary", "trimCredential": true },
         });
         let (provider, identities) = local_signer_from_json_for("mexc", setup.to_string()).unwrap();
         assert_eq!(
             identities.primary.as_ref().unwrap().require_stable_id(),
-            Ok("account/primary")
+            Ok(stable)
         );
         assert_eq!(
             identities.secondary.as_ref().unwrap().require_stable_id(),
@@ -369,7 +376,14 @@ fn venue_aware_whitespace_only_primary_and_malformed_setup_do_not_invent_credent
         let identity = identities.primary.unwrap();
         assert!(identity.credential.0.is_empty());
         assert!(identity.validate().is_err());
-        assert!(identity.stable_id.is_none());
+        if cfg!(feature = "mexc") {
+            assert_eq!(
+                identity.stable_id.as_deref(),
+                Some("mexc:804dda9de6fb71fa4807af90")
+            );
+        } else {
+            assert!(identity.stable_id.is_none());
+        }
         let request = SignRequest {
             receipt: Default::default(),
             context: Default::default(),
@@ -408,46 +422,50 @@ fn venue_aware_whitespace_only_primary_and_malformed_setup_do_not_invent_credent
 
 #[cfg(feature = "mexc")]
 #[test]
-fn setup_policy_does_not_adopt_unmigrated_mexc() {
-    struct NeverConstruct;
-    impl safe_cex_venues::Visit for NeverConstruct {
+fn mexc_provider_injection_requires_its_installed_provider() {
+    struct Construct;
+    impl safe_cex_venues::Visit for Construct {
         type Output = ();
-        fn visit<V: safe_cex_engine::Venue + 'static>(self, _: safe_cex_engine::Engine<V>) {
-            panic!("setup policy cannot admit provider injection into an unmigrated venue");
-        }
+        fn visit<V: safe_cex_engine::Venue + 'static>(self, _: safe_cex_engine::Engine<V>) {}
     }
     let (provider, identities) = local_signer_from_json_for(
         "mexc",
-        r#"{
-        "primary":{"key":" primary-key ","secret":"primary-secret"}
-    }"#
-        .into(),
+        r#"{"primary":{"key":" primary-key ","secret":"primary-secret"}}"#.into(),
     )
     .unwrap();
-    for (refs, supplied_provider) in [(true, false), (false, true), (true, true)] {
+    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    options.signing = Some(identities.clone());
+    let error = safe_cex_venues::build_with_signer(
+        "mexc",
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        None,
+        Construct,
+    )
+    .unwrap_err();
+    assert_eq!(error.message, "Engine signing provider is required");
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    assert!(error.outcome.is_none());
+    for refs in [false, true] {
         let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
         options.signing = refs.then(|| identities.clone());
-        let error = safe_cex_venues::build_with_signer(
-            "mexc",
-            options,
-            Some(safe_cex_engine::test_support::seeded_entropy(17)),
-            supplied_provider.then(|| provider.clone()),
-            NeverConstruct,
-        )
-        .expect_err("setup normalization is independent of family signer adoption");
-        assert_eq!(
-            error.message,
-            "Injected signing is not supported for this venue yet"
+        assert!(
+            safe_cex_venues::build_with_signer(
+                "mexc",
+                options,
+                Some(safe_cex_engine::test_support::seeded_entropy(17)),
+                Some(provider.clone()),
+                Construct
+            )
+            .is_ok()
         );
-        assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
-        assert!(error.outcome.is_none());
     }
 }
 
-// Unmigrated control family: MEXC (moved from Bitunix by #2190; move on with the next migration).
-#[cfg(feature = "mexc")]
+// Blofin remains a provider-injection refusal control after MEXC adoption.
+#[cfg(feature = "blofin")]
 #[test]
-fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_mexc() {
+fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_blofin() {
     struct NeverConstruct;
     impl safe_cex_venues::Visit for NeverConstruct {
         type Output = ();
@@ -459,7 +477,7 @@ fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_mexc() {
         r#"{"primary":{"key":"primary-key","secret":"primary-secret"}}"#.into(),
     )
     .unwrap();
-    for venue in ["mexc"] {
+    for venue in ["blofin"] {
         for (refs, supplied_provider) in [(true, false), (false, true), (true, true)] {
             let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
             options.signing = refs.then(|| identities.clone());
