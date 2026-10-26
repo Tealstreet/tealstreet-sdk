@@ -421,9 +421,10 @@ mod retire_unissued_plan_calls {
             store: &mut e.store,
             io: &mut e.io,
         };
-        assert!(
-            cx.retire_unissued_plan_call(&plan, &slot).is_err(),
-            "an expired owner refuses"
+        assert_eq!(
+            cx.retire_unissued_plan_call(&plan, &slot),
+            Err(Error::TimedOut),
+            "an expired owner refuses with validate_plan's TimedOut"
         );
     }
 

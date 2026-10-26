@@ -112,6 +112,11 @@ issue and finish. Until source, the API is an inert stub returning `Invalid`.
    - outside issue custody (`Revoked`);
    - an expired owner (refused, nothing changed).
 
+A Waiting slot and a slot before its `eligible_at` cannot be named by a venue:
+`plan_slots` yields only eligible Available slots, and eligibility never goes
+back. Admission still checks both as defense in depth, with no executable
+control. An expired owner refuses with `validate_plan`'s `TimedOut`.
+
 Executed against the inert stub: 10 tests, 9 assertion RED, 1 GREEN (the
 dependent-Plan refusal, which the stub's `Invalid` satisfies), 0 ignored. The
 serial and barrier refusals are source-stage controls (they need those
