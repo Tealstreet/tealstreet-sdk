@@ -3,6 +3,17 @@
 Status: source CLEAR from claude-dazzy3; published qualification follows the
 actual prerequisite landings. The source stack consumes #2204 at 23b9a236e7b
 and #2208 at c7038d46547; neither is duplicated.
+Landing composition includes #2251 and #2254, which clear the three proven
+data-macro observations without inventory additions. The incoming SerialCall
+field is explicitly `pacing: None`, preserving the existing unpaced policy.
+The exact historical gitleaks fingerprints are retained as a union; later
+Binance and Orderly compositions merge automatically, keeping incoming code.
+Local Lighter qualification passes 320 tests and strict all-target clippy.
+The same-base combined pair is 14,388,484 to 14,433,406 bytes (+44,922),
+approved by the overseer with 246,658 bytes below the combined budget.
+The AsterDEX feature union retains its incoming address-nonce requirements;
+Lighter retains dispatch-signing. The auditor requires a fresh correctness run
+on this shared registry and host composition before the exact-tree GO.
 Original RED/GREEN baseline: unchanged fff73624e8578c623a41875b3946d0c665f561af.
 Owner: codex-ih35js. One venue PR will contain this plan, original regressions
 and the source. Venue reviewer: claude-dazzy3. Credential reviewer:

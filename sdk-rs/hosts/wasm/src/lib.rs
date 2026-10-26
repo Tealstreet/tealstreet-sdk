@@ -1562,6 +1562,83 @@ mod tests {
         assert!(unversioned.hosted_identity.is_none());
     }
 
+    /// The host build must run address setup at start: a V3 wallet's signing
+    /// address is verified there, and every V3 signature depends on it.
+    #[cfg(feature = "asterdex")]
+    #[test]
+    fn a_v3_wallet_account_signs_after_wasm_start() {
+        use serde_json::Value;
+        const NOW: f64 = 1_700_000_000_000.;
+        let options = r#"{"applicationId":"0x63DD5aCC6b1aa0f563956C0e534DD30B6dcF7C4e","asterdex":{"apiVersion":"v3","signerAddress":"0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0"}}"#;
+        let setup = r#"{"primary":{"key":"0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0","secret":"4fd0a42218f3eae43a6ce26d22544e986139a01e5b34a62db53757ffca81bae1","secretEncoding":"hex"}}"#;
+        let Ok(mut engine) = crate::WasmEngine::new("asterdex", options, Some(setup.into())) else {
+            panic!("trusted V3 setup must construct");
+        };
+        let decode = |text: String| -> Vec<Value> {
+            if text.is_empty() {
+                Vec::new()
+            } else {
+                serde_json::from_str(&text).unwrap()
+            }
+        };
+        let mut queue: std::collections::VecDeque<Value> = decode(engine.start(NOW)).into();
+        queue.extend(decode(
+            engine
+                .command(r#"{"op":"fetchStpMode","command":1}"#, NOW)
+                .unwrap(),
+        ));
+        let mut released = Vec::new();
+        let mut resource = 0;
+        while let Some(action) = queue.pop_front() {
+            if action["op"] != "managedHttp" {
+                continue;
+            }
+            match action["phase"].as_str() {
+                Some("prepare") => {
+                    resource += 1;
+                    let next = engine
+                        .http_prepared(
+                            action["preparation"].as_str().unwrap(),
+                            &resource.to_string(),
+                            None,
+                            NOW,
+                        )
+                        .unwrap();
+                    queue.extend(decode(next));
+                }
+                Some("bind") => {
+                    let claim: Value = serde_json::from_str(
+                        &engine.http_claim(action["permit"].as_str().unwrap(), NOW),
+                    )
+                    .unwrap();
+                    if claim["status"] == "released" {
+                        let packet = &action["packet"];
+                        let url = packet["url"].as_str().unwrap().to_owned();
+                        if url.ends_with("/time") {
+                            let id = packet["request"].as_f64().unwrap();
+                            queue.extend(decode(engine.http_start(id, 200, "", NOW).unwrap()));
+                            let body = format!(r#"{{"serverTime":{NOW}}}"#);
+                            queue.extend(decode(
+                                engine.http_chunk(id, body.as_bytes(), NOW).unwrap(),
+                            ));
+                            queue.extend(decode(engine.http_end(id, NOW).unwrap()));
+                        }
+                        released.push(url);
+                    }
+                    queue.extend(decode(engine.prepare_dispatch(NOW)));
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            released.iter().any(|url| url.contains("/stpMode")
+                && url.contains("&signer=0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0&")
+                && url.contains("&nonce=")
+                && url.contains("&signature=0x")),
+            "a V3 signed read must release after start: {released:?}"
+        );
+    }
+
     #[cfg(feature = "bybit")]
     mod bybit_signer_construction {
         use crate::WasmEngine;
@@ -2187,6 +2264,7 @@ mod tests {
                         "hyrotrader",
                         "bybitinverse",
                         "bybitspot",
+                        "binanceinverse",
                     ],
                     venue,
                 ),

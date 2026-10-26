@@ -2661,6 +2661,18 @@ metadata/settings or fill-completeness state. Existing TS internal snapshot
 seeding/gap repair is separate; the bounded NX/CLI/MCP audit established no
 direct default producer or new caller argument.
 
+### Hyperliquid mixed batch effects and accepted identities
+
+Rust retains every proven Resting/Filled order ID from a correctly correlated
+batch, even when another row refuses. The failure carries structured partial
+order IDs and Unknown for a mixed result; it never reports the whole batch as
+rejected or resends it. Accepted rows run the normal account reducer. A mixed
+cancel removes successful/terminal legs and restores only refused legs, so a
+cancelled order is never resurrected. All-refused batches retain Rejected with
+no accepted IDs. An accepted earlier physical call followed by a later refusal
+also retains its IDs and projects Unknown. This deliberately fixes the native early-error return; existing
+custody originals that described its dropped-ID behaviour now pin this contract.
+
 ### Hyperliquid signed cancellation scheduling (#1693)
 
 The existing perpetual `scheduleCancel(time?: number | null): Promise<void>`
@@ -9188,6 +9200,51 @@ Follow-up (engine owner, fe7lgm): a granted plan resend can only be
 released from plan custody. A venue whose resend must wait on a venue
 condition therefore needs a serial-plan condition wait, as AsterDEX does here.
 A custody-preserving parked resend would remove that need.
+## AsterDEX V3 nonces from the engine address domain
+
+AsterDEX V3 signing nonces now come from the engine's `asterdex-v3` address
+domain ([RUST_ADDRESS_NONCE_DOMAINS.md](RUST_ADDRESS_NONCE_DOMAINS.md)), keyed
+by the API wallet address that the installed signing key proves at trusted
+setup. The venue allocator (`NONCES`) is deleted in the same build.
+
+Unchanged:
+- The values: the calibrated protocol millisecond x1000, or the previous value
+  plus 1.
+- One sequence per API wallet across every engine, user and network in one
+  process or WASM memory, including an aliased read slot (`auth.privateKey`).
+- Nonces are not persisted. Activation is a cold whole-process or
+  WASM-instance replacement.
+- V1 HMAC accounts are claim-free and unchanged.
+
+The wire `signer` is now the EIP-55 form of the verified address rather than
+the configured string. The two are equal for every accepted configuration.
+
+**N1 (overseer ruling).** If a slot's configured V3 API wallet differs from
+the address its signing key proves, native signed and sent the configured
+wallet, and the venue rejected every request on that slot. That covers
+`auth.signerAddress`, else the API key, or the read key for the read slot. It
+includes an aliased read slot that names its read key while signing with the
+primary wallet.
+
+Rust now refuses that slot at startup with a `CONFIG_INVALID` notice, "Aster
+V3 API wallet address <configured> does not match the signing key's address
+<derived>":
+- Requests on that slot fail with the same message, not sent, before any nonce
+  is reserved.
+- Job validation reports it as `InvalidInput`, not an authentication failure,
+  so no auth health latches.
+- Public data and the other slot keep working.
+- The derived address is never substituted.
+
+Two admission tests that pinned such mismatched configurations now assert this
+refusal, and also cover a matching alias.
+
+V3 private work also requires host address setup before start. An engine
+started without it, or a custom signer without owned public-address setup,
+refuses V3 private requests as not sent. A signature completing after a newer
+nonce from the same wallet was released is prepared again with a fresh nonce,
+never sent stale.
+
 ## AsterDEX managed sockets
 
 Both AsterDEX streams are engine-managed
@@ -9718,6 +9775,97 @@ Auth/rate status fallbacks and header-proven Retry-After remain shared policy.
 The regression covers coded400,401,403,429,408,500 and malformed gateway bodies.
 Beta public evidence uses explicit Rust through the JS/WASM host, including
 managed HTTP recording; native unit results alone do not certify that path.
+
+### Kraken beta partial writes and request authentication
+
+Kraken Futures and Spot failures retain proven placement, amendment and
+cancellation-command IDs in `VenueError.partial.order_ids`. For cancellation
+commands these name confirmed cancellations, not live placements. An amend-as-
+replace never includes its cancelled original in the replacement-ID partial.
+A failure after any known
+write effect reports `Unknown`; transport loss, unrecognized ACKs and unknown
+native codes also stay explicit `Unknown`. No failed command becomes success or
+loses its accepted prefix. Successful cancellation/replacement result shapes stay
+unchanged. This supersedes the earlier None-after-progress projection for Kraken.
+
+Both venues use the shared pending-placement/order guard and uncertain-write
+reconcile hook. Cancel-all stays fenced until a complete current order read
+clears the engine's original read token. An older in-flight read schedules a fresh
+follow-up instead of clearing a newer uncertainty; malformed or rejected rows
+cannot clear it. Reconciliation adds reads, never a write resend.
+
+A single Spot HTTP 401/403 fails that request with its auth kind and does not
+emit Deactivate. The existing one definitive invalid-signature resend and its
+exhausted-refusal policy remain, as do definitive revoked-key and read-permission
+refusals; 408/5xx cannot grant that resend or terminal auth policy. Futures uses a
+CodeTable on both 2xx error envelopes and non-2xx bodies, retaining native code
+and message while shared 408/5xx precedence preserves uncertainty.
+
+Rust-native tests are regression evidence only. Browser beta readiness requires
+separate JS `EngineHost` plus compiled WASM replay/live-public results, using the
+managed-HTTP recorder fix; no native-host run counts as browser readiness.
+
+### Binance signing residue: legacy test oracle retired
+
+No caller-visible change. Binance already signed every request through the provider. The remaining legacy signing code was a test-only HMAC oracle and fixtures, now replaced by provider-path proofs of the documented vector and of every configured receive window ([RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md)). Signing inventory for Binance: 27 → 4, the four being the dispatch recipe's own lines.
+
+### Per-call pacing on serial Plans
+
+`SerialCall.pacing` names the pacing a call's legs carry; `None` inherits the
+root. A release-domain member resolves through `domain_pacing` at admission and
+every continuation, so it names only what the domain admits; any other call,
+including a Read in a `Mutations` domain, stays unpaced and names only a
+zero-gap group. Legs are stamped from the call, not the root. Existing adopters
+pass `None` and are unchanged. Serial is deliberately stricter than Background:
+a non-member serial Read naming a positive-gap domain pacing is Invalid, while a
+Background Read naming it is admitted and kept out of the FIFO.
+
+### Binance COIN-M: per-coin currencies and coinMargined, as in TypeScript
+
+The COIN-M balance now carries a per-coin `currencies` row next to `coins`, in
+coin units: total = walletBalance, free = availableBalance, used =
+initialMargin, upnl = unrealizedProfit. `FetchBalanceInfo` answers
+`{"coinMargined":true}` with no I/O, so `getBalanceSlice` gives an inverse
+market its margin coin's balance and reads zero for a coin the account does
+not hold, instead of the USD total.
+
+### A CDN refusal is a block, not a bad key
+
+When a 401/403 carries no native code, the engine's last status fallback
+classifies it as `RateLimited` if the body has CloudFront's own error-page
+marker ("Generated by cloudfront (CloudFront)"). The request never reached the
+venue (Bybit's CDN refusing the egress address). A venue error that merely names
+a CloudFront host stays an auth kind. Native codes and a venue's own declared
+401/403 status rows take precedence, so a venue that declares those rows (OKX,
+Bitget, Bitunix) keeps a CDN page as auth. Move the check ahead of the status
+rows if such a venue is ever fronted by CloudFront.
+
+### Bitunix account read classification (P1 #33)
+
+A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
+
+### Binance Spot: reduceOnly and close are ignored, as in TypeScript
+
+Binance Spot placement no longer rejects `reduceOnly: true` or `close: true`.
+Spot has no position to reduce, so both flags are dropped and never sent; a
+sell beyond the balance fails at Binance. Spot `conditional` and trailing
+orders are still refused, exactly as TypeScript refuses them.
+
+### Binance request refusals: typed command terminals
+
+Binance's local pre-admission refusals (unsupported commands, Spot derivative settings, stop-limit amend, keyless trading, invalid plans, bad candle intervals or ranges) are now each the command's own typed engine terminal, with native text, kind and NotSent, and no I/O ([RUST_BINANCE_REQUEST_REFUSALS.md](RUST_BINANCE_REQUEST_REFUSALS.md)). An unsupported candle interval is now typed `Unsupported`; it was a bare message.
+
+### Orderly O1: provider-signed account reads, history and socket auth
+
+Orderly's private reads and its socket auth now sign through an installed Ed25519 provider; the venue holds only identity refs ([RUST_ORDERLY_PROVIDER_READS.md](RUST_ORDERLY_PROVIDER_READS.md)). Trading still signs locally with the seed until O2.
+- **Headers and frame.** Unchanged in names, order and bytes. Each stamp is the request's release time, which is native's own instant whenever nothing was queued.
+- **Account reads.** Bounded Background reads (20 s each). A delivery from a superseded read changes nothing. A failed or refused read is reported and retried exactly as a native failed read is, including the 5 s startup retry. A refused signature is never silent.
+- **History (better than TypeScript).**
+  - The caller's wait bounds the whole walk, including the funding spacing delays. An expired walk fails with the shared typed refusal instead of sending late pages.
+  - A lost page keeps its `Network` kind; it was `Internal`.
+  - A signing refusal fails the query outright, even after accepted pages, as before.
+- **Socket auth.** A provider refusal sends no frame and closes the socket. Without a Primary identity the socket closes without signing.
+- **Interim (until O2).** A protective placement that an account snapshot confirms completes one tick after that snapshot, rather than inside it. The result is unchanged.
 
 ## Lighter public beta data
 
