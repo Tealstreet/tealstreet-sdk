@@ -40,6 +40,31 @@ pub fn actions(engine: &mut Engine<Okx>) -> Vec<Action> {
 pub fn prepared(engine: &mut Engine<Okx>, now: f64) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(engine, now)
 }
+/// `actions` plus every frame the public feed's 50 ms subscription pacing
+/// releases: fires each batch timer armed within the next few seconds.
+pub fn release_paced(engine: &mut Engine<Okx>, now: f64, mut actions: Vec<Action>) -> Vec<Action> {
+    let mut fired = std::collections::HashSet::new();
+    loop {
+        let due: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms <= now + 5_000.0 => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .filter(|(timer, _)| !fired.contains(timer))
+            .collect();
+        if due.is_empty() {
+            return actions;
+        }
+        for (timer, at) in due {
+            fired.insert(timer);
+            engine.handle(at, safe_cex_engine::Event::TimerFired { timer });
+            actions.extend(prepared(engine, at));
+        }
+    }
+}
 /// Removes the first HTTP request; managed reads also arm deadline timers.
 pub fn take_http(actions: &mut Vec<Action>) -> Action {
     let i = actions
