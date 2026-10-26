@@ -153,10 +153,16 @@ in CALLERS. The standard is better than TS, not reproducing its races or quirks.
 Proposed family descriptor: hyperliquid.l1/1, shared by both aliases but bound to
 the selected alias/product, account, network and provider generation. It carries
 method/host/path, a closed typed native action, exact decimal nonce and explicit
-vault presence. The peer rebuilds the native action in declaration order, then
-recomputes MessagePack, nonce/vault suffix and the fixed Agent domain. It compares
-the reconstructed digest/receipt to the origin's retained work before signing.
-Unknown/duplicate fields, altered action fields, asset/quantity/price/builder,
+vault presence. At the ORIGIN, codec describe reconstructs MessagePack, the
+nonce/vault suffix and fixed Agent digest from that descriptor plus its trusted
+binding, and attests byte-equality with the ENTIRE actual work graph. The peer
+receives only the descriptor, receipt and authenticated binding, not the origin's
+work or refs. It independently rebuilds the native action in declaration order
+and the exact work with its OWN binding/installed refs before signing. On return,
+the origin validates the complete result against its retained original work,
+including receipt, address and signature recovery. Neither endpoint claims to
+inspect the other's opaque refs or retained work. Unknown/duplicate fields,
+altered action fields, asset/quantity/price/builder,
 wrong network/endpoint/vault, noncanonical nonce and receipt disagreement refuse.
 No generic JSON reserialization is allowed to silently reorder the action hash.
 
@@ -173,6 +179,20 @@ managed Mutation owner for actions. Existing v1 HMAC/Bitunix behavior is unchang
 A v1-only peer refuses this capability before a private command can be sent.
 The production RemoteSigner transport and browser receiver must actually expose
 this channel; standalone peer fixtures alone do not make an account eligible.
+
+codec.replayUntil and a bounded freshness validator are mandatory. The origin
+records a genuine prepared stampMs in the receipt, independently of its reserved
+nonce. Require a finite 5s signing-freshness window from that stamp, capped by the
+original owning deadline; never infer preparation time from the nonce. Native
+HL nonce admissibility (T-2days to T+1day) is NOT a signature-task timestamp or a
+reasonable tombstone lifetime. Retain the decision until
+max(original deadline, prepared stampMs + 5000ms), with the existing bounded
+per-account replay capacity. Replaying a used task/receipt with a fresh routing
+id or a new deadline after the original deadline still refuses. Refuse timestamp,
+receipt and clock-revision disagreement, pin exact equality/late-result controls,
+and record the conservative freshness bound in CALLERS. PublicAddress Setup
+keeps its separate setup deadline/join lifecycle, with no fabricated business
+stamp or nonce.
 
 Consume the approved descriptor carrier (A), owner m26ps4; do not design a new
 seam. SignStep::descriptor() -> Option<String> defaults to None, preserving
@@ -196,12 +216,14 @@ Do not manufacture a Mutation/Session owner or accept arbitrary role-less work.
 This source must land before HL consumes it.
 
 PayloadSigner is an explicit structured HL scheme owned by this PR, with
-9czdjh shared-host and kuhwxi security review of PayloadSignerRequest: the callback receives the same validated action/nonce/vault/
-network descriptor and returns the exact raw-signature/public-address contract,
-not an HMAC, arbitrary digest or callback-selected URL/body. The agent address
-capability must exist at setup too; a signature-only callback is Unsupported,
-not silently treated as remote or local signing. Use the same family validator
-and recovery checks for both modes. Preserve RemoteSigner precedence, frozen
+9czdjh shared-host and kuhwxi security review of PayloadSignerRequest. It uses
+that SAME v2 frame/channel and codec: the validated action/nonce/vault/network
+descriptor in, the family codec's complete SignResult shape and exact receipt
+out. No parallel raw-signature/public-address protocol, HMAC reinterpretation,
+arbitrary digest or callback-selected URL/body. Setup capability must use the
+same channel too; a signature-only callback is Unsupported, not silently treated
+as remote or local signing. Use the same family graph validator, result recovery
+and replayUntil fences for both modes. Preserve RemoteSigner precedence, frozen
 public-only callback receivers, abort/dispose behavior and sanitized failures.
 Do not claim payloadSupported until this exact contract and JS/WASM tests pass.
 
@@ -243,6 +265,10 @@ assertion REDs from setup/compile failure and entry-gated suffixes.
 6. Async ownership: slow/disconnected/refusing provider, timeout at equality,
    cancellation, disposal, late/duplicate replies and clock revision. Require
    resource join/drain, no stale body publication and no extra HTTP write.
+   Pin genuine prepared-stamp freshness, nonce/stamp independence, bounded
+   replayUntil retention and used task/receipt replay with a fresh routing id or
+   extended deadline. Neither a two-day nonce window nor 64 evictable tombstones
+   may authorize replay after the original task expires.
 7. Financial regressions: mixed Place [accepted, refused] retains structured ID
    and Unknown; prior accepted call/later refusal retains Unknown; mixed Cancel
    does not restore accepted legs; failed amendment never sends replacement;
