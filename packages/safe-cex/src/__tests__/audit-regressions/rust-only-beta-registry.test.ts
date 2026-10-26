@@ -132,7 +132,7 @@ describe('Rust-only beta construction', () => {
   });
   it('refuses unsupported delegated modes and Paradex callbacks without fallback', async () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
-    for (const name of ['paradex', 'hyperliquid', 'apexomni'] as const) {
+    for (const name of ['kraken', 'krakenspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'paradex', 'bitunix', 'phemex', 'bingx', 'apexomni', 'blofin', 'cryptocom', 'asterdex'] as const) {
       for (const signing of [{ remoteSigner }, { payloadSigner: vi.fn() }]) {
         expect(() => assertBetaAccount(name, { key: 'local', secret: 'local', ...signing })).toThrow(ExchangeError);
         await expect(createExchange(name, { key: 'local', secret: 'local', ...signing })).rejects.toMatchObject(
