@@ -9451,6 +9451,19 @@ An accepted placement with a malformed financial row retains the original Store
 identity and publishes no fabricated replacement. It still fences older Orders
 reads before reconciliation. Existing native financial formatting and private
 socket authentication remain unchanged.
+
+## Bitrue trading writes on Preflight roots and Plans (B2, #2201)
+
+Every Bitrue trading command now owns a Preflight root, and the legacy funnel is gone. Placements, amends and leverage run as one streamed serial Plan. A cancel batch runs as one complete Plan of independent calls. Every call signs with the Primary.
+
+- **Entry and FIFO.** A validation refusal is the command's own NotSent terminal. A command behind a live job parks, is re-planned against the current Store when it wakes, and an expired parked command gets one NotSent terminal there. A keyless command keeps the local refusal ("Bitrue trading requires API credentials"). Margin type and hedged position mode remain local Unsupported refusals.
+- **In-job reads sign with the Primary (D3).** Inspect, Verify and census GETs used the read key by method before; they now sign with the Primary. Each keeps native's three Network/Timeout retries, chained per call, never a fourth. A read's -1022 re-signs once.
+- **Resend.** A write's -1022 resends once with the same client order ID, stamped strictly after the released attempt.
+- **Write facts.** The code table carries native's documented refusals. -2017 is now Rejected, as native classified it. 401, 403 and 429 are cited status refusals. An unlisted code or an unproven 2xx is Unknown; before, it was unclassified (None). A 5xx write is the engine's unproven seal ("HTTP response does not prove the write outcome", VenueUnavailable). Accepted IDs ride the journal, so a failure after an accepted write keeps them as `partial`. An unproven Verify after an accepted cancel is a known partial: outcome None with the cancel's ID.
+- **Cancel batches (Q1).** Each target is an independent call. A child closed by its parent's ACK or by the stream is retired unissued, and all targets closed is a successful empty Plan. The terminal message is the journal's selected leg error followed by native's aggregate JSON (`canceledOrderIds`, `failedOrders`), bounded at 4 KiB. An Unknown leg projects Unknown, with the confirmed IDs.
+- **Protective census (D4).** The census is the job's own final Primary open-order read, issued right after the placement. A clean census completes the command. A failed one carries native's "order read failed" diagnostic and the "outcome is uncertain" text, and projects Unknown with the accepted placement IDs (fe7lgm's `inherit_plan_uncertainty`, #2205). The B1 interim deferral is gone.
+- **Reconcile.** An Unknown seal reconciles through Primary open-order snapshots (`PrimaryRead { PostUnknownOrderRead }`). A clean snapshot postdating a protective fence releases cancel-all.
+
 ## AsterDEX V3 configured signer mismatch (approved, adoption pending)
 
 The address-nonce consumer must refuse at trusted setup when the configured
