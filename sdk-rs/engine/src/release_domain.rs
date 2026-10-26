@@ -4,6 +4,10 @@
 use super::*;
 use crate::request_context::{DomainMembers, Error, Operation, Pacing, ReleaseDomain};
 
+/// Members are managed requests, so the managed limit bounds the queue and
+/// the held Binds; both are reserved once at construction.
+pub(super) const CAPACITY: usize = 256;
+
 /// A domain must name a registered group at exactly its registered gap.
 pub(super) fn validate(domain: ReleaseDomain, registered: &[Pacing]) -> Result<(), Error> {
     if registered.contains(&domain.pacing) {
@@ -13,8 +17,44 @@ pub(super) fn validate(domain: ReleaseDomain, registered: &[Pacing]) -> Result<(
     }
 }
 
+/// A non-head member's latest Bind. It may carry signed headers, a body or a
+/// Session bearer, so every exit other than its release wipes it.
+pub(super) struct Held(Option<Action>);
+
+impl Held {
+    fn release(mut self) -> Action {
+        self.0.take().expect("held Bind")
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        if let Some(action) = self.0.as_mut() {
+            crate::signing_dispatch::wipe(action);
+        }
+    }
+}
+
+/// The queue and held storage, reserved at construction for a declared
+/// domain, so acceptance never allocates.
+pub(super) type Storage = (
+    std::collections::VecDeque<RequestId>,
+    Vec<(RequestId, Held)>,
+);
+pub(super) fn reserve(declared: bool) -> Result<Storage, Error> {
+    let (mut queue, mut held) = Storage::default();
+    if declared {
+        queue
+            .try_reserve_exact(CAPACITY)
+            .map_err(|_| Error::Capacity)?;
+        held.try_reserve_exact(CAPACITY)
+            .map_err(|_| Error::Capacity)?;
+    }
+    Ok((queue, held))
+}
+
 impl IoCore {
-    fn domain_member(&self, operation: Operation) -> Option<Pacing> {
+    pub(super) fn domain_member(&self, operation: Operation) -> Option<Pacing> {
         let domain = self.release_domain?;
         match domain.members {
             DomainMembers::AllRest => Some(domain.pacing),
@@ -37,12 +77,35 @@ impl IoCore {
         }
     }
 
+    /// The managed boundary's check, before any ID is spent. A member must
+    /// already carry the domain pacing from whichever path built its Context,
+    /// must not be an atomic group member (a group releases together, so it
+    /// cannot take one FIFO turn per member), and must fit the queue.
+    pub(super) fn domain_admits(
+        &self,
+        operation: Operation,
+        pacing: Option<Pacing>,
+        grouped: bool,
+    ) -> Result<(), Error> {
+        let Some(domain) = self.domain_member(operation) else {
+            return Ok(());
+        };
+        if pacing != Some(domain) || grouped {
+            return Err(Error::Invalid);
+        }
+        if self.domain_queue.len() >= CAPACITY {
+            return Err(Error::Capacity);
+        }
+        Ok(())
+    }
+
     /// The one linearization point: an accepted physical request joins the tail.
     pub(super) fn domain_accept(&mut self, request: RequestId, pacing: Option<Pacing>) {
         if self
             .release_domain
             .is_some_and(|domain| pacing == Some(domain.pacing))
         {
+            debug_assert!(self.domain_queue.len() < CAPACITY);
             self.domain_queue.push_back(request);
         }
     }
@@ -58,8 +121,12 @@ impl IoCore {
             .iter_mut()
             .find(|(held, _)| *held == request)
         {
-            Some((_, held)) => *held = bind,
-            None => self.domain_held.push((request, bind)),
+            // The replaced Bind is wiped as its holder drops.
+            Some((_, held)) => *held = Held(Some(bind)),
+            None => {
+                debug_assert!(self.domain_held.len() < CAPACITY);
+                self.domain_held.push((request, Held(Some(bind))));
+            }
         }
         None
     }
@@ -81,7 +148,7 @@ impl IoCore {
         };
         if let Some(index) = self.domain_held.iter().position(|(held, _)| *held == head) {
             let (_, bind) = self.domain_held.remove(index);
-            self.actions.push(bind);
+            self.actions.push(bind.release());
         }
     }
 }

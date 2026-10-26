@@ -431,6 +431,12 @@ impl<P> Cx<'_, P> {
                     .domain_pacing(policy.operation, policy.pacing)?,
                 ..policy
             };
+            // An atomic group releases together, so it cannot take one FIFO
+            // turn per member; refused before any Plan ID is spent.
+            #[cfg(all(feature = "release-domains", feature = "http-mutation-barriers"))]
+            if !barriers.is_empty() && self.io.core.domain_member(policy.operation).is_some() {
+                return Err(Error::Invalid);
+            }
             let prepared = PreparedAdmission {
                 schedule: Schedule::from_steps(steps),
                 terminals: terminal_ordinals(steps, &policy, terminals),

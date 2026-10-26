@@ -64,12 +64,21 @@ pub enum DomainMembers { AllRest, Mutations }
     atomic group, including a caller Policy with `pacing: None` inside a domain
     venue;
   - no barrier is split, and there are no simultaneous paced barrier releases;
+  - a zero-gap atomic group is also refused for a domain member, at Plan
+    admission and again at the managed boundary, before any ID (zs5e83 P2-1):
+    a group releases together and cannot take one FIFO turn per member;
   - the dispatch-nonce barrier refusal is kept.
 - The **engine stamps** the domain's pacing onto every member Context it issues
   for this venue. That covers command, background, discovery, Preflight call,
   Plan leg and serial call Contexts. A member's own `Policy.pacing` must be
   `None` or that same group, otherwise `Invalid`, so no Policy can bypass the
-  domain or join a second one.
+  domain or join a second one. The managed boundary re-checks it before any
+  ID, so a path that missed the stamp is refused, not run outside the FIFO
+  (uufub4 source P1: the Preflight read path now stamps too).
+- The queue and held Binds are reserved once at construction (the managed
+  limit, 256); acceptance never allocates, and a full queue is `Capacity`
+  before any ID (zs5e83 P2-2). A held Bind is wiped on replacement, terminal
+  and engine drop (zs5e83 P2-3).
 - Coinbase declares `AllRest`; Hyperliquid declares `Mutations`.
 
 ### 2. FIFO, enforced at Bind

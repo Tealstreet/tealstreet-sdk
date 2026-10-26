@@ -1616,7 +1616,7 @@ struct IoCore {
     #[cfg(feature = "release-domains")]
     domain_queue: std::collections::VecDeque<RequestId>,
     #[cfg(feature = "release-domains")]
-    domain_held: Vec<(RequestId, Action)>,
+    domain_held: Vec<(RequestId, release_domain::Held)>,
     /// Parked WriteAfterReads Preflights bounded by their caller's receipt:
     /// (cap, owner, its timer).
     #[cfg(feature = "write-preflight-wait")]
@@ -3595,6 +3595,9 @@ impl<V: Venue> Engine<V> {
                 VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
             })?;
         }
+        #[cfg(feature = "release-domains")]
+        let (domain_queue, domain_held) = release_domain::reserve(release_domain.is_some())
+            .map_err(|_| VenueError::new("HTTP release domain capacity unavailable"))?;
         Ok(Self {
             venue,
             http_release,
@@ -3605,6 +3608,10 @@ impl<V: Venue> Engine<V> {
                     http_pacing,
                     #[cfg(feature = "release-domains")]
                     release_domain,
+                    #[cfg(feature = "release-domains")]
+                    domain_queue,
+                    #[cfg(feature = "release-domains")]
+                    domain_held,
                     nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
                     #[cfg(feature = "dispatch-nonce")]
                     nonce_enabled: V::dispatch_nonce(),

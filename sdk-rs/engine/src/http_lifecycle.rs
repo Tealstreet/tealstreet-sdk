@@ -753,6 +753,20 @@ impl<P> Cx<'_, P> {
         if let Err(error) = self.io.core.http_pacing.check(context.pacing(), self.now) {
             return Err((pending, error));
         }
+        #[cfg(feature = "release-domains")]
+        if let Err(error) = self
+            .io
+            .core
+            .domain_admits(context.operation(), context.pacing(), {
+                #[cfg(feature = "http-mutation-barriers")]
+                let grouped = group.is_some();
+                #[cfg(not(feature = "http-mutation-barriers"))]
+                let grouped = false;
+                grouped
+            })
+        {
+            return Err((pending, error));
+        }
         #[cfg(feature = "dispatch-nonce")]
         let nonce_claim = match validate_nonce_recipe(
             step.as_deref(),

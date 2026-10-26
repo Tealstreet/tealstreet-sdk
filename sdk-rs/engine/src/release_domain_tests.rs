@@ -14,16 +14,21 @@ const GROUP: Pacing = Pacing {
     group: 1,
     minimum_gap_ms: GAP,
 };
+const ZERO: Pacing = Pacing {
+    group: 3,
+    minimum_gap_ms: 0.,
+};
 
 /// `D`: 0 no domain, 1 an all-REST domain on the registered group, 2 a domain
-/// naming an unregistered group.
+/// naming an unregistered group, 3 a Mutations domain, 4 a Mutations domain
+/// on the registered zero-gap group.
 #[derive(Default)]
 struct Fifo<const D: u8>;
 
 impl<const D: u8> Venue for Fifo<D> {
     type Pending = u32;
     fn http_pacing(&self) -> &[Pacing] {
-        &[GROUP]
+        &[GROUP, ZERO]
     }
     fn http_release_domain() -> Option<ReleaseDomain> {
         match D {
@@ -40,6 +45,10 @@ impl<const D: u8> Venue for Fifo<D> {
             }),
             3 => Some(ReleaseDomain {
                 pacing: GROUP,
+                members: DomainMembers::Mutations,
+            }),
+            4 => Some(ReleaseDomain {
+                pacing: ZERO,
                 members: DomainMembers::Mutations,
             }),
             _ => None,
@@ -442,4 +451,192 @@ fn a_non_head_member_terminal_removes_only_itself() {
         [id(tokens[2])],
         "C is next after A; B is gone"
     );
+}
+
+fn preflight_read<const D: u8>(
+    engine: &mut Engine<Fifo<D>>,
+    preflight: &crate::request_context::Preflight,
+    pacing: Option<Pacing>,
+) -> Result<Context, crate::request_context::Error> {
+    Cx {
+        now: 0.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    }
+    .preflight_read_context(
+        preflight,
+        read(pacing),
+        crate::request_context::plan::CallTerms {
+            wait_ms: 0,
+            timeout_ms: 20_000,
+            attempts: 1,
+            retry_window: crate::request_context::plan::RetryWindow::FreshAttempt,
+        },
+    )
+}
+
+#[test]
+fn a_preflight_read_joins_an_all_rest_domain_behind_an_earlier_member() {
+    let mut e = engine::<1>();
+    let background = context(&mut e, 0.);
+    let a = queue(&mut e, background, 0, 0.);
+    let preflight = write_preflight(&mut e, 7);
+    let read = preflight_read(&mut e, &preflight, None).unwrap();
+    assert_eq!(read.pacing(), Some(GROUP), "stamped with the domain pacing");
+    let token = queue(&mut e, read, 1, 0.);
+    assert!(
+        prepare(&mut e, token, 0.).is_empty(),
+        "prepared first, the Preflight read still holds behind A"
+    );
+    let a = prepare(&mut e, a, 0.);
+    assert!(matches!(e.claim_http(100., a[0].1), Ok(Claim::Released(_))));
+    let p = binds(&mut e);
+    assert_eq!(p.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [id(token)]);
+    assert_eq!(
+        e.claim_http(100. + GAP - 1., p[0].1),
+        Ok(Claim::WaitUntil(100. + GAP))
+    );
+    assert!(matches!(
+        e.claim_http(100. + GAP, p[0].1),
+        Ok(Claim::Released(_))
+    ));
+}
+
+/// Takes one probe ID; with nothing spent between two probes they are adjacent.
+fn next_id<const D: u8>(engine: &mut Engine<Fifo<D>>) -> u64 {
+    engine.io.core.next_id.reserve(1).expect("ids").start + 1
+}
+
+#[test]
+fn a_preflight_read_naming_another_group_spends_nothing() {
+    let mut e = engine::<1>();
+    let preflight = write_preflight(&mut e, 7);
+    let before = next_id(&mut e);
+    let foreign = Pacing {
+        group: 2,
+        minimum_gap_ms: 0.,
+    };
+    assert_eq!(
+        preflight_read(&mut e, &preflight, Some(foreign)).err(),
+        Some(crate::request_context::Error::Invalid)
+    );
+    assert_eq!(next_id(&mut e), before + 1, "no ID was spent");
+    assert!(
+        preflight_read(&mut e, &preflight, None).is_ok(),
+        "the call was not spent"
+    );
+}
+
+#[test]
+fn a_preflight_read_is_unpaced_outside_an_all_rest_domain() {
+    let mut mutations = engine::<3>();
+    let preflight = write_preflight(&mut mutations, 7);
+    let read = preflight_read(&mut mutations, &preflight, None).unwrap();
+    assert_eq!(read.pacing(), None, "a read is not a Mutations member");
+    let p = queue(&mut mutations, read, 1, 0.);
+    assert_eq!(prepare(&mut mutations, p, 0.).len(), 1, "binds at once");
+    let mut none = engine::<0>();
+    let preflight = write_preflight(&mut none, 7);
+    assert_eq!(
+        preflight_read(&mut none, &preflight, None)
+            .unwrap()
+            .pacing(),
+        None
+    );
+}
+
+#[cfg(feature = "http-mutation-barriers")]
+#[test]
+fn a_zero_gap_barrier_plan_is_refused_in_a_domain() {
+    use crate::request_context::plan::{CallBound, MutationBarrierBound, RetryWindow, StepBound};
+    let mut e = engine::<4>();
+    let preflight = write_preflight(&mut e, 7);
+    let call = || CallBound {
+        timeout_ms: 20_000,
+        attempts: 1,
+        retry_window: RetryWindow::FreshAttempt,
+        after_refusal: &[],
+    };
+    let calls = [call(), call()];
+    let steps = [StepBound {
+        wait_ms: 0,
+        calls: &calls,
+    }];
+    let before = next_id(&mut e);
+    let refused = Cx {
+        now: 0.,
+        store: &mut e.store,
+        io: &mut e.io,
+    }
+    .admit_plan_with_barriers(
+        &preflight,
+        &steps,
+        crate::request_context::PlanPolicy {
+            independent_calls: false,
+            operation: Operation::Mutation,
+            credential: Some(credential()),
+            pacing: None,
+            retry: RetryPolicy::Never,
+        },
+        &[MutationBarrierBound { step: 0 }],
+    );
+    assert_eq!(refused.err(), Some(crate::request_context::Error::Invalid));
+    assert_eq!(next_id(&mut e), before + 1, "no Plan ID was spent");
+}
+
+#[test]
+fn the_managed_boundary_refuses_unstamped_grouped_and_overflowing_members() {
+    use crate::request_context::Error;
+    let mut e = engine::<1>();
+    let core = &mut e.io.core;
+    assert_eq!(
+        core.domain_admits(Operation::Read, None, false),
+        Err(Error::Invalid)
+    );
+    assert_eq!(
+        core.domain_admits(Operation::Read, Some(GROUP), true),
+        Err(Error::Invalid)
+    );
+    assert_eq!(
+        core.domain_admits(Operation::Read, Some(GROUP), false),
+        Ok(())
+    );
+    let reserved = core.domain_queue.capacity();
+    for n in 0..super::release_domain::CAPACITY as u64 {
+        core.domain_accept(RequestId(n), Some(GROUP));
+    }
+    assert_eq!(core.domain_queue.capacity(), reserved, "no reallocation");
+    assert_eq!(
+        core.domain_admits(Operation::Read, Some(GROUP), false),
+        Err(Error::Capacity)
+    );
+}
+
+#[test]
+fn a_held_bind_is_wipeable_with_release_domains_alone() {
+    let mut e = engine::<1>();
+    let background = context(&mut e, 0.);
+    let token = queue(&mut e, background, 0, 0.);
+    e.http_prepared(
+        0.,
+        token,
+        Prepared {
+            id: token.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let mut bind = e
+        .drain_actions()
+        .find(|action| {
+            matches!(action, Action::ManagedHttp(managed) if matches!(**managed, HttpAction::Bind { .. }))
+        })
+        .expect("the head binds");
+    crate::signing_dispatch::wipe(&mut bind);
+    let Action::ManagedHttp(managed) = &bind else {
+        unreachable!()
+    };
+    let HttpAction::Bind { request, .. } = &**managed else {
+        unreachable!()
+    };
+    assert!(request.url.is_empty(), "the Bind's request is wiped");
 }
