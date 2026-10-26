@@ -71,54 +71,60 @@ fn beta_mixed_place_preserves_every_accepted_oid_in_either_row_order() {
 
 #[test]
 fn beta_mixed_cancel_removes_only_successful_legs_in_either_row_order() {
-    for success_first in [true, false] {
-        let (mut e, socket) = ready("disabled");
-        open_order(&mut e, socket, 1500.);
-        message(
-            &mut e,
-            socket,
-            1501.,
-            r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":10,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
-        );
-        e.drain_plain().for_each(drop);
-        e.handle(
-            2000.,
-            Event::Command(Command::CancelOrders {
-                command: 81,
-                ids: vec!["9".into(), "10".into()],
-            }),
-        );
-        let request = write(&mut e);
-        let rows = if success_first {
-            r#""success",{"error":"cancel refused"}"#
-        } else {
-            r#"{"error":"cancel refused"},"success""#
-        };
-        reply_at(
-            &mut e,
-            &request,
-            2001.,
-            &format!(
-                r#"{{"status":"ok","response":{{"type":"cancel","data":{{"statuses":[{rows}]}}}}}}"#
-            ),
-        );
-        let actions = e.drain_plain().collect::<Vec<_>>();
-        assert_eq!(failed(&actions).outcome, Some(Outcome::Unknown));
-        let (cancelled, refused) = if success_first {
-            ("9", "10")
-        } else {
-            ("10", "9")
-        };
-        assert!(e.store().order(cancelled).is_none());
-        assert_eq!(
-            e.store().order(refused).unwrap().status,
-            safe_cex_engine::model::OrderStatus::Open
-        );
-        assert!(
-            !actions
-                .iter()
-                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
-        );
+    for accepted in [
+        r#""success""#,
+        r#"{"error":"Order was never placed, already canceled, or filled. asset=0"}"#,
+    ] {
+        for success_first in [true, false] {
+            let (mut e, socket) = ready("disabled");
+            open_order(&mut e, socket, 1500.);
+            message(
+                &mut e,
+                socket,
+                1501.,
+                r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":10,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
+            );
+            e.drain_plain().for_each(drop);
+            e.handle(
+                2000.,
+                Event::Command(Command::CancelOrders {
+                    command: 81,
+                    ids: vec!["9".into(), "10".into()],
+                }),
+            );
+            let request = write(&mut e);
+            let refusal = r#"{"error":"cancel refused"}"#;
+            let rows = if success_first {
+                format!("{accepted},{refusal}")
+            } else {
+                format!("{refusal},{accepted}")
+            };
+            reply_at(
+                &mut e,
+                &request,
+                2001.,
+                &format!(
+                    r#"{{"status":"ok","response":{{"type":"cancel","data":{{"statuses":[{rows}]}}}}}}"#
+                ),
+            );
+            let actions = e.drain_plain().collect::<Vec<_>>();
+            assert_eq!(failed(&actions).outcome, Some(Outcome::Unknown));
+            let (cancelled, refused) = if success_first {
+                ("9", "10")
+            } else {
+                ("10", "9")
+            };
+            assert!(e.store().order(cancelled).is_none());
+            assert_eq!(
+                e.store().order(refused).unwrap().status,
+                safe_cex_engine::model::OrderStatus::Open
+            );
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+            );
+        }
     }
 }
 
@@ -137,4 +143,43 @@ fn beta_all_refused_rows_have_no_partial_ids_or_published_orders() {
     assert_eq!(error.outcome, Some(Outcome::Rejected));
     assert!(error.partial.is_none());
     assert!(e.store().orders().is_empty());
+}
+
+#[test]
+fn beta_prior_accepted_call_then_refusal_keeps_ids_and_unknown() {
+    let (mut e, _) = ready("disabled");
+    let order = opts(r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":1}"#);
+    e.handle(
+        2000.,
+        Event::Command(Command::PlaceOrders {
+            command: 81,
+            orders: vec![order.clone(), order],
+        }),
+    );
+    let request = write(&mut e);
+    reply_at(
+        &mut e,
+        &request,
+        2001.,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":101}}]}}}"#,
+    );
+    let timer = pace_timer(&mut e);
+    e.handle(3000., Event::TimerFired { timer });
+    let second = write(&mut e);
+    reply_at(
+        &mut e,
+        &second,
+        3001.,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"later call refused"}]}}}"#,
+    );
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    let error = failed(&actions);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["101"]);
+    assert!(e.store().order("101").is_some());
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
 }
