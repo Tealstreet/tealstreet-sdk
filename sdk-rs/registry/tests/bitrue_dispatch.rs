@@ -15,19 +15,50 @@ impl Visit for Catalogue {
             .collect()
     }
 }
+/// The routing intent each catalogue read declares at preparation: managed
+/// requests carry their route there, not in `HttpRequest::route`.
+struct Intents;
+impl Visit for Intents {
+    type Output = Vec<safe_cex_engine::request_context::RoutingIntent>;
+    fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
+        use safe_cex_engine::request_context::HttpAction;
+        engine.start(1234.9);
+        engine.prepare_dispatch(1234.9);
+        engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::ManagedHttp(managed) => match *managed {
+                    HttpAction::Prepare {
+                        intent, request, ..
+                    } if request.url.ends_with("/fapi/v1/contracts") => Some(intent),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    }
+}
+const PRIMARY: [safe_cex_engine::request_context::RoutingIntent; 1] =
+    [safe_cex_engine::request_context::RoutingIntent::Primary];
 fn entropy() -> Option<safe_cex_engine::entropy::Entropy> {
     Some(safe_cex_engine::test_support::seeded_entropy(17))
 }
 #[test]
 fn trusted_compatibility_setup_signs_catalogue_with_primary_and_normalizes_only_window() {
     for (window, expected) in [(None, "20000"), (Some(0), "1"), (Some(100_000), "60000")] {
-        let mut options:EngineOptions=serde_json::from_str(r#"{"key":"fixture-primary-key","secret":"fixture-primary-secret","readCredentials":{"key":"fixture-read-key","secret":"fixture-read-secret"},"publicDataOnly":true}"#).unwrap();
-        options.recv_window = window.map(f64::from);
-        let requests = build("bitrue", options, entropy(), Catalogue).unwrap();
+        let options = || {
+            let mut options: EngineOptions = serde_json::from_str(r#"{"key":"fixture-primary-key","secret":"fixture-primary-secret","readCredentials":{"key":"fixture-read-key","secret":"fixture-read-secret"},"publicDataOnly":true}"#).unwrap();
+            options.recv_window = window.map(f64::from);
+            options
+        };
+        let requests = build("bitrue", options(), entropy(), Catalogue).unwrap();
+        assert_eq!(
+            build("bitrue", options(), entropy(), Intents).unwrap(),
+            PRIMARY
+        );
         assert_eq!(requests.len(), 1);
         let r = &requests[0];
         assert_eq!(r.url, "https://fapi.bitrue.com/fapi/v1/contracts");
-        assert_eq!(r.route, Some(safe_cex_engine::RequestRoute::Primary));
         assert!(
             r.headers
                 .contains(&("X-CH-APIKEY", "fixture-primary-key".into()))
@@ -84,8 +115,14 @@ fn keyless_catalogue_and_hosted_admission_remain_distinct() {
     .unwrap();
     assert_eq!(requests.len(), 1);
     assert_eq!(
-        requests[0].route,
-        Some(safe_cex_engine::RequestRoute::Primary)
+        build(
+            "bitrue",
+            serde_json::from_str("{}").unwrap(),
+            entropy(),
+            Intents
+        )
+        .unwrap(),
+        PRIMARY
     );
     assert_eq!(
         requests[0]
@@ -114,8 +151,15 @@ fn explicit_empty_primary_keeps_the_native_unsigned_catalogue() {
         .unwrap();
         assert_eq!(requests.len(), 1, "unsigned catalogue for {input}");
         assert_eq!(
-            requests[0].route,
-            Some(safe_cex_engine::RequestRoute::Primary)
+            build(
+                "bitrue",
+                serde_json::from_str(input).unwrap(),
+                entropy(),
+                Intents
+            )
+            .unwrap(),
+            PRIMARY,
+            "{input}"
         );
         assert_eq!(
             requests[0]
