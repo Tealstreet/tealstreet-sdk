@@ -99,11 +99,18 @@ impl IoCore {
         Ok(())
     }
 
-    /// The one linearization point: an accepted physical request joins the tail.
-    pub(super) fn domain_accept(&mut self, request: RequestId, pacing: Option<Pacing>) {
+    /// The one linearization point: an accepted physical request joins the
+    /// tail only as a domain member; a non-member naming the group is unpaced
+    /// by the FIFO, as `domain_admits` already treats it.
+    pub(super) fn domain_accept(
+        &mut self,
+        request: RequestId,
+        operation: Operation,
+        pacing: Option<Pacing>,
+    ) {
         if self
-            .release_domain
-            .is_some_and(|domain| pacing == Some(domain.pacing))
+            .domain_member(operation)
+            .is_some_and(|domain| pacing == Some(domain))
         {
             debug_assert!(self.domain_queue.len() < CAPACITY);
             self.domain_queue.push_back(request);

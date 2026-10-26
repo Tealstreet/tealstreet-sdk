@@ -603,7 +603,7 @@ fn the_managed_boundary_refuses_unstamped_grouped_and_overflowing_members() {
     );
     let reserved = core.domain_queue.capacity();
     for n in 0..super::release_domain::CAPACITY as u64 {
-        core.domain_accept(RequestId(n), Some(GROUP));
+        core.domain_accept(RequestId(n), Operation::Read, Some(GROUP));
     }
     assert_eq!(core.domain_queue.capacity(), reserved, "no reallocation");
     assert_eq!(
@@ -639,4 +639,23 @@ fn a_held_bind_is_wipeable_with_release_domains_alone() {
         unreachable!()
     };
     assert!(request.url.is_empty(), "the Bind's request is wiped");
+}
+
+#[test]
+fn a_non_member_read_naming_the_group_does_not_join_a_mutations_fifo() {
+    let mut e = engine::<3>();
+    let read = Cx {
+        now: 0.,
+        store: &mut e.store,
+        io: &mut e.io,
+    }
+    .http_context(Scope::Background, read(Some(GROUP)))
+    .unwrap();
+    assert_eq!(read.pacing(), Some(GROUP), "the read keeps its own pacing");
+    let token = queue(&mut e, read, 1, 0.);
+    assert!(
+        e.io.core.domain_queue.is_empty(),
+        "a non-member is never a FIFO member"
+    );
+    assert_eq!(prepare(&mut e, token, 0.).len(), 1, "it binds at once");
 }

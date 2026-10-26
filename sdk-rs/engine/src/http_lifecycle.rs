@@ -1038,9 +1038,11 @@ impl<P> Cx<'_, P> {
         .expect("validated physical HTTP window");
         let preparation = lifecycle.preparation();
         #[cfg(feature = "release-domains")]
-        self.io
-            .core
-            .domain_accept(request, lifecycle.context().pacing());
+        self.io.core.domain_accept(
+            request,
+            lifecycle.context().operation(),
+            lifecycle.context().pacing(),
+        );
         self.io.core.managed_http.insert(
             request,
             Managed {
