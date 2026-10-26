@@ -175,14 +175,25 @@ fn scoped(verdict: Verdict, intent: Intent) -> Verdict {
     }
 }
 
-fn status_kind(status: u16) -> Option<ErrorKind> {
-    match status {
+fn status_kind(response: &Response<'_>) -> Option<ErrorKind> {
+    match response.status {
         200..=299 => Some(ErrorKind::Internal),
+        401 | 403 if cdn_refusal(response) => Some(ErrorKind::RateLimited),
         401 => Some(ErrorKind::AuthInvalid),
         403 => Some(ErrorKind::AuthPermission),
         418 | 429 => Some(ErrorKind::RateLimited),
         _ => None,
     }
+}
+
+/// A CDN refusing the egress address (CloudFront's error page) answers before
+/// the venue sees the request, so it says nothing about the key.
+fn cdn_refusal(response: &Response<'_>) -> bool {
+    const SCAN: usize = 64 * 1024;
+    let body = response.body.as_bytes();
+    body[..body.len().min(SCAN)]
+        .windows(b"cloudfront".len())
+        .any(|window| window.eq_ignore_ascii_case(b"cloudfront"))
 }
 
 /// Engine precedence, rules 2-6. Call only for a failed or unproven answer; a
@@ -218,7 +229,7 @@ fn verdict_for_delivery(
     }
     match table.status_verdict(response.status) {
         Some(verdict) if !(200..300).contains(&response.status) => scoped(verdict, intent),
-        _ => Verdict::Unknown(status_kind(response.status)),
+        _ => Verdict::Unknown(status_kind(response)),
     }
 }
 
