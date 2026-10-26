@@ -9657,3 +9657,36 @@ clock; payload financial timestamps/values stay. Paused capacity uses254 depth
 peers then two independent candle peers after genuine429. Exact completion
 Cancel is captured/checked once. The secondary helper is test support with real
 installed providers and genuine test command entry; native assertions retained.
+
+### Phemex beta non-success write diagnostics
+
+Non-2xx managed writes retain the shared classifier's kind and strict native
+code/message in the terminal error instead of only embedding the HTTP body in
+prose. HTTP408/5xx use the existing bounded diagnostic-evidence hook; they keep
+the shared status precedence. All non-2xx writes remain Unknown, with no resend
+or financial reducer authority, including a body claiming an accepted order ID.
+Auth/rate status fallbacks and header-proven Retry-After remain shared policy.
+The regression covers coded400,401,403,429,408,500 and malformed gateway bodies.
+Beta public evidence uses explicit Rust through the JS/WASM host, including
+managed HTTP recording; native unit results alone do not certify that path.
+
+## Rust-only beta SDK admission
+
+SDK web/native registries, saved-account/public factories and worker startup
+select `RustEngineExchange` without an engine opt-in. The single SDK beta roster
+is `packages/safe-cex/src/exchanges/rust/betaVenues.ts`; names outside it refuse
+with typed `Unsupported` / `NotSent` before clock, runtime or transport work.
+Previously saved OUT accounts cannot start in this build. The `engine: 'rust'`
+input remains compatible but no longer selects between implementations.
+
+There is no TypeScript venue or hosted-signing venue fallback. An IN account
+using `remoteSigner` / `payloadSigner` without enabled Rust remote policy
+refuses with `Unsupported` / `NotSent`; Paradex beta supports local keys only.
+Enabled Rust provider paths retain their existing custody and wire contracts.
+
+Metadata and standalone `*.signing.ts` codecs used by `rust/legacySigning.ts`
+remain runtime dependencies. Independent TS/native financial, transport and
+signing reference oracles remain test-only. Historical Rust adapter fixtures
+mock the beta admission layer explicitly; real SDK/worker refusal controls do
+not use that fixture. Retained oracle execution is not beta activation. R2 owns
+adapter relocation/deletion and retargets those test-only imports.

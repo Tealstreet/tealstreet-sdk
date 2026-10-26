@@ -1,24 +1,21 @@
-import { mapMEXCSignerSetup } from './mexcSignerSetup';
-import { copyHistoryCompleteness } from '../../historyCompleteness';
-import { signHostedHttp, signHostedWsAuth } from './legacySigning';
-import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type {
   AccountAuthResult,
   CommandProgress,
-  EngineCapabilities,
   EngineBridgeConstruction,
+  EngineCapabilities,
   EngineConstruction,
   EngineEvent,
   EngineHealth,
   EngineHost as EngineHostType,
   Transport,
-  WasmEngineLike,
   VenueErrorDetail,
+  WasmEngineLike,
 } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeErrorKind } from '../../commandOutcome';
 import type { Store } from '../../store/store.interface';
 import type {
-  Candle,
   AccountGreeks,
+  Candle,
   ClosedPnlEntry,
   ExchangeAccount,
   ExchangeName,
@@ -45,21 +42,22 @@ import type {
   ValidateAccountResult,
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker, WorkerForwardedMethod } from '../base';
+import type { CallableMethodsInWorker, EngineSnapshot, ExchangeCapabilities, WorkerForwardedMethod } from '../base';
+import type { BaseWebSocket } from '../base.ws';
 import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
-import type { EngineSnapshot } from '../base';
+import type { LighterAccountTier } from '../lighter/lighter.account-tier';
+import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
 
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
-import type { ExchangeErrorKind } from '../../commandOutcome';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
+import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
-import { DefaultStore } from '../../store/store.base';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
@@ -67,26 +65,16 @@ import { multiply } from '../../utils/safe-math';
 import { subscribeTickIntervalMultipliers } from '../../utils/tickIntervalOverride';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
-import {
-  isAsterDEXStpMode,
-  resolveAsterDEXApiVersion,
-} from '../asterdex/asterdex.types';
+import { isAsterDEXStpMode, resolveAsterDEXApiVersion } from '../asterdex/asterdex.types';
 import {
   BaseExchange,
   CAPABILITY_METHODS,
-  type ExchangeCapabilities,
   markBaseCapabilityFallback,
   summarizeSocketHealth,
   WORKER_FORWARDED_METHODS,
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
-import type { BaseWebSocket } from '../base.ws';
-import { deriveBridgeConstruction, derivePublicMode, deriveRemoteSigningPolicy, deriveSignerSetupMapping, deriveSignerSetupPolicy } from './construction';
-import { RustSocketHandle } from './rustSockets';
-import { type AsterDEXPublicSetup, mapAsterDEXSignerSetup } from './asterdexSignerSetup';
-import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
-import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigning } from './delegatedSignerSetup';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
@@ -103,13 +91,26 @@ import {
   patternClientOrderIdRule,
   withReplacementClientOrderId,
 } from '../clientOrderId';
+import { isKeylessRemoteSigned } from '../hostedSigningVenues';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
-import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
 import { parseLighterApiKeyIndex } from '../lighter/lighter.utils';
+import { mapOkxClosedPosition } from '../okx/okx.closed-pnl';
 import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 import { BROKER_ID as PHEMEX_BROKER_ID } from '../phemex/phemex.types';
 import { txflowClientOrderIdRule } from '../txflow/txflow.client-id';
-import { hostedSigningVenues, isKeylessRemoteSigned } from '../hostedSigningVenues';
+import { mapAsterDEXSignerSetup } from './asterdexSignerSetup';
+import { assertBetaAccount, BETA_VENUES, isBetaVenue } from './betaVenues';
+import {
+  deriveBridgeConstruction,
+  derivePublicMode,
+  deriveRemoteSigningPolicy,
+  deriveSignerSetupMapping,
+  deriveSignerSetupPolicy,
+} from './construction';
+import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigning } from './delegatedSignerSetup';
+import { signHostedHttp, signHostedWsAuth } from './legacySigning';
+import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
+import { mapMEXCSignerSetup } from './mexcSignerSetup';
 import { paradexSigningTransport } from './paradex.signing';
 import {
   IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
@@ -118,102 +119,12 @@ import {
   rustPublicFeedIdentity,
   serveInProcessPublicData,
 } from './publicFeed';
+import { RustSocketHandle } from './rustSockets';
 
-/** Exchange names the Rust engine runs; the engine takes the same name. */
-export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set<ExchangeName>([
-  'coinbase',
-  'coinbasespot',
-  'apexomni',
-  'asterdex',
-  'breakoutprop',
-  'binance',
-  'binancespot',
-  'binanceinverse',
-  'backpack',
-  'tealstreet-dex',
-  'kodiakfi',
-  'mode',
-  'salsadex',
-  'what',
-  'woofi',
-  'binancepm',
-  'bitget',
-  'bitgetusdc',
-  'bitgetinverse',
-  'blofin',
-  'bitrue',
-  'grvt',
-  'mexc',
-  'woo',
-  'bingx',
-  'bitunix',
-  'bybit',
-  'bybitinverse',
-  'bybitspot',
-  'bybitdemo',
-  'hyrotrader',
-  'cryptocom',
-  'kucoin',
-  'kucoinspot',
-  'polymarket',
-  'hyperliquid',
-  'hyperliquidspot',
-  'paradex',
-  'txflow',
-  'kraken',
-  'krakenspot',
-  'lighter',
-  'lighter-robinhood',
-  'okx',
-  'okxeu',
-  'okxdemo',
-  'okxeudemo',
-  'weex',
-  'phemex',
-]);
-
-export const isRustVenue = (name: ExchangeName) => RUST_VENUES.has(name);
-
-/**
- * TS venues whose signing honours `payloadSigner` (Bybit's API factory, Binance's signer).
- * Other TS venues, including the kept hosted Coinbase/Orderly classes, ignore it while
- * `canSign` still counts it, so routing those to TS would start a venue that cannot sign.
- */
-const TS_PAYLOAD_SIGNER_VENUES = new Set<ExchangeName>([
-  'bybit',
-  'bybitinverse',
-  'bybitspot',
-  'bybitdemo',
-  'hyrotrader',
-  'binance',
-  'binancepm',
-  'binancespot',
-  'binanceinverse',
-]);
-
-/** A payload-signed account the engine would ignore but a TS venue signs through. */
-const needsTsPayloadSigner = (
-  name: ExchangeName,
-  options: Partial<Pick<ExchangeOptions, 'payloadSigner' | 'publicDataOnly'>>,
-) => Boolean(options.payloadSigner) && TS_PAYLOAD_SIGNER_VENUES.has(name) && options.publicDataOnly !== true;
-
-/**
- * One factory/worker choice. Reviewed delegated families use their owned provider;
- * other keyless/payload families retain their existing TS compatibility path.
- */
-export const runsOnRustEngine = (
-  name: ExchangeName,
-  options: Partial<
-    Pick<
-      ExchangeOptions,
-      'engine' | 'secret' | 'remoteSigner' | 'auth' | 'payloadSigner' | 'publicDataOnly'
-    >
-  >,
-) =>
-  options.engine === 'rust' &&
-  isRustVenue(name) &&
-  (deriveRemoteSigningPolicy(name)?.enabled === true ||
-    (!isKeylessRemoteSigned(name, options) && !needsTsPayloadSigner(name, options)));
+/** The public registry and direct construction share the same beta policy. */
+export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set(BETA_VENUES);
+export const isRustVenue = (name: ExchangeName) => isBetaVenue(name);
+export const runsOnRustEngine = (name: ExchangeName, _options?: Partial<ExchangeOptions>) => isBetaVenue(name);
 
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
@@ -301,19 +212,28 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
 
 export type WasmEngineModule = {
   resolveConstruction?: (venue: string, optionsJson: string) => string;
-  WasmEngine: new (venue: string, optionsJson: string, signerSetupJson?:string) => WasmEngineLike;
+  WasmEngine: new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
 };
 
 /** Preserve native constructor classification at the same boundary as command failures. */
 type SignerSetup = LocalSignerSetup | DelegatedSignerSetup;
-const constructEngine = (Constructor: WasmEngineModule['WasmEngine'], venue: string, options: string, setup?:SignerSetup): WasmEngineLike => {
+const constructEngine = (
+  Constructor: WasmEngineModule['WasmEngine'],
+  venue: string,
+  options: string,
+  setup?: SignerSetup,
+): WasmEngineLike => {
   try {
-    return setup ? setup.construct(Constructor,venue,options) : new Constructor(venue, options);
+    return setup ? setup.construct(Constructor, venue, options) : new Constructor(venue, options);
   } catch (error) {
     const encoded = (error as { venueError?: unknown } | null)?.venueError;
     let detail: VenueErrorDetail | undefined;
     if (typeof encoded === 'string') {
-      try { detail = JSON.parse(encoded) as VenueErrorDetail; } catch { /* Older or custom loaders retain their original error. */ }
+      try {
+        detail = JSON.parse(encoded) as VenueErrorDetail;
+      } catch {
+        /* Older or custom loaders retain their original error. */
+      }
     }
     if (detail && typeof detail.message === 'string') throw new ExchangeError(detail.message, detail);
     throw error;
@@ -395,38 +315,22 @@ export class RustEngineExchange extends BaseExchange {
     this.publicFeedDisabled = true;
   }
   private sharedPublicFeed?: RustPublicFeedClient;
-  private hostedSigningVenue?: Promise<BaseExchange>;
-  // The base arrow is assigned by the base constructor, before this field initializes.
-  private readonly localSignWsAuth = (this as BaseExchange).signWsAuth;
-
-  /** The browser signs hosted accounts; names with no other TS venue sign through the kept one. */
-  private hostedSigner = (): Promise<BaseExchange> | undefined => {
-    const load = hostedSigningVenues[this.name];
-    if (!load) return undefined;
-    if (this.isDisposed) return Promise.reject(new Error('Exchange disposed'));
-    if (!this.hostedSigningVenue) {
-      const venue = load().then((Venue) => new Venue(this.name, this.options, new DefaultStore()));
-      // A failed chunk load must not poison signing for the account's lifetime.
-      venue.catch(() => {
-        if (this.hostedSigningVenue === venue) this.hostedSigningVenue = undefined;
-      });
-      this.hostedSigningVenue = venue;
-    }
-    return this.hostedSigningVenue;
-  };
-
   override signHttpRequest = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
     if (this.bridgeConstruction.dispatchSigning) {
       try {
         await this.ensureHost();
-        return await signHostedHttp(this.name, this.options, Boolean(this.signerSetup?.primaryComplete), this.host!, request);
+        return await signHostedHttp(
+          this.name,
+          this.options,
+          Boolean(this.signerSetup?.primaryComplete),
+          this.host!,
+          request,
+        );
       } catch {
         return { id: request.id, error: 'Hosted HTTP signing failed' };
       }
     }
-    const signer = this.hostedSigner();
-    if (!signer) return { id: request.id, error: 'Exchange does not have xhr for signing' };
-    return (await signer).signHttpRequest(request);
+    return { id: request.id, error: 'Hosted HTTP signing is unsupported in this build' };
   };
 
   override signWsAuth = async (request: RemoteSignerRequest): Promise<RemoteSignerResponse> => {
@@ -438,8 +342,7 @@ export class RustEngineExchange extends BaseExchange {
         return { id: request.id, error: 'Hosted WS auth signing failed' };
       }
     }
-    const signer = this.hostedSigner();
-    return signer ? (await signer).signWsAuth(request) : this.localSignWsAuth(request);
+    return { id: request.id, error: 'Hosted WS auth signing is unsupported in this build' };
   };
   private stopInProcessFeed?: () => void;
   private requestSharedSnapshot = false;
@@ -510,12 +413,10 @@ export class RustEngineExchange extends BaseExchange {
   private loadWorkerCapabilities = (): Promise<void> =>
     (this.workerCapabilities ??= this.callWorker('fetchEngineCapabilities').then(
       (record) => {
-        if (record && !this.capabilityRecord && !this.isDisposed) this.adoptEngineCapabilities(record as EngineCapabilities);
+        if (record && !this.capabilityRecord && !this.isDisposed)
+          this.adoptEngineCapabilities(record as EngineCapabilities);
       },
       (error: unknown) => {
-        // A hosted account's server worker runs a TS venue (hostedSigningVenues) and has no
-        // engine record; keep the forwarders' defaults instead of retrying forever.
-        if (error instanceof Error && error.message.endsWith('does not support fetchEngineCapabilities')) return;
         this.workerCapabilities = undefined;
         this.workerCapabilityRetryAt = Date.now() + WORKER_CAPABILITY_RETRY_MS;
         throw error;
@@ -547,7 +448,9 @@ export class RustEngineExchange extends BaseExchange {
     const message = startupFailed
       ? `${this.name}.${method}: exchange has not started because startup failed; reconnect before calling ${method}.`
       : `${this.name}.${method}: exchange has not started; call start() or loadCapabilities() first.`;
-    const error = (!startupFailed && this.engineFailure) || new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
+    const error =
+      (!startupFailed && this.engineFailure) ||
+      new ExchangeError(message, { message, kind: 'invalidInput', outcome: 'notSent' });
     const cause = this.engineFailure ?? this.startupFailure;
     if (startupFailed && cause) Object.defineProperty(error, 'cause', { value: cause, configurable: true });
     this.reportCommandError(error);
@@ -613,6 +516,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
+    assertBetaAccount(exchangeName, options);
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
     if (options.localSigner !== undefined && !bridgeConstruction.dispatchSigning) {
       const message = 'Local signer setup is not supported for this Rust venue yet';
@@ -632,21 +536,44 @@ export class RustEngineExchange extends BaseExchange {
         setupError = error;
       }
     }
-    const signerSetup = bridgeConstruction.dispatchSigning && !setupError
-      ? delegated ? new DelegatedSignerSetup(exchangeName, options)
-        : aster ? new LocalSignerSetup(aster.setupOptions, deriveSignerSetupPolicy(exchangeName), aster.secondarySigningFromPrimary)
-          : deriveSignerSetupMapping(exchangeName) === 'apexomni'
-            ? new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName), false, options.omniKeySeed || undefined)
-            : new LocalSignerSetup(deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options, deriveSignerSetupPolicy(exchangeName))
+    const signerSetup =
+      bridgeConstruction.dispatchSigning && !setupError
+        ? delegated
+          ? new DelegatedSignerSetup(exchangeName, options)
+          : aster
+            ? new LocalSignerSetup(
+                aster.setupOptions,
+                deriveSignerSetupPolicy(exchangeName),
+                aster.secondarySigningFromPrimary,
+              )
+            : deriveSignerSetupMapping(exchangeName) === 'apexomni'
+              ? new LocalSignerSetup(
+                  options,
+                  deriveSignerSetupPolicy(exchangeName),
+                  false,
+                  options.omniKeySeed || undefined,
+                )
+              : new LocalSignerSetup(
+                  deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options,
+                  deriveSignerSetupPolicy(exchangeName),
+                )
+        : undefined;
+    const signingMode = signerSetup
+      ? derivePublicMode(exchangeName, options, undefined, signerSetup.credentialPresence)
       : undefined;
-    const signingMode=signerSetup ? derivePublicMode(exchangeName,options,undefined,signerSetup.credentialPresence) : undefined;
-    if (signingMode && !signingMode.publicDataOnly && delegatedMode === 'payload'
-      && delegatedPolicy && !delegatedPolicy.payloadSupported) {
+    if (
+      signingMode &&
+      !signingMode.publicDataOnly &&
+      delegatedMode === 'payload' &&
+      delegatedPolicy &&
+      !delegatedPolicy.payloadSupported
+    ) {
       signerSetup?.dispose();
       const message = 'This Rust account has no REST-only PayloadSigner lifecycle';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
-    if (signerSetup || setupError) options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
+    if (signerSetup || setupError)
+      options = delegated ? withoutDelegatedSigning(options) : withoutSigningCredentials(options);
     const coinbaseReadOptions = bridgeConstruction.primaryCredentialsOnly
       ? [options.secondary_key, options.secondary_secret, options.secondary_passphrase]
       : [];
@@ -670,14 +597,14 @@ export class RustEngineExchange extends BaseExchange {
     }
     super(exchangeName, options, store);
     this.bridgeConstruction = bridgeConstruction;
-    this.signerSetup=signerSetup;
+    this.signerSetup = signerSetup;
     this.asterPublicSetup = aster?.publicSetup;
     this.setupError = setupError;
     if (signerSetup instanceof DelegatedSignerSetup) {
       this.delegatedIntent = signerSetup.intent;
       this.delegatedUsesPayloadSigner = signerSetup.usesPayloadSigner;
     }
-    if (signingMode) this.constructionRecord={bridge:bridgeConstruction,...signingMode};
+    if (signingMode) this.constructionRecord = { bridge: bridgeConstruction, ...signingMode };
     this.warnIgnoredCoinbaseReadOptions = ignoredCoinbaseReadOptions;
     this.commandTimeoutMs = commandTimeoutMs;
     // Handles satisfy the BaseWebSocket members callers read; venues own the sockets.
@@ -699,13 +626,20 @@ export class RustEngineExchange extends BaseExchange {
     const ready = this.capabilitiesFor('fetchHistoricalPositions');
     const capabilities = ready instanceof Promise ? await ready : ready;
     switch (capabilities.positionHistory) {
-      case 'fillsAccount': return this.foldClosedPositionRecords(opts, { symbolScoped: false });
-      case 'fillsSymbol': return this.foldClosedPositionRecords(opts, { symbolScoped: true });
-      case 'bybit': return this.bybitJournal(opts);
-      case 'okx': return this.okxJournal(opts);
-      case 'blofin': return this.blofinJournal(opts);
-      case 'wooOrders': return this.wooJournal(opts);
-      case 'unsupported': return this.defaultHistoricalPositions(opts);
+      case 'fillsAccount':
+        return this.foldClosedPositionRecords(opts, { symbolScoped: false });
+      case 'fillsSymbol':
+        return this.foldClosedPositionRecords(opts, { symbolScoped: true });
+      case 'bybit':
+        return this.bybitJournal(opts);
+      case 'okx':
+        return this.okxJournal(opts);
+      case 'blofin':
+        return this.blofinJournal(opts);
+      case 'wooOrders':
+        return this.wooJournal(opts);
+      case 'unsupported':
+        return this.defaultHistoricalPositions(opts);
     }
   };
 
@@ -722,13 +656,15 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   get isPublicDataOnly(): boolean {
-    return this.constructionRecord?.publicDataOnly ??
-      derivePublicMode(this.name, this.options, this.constructionRecord?.asterdexApiVersion).publicDataOnly;
+    return (
+      this.constructionRecord?.publicDataOnly ??
+      derivePublicMode(this.name, this.options, this.constructionRecord?.asterdexApiVersion).publicDataOnly
+    );
   }
 
   private constructionRecord?: EngineConstruction;
-  private signerSetup?:SignerSetup;
-  private delegatedIntent?:Readonly<{ remoteSigner: boolean; payloadSigner: boolean }>;
+  private signerSetup?: SignerSetup;
+  private delegatedIntent?: Readonly<{ remoteSigner: boolean; payloadSigner: boolean }>;
   private delegatedUsesPayloadSigner?: boolean;
   /** Resolved by trusted setup before credentials were stripped. */
   private asterPublicSetup?: AsterDEXPublicSetup;
@@ -736,13 +672,18 @@ export class RustEngineExchange extends BaseExchange {
 
   private get asterApiVersion() {
     // Construction/getters are synchronous; WASM loads asynchronously on first use.
-    return this.constructionRecord?.asterdexApiVersion ?? this.asterPublicSetup?.apiVersion
-      ?? resolveAsterDEXApiVersion(this.options);
+    return (
+      this.constructionRecord?.asterdexApiVersion ??
+      this.asterPublicSetup?.apiVersion ??
+      resolveAsterDEXApiVersion(this.options)
+    );
   }
 
   protected override get canSign(): boolean {
-    return this.constructionRecord?.canSign ??
-      derivePublicMode(this.name, this.options, this.constructionRecord?.asterdexApiVersion).canSign;
+    return (
+      this.constructionRecord?.canSign ??
+      derivePublicMode(this.name, this.options, this.constructionRecord?.asterdexApiVersion).canSign
+    );
   }
   private updateTickerSymbols = () => {
     this.sharedPublicFeed?.send({ op: 'tickerSymbols', symbols: this.getActiveTickerSymbols() });
@@ -770,9 +711,12 @@ export class RustEngineExchange extends BaseExchange {
 
   private receiveAccountAuth = ({ credential, scope, outcome }: AccountAuthResult): void => {
     if (this.isDisposed || this.engineFailure) return;
-    const index = (credential === 'secondary' ? 5 : 0) + ['account', 'balance', 'orders', 'positions', 'settings'].indexOf(scope);
+    const index =
+      (credential === 'secondary' ? 5 : 0) + ['account', 'balance', 'orders', 'positions', 'settings'].indexOf(scope);
     // Reuse Base's cap for each context, then expose their maximum to its policy.
-    this.accountAuthStreaks[index] = this.setAuthFailureStreak(outcome === 'accepted' ? 0 : this.accountAuthStreaks[index] + 1);
+    this.accountAuthStreaks[index] = this.setAuthFailureStreak(
+      outcome === 'accepted' ? 0 : this.accountAuthStreaks[index] + 1,
+    );
     this.setAuthFailureStreak(Math.max(...this.accountAuthStreaks));
     this.updatePollingPolicy();
   };
@@ -788,19 +732,24 @@ export class RustEngineExchange extends BaseExchange {
     // The resolved tick still bounds a slowdown (auth backoff and server multiplier
     // caps), unless a venue's native cadence is already slower.
     const ceiling = scale === null ? undefined : resolved;
-    if (this.pollingPolicy?.scale === scale && this.pollingPolicy.ceiling === ceiling) return this.pollingPolicy.promise;
+    if (this.pollingPolicy?.scale === scale && this.pollingPolicy.ceiling === ceiling)
+      return this.pollingPolicy.promise;
     // Install before dispatch: native actions can synchronously change policy again.
     const policy: NonNullable<RustEngineExchange['pollingPolicy']> = { scale, ceiling };
     this.pollingPolicy = policy;
-    policy.promise = this.command<void>({ op: 'setPollScale', scale, ...(ceiling !== undefined && { ceiling }) }).catch((error) => {
-      if (this.pollingPolicy === policy) this.pollingPolicy = undefined;
-      throw error;
-    });
+    policy.promise = this.command<void>({ op: 'setPollScale', scale, ...(ceiling !== undefined && { ceiling }) }).catch(
+      (error) => {
+        if (this.pollingPolicy === policy) this.pollingPolicy = undefined;
+        throw error;
+      },
+    );
     return policy.promise;
   };
 
   private updatePollingPolicy = (): void => {
-    void this.syncPollingPolicy()?.catch(() => { /* command() owns error reporting; the next check can retry. */ });
+    void this.syncPollingPolicy()?.catch(() => {
+      /* command() owns error reporting; the next check can retry. */
+    });
   };
 
   /** Startup is single-use; metadata factories can replace an already-started instance. */
@@ -814,8 +763,13 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.startup) {
       this.startupState = 'pending';
       this.startup = this.startEngine().then(
-        () => { this.startupState = 'ready'; },
-        (error: unknown) => { this.startupState = 'failed'; throw error; },
+        () => {
+          this.startupState = 'ready';
+        },
+        (error: unknown) => {
+          this.startupState = 'failed';
+          throw error;
+        },
       );
     }
     return this.startup;
@@ -833,7 +787,10 @@ export class RustEngineExchange extends BaseExchange {
     if (this.setupError) throw this.setupError;
     if (this.warnIgnoredCoinbaseReadOptions) {
       this.warnIgnoredCoinbaseReadOptions = false;
-      this.log('Saved read credentials and their proxy are ignored; Coinbase private reads use primary credentials.', LogSeverity.Warning);
+      this.log(
+        'Saved read credentials and their proxy are ignored; Coinbase private reads use primary credentials.',
+        LogSeverity.Warning,
+      );
     }
     if (this.options.externalPublicData?.type === 'websocket') {
       throw new Error(
@@ -847,8 +804,16 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('privateOnly conflicts with direct publicFeed policy');
     }
     assertEngineAccountRouting(this.options, this.name);
-    if (!this.isPublicDataOnly && !this.signerSetup?.primaryComplete && isKeylessRemoteSigned(this.name, this.options)) {
-      throw new Error('Rust engine cannot sign through remoteSigner; keyless remote-signed accounts run on the TS venue');
+    if (
+      !this.isPublicDataOnly &&
+      !this.signerSetup?.primaryComplete &&
+      isKeylessRemoteSigned(this.name, this.options)
+    ) {
+      throw new ExchangeError('Delegated signing is unsupported in this build', {
+        message: 'Delegated signing is unsupported in this build',
+        kind: 'unsupported',
+        outcome: 'notSent',
+      });
     }
     const transportFactory = engineTransport;
     const { WasmEngine } = await new Promise<WasmEngineModule>((resolve, reject) => {
@@ -887,12 +852,19 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    let transport = createEngineTransport(this.name, this.options, (transportFactory ?? synchronizedEngineTransport)(), this.signerSetup);
+    let transport = createEngineTransport(
+      this.name,
+      this.options,
+      (transportFactory ?? synchronizedEngineTransport)(),
+      this.signerSetup,
+    );
     if (this.bridgeConstruction.payloadSigning) {
       transport = paradexSigningTransport(this.options, transport);
-      if (this.options.payloadSigner) transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
+      if (this.options.payloadSigner)
+        transport = { ...transport, signPayload: (request) => this.options.payloadSigner!(request) };
     }
-    const engine = constructEngine(WasmEngine,
+    const engine = constructEngine(
+      WasmEngine,
       this.name,
       JSON.stringify({
         key,
@@ -905,12 +877,14 @@ export class RustEngineExchange extends BaseExchange {
               return valid === undefined ? {} : { readCredentialsValid: valid };
             })()
           : this.options.secondary_key
-          ? { readCredentials: {
-              key: this.options.secondary_key,
-              secret: this.options.secondary_secret,
-              passphrase: this.options.secondary_passphrase ?? passphrase,
-            } }
-          : {}),
+            ? {
+                readCredentials: {
+                  key: this.options.secondary_key,
+                  secret: this.options.secondary_secret,
+                  passphrase: this.options.secondary_passphrase ?? passphrase,
+                },
+              }
+            : {}),
         omniKeySeed,
         testnet: Boolean(testnet),
         bybitSiteId: this.options.bybitSiteId,
@@ -922,7 +896,8 @@ export class RustEngineExchange extends BaseExchange {
           payloadSigner: this.delegatedIntent?.payloadSigner ?? Boolean(this.options.payloadSigner),
           apiKeyIndexPresent: Boolean(this.options.apiKeyIndex),
         },
-        remoteSigning: this.delegatedIntent !== undefined || Boolean(this.options.remoteSigner || this.options.payloadSigner),
+        remoteSigning:
+          this.delegatedIntent !== undefined || Boolean(this.options.remoteSigner || this.options.payloadSigner),
         extra: { kucoinBroker: this.options.extra?.kucoinBroker },
         hyrotrader: {
           mode: this.options.extra?.hyrotraderMode,
@@ -959,9 +934,11 @@ export class RustEngineExchange extends BaseExchange {
         payloadSigner: this.delegatedUsesPayloadSigner ?? Boolean(this.options.payloadSigner),
         // Key material reaches the provider only through signer setup.
         asterdex: {
-          apiVersion: this.asterPublicSetup?.apiVersion
-            ?? (['v1', 'v3'].includes(this.options.extra?.asterdexApiVersion ?? '')
-              ? this.options.extra?.asterdexApiVersion : undefined),
+          apiVersion:
+            this.asterPublicSetup?.apiVersion ??
+            (['v1', 'v3'].includes(this.options.extra?.asterdexApiVersion ?? '')
+              ? this.options.extra?.asterdexApiVersion
+              : undefined),
           userAddress: this.options.auth?.userAddress,
           signerAddress: this.asterPublicSetup?.signerAddress ?? this.options.auth?.signerAddress,
           readSignerAddress: this.asterPublicSetup?.readSignerAddress,
@@ -1004,11 +981,20 @@ export class RustEngineExchange extends BaseExchange {
             for (const wake of this.startupWaiters) wake();
           },
         },
-        { commandTimeoutMs: this.commandTimeoutMs, ownsEngine: true,
-          ...(this.signerSetup instanceof DelegatedSignerSetup ? { signer: this.signerSetup.signer, signerAlgorithms: this.signerSetup.signerAlgorithms } : {}) },
+        {
+          commandTimeoutMs: this.commandTimeoutMs,
+          ownsEngine: true,
+          ...(this.signerSetup instanceof DelegatedSignerSetup
+            ? { signer: this.signerSetup.signer, signerAlgorithms: this.signerSetup.signerAlgorithms }
+            : {}),
+        },
       );
     } catch (error) {
-      try { engine.free?.(); } catch { /* Keep the original construction error. */ }
+      try {
+        engine.free?.();
+      } catch {
+        /* Keep the original construction error. */
+      }
       throw error;
     }
     try {
@@ -1066,14 +1052,13 @@ export class RustEngineExchange extends BaseExchange {
     for (const method of methods) {
       if (inert.has(method)) continue;
       const local = this[method] as (...args: unknown[]) => Promise<unknown>;
-      (this as Record<WorkerForwardedMethod | 'fetchHistoricalPositions' | NativeAccountRead, unknown>)[method] = async (
-        ...args: unknown[]
-      ) => {
-        if (!this.routesToWorker) return local(...args);
-        const result = await this.callWorker(method, ...args);
-        // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
-        return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
-      };
+      (this as Record<WorkerForwardedMethod | 'fetchHistoricalPositions' | NativeAccountRead, unknown>)[method] =
+        async (...args: unknown[]) => {
+          if (!this.routesToWorker) return local(...args);
+          const result = await this.callWorker(method, ...args);
+          // Array properties do not survive every bridge, so the worker sends the replacement ID beside the IDs.
+          return method === 'updateOrder' ? decodeWorkerOrderIds(result as WorkerOrderIds) : result;
+        };
     }
   }
 
@@ -1108,8 +1093,7 @@ export class RustEngineExchange extends BaseExchange {
 
   /** exchange-server's in-process source speaks the shared-feed protocol over an in-memory port. */
   private openSharedFeedPort = ():
-    | { port: MessagePort; policy?: { handshakeTimeoutMs: number; inProcess: true } }
-    | undefined => {
+    { port: MessagePort; policy?: { handshakeTimeoutMs: number; inProcess: true } } | undefined => {
     if (this.options.publicFeed?.mode === 'shared') return { port: this.options.publicFeed.port };
     const external = this.options.externalPublicData;
     if (external?.type !== 'in-process' || !this.usesInProcessPublicData) return undefined;
@@ -1131,7 +1115,11 @@ export class RustEngineExchange extends BaseExchange {
           const wasReady = this.sharedPublicReady;
           if (
             this.requestSharedSnapshot &&
-            update.tickers?.some((ticker) => this.store.marketsBySymbol[ticker.symbol] && TICKER_FIELDS.some((field) => Number.isFinite(ticker[field])))
+            update.tickers?.some(
+              (ticker) =>
+                this.store.marketsBySymbol[ticker.symbol] &&
+                TICKER_FIELDS.some((field) => Number.isFinite(ticker[field])),
+            )
           )
             this.sharedPublicReady = true;
           this.host?.flush();
@@ -1182,10 +1170,12 @@ export class RustEngineExchange extends BaseExchange {
     // at the store's, matching what the TS worker posts today.
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
     const bookMs = (exchangeMetadata[this.name]?.orderbookTickDelay || STORE_FLUSH_MS) * multiplier;
-    this.flushTimers.push(setInterval(() => {
-      this.updatePollingPolicy();
-      this.host?.flush();
-    }, STORE_FLUSH_MS * multiplier));
+    this.flushTimers.push(
+      setInterval(() => {
+        this.updatePollingPolicy();
+        this.host?.flush();
+      }, STORE_FLUSH_MS * multiplier),
+    );
     // Staleness has no socket event of its own; re-derive health on a slow clock.
     this.flushTimers.push(setInterval(this.syncSocketHealthToStore, SOCKET_HEALTH_SYNC_MS));
     if (bookMs < STORE_FLUSH_MS * multiplier) {
@@ -1387,8 +1377,7 @@ export class RustEngineExchange extends BaseExchange {
     if (!this.onFrame || this.feedCandleListeners.size) {
       for (const { symbol, interval, candle } of read(() => this.applier.candles(frame))) {
         this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => {
-          if (!this.onFrame || this.feedCandleListeners.has(listener))
-            this.dispatchFrameEvent(() => listener(candle));
+          if (!this.onFrame || this.feedCandleListeners.has(listener)) this.dispatchFrameEvent(() => listener(candle));
         });
       }
     }
@@ -1453,7 +1442,8 @@ export class RustEngineExchange extends BaseExchange {
     const current = this.store.socketHealth;
     // A private stream delivering again proves the key; later rejections still count.
     if (health.privateInitialized && !current?.privateInitialized) this.recordAuthSuccess();
-    if (current && (Object.keys(health) as (keyof typeof health)[]).every((key) => current[key] === health[key])) return;
+    if (current && (Object.keys(health) as (keyof typeof health)[]).every((key) => current[key] === health[key]))
+      return;
     this.store.updateSocketHealth(health);
   };
 
@@ -1596,7 +1586,11 @@ export class RustEngineExchange extends BaseExchange {
     for (const order of orders) {
       if (order.impliedVolatility === undefined) continue;
       if (!this.capabilityRecord?.options) this.rejectPreflight('Options are not enabled on this account');
-      if (typeof order.impliedVolatility !== 'number' || !Number.isFinite(order.impliedVolatility) || order.impliedVolatility <= 0) {
+      if (
+        typeof order.impliedVolatility !== 'number' ||
+        !Number.isFinite(order.impliedVolatility) ||
+        order.impliedVolatility <= 0
+      ) {
         this.rejectPreflight('impliedVolatility must be finite and positive');
       }
     }
@@ -1720,13 +1714,14 @@ export class RustEngineExchange extends BaseExchange {
             skipped.push(`${position.symbol}: invalid close size`);
             continue;
           }
-          if (amount > 0) orders.push({
-            symbol: position.symbol,
-            side: position.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
-            type: OrderType.Market,
-            amount,
-            reduceOnly: true,
-          });
+          if (amount > 0)
+            orders.push({
+              symbol: position.symbol,
+              side: position.side === PositionSide.Long ? OrderSide.Sell : OrderSide.Buy,
+              type: OrderType.Market,
+              amount,
+              reduceOnly: true,
+            });
         }
         // One batch retains native partial/unknown outcomes without replaying
         // a close against positions that have not yet reconciled.
@@ -1830,8 +1825,7 @@ export class RustEngineExchange extends BaseExchange {
 
   private validateAsterStp = (mode?: AsterDEXStpMode): void => {
     if (mode === undefined) return;
-    if (this.asterApiVersion !== 'v3')
-      throw new Error('AsterDEX self-trade prevention requires API v3');
+    if (this.asterApiVersion !== 'v3') throw new Error('AsterDEX self-trade prevention requires API v3');
     if (!isAsterDEXStpMode(mode)) throw new Error(`Invalid AsterDEX self-trade-prevention mode: ${String(mode)}`);
   };
 
@@ -1869,7 +1863,8 @@ export class RustEngineExchange extends BaseExchange {
           this.isPublicDataOnly &&
           this.nativeLoaded & LOADED_FLAG.MARKETS &&
           (flag & (LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS) & ~this.nativeLoaded) !== 0
-        ) finish(new Error(`Native ${label} is unavailable for a public-data-only account`));
+        )
+          finish(new Error(`Native ${label} is unavailable for a public-data-only account`));
         else if (
           (this.nativeLoaded & flag) === flag &&
           (!(flag & LOADED_FLAG.TICKERS) || !this.sharedPublicFeed || this.sharedPublicReady)
@@ -1996,7 +1991,9 @@ export class RustEngineExchange extends BaseExchange {
   fetchPositions = async (symbols?: string[]) => {
     await this.untilNativeData(LOADED_FLAG.MARKETS | LOADED_FLAG.POSITIONS, 'positions');
     this.syncAccountState();
-    return symbols ? this.store.positions.filter((position) => symbols.includes(position.symbol)) : this.store.positions;
+    return symbols
+      ? this.store.positions.filter((position) => symbols.includes(position.symbol))
+      : this.store.positions;
   };
 
   fetchPositionMode = async () => {
@@ -2046,8 +2043,7 @@ export class RustEngineExchange extends BaseExchange {
   fetchOrderBook = async (symbol: string, limit?: number): Promise<OrderBook> => {
     const ready = this.capabilitiesFor('fetchOrderBook');
     const capabilities = ready instanceof Promise ? await ready : ready;
-    if (!capabilities.orderBookQuery)
-      throw new Error('Orderbook snapshot queries are unavailable for this venue');
+    if (!capabilities.orderBookQuery) throw new Error('Orderbook snapshot queries are unavailable for this venue');
     return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
   };
 
@@ -2094,8 +2090,10 @@ export class RustEngineExchange extends BaseExchange {
       const cached = this.store.fetchedLeverage[symbol];
       const usable =
         cached &&
-        Number.isFinite(cached.buyLeverage) && cached.buyLeverage > 0 &&
-        Number.isFinite(cached.sellLeverage) && cached.sellLeverage > 0;
+        Number.isFinite(cached.buyLeverage) &&
+        cached.buyLeverage > 0 &&
+        Number.isFinite(cached.sellLeverage) &&
+        cached.sellLeverage > 0;
       if (query === 'settings') return usable ? cached : null;
       // Metadata-refreshed rails answer from settings once loaded; before the
       // first refresh (a flat, freshly selected symbol) the venue is read.
@@ -2114,7 +2112,11 @@ export class RustEngineExchange extends BaseExchange {
     const ready = this.capabilitiesFor('fetchHistoricalOrders');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (capabilities.rejectOrderHistoryFilters && (opts?.orderId !== undefined || opts?.status !== undefined)) {
-      return Promise.reject(new Error(`${this.clientOrderIdRule?.label ?? this.name} order history does not support orderId or status filters`));
+      return Promise.reject(
+        new Error(
+          `${this.clientOrderIdRule?.label ?? this.name} order history does not support orderId or status filters`,
+        ),
+      );
     }
     return this.command<HistoricalOrder[]>({
       op: 'fetchOrderHistory',
@@ -2232,11 +2234,18 @@ export class RustEngineExchange extends BaseExchange {
       } else if (format === 'blofin') {
         entry = mapBlofinClosedPosition(row, (instId) => this.store.marketsById[instId]?.symbol, account);
       } else {
-        entry = mapBybitClosedPnl(row, account, capabilities.inverseClosedPositions || isBybitInverseSymbol(row.symbol));
+        entry = mapBybitClosedPnl(
+          row,
+          account,
+          capabilities.inverseClosedPositions || isBybitInverseSymbol(row.symbol),
+        );
       }
       if (entry) entries.push(entry);
     }
-    return copyHistoryCompleteness(rows, entries.sort((a, b) => b.closedTime - a.closedTime));
+    return copyHistoryCompleteness(
+      rows,
+      entries.sort((a, b) => b.closedTime - a.closedTime),
+    );
   };
 
   /**
@@ -2264,8 +2273,9 @@ export class RustEngineExchange extends BaseExchange {
       this.bookListeners.set(symbol, listeners);
     }
     const listenerId =
-      (!this.bridgeConstruction.isolatedBookSubscriptions ? [...listeners].find(([, listener]) => listener === callback)?.[0] : undefined) ??
-      ++this.nextBookListenerId;
+      (!this.bridgeConstruction.isolatedBookSubscriptions
+        ? [...listeners].find(([, listener]) => listener === callback)?.[0]
+        : undefined) ?? ++this.nextBookListenerId;
     listeners.set(listenerId, callback);
     if (first) this.bookDemand(symbol, true);
     return () => {
@@ -2332,11 +2342,6 @@ export class RustEngineExchange extends BaseExchange {
 
   dispose() {
     this.signerSetup?.dispose();
-    void this.hostedSigningVenue?.then(
-      (venue) => venue.dispose(),
-      () => undefined,
-    );
-    this.hostedSigningVenue = undefined;
     this.stopWorkerCapabilitySync?.();
     this.stopWorkerCapabilitySync = undefined;
     this.sharedPublicFeed?.dispose();
