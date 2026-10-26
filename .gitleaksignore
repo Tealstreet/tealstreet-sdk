@@ -122,3 +122,6 @@ ea5ec84ee69b5a6e4f7f90322f9afd285a718a0f:sdk-rs/venues/blofin/tests/hmac_dispatc
 # Bitunix hosted login golden: a public double-SHA256 vector over fixture inputs,
 # shared with base.ws-auth-signing.test.ts. Exact fingerprint only; no credential bytes.
 c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-regressions/rust.bitunix-hosted-provider.wasm.test.ts:generic-api-key:61
+
+# Historical public impostor-URL fixture; no credential, now assembled from URL components.
+2fe0c6b5007f157d12a19ff1c5e77302cbe030c6:sdk-rs/harness/live-smoke-venues.test.mjs:generic-api-key:222

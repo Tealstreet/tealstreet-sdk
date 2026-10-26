@@ -9817,3 +9817,12 @@ Orderly's private reads and its socket auth now sign through an installed Ed2551
   - A signing refusal fails the query outright, even after accepted pages, as before.
 - **Socket auth.** A provider refusal sends no frame and closes the socket. Without a Primary identity the socket closes without signing.
 - **Interim (until O2).** A protective placement that an account snapshot confirms completes one tick after that snapshot, rather than inside it. The result is unchanged.
+
+### ApeX Omni browser signer bootstrap
+
+The isolated ApeX WASM family enables `dispatch-signing`, matching its
+construction declaration and accepting the bridge's separate local signer setup.
+Raw compatibility and explicit setup both construct a real installed provider,
+retain private capability, and start managed discovery. Native constructor and
+compiled-family integration controls exercise both paths with the public zkLink
+seed corpus. The cross-venue construction feature guard is a separate follow-up.
