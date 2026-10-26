@@ -9252,6 +9252,30 @@ proof of normal pressure reachability. Any normally reachable fail-closed row
 goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
 supervision constants are unchanged; no generic coexistence/recovery seam.
 
+## Lighter Schnorr auth recipe and public key (P3 parts 2+3)
+
+Shared prerequisites for the Lighter venue cutover (owner codex-ih35js). Nothing
+calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
+`cfg!(feature = "schnorr")` and declares Lighter's signing ref
+`signingAlgorithm: schnorrDigest` in the same change as the eager-holder removal.
+
+- **Auth token deadline from the signing stamp.** `AuthRecipe` derives the
+  60-second deadline from the dispatch `stamp_ms` (the preparation moment), where
+  legacy `account_auth` uses `cx.now` at issue. The stamp is equal or later, so a
+  parked request's token is valid for 60 s from signing rather than from
+  queueing. Pinned by `re_preparation_replaces_entropy_and_deadline`.
+- **WS subscribe escaping.** The private subscribe frame is serialized, so it is
+  byte-equal to legacy for the real `account_all_orders/{account}` channel but
+  escapes a hostile channel instead of splicing it into JSON.
+- **Canonical public keys.** `lighter::public_key` reduces each little-endian
+  limb below the Goldilocks prime. The field could hold a limb as an unreduced
+  p (it did for the scalar n-1), where Go always reduces; all Go fixture keys
+  are canonical. Pinned by `lighter_public_keys_are_canonically_encoded`.
+- **Declared keys refused at setup.** A ref declared `schnorrDigest` with a
+  non-canonical, zero or wrong-width scalar is refused at trusted setup
+  (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
+  ref is declared at the cutover.
+
 ## Bitrue reads and listen-key sessions leave the legacy funnel (B1, #2173)
 
 Every Bitrue HTTP request except trading now runs under engine-managed authority. Trading writes stay on the legacy funnel until B2.
@@ -9427,6 +9451,19 @@ An accepted placement with a malformed financial row retains the original Store
 identity and publishes no fabricated replacement. It still fences older Orders
 reads before reconciliation. Existing native financial formatting and private
 socket authentication remain unchanged.
+
+## Bitrue trading writes on Preflight roots and Plans (B2, #2201)
+
+Every Bitrue trading command now owns a Preflight root, and the legacy funnel is gone. Placements, amends and leverage run as one streamed serial Plan. A cancel batch runs as one complete Plan of independent calls. Every call signs with the Primary.
+
+- **Entry and FIFO.** A validation refusal is the command's own NotSent terminal. A command behind a live job parks, is re-planned against the current Store when it wakes, and an expired parked command gets one NotSent terminal there. A keyless command keeps the local refusal ("Bitrue trading requires API credentials"). Margin type and hedged position mode remain local Unsupported refusals.
+- **In-job reads sign with the Primary (D3).** Inspect, Verify and census GETs used the read key by method before; they now sign with the Primary. Each keeps native's three Network/Timeout retries, chained per call, never a fourth. A read's -1022 re-signs once.
+- **Resend.** A write's -1022 resends once with the same client order ID, stamped strictly after the released attempt.
+- **Write facts.** The code table carries native's documented refusals. -2017 is now Rejected, as native classified it. 401, 403 and 429 are cited status refusals. An unlisted code or an unproven 2xx is Unknown; before, it was unclassified (None). A 5xx write is the engine's unproven seal ("HTTP response does not prove the write outcome", VenueUnavailable). Accepted IDs ride the journal, so a failure after an accepted write keeps them as `partial`. An unproven Verify after an accepted cancel is a known partial: outcome None with the cancel's ID.
+- **Cancel batches (Q1).** Each target is an independent call. A child closed by its parent's ACK or by the stream is retired unissued, and all targets closed is a successful empty Plan. The terminal message is the journal's selected leg error followed by native's aggregate JSON (`canceledOrderIds`, `failedOrders`), bounded at 4 KiB. An Unknown leg projects Unknown, with the confirmed IDs.
+- **Protective census (D4).** The census is the job's own final Primary open-order read, issued right after the placement. A clean census completes the command. A failed one carries native's "order read failed" diagnostic and the "outcome is uncertain" text, and projects Unknown with the accepted placement IDs (fe7lgm's `inherit_plan_uncertainty`, #2205). The B1 interim deferral is gone.
+- **Reconcile.** An Unknown seal reconciles through Primary open-order snapshots (`PrimaryRead { PostUnknownOrderRead }`). A clean snapshot postdating a protective fence releases cancel-all.
+
 ## AsterDEX V3 configured signer mismatch (approved, adoption pending)
 
 The address-nonce consumer must refuse at trusted setup when the configured
@@ -9493,6 +9530,23 @@ The remaining conservative request/signing/credential inventory describes manage
 failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
 identity options. This slice retains those rows and all checker rules; completion
 of the custody audit does not claim inventory zero or a new endpoint migration.
+
+
+### Shared hosted operation foundation
+
+The opt-in structured-operation provider/peer uses immutable per-slot negotiated
+bindings and closed native family codecs. Legacy v1 signing contexts and routes
+stay unchanged. Missing business ownership, unknown recipes, replay, deadline or
+clock-revision changes refuse without a fallback. Peer validation failures are
+sanitized NotSent refusals, not credential latch evidence. Late work cannot
+publish a signature or HTTP request, and cancellation grants no joined-resource
+acknowledgement. The 64-entry per-account bound refuses new work rather than
+forgetting replay decisions before the codec freshness horizon.
+
+Kraken's advisory SignRequest context retains the exact wire path instead of the
+stripped signing path; the native preimage builder still strips /derivatives at
+the same cryptographic boundary. HTTP bytes, financial fields and native MACs are
+unchanged. This foundation does not enable hosted Kraken or alter nonce issuers.
 
 
 ## MEXC installed signing and selected private Reads

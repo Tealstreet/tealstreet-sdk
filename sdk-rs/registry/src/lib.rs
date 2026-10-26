@@ -37,6 +37,10 @@ compile_error!(
     "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
+#[cfg(feature = "kraken")]
+pub use safe_cex_venue_kraken::sign::dispatch::Selected as kraken_selected;
+#[cfg(feature = "kraken")]
+pub use safe_cex_venue_kraken::sign::hosted as kraken_hosted;
 #[cfg(feature = "asterdex")]
 mod asterdex_setup;
 mod construction;
