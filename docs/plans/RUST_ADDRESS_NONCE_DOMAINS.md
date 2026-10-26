@@ -1,0 +1,245 @@
+# Address-keyed dispatch nonce domains
+
+Owner: codex-uufub4, by direct overseer assignment. Required reviewers:
+claude-m26ps4 (credentials), claude-19pt8s (AsterDEX V3) and codex-zs5e83
+(Hyperliquid). This replaces the earlier assignment of Hyperliquid's nonce
+subject to m26ps4; it does not transfer either venue's adoption. WEEX and
+Coinbase reviews returned before this work began. Immutable planning base:
+`da369f632b9c08c63aa94bf393583b1bf8d1e2ca`, actual Rust landing branch
+`origin/feat/rust-rewrite`. Dedicated branch: `feat/rust-address-nonce-domains`.
+
+Status: plan only. This checkpoint changes this document and its index row.
+No runtime, Cargo, provider, host, consumer, fixture or inventory change; no
+build, source activation, push, CI or size result is implied.
+
+## Existing authority and the precise extension
+
+The #2093 dispatcher already reserves once during an eligible recipe prepare,
+records the exact reservation, validates provider application and performs a
+released-floor check with final Claim. It already has immutable attempts,
+one-use claims, decimal-string receipts and bounded pre-send repair. Reuse it.
+Do not add another counter, venue allocator or provider-supplied nonce.
+
+`NonceDomain` currently has private name/floor/limit fields. `KRAKEN` uses a
+trusted stable-id subject; `NonceClaim::mint` currently requires that subject
+for every domain. `HYPERLIQUID_AGENT` already exists for the callback-time Cx
+allocator, keyed by the public agent address. Aster V3's current recipe instead
+calls its one interim per-signer allocator at preparation. Neither existing
+path supplies the proposed address-bound dispatch claim.
+
+The shared extension adds an address subject strategy and reviewed address
+domain declarations. Stable-id Kraken behavior and its existing lifecycle
+controls remain unchanged. Address subjects never fall back to stable_id,
+credential text, a slot name, a KeyRef, a secret digest or a configured account.
+An address proves no account permission, role, Session or transport authority.
+
+## Domain policy and namespace continuity
+
+| Domain | Subject | Clock floor | Limit | Sharing boundary |
+| --- | --- | --- | --- | --- |
+| Existing KRAKEN | Existing tagged stable-id key | RawMs x1000 | u64::MAX | Existing Spot/Futures contract, unchanged |
+| Existing HYPERLIQUID_AGENT | Verified actual agent's 20 address bytes | RawMs x1 | 2^53-1 | Same agent across engines, vaults, networks and TxFlow in one process/WASM memory |
+| Proposed ASTERDEX_V3 | Verified actual signing agent's 20 address bytes | ProtocolMs x1000 | u64::MAX | Same signer across user/account aliases; native network-sharing disposition confirmed by consumer before source |
+
+The Aster policy follows its actual `interim_nonce`/`next_nonce` and signer
+admission plan; consumer review must confirm its limit and network sharing.
+Keep Aster V1 HMAC claim-free. Do not require a public-address operation for an
+HMAC identity or change its construction/refusal behavior.
+
+Canonicalize a validated address to exactly20 bytes. Spellings allowed at the
+consumer's existing input boundary must identify the same bytes; there is no
+new permissive native-config parser. The resulting NonceKey must be exactly
+the current SHA256 of `0x` followed by40 lowercase hex digits. In particular,
+Hyperliquid's domain name and key bytes remain unchanged. A new type tag on
+that address hash would reset its sequence and is forbidden. Kraken's stable-id
+tag remains separate, including a stable-id whose text resembles an address.
+
+Use the existing process/WASM-memory NONCES store, never an engine-local map.
+State survives engine/provider recreation. Different address domains remain
+separate even for the same address; different agents remain independent.
+Vault, wallet/user, API credential and chain configuration do not replace the
+actual signer subject. No cross-process or separate-WASM-memory coordination
+is claimed by a process-global mutex.
+
+## Trusted address binding, before start
+
+m26ps4's direction at the planning base confirms no existing carrier. Phase3
+#2175 adds SetupFacts and a private signing-not-configured flag, not an address.
+Consume its ACTUAL landing before source touches Identity/setup; do not build
+on its unpublished head or duplicate its private flag.
+
+Under a non-default address-nonce feature, Identity gains a private
+`verified_address: Option<VerifiedAddress>`, marked `#[serde(skip)]`, with no
+public setter. The binding participates in equality and contains exactly:
+
+- The20 public address bytes.
+- The exact selected signing KeyRef from which they were obtained.
+- Algorithm::Secp256k1Digest.
+
+There is no secret in this carrier. Debug may show the public address but must
+not disclose its binding KeyRef. Serialization or an incoming wire object
+cannot create the binding; deserialized identities need trusted initialization.
+
+Local trusted setup derives the address while installing the slot's signing
+material, using the same declared-key primitive as Operation::PublicAddress.
+The result is20 bytes, not the credential presentation or a caller's address.
+Hosted/asynchronous providers answer an engine-owned pre-start PublicAddress
+operation for that exact installed signing ref. This is an assertion by the
+already trusted provider, not independent proof of possession of its secret.
+Unsupported providers cannot activate the address-nonce path.
+
+Only engine-owned trusted initialization installs VerifiedAddress. The precise
+cross-crate bridge for LocalSigner and the pre-start async setup operation are
+mandatory m26 source-review gates: no public address setter or raw result
+injection is silently authorized. Setup must carry a real initialization
+generation/correlation; it cannot fabricate a business Attempt or Session.
+Changing provider, identities, signing refs or algorithm before start invalidates
+both pending answers and installed bindings. Duplicate, late or foreign answers
+cannot bind a replacement. After start, existing identity/signer sealing stays.
+
+Each slot gets its own validated binding. A deliberately shared signing ref may
+produce equal addresses, but an unverified secondary cannot copy a primary
+binding to become eligible. Missing signing, including phase3 optional absence,
+produces no binding. An address claim then refuses InvalidSubject before nonce
+reservation/provider signing; absence is not an authentication-health failure.
+Public-only or otherwise unused identities must not gain an unwanted signing
+requirement or setup call. Consumer eligibility precedes required attestation.
+
+## Declaration and selected claim
+
+Proposed narrow declaration, subject to exact source review:
+
+```rust
+// Feature-gated, object-safe default method; no associated const.
+fn address_nonce_domain(&self) -> Option<&'static NonceDomain> { None }
+```
+
+Capture the venue declaration once during trusted initialization and seal it
+at start. An instance method permits Aster V1 to return None while V3 declares
+ASTERDEX_V3. Hyperliquid declares HYPERLIQUID_AGENT when its installed consumer
+adopts. Reviewed engine constants fix names, clocks and limits; venue options
+cannot create arbitrary domain names or change their arithmetic.
+
+Keep existing `Slots<Identity>::select_with_nonce` and the recipe-owned
+NonceClaim. Mint from the exact immutable member selected by Slots, according
+to the domain's subject strategy. For an address domain, obtain only that
+member's verified binding and check exact signing ref/algorithm. Stable_id is
+neither required nor accepted as a substitute. Do not add an API accepting an
+arbitrary Selection plus an unrelated Identity or address.
+
+Before accepting/reserving an address claim, require the same declared domain,
+installed provider binding, selected slot/credential/signing refs, role-derived
+egress and current owner/attempt. A foreign domain, missing declaration, stale
+binding, changed ref or swapped slot fails closed before reservation or private
+work. A declared address path cannot opt into a stable-id claim. Existing
+claim-free unsigned work remains claim-free; selecting a domain is not itself
+permission to send. Keep current dispatch_nonce/NonceUnscheduled admission and
+the existing refusal of nonce-bearing atomic barrier groups.
+
+The precise representation and all validation entry paths are source gates.
+The address feature must not enlarge Identity or dispatcher state when off.
+No crypto dependency is introduced from engine back into crypto.
+
+## Reservation, release and repair stay #2093
+
+Reserve only in the genuine dispatcher preparation after all available subject
+and route validation, never at venue queueing or setup attestation. One
+preparation records one reservation; duplicate reservation or another claim
+within it refuses. Preserve checked integer arithmetic and the existing raw
+receipt-clock ceiling. Protocol calibration affects Aster's declared floor,
+not Hyperliquid's RawMs floor. StampFloor is separate from a nonce counter.
+
+Failed or abandoned reservations leave gaps; reserved maxima never roll back.
+Reservation alone does not supersede an earlier attempt. Only exact attempt
+replacement or the committed released floor can make its output stale. Fence
+before provider apply and again at final Claim. Validate all fallible pacing,
+journal, owner, route, deadline and binding work before the private atomic
+released-floor/Lifecycle/pacing commit. No callback/allocation under the mutex.
+
+WaitUntil adds no reservation itself and commits neither released-nonce nor
+pacing floor. Stale repair may reserve a new nonce and recompute the actual
+preimage/signature. Retain managed Attempt, owner, original deadline, selected
+binding and cumulative maximum8 nonce repairs; no budget renewal or extra Plan
+credit. Old preparation/permit/provider output is inert. A release-domain FIFO
+head keeps its place during reprepare; this seam adds no ordering scheduler.
+
+Release and wire use the same exact u64 nonce and canonical decimal-string
+SignReceipt.nonce. Hyperliquid's safe-number wire bound remains enforced;
+Aster values above2^53 stay exact decimal/u64 values. No rounding through f64,
+new receipt schema, blind digest, provider-selected nonce, physical retry or
+automatic replay of a possibly-sent mutation is introduced.
+
+## Consumer handoff is a separate activation gate
+
+The shared seam does not convert native Hyperliquid/TxFlow or replace Aster's
+interim allocator. Only consumer-owned source cutovers remove those callers.
+Sharing Hyperliquid's existing key preserves reserved high-water; it does not
+make old unfenced prepared/sent work obey the new released-floor fence.
+
+Aster additionally moves a separate per-signer map. Source/activation needs an
+explicit consumer-reviewed continuity disposition for its existing reserved
+high-water, rollback clocks and owned outstanding work. No second empty counter,
+wall-clock assumption, alias or public numeric seed proves takeover. Identify
+and retire/fence owned legacy work at the owning boundary before claiming a
+complete cutover; any required drain/import authority is separately reviewed,
+not fabricated by this subject carrier. Preserve both maxima already present
+in the target. Arbitrary external issuers remain the disclosed native exposure.
+
+## Required originals and source gates
+
+1. Actual setup/provider address binding: local scalar and async PublicAddress
+   agree for the exact selected refs; malformed lengths, wrong algorithm/ref,
+   unsolicited/stale/duplicate setup answers and serialized forged metadata
+   cannot mint. Provider/identity replacement invalidates old proofs. Missing
+   or optional signing stays absent without an auth latch.
+2. Primary/secondary selection and alias controls: same actual signer across
+   different credential refs/stable IDs shares a sequence; different signers
+   with equal stable-id text do not. Swap slots/ref/provider/domain and require
+   refusal before reservation, provider signing, I/O or publication.
+3. Address canonicalization and continuity: supported hex/prefix spellings,
+   malformed inputs and exact equality with the existing HL key. Alternate
+   existing Cx and new claim reservations, recreate engines, and include TxFlow
+   and multiple vaults/users without resetting either target maximum.
+4. Family arithmetic: raw versus calibrated clocks, fixed/regressing clocks,
+   more than1000 reservations per millisecond, invalid/nonfinite/negative times,
+   fractional flooring, scaling overflow, MAX_SAFE and u64 exhaustion. Same
+   agent across permitted network variants shares the consumer-pinned domain.
+5. Genuine managed Prepare/Sign/Bind/Claim: reversed provider/claim order,
+   abandoned larger reservation, stale apply and stale Claim, current retry
+   versus forbidden Unknown replay, duplicate/expiry/cancel and cumulative8
+   repairs. Retain exact provider/native digest and full request-wire oracles.
+6. Pacing composition: WaitUntil changes neither released nor pacing floor,
+   retains existing reservation, and rechecks freshness on later Claim.
+   Domain-head reprepare keeps ordering; failure retires only exact resources
+   and recovers credits. Positive-gap/nonce barrier refusals remain intact.
+7. Stable-id Kraken and feature-off controls: existing originals unchanged,
+   no new address requirement for Kraken, V1 HMAC or non-adopters, dyn Venue
+   remains usable, and no setup-triggered business signing/nonce allocation.
+
+Missing proposed symbols are not compiling-original RED evidence. Use genuine
+existing primitive/dispatcher boundaries for originals; introduce new API-shape
+tests with the reviewed source and disclose unreachable suffixes. No fake
+Identity, slot, claim, setup answer, Context or predicted resource ID qualifies.
+
+## Scope, zero-growth and publication gates
+
+Proposed non-default engine feature: `address-nonce = ["dispatch-nonce"]`.
+Gate the carrier field, subject strategy, declaration capture, setup handling
+and checks so ordinary builds retain their exact layout and code paths. This
+shared PR enables no venue dependency feature and adopts neither consumer.
+Phase3 actual landing plus m26 and both consumer reviews precede source.
+
+At first source, merge the actual Rust landing tip. Measure paired default
+Bybit, Bitget and stable-id Kraken families and one LOCAL composed combined
+build; non-adopters must have zero byte growth with the feature off. Test the
+address feature on separately, including dispatch-nonce/serial/selection modes;
+do not relabel a test harness as consumer adoption or current WASM execution.
+Consumers later enable the feature in their own measured family/combined PRs.
+Keep fixed budgets and current counterbalanced Bitget CPU policy, no overrides.
+Delete each owned scratch target after measuring; retain sources/artifacts/logs.
+
+Scoped originals and strict checks, existing nonce/credential controls, relevant
+feature-mode rows, fmt, all bans/ratchets, immutable source/fixture/map review,
+frozen-head CI and auditor GO remain required. CI records family sizes, never
+the local combined artifact. The planning checkpoint has shipping delta0 by
+construction, with no measured runtime or execution claim.
