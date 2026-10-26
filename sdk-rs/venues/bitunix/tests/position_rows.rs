@@ -70,7 +70,9 @@ fn seeded() -> (TestEngine, SocketId) {
             row("XRPUSDT", "xrp-route", "4", "SELL", "HEDGE"),
         ]),
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     assert_eq!(e.store().positions().len(), 4);
     (e, socket)
 }
@@ -111,7 +113,7 @@ fn identified_bad_symbol_keeps_both_hedge_legs_while_peers_and_absence_progress(
         assert_eq!(btc.len(), 2);
         assert!(btc.iter().all(|p| p.leverage == 20.0));
         assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
-        assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED)));
+        assert!(safe_cex_engine::test_support::prepared_now(&mut e).into_iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(event)) if event.code == safe_cex_engine::log::code::ROW_SKIPPED)));
     }
 }
 #[test]
@@ -146,7 +148,9 @@ fn unidentified_bad_neighbor_holds_absence_but_cannot_resurrect_a_valid_zero_pos
             .contracts,
         5.0
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     let r = request(&mut e, socket, 5000.0);
     answer(&mut e, r.id, 6100.0, &body(&[]));
     assert!(e.store().positions().is_empty());
@@ -201,7 +205,9 @@ fn retained_position_ids_and_settings_still_route_reductions_to_original_native_
         4100.0,
         &body(&[bad, row("ETHUSDT", "eth-new", "5", "SELL", "HEDGE")]),
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     let order = serde_json::from_str(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","price":90000,"amount":0.1,"reduceOnly":true}"#).unwrap();
     e.handle(
         4200.0,
@@ -275,7 +281,9 @@ fn partial_position_read_updates_ui_peers_but_cannot_prove_a_trading_prerequisit
             r#"{"symbol":"ETHUSDT","qty":{}}"#.into(),
         ]),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()

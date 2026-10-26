@@ -1,3 +1,4 @@
+import { mapMEXCSignerSetup } from './mexcSignerSetup';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
@@ -638,7 +639,7 @@ export class RustEngineExchange extends BaseExchange {
         : aster ? new LocalSignerSetup(aster.setupOptions, deriveSignerSetupPolicy(exchangeName), aster.secondarySigningFromPrimary)
           : deriveSignerSetupMapping(exchangeName) === 'apexomni'
             ? new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName), false, options.omniKeySeed || undefined)
-            : new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName))
+            : new LocalSignerSetup(deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options, deriveSignerSetupPolicy(exchangeName))
       : undefined;
     const signingMode=signerSetup ? derivePublicMode(exchangeName,options,undefined,signerSetup.credentialPresence) : undefined;
     if (signingMode && !signingMode.publicDataOnly && delegatedMode === 'payload'

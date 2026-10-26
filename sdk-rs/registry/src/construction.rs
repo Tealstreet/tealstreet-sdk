@@ -37,6 +37,8 @@ struct Rule {
 /// A family whose trusted setup maps account fields before provider install.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SetupMapping {
+    /// Existing raw-Primary account namespace, before credential trimming.
+    Mexc,
     /// Version-resolved V1/V3 slots and the read agent's primary-wallet alias.
     Asterdex,
     /// The OmniKey seed as the primary's zkLink role; no read credentials.

@@ -57,7 +57,8 @@ fn pending_read(e: &mut TestEngine, socket: SocketId, channel: &str) -> RequestI
     requests(e).remove(0).id
 }
 fn done(e: &mut TestEngine, command: u32) -> Result<String, String> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone {
                 command: id,
@@ -139,7 +140,9 @@ fn full_position_batch_keeps_whole_batch_caller_id_preflight() {
             ],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         actions
