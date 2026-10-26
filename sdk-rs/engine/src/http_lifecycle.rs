@@ -2585,10 +2585,10 @@ impl<V: Venue> Engine<V> {
                 self.io.core.http_history_failure = None;
             }
             let previous = self.io.core.http_delivery.replace(delivery.clone());
-            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            #[cfg(feature = "http-plans")]
             let exempt = proof.error().is_some()
                 && self.venue.status_exempt_refusal(&pending.value, response);
-            #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+            #[cfg(not(feature = "http-plans"))]
             let exempt = false;
             if let Some(error) = proof.error().filter(|_| !exempt) {
                 let venue = &self.venue;
@@ -2650,7 +2650,7 @@ impl<V: Venue> Engine<V> {
                     Some((response.status, response.headers.to_owned()));
                 #[cfg(feature = "repair-mutations")]
                 let previous_data = self.begin_repair_data(Some(request));
-                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+                #[cfg(feature = "http-plans")]
                 let previous_exempt = std::mem::replace(
                     &mut self.io.core.http_status_exempt,
                     exempt.then_some(request),
@@ -2667,7 +2667,7 @@ impl<V: Venue> Engine<V> {
                 #[cfg(feature = "repair-mutations")]
                 self.end_repair_data(previous_data);
                 self.io.core.http_write_reply = None;
-                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+                #[cfg(feature = "http-plans")]
                 {
                     self.io.core.http_status_exempt = previous_exempt;
                 }

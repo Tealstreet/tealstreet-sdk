@@ -40,6 +40,10 @@ mod planned_calls {
         early_replayed: Option<Result<(), Error>>,
         early_result: Option<Result<(), Error>>,
         responses: usize,
+        status_probe: bool,
+        status_hook_calls: std::cell::Cell<usize>,
+        status_verdict: Option<crate::classify::Verdict>,
+        status_grant: bool,
         timers: usize,
         retired: usize,
         /// Issue the first leg in admission custody but never queue it.
@@ -319,6 +323,14 @@ mod planned_calls {
     }
     impl Venue for Plans {
         type Pending = Context;
+        fn status_exempt_refusal(&self, _: &Context, response: Response<'_>) -> bool {
+            if !self.status_probe {
+                return false;
+            }
+            self.status_hook_calls.set(self.status_hook_calls.get() + 1);
+            serde_json::from_str::<serde_json::Value>(response.body)
+                .is_ok_and(|value| value.get("code").and_then(|code| code.as_str()) == Some("400005"))
+        }
         fn start(&mut self, _: &mut Cx<'_, Context>) {}
         fn on_response(
             &mut self,
@@ -329,6 +341,31 @@ mod planned_calls {
             let plan = self.plan.as_ref().unwrap().clone();
             let slot = self.slot.as_ref().unwrap().clone();
             cx.validate_plan_delivery(&plan, &context).unwrap();
+            if self.status_probe {
+                use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
+                const TABLE: CodeTable = CodeTable {
+                    rows: &[Row {
+                        key: Key::Text("400005"),
+                        verdict: Verdict::RefusedResend(crate::ErrorKind::AuthInvalid),
+                        only: None,
+                    }],
+                    success: &[Key::Text("200000")],
+                    unlisted: Verdict::Unknown(None),
+                    status: &[],
+                };
+                let value: serde_json::Value = serde_json::from_str(response.body).unwrap();
+                let native = Native {
+                    code: NativeCode::Text(value["code"].as_str().unwrap()),
+                    message: "clock refused",
+                };
+                let (verdict, grant) = cx
+                    .http_write_failure(&context, &TABLE, Some(&native), "clock refused", None)
+                    .unwrap();
+                self.responses += 1;
+                self.status_verdict = Some(verdict);
+                self.status_grant = grant.is_some();
+                return;
+            }
             if let Some(expected) = self.expected_intents.pop_front() {
                 use crate::classify::{CodeTable, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict};
                 const TABLE: CodeTable = CodeTable {
@@ -813,6 +850,94 @@ mod planned_calls {
             engine.claim_http(now, permit),
             Ok(Claim::Released(_))
         ));
+    }
+    #[test]
+    fn complete_plan_status_exemption_needs_no_session_or_serial_plan() {
+        for status in [408, 500, 503, 599] {
+            let mut e = crate::test_support::seeded_engine(Plans {
+                write: true,
+                status_probe: true,
+                ..Default::default()
+            });
+            start(&mut e, 0.);
+            let (token, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, token, 0.);
+            let body = r#"{"code":"400005"}"#;
+            for _ in 0..2 {
+                e.handle(
+                    1.,
+                    Event::HttpResponse {
+                        request: token.attempt().request,
+                        response: Response {
+                            status,
+                            headers: "",
+                            body,
+                        },
+                    },
+                );
+            }
+            assert_eq!(
+                e.venue.responses, 1,
+                "one exact complete DATA delivery at {status}"
+            );
+            assert_eq!(e.venue.status_hook_calls.get(), 1);
+            assert_eq!(
+                e.venue.status_verdict,
+                Some(crate::classify::Verdict::RefusedResend(
+                    crate::ErrorKind::AuthInvalid
+                ))
+            );
+            assert!(e.venue.status_grant);
+            assert!(
+                e.io.core.request_contexts.has_plans(),
+                "classification does not seal the Plan"
+            );
+            assert!(!e.drain_actions().any(|a| matches!(
+                a,
+                Action::Http(_)
+                    | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
+            )));
+        }
+    }
+    #[test]
+    fn complete_plan_nonexempt_and_default_statuses_keep_strict_custody() {
+        for (probe, status, body, delivered, hooks) in [
+            (true, 503, r#"{"code":"400002"}"#, false, 1),
+            (true, 503, r#"{"code":"400005"} trailing"#, false, 1),
+            (true, 503, r#"{"code":"400005""#, false, 1),
+            (false, 503, r#"{"code":"400005"}"#, false, 0),
+            (true, 200, r#"{"code":"400005"}"#, true, 0),
+            (true, 401, r#"{"code":"400005"}"#, true, 0),
+        ] {
+            let mut e = crate::test_support::seeded_engine(Plans {
+                write: true,
+                status_probe: probe,
+                ..Default::default()
+            });
+            start(&mut e, 0.);
+            let (token, _) = prepared(&e.drain_actions().collect::<Vec<_>>());
+            release(&mut e, token, 0.);
+            e.handle(
+                1.,
+                Event::HttpResponse {
+                    request: token.attempt().request,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            assert_eq!(e.venue.responses, usize::from(delivered));
+            assert_eq!(e.venue.status_hook_calls.get(), hooks);
+            let actions: Vec<_> = e.drain_actions().collect();
+            if !delivered {
+                assert!(actions.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command: 7, error }) if error.outcome == Some(crate::Outcome::Unknown)
+            )), "unproven status still seals Unknown: {actions:?}");
+                assert!(!e.io.core.request_contexts.has_plans());
+            }
+        }
     }
     fn response(engine: &mut Engine<Plans>, token: Preparation, now: f64, body: &str) {
         engine.handle(

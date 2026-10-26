@@ -2005,9 +2005,9 @@ impl<P> Cx<'_, P> {
             body: "",
         };
         let delivery = self.current_write_delivery(context)?;
-        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        #[cfg(feature = "http-plans")]
         let status_exempt = self.io.core.http_status_exempt == Some(delivery.attempt.request);
-        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+        #[cfg(not(feature = "http-plans"))]
         let status_exempt = false;
         Ok(crate::classify::fact_for_delivery(
             table,

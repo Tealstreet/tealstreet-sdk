@@ -1551,7 +1551,7 @@ struct IoCore {
     http_write_reply: Option<(u16, String)>,
     #[cfg(feature = "repair-mutations")]
     repairs: repair_core::Repairs,
-    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    #[cfg(feature = "http-plans")]
     http_status_exempt: Option<RequestId>,
     // Reconcile reads the engine owes the venue, one per uncertain seal: the
     // symbols (`None` = all) and the earliest time to ask.
@@ -1693,7 +1693,7 @@ impl Default for IoCore {
             http_write_reply: None,
             #[cfg(feature = "repair-mutations")]
             repairs: Default::default(),
-            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            #[cfg(feature = "http-plans")]
             http_status_exempt: None,
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
