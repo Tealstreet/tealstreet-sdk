@@ -9933,3 +9933,9 @@ whose two lists committed cleanly. Crypto.com has no placement scope, so this
 fence engages only once the engine's Phase B marker records an Unknown placement
 without one. Until then `an_unknown_placement_fences_its_symbol_until_a_fresh_order_read`
 fails at the retry (admitted today) and blocks the opt-in from landing.
+
+ApeX opts in the same way. `reconcile_uncertain` owes one fresh open-orders
+read, starting it at once unless one is pending, and a read in flight when asked
+can no longer release. Release follows publication of a clean snapshot leg
+(rejected 0), on both the heal and the joint snapshot paths. Its control is the
+same-named test in `venues/apexomni/tests/trading.rs`, also pending Phase B.

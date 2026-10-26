@@ -145,6 +145,8 @@ struct Snapshot {
     positions: Option<Vec<Position>>,
     orders: Option<Vec<Order>>,
     metadata: Option<(String, String, String)>,
+    /// The orders leg was fresh and clean, so publishing it releases the uncertain fence.
+    orders_release: bool,
 }
 
 #[derive(Default)]
@@ -176,6 +178,10 @@ pub struct Account {
     balance_pending: bool,
     positions_pending: bool,
     orders_pending: bool,
+    /// An uncertain placement asked for an orders read dispatched after its mark.
+    reconcile_owed: bool,
+    /// The orders read in flight started after every such ask, so it may release the fence.
+    order_read_fresh: bool,
     snapshot: Option<Snapshot>,
     generation: u64,
     revision: u64,
@@ -754,6 +760,7 @@ impl ApexOmni {
             positions: None,
             orders: None,
             metadata: None,
+            orders_release: false,
         });
         self.request_positions(cx, Some(generation));
         self.request_orders(cx, Some(generation));
@@ -763,6 +770,13 @@ impl ApexOmni {
         if !self.account.positions_pending {
             self.request_positions(cx, None);
         }
+    }
+    /// Idempotent: the engine re-asks while a placement stays uncertain. A read already in
+    /// flight may predate the mark, so it can no longer release; one fresh read is owed.
+    pub(crate) fn reconcile_uncertain_placement(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.reconcile_owed = true;
+        self.account.order_read_fresh = false;
+        self.heal_orders(cx);
     }
     pub(crate) fn heal_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.account.orders_pending {
@@ -787,6 +801,7 @@ impl ApexOmni {
 
     fn request_orders(&mut self, cx: &mut Cx<'_, Pending>, generation: Option<u64>) {
         self.account.orders_pending = true;
+        self.account.order_read_fresh = std::mem::take(&mut self.account.reconcile_owed);
         let pending = Request::Orders {
             generation,
             revision: self.account.revision,
@@ -1030,6 +1045,9 @@ impl ApexOmni {
                     self.snapshot_failed(cx, generation, "invalid orders snapshot");
                     return;
                 }
+                // A clean read started after the mark releases the fence once published.
+                let release =
+                    rows.rejected() == 0 && std::mem::take(&mut self.account.order_read_fresh);
                 // Bracket children share their parent's identity.
                 let rows = rows.commit(cx.store.orders().iter().cloned(), |o| {
                     base_id(&o.id).to_owned()
@@ -1042,10 +1060,17 @@ impl ApexOmni {
                         .filter(|s| s.generation == generation)
                     {
                         snapshot.orders = Some(rows);
+                        snapshot.orders_release = release;
                     }
                     self.commit_snapshot(cx);
                 } else {
                     self.commit_orders(cx, rows, revision);
+                    if release {
+                        cx.orders_reconciled(None);
+                    }
+                }
+                if self.account.reconcile_owed {
+                    self.heal_orders(cx);
                 }
             }
             Request::Balance => {
@@ -1165,6 +1190,9 @@ impl ApexOmni {
             snapshot.revision,
         );
         self.commit_orders(cx, snapshot.orders.expect("orders"), snapshot.revision);
+        if snapshot.orders_release {
+            cx.orders_reconciled(None);
+        }
         if let Some((id, maker, taker)) = snapshot.metadata {
             self.account.account_id = id;
             self.account.maker_fee = maker;
