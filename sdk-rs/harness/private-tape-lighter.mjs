@@ -44,11 +44,19 @@ command({op:'setLeverage',symbol:'ETH',leverage:5});setting(2000,0,9);http('GET'
 command({op:'setMarginType',symbol:'ETH',isolated:true});setting(2000,1,10);http('GET','/api/v1/account?by=index&value=42',account(5,1),undefined,{afterCommand:4});
 command({op:'setPositionMode',hedged:false});
 command({op:'placeOrders',orders:[{symbol:'ETH',type:'limit',side:'buy',price:90,amount:0.25,stopLoss:80,takeProfit:120}]});
-write(14,orderInfo(9000,250),11);write(14,orderInfo(7920,250,2,0,1,1,8000),12);write(14,orderInfo(11880,250,4,0,1,1,12000),13);
-ws(1,{type:'update/account_all_orders',channel:'account_all_orders:42',orders:{1:[row(7002)]}});open([row(7002)],6,time);
-command({op:'amendOrder',id:'7002',price:95,amount:0.5});cancel(7002,14);write(14,orderInfo(9500,500),15);open([],7);
+// One create_grouped_orders (OTOCO): parent, then reduce-only IOC stop-loss and take-profit legs.
+const leg=({AccountIndex,ApiKeyIndex,Nonce,Sig,ExpiredAt,L2TxAttributes,...order})=>order;
+const {L2TxAttributes}=orderInfo(0,0);
+write(28,{AccountIndex:42,ApiKeyIndex:3,GroupingType:3,Orders:[leg(orderInfo(9000,250)),leg(orderInfo(7920,0,2,0,1,1,8000)),leg(orderInfo(11880,0,4,0,1,1,12000))],ExpiredAt:1,Sig:'placeholder',...(L2TxAttributes?{L2TxAttributes}:{})},11);records.at(-1).afterCommand=6;
+// The stream proves every leg by the client index this replay minted.
+const legs=[row(7002,{client_order_index:'<created:6:0>'}),row(7003,{client_order_index:'<created:6:1>',type:'stop-loss',is_ask:true,reduce_only:true,time_in_force:0,initial_base_amount:'0',remaining_base_amount:'0',price:'79.2',trigger_price:'80'}),row(7004,{client_order_index:'<created:6:2>',type:'take-profit',is_ask:true,reduce_only:true,time_in_force:0,initial_base_amount:'0',remaining_base_amount:'0',price:'118.8',trigger_price:'120'})];
+// Pushed once the grouped write is served, before its acknowledgement is consumed.
+ws(1,{type:'update/account_all_orders',channel:'account_all_orders:42',orders:{1:legs}});Object.assign(records.at(-1),{beforeAck:true,afterCommand:6});
+// The ordinary account update follows the command, as for any placement.
+ws(1,{type:'update/account_all_orders',channel:'account_all_orders:42',orders:{1:legs}});open(legs.map((r)=>({...r,client_order_index:Number(r.order_index)})),6);
+command({op:'amendOrder',id:'7002',price:95,amount:0.5});cancel(7002,12);write(14,orderInfo(9500,500),13);open(legs.slice(1).map((r)=>({...r,client_order_index:Number(r.order_index)})),7);
 command({op:'placeOrders',orders:[{symbol:'ETH',type:'limit',side:'buy',price:96,amount:0.25},{symbol:'ETH',type:'limit',side:'buy',price:97,amount:0.5}]});
-http('POST','/api/v1/sendTxBatch',{code:200,tx_hash:['offline-tx-16','offline-tx-17']},new URLSearchParams({tx_types:'[14,14]',tx_infos:JSON.stringify([JSON.stringify({...orderInfo(9600,250),Nonce:16}),JSON.stringify({...orderInfo(9700,500),Nonce:17})])}).toString());
+http('POST','/api/v1/sendTxBatch',{code:200,tx_hash:['offline-tx-14','offline-tx-15']},new URLSearchParams({tx_types:'[14,14]',tx_infos:JSON.stringify([JSON.stringify({...orderInfo(9600,250),Nonce:14}),JSON.stringify({...orderInfo(9700,500),Nonce:15})])}).toString());
 // The legacy array payload makes TS emit both a FILLED order and the execution.
 // Rust accepts the execution once; the independent gate oracle removes the TS duplicate.
 const filled=row(8001,{status:'filled',price:'100',initial_base_amount:'0.25',filled_base_amount:'0.25',remaining_base_amount:'0',updated_at:EPOCH+6500});

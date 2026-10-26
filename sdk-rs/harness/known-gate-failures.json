@@ -36491,7 +36491,7 @@
     },
     {
       "venue": "lighter",
-      "tapeSha256": "5e5f782963f6566aebf5e7227eb707946f6e614f9a9e811445b3fb421be97f36",
+      "tapeSha256": "d760332065998f88a7573908f19e23f150e13ad4e15f5a1b7262e95e808edb31",
       "tape": "sdk-rs/harness/tapes/lighter-testnet-private.jsonl",
       "diagnostics": [
         {
@@ -37350,7 +37350,7 @@
     },
     {
       "venue": "lighter",
-      "tapeSha256": "9db66394045c4d3d8774ee7451c9eeacd82797930e67a8d50e22b4cc30b97767",
+      "tapeSha256": "571163c7038b4a0e7af8d1bf868837f32dffb894e53aa494efdf9b9124f9fd66",
       "tape": "sdk-rs/harness/tapes/lighter-private.jsonl",
       "diagnostics": [
         {
@@ -37383,7 +37383,7 @@
     },
     {
       "venue": "lighter-robinhood",
-      "tapeSha256": "173e43cc71f0c6b317a6001ababf920307df3e46da9e6f5e412e3fa7505fb9e0",
+      "tapeSha256": "9551e40e52319361392bf8634ff47b4a2dc5f1164edcfb1115dad7681d9720cc",
       "tape": "sdk-rs/harness/tapes/lighter-robinhood-private.jsonl",
       "diagnostics": [
         {
@@ -37416,7 +37416,7 @@
     },
     {
       "venue": "lighter-robinhood",
-      "tapeSha256": "4850485f3abcc1e1bb126a9c7d6c36bea528be3c42115dab187d3f98f0eeee10",
+      "tapeSha256": "d53b7425944c0284d7d2bc37a9b27a95fce949ad35b0a4ae0576b60251068f8f",
       "tape": "sdk-rs/harness/tapes/lighter-testnet-private.jsonl",
       "diagnostics": [
         {

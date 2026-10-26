@@ -1,6 +1,8 @@
 //! Goldilocks Poseidon2 and ECgFp5 Schnorr, bound to checked-in Go-WASM vectors.
 use goldilocks_crypto::{Point, ScalarField};
-use poseidon_hash::{Goldilocks, hash_to_quintic_extension};
+use poseidon_hash::{
+    Goldilocks, hash_n_to_one, hash_no_pad, hash_out_to_bytes_le, hash_to_quintic_extension,
+};
 use zeroize::Zeroize;
 
 fn words(input: &[u8]) -> Result<Vec<Goldilocks>, String> {
@@ -36,6 +38,17 @@ pub fn canonical_scalar(key: &[u8]) -> Result<bool, String> {
 /// Poseidon2 hash to the quintic extension used by Schnorr.
 pub fn poseidon2_hash_fp5(input: &[u8]) -> Result<[u8; 40], String> {
     Ok(hash_to_quintic_extension(&words(input)?).to_bytes_le())
+}
+/// Grouped-order commitment (create_grouped_orders): each order's ten words
+/// hashed without padding, then folded left to one hash, as Go's `HashNToOne`.
+pub fn grouped_orders_digest(orders: &[u8]) -> Result<[u8; 32], String> {
+    const ORDER_BYTES: usize = 10 * 8;
+    if orders.is_empty() || !orders.len().is_multiple_of(ORDER_BYTES) {
+        return Err("grouped orders must be whole ten-word orders".into());
+    }
+    let words = words(orders)?;
+    let hashes: Vec<_> = words.chunks(10).map(hash_no_pad).collect();
+    Ok(hash_out_to_bytes_le(hash_n_to_one(&hashes)))
 }
 /// Derive the compressed public key, including Go's scalar reduction semantics.
 pub fn public_key(key: &[u8]) -> Result<[u8; 40], String> {

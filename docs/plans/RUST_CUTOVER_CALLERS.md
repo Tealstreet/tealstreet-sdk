@@ -10094,6 +10094,22 @@ the fence standing. This slice adds no venue retry loop or write resend.
 Multi-DEX reads release symbol-scoped marks only; an unknown-ID amend is refused
 NotSent before dispatch and cannot create an all-symbol mark on this venue.
 
+### Lighter grouped limit entry with TP/SL
+
+A Lighter limit order with `stopLoss`/`takeProfit` is now one grouped
+transaction (OTO or OTOCO), as in TS d94e9d744f1, so the protections no longer
+rest without a position. What callers see:
+- `placeOrders` completes only after the account stream (or a complete orders
+  snapshot) shows the parent and every protective leg, with the ids parent
+  first. Within the provisional 10 s bound this looks like ordinary placement.
+- If proof does not arrive in time, or the private stream drops, the command
+  fails Unknown carrying every accepted id; check open orders before retrying.
+  It is never resent. The next orders snapshot shows what actually landed.
+- A parent large enough to split into several native lots, or an invalid
+  trigger, is refused NotSent before anything is sent.
+- Cancelling or amending a leg of a group that is still being confirmed is
+  refused NotSent until the placement command finishes.
+
 ### Lighter: an Unknown placement fences its symbol
 
 Lighter opts into `guard_pending_placements` and `fence_uncertain_placements`.

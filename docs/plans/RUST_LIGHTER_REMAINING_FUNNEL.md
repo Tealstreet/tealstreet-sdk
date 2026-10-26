@@ -390,3 +390,39 @@ family also enabled registry dispatch without forwarding the WASM host feature.
 The correction preserves those assertion bodies and adds registry controls;
 the host and registry now use the same dispatch path. The historical plan
 reviewer-prose secret-scan match is exempted by its exact commit/path/rule/line.
+
+## Grouped limit entry with TP/SL
+
+TS master d94e9d744f1 parity. A non-reduce-only limit with a stop loss and/or
+take profit is one `create_grouped_orders` transaction (tx type 28): OTO
+(grouping 1) with one child, OTOCO (grouping 3) with both, in the order parent,
+stop loss, take profit. Children are the opposite side, native amount 0,
+reduce-only, IOC, type 2/4, with the trigger and execution guard price that
+conditional orders use. One nonce, one `sendTx`. A parent that would split into
+several native lots, or an invalid trigger, is refused NotSent before any
+request. Market entries keep their separate protective transactions.
+
+- Proof (ruling (c)): an acknowledgement is not Done. Every leg must be seen by
+  its own `client_order_index` in the private stream or an active-orders
+  snapshot row; any status counts as existence. A row's native order index is
+  never compared with our minted indexes (the two share the u64 space). Counts
+  or partial sightings never release. After the last step the
+  Plan parks in `serial_plan_settle_wait` (engine #2274), released by that
+  proof, and the ready handler always ends the Plan: `done_plan` with every id,
+  parent first, or Unknown.
+- Bound: `GROUP_PROOF_BOUND_MS` = 10 s, provisional. No Lighter private tape
+  records the ACK-to-stream gap; it equals the reduce-only position wait and is
+  to be refined from the credentialed live smoke.
+- Failure: bound expiry, or the private stream closing while a group is
+  pending, gives `inherit_plan_uncertainty` then Unknown with every accepted
+  id. Nothing is replayed. A grouped submit answered 408, 5xx or 21104 is
+  Unknown and is never resent (the single-transaction 21104 reseed does not
+  apply to groups).
+- Reconciliation: an Unknown group schedules the engine's reconcile read
+  (`reconcile_uncertain` refreshes account and active orders); the next
+  complete snapshot replaces the store with the venue's truth, so a missing leg
+  stays missing and never becomes Done.
+- Lock: while the job is unfinished, a cancel, amend or cancel-all naming any
+  group leg is refused NotSent ("awaiting confirmation of its grouped
+  placement") before the job queue; the parent is held for the whole Plan.
+

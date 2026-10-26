@@ -58,6 +58,9 @@ export const decodeLighterTransactions = (body) => {
   }
   return [{ type: Number(form.get('tx_type')), info: parseRequestJson(form.get('tx_info')) }];
 };
+// Client order indexes a write creates: one per order, grouped orders included.
+const createdIds = (type, info) => type === 14 ? [String(info.ClientOrderIndex)]
+  : type === 28 && Array.isArray(info.Orders) ? info.Orders.map((order) => String(order.ClientOrderIndex)) : [];
 export function createLighterVerifier(options, oracle = crypto, exchangeName = 'lighter') {
   if (!oracle) throw new Error('Initialize the independent Lighter oracle first');
   const account = String(options.applicationId);
@@ -85,6 +88,14 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
     if (type === 14) {
       preimage += orderWords(info, now);
       ids = [String(info.ClientOrderIndex)];
+    } else if (type === 28) {
+      // create_grouped_orders: GroupingType, then Go's HashNToOne over each order's HashNoPad.
+      const grouping = Number(integer(info.GroupingType, 3n));
+      const count = grouping === 3 ? 3 : grouping === 1 || grouping === 2 ? 2 : 0;
+      if (!Array.isArray(info.Orders) || !count || info.Orders.length !== count) return false;
+      const hashes = info.Orders.map((order) => result(oracle.poseidon2Hash(orderWords(order, now))));
+      preimage += words(grouping) + hashes.slice(1).reduce((digest, hash) => result(oracle.poseidon2HashTwoToOne(digest, hash)), hashes[0]);
+      ids = info.Orders.map((order) => String(order.ClientOrderIndex));
     } else if (type === 15) {
       integer(info.MarketIndex,32767n);
       if (info.MarketIndex === 255) return false;
@@ -98,7 +109,7 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
     } else return false;
     if (new Set(ids).size !== ids.length || ids.some((id) => generated.has(id))) return false;
     if (info.L2TxAttributes !== undefined) {
-      if (type !== 14) return false;
+      if (type !== 14 && type !== 28) return false;
       const attrs = info.L2TxAttributes;
       if (!attrs || Object.keys(attrs).sort().join(',') !== '1,2,3') return false;
       for (const value of Object.values(attrs)) integer(value);
@@ -125,7 +136,7 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
         if (privateRead && !tokens.length) return false;
         if (!/\/sendTx(?:Batch)?$/.test(parsed.pathname)) return method === 'GET';
         const transactions = decodeLighterTransactions(body);
-        const ids = transactions.filter(({type}) => type === 14).map(({info}) => String(info.ClientOrderIndex));
+        const ids = transactions.flatMap(({type,info}) => createdIds(type,info));
         return method === 'POST' && new Set(ids).size === ids.length
           && transactions.every((tx) => verifyTransaction(tx,now));
       } catch { return false; }
@@ -145,7 +156,7 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
         : Array.isArray(hashes) && hashes.length === transactions.length && hashes.every((hash) => typeof hash === 'string' && hash.length > 0);
       if (!valid) return;
       for (const {type,info} of transactions) {
-        const ids = type === 14 ? [info.ClientOrderIndex] : [];
+        const ids = createdIds(type,info);
         for (const id of ids) {
           if (generated.has(String(id))) throw new Error('Lighter generated order index reused');
           generated.add(String(id));
@@ -154,6 +165,14 @@ export function createLighterVerifier(options, oracle = crypto, exchangeName = '
           commandIds.set(commandIndex, created);
         }
       }
+    },
+    // A tape frame may quote an index this replay created: "<created:command:order>".
+    echoCreated(text) {
+      return text.replace(/"<created:(\d+):(\d+)>"/g, (_, command, order) => {
+        const id = commandIds.get(Number(command))?.[Number(order)];
+        if (id === undefined) throw new Error(`Lighter tape quotes order ${order} that command ${command} never created`);
+        return JSON.stringify(id);
+      });
     },
     commandResult(result, command, commandIndex=1) {
       if (!['placeOrders','amendOrder'].includes(command?.op) || !result?.ok) return result;
