@@ -538,6 +538,9 @@ impl Venue for Kraken {
     fn guard_pending_placements(&self) -> bool {
         true
     }
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_orders(cx);
     }
