@@ -39,12 +39,22 @@ An address proves no account permission, role, Session or transport authority.
 | --- | --- | --- | --- | --- |
 | Existing KRAKEN | Existing tagged stable-id key | RawMs x1000 | u64::MAX | Existing Spot/Futures contract, unchanged |
 | Existing HYPERLIQUID_AGENT | Verified actual agent's 20 address bytes | RawMs x1 | 2^53-1 | Same agent across engines, vaults, networks and TxFlow in one process/WASM memory |
-| Proposed ASTERDEX_V3 | Verified actual signing agent's 20 address bytes | ProtocolMs x1000 | u64::MAX | Same signer across user/account aliases; native network-sharing disposition confirmed by consumer before source |
+| Proposed ASTERDEX_V3 | Verified actual signing agent's 20 address bytes | ProtocolMs x1000 | u64::MAX | Same actual signer across users, engines and networks in one process/WASM memory |
 
-The Aster policy follows its actual `interim_nonce`/`next_nonce` and signer
-admission plan; consumer review must confirm its limit and network sharing.
+The Aster consumer confirmed this clock/limit and native process-local sharing
+against actual `interim_nonce`/`next_nonce`. Use the same dispatcher-calibrated
+protocol observation: `stamp_ms()` floors DispatchContext.now_ms, and the nonce
+floor is that integer stamp multiplied by1000 with checked u64 arithmetic.
+Preserve its overflow refusal through the consumer's SignError::Unavailable
+projection. ProtocolMs must never silently become RawMs for this consumer.
 Keep Aster V1 HMAC claim-free. Do not require a public-address operation for an
 HMAC identity or change its construction/refusal behavior.
+
+With Aster's auth wallet, trusted setup aliases the read slot to the primary's
+signing ref and signer address; both selected slots must share one sequence.
+Without that wallet, independently configured read agents use their own exact
+address/ref pairs. Each slot still passes the same engine-owned address binding
+operation; configuration text alone cannot install a verified subject.
 
 Canonicalize a validated address to exactly20 bytes. Spellings allowed at the
 consumer's existing input boundary must identify the same bytes; there is no
@@ -177,9 +187,15 @@ binding and cumulative maximum8 nonce repairs; no budget renewal or extra Plan
 credit. Old preparation/permit/provider output is inert. A release-domain FIFO
 head keeps its place during reprepare; this seam adds no ordering scheduler.
 
-Release and wire use the same exact u64 nonce and canonical decimal-string
-SignReceipt.nonce. Hyperliquid's safe-number wire bound remains enforced;
-Aster values above2^53 stay exact decimal/u64 values. No rounding through f64,
+The new INTERNAL SignReceipt.nonce records the reserved u64 as a canonical
+decimal string for provider/dispatcher validation. This is not a new field or
+encoding on either venue's native protocol. Aster retains decimal digits in
+its query and the same32-byte big-endian nonce word in its EIP-191/712 preimage;
+its current native recipe has no nonce receipt. Hyperliquid retains its native
+JSON safe-integer nonce and u64 big-endian action-hash bytes. Release, receipt
+and the native preimage/wire must describe the same exact reserved value.
+Hyperliquid's safe-number bound remains enforced; Aster values above2^53 stay
+exact decimal/u64 values. No rounding through f64,
 new receipt schema, blind digest, provider-selected nonce, physical retry or
 automatic replay of a possibly-sent mutation is introduced.
 
@@ -190,14 +206,25 @@ interim allocator. Only consumer-owned source cutovers remove those callers.
 Sharing Hyperliquid's existing key preserves reserved high-water; it does not
 make old unfenced prepared/sent work obey the new released-floor fence.
 
-Aster additionally moves a separate per-signer map. Source/activation needs an
-explicit consumer-reviewed continuity disposition for its existing reserved
-high-water, rollback clocks and owned outstanding work. No second empty counter,
-wall-clock assumption, alias or public numeric seed proves takeover. Identify
-and retire/fence owned legacy work at the owning boundary before claiming a
-complete cutover; any required drain/import authority is separately reviewed,
-not fabricated by this subject carrier. Preserve both maxima already present
-in the target. Arbitrary external issuers remain the disclosed native exposure.
+Aster additionally moves a separate, unpersisted per-signer map. Its consumer
+deletes that allocator in the same build that adopts the engine domain. This
+code cutover must not be described as a floor-based continuity proof: at
+protocol stamp100, legacy reservations100000 and100001 followed by a fresh
+counter at the same stamp repeat100000. Fixed or regressing clocks and bursts
+make the same issue explicit. Address normalization also intentionally merges
+old differently cased signer-string namespaces; it cannot reset a live maximum.
+
+There is no new cross-restart persistence promise. A complete cold process or
+WASM-memory replacement with no surviving owned issuer/prepared local work may
+retain native's unpersisted-reset boundary; it does not need an invented numeric
+seed or import. The consumer must identify that actual activation boundary.
+If live old/new state or owned work survives within a handoff, its continuity
+and retirement/fence disposition remain source/adoption gates. Deleting a map
+in a new build alone proves neither retirement nor clock dominance. Preserve
+both maxima already present in the target. Any required drain/import authority
+is separately reviewed, not fabricated by this subject carrier. A released or
+possibly-sent mutation is never replayed, and no remote nonexecution proof is
+inferred. Arbitrary external issuers remain the disclosed native exposure.
 
 ## Required originals and source gates
 
