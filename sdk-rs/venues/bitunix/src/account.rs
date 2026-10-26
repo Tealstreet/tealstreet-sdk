@@ -1366,13 +1366,11 @@ impl BitunixFutures {
             self.debounce(cx, Axis::Orders);
             return;
         }
-        // Both complete Primary snapshots postdate the uncertain write.
-        // Each clean owed snapshot reports; the engine's epoch rule releases
-        // only marks that predate it. The debt clears at its own serial.
-        if reconcile && !partial {
-            if self.account.owed[slot].is_some_and(|owed| serial >= owed) {
-                self.account.owed[slot] = None;
-            }
+        // A slot counts only when its own clean snapshot pays the debt: the
+        // engine judges freshness by the last response alone, so a joined
+        // census older than the latest request must never complete a release.
+        if reconcile && !partial && self.account.owed[slot].is_some_and(|owed| serial >= owed) {
+            self.account.owed[slot] = None;
             self.account.reconciled[slot] = true;
             if self.account.reconciled == [true, true] {
                 self.account.reconciled = [false, false];

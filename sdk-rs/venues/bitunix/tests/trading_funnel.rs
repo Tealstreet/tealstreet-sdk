@@ -883,3 +883,273 @@ fn a_second_seal_joins_the_owed_census_and_a_later_one_pays_it() {
         "ETH released"
     );
 }
+
+/// dazzy3's composite-release hazard: a release needs both slots, and the
+/// engine judges freshness by the last response only. A TP/SL census joined
+/// before the second mark must not count for it, even when it commits clean.
+#[test]
+fn a_joined_pre_mark_census_never_counts_toward_a_later_release() {
+    let pairs = PAIRS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","base":"ETH","quote":"USDT","symbolStatus":"OPEN","basePrecision":2,"quotePrecision":2,"maxLimitOrderVolume":"1000"}]}"#,
+    );
+    let tickers = TICKERS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","last":"3000","open":"2900","markPrice":"3001","baseVol":"10","quoteVol":"30000"}]}"#,
+    );
+    let (mut e, _) = startup_serving(
+        engine(Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Options::default()
+        }),
+        &pairs,
+        &tickers,
+    );
+    let place = |command: u32, symbol: &str, price: f64| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol": symbol, "type": "limit", "side": "buy", "price": price, "amount": 1.0,
+            }))
+            .unwrap(),
+        ],
+    };
+    let reads = |actions: &[Action], tpsl: bool| -> Vec<HttpRequest> {
+        http(actions)
+            .into_iter()
+            .filter(|r| r.url.ends_with("get_pending_orders") && r.url.contains("/tpsl/") == tpsl)
+            .collect()
+    };
+    let lose = |e: &mut TestEngine,
+                log: &mut Vec<Action>,
+                command: u32,
+                symbol: &str,
+                price: f64,
+                at: f64| {
+        e.handle(at, Event::Command(place(command, symbol, price)));
+        let placed = prepared(e, at);
+        let write = post(&http(&placed), "place_order").expect("the placement");
+        log.extend(placed);
+        e.handle(
+            at + 10.0,
+            Event::HttpFailed {
+                request: write.id,
+                error: "lost placement ACK",
+            },
+        );
+        let sealed = prepared(e, at + 10.0);
+        log.extend(sealed.iter().cloned());
+        sealed
+    };
+    let fenced = |e: &mut TestEngine, log: &mut Vec<Action>, command: u32, at: f64| {
+        e.handle(at, Event::Command(place(command, "ETHUSDT", 2900.0)));
+        let out = prepared(e, at);
+        let refused = writes_of(&out, "place_order") == 0;
+        log.extend(out);
+        refused
+    };
+    let respond = |e: &mut TestEngine, log: &mut Vec<Action>, request: &HttpRequest, at: f64| {
+        let body = if request.url.contains("/tpsl/") {
+            TPSL
+        } else {
+            ORDERS
+        };
+        log.extend(answer(e, at, request, body));
+    };
+    let mut log = Vec::new();
+
+    // Mark 1 (BTC): regular A and TP/SL B are owed and issued.
+    let sealed = lose(&mut e, &mut log, 401, "BTCUSDT", 90000.0, 1000.0);
+    let (a, b) = (reads(&sealed, false), reads(&sealed, true));
+    assert_eq!((a.len(), b.len()), (1, 1));
+    // A commits clean before the second mark.
+    respond(&mut e, &mut log, &a[0], 1100.0);
+    // Mark 2 (ETH): a fresh regular C; the owed TP/SL B in flight is joined.
+    let sealed = lose(&mut e, &mut log, 402, "ETHUSDT", 2900.0, 1200.0);
+    let c = reads(&sealed, false);
+    assert_eq!(c.len(), 1, "a fresh regular census after mark 2");
+    assert!(
+        reads(&sealed, true).is_empty(),
+        "B is joined, not superseded"
+    );
+    // B (pre-mark-2) answers clean, then C: B must not complete the release.
+    respond(&mut e, &mut log, &b[0], 1300.0);
+    respond(&mut e, &mut log, &c[0], 1400.0);
+    assert!(
+        fenced(&mut e, &mut log, 403, 1500.0),
+        "mark 2's TP/SL census has not completed"
+    );
+    // Control: due timers send the TP/SL census owed to mark 2; it releases ETH.
+    let mut fired = std::collections::HashSet::new();
+    let mut d = Vec::new();
+    while d.is_empty() {
+        let cleared: std::collections::HashSet<_> = log
+            .iter()
+            .filter_map(|a| match a {
+                Action::ClearTimer { timer } => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        let (timer, at) = log
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms }
+                    if !cleared.contains(timer) && !fired.contains(timer) =>
+                {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .min_by(|x, y| x.1.total_cmp(&y.1))
+            .expect("mark 2's TP/SL census is scheduled");
+        fired.insert(timer);
+        e.handle(at.max(1500.0), Event::TimerFired { timer });
+        let out = prepared(&mut e, at.max(1500.0));
+        d = reads(&out, true);
+        for request in reads(&out, false) {
+            respond(&mut e, &mut log, &request, at.max(1500.0) + 50.0);
+        }
+        log.extend(out);
+    }
+    respond(&mut e, &mut log, &d[0], 5000.0);
+    assert!(
+        !fenced(&mut e, &mut log, 404, 5100.0),
+        "mark 2's own census releases ETH"
+    );
+}
+
+/// dazzy3's corrected interleaving: TP/SL B commits before mark 2, regular A
+/// is joined across mark 2 and answers after it; mark 2's fresh TP/SL D must
+/// not release with A standing in for mark 2's regular census C.
+#[test]
+fn a_joined_pre_mark_regular_census_never_counts_toward_a_later_release() {
+    let pairs = PAIRS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","base":"ETH","quote":"USDT","symbolStatus":"OPEN","basePrecision":2,"quotePrecision":2,"maxLimitOrderVolume":"1000"}]}"#,
+    );
+    let tickers = TICKERS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","last":"3000","open":"2900","markPrice":"3001","baseVol":"10","quoteVol":"30000"}]}"#,
+    );
+    let (mut e, _) = startup_serving(
+        engine(Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Options::default()
+        }),
+        &pairs,
+        &tickers,
+    );
+    let place = |command: u32, symbol: &str, price: f64| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol": symbol, "type": "limit", "side": "buy", "price": price, "amount": 1.0,
+            }))
+            .unwrap(),
+        ],
+    };
+    let reads = |actions: &[Action], tpsl: bool| -> Vec<HttpRequest> {
+        http(actions)
+            .into_iter()
+            .filter(|r| r.url.ends_with("get_pending_orders") && r.url.contains("/tpsl/") == tpsl)
+            .collect()
+    };
+    let lose = |e: &mut TestEngine,
+                log: &mut Vec<Action>,
+                command: u32,
+                symbol: &str,
+                price: f64,
+                at: f64| {
+        e.handle(at, Event::Command(place(command, symbol, price)));
+        let placed = prepared(e, at);
+        let write = post(&http(&placed), "place_order").expect("the placement");
+        log.extend(placed);
+        e.handle(
+            at + 10.0,
+            Event::HttpFailed {
+                request: write.id,
+                error: "lost placement ACK",
+            },
+        );
+        let sealed = prepared(e, at + 10.0);
+        log.extend(sealed.iter().cloned());
+        sealed
+    };
+    let fenced = |e: &mut TestEngine, log: &mut Vec<Action>, command: u32, at: f64| {
+        e.handle(at, Event::Command(place(command, "ETHUSDT", 2900.0)));
+        let out = prepared(e, at);
+        let refused = writes_of(&out, "place_order") == 0;
+        log.extend(out);
+        refused
+    };
+    let respond = |e: &mut TestEngine, log: &mut Vec<Action>, request: &HttpRequest, at: f64| {
+        let body = if request.url.contains("/tpsl/") {
+            TPSL
+        } else {
+            ORDERS
+        };
+        log.extend(answer(e, at, request, body));
+    };
+    let mut log = Vec::new();
+
+    // Mark 1 (BTC): regular A and TP/SL B are owed and issued.
+    let sealed = lose(&mut e, &mut log, 401, "BTCUSDT", 90000.0, 1000.0);
+    let (a, b) = (reads(&sealed, false), reads(&sealed, true));
+    assert_eq!((a.len(), b.len()), (1, 1));
+    // B commits clean before the second mark.
+    respond(&mut e, &mut log, &b[0], 1100.0);
+    // Mark 2 (ETH): a fresh TP/SL D; the owed regular A in flight is joined.
+    let sealed = lose(&mut e, &mut log, 402, "ETHUSDT", 2900.0, 1200.0);
+    let dd = reads(&sealed, true);
+    assert_eq!(dd.len(), 1, "a fresh TP/SL census after mark 2");
+    assert!(
+        reads(&sealed, false).is_empty(),
+        "A is joined, not superseded"
+    );
+    // A (pre-mark-2) answers clean, then D: A must not stand in for C.
+    respond(&mut e, &mut log, &a[0], 1300.0);
+    respond(&mut e, &mut log, &dd[0], 1400.0);
+    assert!(
+        fenced(&mut e, &mut log, 403, 1500.0),
+        "mark 2's regular census has not completed"
+    );
+    // Control: due timers send the TP/SL census owed to mark 2; it releases ETH.
+    let mut fired = std::collections::HashSet::new();
+    let mut d = Vec::new();
+    while d.is_empty() {
+        let cleared: std::collections::HashSet<_> = log
+            .iter()
+            .filter_map(|a| match a {
+                Action::ClearTimer { timer } => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        let (timer, at) = log
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms }
+                    if !cleared.contains(timer) && !fired.contains(timer) =>
+                {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .min_by(|x, y| x.1.total_cmp(&y.1))
+            .expect("mark 2's regular census is scheduled");
+        fired.insert(timer);
+        e.handle(at.max(1500.0), Event::TimerFired { timer });
+        let out = prepared(&mut e, at.max(1500.0));
+        d = reads(&out, false);
+        for request in reads(&out, true) {
+            respond(&mut e, &mut log, &request, at.max(1500.0) + 50.0);
+        }
+        log.extend(out);
+    }
+    respond(&mut e, &mut log, &d[0], 5000.0);
+    assert!(
+        !fenced(&mut e, &mut log, 404, 5100.0),
+        "mark 2's own census releases ETH"
+    );
+}
