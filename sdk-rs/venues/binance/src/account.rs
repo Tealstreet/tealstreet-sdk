@@ -167,6 +167,8 @@ pub struct AccountState {
     orders: Option<OrdersJoin>,
     orders_refresh_timer: Option<TimerId>,
     orders_stale: bool,
+    /// A reconcile asked while a snapshot was in flight: read again once it settles.
+    orders_owed: bool,
     last_orders_retry_at: f64,
     logged_balance: bool,
     wallet_assets: Option<Vec<WalletAsset>>,
@@ -447,6 +449,16 @@ impl BinanceFutures {
                 version: self.account.account_version,
             }),
         );
+    }
+
+    /// Fresh open-orders read after an uncertain placement. Joins an in-flight
+    /// snapshot by owing a new one behind it, since that read predates the mark.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.orders.is_some() {
+            self.account.orders_owed = true;
+        } else {
+            self.fetch_orders(cx);
+        }
     }
 
     pub(crate) fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1336,6 +1348,13 @@ impl BinanceFutures {
             return;
         }
         let join = self.account.orders.take().expect("checked above");
+        self.settle_orders(cx, join);
+        if std::mem::take(&mut self.account.orders_owed) {
+            self.fetch_orders(cx);
+        }
+    }
+
+    fn settle_orders(&mut self, cx: &mut Cx<'_, Pending>, join: OrdersJoin) {
         if join.failed {
             self.account.orders_stale = true;
             return;
@@ -1409,6 +1428,7 @@ impl BinanceFutures {
                 return;
             }
         }
+        let clean = join.skipped.rejected() == 0;
         if !cx
             .store
             .commit_orders_snapshot([join.token], |current_rows| {
@@ -1473,6 +1493,9 @@ impl BinanceFutures {
         {
             self.account.orders_stale = true;
             self.schedule_orders_refresh(cx);
+        } else if clean {
+            // Published and fully mapped: this read may resolve an uncertain placement.
+            cx.orders_reconciled(None);
         }
     }
 

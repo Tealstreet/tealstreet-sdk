@@ -9936,3 +9936,23 @@ until its opt-in) from managed, single-Context and legacy `cx.request` writes,
 and amend roots whose replacement places (zs5e83's audits,
 /tmp/codex-beta-plan-fence-audit/report.md and followup.md). Paradex's
 venue-local same-ID amend fence stays as is.
+
+### Binance: an Unknown placement fences its symbol
+
+All four Binance products (USD-M, Portfolio Margin, Spot, COIN-M) opt into
+`fence_uncertain_placements` and link the engine `order-locks` feature. After a
+placement whose outcome is Unknown (a lost or 5xx order POST), on that symbol:
+- `placeOrders` and `amendOrder` fail NotSent with "Placement outcome is
+  uncertain; reconcile before placing or amending" and send nothing;
+- cancelling a known order by id is still admitted;
+- `cancelSymbolOrders` keeps the engine default `fence_uncertain_cancel_all`:
+  it is refused until reconcile. Binance's cancel-all is a native per-symbol
+  DELETE, but opting out would oblige the venue to cancel a late-landing order
+  itself once its fresh read proves it, which Binance does not do.
+The Unknown starts a fresh open-orders read at once (regular plus the variant's
+algo or conditional orders). The fence clears on the first clean, complete
+snapshot requested after the write: a snapshot already in flight when the write
+went out (another is owed behind it), a failed read, or one with an unmappable
+row does not clear it. Binance writes are single managed Contexts with no
+placement scope, so the mark comes from the Unknown write fact itself (engine
+Phase B); until Phase B lands the fence does not engage for Binance.
