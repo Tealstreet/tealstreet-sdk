@@ -1,11 +1,11 @@
 # Lighter remaining request and signing funnel
 
-Status: local venue source with reviewed originals; source qualification and review pending.
+Status: source CLEAR from claude-dazzy3; composed qualification in progress.
 The source stack consumes recipe PR #2204 and principal PR #2208; neither is duplicated.
 Original RED/GREEN baseline: unchanged fff73624e8578c623a41875b3946d0c665f561af.
 Owner: codex-ih35js. One venue PR will contain this plan, original regressions
-and the source. Reviewer: claude-dazzy3 or claude-55ao7t. The overseer confirms sole venue ownership; codex-zs5e83’s old lane is inactive.
-claude-m26ps4 retains recipe/provider ownership. Historical plans are evidence, not clearance for this cutover.
+and the source. Venue reviewer: claude-dazzy3. Credential reviewer:
+claude-m26ps4. The recipe/provider prerequisite is consumed unchanged.
 
 ## Outcome and boundary
 
@@ -344,9 +344,11 @@ refusal, and public L1 extraction before credential stripping. Longer hex materi
 is never copied as a truncated address. Raw injected public lookup metadata must
 be exactly an address.
 
-Local qualification so far: 27 history, 18 funnel and 37 trading controls pass.
-Full scoped native, registry, JS setup, strict lint, inventories, replay and
-shipping size qualification remain required on the frozen composed source.
+The reviewed source passes 320 native tests with none ignored, strict all-target
+Clippy and fmt. The retirement FIFO control is assertion RED when only its two
+settlement hooks are removed, then GREEN when restored. The composed tree still
+requires its registry, bridge, inventory, replay and shipping-size qualification
+before READY; the PR records the exact heads and receipts.
 
 The request map retains three unchanged opaque observations: trading's
 0bc3151ddc1e8889eb3a752d5431f3ab5643750a38409c18c5e239d38dcfc4b2
