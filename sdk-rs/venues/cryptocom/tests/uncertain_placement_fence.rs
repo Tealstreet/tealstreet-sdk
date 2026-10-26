@@ -126,3 +126,58 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
         "the retry places once released"
     );
 }
+
+#[test]
+fn engine_re_asks_join_the_fresh_read_in_flight_and_its_clean_answer_releases() {
+    let mut h = Harness::new();
+    h.load();
+    place(&mut h, 1, "first");
+    advance(&mut h, 50.0);
+    let write = h.http("private/create-order");
+    h.event(Event::HttpFailed {
+        request: write.id,
+        error: "response lost after acceptance",
+    });
+    advance(&mut h, 50.0);
+    h.failures.clear();
+
+    // The seal's ask starts one fresh account cycle; its orders read stays unanswered.
+    h.reply("get-positions", EMPTY);
+    h.reply("user-balance", BALANCE);
+    let fresh = h.http("private/get-open-orders");
+
+    // The engine re-asks at +1, +2 and +4 s: each joins the read in flight.
+    for (i, wait) in [1_100.0, 2_100.0, 4_100.0].into_iter().enumerate() {
+        advance(&mut h, wait);
+        assert!(
+            !sent(&h, "get-positions"),
+            "re-ask {i} must not start another account read"
+        );
+        assert!(
+            !sent(&h, "private/get-open-orders"),
+            "re-ask {i} must not replace the fresh read"
+        );
+        place(&mut h, 10 + i as u32, "held-retry");
+        advance(&mut h, 50.0);
+        assert!(
+            refused_uncertain(&h),
+            "the retry stays refused while the fresh read is held"
+        );
+        assert!(!sent(&h, "private/create-order"));
+        h.failures.clear();
+    }
+
+    // The original fresh read answers clean: it releases, and the retry places.
+    h.respond(&fresh, EMPTY);
+    h.reply("advanced/get-open-orders", EMPTY);
+    place(&mut h, 20, "released-retry");
+    advance(&mut h, 50.0);
+    assert!(
+        !refused_uncertain(&h),
+        "the held fresh read releases the fence"
+    );
+    assert!(
+        sent(&h, "private/create-order"),
+        "the retry places once released"
+    );
+}

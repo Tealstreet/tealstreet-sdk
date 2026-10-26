@@ -1080,6 +1080,7 @@ impl ApexOmni {
         delivery: Request,
         error: VenueError,
     ) {
+        self.note_write_settled();
         let _ = cx.fail_plan(&delivery.plan, error);
     }
 
@@ -1170,6 +1171,7 @@ impl ApexOmni {
         delivery: Request,
         response: Response<'_>,
     ) {
+        self.note_write_settled();
         if cx
             .validate_plan_delivery(&delivery.plan, &delivery.context)
             .is_err()

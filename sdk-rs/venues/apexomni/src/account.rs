@@ -145,8 +145,6 @@ struct Snapshot {
     positions: Option<Vec<Position>>,
     orders: Option<Vec<Order>>,
     metadata: Option<(String, String, String)>,
-    /// The orders leg was fresh and clean, so publishing it releases the uncertain fence.
-    orders_release: bool,
 }
 
 #[derive(Default)]
@@ -182,6 +180,10 @@ pub struct Account {
     reconcile_owed: bool,
     /// The orders read in flight started after every such ask, so it may release the fence.
     order_read_fresh: bool,
+    /// Trading writes answered or lost so far; every uncertain seal follows one.
+    writes_settled: u64,
+    /// `writes_settled` at the last reconcile ask, telling a new seal from an engine re-ask.
+    asked_at: u64,
     snapshot: Option<Snapshot>,
     generation: u64,
     revision: u64,
@@ -760,7 +762,6 @@ impl ApexOmni {
             positions: None,
             orders: None,
             metadata: None,
-            orders_release: false,
         });
         self.request_positions(cx, Some(generation));
         self.request_orders(cx, Some(generation));
@@ -771,11 +772,21 @@ impl ApexOmni {
             self.request_positions(cx, None);
         }
     }
-    /// Idempotent: the engine re-asks while a placement stays uncertain. A read already in
-    /// flight may predate the mark, so it can no longer release; one fresh read is owed.
+    /// A trading write was answered or lost: the next reconcile ask may be a new seal.
+    pub(crate) fn note_write_settled(&mut self) {
+        self.account.writes_settled += 1;
+    }
+    /// A new seal follows a settled write: a read already in flight may predate its mark,
+    /// so it can no longer release and a fresh read is owed. An engine re-ask (no write
+    /// settled since) joins the read in flight, or starts a fresh one when none is.
     pub(crate) fn reconcile_uncertain_placement(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.reconcile_owed = true;
-        self.account.order_read_fresh = false;
+        if self.account.writes_settled != self.account.asked_at {
+            self.account.asked_at = self.account.writes_settled;
+            self.account.order_read_fresh = false;
+            self.account.reconcile_owed = true;
+        } else if !self.account.orders_pending {
+            self.account.reconcile_owed = true;
+        }
         self.heal_orders(cx);
     }
     pub(crate) fn heal_orders(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1060,9 +1071,11 @@ impl ApexOmni {
                         .filter(|s| s.generation == generation)
                     {
                         snapshot.orders = Some(rows);
-                        snapshot.orders_release = release;
                     }
-                    self.commit_snapshot(cx);
+                    // Released here only: this response's token certifies the orders read.
+                    if self.commit_snapshot(cx) && release {
+                        cx.orders_reconciled(None);
+                    }
                 } else {
                     self.commit_orders(cx, rows, revision);
                     if release {
@@ -1166,14 +1179,15 @@ impl ApexOmni {
         self.snapshot_failed(cx, generation, &error.message);
     }
 
-    fn commit_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
+    /// Publishes a complete snapshot; true when this call published it.
+    fn commit_snapshot(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
         if !self
             .account
             .snapshot
             .as_ref()
             .is_some_and(|s| s.positions.is_some() && s.orders.is_some())
         {
-            return;
+            return false;
         }
         let snapshot = self.account.snapshot.take().expect("complete snapshot");
         if snapshot.revision < self.account.snapshot_floor {
@@ -1182,7 +1196,7 @@ impl ApexOmni {
                 code::SNAPSHOT_DISCARDED,
                 "ApeX snapshot predates retired terminal guards; retaining last state",
             );
-            return;
+            return false;
         }
         self.commit_positions(
             cx,
@@ -1190,9 +1204,6 @@ impl ApexOmni {
             snapshot.revision,
         );
         self.commit_orders(cx, snapshot.orders.expect("orders"), snapshot.revision);
-        if snapshot.orders_release {
-            cx.orders_reconciled(None);
-        }
         if let Some((id, maker, taker)) = snapshot.metadata {
             self.account.account_id = id;
             self.account.maker_fee = maker;
@@ -1201,6 +1212,7 @@ impl ApexOmni {
         self.account.initialized = true;
         // Queued only after the completing snapshot leg retires.
         self.follow_ups.push(crate::read::FollowUp::Balance);
+        true
     }
 
     fn commit_positions(

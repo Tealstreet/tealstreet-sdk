@@ -9940,16 +9940,22 @@ their reconcile; any other end drops the mark. Amend roots are marked too, so an
 Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
 same-ID amend fence stays as is.
 
-Crypto.com opts in with no lock scope, through Phase B. `reconcile_uncertain`
-owes one fresh Orders+AdvancedOrders read (idempotent across the engine's
-re-asks) and starts it at once when no account read is in flight. A read already
-in flight when the hook is asked can no longer release; `orders_reconciled`
-follows only a fresh read whose two lists committed cleanly. Control:
+Crypto.com opts in with no lock scope, through Phase B. Both Crypto.com and ApeX
+tell a new seal from an engine re-ask by counting settled trading writes (every
+seal follows one). A new seal demotes a read in flight, which may predate its
+mark, and owes a fresh read. A re-ask joins the read in flight, or starts a fresh
+one when none is. Crypto.com's fresh read is Orders+AdvancedOrders, started at
+once when no account read is in flight, and `orders_reconciled` follows only when
+both lists commit cleanly. Cancel-all: store-composed (`EachOpenSymbol`) and
+fenced while uncertain (default `fence_uncertain_cancel_all`), since a composed
+cancel-all cannot reach a placement the store has not seen. Control:
 `an_unknown_placement_fences_its_symbol_until_a_fresh_order_read` in
 `venues/cryptocom/tests/uncertain_placement_fence.rs`.
 
 ApeX opts in the same way. `reconcile_uncertain` owes one fresh open-orders
 read, starting it at once unless one is pending, and a read in flight when asked
-can no longer release. Release follows publication of a clean snapshot leg
-(rejected 0), on both the heal and the joint snapshot paths. Its control is the
+can no longer release. Release follows publication of a clean orders leg
+(rejected 0): on the heal path, and on the joint snapshot path only when the
+orders response completes the snapshot, so the release token certifies the
+orders read itself. Cancel-all: store-composed and fenced, as for Crypto.com. Its control is the
 same-named test in `venues/apexomni/tests/trading.rs`.

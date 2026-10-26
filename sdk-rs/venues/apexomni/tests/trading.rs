@@ -1738,3 +1738,119 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     );
     assert_eq!(order_writes(&retry), 1, "the retry places once released");
 }
+
+/// The engine re-asks the hook while the placement stays uncertain; each re-ask must
+/// join the fresh read in flight, and that read's clean answer releases.
+#[test]
+fn engine_re_asks_join_the_fresh_read_in_flight_and_its_clean_answer_releases() {
+    const EMPTY: &str = r#"{"code":0,"data":[]}"#;
+    let (mut e, _) = ready_with_socket();
+    let mut timers: Vec<(safe_cex_engine::TimerId, f64)> = Vec::new();
+    let take = |e: &mut TestEngine, timers: &mut Vec<(safe_cex_engine::TimerId, f64)>| {
+        let actions = actions(e);
+        for action in &actions {
+            match action {
+                Action::SetTimer { timer, at_ms } => timers.push((*timer, *at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| t != timer),
+                _ => {}
+            }
+        }
+        actions
+    };
+    let advance = |e: &mut TestEngine,
+                   timers: &mut Vec<(safe_cex_engine::TimerId, f64)>,
+                   to: f64,
+                   out: &mut Vec<Action>| {
+        while let Some(i) = timers.iter().position(|(_, at)| *at <= to) {
+            let (timer, at) = timers.remove(i);
+            e.handle(at.max(e.now), Event::TimerFired { timer });
+            for action in actions(e) {
+                match &action {
+                    Action::SetTimer { timer, at_ms } => timers.push((*timer, *at_ms)),
+                    Action::ClearTimer { timer } => timers.retain(|(t, _)| t != timer),
+                    _ => {}
+                }
+                out.push(action);
+            }
+        }
+        e.now = e.now.max(to);
+    };
+    let open_orders = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/open-orders")))
+            .count()
+    };
+    let order_writes = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/order")))
+            .count()
+    };
+    let refused = |actions: &[Action]| {
+        actions.iter().any(|a| {
+            matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
+                if error.message.contains("Placement outcome is uncertain"))
+        })
+    };
+    let place =
+        |e: &mut TestEngine, now: f64, command: safe_cex_engine::CommandId, client: &str| {
+            e.handle(
+                now,
+                Event::Command(Command::PlaceOrders {
+                    command,
+                    orders: vec![order(serde_json::json!({ "clientOrderId": client }))],
+                }),
+            );
+        };
+
+    place(&mut e, NOW + 10.0, 42, "first");
+    let write = http(take(&mut e, &mut timers))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/order"))
+        .expect("the placement write");
+    e.handle(
+        NOW + 20.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "connection reset after write",
+        },
+    );
+    // The seal's ask starts the fresh read; it stays unanswered.
+    let fresh = http(take(&mut e, &mut timers))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the fresh reconcile read");
+
+    let mut now = NOW + 20.0;
+    for (i, wait) in [1_100.0, 2_100.0, 4_100.0].into_iter().enumerate() {
+        now += wait;
+        let mut fired = Vec::new();
+        advance(&mut e, &mut timers, now, &mut fired);
+        assert_eq!(
+            open_orders(&fired),
+            0,
+            "re-ask {i} must not replace the fresh read"
+        );
+        place(
+            &mut e,
+            now,
+            50 + i as safe_cex_engine::CommandId,
+            "held-retry",
+        );
+        let retry = take(&mut e, &mut timers);
+        assert!(
+            refused(&retry),
+            "the retry stays refused while the fresh read is held"
+        );
+        assert_eq!(order_writes(&retry), 0);
+    }
+
+    // The original fresh read answers clean: it releases, and the retry places.
+    response(&mut e, &fresh, now + 10.0, EMPTY);
+    take(&mut e, &mut timers);
+    place(&mut e, now + 20.0, 60, "released-retry");
+    let retry = take(&mut e, &mut timers);
+    assert!(!refused(&retry), "the held fresh read releases the fence");
+    assert_eq!(order_writes(&retry), 1, "the retry places once released");
+}
