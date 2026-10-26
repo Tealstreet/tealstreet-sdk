@@ -48,10 +48,10 @@ In `account.rs`, the two `matches!(request, Request::Info)` checks become the `R
   - Native's queue (cap 100) parks Preflights in FIFO order, and the front is planned again against the current Store when it wakes. A wake past the caller's wait is the typed timeout, NotSent.
 - **Bulk cancellation.** It supersedes queued order mutations on its scope. A parked Preflight fails only in its own ready custody, so each superseded one is woken and fails NotSent with native's text. The live job on the scope sends nothing more, and a paused one ends at once with native's error. The cancellation runs next, at the front of the FIFO.
 - **Jobs.** Every ordered job (placement, protective pairs, amend, leverage, margin type) is a streamed serial Plan, and each next call comes from the previous call's DATA. A placement's conflicting-order cancel is narrowed to a Cancel leg.
-  - FetchLeverage is a Read call settled by `done_read_plan_after_data`.
+  - FetchLeverage keeps its native FIFO place under a `ReadOnly` Preflight: one Read Plan (`admit_plan`, Read policy) settled by `done_read_plan_after_data`.
   - Bulk cancellation's two family DELETEs are a complete Plan with `independent_calls`. A failed leg is settled and the next one still goes, as natively.
 - **Protective pauses.** After a pair write (or a parent cancel that precedes a rebuild) whose legs aren't yet visible, the Plan parks in `serial_plan_condition_wait`, bounded at 20 s. It is released from `trade_reconcile` once the stream or a snapshot shows the legs, or shows the root as terminal.
-  - **D1** (dazzy3): a job that ends on such a pause issues one Primary-signed `GET /v1/algo/orders?symbol=…&status=INCOMPLETE` as its final Read call, and `done_plan` follows only when the waited legs are listed or terminal.
+  - **D1** (dazzy3): a job that ends on such a pause issues one Primary-signed `GET /v1/algo/orders?status=INCOMPLETE&page=1&size=500` (the native account poll's own listing) as its final Read call, and `done_plan` follows only when the waited legs are listed or terminal.
   - Wait expiry, a listing that lacks a leg, and any failure of that read call `inherit_plan_uncertainty` (#2205) before `fail_plan`. The terminal is Unknown with the accepted IDs and native's "protective state is unconfirmed" text, and the scope stays fenced until reconciled.
 - **Write facts.** Successful writes record `Accepted` with their order IDs.
   - Delivered failures are classified by the cited `CODES` table (orderly.network error codes). A cited refusal is Rejected. -1000, -1007, -1011, -1012 and any unlisted code are Unknown, and an unknown write reconciles the account, as a lost one does.
@@ -62,6 +62,7 @@ In `account.rs`, the two `matches!(request, Request::Info)` checks become the `R
 - **Raw seed retired.** `Options` no longer has the key or seed, and `sign::Credentials`, its erasure and the `Sensitive` wrapper are deleted. The registry's shape check is the stateless `sign::keys_valid`, and a mismatched key and seed pair is still caught only by the venue (dazzy3's nit, deferred: every fixture uses an unpaired key).
 - **O1 interim deleted.** The zero-delay deferred reconcile is removed: a condition-wait release only schedules, so it is legal inside a managed delivery.
 - **Inventory after O2:** request 18 → 0 and signing 12 → 0 for Orderly.
+- **Replay:** the private broker tapes (orderly and woofi on mainnet, kodiakfi on testnet) match the base wasm exactly, 912/912 declared known failures.
 - **Engine features:** `condition-waits`, `http-plans`, `order-locks` and `serial-plans`. The combined build already links all four through other venues, so only Orderly's family grows. CI measures it.
 
 ## Controls (O1)

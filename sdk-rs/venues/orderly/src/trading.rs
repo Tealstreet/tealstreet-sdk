@@ -1335,7 +1335,11 @@ impl Orderly {
                     let error = not_sent("Orderly private account is not ready");
                     return self.end(cx, active, None, error);
                 };
-                let admitted = if independent {
+                let admitted = if step.method == Method::Get {
+                    // FetchLeverage: one Read call under its read-only Preflight.
+                    admit_read(cx, &active.preflight, credential)
+                        .and_then(|plan| first_slot(cx, &plan).map(|slot| (plan, slot)))
+                } else if independent {
                     admit_independent(
                         cx,
                         &active.preflight,
@@ -2221,13 +2225,18 @@ impl Orderly {
                     }
                     Answer::Wait(waiting) => self.pause(cx, active, &request, waiting),
                     Answer::Done(result) => {
-                        // The read's call is sealed, completing the schedule.
                         let plan = active.plan.clone().expect("live Plan");
-                        let sealed = cx.finish_plan_call(&plan, &request.slot, &request.context);
-                        if sealed.and_then(|()| cx.done_plan(&plan, result)).is_err() {
+                        let done = cx.done_read_plan_after_data(
+                            &plan,
+                            &request.slot,
+                            &request.context,
+                            result,
+                        );
+                        if done.is_err() {
                             let error = VenueError::new("Orderly leverage read could not complete");
-                            let _ = cx.fail_plan(&plan, error);
+                            return self.end(cx, active, current, error);
                         }
+                        let _ = cx.finish_plan_call(&plan, &request.slot, &request.context);
                         self.next_job(cx);
                     }
                 }
@@ -2384,6 +2393,34 @@ fn admit_independent(
             pacing: None,
             retry: RetryPolicy::Never,
             independent_calls: true,
+        },
+    )
+}
+
+/// FetchLeverage's one Read call.
+fn admit_read(
+    cx: &mut Cx<'_, Pending>,
+    preflight: &Preflight,
+    credential: safe_cex_engine::request_context::Credential,
+) -> Result<Plan, safe_cex_engine::request_context::Error> {
+    let call = [CallBound {
+        timeout_ms: CALL_MS,
+        attempts: 1,
+        retry_window: RetryWindow::FreshAttempt,
+        after_refusal: &[],
+    }];
+    cx.admit_plan(
+        preflight,
+        &[StepBound {
+            wait_ms: 0,
+            calls: &call,
+        }],
+        PlanPolicy {
+            operation: Operation::Read,
+            credential: Some(credential),
+            pacing: None,
+            retry: RetryPolicy::Never,
+            independent_calls: false,
         },
     )
 }

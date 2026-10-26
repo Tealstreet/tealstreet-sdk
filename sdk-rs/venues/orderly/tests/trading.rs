@@ -2011,3 +2011,37 @@ fn a_lost_verification_read_ends_unknown() {
             .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
     );
 }
+
+/// FetchLeverage keeps its native FIFO place as a read-only Preflight and
+/// answers native's rails from one Primary-signed GET.
+#[test]
+fn fetch_leverage_reads_through_the_trading_fifo() {
+    let (mut e, _) = ready();
+    requests(&mut e);
+    e.handle(
+        2000.0,
+        Event::Command(Command::FetchLeverage {
+            command: 61,
+            symbol: "BTCUSDC".into(),
+        }),
+    );
+    let out = actions(&mut e);
+    let read = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains("/v1/client/leverage?") => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the leverage read: {out:?}"));
+    assert_eq!(read.method, safe_cex_engine::Method::Get);
+    reply(
+        &mut e,
+        &read,
+        200,
+        r#"{"success":true,"data":{"max_leverage":12}}"#,
+    );
+    assert_eq!(
+        done(actions(&mut e), 61).unwrap(),
+        r#"{"buyLeverage":12.0,"sellLeverage":12.0}"#
+    );
+}
