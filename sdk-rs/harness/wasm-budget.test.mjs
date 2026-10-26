@@ -23,6 +23,9 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_387_670, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_388_544, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_418_240, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_418_676, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_419_317, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_420_288, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_419_038, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_419_264, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_420_478, 'venue', 'asterdex'), undefined);
