@@ -8,9 +8,11 @@ Coinbase reviews returned before this work began. Immutable planning base:
 `da369f632b9c08c63aa94bf393583b1bf8d1e2ca`, actual Rust landing branch
 `origin/feat/rust-rewrite`. Dedicated branch: `feat/rust-address-nonce-domains`.
 
-Status: plan only. This checkpoint changes this document and its index row.
-No runtime, Cargo, provider, host, consumer, fixture or inventory change; no
-build, source activation, push, CI or size result is implied.
+Status: credential and both consumer PLAN directions reviewed; overseer
+authorized local originals while the carries return. The initial checkpoint
+changed only this document and its index row; the subsequent original target
+adds no runtime, Cargo, provider, host, consumer or inventory change. Source
+activation, push, CI and shipping size results remain separate gates.
 
 ## Existing authority and the precise extension
 
@@ -214,10 +216,12 @@ counter at the same stamp repeat100000. Fixed or regressing clocks and bursts
 make the same issue explicit. Address normalization also intentionally merges
 old differently cased signer-string namespaces; it cannot reset a live maximum.
 
-There is no new cross-restart persistence promise. A complete cold process or
-WASM-memory replacement with no surviving owned issuer/prepared local work may
-retain native's unpersisted-reset boundary; it does not need an invented numeric
-seed or import. The consumer must identify that actual activation boundary.
+There is no new cross-restart persistence promise. The Aster consumer confirmed
+its activation contract: cold whole-process or WASM-instance replacement, with
+no surviving old issuer/prepared local work and no old/new allocator coexistence
+in one instance. That retains native's unpersisted-reset boundary without an
+invented numeric seed, import or drain API. Reads re-sign fresh after restart;
+writes are not resent across the boundary.
 If live old/new state or owned work survives within a handoff, its continuity
 and retirement/fence disposition remain source/adoption gates. Deleting a map
 in a new build alone proves neither retirement nor clock dominance. Preserve
@@ -267,6 +271,30 @@ Missing proposed symbols are not compiling-original RED evidence. Use genuine
 existing primitive/dispatcher boundaries for originals; introduce new API-shape
 tests with the reviewed source and disclose unreachable suffixes. No fake
 Identity, slot, claim, setup answer, Context or predicted resource ID qualifies.
+
+### Local current-API original checkpoint
+
+`engine/tests/address_nonce_domains.rs` exercises actual Cx reservations from
+engine start. Real joined child processes establish cold counter reset/repeat;
+recreated engines in the same process establish retained live high-water.
+The x1000 cold arithmetic probe uses existing KRAKEN with a public NonceKey,
+not a fabricated ASTERDEX_V3 declaration, selected claim or Aster clock proof.
+Address spellings, independent agents/domains, parallel engines, fixed/backward
+clocks, bursts above1000/ms and the safe-integer limit use the existing store.
+
+The proposed contract's hostile identities have NO verified binding: stable-id
+text or serialized address metadata must not mint a claim, and missing signing
+must retain MissingKey before subject validation. A genuine Kraken stable-id
+selection is the working mint control. These cases compile on current
+dispatch-nonce; the source adoption will move their enclosing feature guard to
+address-nonce without weakening the assertions. They do not simulate successful
+pre-start attestation or address-bound Prepare/Sign/Bind/Claim.
+
+Feature-off controls retain unavailable dispatcher claims and the ordinary
+Identity wire shape. These are behavior controls, NOT a byte-growth proof.
+The fixed-budget paired WASM equality gate below is still mandatory at source.
+Existing native/dispatcher originals, carrier/provider lifecycle controls and
+all consumer financial/wire assertions remain separate required evidence.
 
 ## Scope, zero-growth and publication gates
 

@@ -11,7 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
-| Address-keyed dispatch nonce domains | Plan; credential and both consumer reviews pending | Before extending #2093 claims to verified Aster V3 signer and Hyperliquid agent subjects; no non-adopter growth or consumer activation implied | [RUST_ADDRESS_NONCE_DOMAINS.md](RUST_ADDRESS_NONCE_DOMAINS.md) |
+| Address-keyed dispatch nonce domains | Plan directions CLEAR; local originals checkpoint | Before extending #2093 claims to verified Aster V3 signer and Hyperliquid agent subjects; no non-adopter growth or consumer activation implied | [RUST_ADDRESS_NONCE_DOMAINS.md](RUST_ADDRESS_NONCE_DOMAINS.md) |
 | WEEX depth and socket custody | Plan/native/API CLEAR; first19 originals13RED/6GREEN local; source held | Remaining Depth observations and both native socket lifecycles; truthful inventory residue disposition and fixed size gates | [RUST_WEEX_DEPTH_SOCKET_CONTEXT.md](RUST_WEEX_DEPTH_SOCKET_CONTEXT.md) |
 | Request macro provenance precision | Plan only; overseer-approved WEEX false-positive correction | Before pruning pure data macro rows while preserving raw sender and cross-venue gate coverage | [RUST_REQUEST_MACRO_PROVENANCE.md](RUST_REQUEST_MACRO_PROVENANCE.md) |
 | Shared repair Mutation authority | Joint plan; engine direction CLEAR, originals/source separate | Before Phemex late-cancel or Backpack trigger-repair migration, snapshot-origin authority, subject lifecycle or joint cancel batching. | [RUST_REPAIR_MUTATION_AUTHORITY.md](RUST_REPAIR_MUTATION_AUTHORITY.md) |
