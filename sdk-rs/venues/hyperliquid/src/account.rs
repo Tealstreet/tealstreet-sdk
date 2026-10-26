@@ -105,6 +105,7 @@ pub struct Account {
     state_refresh_timer: Option<TimerId>,
     pub orders_revision: HashMap<String, u64>,
     inflight: HashSet<String>,
+    orders_refresh_due: HashSet<String>,
     pub suppressed: HashMap<String, f64>,
     seen_fills: HashSet<u64>,
     fill_queue: VecDeque<u64>,
@@ -548,6 +549,38 @@ impl Hyperliquid {
             self.refresh_orders_scope(cx, &dex);
         }
     }
+    pub(crate) fn reconcile_order_scopes(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbols: Option<&[String]>,
+    ) {
+        let mut dexes = if let Some(symbols) =
+            symbols.filter(|symbols| symbols.iter().all(|s| cx.store.market(s).is_some()))
+        {
+            symbols
+                .iter()
+                .map(|symbol| self.dex_of(cx, symbol).to_owned())
+                .collect::<Vec<_>>()
+        } else {
+            std::iter::once(String::new())
+                .chain(self.dex_names.iter().cloned())
+                .collect()
+        };
+        dexes.sort();
+        dexes.dedup();
+        for dex in dexes {
+            if self.account.inflight.contains(&format!("orders:{dex}")) {
+                self.account.orders_refresh_due.insert(dex);
+            } else {
+                self.refresh_orders_scope(cx, &dex);
+            }
+        }
+    }
+    fn refresh_owed_orders(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
+        if self.account.orders_refresh_due.remove(dex) {
+            self.refresh_orders_scope(cx, dex);
+        }
+    }
     fn refresh_orders_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
         if self.user().is_none() || !self.account.inflight.insert(format!("orders:{dex}")) {
             return;
@@ -839,10 +872,12 @@ impl Hyperliquid {
             } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
                 if !valid {
+                    self.refresh_owed_orders(cx, &dex);
                     return;
                 }
                 if self.account.orders_revision.get(&dex).copied().unwrap_or(0) != revision {
                     self.schedule_orders(cx);
+                    self.refresh_owed_orders(cx, &dex);
                     return;
                 }
                 let mut merged = cx
@@ -874,10 +909,26 @@ impl Hyperliquid {
                     }
                 }
                 cx.store.set_orders(merged);
+                if coverage.rejected() == 0 {
+                    let symbols: Vec<_> = cx
+                        .store
+                        .markets()
+                        .iter()
+                        .filter(|market| self.dex_of(cx, &market.symbol) == dex)
+                        .map(|market| market.symbol.clone())
+                        .collect();
+                    for symbol in symbols {
+                        cx.orders_reconciled(Some(&symbol));
+                    }
+                    if dex.is_empty() && self.dex_names.is_empty() && self.discovery_settled() {
+                        cx.orders_reconciled(None);
+                    }
+                }
                 self.account
                     .suppressed
                     .retain(|_, at| cx.now - *at < 120_000.0);
                 let _ = seen;
+                self.refresh_owed_orders(cx, &dex);
             }
             Request::Spot { revision } => {
                 self.account.spot_inflight = false;
@@ -930,6 +981,7 @@ impl Hyperliquid {
                 Ok(row) => {
                     let id = row.oid.to_string();
                     if !seen.insert(id.clone()) {
+                        coverage.reject(Some(id));
                         return;
                     }
                     if self
@@ -1011,6 +1063,7 @@ impl Hyperliquid {
             }
             Request::Orders { dex, .. } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
+                self.refresh_owed_orders(cx, &dex);
             }
             Request::Spot { .. } => self.account.spot_inflight = false,
             Request::Asset { symbol, .. } => {

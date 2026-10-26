@@ -9912,3 +9912,17 @@ alias and transitive local Cargo features. Setup mappings declare their required
 bootstrap features; AsterDEX additionally requires address setup and signing
 metadata. Combined default features cannot satisfy an isolated family's check.
 Negative controls pin missing features and reject unknown setup mappings.
+
+## Hyperliquid uncertain-placement reconciliation
+
+Hyperliquid and HyperliquidSpot reconcile uncertain placements through their
+existing complete `frontendOpenOrders` read. Repeated engine requests join the
+in-flight DEX scope and owe at most one successor read. After Store publication,
+only a clean snapshot with zero rejected rows reports that scope reconciled;
+duplicate or malformed rows cannot release it. The engine's dispatch token
+keeps a pre-write read from releasing a newer uncertainty fence.
+
+The placement-fence opt-in still awaits the generic legacy-write Phase B of
+the engine fence fix. The two four-step venue controls currently fail at the
+post-Unknown retry assertion; their stale/fresh-read suffixes are not yet runtime
+proof. This slice adds no venue retry loop or write resend.
