@@ -32,6 +32,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // AsterDEX host address setup (#2233): CI 1,417,307, rounded up to 1385 KiB under the
 // standing venue allowance; the larger of it and the incoming cap.
 // Tip after #2223 plus #2233: CI AsterDEX 1,418,786-1,419,038 rounded up to 1386 KiB, a <=2 KiB shared-code raise.
+// #2262 shared hosted-codec layout (Bitunix hosted signing): CI AsterDEX 1,419,317, rounded up
+// to 1387 KiB, a <=2 KiB shared-code raise over 1385 KiB; the larger of it and the incoming cap.
 // #2279 (engine uncertain-placement fence and re-ask): CI Bitget 1,485,945 (1452 KiB, at the
 // ceiling), AsterDEX 1,420,478 (1388 KiB), Bybit 1,448,312 (1415 KiB) and Kraken 1,407,904
 // (1375 KiB), each a <=2 KiB shared-code raise. CI on b666a1a9a54 (with the re-ask flag):

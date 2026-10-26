@@ -398,6 +398,8 @@ fn primary_and_fallback_catalogues_retry_with_backoff_then_keep_valid_neighbors(
             _ => None,
         })
         .unwrap();
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     reply(&mut e, id, &MARKETS.replacen("[", "[{},", 1));
     assert_eq!(e.store().markets().len(), 2);
     assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message == "Skipped malformed public discovery row")));
