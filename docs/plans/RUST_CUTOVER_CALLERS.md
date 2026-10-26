@@ -9517,3 +9517,19 @@ The remaining conservative request/signing/credential inventory describes manage
 failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
 identity options. This slice retains those rows and all checker rules; completion
 of the custody audit does not claim inventory zero or a new endpoint migration.
+
+## Bitunix trading on Preflight roots and serial Plans (#2207)
+
+Every Bitunix trading command opens a Preflight root before validation and runs one serial Plan; account, settings and history reads are managed. Bitunix leaves the legacy request funnel (request sites 9 → 0).
+
+- **Refusals.** A validation refusal is the command's one NotSent terminal. Keyless trading keeps the local "Bitunix credentials required" refusal.
+- **Concurrency (better than TypeScript).** Jobs stay concurrent with no FIFO, so a cancel is never held behind a batch place's 1000 ms chunk gap. The engine's order lock now refuses a second mutation of an order for its whole job, which native allowed. A second leverage or margin change on the same symbol, or a second position-mode change, is refused NotSent while one is in flight.
+- **Prerequisite reads.** Positions, orders and TP/SL reads before a placement sign Primary inside the command, even with a read key configured. A failed or superseded one is NotSent ("Bitunix preflight reconciliation failed") with no write.
+- **Write outcomes ride the journal.** The venue's `aggregate`, `append` and `effective` bookkeeping is gone. Batch place and cancel ACKs use `http_write_batch`, and a malformed or missing ACK row makes the batch Unknown while keeping the observed IDs.
+  - A refused chunk keeps the earlier accepted IDs as partial, and later chunks still go out, as native.
+  - **Changed:** an uncertain chunk now ends the job before later chunks; native kept sending them.
+- **Classification.** HTTP status classifies a non-2xx write: 400 Rejected, 401 AuthInvalid, 403 AuthPermission and 429 RateLimited are refusals, and 408 and 5xx are the engine's Unknown ("HTTP response does not prove the write outcome").
+  - **Changed:** the body's code is not evidence on a non-2xx, so `venueCode` is absent there.
+  - Code `10007` in a 2xx write answer re-signs once with a fresh nonce; reads keep it as a plain refusal.
+- **Recoveries stay in the job.** "Position does not exist" re-reads and re-places once. The amend fallback (cancel, final-state read, replacement) runs as continuations under the same order lock. A lost in-job read keeps the journal's selected error and appends its own text.
+- **Reconcile.** An uncertain seal restores the job's optimistic rows and reads Primary order and TP/SL snapshots (`PrimaryRead { PostUnknownOrderRead }`). Both complete snapshots release the engine's placement fence (`orders_reconciled`). Callers see those GETs after an Unknown write.
