@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType } from '../../types';
 
@@ -27,7 +27,7 @@ describe('GRVT private native values', () => {
 
 describe('GRVT session resend headers', () => {
   it('refreshes the SDK cookie together with its proxy session header', async () => {
-    const { createTradingAPI } = await import('../../exchanges/grvt/grvt.api');
+    const { createTradingAPI } = await import('../reference/grvt/grvt.api');
     const owner = { apiExtras: { sessionCookie: 'session-before', accountId: 'account' }, log: vi.fn(),
       authenticate: vi.fn(async () => { owner.apiExtras.sessionCookie = 'session-after'; return true; }) };
     const api = createTradingAPI({} as any, owner);

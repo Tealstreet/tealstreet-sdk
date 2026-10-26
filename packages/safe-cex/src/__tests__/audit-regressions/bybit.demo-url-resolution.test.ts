@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { BASE_URL, DEMO_URL } from '../../exchanges/bybit/bybit.types';
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
-import { BybitDemoExchange } from '../../exchanges/bybit/bybitdemo.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
 
 const createStore = () =>
   ({

@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidExchange } from '../exchanges/hyperliquid/hyperliquid.exchange';
+import { HyperliquidExchange } from './reference/hyperliquid/hyperliquid.exchange';
 import { DefaultStore } from '../store/store.base';
 
 // Core perps come from a module helper, not a method; this test is about the HIP-3
 // loop, so the core fetch is stubbed to a minimal valid shape.
-vi.mock('../exchanges/hyperliquid/hyperliquid.market-startup-helpers', () => ({
+vi.mock('./reference/hyperliquid/hyperliquid.market-startup-helpers', () => ({
   fetchCoreMetaAndAssetCtxsWithFallback: vi.fn(async () => [{ universe: [] }, []]),
   fetchHip3MetaAndAssetCtxsWithRetry: vi.fn(async () => null),
 }));

@@ -1022,3 +1022,126 @@ fn engine_re_asks_join_the_running_fresh_read_until_it_releases() {
     );
     post(&prepared(&mut engine, 3_200.));
 }
+
+const SIGNATURE_REJECTED: &str = r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#;
+
+fn refuse(engine: &mut Engine<Okx>, action: &Action, status: u16, body: &str, now: f64) {
+    let Action::Http(r) = action else {
+        panic!("expected request")
+    };
+    engine.handle(
+        now,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
+
+fn failures(output: &[Action]) -> Vec<&safe_cex_engine::VenueError> {
+    output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: OWNER,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_signature_rejected_write_is_re_signed_and_resent_once() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 401, SIGNATURE_REJECTED, 6.);
+    let second = prepared(&mut engine, 6.);
+    assert!(
+        failures(&second).is_empty(),
+        "the resend decides the outcome"
+    );
+    let (Action::Http(a), Action::Http(b)) = (post(&first), post(&second)) else {
+        unreachable!()
+    };
+    assert_ne!(a.id, b.id, "a fresh physical attempt");
+    assert_eq!(a.body, b.body, "the same native write");
+    reply(
+        &mut engine,
+        post(&second),
+        r#"{"code":"0","msg":"","data":[{"ordId":"777","clOrdId":"","sCode":"0","sMsg":""}]}"#,
+        7.,
+    );
+    let output = prepared(&mut engine, 7.);
+    assert!(output.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { command: OWNER, result }) if result.contains("777")
+    )));
+}
+
+#[test]
+fn a_second_signature_rejection_fails_without_a_third_send() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 401, SIGNATURE_REJECTED, 6.);
+    let second = prepared(&mut engine, 6.);
+    refuse(&mut engine, post(&second), 401, SIGNATURE_REJECTED, 7.);
+    let output = prepared(&mut engine, 7.);
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "no third send"
+    );
+    let errors = failures(&output);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Rejected));
+}
+
+#[test]
+fn other_key_refusals_are_never_resent() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(
+        &mut engine,
+        post(&first),
+        401,
+        r#"{"code":"50111","msg":"Invalid OK-ACCESS-KEY","data":[]}"#,
+        6.,
+    );
+    let output = prepared(&mut engine, 6.);
+    assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(failures(&output).len(), 1);
+}
+
+#[test]
+fn a_signature_code_on_an_unproven_status_is_never_resent() {
+    // A 5xx proves nothing about the write, so 50113 in its body is no refusal.
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 503, SIGNATURE_REJECTED, 6.);
+    let output = prepared(&mut engine, 6.);
+    // Reconciliation reads may follow; the write itself is never sent again.
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "no resend of an unproven write"
+    );
+    let failed = failures(&output);
+    assert!(
+        failed
+            .iter()
+            .all(|error| error.outcome == Some(safe_cex_engine::Outcome::Unknown)),
+        "an unproven write stays Unknown: {failed:?}"
+    );
+}

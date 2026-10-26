@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createAPI } from '@tealstreet/safe-cex/src/exchanges/bybit/bybit.api';
+import { createAPI } from '@tealstreet/safe-cex/src/__tests__/reference/bybit/bybit.api';
 
 import { readConfig } from './config';
 

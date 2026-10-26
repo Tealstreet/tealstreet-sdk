@@ -1,8 +1,8 @@
-import { BybitPrivateWebsocket } from '../../exchanges/bybit/bybit.ws-private';
-import { BybitInversePrivateWebsocket } from '../../exchanges/bybit/bybitinverse.ws-private';
+import { BybitPrivateWebsocket } from '../reference/bybit/bybit.ws-private';
+import { BybitInversePrivateWebsocket } from '../reference/bybit/bybitinverse.ws-private';
 // `bybitspot.ws-private.ts` exports its class under the SAME name as the linear
 // one, so it has to be aliased rather than named.
-import { BybitPrivateWebsocket as BybitSpotPrivateWebsocket } from '../../exchanges/bybit/bybitspot.ws-private';
+import { BybitPrivateWebsocket as BybitSpotPrivateWebsocket } from '../reference/bybit/bybitspot.ws-private';
 import { virtualClock } from '../../utils/virtualClock';
 
 /**

@@ -9956,7 +9956,14 @@ is true on a backoff re-ask with no new uncertain write since the last ask: the
 hook must then join any read already running or owed, never start or owe
 another (a slow read would otherwise never complete and release). A venue may hold the fence to its
 native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
-opts in. Phase B: the fence no longer needs a lock scope. On an opted-in venue whose
+opts in. Not covered yet (Phase B): an Unknown marker for venues with no
+placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
+until its opt-in) from managed, single-Context and legacy `cx.request` writes,
+and amend roots whose replacement places (zs5e83's audits,
+/tmp/codex-beta-plan-fence-audit/report.md and followup.md). Paradex's
+venue-local same-ID amend fence stays as is.
+
+Phase B (#2288) covers it: the fence no longer needs a lock scope. On an opted-in venue whose
 placements or amends hold no scope (guard flags off: Binance x4, Bybit,
 Crypto.com, BingX, ApeX, Hyperliquid, Paradex), entry still refuses a fenced
 symbol (cancel-all as its `fence_uncertain_cancel_all` declares), and every
@@ -9967,12 +9974,52 @@ their reconcile; any other end drops the mark. Amend roots are marked too, so an
 Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
 same-ID amend fence stays as is.
 
-opts in. Not covered yet (Phase B): an Unknown marker for venues with no
-placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
-until its opt-in) from managed, single-Context and legacy `cx.request` writes,
-and amend roots whose replacement places (zs5e83's audits,
-/tmp/codex-beta-plan-fence-audit/report.md and followup.md). Paradex's
-venue-local same-ID amend fence stays as is.
+## Lighter public beta data
+
+Market snapshots seed last price and start ticker hydration before socket Open.
+The existing single-flight guard prevents duplicate pending reads. Stats decode base and
+USD open interest independently, preferring the base field when both exist.
+REST depth sums are rounded to the market's declared amount precision to remove
+binary addition residue. Public close requests a recovery snapshot immediately
+when existing pacing permits; one inflight request per book remains the limit.
+A newer socket snapshot invalidates an older recovery reply. Grouped limit
+TP/SL remains a separately tested beta blocker, not part of this public slice.
+
+Before socket Open, the first ticker seed also publishes real exchangeStats
+daily volume, quote volume and percentage. TypeScript's REST fallback drops
+those fields. The overseer accepts this more complete bootstrap in readiness
+comparison; the raw replay still reports these differences without relaxed
+tolerances. Prices, books and later checkpoints must agree.
+The CI verifier declares only exact recorded bootstrap paths with TS zero and
+finite Rust values. Later checkpoints and other fields remain strict; existing
+private fill/order baseline declarations remain separate and unchanged.
+
+### Restored candle-cache crates for the monorepo candle-server
+
+`sdk-rs/safe-cex-candle-cache`, `safe-cex-num` and `safe-cex-types` are restored
+verbatim from master (overseer ruling), because the monorepo
+`Dockerfile.candle-server` builds `-p safe-cex-candle-cache --bin
+candle-cache-owner` from this workspace. They keep master's serde_json features
+(`arbitrary_precision`, `preserve_order`). Every `--workspace` CI command
+excludes them so those features never unify into the port. The native
+`candle-cache` check builds, lints and tests them alone, and
+`scripts/check-serde-json-features.py` fails if any port package resolves those
+features. Not run: master's TypeScript-oracle tests (they need an isolated TS
+install), the candle-cache `fix_audit` and `monthly_behavior` targets and two
+lib tests, which load the TypeScript compiler over TS venue sources, and one `safe-cex-types` audit of a crate the port deleted. No port
+crate may depend on these three.
+
+### One re-signed resend of a write signature rejection
+
+A write refused for its signature executed nothing, so it is re-signed and sent
+once more, writes included (TS 9db593a2338 parity). Binance `-1022` and OKX
+`50113` are `RefusedResend(AuthInvalid)` rows. Binance write legs use
+`RetryPolicy::DefinitiveRefusal` and resend through `http_resend_context`; OKX
+serial writes declare `attempts: 2` and resend through `plan_resend_context`.
+The journal refuses a second resend, so a second rejection fails as
+`AuthInvalid`/`Rejected` with no third send. Every other refusal is still never
+resent. Kraken spot already re-signs a trade once on `EAPI:Invalid signature`
+(`spot/account.rs` `private_response`), and Bitunix `10007` landed in #2207.
 
 ### Binance: an Unknown placement fences its symbol
 

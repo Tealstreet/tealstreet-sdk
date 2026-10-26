@@ -38,9 +38,18 @@ pub struct Request {
     command: CommandId,
     context: Context,
     call: Call,
+    resend: Resend,
+}
+
+/// What a signature-rejected write needs to be re-signed and sent once more.
+struct Resend {
+    method: Method,
+    url: String,
+    query: Query,
 }
 
 /// What a response means for its job.
+#[derive(Clone)]
 enum Call {
     /// Portfolio margin answers with our client id, which is the order's id.
     PlaceOne {
@@ -140,12 +149,14 @@ struct Amendment {
     replacement: PlaceOrderOpts,
 }
 
+#[derive(Clone)]
 struct CancelTarget {
     id: String,
     symbol: String,
     native: Option<u64>,
 }
 
+#[derive(Clone)]
 enum CancelProof {
     One(CancelTarget),
     Algo(CancelTarget),
@@ -598,7 +609,8 @@ impl BinanceFutures {
                     credential: Some(selection.credential(credentials.credential.clone())),
                     timeout_ms: 20_000,
                     pacing: None,
-                    retry: RetryPolicy::Never,
+                    // A -1022 signature rejection is re-signed and sent once more.
+                    retry: RetryPolicy::DefinitiveRefusal,
                 },
             );
             let context = context.and_then(|context| {
@@ -616,22 +628,12 @@ impl BinanceFutures {
                 return;
             };
             cx.command_progress(command, planned.receipts);
-            if cx
-                .request_signed_managed(
-                    context.clone(),
-                    None,
-                    planned.method,
-                    format!("{}{}", self.urls.account_rest, planned.path),
-                    None,
-                    Box::new(self.signed_recipe(credentials, planned.query)),
-                    Pending::Trade(Request {
-                        command,
-                        context,
-                        call: planned.call,
-                    }),
-                )
-                .is_err()
-            {
+            let resend = Resend {
+                method: planned.method,
+                url: format!("{}{}", self.urls.account_rest, planned.path),
+                query: planned.query,
+            };
+            if !self.send_trade(cx, command, context, planned.call, resend, credentials) {
                 self.trading.jobs.remove(&command);
                 let _ = cx.fail_context(
                     &root,
@@ -640,6 +642,33 @@ impl BinanceFutures {
                 return;
             }
         }
+    }
+
+    /// Sign and send one write leg; false when the engine refuses it.
+    fn send_trade(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        context: Context,
+        call: Call,
+        resend: Resend,
+        credentials: crate::sign::Credentials,
+    ) -> bool {
+        cx.request_signed_managed(
+            context.clone(),
+            None,
+            resend.method,
+            resend.url.clone(),
+            None,
+            Box::new(self.signed_recipe(credentials, resend.query.clone())),
+            Pending::Trade(Request {
+                command,
+                context,
+                call,
+                resend,
+            }),
+        )
+        .is_ok()
     }
 
     pub(crate) fn capture_unproven_trade(
@@ -762,8 +791,11 @@ impl BinanceFutures {
             command,
             context,
             call,
+            resend,
         } = request;
         let native_response = response.is_ok();
+        let resend_call = call.clone();
+        let stopped = self.trading.jobs.get(&command).is_some_and(|job| job.stop);
 
         let mut reports = Vec::new();
         let mut batch_reports = false;
@@ -1012,8 +1044,22 @@ impl BinanceFutures {
             } else {
                 recorded
             };
-            if recorded.is_err() {
-                return;
+            match recorded {
+                Err(_) => return,
+                // One re-signed resend of a definitive signature refusal; the
+                // journal refuses a second, which then fails as recorded.
+                // A job already stopping, or ended, never sends again.
+                Ok(Some(grant))
+                    if may_resend(stopped, self.trading.jobs.contains_key(&command)) =>
+                {
+                    // Undo the stop this refusal just set: the leg is resent, not failed.
+                    if let Some(job) = self.trading.jobs.get_mut(&command) {
+                        job.stop = stopped;
+                    }
+                    self.resend_trade(cx, command, &context, grant, resend_call, resend);
+                    return;
+                }
+                Ok(_) => {}
             }
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
@@ -1023,6 +1069,36 @@ impl BinanceFutures {
         job.outstanding = job.outstanding.saturating_sub(1);
         if job.outstanding == 0 {
             self.advance(cx, command);
+        }
+    }
+
+    fn resend_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        context: &Context,
+        grant: safe_cex_engine::request_context::ResendGrant,
+        call: Call,
+        resend: Resend,
+    ) {
+        let sent = self
+            .credentials
+            .select(CredentialRole::Mutation)
+            .ok()
+            .map(|(_, credentials)| credentials.clone())
+            .and_then(|credentials| {
+                let context = cx.http_resend_context(context, grant).ok()?;
+                self.send_trade(cx, command, context, call, resend, credentials)
+                    .then_some(())
+            });
+        if sent.is_none()
+            && let Some(job) = self.trading.jobs.remove(&command)
+            && let Some(root) = job.context
+        {
+            let _ = cx.fail_context(
+                &root,
+                VenueError::new("Binance HTTP lifecycle refused the signature resend"),
+            );
         }
     }
 
@@ -1907,9 +1983,10 @@ const BINANCE: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::RateLimited),
             only: None,
         },
+        // A rejected signature executed nothing: re-sign and send once more.
         Row {
             key: Key::Int(-1022),
-            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
         Row {
@@ -3148,6 +3225,28 @@ mod audit_tests {
         assert_eq!(
             result,
             Err("Binance client order ID generation failed: entropy unavailable".into())
+        );
+    }
+}
+
+/// A granted signature resend goes out only for a live job that was not
+/// already stopping before this refusal.
+fn may_resend(stopped_before: bool, job_live: bool) -> bool {
+    job_live && !stopped_before
+}
+
+#[cfg(test)]
+mod resend_guard_tests {
+    #[test]
+    fn a_stopping_or_ended_job_never_resends() {
+        assert!(super::may_resend(false, true));
+        assert!(
+            !super::may_resend(true, true),
+            "stopping before the refusal"
+        );
+        assert!(
+            !super::may_resend(false, false),
+            "the command already ended"
         );
     }
 }
