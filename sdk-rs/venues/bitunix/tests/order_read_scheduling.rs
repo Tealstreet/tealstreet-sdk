@@ -203,7 +203,7 @@ fn failed_reads_release_both_tokens_for_independent_bounded_repair() {
                         error: "read unavailable",
                     },
                 );
-                actions.extend(safe_cex_engine::test_support::prepared_now(&mut e).into_iter());
+                actions.extend(safe_cex_engine::test_support::prepared_now(&mut e));
             } else {
                 actions.extend(answer(
                     &mut e,

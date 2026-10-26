@@ -179,6 +179,10 @@ struct Live {
     settings: Option<String>,
     /// A paced call waiting for the Plan timer.
     waiting: Option<Step>,
+    /// A batch chunk's refusal: later chunks still go out, then the job fails.
+    failure: Option<VenueError>,
+    /// Native text that follows the journal's selected error.
+    note: Option<String>,
 }
 #[derive(Default)]
 pub struct TradingState {
@@ -451,6 +455,8 @@ impl BitunixFutures {
                 prepare: None,
                 settings: None,
                 waiting: None,
+                failure: None,
+                note: None,
             },
         );
         // (b): one settings change per scope; a second is refused, not queued.
@@ -614,10 +620,18 @@ impl BitunixFutures {
         let Some(live) = self.trading.live.get_mut(&command) else {
             return;
         };
-        if let Some(crate::account::ReadCustody::Plan(_, slot, context)) = custody {
-            live.current = Some((slot, context));
-        }
-        if !success {
+        // The delivery hands off to the next read or the first write.
+        let retired = match custody {
+            Some(crate::account::ReadCustody::Plan(_, slot, context)) => {
+                live.current = Some((slot, context));
+                true
+            }
+            Some(crate::account::ReadCustody::Preflight(preflight, context)) => {
+                cx.finish_preflight_call(&preflight, &context).is_ok()
+            }
+            _ => true,
+        };
+        if !success || !retired {
             live.prepare = None;
             return self.end(
                 cx,
@@ -1410,11 +1424,22 @@ impl BitunixFutures {
             .and_then(|live| live.waiting.take());
         match (slot, step) {
             (Some(slot), Some(step)) => self.issue(cx, command, slot, step, false),
-            _ => self.end(cx, command, VenueError::new("Bitunix job lost its schedule")),
+            _ => self.end(
+                cx,
+                command,
+                VenueError::new("Bitunix job lost its schedule"),
+            ),
         }
     }
     /// Queues one Plan call; every call signs Primary.
-    fn issue(&mut self, cx: &mut Cx<'_, Pending>, command: u32, slot: Slot, step: Step, resent: bool) {
+    fn issue(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: u32,
+        slot: Slot,
+        step: Step,
+        resent: bool,
+    ) {
         let Some(plan) = self.trading.plan(command).cloned() else {
             return;
         };
@@ -1524,13 +1549,24 @@ impl BitunixFutures {
                 if let Some((slot, context)) = &live.current {
                     let _ = cx.finish_plan_call(plan, slot, context);
                 }
-                let failed = cx.fail_plan(plan, error);
+                let failed = match &live.note {
+                    Some(note) => cx.fail_plan_noted(plan, error, note),
+                    None => cx.fail_plan(plan, error),
+                };
                 debug_assert!(failed.is_ok(), "Plan terminal stranded");
             }
         }
         self.debounce(cx, Axis::Orders);
     }
     fn finish(&mut self, cx: &mut Cx<'_, Pending>, command: u32) {
+        if let Some(error) = self
+            .trading
+            .live
+            .get_mut(&command)
+            .and_then(|live| live.failure.take())
+        {
+            return self.end(cx, command, error);
+        }
         let Some(live) = self.take_live(command) else {
             return;
         };
@@ -1575,18 +1611,35 @@ impl BitunixFutures {
             Self::cleanup(cx, &job);
         }
         self.account.reconcile = true;
+        self.account.reconciled = [false, false];
         self.read_axis(cx, Axis::Orders);
+        self.read_axis(cx, Axis::Tpsl);
+        self.account.reconcile = false;
     }
     /// A call failed in transport; a released write is Unknown.
-    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, message: &str) {
+    pub(crate) fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        message: &str,
+    ) {
         let write = !request.step.read();
         if let Some(plan) = self.trading.plan(request.command).cloned() {
             let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
         }
+        // A lost in-job read leaves earlier facts selected; its text follows.
+        if !write && let Some(live) = self.trading.live.get_mut(&request.command) {
+            live.note = Some(message.to_owned());
+        }
         self.end(cx, request.command, error::transport(message, write));
     }
     /// A call refused before release (signing): NotSent for this call.
-    pub(crate) fn trade_error(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: VenueError) {
+    pub(crate) fn trade_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
         if let Some(plan) = self.trading.plan(request.command).cloned() {
             let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
         }
@@ -1616,10 +1669,14 @@ impl BitunixFutures {
             Err(error) => return self.write_refused(cx, request, &response, error),
         };
         let accepted = match &request.step.call {
-            Call::Place { clients, batch: false } => self.place_answer(cx, &request, data, clients),
-            Call::Place { clients, batch: true } => {
-                self.batch_answer(cx, &request, data, clients.len())
-            }
+            Call::Place {
+                clients,
+                batch: false,
+            } => self.place_answer(cx, &request, data, clients),
+            Call::Place {
+                clients,
+                batch: true,
+            } => self.batch_answer(cx, &request, data, clients.len()),
             Call::Cancel { ids, require_ack } => {
                 self.cancel_answer(cx, &request, data, ids, *require_ack)
             }
@@ -1712,7 +1769,12 @@ impl BitunixFutures {
         error: VenueError,
     ) {
         let command = request.command;
-        let code = error.venue_code.as_deref().and_then(|code| code.parse::<i64>().ok());
+        // HTTP status owns classification; a native code decides only a 2xx.
+        let code = error
+            .venue_code
+            .as_deref()
+            .filter(|_| (200..300).contains(&response.status))
+            .and_then(|code| code.parse::<i64>().ok());
         let native = code.map(|code| Native {
             code: NativeCode::Int(code),
             message: "",
@@ -1855,9 +1917,6 @@ impl BitunixFutures {
             context,
             ..
         } = request;
-        let Some(plan) = self.trading.plan(command).cloned() else {
-            return;
-        };
         let Some((_, identity)) = self.trade_identity() else {
             let error = error::not_sent("Bitunix credentials required", ErrorKind::AuthInvalid);
             return self.end(cx, command, error);
@@ -1872,7 +1931,6 @@ impl BitunixFutures {
             body.clone(),
             self.options.testnet,
         );
-        let _ = plan;
         let pending = Pending::Trade(Request {
             command,
             step,
@@ -1962,34 +2020,58 @@ impl BitunixFutures {
         let Ok(rows) = serde_json::from_str::<BatchResult<'_>>(data) else {
             return Self::record(cx, request, Err("Malformed Bitunix batch response".into()));
         };
-        let successes = ack_rows(rows.success_list).unwrap_or_default();
-        let rejected = ack_rows(rows.failure_list).unwrap_or_default();
+        let (successes, mut malformed) = match ack_rows(rows.success_list) {
+            Ok(rows) => (rows, false),
+            Err(_) => (Vec::new(), true),
+        };
+        let rejected = ack_rows(rows.failure_list).unwrap_or_else(|_| {
+            malformed = true;
+            Vec::new()
+        });
         let mut ids = Vec::new();
         let mut seen = HashSet::new();
         // Decode independently: a malformed sibling cannot erase observed IDs,
         // and a missing one leaves the count short (Unknown).
         for raw in successes {
-            if let Ok((Some(id), false)) = ack_identity(raw.get(), true)
-                && seen.insert(id.clone())
-            {
-                ids.push(id);
+            match ack_identity(raw.get(), true) {
+                Ok((Some(id), bad)) => {
+                    malformed |= bad;
+                    if seen.insert(id.clone()) {
+                        ids.push(id);
+                    }
+                }
+                _ => malformed = true,
             }
         }
         let failures: Vec<_> = rejected
             .iter()
-            .filter_map(|raw| serde_json::from_str::<Failure<'_>>(raw.get()).ok())
+            .filter_map(|raw| {
+                let failure = serde_json::from_str::<Failure<'_>>(raw.get()).ok();
+                malformed |= failure.is_none();
+                failure
+            })
             .collect();
         let messages: Vec<_> = failures
             .iter()
-            .map(|f| format!("{} ({})", f.error_msg, f.error_code.map_or(0, |code| code.0)))
+            .map(|f| {
+                format!(
+                    "{} ({})",
+                    f.error_msg,
+                    f.error_code.map_or(0, |code| code.0)
+                )
+            })
             .collect();
         let mut items: Vec<_> = ids.iter().map(|id| BatchItem::Accepted(id)).collect();
         items.extend(failures.iter().map(|f| {
             BatchItem::Native(Native {
-                code: NativeCode::Int(f.error_code.map_or(0, |code| i64::from(code.0))),
+                code: NativeCode::Int(f.error_code.map_or(0, |code| code.0)),
                 message: &f.error_msg,
             })
         }));
+        // An unreadable row proves nothing: the empty identity makes it Unknown.
+        if malformed {
+            items.push(BatchItem::Accepted(""));
+        }
         let message = if messages.is_empty() {
             "Bitunix batch response has incomplete order acknowledgements".to_owned()
         } else {
@@ -1998,6 +2080,8 @@ impl BitunixFutures {
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.job.ids.extend(ids.iter().cloned());
         }
+        // Native: a refused or uncertain chunk never holds back later chunks;
+        // the job fails once they have gone out.
         match cx.http_write_batch(
             &request.context,
             &codes::BITUNIX,
@@ -2012,7 +2096,12 @@ impl BitunixFutures {
                 | WriteResult::KnownPartial(error)
                 | WriteResult::PartialUnknown(error)
                 | WriteResult::Failed(error),
-            ) => Err(Some(error)),
+            ) => {
+                if let Some(live) = self.trading.live.get_mut(&request.command) {
+                    live.failure.get_or_insert(error);
+                }
+                Ok(())
+            }
             Err(_) => Err(None),
         }
     }
@@ -2064,7 +2153,10 @@ impl BitunixFutures {
             Ok(rows) => (rows, true),
             Err(_) => (Vec::new(), false),
         };
-        let rejected = ack_rows(ack.failure_list).unwrap_or_default();
+        let (rejected, failures_valid) = match ack_rows(ack.failure_list) {
+            Ok(rows) => (rows, true),
+            Err(_) => (Vec::new(), false),
+        };
         let succeeded: HashSet<String> = successes
             .iter()
             .filter_map(|raw| match ack_identity(raw.get(), false) {
@@ -2078,9 +2170,13 @@ impl BitunixFutures {
             .iter()
             .filter_map(|raw| serde_json::from_str::<Item<'_>>(raw.get()).ok())
             .collect();
+        let malformed = !rows_valid
+            || !failures_valid
+            || successes.len() != succeeded.len()
+            || failures.len() != rejected.len();
         // Native: a clean code-0 answer cancels every target unless an ACK is
         // required; otherwise only the echoed IDs are proven.
-        let all = !require_ack && rows_valid && rejected.is_empty() && successes.len() == succeeded.len();
+        let all = !require_ack && !malformed && rejected.is_empty();
         let mut canceled = Vec::new();
         for id in ids {
             if all || succeeded.contains(&raw_id(id)) {
@@ -2099,10 +2195,13 @@ impl BitunixFutures {
         let mut items: Vec<_> = raws.iter().map(|id| BatchItem::Accepted(id)).collect();
         items.extend(failures.iter().map(|f| {
             BatchItem::Native(Native {
-                code: NativeCode::Int(f.error_code.map_or(0, |code| i64::from(code.0))),
+                code: NativeCode::Int(f.error_code.map_or(0, |code| code.0)),
                 message: &f.error_msg,
             })
         }));
+        if malformed {
+            items.push(BatchItem::Accepted(""));
+        }
         let message = failures
             .iter()
             .map(|f| {
@@ -2178,7 +2277,12 @@ impl BitunixFutures {
     }
     /// The amend fallback's Read: the canceled parent must be final before
     /// its remainder is re-placed.
-    fn replacement_answer(&mut self, cx: &mut Cx<'_, Pending>, request: Request, response: Response<'_>) {
+    fn replacement_answer(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
         let command = request.command;
         let Call::ReconcileReplacement {
             parent,
@@ -2204,14 +2308,19 @@ impl BitunixFutures {
                 trade_qty: crate::wire::StrictNum,
             }
             let row: FinalOrder<'_> = serde_json::from_str(body).map_err(|e| e.to_string())?;
-            if row.order_id != parent.as_str() || row.symbol != payload.symbol.as_deref().unwrap_or("") {
+            if row.order_id != parent.as_str()
+                || row.symbol != payload.symbol.as_deref().unwrap_or("")
+            {
                 return Err("Bitunix canceled order identity is not reconciled".to_owned());
             }
             let status = row.status.to_ascii_uppercase();
             if !matches!(status.as_str(), "CANCELED" | "CANCELLED" | "FILLED") {
                 return Err("Bitunix cancel not final; replacement was not placed".into());
             }
-            let m = cx.store.market(&row.symbol).ok_or("Bitunix market missing")?;
+            let m = cx
+                .store
+                .market(&row.symbol)
+                .ok_or("Bitunix market missing")?;
             if status == "FILLED" {
                 return Ok(None);
             }

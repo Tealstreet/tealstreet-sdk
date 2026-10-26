@@ -535,6 +535,43 @@ fn candle(k: &Kline, rest: bool) -> Candle {
     }
 }
 impl Venue for BitunixFutures {
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
+    /// One mutation per order for its whole job, continuations included.
+    fn guard_order_mutations(&self) -> bool {
+        true
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Trade(request) => request.reconciliation(),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.trading_retired(owner);
+    }
+    /// An uncertain seal: restore sealed jobs' rows, then Primary order
+    /// snapshots report through `orders_reconciled`.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_trading(cx);
+    }
     fn account_auth_outcome(
         &self,
         pending: &Pending,
@@ -1026,9 +1063,6 @@ impl Venue for BitunixFutures {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.trade_timer(cx, timer) {
-            return;
-        }
         if self.account_timer(cx, timer) {
             return;
         }

@@ -151,20 +151,30 @@ fn a_refused_later_chunk_keeps_the_accepted_ids() {
         &first,
         r#"{"code":0,"data":{"successList":[{"orderId":"1"},{"orderId":"2"},{"orderId":"3"},{"orderId":"4"},{"orderId":"5"}],"failureList":[]}}"#,
     );
-    let timer = actions
+    // The chunk gap is a Plan timer; an order refresh may share its instant.
+    let timers: Vec<_> = actions
         .iter()
-        .find_map(|a| match a {
+        .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } if *at_ms >= 1000.0 => Some((*timer, *at_ms)),
             _ => None,
         })
-        .expect("the 1000 ms chunk gap");
-    e.handle(timer.1, Event::TimerFired { timer: timer.0 });
-    let second = http(&prepared(&mut e, timer.1)).remove(0);
+        .collect();
+    let gap = timers.first().expect("the 1000 ms chunk gap").1;
+    let mut requests = Vec::new();
+    for (timer, at) in &timers {
+        e.handle(*at, Event::TimerFired { timer: *timer });
+        requests.extend(http(&prepared(&mut e, *at)));
+    }
+    let timer = (timers[0].0, gap);
+    let second = requests
+        .into_iter()
+        .find(|r| r.url.ends_with("place_order"))
+        .expect("the second chunk");
     let actions = answer(
         &mut e,
         timer.1 + 1.0,
         &second,
-        r#"{"code":10001,"msg":"Parameter error"}"#,
+        r#"{"code":10002,"msg":"Parameter error"}"#,
     );
     let error = failure(&actions, 51).expect("one terminal");
     assert_eq!(
@@ -278,4 +288,39 @@ fn a_cancel_is_not_held_behind_a_batch_place_gap() {
         1,
         "the cancel goes out inside the gap"
     );
+}
+
+/// Control 9c (dazzy3 c): two jobs' prerequisite reads answer out of order;
+/// the older snapshot never overwrites the newer, and its job sends no write.
+#[test]
+fn an_older_prerequisite_snapshot_never_overwrites_a_newer_one() {
+    let (mut e, _) = startup();
+    let stop = || -> safe_cex_engine::model::PlaceOrderOpts {
+        serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","type":"stop_market","side":"buy","price":100000,"amount":0}"#,
+        )
+        .unwrap()
+    };
+    for command in [61, 62] {
+        e.handle(
+            2000.0,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![stop()],
+            }),
+        );
+    }
+    let reads: Vec<_> = http(&prepared(&mut e, 2000.0))
+        .into_iter()
+        .filter(|r| r.url.contains("get_pending_positions"))
+        .collect();
+    assert_eq!(reads.len(), 2, "each job reads positions");
+    answer(&mut e, 2001.0, &reads[1], POSITIONS);
+    let actions = answer(&mut e, 2002.0, &reads[0], r#"{"code":0,"data":[]}"#);
+    assert!(!e.store().positions().is_empty(), "the newer snapshot stands");
+    assert_eq!(
+        failure(&actions, 61).and_then(|e| e.outcome),
+        Some(Outcome::NotSent)
+    );
+    assert_eq!(writes(&http(&actions), "/tpsl/"), 0);
 }

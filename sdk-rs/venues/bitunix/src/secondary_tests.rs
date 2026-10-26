@@ -47,10 +47,10 @@ fn check_signature(r: &HttpRequest, key: &str, material: &str, query: &str) {
     let expected = hex(&sha256(format!("{first}{material}").as_bytes()));
     assert_eq!(header(r, "sign"), expected);
 }
-/// Selection is by role, not method: reads sign with the read key, and a
-/// trading-job request and the socket login sign Primary whatever the method.
+/// Selection is by role: reads sign with the read key and the socket login
+/// signs Primary. In-job reads sign Primary (trading_funnel control 4).
 #[test]
-fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
+fn reads_use_the_read_key_and_the_login_stays_primary() {
     for secondary in [false, true] {
         let (mut opts, provider) = options();
         if !secondary {
@@ -66,10 +66,8 @@ fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
                 };
                 v.signed_request(
                     cx,
-                    Method::Get,
                     "/secondary-test",
                     params(),
-                    None,
                     Pending::SymbolSettings {
                         symbol: "BTCUSDT".into(),
                         write_revision: 0,
@@ -77,16 +75,6 @@ fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
                         custody: None,
                     },
                 );
-                for method in [Method::Get, Method::Post] {
-                    v.signed_request(
-                        cx,
-                        method,
-                        "/secondary-test",
-                        params(),
-                        (method != Method::Get).then(|| r#"{"amount":"1"}"#.into()),
-                        Pending::Trade(trading::Request::leverage_probe(9)),
-                    );
-                }
                 v.login(cx, SocketId(777));
             },
         );
@@ -101,7 +89,7 @@ fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
                 _ => None,
             })
             .collect();
-        assert_eq!(requests.len(), 3);
+        assert_eq!(requests.len(), 1);
         for (index, r) in requests.into_iter().enumerate() {
             let (key, material) = if secondary && index == 0 {
                 ("read-key", "read-material")

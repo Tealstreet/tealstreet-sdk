@@ -4,7 +4,7 @@ use crate::wire::*;
 use crate::{BitunixFutures, Feed, Pending, REST};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
-use safe_cex_engine::credential_selection::CredentialRole;
+use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
 use safe_cex_engine::execution::{Arithmetic, Cursor, ExecutionRounding};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
@@ -99,6 +99,8 @@ pub struct Read {
     pub native: Vec<(String, NativeOrder)>,
     pub invalid: bool,
     pub baselines: Vec<(String, (f64, f64))>,
+    /// A Primary order snapshot after an uncertain write.
+    pub reconcile: bool,
 }
 impl Read {
     pub(crate) fn orders_current(&self, store: &safe_cex_engine::Store) -> bool {
@@ -189,6 +191,8 @@ pub struct AccountState {
     pub(crate) recovery: crate::recovery::State,
     /// The next order snapshots reconcile an uncertain write: Primary-signed.
     pub reconcile: bool,
+    /// Regular and TP/SL order snapshots committed since that reconcile.
+    pub reconciled: [bool; 2],
     /// Symbols whose leverage/margin mode were read on first candle interest.
     pub symbol_settings: std::collections::HashSet<String>,
     /// Serial of the last balance read that was answered (reply or failure).
@@ -315,75 +319,21 @@ impl BitunixFutures {
         self.read_axis(cx, Axis::Orders);
         self.account.tick = Some(cx.set_timer(TICK_MS));
     }
+    /// An account or settings read: a placement's prerequisite reads run
+    /// under its command, everything else is a managed Background read.
     pub(crate) fn signed_request(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        method: Method,
         path: &str,
         params: Params,
-        body: Option<String>,
         pending: Pending,
     ) {
-        let background = match &pending {
-            Pending::Private(read) => read.after.is_none(),
-            Pending::SymbolSettings { .. } => true,
-            _ => false,
-        };
-        if background {
-            return self.issue_read(cx, path, params, pending);
+        match pending {
+            Pending::Private(read) if read.after.is_some() => {
+                self.issue_prerequisite(cx, path, params, read)
+            }
+            pending => self.issue_read(cx, path, params, pending),
         }
-        if let Pending::Private(read) = pending {
-            return self.issue_prerequisite(cx, path, params, read);
-        }
-        // By role, not method: a GET inside a trading job signs Primary.
-        let role = match &pending {
-            Pending::Private(read) => CredentialRole::Read {
-                scope: Some(match read.axis {
-                    Axis::Balance => safe_cex_engine::AccountReadScope::Balance,
-                    Axis::Positions => safe_cex_engine::AccountReadScope::Positions,
-                    Axis::Orders | Axis::Tpsl => safe_cex_engine::AccountReadScope::Orders,
-                }),
-            },
-            Pending::SymbolSettings { .. } => CredentialRole::Read {
-                scope: Some(safe_cex_engine::AccountReadScope::Settings),
-            },
-            Pending::Trade(_) => CredentialRole::Mutation,
-            _ => CredentialRole::Read { scope: None },
-        };
-        let Ok((selection, identity)) = self.slots.select(role) else {
-            self.fail_private(cx, pending, "Bitunix credentials required");
-            return;
-        };
-        let identity = identity.clone();
-        let testnet = self.options.testnet;
-        let headers = if testnet {
-            sign::dispatch::TESTNET_HEADERS
-        } else {
-            sign::dispatch::HEADERS
-        }
-        .iter()
-        .map(|(name, value)| (*name, (*value).to_owned()))
-        .collect();
-        let query = params.query();
-        let url = format!(
-            "{REST}{path}{}{}",
-            if query.is_empty() { "" } else { "?" },
-            query
-        );
-        let recipe = sign::dispatch::Http::new(
-            identity,
-            method,
-            url.clone(),
-            params.signing(),
-            body.clone(),
-            testnet,
-        );
-        let id = if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance) {
-            cx.request_streamed(method, url, headers, crate::recovery::LIST, pending)
-        } else {
-            cx.request(method, url, headers, body, pending)
-        };
-        selection.sign(cx, id, Box::new(recipe));
     }
     /// An account or settings read as a managed Background read on the read
     /// key (else Primary). Native recovery owns retries: the engine sends once.
@@ -404,7 +354,15 @@ impl BitunixFutures {
         };
         let stream = matches!(&pending, Pending::Private(read) if read.axis != Axis::Balance)
             .then_some(crate::recovery::LIST);
-        let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: Some(scope) });
+        // After an uncertain write the order census signs Primary.
+        let role = match &pending {
+            Pending::Private(read) if read.reconcile => ReadRole::Primary {
+                reason: PrimaryReason::PostUnknownOrderRead,
+                scope: Some(scope),
+            },
+            _ => ReadRole::Read { scope: Some(scope) },
+        };
+        let selected = SelectedRead::select(&self.slots, role);
         let policy = ReadPolicy {
             timeout_ms: 20_000,
             pacing: None,
@@ -456,7 +414,13 @@ impl BitunixFutures {
     /// A placement's prerequisite read under its command: a Preflight read
     /// before the Plan exists, else the Plan's next serial Read call. Both sign
     /// Primary. Any refusal fails the prerequisite NotSent before a write.
-    fn issue_prerequisite(&mut self, cx: &mut Cx<'_, Pending>, path: &str, params: Params, mut read: Read) {
+    fn issue_prerequisite(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        params: Params,
+        mut read: Read,
+    ) {
         let command = read.after.expect("a prerequisite read");
         let Some((credential, identity)) = self.trade_identity() else {
             return self.prepared(cx, command, false, None);
@@ -664,6 +628,7 @@ impl BitunixFutures {
             native: vec![],
             invalid: false,
             baselines: vec![],
+            reconcile: self.account.reconcile && axis.order_slot().is_some(),
         };
         if let Some(slot) = axis.order_slot() {
             self.account.order_reads[slot] = Some(OrderReadProgress {
@@ -680,7 +645,7 @@ impl BitunixFutures {
             self.account.position_dirty = false;
             self.account.timers[1] = Some(cx.set_timer(POSITION_STALL_MS));
         }
-        self.signed_request(cx, Method::Get, path, params, None, Pending::Private(read));
+        self.signed_request(cx, path, params, Pending::Private(read));
     }
     /// Like TS listenOHLCV: read a symbol's leverage and margin mode once,
     /// so a flat symbol reports its real settings instead of defaults.
@@ -706,7 +671,7 @@ impl BitunixFutures {
             serial,
             custody: None,
         };
-        self.signed_request(cx, Method::Get, SYMBOL_SETTINGS, params, None, pending);
+        self.signed_request(cx, SYMBOL_SETTINGS, params, pending);
     }
     pub(crate) fn symbol_settings_response(
         &mut self,
@@ -1365,11 +1330,25 @@ impl BitunixFutures {
         let Some(token) = read.order_token.take() else {
             return;
         };
+        let (reconcile, slot, partial) = (
+            read.reconcile,
+            usize::from(read.axis == Axis::Tpsl),
+            read.partial_orders(),
+        );
         if !cx
             .store
             .commit_orders_snapshot([token], |current| self.apply_orders_snapshot(current, read))
         {
             self.debounce(cx, Axis::Orders);
+            return;
+        }
+        // Both complete Primary snapshots postdate the uncertain write.
+        if reconcile && !partial {
+            self.account.reconciled[slot] = true;
+            if self.account.reconciled == [true, true] {
+                self.account.reconciled = [false, false];
+                cx.orders_reconciled(None);
+            }
         }
     }
     fn apply_orders_snapshot(&mut self, current: &[Order], mut read: Read) -> Vec<Order> {

@@ -335,7 +335,12 @@ fn chunks_at_five_with_one_second_cooldown_and_never_retries_unknown_writes() {
     let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()
         .collect();
-    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    // Only the uncertain seal's order census follows; no further write.
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+    );
     assert!(
         actions
             .iter()
@@ -459,7 +464,12 @@ fn cancel_item_failure_aborts_replacement_and_keeps_parent_open() {
     let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()
         .collect();
-    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    // Only the uncertain seal's order census follows; no further write.
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+    );
     assert!(
         actions
             .iter()
@@ -657,7 +667,12 @@ fn incomplete_cancel_ack_never_places_replacement() {
     let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()
         .collect();
-    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    // Only the uncertain seal's order census follows; no further write.
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+    );
     assert!(
         actions
             .iter()
