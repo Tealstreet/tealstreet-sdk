@@ -218,3 +218,79 @@ async fn dropping_an_unpolled_run_retains_the_already_started_setup_owner() {
     .unwrap();
     assert!(state.joined.load(Ordering::SeqCst));
 }
+
+#[tokio::test]
+async fn cancelling_a_frame_server_retains_actual_setup_until_cleanup_joins() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (host, state, release) = fixture();
+            let mut server = safe_cex_native::FrameServer::new(Default::default()).unwrap();
+            server.add_account("held", "opaque-token", host).unwrap();
+            tokio::task::yield_now().await;
+            drop(server);
+            tokio::task::yield_now().await;
+            wait_for_retirement(&state).await;
+            release.send(()).unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while state.dropped.load(Ordering::SeqCst) == 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(state.joined.load(Ordering::SeqCst));
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn frame_server_shutdown_waits_for_actual_setup_cleanup() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (host, state, release) = fixture();
+            let mut server = safe_cex_native::FrameServer::new(Default::default()).unwrap();
+            server.add_account("held", "opaque-token", host).unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let (shutdown, stop) = oneshot::channel();
+            let run =
+                tokio::task::spawn_local(server.serve(listener, async { stop.await.unwrap() }));
+            tokio::task::yield_now().await;
+            shutdown.send(()).unwrap();
+            tokio::task::yield_now().await;
+            wait_for_retirement(&state).await;
+            assert!(
+                !run.is_finished(),
+                "server stop must join the actual setup owner"
+            );
+            release.send(()).unwrap();
+            run.await.unwrap().unwrap();
+            assert!(state.joined.load(Ordering::SeqCst));
+            assert_eq!(state.dropped.load(Ordering::SeqCst), 1);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn frame_server_reports_actual_setup_cleanup_failure() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (host, state, release) = fixture();
+            let mut server = safe_cex_native::FrameServer::new(Default::default()).unwrap();
+            server.add_account("held", "opaque-token", host).unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let (shutdown, stop) = oneshot::channel();
+            let run =
+                tokio::task::spawn_local(server.serve(listener, async { stop.await.unwrap() }));
+            tokio::task::yield_now().await;
+            shutdown.send(()).unwrap();
+            tokio::task::yield_now().await;
+            wait_for_retirement(&state).await;
+            assert!(!run.is_finished());
+            drop(release);
+            let error = run.await.unwrap().unwrap_err();
+            assert_eq!(error.to_string(), "Address setup cleanup failed");
+            assert!(!state.joined.load(Ordering::SeqCst));
+            assert_eq!(state.dropped.load(Ordering::SeqCst), 1);
+        })
+        .await;
+}
