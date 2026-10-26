@@ -9715,6 +9715,17 @@ managed-HTTP recorder fix; no native-host run counts as browser readiness.
 
 No caller-visible change. Binance already signed every request through the provider. The remaining legacy signing code was a test-only HMAC oracle and fixtures, now replaced by provider-path proofs of the documented vector and of every configured receive window ([RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md)). Signing inventory for Binance: 27 → 4, the four being the dispatch recipe's own lines.
 
+### Per-call pacing on serial Plans
+
+`SerialCall.pacing` names the pacing a call's legs carry; `None` inherits the
+root. A release-domain member resolves through `domain_pacing` at admission and
+every continuation, so it names only what the domain admits; any other call,
+including a Read in a `Mutations` domain, stays unpaced and names only a
+zero-gap group. Legs are stamped from the call, not the root. Existing adopters
+pass `None` and are unchanged. Serial is deliberately stricter than Background:
+a non-member serial Read naming a positive-gap domain pacing is Invalid, while a
+Background Read naming it is admitted and kept out of the FIFO.
+
 ## Rust-only beta SDK admission
 
 SDK web/native registries, saved-account/public factories and worker startup
