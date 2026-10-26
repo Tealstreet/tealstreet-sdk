@@ -87,6 +87,8 @@ pub(crate) const CAPACITY_REACHED: &str =
 pub(crate) enum Refusal {
     Conflict(CommandId),
     Capacity(CommandId),
+    /// A placement or amend on a symbol whose earlier placement is Unknown.
+    Uncertain(CommandId),
 }
 
 impl OrderLocks {
@@ -178,6 +180,16 @@ impl OrderLocks {
                     .as_ref()
                     .is_some_and(|s| s.is_empty() || s == all)
         };
+        // Until a fresh order read resolves an Unknown placement, another
+        // placement or amend on its symbol could duplicate it. Cancels stay
+        // admitted: they cannot place (cancel-all is the venue's opt-in below).
+        let mutates = scope.placing || !scope.cancel_only && !scope.ids.is_empty();
+        if mutates
+            && (scope.unknown_symbol && !self.uncertain.is_empty()
+                || scope.symbols.iter().any(|symbol| self.uncertain(symbol)))
+        {
+            return Err(Refusal::Uncertain(command));
+        }
         if fence_uncertain
             && scope
                 .all_symbol
