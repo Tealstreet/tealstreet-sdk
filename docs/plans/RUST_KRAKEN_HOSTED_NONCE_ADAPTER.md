@@ -128,3 +128,23 @@ ownership shapes have no forwarded metadata, and no export is read at action
 delivery) and three v1/retired-task GREENs, zero skipped. Deep-freeze and snapshot
 suffixes after the missing-metadata assertions are not claimed executed. JS
 syntax passes. Production host, provider, registry and venue code is unchanged.
+
+m26ps4 and fe7lgm cleared this API with host-validation pins, now included in
+the originals: parse only the closed root/owner/role keys and exhaustive enum
+sets; require nonnegative safe integers for task/request/generation and task
+equality to the delivered attempt; accept the raw finite fractional deadline and
+scope:null. Copy only validated fields, never extra keys or credential material.
+Ordinary export errors, malformed JSON or invalid descriptors become absent
+metadata for v1; a v2 consumer still refuses before transport. WASM RuntimeError
+and RangeError preserve EngineHost.invoke's fatal cleanup, with no provider,
+timer or pending-map revival. No numeric export or engine API change is needed.
+Source waits until socket #2177 is handled; F1/F2 and real peer proof stay open.
+
+The validation checkpoint executes 51 controls: 48 assertion REDs and the same
+three v1/retired-task GREENs, zero skipped. All 48 fail at absent metadata or
+an unqueried live export, not fixture setup. Positive cases enumerate every
+exported scope and primary-read reason, scope:null, Mutation and SessionAuth.
+The invalid-descriptor, ordinary-error and fatal-trap suffixes are not claimed
+executed past the missing-query assertion. Existing signer/nonce working-control
+logs remain 20 GREENs against unchanged production host code. Syntax and diff
+checks pass; this checkpoint changes only these originals and plan text.
