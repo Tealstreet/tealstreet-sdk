@@ -1,9 +1,13 @@
 //! Bounded paged reads, independent of account reconciliation and store writes.
 use crate::{MexcFutures, Pending, REST, sign, wire::*};
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, WindowOrder};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
+};
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, VenueError, num};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -11,7 +15,9 @@ const WINDOW: f64 = 90.0 * 86_400_000.0 - 1.0;
 const MAX_PAGES: u32 = 1000;
 
 pub struct Request {
-    owner: Box<CursorHistory<Row>>,
+    owner: Box<ReadCursorHistory<Row>>,
+    root: Root,
+    leg: Option<Leg>,
     kind: Kind,
     symbol: Option<String>,
     order_id: Option<String>,
@@ -23,6 +29,48 @@ pub struct Request {
     limit: usize,
     size: u32,
     bad: bool,
+}
+enum Root {
+    Private(ReadRoot),
+    Public(Context),
+}
+impl Root {
+    fn context(&self) -> &Context {
+        match self {
+            Self::Private(root) => root.context(),
+            Self::Public(root) => root,
+        }
+    }
+}
+enum Leg {
+    Private(ReadLeg),
+    Public(Context),
+}
+impl Leg {
+    fn context(&self) -> &Context {
+        match self {
+            Self::Private(leg) => leg.context(),
+            Self::Public(leg) => leg,
+        }
+    }
+}
+impl Request {
+    fn current(&self, cx: &Cx<'_, Pending>) -> bool {
+        let Some(leg) = &self.leg else {
+            return false;
+        };
+        let valid = match (&self.root, leg) {
+            (Root::Private(root), Leg::Private(leg)) => root.validate_delivery(cx, leg),
+            (Root::Public(root), Leg::Public(leg)) => cx.validate_read_http_delivery(root, leg),
+            _ => return false,
+        };
+        valid.is_ok() && self.owner.validate_delivery(cx, leg.context()).is_ok()
+    }
+    fn retire(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = self.leg.take() {
+            let _ = cx.finish_http_context(leg.context());
+        }
+    }
 }
 #[derive(Clone, Copy)]
 enum Kind {
@@ -255,15 +303,39 @@ impl MexcFutures {
         } else {
             windows.push_back((window_from, window_to));
         }
+        let root = if matches!(kind, Kind::Trades) {
+            match cx.admit_caller_read_root(None, None) {
+                Ok(root) => Root::Public(root),
+                Err(_) => return,
+            }
+        } else {
+            match SelectedRead::command_root(
+                cx,
+                self.read_selection(true, None),
+                LocalRefusal {
+                    diagnostic: None,
+                    error: VenueError::new("MEXC private queries require credentials"),
+                },
+            ) {
+                Ok(root) => Root::Private(root),
+                Err(_) => return,
+            }
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.context().clone()) {
+            Ok(completion) => completion,
+            Err(_) => return,
+        };
         self.query_page(
             cx,
             Request {
-                owner: Box::new(CursorHistory::new(
-                    Completion::new(command),
+                owner: Box::new(ReadCursorHistory::new(
+                    completion,
                     CursorWalk::starting_at(MAX_PAGES, "1".into()),
                     |_| "MEXC history pagination limit exceeded".into(),
                     |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
                 )),
+                root,
+                leg: None,
                 kind,
                 symbol,
                 order_id,
@@ -323,23 +395,97 @@ impl MexcFutures {
         };
         let payload = sign::query(params);
         let url = format!("{REST}{path}?{payload}");
-        let headers = if matches!(r.kind, Kind::Trades) {
-            vec![]
-        } else {
-            self.credentials.as_ref().unwrap().headers_window(
-                cx.now,
-                &payload,
-                self.options.recv_window,
-            )
-        };
         let at = if matches!(r.kind, Kind::Funding) {
             ArrayAt::Path(&["data", "resultList"])
         } else {
             ArrayAt::EnvelopeField("data")
         };
-        cx.request_streamed(Method::Get, url, headers, at, Pending::History(request));
+        let leg = match &request.root {
+            Root::Private(root) => root
+                .leg(
+                    cx,
+                    ReadLegPolicy {
+                        timeout_ms: 20_000,
+                        pacing: None,
+                    },
+                )
+                .map(Leg::Private),
+            Root::Public(root) => cx
+                .http_leg_context(
+                    root,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .map(Leg::Public),
+        };
+        let leg = match leg {
+            Ok(leg) => leg,
+            Err(error) => {
+                let _ = request.owner.finish(cx, Err(error.venue_error()));
+                return;
+            }
+        };
+        let result = match leg {
+            Leg::Private(leg) => {
+                let recipe_path = if payload.is_empty() {
+                    format!("{path}?")
+                } else {
+                    path
+                };
+                leg.queue(
+                    cx,
+                    ReadRequest {
+                        method: Method::Get,
+                        url,
+                        body: None,
+                        stream: Some(at),
+                    },
+                    |identity| {
+                        Box::new(sign::dispatch::Http::new(
+                            identity.clone(),
+                            Method::Get,
+                            recipe_path,
+                            payload,
+                            self.options.recv_window,
+                        ))
+                    },
+                    |leg| {
+                        let mut request = request;
+                        request.leg = Some(Leg::Private(leg));
+                        Pending::History(request)
+                    },
+                )
+            }
+            Leg::Public(context) => {
+                let mut request = request;
+                request.leg = Some(Leg::Public(context.clone()));
+                let result = cx.request_managed(
+                    context,
+                    None,
+                    Method::Get,
+                    url,
+                    None,
+                    Pending::History(request),
+                );
+                if let Ok(id) = result {
+                    cx.stream_response(id, at);
+                }
+                result
+            }
+        };
+        if let Err((Pending::History(request), error)) = result {
+            self.query_failed(cx, request, &error.venue_error().message);
+        }
     }
     pub fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
+        if !r.current(cx) {
+            return;
+        }
         let result = (|| -> Result<(String, f64, Row), String> {
             let bad = |e: serde_json::Error| e.to_string();
             Ok(match r.kind {
@@ -467,10 +613,12 @@ impl MexcFutures {
                 if r.from.is_none_or(|a| time >= a)
                     && r.to.is_none_or(|b| time <= b)
                     && r.symbol.as_ref().is_none_or(|s| s == symbol)
-                    && r.owner.fresh(id)
                     && r.owner.accepted_len() + r.owner.staged_len() < r.limit
+                    && let Some(leg) = &r.leg
+                    && let Ok(mut page) = r.owner.admit(cx, leg.context())
+                    && page.fresh(id)
                 {
-                    r.owner.stage(row);
+                    page.stage(row);
                 }
             }
             Err(_) => r.bad = true,
@@ -478,6 +626,10 @@ impl MexcFutures {
     }
 
     pub fn query_response(&self, cx: &mut Cx<'_, Pending>, mut r: Request, response: Response<'_>) {
+        if !r.current(cx) {
+            self.query_failed(cx, r, "MEXC history delivery expired");
+            return;
+        }
         let envelope = match Envelope::checked(response.body) {
             Ok(e) if response.status == 200 => e,
             Ok(_) => {
@@ -518,12 +670,22 @@ impl MexcFutures {
             && r.order_id.is_none();
         let next = (read_more && has_more).then(|| (r.page + 1).to_string());
         let fresh = r.owner.staged_len();
-        match r.owner.advance(CursorPage {
-            want_more: next.is_some(),
-            next,
-            rows: r.count as usize,
-            fresh,
-        }) {
+        let step = {
+            let Some(leg) = &r.leg else {
+                return;
+            };
+            let Ok(mut page) = r.owner.admit(cx, leg.context()) else {
+                return;
+            };
+            page.advance(CursorPage {
+                want_more: next.is_some(),
+                next,
+                rows: r.count as usize,
+                fresh,
+            })
+        };
+        r.retire(cx);
+        match step {
             CursorStep::More(_) => {
                 r.page += 1;
                 r.count = 0;
@@ -531,7 +693,7 @@ impl MexcFutures {
                 return;
             }
             CursorStep::Stalled(_) => {
-                r.owner.reject(
+                let _ = r.owner.reject(
                     cx,
                     VenueError::new("MEXC history pagination limit exceeded"),
                 );
@@ -545,7 +707,8 @@ impl MexcFutures {
                 // Native windows each have their own 1000-page budget. Keep the
                 // logical owner, admitted output and output identities intact.
                 if !r.owner.restart_stage() {
-                    r.owner
+                    let _ = r
+                        .owner
                         .reject(cx, VenueError::new("MEXC history window lifecycle failed"));
                     return;
                 }
@@ -555,9 +718,10 @@ impl MexcFutures {
                 return;
             }
         }
-        r.owner.finish(cx, Ok(()));
+        let _ = r.owner.finish(cx, Ok(()));
     }
-    pub fn query_failed(&self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
-        r.owner.finish(cx, Err(VenueError::new(error)));
+    pub fn query_failed(&self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
+        r.retire(cx);
+        let _ = r.owner.finish(cx, Err(VenueError::new(error)));
     }
 }
