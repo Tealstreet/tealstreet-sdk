@@ -121,12 +121,25 @@ class CredentialSelectionBan(unittest.TestCase):
                                     'opaque.rs': 'pub struct Option<T> { value: T, key: Vec<u8> }\n'},
             'path_module_outside_crate': {'src/lib.rs': '#[path = "../../opaque.rs"] mod foreign;\n' + P + FIELD + USE},
             'missing_module': 'mod missing;\n' + P + FIELD + USE,
+            # Escaped or raw path literals are refused, never decoded.
+            'escaped_path_literal': {'src/lib.rs': '#[path = "\\x2e\\x2e/opaque.rs"] mod foreign;\n' + P + FIELD + USE,
+                                     'opaque.rs': 'pub struct Option<T> { value: T, key: Vec<u8> }\n',
+                                     # A harmless decoy at the undecoded spelling.
+                                     'src/\\x2e\\x2e/opaque.rs': 'pub struct Decoy;\n'},
+            'raw_path_literal': {'src/lib.rs': '#[path = r"../opaque.rs"] mod wire;\n' + P + FIELD + USE,
+                                 'opaque.rs': 'pub struct Option<T> { value: T, key: Vec<u8> }\n',
+                                 'src/r"../opaque.rs': 'pub struct Decoy;\n'},
+            # The sysroot behind prelude derives must not be rebound.
+            'aliased_std_root': 'use foreign as std;\nuse std::default::Default;\n#[derive(Default)]\npub struct W;\n'
+                                + P + FIELD + USE,
+            'aliased_core_root': 'use foreign as core;\nuse core::default::Default;\n#[derive(Default)]\npub struct W;\n'
+                                 + P + FIELD + USE,
+            'local_std_module': 'mod std { pub mod default { pub use foreign::Default; } }\n' + P + FIELD + USE,
         }
         with tempfile.TemporaryDirectory() as directory:
             try:
                 ban.ROOT = pathlib.Path(directory)
-                (ban.ROOT / 'Cargo.toml').write_text(
-                    '[workspace.dependencies]\n' + '\n'.join(ban.rust_scope.ROOT_DEPENDENCIES.values()) + '\n')
+                (ban.ROOT / 'Cargo.toml').write_text(ban.rust_scope.workspace_manifest())
                 manifest = ('[dependencies]\nsafe-cex-engine = { workspace = true }\n'
                             'safe-cex-crypto = { workspace = true }\nserde.workspace = true\n')
                 for crate, source in {**adopted, **counted}.items():
@@ -152,6 +165,32 @@ class CredentialSelectionBan(unittest.TestCase):
                 self.assertEqual(result['venues/raw/src/lib.rs'].get('ReadCredentials'), 1)
             finally:
                 ban.ROOT = old_root
+
+    def test_root_dependencies_come_from_the_parsed_manifests(self):
+        import tempfile
+        venue = '[dependencies]\nsafe-cex-engine = { workspace = true }\n'
+        canonical = ban.rust_scope.workspace_manifest()
+        cases = {
+            'canonical': (canonical, venue, True),
+            'commented_canonical': ('[workspace.dependencies]\nsafe-cex-engine = { path = "fork" }\n'
+                                    '# safe-cex-engine = { path = "engine" }\n', venue, False),
+            'string_canonical': (canonical + 'note = "safe-cex-engine = { path = \\"engine\\" }"\n'
+                                 .replace('[workspace.dependencies]', ''), venue, True),
+            'package_rename': (canonical + '[workspace.dependencies.evil]\npackage = "safe-cex-engine"\npath = "fork"\n',
+                               venue, False),
+            'venue_rename': (canonical, '[dependencies]\nsafe_cex_engine = { package = "evil", path = "../evil" }\n', False),
+            'target_table': (canonical, venue + '[target.wasm32.dependencies]\nsafe-cex-engine = { path = "../fork" }\n', False),
+            'dotted_workspace': (canonical, '[dependencies]\nsafe-cex-engine.workspace = true\n', True),
+            'unparseable': ('[workspace', venue, False),
+        }
+        for name, (workspace, manifest, proven) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as directory:
+                crate = pathlib.Path(directory) / 'venues/x'
+                crate.mkdir(parents=True)
+                (crate / 'Cargo.toml').write_text(manifest)
+                (crate.parent.parent / 'Cargo.toml').write_text(workspace)
+                reasons = ban.rust_scope.dependency_reasons(crate, {'safe_cex_engine'})
+                self.assertEqual(not reasons, proven, reasons)
 
     def test_unrelated_neighbouring_edits_do_not_change_counts(self):
         before = 'let read = self.options.read_credentials.as_ref();'

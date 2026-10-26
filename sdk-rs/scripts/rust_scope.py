@@ -13,6 +13,7 @@ import functools
 import importlib.util
 import pathlib
 import re
+import tomllib
 
 ITEMS = {'struct', 'enum', 'type', 'trait', 'union', 'mod', 'fn', 'const', 'static'}
 IDENT = re.compile(r'[A-Za-z_][A-Za-z_0-9]*')
@@ -359,10 +360,29 @@ def brace_depths(stream):
     return result
 
 
-# Crate roots a proof may rely on, and the one workspace dependency each must be.
-ROOT_DEPENDENCIES = {'safe_cex_engine': 'safe-cex-engine = { path = "engine" }',
-                     'safe_cex_crypto': 'safe-cex-crypto = { path = "crypto" }',
-                     'serde': 'serde = { version = "1", features = ["derive"] }'}
+# Crate roots a proof may rely on: the Cargo key and the exact parsed workspace
+# dependency each must be. `std` and `core` are sysroot crates with no Cargo key.
+ROOT_DEPENDENCIES = {'safe_cex_engine': ('safe-cex-engine', {'path': 'engine'}),
+                     'safe_cex_crypto': ('safe-cex-crypto', {'path': 'crypto'}),
+                     'serde': ('serde', {'version': '1', 'features': ['derive']})}
+SYSROOT = {'std', 'core'}
+DEPENDENCY_TABLES = ('dependencies', 'dev-dependencies', 'build-dependencies')
+# A `#[path]` literal is accepted only in this plain, escape-free spelling.
+PLAIN_PATH = re.compile(r'"[A-Za-z0-9_./-]+"')
+
+
+def workspace_manifest():
+    """TOML declaring every root dependency exactly as the proof expects (fixtures)."""
+    def value(spec):
+        return '{ ' + ', '.join(f'{k} = {_toml(v)}' for k, v in spec.items()) + ' }'
+    return '[workspace.dependencies]\n' + ''.join(
+        f'{key} = {value(spec)}\n' for key, spec in ROOT_DEPENDENCIES.values())
+
+
+def _toml(value):
+    if isinstance(value, list):
+        return '[' + ', '.join(_toml(v) for v in value) + ']'
+    return '"' + value + '"'
 TEST_ATTRIBUTE = ['#', '[', 'cfg', '(', 'test', ')', ']']
 
 
@@ -424,8 +444,9 @@ def module_closure(streams, production):
                 k = opening - 2
             name = stream[i + 1].removeprefix('r#')
             if attribute_path is not None:
-                if not attribute_path.startswith('"'):
-                    reasons.append(f'{path.name}: unparsed path attribute')
+                # Escapes, raw strings and other spellings are refused, never decoded.
+                if not PLAIN_PATH.fullmatch(attribute_path):
+                    reasons.append(f'{path.name}: unsupported path literal')
                     continue
                 candidates = [path.parent / attribute_path.strip('"')]
             else:
@@ -444,34 +465,44 @@ def module_closure(streams, production):
     return reasons, streams
 
 
+def dependency_tables(manifest):
+    """Every dependency table of a parsed manifest, target-specific ones included."""
+    tables = [manifest.get(table, {}) for table in DEPENDENCY_TABLES]
+    for target in manifest.get('target', {}).values():
+        tables += [target.get(table, {}) for table in DEPENDENCY_TABLES]
+    return tables
+
+
 def dependency_reasons(crate_dir, names):
-    """Each root in `names` is the expected workspace dependency, and no other Cargo
-    key of the venue crate spells a watched name."""
+    """From the parsed manifests: each root in `names` is its exact workspace
+    dependency, and no other Cargo key or package rename spells a watched name."""
     reasons = []
     try:
-        manifest = (crate_dir / 'Cargo.toml').read_text()
-        workspace = (crate_dir.parent.parent / 'Cargo.toml').read_text()
-    except OSError:
-        return ['no Cargo manifests']
-    keys = collections.defaultdict(list)
-    for line in manifest.splitlines():
-        match = re.match(r'\s*([A-Za-z0-9_-]+)(\.workspace)?\s*=', line)
-        if match and not line.strip().startswith('['):
-            keys[match.group(1).replace('-', '_')].append(line.strip())
+        manifest = tomllib.loads((crate_dir / 'Cargo.toml').read_text())
+        workspace = tomllib.loads((crate_dir.parent.parent / 'Cargo.toml').read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return ['no parseable Cargo manifests']
+    spelled = collections.defaultdict(list)
+    for table in dependency_tables(manifest):
+        for key, value in table.items():
+            spelled[key.replace('-', '_')].append(value)
+            if isinstance(value, dict) and isinstance(value.get('package'), str):
+                spelled[value['package'].replace('-', '_')].append({'renamed': key})
+    shared = workspace.get('workspace', {}).get('dependencies', {})
     for name in names:
-        lines = keys.get(name, [])
+        values = spelled.get(name, [])
         if name not in ROOT_DEPENDENCIES:
-            if lines:
+            if values:
                 reasons.append(f'Cargo dependency spells watched name {name}')
             continue
-        dependency = ROOT_DEPENDENCIES[name].split(' =')[0]
-        if not lines or any(not re.fullmatch(
-                re.escape(dependency) + r'(\.workspace = true| = \{ workspace = true(, features = \[[^\]]*\])? \})', line)
-                for line in lines):
+        key, expected = ROOT_DEPENDENCIES[name]
+        if not values or any(not isinstance(value, dict) or value.get('workspace') is not True
+                             or not set(value) <= {'workspace', 'features'} for value in values):
             reasons.append(f'{name} is not the workspace dependency')
-        if workspace.count(ROOT_DEPENDENCIES[name]) != 1 or re.search(
-                r'package\s*=\s*"' + re.escape(dependency) + '"', workspace):
-            reasons.append(f'workspace {name} is not {ROOT_DEPENDENCIES[name]}')
+        declared = [k for k in shared if k.replace('-', '_') == name]
+        renamed = [k for k, v in shared.items() if isinstance(v, dict) and v.get('package') == key]
+        if declared != [key] or shared[key] != expected or renamed:
+            reasons.append(f'workspace {name} is not {key} = {expected}')
     return reasons
 
 
@@ -486,8 +517,9 @@ def crate_refusals(sdk_root, streams, watched, allowed_use=None, definitions=Non
     if production:
         streams = {path: strip_cfg_test(stream) for path, stream in streams.items()}
     reasons, streams = module_closure(streams, production)
-    # Roots the crate's generators rely on are proven like any watched root.
-    watched = set(watched)
+    # Roots the crate's generators rely on are proven like any watched root, and the
+    # sysroot crates behind prelude derives must never be rebound.
+    watched = set(watched) | SYSROOT
     for stream in streams.values():
         if any(len(path) == 2 and path[0] in WORKSPACE_MACRO_CRATES for path, _ in macro_invocations(stream)):
             watched.add('safe_cex_crypto')

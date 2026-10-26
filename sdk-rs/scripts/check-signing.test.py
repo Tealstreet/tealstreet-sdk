@@ -30,8 +30,7 @@ class SigningBan(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             try:
                 ban.ROOT = pathlib.Path(directory)
-                (ban.ROOT / 'Cargo.toml').write_text(
-                    '[workspace.dependencies]\n' + '\n'.join(ban.rust_scope.ROOT_DEPENDENCIES.values()) + '\n')
+                (ban.ROOT / 'Cargo.toml').write_text(ban.rust_scope.workspace_manifest())
                 for crate, source in crates.items():
                     path = ban.ROOT / f'venues/{crate}/src/lib.rs'
                     path.parent.mkdir(parents=True)

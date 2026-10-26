@@ -808,21 +808,8 @@ class MacroImportProof:
         if len(part) != 7 or part[2] != '::' or part[4:] != ['::', '*', ';'] \
                 or not IDENT.fullmatch(part[3]):
             return None
-        manifest = root.parent.parent / 'Cargo.toml'
+        # The root proof parses both Cargo manifests for the engine dependency.
         engine_lib = (ROOT / ENGINE_LIB).resolve()
-        try:
-            dependencies = [line for line in manifest.read_text().splitlines()
-                            if re.match(r'\s*safe[-_]cex[-_]engine\s*=', line)]
-            workspace = (ROOT / 'Cargo.toml').read_text()
-        except OSError:
-            return None
-        if not dependencies or any(not re.fullmatch(
-                r'safe-cex-engine = \{ workspace = true(, features = \[[^\]]*\])? \}', line.strip())
-                for line in dependencies):
-            return None
-        if workspace.count('safe-cex-engine = { path = "engine" }') != 1 \
-                or re.search(r'package\s*=\s*"safe-cex-engine"', workspace):
-            return None
         if engine_lib not in self.engine_tracked or not self.engine_root_proven(root.parent):
             return None
         lib_stream = tokens(engine_lib.read_text())
