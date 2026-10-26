@@ -464,3 +464,12 @@ prerequisite baseline dcd6f797067 and composed60008f49266. A single later
 Bybit method-order pair checks appending the new Signer hooks after the old
 methods; it is diagnostic, not a new zero-growth hold. Source composes on
 actual #2199 landing d3756f2a5fe, with its business carrier incoming-exact.
+
+The completed LOCAL combined measurement is scoped to008c0daf732 (tree
+961f6a864d5), on actual393b7668194:14,041,254 bytes, leaving638,810 bytes
+under14,680,064. Optimized Node/Web outputs are identical, SHA256
+4829ac9157a98afc5f780749eaac11b76f4152ca1dac7334cfe7cc7f9e997611.
+All6,094 archived tracked blobs matched that tree; the owned target was deleted.
+This is not a fresh measurement of the later Bitget/Phemex composition. Their
+incoming changes and the exact source-preservation packet go to the auditor
+for bounded qualification/measurement carry before READY.

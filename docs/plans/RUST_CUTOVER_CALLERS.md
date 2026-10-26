@@ -9366,3 +9366,8 @@ provider hooks and retirement variant have a measured default-off Bybit cost
 of437 bytes on the reviewed pair, explicitly accepted by the overseer. No
 consumer is enabled by this shared prerequisite; CI measures family sizes, and
 the current composed local combined must fit the14 MiB budget.
+
+Address-keyed nonce claims without the feature now refuse instead of accepting
+stable-id text as an address subject. No current adopter uses that unsupported
+path. The additive selection errors preserve typed missing/signing-not-configured
+and setup-capability refusals without adding an auth-health latch.
