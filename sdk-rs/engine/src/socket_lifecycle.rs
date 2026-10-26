@@ -86,6 +86,17 @@ pub enum Invalidation {
     Required,
 }
 
+/// Optional managed-socket behaviour a venue declares. An undeclared
+/// capability is refused at admission and its engine paths are compiled out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SocketCapabilities {
+    /// Continuations admitted by `set_socket_interests_then`.
+    pub handoff: bool,
+}
+impl SocketCapabilities {
+    pub const FULL: Self = Self { handoff: true };
+}
+
 #[cfg(feature = "socket-native-timing")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StableAnchor {
