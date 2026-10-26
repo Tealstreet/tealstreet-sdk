@@ -299,12 +299,11 @@ fn partial_position_read_updates_ui_peers_but_cannot_prove_a_trading_prerequisit
 
 #[test]
 fn partial_initial_positions_do_not_claim_readiness_and_clean_retry_can_complete() {
-    use safe_cex_venue_bitunix::{BitunixFutures, Options};
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(0.0);
     let mut position = None;
     loop {

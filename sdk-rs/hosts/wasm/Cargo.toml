@@ -15,7 +15,7 @@ http-mutation-barriers = ["safe-cex-engine/http-mutation-barriers"]
 sign-meta = ["safe-cex-engine/sign-meta"]
 # Additive provider bootstrap; at least one venue feature is still required.
 dispatch-signing = ["safe-cex-venues/dispatch-signing"]
-bitunix = ["safe-cex-venues/bitunix", "text-ingress"]
+bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing"]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
 grvt = ["safe-cex-venues/grvt", "text-ingress"]

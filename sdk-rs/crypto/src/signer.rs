@@ -55,6 +55,11 @@ pub struct LocalIdentity {
     pub secret_encoding: KeyEncoding,
     #[serde(default)]
     pub trim_credential: bool,
+    /// Trim the signing key text once before decoding; policy-declared.
+    /// Linked only by families that declare it (Bitunix).
+    #[cfg(feature = "trim-signing")]
+    #[serde(default)]
+    pub trim_signing: bool,
     /// Declared extra signing material, e.g. ApeX's zkLink seed.
     #[serde(default)]
     pub extra: LocalExtras,
@@ -73,6 +78,8 @@ impl Default for LocalIdentity {
             stable_id: None,
             secret_encoding: KeyEncoding::default(),
             trim_credential: false,
+            #[cfg(feature = "trim-signing")]
+            trim_signing: false,
             extra: LocalExtras::default(),
             signing_from_primary: false,
         }
@@ -156,6 +163,19 @@ impl<'de> serde::Deserialize<'de> for Secret {
     }
 }
 
+/// Unicode White_Space trim into a fresh guarded buffer; the input is wiped on drop.
+#[cfg(feature = "trim-signing")]
+fn trimmed(input: Secret) -> Secret {
+    let Some(value) = input.0.as_deref() else {
+        return input;
+    };
+    let text = value.trim();
+    if text.len() == value.len() {
+        return input;
+    }
+    Secret::new(text.to_owned())
+}
+
 // Decoded buffers stay guarded on every failure, including the second slot.
 struct DecodedIdentity {
     key: Zeroizing<Vec<u8>>,
@@ -183,9 +203,17 @@ impl DecodedIdentity {
                     .to_vec(),
             );
         }
+        #[cfg(feature = "trim-signing")]
+        let secret = if identity.trim_signing {
+            trimmed(identity.secret)
+        } else {
+            identity.secret
+        };
+        #[cfg(not(feature = "trim-signing"))]
+        let secret = identity.secret;
         Ok(Self {
             key,
-            secret: key_material::decode(identity.secret, identity.secret_encoding)?,
+            secret: key_material::decode(secret, identity.secret_encoding)?,
             passphrase: identity
                 .passphrase
                 .map(|value| key_material::decode(value, KeyEncoding::Utf8))
@@ -358,6 +386,10 @@ impl LocalSigner {
             if let Some(identity) = identity {
                 if let Some(trim) = rule.and_then(|rule| rule.trim_credential) {
                     identity.trim_credential = trim;
+                }
+                #[cfg(feature = "trim-signing")]
+                if let Some(trim) = rule.and_then(|rule| rule.trim_signing) {
+                    identity.trim_signing = trim;
                 }
                 if let Some(encoding) = rule.and_then(|rule| rule.secret_encoding) {
                     identity.secret_encoding = encoding;
@@ -3005,6 +3037,124 @@ mod tests {
             wallet.can_sign(&key, Algorithm::Ed25519),
             Capability::Unsupported
         );
+    }
+
+    #[cfg(feature = "trim-signing")]
+    #[test]
+    fn declared_signing_trim_installs_one_trimmed_material_for_rest_and_login() {
+        use safe_cex_engine::signing::IdentitySetupPolicy;
+        // Bitunix: both the API key and the signing key are trimmed once at setup.
+        let trim = IdentitySetupPolicy {
+            trim_credential: Some(true),
+            trim_signing: Some(true),
+            ..Default::default()
+        };
+        let policy = CredentialSetupPolicy {
+            primary: Some(trim),
+            secondary: Some(trim),
+        };
+        let setup = r#"{"primary":{"key":" yourApiKey\t","secret":" yourSecretKey \n"},
+            "secondary":{"key":"read-key ","secret":" read-secret"}}"#;
+        let (signer, ids) = LocalSigner::from_json_with_policy(setup.into(), policy).unwrap();
+        for (identity, key, secret) in [
+            (ids.primary.unwrap(), "yourApiKey", "yourSecretKey"),
+            (ids.secondary.unwrap(), "read-key", "read-secret"),
+        ] {
+            assert_eq!(signer.key(&identity.credential).unwrap(), key.as_bytes());
+            assert_eq!(
+                signer.key(identity.signing_ref().unwrap()).unwrap(),
+                secret.as_bytes()
+            );
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![
+                    Operation::Sha256 {
+                        payload: vec![
+                            PayloadPart::Bytes {
+                                bytes: b"1234561700000000123".to_vec(),
+                            },
+                            PayloadPart::Credential {
+                                key: identity.credential.clone(),
+                            },
+                        ],
+                    },
+                    Operation::Sign {
+                        algorithm: Algorithm::Sha256SecretSuffix,
+                        key: identity.signing_ref().unwrap().clone(),
+                        payload: vec![PayloadPart::Result {
+                            index: 0,
+                            encoding: Encoding::Hex,
+                        }],
+                    },
+                ],
+            };
+            let inner = crate::hex(&crate::sha256(
+                format!("1234561700000000123{key}").as_bytes(),
+            ));
+            assert_eq!(
+                signer.sign_now(&request).unwrap().values[1],
+                crate::sha256(format!("{inner}{secret}").as_bytes()).to_vec()
+            );
+        }
+        // Undeclared, the exact bytes stay untouched.
+        let (exact, ids) = LocalSigner::from_json(setup.into()).unwrap();
+        assert_eq!(
+            exact
+                .key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            "\u{a0}yourSecretKey \n".as_bytes()
+        );
+        // The declared policy wins over contrary caller metadata, and trimming
+        // precedes decoding, so a pasted trailing newline on hex material decodes.
+        let off = CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                trim_signing: Some(false),
+                ..Default::default()
+            }),
+            secondary: None,
+        };
+        let (kept, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":" s ","trimSigning":true}}"#.into(),
+            off,
+        )
+        .unwrap();
+        assert_eq!(
+            kept.key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            b" s "
+        );
+        let (hex, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":"6162\n","secretEncoding":"hex"}}"#.into(),
+            policy,
+        )
+        .unwrap();
+        assert_eq!(
+            hex.key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            b"ab"
+        );
+        // Rust White_Space includes NEL (U+0085) but not BOM (U+FEFF).
+        for (secret, installed) in [(r"\u0085s\u0085", "s"), (r"\ufeffs", "\u{feff}s")] {
+            let (signer, ids) = LocalSigner::from_json_with_policy(
+                format!(r#"{{"primary":{{"key":"k","secret":"{secret}"}}}}"#),
+                policy,
+            )
+            .unwrap();
+            assert_eq!(
+                signer
+                    .key(ids.primary.unwrap().signing_ref().unwrap())
+                    .unwrap(),
+                installed.as_bytes()
+            );
+        }
+        // A whitespace-only signing key becomes absent material, not a ref.
+        let (_, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":"  "}}"#.into(),
+            policy,
+        )
+        .unwrap();
+        assert!(ids.primary.unwrap().signing_ref().is_err());
     }
 }
 
