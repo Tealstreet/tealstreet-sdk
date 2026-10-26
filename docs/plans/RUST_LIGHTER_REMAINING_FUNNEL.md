@@ -188,13 +188,17 @@ requires its exact successful DATA. Only the fresh nonce Read’s exact DATA may
 never seed from stale reads, message text or a venue-local nonce assignment.
 Re-preparation retains reserved transaction nonces and client indexes.
 
-Nonce API fit is with the core owner before source: this base’s landed TxRecipe
-takes fixed transaction nonces and uses engine::nonce::VenueCounter with
-SeedTicket/seed/take/invalidate. Dispatch NonceClaim currently has only raw-
-or protocol-clock floors, no venue-seeded domain or reseed API. Do not replace
-a venue counter with a clock floor or reset the dispatch repair budget. If the
-core owner requires a new shared seeded-counter API, that is a prerequisite,
-not a second counter implementation in this venue.
+Core/nonce fit is CLEAR from codex-uufub4 at 42293b511fd against fff73624e85:
+retain engine::nonce::VenueCounter<MAX_SAFE>, ticket/seed/take/invalidate and
+the issued (Transaction, u64) through TxRecipe re-preparation. Only exact fresh
+nextNonce DATA seeds the captured original SeedTicket; stale and duplicate
+DATA is refused. The one-reseed budget belongs to the original job. There is
+no reviewed P5 seeded-counter API in clock-based dispatchNonceClaim, so this
+consumer does not enable dispatch-nonce or import its clock maxima/repair
+budget. A second 21104 or failed seed explicitly calls fail_plan; permission
+from refusals_complete never converts that decision into done_plan. This is
+narrow API fit, not source/adoption clearance. Receipt is
+/tmp/codex-uuf-lighter-core-plan-review.json.
 
 Preserve financial reducers, safe integer ranges, order expiry, amendment fill
 checks, builder fees and the unknown-setting reconciliation barrier. Optimistic
@@ -260,8 +264,10 @@ recorded family/combined evidence and the auditor's exact-tree landing GO.
 ## Original execution ledger
 
 The first local original target is request_context_remaining_funnel.rs, 14
-controls on the unchanged fff73624e85 runtime. Execution is in progress; no RED
-or GREEN count is claimed yet. Preparation controls cover lookup, snapshot,
+controls on the unchanged fff73624e85 runtime. Execution on local original head 86a543ed20f produced 11 assertion REDs and
+3 GREEN controls, zero ignored, with unchanged runtime. All nine preparation
+REDs fail at the physical-before-preparation assertion; unclaimed history fails
+at terminal authority; expiry fails at the one-terminal-at-equality assertion. Preparation controls cover lookup, snapshot,
 orders, private history, limits, approval, nonce, submission and tier mutation.
 Separate controls cover unclaimed history and receipt equality. Native controls
 cover unsigned public history, exact transaction values/result IDs and successful
