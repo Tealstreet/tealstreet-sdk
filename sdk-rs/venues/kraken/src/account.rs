@@ -93,10 +93,6 @@ pub struct Account {
     terminal: RecentIds<16384>,
     inflight: HashSet<u8>,
     orders_reconcile: bool,
-    /// Unknown terminals distinguish a new seal from an engine re-ask.
-    pub(super) uncertain_writes: u64,
-    /// The running reconcile read covers this Unknown-terminal generation.
-    orders_reconciling: Option<u64>,
     started: bool,
     pub(super) feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     socket: Option<SocketId>,
@@ -612,7 +608,9 @@ impl Kraken {
         }
     }
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.orders_reconciling == Some(self.account.uncertain_writes) {
+        if cx.reconcile_reask()
+            && (self.account.orders_reconcile || self.account.inflight.contains(&(Scope::Orders as u8)))
+        {
             return;
         }
         self.account.orders_reconcile = true;
@@ -645,9 +643,7 @@ impl Kraken {
                 continue;
             }
             if scope == Scope::Orders {
-                self.account.orders_reconciling =
-                    std::mem::take(&mut self.account.orders_reconcile)
-                        .then_some(self.account.uncertain_writes);
+                self.account.orders_reconcile = false;
             }
             let revision = match scope {
                 Scope::Orders => self.account.orders_revision,
@@ -674,9 +670,6 @@ impl Kraken {
             };
             if let Err(error) = result {
                 self.account.inflight.remove(&key);
-                if scope == Scope::Orders {
-                    self.account.orders_reconciling = None;
-                }
                 cx.retried_failure("kraken.account:634", error);
             }
         }
@@ -1397,11 +1390,8 @@ impl Kraken {
         response: Response<'_>,
     ) {
         self.account.inflight.remove(&(request.scope as u8));
-        if request.scope == Scope::Orders {
-            self.account.orders_reconciling = None;
-            if self.account.orders_reconcile {
-                self.account_refresh(cx);
-            }
+        if request.scope == Scope::Orders && self.account.orders_reconcile {
+            self.account_refresh(cx);
         }
         let field = match request.scope {
             Scope::Orders => Some("openOrders"),
@@ -1512,11 +1502,8 @@ impl Kraken {
         _error: &str,
     ) {
         self.account.inflight.remove(&(request.scope as u8));
-        if request.scope == Scope::Orders {
-            self.account.orders_reconciling = None;
-            if self.account.orders_reconcile {
-                self.account_refresh(cx);
-            }
+        if request.scope == Scope::Orders && self.account.orders_reconcile {
+            self.account_refresh(cx);
         }
         self.account.read_failures = self.account.read_failures.saturating_add(1);
         cx.retried_failure(

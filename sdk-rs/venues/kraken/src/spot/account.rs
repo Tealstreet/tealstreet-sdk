@@ -47,10 +47,6 @@ pub struct Account {
     balance_guard: StaleGuard,
     orders_flight: bool,
     orders_reconcile: bool,
-    /// Unknown terminals distinguish a new seal from an engine re-ask.
-    pub(super) uncertain_writes: u64,
-    /// The running reconcile read covers this Unknown-terminal generation.
-    orders_reconciling: Option<u64>,
     pub provenance: HashMap<String, String>,
     pub terminal: HashSet<String>,
     terminal_fifo: VecDeque<String>,
@@ -367,7 +363,9 @@ impl KrakenSpot {
         );
     }
     pub(super) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.orders_reconciling == Some(self.account.uncertain_writes) {
+        if cx.reconcile_reask()
+            && (self.account.orders_reconcile || self.account.orders_flight)
+        {
             return;
         }
         self.account.orders_reconcile = true;
@@ -378,8 +376,7 @@ impl KrakenSpot {
             return;
         }
         self.account.orders_flight = true;
-        self.account.orders_reconciling = std::mem::take(&mut self.account.orders_reconcile)
-            .then_some(self.account.uncertain_writes);
+        self.account.orders_reconcile = false;
         self.request_private(
             cx,
             "/0/private/OpenOrders",
@@ -730,7 +727,6 @@ impl KrakenSpot {
             }
             Kind::Orders { revision } => {
                 self.account.orders_flight = false;
-                self.account.orders_reconciling = None;
                 let result = self.orders_response(cx, text, *revision);
                 if self.account.orders_reconcile {
                     self.orders_read(cx);
@@ -818,7 +814,6 @@ impl KrakenSpot {
                 }
                 Kind::Orders { .. } => {
                     self.account.orders_flight = false;
-                    self.account.orders_reconciling = None;
                     if self.account.orders_reconcile {
                         self.orders_read(cx);
                     }

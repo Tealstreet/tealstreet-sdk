@@ -9951,9 +9951,9 @@ NotSent until a complete, clean open-orders read publishes and calls
 `orders_reconciled`. Cancel by ID remains admitted; store-composed cancel-all
 keeps the shared uncertainty guard. A pre-mark read cannot release a newer mark.
 
-The account hook joins a running read for the same Unknown-terminal generation.
-A new Unknown terminal owes a follow-up behind an older read; engine backoff
-re-asks do not restart a fresh read or perpetually owe another one. Failed or
+The account hook uses `cx.reconcile_reask` to join a running or already-owed
+read. A new seal owes a follow-up behind an older read; engine backoff re-asks
+do not restart a fresh read or perpetually owe another one. Failed or
 malformed reads leave the fence in place until a clean retry. This is local-key
 beta safety; it does not enable hosted signing. Native engine controls prove
 retry/amend refusal, stale/fresh release, held reads across three engine re-asks,
