@@ -51,6 +51,25 @@ pub fn ready_with_payloads(
     tickers: &str,
     balance: &str,
 ) -> (Engine<KrakenSpot>, SocketId, Option<SocketId>) {
+    ready_open_mode(public, meta, tickers, balance, None)
+}
+pub fn ready_without_private_open() -> (Engine<KrakenSpot>, SocketId, Option<SocketId>) {
+    ready_open_mode(false, META, TICKERS, BALANCE, Some(SocketChannel::Private))
+}
+pub fn ready_with_public_unopened(
+    meta: &str,
+    tickers: &str,
+    balance: &str,
+) -> (Engine<KrakenSpot>, SocketId, Option<SocketId>) {
+    ready_open_mode(true, meta, tickers, balance, Some(SocketChannel::Public))
+}
+fn ready_open_mode(
+    public: bool,
+    meta: &str,
+    tickers: &str,
+    balance: &str,
+    held: Option<SocketChannel>,
+) -> (Engine<KrakenSpot>, SocketId, Option<SocketId>) {
     let mut opts = options();
     opts.public_data_only = public;
     let mut e = safe_cex_engine::test_support::seeded_engine(KrakenSpot::new(opts));
@@ -88,7 +107,9 @@ pub fn ready_with_payloads(
                     } else {
                         pubsocket = Some(socket)
                     }
-                    e.handle(NOW, Event::WsOpened { socket });
+                    if channel != held {
+                        e.handle(NOW, Event::WsOpened { socket });
+                    }
                 }
                 _ => {}
             }
