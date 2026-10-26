@@ -262,8 +262,8 @@ Capacity, leaving permanent encoder/private outcomes fail closed. A bounded
 observer around the real Futures/Spot venues creates genuine valid-key proposal
 and continuation credit pressure. Kraken has no production continuation consumer;
 the fixture carries a live Background read Context as opaque native Pending,
-never as a new HTTP request or financial continuation. All 512 retired wakes are
-replayed before and after recovery and must remain inert.
+never as a new HTTP request or financial continuation. One genuine published wake is replayed before and after recovery; the other 511
+retired continuations must expose no wake or callback. No timer identity is invented.
 
 Frame-byte pressure uses actual native codec batches, each padded with legal JSON
 whitespace below the per-frame cap; parsing independently proves identical JSON.

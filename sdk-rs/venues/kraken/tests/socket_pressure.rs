@@ -18,6 +18,7 @@ use std::rc::Rc;
 enum Pressure {
     Proposals,
     Continuations,
+    WarmContinuation,
     Frames,
 }
 #[derive(Default)]
@@ -79,7 +80,7 @@ impl<V: Venue> Venue for Observed<V> {
             let feed = self.trace.borrow().feed.unwrap();
             let desired: Vec<_> = self.trace.borrow().desired.values().cloned().collect();
             assert!(desired.len() >= 3, "real ticker and two book interests");
-            let context = if matches!(mode, Pressure::Continuations) {
+            let context = if matches!(mode, Pressure::Continuations | Pressure::WarmContinuation) {
                 Some(
                     cx.http_context(
                         Scope::Background,
@@ -105,7 +106,14 @@ impl<V: Venue> Venue for Observed<V> {
                 return;
             }
             if !matches!(mode, Pressure::Frames) {
-                for _ in 0..MAX_FEEDS {
+                let count = if matches!(mode, Pressure::WarmContinuation) {
+                    1
+                } else if matches!(mode, Pressure::Continuations) {
+                    MAX_FEEDS - 1
+                } else {
+                    MAX_FEEDS
+                };
+                for _ in 0..count {
                     if let Some(context) = &context {
                         let key = desired[0].key.as_ref();
                         cx.set_socket_interests_then(
@@ -120,6 +128,13 @@ impl<V: Venue> Venue for Observed<V> {
                     }
                 }
             }
+        }
+        if matches!(mode, Some(Pressure::WarmContinuation)) {
+            return;
+        }
+        if matches!(mode, Some(Pressure::Proposals)) {
+            self.native
+                .on_command(cx, Command::SetTickerSymbols { symbols: vec![] });
         }
         self.native.on_command(cx, c)
     }
@@ -406,6 +421,21 @@ fn exercise<V: Venue>(mut h: Harness<V>, mode: Pressure, spot: bool) {
             h.command(Command::SubscribeOrderBook { symbol });
         }
     }
+    let old_wakes = if matches!(mode, Pressure::Continuations) {
+        h.trace.borrow_mut().pressure = Some(Pressure::WarmContinuation);
+        let warm = h.command(Command::SetTickerSymbols { symbols: vec![] });
+        let wakes: Vec<_> = warm
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == h.now => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(wakes.len(), 1, "one real published continuation wake");
+        wakes
+    } else {
+        vec![]
+    };
     h.trace.borrow_mut().pressure = Some(mode);
     let actions = h.command(Command::SetTickerSymbols {
         symbols: if matches!(mode, Pressure::Frames) {
@@ -453,20 +483,11 @@ fn exercise<V: Venue>(mut h: Harness<V>, mode: Pressure, spot: bool) {
     if matches!(mode, Pressure::Frames) {
         assert_eq!(h.trace.borrow().refused, [SocketError::Capacity]);
     }
-    let old_wakes: Vec<_> = actions
-        .iter()
-        .filter_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == h.now => Some(*timer),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        old_wakes.len(),
-        if matches!(mode, Pressure::Continuations) {
-            MAX_FEEDS
-        } else {
-            0
-        }
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==h.now)),
+        "unpublished retired wakes cannot escape"
     );
     h.now += 1.;
     for timer in &old_wakes {
