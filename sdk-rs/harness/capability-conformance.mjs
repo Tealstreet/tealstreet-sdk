@@ -10,8 +10,8 @@ const enums = {
   leverageQuery: ['settings', 'onRead', 'onMetadata', 'onReadAndMetadata'],
   maxLeverage: ['market', 'query', 'rails', 'unsupported'],
   quantityUnits: ['base', 'nativePlacement', 'inverseNative', 'contractCount', 'inverseContractSized'],
-  positionHistory: ['unsupported', 'fillsAccount', 'fillsSymbol', 'bybit', 'okx', 'blofin', 'wooOrders'],
-  closedPositionFormat: ['unsupported', 'bybit', 'okx', 'blofin'],
+  positionHistory: ['unsupported', 'fillsAccount', 'fillsSymbol', 'bybit', 'okx', 'blofin', 'wooOrders', 'bitunix'],
+  closedPositionFormat: ['unsupported', 'bybit', 'okx', 'blofin', 'bitunix'],
   fillHistoryTime: ['asProvided', 'secondsOrMilliseconds', 'nonnegativeSecondsOrMilliseconds'],
 };
 // These fields affect arguments, frames or bridge policy, not a new command op.
