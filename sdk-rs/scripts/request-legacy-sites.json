@@ -8,17 +8,6 @@
   "venues/apexomni/src/public.rs": {
     "ea54413cb720d7c3e45aaf3bb9d7b167d66e7bfae2e044e17678ef461eb01056": 1
   },
-  "venues/asterdex/src/request.rs": {
-    "88bdec8ef506ecbd68261b35ee606556be07fe3c55808a6207547bfa573be0e0": 1,
-    "f7818fa1b23d5e723b91adaaf8f12a2dbd27f9bd93c7d4f70190205b1437fd96": 1,
-    "a672a578fda69c95c5b016d238bdf330892623a317a07c7efdb3b610655836b0": 1
-  },
-  "venues/asterdex/src/trading.rs": {
-    "ea0ff1d0bf1689d0410b0bcc1cbbeedc2fa1bec60349440b50760648369edf0e": 1,
-    "488da2b855444a6285294159c398a6aa8dc7f130410e9940370a66662c3e7eef": 1,
-    "b57c0e274933eb087e87e945d41b0c3fb51bb9e53ab1d343454facd2109f5f69": 1,
-    "a41063f04016af862c5272c6ee36a28f313b9e5dbef3294b7c65d74c86df29d0": 1
-  },
   "venues/backpack/src/account.rs": {
     "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1
   },

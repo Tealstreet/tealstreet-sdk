@@ -6,8 +6,8 @@ use safe_cex_engine::book::Book;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
-    Action, Command, Cx, Engine, ErrorKind, Event, Method, Notice, Outcome, Response, SocketId,
-    TimerId, Venue,
+    Action, Command, Cx, Engine, ErrorKind, Event, Notice, Outcome, Response, SocketId, TimerId,
+    Venue,
 };
 
 const NOW: f64 = 1_700_000_000_000.;
@@ -479,7 +479,7 @@ fn native_routing_cleanup_removes_only_store_observed_acknowledgements() {
     );
 }
 #[test]
-fn valid_legacy_setting_keeps_signed_post_without_a_managed_root() {
+fn valid_setting_at_full_managed_capacity_is_one_typed_refusal() {
     let mut e = engine(Case::CapacityWrite);
     fill(&mut e);
     e.handle(
@@ -490,41 +490,15 @@ fn valid_legacy_setting_keeps_signed_post_without_a_managed_root() {
             hedged: true,
         }),
     );
-    let mut out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
-    if let Some(id) = out.iter().find_map(|a| match a {
-        Action::Http(h) if h.url.ends_with("/time") => Some(h.id),
-        _ => None,
-    }) {
-        e.handle(
-            NOW,
-            Event::HttpResponse {
-                request: id,
-                response: Response {
-                    status: 200,
-                    headers: "",
-                    body: r#"{"serverTime":1700000000000}"#,
-                },
-            },
-        );
-        out.extend(safe_cex_engine::test_support::prepared_actions(&mut e, NOW));
-    }
-    let http = out
-        .iter()
-        .find_map(|a| match a {
-            Action::Http(h) if h.url.contains("/positionSide/dual?") => Some(h),
-            _ => None,
-        })
-        .expect("unchanged accepted native signed write at full managed capacity");
-    assert_eq!(http.method, Method::Post);
-    assert!(http.url.contains("dualSidePosition=true&"));
-    assert!(http.url.contains("signature="));
-    assert!(!e.venue().inner.trading.jobs.is_empty());
+    // Managed trade plans need a slot: one typed refusal, nothing sent, and
+    // native routing state untouched.
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    capacity_refused(&out, false);
     assert_eq!(e.venue().peers.len(), 256);
-    assert_eq!(e.venue().after, 256);
 }
 
 #[test]
-fn valid_v3_stp_read_keeps_secondary_signed_get_at_full_managed_capacity() {
+fn valid_v3_stp_read_at_full_managed_capacity_is_one_typed_refusal() {
     let primary = "01".repeat(32);
     let secondary = "02".repeat(32);
     let primary_address = safe_cex_crypto::ethereum::private_key_address(&primary).unwrap();
@@ -546,53 +520,15 @@ fn valid_v3_stp_read_keeps_secondary_signed_get_at_full_managed_capacity() {
         NOW,
         Event::Command(Command::FetchStpMode { command: OWNER }),
     );
-    let mut out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
-    if let Some(id) = out.iter().find_map(|a| match a {
-        Action::Http(h) if h.url.ends_with("/time") => Some(h.id),
-        _ => None,
-    }) {
-        e.handle(
-            NOW,
-            Event::HttpResponse {
-                request: id,
-                response: Response {
-                    status: 200,
-                    headers: "",
-                    body: r#"{"serverTime":1700000000000}"#,
-                },
-            },
-        );
-        out.extend(safe_cex_engine::test_support::prepared_actions(&mut e, NOW));
-    }
-    let http = out
-        .iter()
-        .find_map(|a| match a {
-            Action::Http(h) if h.url.contains("/fapi/v3/stpMode?") => Some(h),
-            _ => None,
-        })
-        .expect("native signed STP Read retains secondary selection at full capacity");
-    assert_eq!(http.method, Method::Get);
-    assert!(http.url.contains(&format!("signer={secondary_address}")));
-    assert!(http.url.contains("signature="));
-    let request = http.id;
-    e.handle(
-        NOW,
-        Event::HttpResponse {
-            request,
-            response: Response {
-                status: 200,
-                headers: "",
-                body: r#"{"stpMode":"EXPIRE_TAKER"}"#,
-            },
-        },
-    );
-    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: OWNER, result }) if result == "\"EXPIRE_TAKER\"")));
+    // Managed trade plans need a slot: one typed refusal, nothing sent, and
+    // native routing state untouched.
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    capacity_refused(&out, true);
     assert_eq!(e.venue().peers.len(), 256);
-    assert_eq!(e.venue().after, 256);
 }
 
 #[test]
-fn retired_ack_does_not_consume_native_capacity_for_an_accepted_job() {
+fn valid_placement_at_full_managed_capacity_keeps_ack_routing_untouched() {
     let mut e = seeded_ack();
     fill(&mut e);
     e.handle(
@@ -602,36 +538,15 @@ fn retired_ack_does_not_consume_native_capacity_for_an_accepted_job() {
             orders: vec![placement(); 9_999],
         }),
     );
-    let mut out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
-    if let Some(id) = out.iter().find_map(|a| match a {
-        Action::Http(h) if h.url.ends_with("/time") => Some(h.id),
-        _ => None,
-    }) {
-        e.handle(
-            NOW,
-            Event::HttpResponse {
-                request: id,
-                response: Response {
-                    status: 200,
-                    headers: "",
-                    body: r#"{"serverTime":1700000000000}"#,
-                },
-            },
-        );
-        out.extend(safe_cex_engine::test_support::prepared_actions(&mut e, NOW));
-    }
-    assert!(out.iter().any(
-        |a| matches!(a, Action::Http(h) if h.method == Method::Post && h.url.contains("/order?"))
-    ));
+    // Managed trade plans need a slot: one typed refusal, nothing sent, and
+    // native routing state untouched.
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    capacity_refused(&out, false);
     let inner = &e.venue().inner;
-    assert!(!inner.trading.acknowledged.contains_key("retired"));
+    assert!(inner.trading.acknowledged.contains_key("retired"));
     assert!(inner.trading.acknowledged.contains_key("live"));
-    assert_eq!(
-        inner.trading.jobs.get(&OWNER).unwrap().reserved_places,
-        9_999
-    );
+    assert!(!inner.trading.jobs.contains_key(&OWNER));
     assert_eq!(e.venue().peers.len(), 256);
-    assert_eq!(e.venue().after, 256);
 }
 
 fn seeded_symbol_cancel() -> Engine<Probe> {
@@ -657,7 +572,7 @@ fn full_symbol_cancel_does_not_prune_during_job_construction() {
     refused(&out, Case::SymbolCancel, ErrorKind::Internal);
 }
 #[test]
-fn valid_symbol_cancel_keeps_store_and_live_ack_routing_without_duplicates() {
+fn valid_symbol_cancel_at_full_managed_capacity_keeps_ack_routing_untouched() {
     let mut e = seeded_ack();
     fill(&mut e);
     e.handle(
@@ -667,43 +582,14 @@ fn valid_symbol_cancel_keeps_store_and_live_ack_routing_without_duplicates() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    let mut out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
-    if let Some(id) = out.iter().find_map(|a| match a {
-        Action::Http(h) if h.url.ends_with("/time") => Some(h.id),
-        _ => None,
-    }) {
-        e.handle(
-            NOW,
-            Event::HttpResponse {
-                request: id,
-                response: Response {
-                    status: 200,
-                    headers: "",
-                    body: r#"{"serverTime":1700000000000}"#,
-                },
-            },
-        );
-        out.extend(safe_cex_engine::test_support::prepared_actions(&mut e, NOW));
-    }
-    let http = out
-        .iter()
-        .find_map(|a| match a {
-            Action::Http(h) if h.method == Method::Delete && h.url.contains("/order?") => Some(h),
-            _ => None,
-        })
-        .expect("native symbol cancellation still dispatches at full managed capacity");
-    assert!(http.url.contains("symbol=BTCUSDT&orderId=retired&"));
+    // Managed trade plans need a slot: one typed refusal, nothing sent, and
+    // native routing state untouched.
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    capacity_refused(&out, false);
     let inner = &e.venue().inner;
-    assert!(!inner.trading.acknowledged.contains_key("retired"));
+    assert!(inner.trading.acknowledged.contains_key("retired"));
     assert!(inner.trading.acknowledged.contains_key("live"));
-    let steps = &inner.trading.jobs.get(&OWNER).unwrap().steps;
-    assert_eq!(steps.len(), 1);
-    let remaining = steps.front().unwrap();
-    assert_eq!(remaining.method, Method::Delete);
-    assert_eq!(remaining.endpoint, "order");
-    assert!(
-        matches!(&remaining.call, super::Call::Cancel { id, filled_at_amend: None } if id == "live")
-    );
+    assert!(!inner.trading.jobs.contains_key(&OWNER));
     assert_eq!(e.venue().peers.len(), 256);
 }
 
@@ -725,4 +611,26 @@ fn admitted_keyless_symbol_cancel_keeps_native_cleanup_before_auth_refusal() {
         Some("BTCUSDT")
     );
     assert!(e.venue().inner.trading.jobs.is_empty());
+}
+
+/// One engine capacity refusal before any diagnostic or I/O.
+fn capacity_refused(out: &[Action], read: bool) {
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
+    let failures: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: OWNER,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "{out:?}");
+    assert_eq!(failures[0].message, "Engine request capacity reached");
+    assert_eq!(failures[0].outcome, (!read).then_some(Outcome::NotSent));
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandError { .. })))
+    );
 }
