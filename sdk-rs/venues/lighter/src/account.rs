@@ -37,9 +37,7 @@ pub enum Request {
     Limits {
         started_at: f64,
     },
-    ChangeTier {
-        command: safe_cex_engine::CommandId,
-    },
+
     Lookup {
         candidates: VecDeque<Lookup>,
         index: Option<u64>,
@@ -115,7 +113,7 @@ struct OrderBatch {
 pub struct Account {
     pub account_index: Option<u64>,
     pub api_key_index: Option<u8>,
-    pub signer: Option<sign::Signer>,
+    pub identity: Option<safe_cex_engine::signing::Identity>,
     setting_epochs: HashMap<String, u64>,
     pub records: HashMap<String, Order>,
     connection: Connection,
@@ -589,8 +587,7 @@ impl Lighter {
             });
         }
         if self.options.public_data_only
-            || (self.options.secret.as_deref().is_none_or(str::is_empty)
-                && !self.options.remote_signer)
+            || (self.options.identity.is_none() && !self.options.remote_signer)
             || self
                 .options
                 .api_key_index
@@ -602,6 +599,11 @@ impl Lighter {
             cx.store.set_balance(Balance::default());
             return;
         }
+        self.account.identity = self
+            .options
+            .identity
+            .clone()
+            .filter(|identity| identity.signing_ref().is_ok());
         self.account.api_key_index = self
             .options
             .api_key_index
@@ -633,7 +635,7 @@ impl Lighter {
             });
         }
         let mut addresses = Vec::new();
-        for source in [Some(app), self.options.key.as_deref()]
+        for source in [Some(app), self.options.l1_address.as_deref()]
             .into_iter()
             .flatten()
         {
@@ -669,20 +671,20 @@ impl Lighter {
     fn next_lookup(&mut self, cx: &mut Cx<'_, Pending>, mut candidates: VecDeque<Lookup>) {
         if let Some(candidate) = candidates.pop_front() {
             let path = candidate.path();
-            cx.request_streamed(
-                Method::Get,
+            self.account_request(
+                cx,
                 format!("{}/api/v1/{path}", self.host()),
-                vec![],
-                json::ArrayAt::Envelope(&[
+                Some(json::ArrayAt::Envelope(&[
                     &["accounts"],
                     &["sub_accounts"],
                     &["data", "accounts"],
                     &["data", "sub_accounts"],
-                ]),
-                Pending::Account(Request::Lookup {
+                ])),
+                Request::Lookup {
                     candidates,
                     index: None,
-                }),
+                },
+                None,
             );
         } else {
             cx.notice(
@@ -693,50 +695,120 @@ impl Lighter {
         }
     }
     fn identity_ready(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
-        self.account.account_index = Some(account);
-        let signer = if self.options.secret.as_deref().is_none_or(str::is_empty) {
-            Err("Lighter private key is missing".into())
-        } else if self.account.api_key_index.is_none() {
-            Err("Invalid API key index. Expected an integer from 0 to 255.".into())
-        } else if let Some(provider) = self.options.signer_provider.as_deref()
-            && !provider.is_empty()
-            && provider != "tealstreet-sdk"
+        if let Some(expected) = self.options.application_id.as_deref().and_then(index)
+            && expected != account
         {
-            Err(format!(
-                "Unsupported Lighter signer provider \"{provider}\". Legacy third-party signer providers are removed; use tealstreet-sdk."
-            ))
-        } else {
-            sign::Signer::new(
-                self.options.secret.as_deref().unwrap_or_default(),
-                self.chain_id(),
-                account,
-                self.account.api_key_index.unwrap_or_default(),
-            )
-        };
-        match signer {
-            Ok(signer) => {
-                self.account.signer = Some(signer);
-                self.connect_private(cx);
-            }
-            Err(error) => cx.notice(
-                Level::Warn,
+            cx.notice(
+                Level::Error,
                 code::CONFIG_INVALID,
-                format!("Lighter signer unavailable at startup: {error}"),
-            ),
+                "Lighter account lookup returned a different account index",
+            );
+            return;
+        }
+        self.account.account_index = Some(account);
+        if self.account.identity.is_some() {
+            self.connect_private(cx);
         }
         self.refresh_account(cx);
         self.refresh_orders(cx);
         self.account.sync = Some(cx.set_poll_timer(2_000.0));
     }
 
-    pub(crate) fn account_auth(&self, cx: &Cx<'_, Pending>) -> Result<String, String> {
-        self.account
-            .signer
-            .as_ref()
-            .ok_or("Lighter signer unavailable")?
-            .auth_token((cx.now / 1000.0).floor() as u64 + 60, |bytes| {
-                cx.fill_signing_entropy(bytes).map_err(|_| ())
-            })
+    pub(crate) fn auth_recipe(
+        &self,
+        identity: safe_cex_engine::signing::Identity,
+        placement: sign::AuthPlacement,
+    ) -> Result<Box<dyn safe_cex_engine::SignStep>, String> {
+        let account = sign::Account::new(
+            self.chain_id(),
+            self.account
+                .account_index
+                .ok_or("Lighter account is not loaded yet")?,
+            self.account
+                .api_key_index
+                .ok_or("Invalid Lighter API key index")?,
+        )?;
+        Ok(Box::new(sign::FormRecipe(sign::AuthRecipe::new(
+            identity,
+            account,
+            self.host().into(),
+            placement,
+        ))))
+    }
+    pub(crate) fn account_request(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        url: String,
+        at: Option<json::ArrayAt>,
+        request: Request,
+        placement: Option<sign::AuthPlacement>,
+    ) {
+        use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
+        let identity = placement.as_ref().and(self.account.identity.clone());
+        if placement.is_some() && identity.is_none() {
+            self.account_failed(cx, request, "Lighter signer unavailable");
+            return;
+        }
+        let context = match cx.http_context(
+            Scope::Background,
+            Policy {
+                operation: Operation::Read,
+                credential: identity.as_ref().map(crate::primary_credential),
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.account_failed(cx, request, &error.venue_error().message);
+                return;
+            }
+        };
+        let result = match (identity, placement) {
+            (Some(identity), Some(placement)) => match self.auth_recipe(identity, placement) {
+                Ok(recipe) => cx.request_signed_managed(
+                    context.clone(),
+                    None,
+                    Method::Get,
+                    url,
+                    None,
+                    recipe,
+                    Pending::Account {
+                        context: context.clone(),
+                        request,
+                    },
+                ),
+                Err(error) => {
+                    let _ = cx.finish_http_context(&context);
+                    self.account_failed(cx, request, &error);
+                    return;
+                }
+            },
+            _ => cx.request_managed(
+                context.clone(),
+                None,
+                Method::Get,
+                url,
+                None,
+                Pending::Account {
+                    context: context.clone(),
+                    request,
+                },
+            ),
+        };
+        match result {
+            Ok(id) => {
+                if let Some(at) = at {
+                    cx.stream_response(id, at);
+                }
+            }
+            Err((Pending::Account { request, .. }, error)) => {
+                let _ = cx.finish_http_context(&context);
+                self.account_failed(cx, request, &error.venue_error().message);
+            }
+            Err(_) => unreachable!(),
+        }
     }
     pub(crate) fn account_snapshot_serial(&self) -> Option<u64> {
         self.account
@@ -752,21 +824,21 @@ impl Lighter {
         };
         self.account.snapshot_inflight = true;
         self.account.snapshot_serial = self.account.snapshot_serial.wrapping_add(1);
-        cx.request_streamed(
-            Method::Get,
+        self.account_request(
+            cx,
             format!("{}/api/v1/account?by=index&value={account}", self.host()),
-            vec![],
-            json::ArrayAt::Field("accounts"),
-            Pending::Account(Request::Snapshot {
+            Some(json::ArrayAt::Field("accounts")),
+            Request::Snapshot {
                 serial: self.account.snapshot_serial,
                 revision: self.account.revision,
                 account: None,
                 valid: true,
-            }),
+            },
+            None,
         );
     }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.orders_inflight || self.account.signer.is_none() {
+        if self.account.orders_inflight || self.account.identity.is_none() {
             return;
         }
         if self.account.account_index.is_none() {
@@ -782,38 +854,30 @@ impl Lighter {
         revision: u64,
         coverage: SnapshotCoverage<String>,
     ) {
-        let auth = match self.account_auth(cx) {
-            Ok(a) => a,
-            Err(e) => {
-                self.account.orders_inflight = false;
-                cx.notice(Level::Warn, code::REQUEST_FAILED, e);
-                return;
-            }
-        };
         let id = market.as_deref().unwrap_or("255");
         let account = self.account.account_index.unwrap();
-        cx.request_streamed(
-            Method::Get,
+        self.account_request(
+            cx,
             format!(
-                "{}/api/v1/accountActiveOrders?account_index={account}&market_id={id}&auth={auth}",
+                "{}/api/v1/accountActiveOrders?account_index={account}&market_id={id}",
                 self.host()
             ),
-            vec![],
-            json::ArrayAt::Envelope(&[
+            Some(json::ArrayAt::Envelope(&[
                 &["orders"],
                 &["data", "orders"],
                 &["result", "orders"],
                 &["data"],
                 &["result"],
                 &[],
-            ]),
-            Pending::Account(Request::Orders {
+            ])),
+            Request::Orders {
                 revision,
                 market,
                 orders: Vec::new(),
                 coverage,
                 valid: true,
-            }),
+            },
+            Some(sign::AuthPlacement::Query),
         );
     }
     pub(crate) fn account_order_terminal(&self, id: &str) -> bool {
@@ -868,7 +932,24 @@ impl Lighter {
             socket,
             format!(r#"{{"type":"subscribe","channel":"account_all/{account}"}}"#),
         );
-        match self.account_auth(cx){Ok(auth)=>cx.send(socket,format!(r#"{{"type":"subscribe","channel":"account_all_orders/{account}","auth":"{auth}"}}"#)),Err(e)=>cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,e)}
+        if let Some(identity) = self.account.identity.clone() {
+            let channel = format!("account_all_orders/{account}");
+            match self.auth_recipe(
+                identity,
+                sign::AuthPlacement::WsSubscribe {
+                    socket,
+                    url: self.ws_url().into(),
+                    channel: channel.clone(),
+                },
+            ) {
+                Ok(recipe) => cx.send_signed(
+                    socket,
+                    format!(r#"{{"type":"subscribe","channel":"{channel}"}}"#),
+                    recipe,
+                ),
+                Err(error) => cx.notice(Level::Warn, code::STREAM_UNAVAILABLE, error),
+            }
+        }
     }
     pub(crate) fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
@@ -1646,7 +1727,7 @@ impl Lighter {
         item: &str,
     ) {
         match request {
-            Request::Limits { .. } | Request::ChangeTier { .. } => {}
+            Request::Limits { .. } => {}
             Request::Backfill {
                 executions,
                 oldest,
@@ -1859,6 +1940,9 @@ impl Lighter {
             .records
             .retain(|id, _| active.contains(id.as_str()));
         cx.store.set_orders(merged);
+        if !coverage.any() && revision == self.account.revision {
+            cx.orders_reconciled(None);
+        }
     }
     pub(crate) fn account_response(
         &mut self,
@@ -1872,7 +1956,7 @@ impl Lighter {
                 || response.body.trim_start().starts_with('['));
         match request {
             Request::Limits { started_at } => self.limits_response(cx, started_at, response),
-            Request::ChangeTier { command } => self.tier_changed(cx, command, response),
+
             Request::Backfill {
                 run,
                 mut executions,
@@ -1968,7 +2052,7 @@ impl Lighter {
                             && !account.unconfirmed_positions.contains(symbol)
                     });
                     self.commit_snapshot(cx, revision, account);
-                    if self.account.signer.is_none() && !cx.store.loaded().orders {
+                    if self.account.identity.is_none() && !cx.store.loaded().orders {
                         cx.store.set_orders(vec![]);
                     }
                     self.trade_account_ready(cx, serial, confirmed);
@@ -2084,10 +2168,6 @@ impl Lighter {
         match request {
             Request::Limits { started_at } => self.limits_failed(cx, started_at),
             Request::Backfill { run, .. } => self.backfill_failed(cx, run, error.into()),
-            Request::ChangeTier { command } => cx.fail(
-                command,
-                format!("Lighter account tier change outcome is unknown: {error}"),
-            ),
             Request::Lookup { candidates, .. } => self.next_lookup(cx, candidates),
             Request::Snapshot { serial, .. } => {
                 self.account.snapshot_inflight = false;
@@ -2422,18 +2502,6 @@ impl Lighter {
         self.account.backfill_retry = Some((cx.set_timer(2_000.0), run));
     }
     fn request_backfill(&mut self, cx: &mut Cx<'_, Pending>, run: Backfill) {
-        let auth = match self.account_auth(cx) {
-            Ok(auth) => auth,
-            Err(e) => {
-                BackgroundCoverage::Incomplete.report(
-                    cx,
-                    format!(
-                        "Lighter fill backfill skipped; fills during the outage may be missing: {e}"
-                    ),
-                );
-                return;
-            }
-        };
         let account = self.account.account_index.unwrap();
         let mut url = format!(
             "{}/api/v1/trades?limit=100&account_index={account}&sort_by=timestamp&sort_dir=desc&aggregate=false",
@@ -2442,17 +2510,17 @@ impl Lighter {
         if let Some(cursor) = &run.cursor {
             url.push_str(&format!("&cursor={}", safe_cex_engine::url::encode(cursor)));
         }
-        cx.request_streamed(
-            Method::Get,
+        self.account_request(
+            cx,
             url,
-            vec![("authorization", auth)],
-            json::ArrayAt::Field("trades"),
-            Pending::Account(Request::Backfill {
+            Some(json::ArrayAt::Field("trades")),
+            Request::Backfill {
                 run,
                 executions: Vec::new(),
                 oldest: f64::INFINITY,
                 count: 0,
-            }),
+            },
+            Some(sign::AuthPlacement::Header),
         );
     }
 }

@@ -400,13 +400,21 @@ impl AsterDex {
             let url = format!("{}{path}", self.urls.rest);
             return self.release_read(cx, request, url, public_read_policy(), None);
         }
-        let Ok((selection, slot)) = self.credentials.select(request.role) else {
-            self.on_request_failed(cx, request.pending, "Missing required Aster credentials");
-            return false;
+        // Start latches; work issued before start reads the current identities.
+        self.seal_signing(cx, false);
+        let signing = self.signing(request.role);
+        let (selection, identity, auth) = match signing {
+            Ok(signing) => signing,
+            Err(error) => {
+                request.settle(cx);
+                self.on_request_failed(cx, request.pending, &error);
+                return false;
+            }
         };
-        let recipe = self.auth(slot).and_then(|auth| {
+        let credential_ref = identity.credential.clone();
+        let recipe = Ok(auth).and_then(|auth| {
             Recipe::new(
-                slot.identity.clone(),
+                identity,
                 auth,
                 request.method,
                 self.urls.rest,
@@ -431,7 +439,7 @@ impl AsterDex {
         }
         if request.managed_signed() {
             let policy = Policy {
-                credential: Some(selection.credential(slot.identity.credential.clone())),
+                credential: Some(selection.credential(credential_ref.clone())),
                 ..public_read_policy()
             };
             return self.release_read(cx, request, url, policy, Some(Box::new(recipe)));
@@ -442,7 +450,7 @@ impl AsterDex {
             if !self.listen_key_current(&request.pending) {
                 return false;
             }
-            let credential = selection.credential(slot.identity.credential.clone());
+            let credential = selection.credential(credential_ref);
             return self.listen_key_session_write(cx, request, url, credential, recipe);
         }
         // Every signed request is a managed read, a plan write or a listenKey
@@ -1072,7 +1080,20 @@ mod tests {
 
     impl Venue for Probe {
         type Pending = Pending;
+        fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
+            self.inner.address_nonce_domain()
+        }
+        fn public_address_slots(&self) -> safe_cex_engine::AddressSetupSlots {
+            self.inner.public_address_slots()
+        }
+        fn dispatch_nonce() -> bool {
+            true
+        }
+        fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+            safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+        }
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+            self.inner.seal_signing(cx, true);
             self.inner.requests.last_sync_success = Some(cx.now);
         }
         fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
@@ -1170,7 +1191,7 @@ mod tests {
             } else {
                 Options::v1_with_read_agent()
             };
-            let (inner, signer) = options.build();
+            let (inner, signer, identities) = options.build_installed();
             let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
                 inner,
                 method,
@@ -1178,6 +1199,8 @@ mod tests {
                 clock_samples: Vec::new(),
             });
             engine.set_signer(Some(signer)).unwrap();
+            engine.set_identities(identities).unwrap();
+            engine.initialize_address_nonce(0.0).unwrap();
             let mut h = Self {
                 engine,
                 now: 1_700_000_000_000.0,

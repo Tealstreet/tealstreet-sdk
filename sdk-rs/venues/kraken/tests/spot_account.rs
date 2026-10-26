@@ -1063,3 +1063,27 @@ fn row_report_rest_accepted_duplicate_rearms_while_ws_rejected_duplicate_does_no
         "REST preserves its native unfiltered accepted-ID rearm"
     );
 }
+
+#[test]
+fn definitive_revoked_key_and_read_permission_still_report_auth_rejection() {
+    for code in ["EAPI:Invalid key", "EGeneral:Permission denied"] {
+        let (mut e, _, private) = ready(false);
+        message(
+            &mut e,
+            private.unwrap(),
+            r#"{"channel":"balances","type":"update","data":[]}"#,
+        );
+        let request = requests(&mut e).pop().unwrap();
+        reply(&mut e, &request, &format!(r#"{{"error":["{code}"]}}"#));
+        let actions = e.drain_plain().collect::<Vec<_>>();
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+        );
+        assert!(actions.iter().any(
+            |a| matches!(a, Action::Notice(Notice::Event(event)) if event.message.contains(code))
+        ));
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}

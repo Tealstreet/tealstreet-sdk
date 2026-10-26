@@ -1,6 +1,9 @@
-//! `TxRecipe` through the real engine dispatcher and `LocalSigner` produces
-//! the legacy `Signer`'s `sendTx`/`sendTxBatch` body byte for byte (R3), and
-//! holds parked transactions until a valid result arrives (R4).
+#[path = "support/reference_signer.rs"]
+mod reference_signer;
+use reference_signer::{Signer, send_body};
+// `TxRecipe` through the real engine dispatcher and `LocalSigner` produces
+// the legacy `Signer`'s `sendTx`/`sendTxBatch` body byte for byte (R3), and
+// holds parked transactions until a valid result arrives (R4).
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
 use safe_cex_engine::entropy::Entropy;
@@ -14,9 +17,7 @@ use safe_cex_engine::{
     Action, Command, Cx, Engine, Event, HttpRequest, Method, RequestId, Response, SocketId,
     TimerId, Venue,
 };
-use safe_cex_venue_lighter::sign::{
-    Account, Builder, Order, Signer, Transaction, TxRecipe, send_body,
-};
+use safe_cex_venue_lighter::sign::{Account, Builder, Order, Transaction, TxRecipe};
 use std::sync::{Arc, Mutex};
 
 const ORIGIN: &str = "https://mainnet.zklighter.elliot.ai";

@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 // @vitest-environment node
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -135,7 +140,7 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
     httpFailed: idle,
     timer: idle,
   };
-  const construct = vi.fn(function (_name: string, _options: string) {
+  const construct = vi.fn(function (_name: string, _options: string, _setup?: string) {
     return native;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
@@ -188,10 +193,10 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
   };
 }
 
-it('audits every registered alias as supported identity or an explicit unsupported product', () => {
+it('retains all historical identity cases and covers the beta alias subset', () => {
   const inventory = [...commandAliases, ...coinbaseAliases, ...orderlyAliases, ...unsupportedAliases];
   expect(new Set(inventory).size).toBe(49);
-  expect(inventory.slice().sort()).toEqual([...RUST_VENUES].sort());
+  expect(inventory.filter((name) => RUST_VENUES.has(name)).sort()).toEqual([...RUST_VENUES].sort());
   expect(commandAliases.length + coinbaseAliases.length + orderlyAliases.length).toBe(33);
 });
 
@@ -270,7 +275,10 @@ it.each(['lighter', 'lighter-robinhood'] as const)(
     r.result({ userId: '0', affiliateId: '900719925474099312346' });
     await expect(r.exchange.getAccount()).resolves.toEqual({ userId: '0', affiliateId: '900719925474099312346' });
     const nativeOptions = JSON.parse(r.construct.mock.calls[0][1]);
-    expect(nativeOptions).toMatchObject({ publicDataOnly: true, key: '', secret: '', applicationId: '0' });
+    expect(nativeOptions).toMatchObject({ publicDataOnly: true, applicationId: '0' });
+    expect(nativeOptions).not.toHaveProperty('key');
+    expect(nativeOptions).not.toHaveProperty('secret');
+    expect(JSON.parse(r.construct.mock.calls[0][2]!)).toMatchObject({ primary: { key: '', secret: '' } });
     expect(nativeOptions).not.toHaveProperty('apiKeyIndex');
     expect(r.native.start).not.toHaveBeenCalled();
   },

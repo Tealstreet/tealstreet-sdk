@@ -1064,7 +1064,7 @@ impl BybitLinear {
     }
 
     fn remember_terminal_order(&mut self, id: &str) {
-        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro()) {
+        if !(self.variant == crate::Variant::Demo || self.variant.is_hyro() || self.brazil_site) {
             return;
         }
         self.cache_terminal_order(id);
@@ -1655,7 +1655,7 @@ impl BybitLinear {
         id: &str,
         symbol: &str,
     ) {
-        if self.variant != crate::Variant::Demo {
+        if self.variant != crate::Variant::Demo && !self.brazil_site {
             return;
         }
         for delay in [1_000.0, 3_000.0, FILL_REPAIR_GRACE_MS + 250.0] {

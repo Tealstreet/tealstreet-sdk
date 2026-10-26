@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { smokeOrder, LIVE_SMOKE_MAX_NOTIONAL } from './live-smoke.mjs';
+import { MARKET_FLAG } from '../hosts/wasm/js/wire.mjs';
 import { venueMarketRules, LIVE_SMOKE_RULE_SOURCES, LIVE_SMOKE_UNKNOWN_RULES } from './live-smoke-rules.mjs';
 
 const market = { id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT',
@@ -17,6 +19,14 @@ const filters = [
 const fixtures = [
   ['binance', 'binance', market,
     http('https://demo-fapi.binance.com/fapi/v1/exchangeInfo', { symbols: [{ symbol: 'BTCUSDT', filters }] }), 5, 0.001, 0.001, 1],
+  ['phemex', 'phemex', market,
+    http('https://api.phemex.com/public/products', { code: 0, data: { perpProductsV2: [{ symbol: 'BTCUSDT', type: 'PerpetualV2', status: 'Listed', quoteCurrency: 'USDT', settleCurrency: 'USDT', minOrderValueRv: '1', qtyStepSize: '0.001', maxOrderQtyRq: '1000' }] } }), 1, 0.001, 0.001, 1],
+  ['binancespot', 'binancespot', market,
+    http('https://testnet.binance.vision/api/v3/exchangeInfo', { symbols: [{ symbol: 'BTCUSDT', filters: [
+      { filterType: 'LOT_SIZE', minQty: '0.001', maxQty: '100', stepSize: '0.001' },
+      { filterType: 'NOTIONAL', minNotional: '5', applyMinToMarket: true, maxNotional: '9000000' },
+      { filterType: 'PERCENT_PRICE_BY_SIDE', bidMultiplierDown: '0.2', askMultiplierDown: '0.2' },
+    ] }] }), 5, 0.001, 0.001, 1],
   ['asterdex', 'asterdex', market,
     http('https://fapi.asterdex-testnet.com/fapi/v1/exchangeInfo', { symbols: [{ symbol: 'BTCUSDT', filters }] }), 5, 0.001, 0.001, 1],
   ['bybit', 'bybit', market,
@@ -37,6 +47,9 @@ const fixtures = [
     http('https://api.testnet.paradex.trade/v1/markets', { results: [{ symbol: 'BTC-USD-PERP', min_notional: '10', order_size_increment: '0.001' }] }), 10, 0.001, 0.001, 1],
   ['hyperliquid', 'hyperliquid', { ...market, id: 'BTC', symbol: 'BTC-PERP' },
     http('https://api.hyperliquid-testnet.xyz/info', [{ universe: [{ name: 'BTC', szDecimals: 5 }] }, []], { method: 'POST', requestBody: '{"type":"metaAndAssetCtxs"}' }), 10, 0.00001, 0.00001, 1],
+  ['hyperliquidspot', 'hyperliquidspot', { ...market, id: '@142', symbol: 'UBTC/USDC', base: 'UBTC', quote: 'USDC' },
+    http('https://api.hyperliquid.xyz/info', [{ tokens: [{ index: 0, name: 'USDC', szDecimals: 8 }, { index: 197, name: 'UBTC', szDecimals: 5 }],
+      universe: [{ name: '@142', index: 142, tokens: [197, 0] }] }, []], { method: 'POST', requestBody: '{"type":"spotMetaAndAssetCtxs"}' }), 10, 0.00001, 0.00001, 1],
   ['okx', 'okx', { ...market, id: 'BTC-USDT-SWAP' },
     http('https://openapi.okx.com/api/v5/public/instruments?instType=SWAP', { code: '0', data: [{ instId: 'BTC-USDT-SWAP', ctType: 'linear', ctVal: '0.01', minSz: '0.1', lotSz: '0.1', maxLmtSz: '1000' }] }), 0, 0.1, 0.1, 0.01],
   ['blofin', 'blofin', { ...market, id: 'BTC-USDT' },
@@ -47,6 +60,10 @@ const fixtures = [
     http('https://api.backpack.exchange/api/v1/markets', [{ symbol: 'BTC_USDC_PERP', filters: { quantity: { minQuantity: '0.001', maxQuantity: '1000', stepSize: '0.001' } } }]), 0, 0.001, 0.001, 1],
   ['kraken', 'kraken', { ...market, symbol: 'PF_XBTUSD' },
     http('https://demo-futures.kraken.com/derivatives/api/v3/instruments', { result: 'success', instruments: [{ symbol: 'PF_XBTUSD', contractValueTradePrecision: 4, contractSize: 1 }] }), 0, 0.0001, 0.0001, 1],
+  ['krakenspot', 'krakenspot', { ...market, id: 'BTC/USD', symbol: 'XBT/USD', quote: 'USD' },
+    http('https://api.kraken.com/0/public/AssetPairs', { error: [], result: { XXBTZUSD: {
+      wsname: 'XBT/USD', status: 'online', ordermin: '0.00006', costmin: '0.5', lot_decimals: 8, lot_multiplier: 1,
+    } } }), 0.5, 0.00006, 1e-8, 1],
   ['kucoin', 'kucoin', { ...market, id: 'XBTUSDTM', symbol: 'BTCUSDT' },
     http('https://api-futures.kucoin.com/api/v1/contracts/active', { code: '200000', data: [{ symbol: 'XBTUSDTM', lotSize: 1, multiplier: 0.001, isInverse: false, maxOrderQty: 1000000 }] }), 0, 1, 1, 0.001],
   ['mexc', 'mexc', { ...market, id: 'BTC_USDT' },
@@ -79,7 +96,7 @@ for (const [family, venue, selected, record, notional, minimum, step, scale] of 
 }
 
 test('coverage census includes every enabled rule family, unsupported names fail closed', () => {
-  assert.equal(fixtures.length, 21);
+  assert.equal(fixtures.length, 25);
   assert.deepEqual([...new Set(fixtures.map(([family]) => family))].sort(), Object.keys(LIVE_SMOKE_RULE_SOURCES).sort());
   for (const venue of [...Object.keys(LIVE_SMOKE_UNKNOWN_RULES), 'future-unknown-venue'])
     assert.deepEqual(venueMarketRules(venue, fixtures.map((fixture) => fixture[3]), market), { notionalKnown: false, minNotional: 0 });
@@ -87,11 +104,11 @@ test('coverage census includes every enabled rule family, unsupported names fail
 
 test('absent monetary fields do not infer zero from a plausible minimum quantity', () => {
   for (const [family, venue, selected, record] of fixtures.filter(([family]) =>
-    ['binance', 'asterdex', 'bybit', 'bitget', 'bitrue', 'bingx', 'orderly', 'woo', 'lighter', 'paradex', 'coinbase'].includes(family))) {
+    ['binance', 'binancespot', 'phemex', 'asterdex', 'bybit', 'bitget', 'bitrue', 'bingx', 'orderly', 'woo', 'lighter', 'paradex', 'coinbase'].includes(family))) {
     const remove = (value) => {
       if (!value || typeof value !== 'object') return;
       for (const key of Object.keys(value)) {
-        if (['minNotionalValue', 'minOrderAmt', 'minTradeUSDT', 'minOrderMoney', 'tradeMinUSDT', 'min_notional', 'min_quote_amount', 'quote_min_size', 'notional'].includes(key)) delete value[key];
+        if (['minOrderValueRv', 'minNotionalValue', 'minOrderAmt', 'minTradeUSDT', 'minOrderMoney', 'tradeMinUSDT', 'min_notional', 'min_quote_amount', 'quote_min_size', 'notional', 'minNotional'].includes(key)) delete value[key];
         else remove(value[key]);
       }
     };
@@ -188,4 +205,126 @@ test('malformed scalar and null rows fail closed without throwing', () => {
     symbols: [null, 0, ['BTCUSDT'], { symbol: 'BTCUSDT', filters: [null, 0] }],
   });
   assert.equal(venueMarketRules('binance', [source], market).notionalKnown, false);
+});
+
+
+test('Hyperliquid Spot sizing binds the exact pair, base lot and USDC quote', () => {
+  const [, venue, selected, record] = fixtures.find(([family]) => family === 'hyperliquidspot');
+  const check = (edit) => {
+    const payload = JSON.parse(record.body); edit(payload[0]);
+    assert.deepEqual(venueMarketRules(venue, [{ ...record, body: JSON.stringify(payload) }], selected),
+      { notionalKnown: false, minNotional: 0 });
+  };
+  for (const edit of [
+    (m) => { m.universe[0].name = '@143'; },
+    (m) => { m.universe[0].index = 143; },
+    (m) => { m.universe.push({ ...m.universe[0] }); },
+    (m) => { m.universe.push({ ...m.universe[0], name: '@143' }); },
+    (m) => { m.universe[0].tokens = [0, 197]; },
+    (m) => { m.tokens[0].name = 'HYPE'; },
+    (m) => { m.tokens[1].name = 'ETH'; },
+    (m) => { delete m.tokens[1].szDecimals; },
+    (m) => { m.tokens.push({ ...m.tokens[1] }); },
+  ]) check(edit);
+  for (const patch of [{ method: 'GET' }, { requestBody: '{"type":"metaAndAssetCtxs"}' }])
+    assert.deepEqual(venueMarketRules(venue, [{ ...record, ...patch }], selected), { notionalKnown: false, minNotional: 0 });
+  assert.deepEqual(venueMarketRules(venue, [record], { ...selected, quote: 'HYPE' }), { notionalKnown: false, minNotional: 0 });
+});
+
+
+test('Hyperliquid Spot later ambiguous metadata invalidates earlier sizing', () => {
+  const [, venue, selected, record] = fixtures.find(([family]) => family === 'hyperliquidspot');
+  const payload = JSON.parse(record.body);
+  payload[0].universe.push({ ...payload[0].universe[0] });
+  assert.deepEqual(venueMarketRules(venue, [record, { ...record, body: JSON.stringify(payload) }], selected),
+    { notionalKnown: false, minNotional: 0 });
+});
+
+
+test('Hyperliquid Spot minimum order remains post-only, step-aligned and below the smoke cap', () => {
+  const [, venue, selected, record] = fixtures.find(([family]) => family === 'hyperliquidspot');
+  const rules = venueMarketRules(venue, [record], selected);
+  const order = smokeOrder({ ...selected, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.SPOT,
+    precisionPrice: 0.1, minPrice: 0.1 }, { bids: [100000, 1], asks: [100001, 1] }, rules);
+  assert.equal(order.timeInForce, 'PostOnly');
+  assert.equal(order.side, 'buy');
+  assert.ok(order.price < 100000 * 0.98);
+  assert.ok(order.amount * order.amendPrice >= 10);
+  assert.ok(order.amount * order.price <= LIVE_SMOKE_MAX_NOTIONAL);
+  assert.ok(Math.abs(order.amount / rules.amountStep - Math.round(order.amount / rules.amountStep)) < 1e-8);
+});
+
+
+test('Hyperliquid Spot full replacement snapshots revoke sizing for absent or renamed pairs', () => {
+  const [, venue, selected, record] = fixtures.find(([family]) => family === 'hyperliquidspot');
+  for (const universe of [[], [{ name: '@143', index: 143, tokens: [197, 0] }]]) {
+    const payload = JSON.parse(record.body); payload[0].universe = universe;
+    assert.deepEqual(venueMarketRules(venue, [record, { ...record, body: JSON.stringify(payload) }], selected),
+      { notionalKnown: false, minNotional: 0 });
+  }
+});
+
+const spotMarket = { ...market, id: 'BTC/USD', symbol: 'XBT/USD', base: 'BTC', quote: 'USD' };
+const spotPair = { wsname: 'XBT/USD', status: 'online', ordermin: '0.00006', costmin: '0.5', lot_decimals: 8, lot_multiplier: 1 };
+const spotDiscovery = (row = spotPair) => http('https://api.kraken.com/0/public/AssetPairs',
+  { error: [], result: { XXBTZUSD: row } });
+
+test('Kraken Spot discovery keeps quote-cost and base-volume minima in their native units', () => {
+  const result = venueMarketRules('krakenspot', [spotDiscovery()], spotMarket);
+  assert.equal(result.notionalKnown, true);
+  assert.equal(result.minNotional, 0.5);
+  assert.equal(result.minimumAmount, 0.00006);
+  assert.equal(result.amountStep, 1e-8);
+  assert.equal(result.notionalPerAmount, 1);
+  assert.equal(result.quoteQuantity, false);
+});
+
+test('Kraken Spot missing, inconsistent or non-unit metadata refuses sizing', () => {
+  const check = (row) => assert.deepEqual(venueMarketRules('krakenspot', [spotDiscovery(row)], spotMarket),
+    { notionalKnown: false, minNotional: 0 });
+  for (const field of ['costmin', 'ordermin', 'lot_decimals', 'lot_multiplier']) {
+    const row = { ...spotPair }; delete row[field]; check(row);
+  }
+  for (const row of [{ ...spotPair, wsname: 'ETH/USD' }, { ...spotPair, status: 'cancel_only' },
+    { ...spotPair, costmin: 'NaN' }, { ...spotPair, ordermin: '-1' },
+    { ...spotPair, lot_decimals: 1.5 }, { ...spotPair, lot_decimals: 19 }, { ...spotPair, lot_multiplier: 2 }]) check(row);
+  assert.deepEqual(venueMarketRules('krakenspot', [spotDiscovery()], { ...spotMarket, id: 'ETH/USD' }),
+    { notionalKnown: false, minNotional: 0 });
+});
+
+test('Kraken Spot uses the unique native display symbol, not the REST pair key', () => {
+  const catalog = (result) => http('https://api.kraken.com/0/public/AssetPairs', { error: [], result });
+  assert.equal(venueMarketRules('krakenspot', [catalog({ XXBTZUSD: spotPair,
+    'XXBTZUSD.d': spotPair })], spotMarket).notionalKnown, true);
+  for (const result of [{ XXBTZUSD: spotPair, renamed: { ...spotPair } },
+    { 'XXBTZUSD.d': spotPair }, { XXBTZUSD: { ...spotPair, wsname: 'BTC/USD' } }])
+    assert.equal(venueMarketRules('krakenspot', [catalog(result)], spotMarket).notionalKnown, false);
+  assert.equal(venueMarketRules('krakenspot', [spotDiscovery()],
+    { ...spotMarket, id: 'XXBTZUSD' }).notionalKnown, false);
+});
+
+test('Kraken Spot later complete-catalog failure revokes an earlier sizing rule', () => {
+  const good = spotDiscovery();
+  for (const later of [
+    { ...good, body: '{' }, { ...good, body: 'null' }, { ...good, body: '[]' },
+    { ...good, status: 503 },
+    { ...good, body: JSON.stringify({ error: [], result: {} }) },
+    { ...good, body: JSON.stringify({ error: ['EService:Unavailable'], result: { XXBTZUSD: spotPair } }) },
+    spotDiscovery({ ...spotPair, wsname: 'ETH/USD' }),
+  ]) assert.deepEqual(venueMarketRules('krakenspot', [good, later], spotMarket),
+    { notionalKnown: false, minNotional: 0 });
+  assert.equal(venueMarketRules('krakenspot', [{ ...good, body: '{' }, good], spotMarket).notionalKnown, true);
+});
+
+
+test('Kraken Spot smoke quantity stays post-only, above both minima and below the cap', () => {
+  const rules = venueMarketRules('krakenspot', [spotDiscovery()], spotMarket);
+  const order = smokeOrder({ ...spotMarket, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.SPOT,
+    precisionPrice: 0.1, minPrice: 0.1 }, { bids: [100000, 1], asks: [100001, 1] }, rules);
+  assert.equal(order.timeInForce, 'PostOnly');
+  assert.equal(order.side, 'buy');
+  assert.ok(order.amount >= Number(spotPair.ordermin));
+  assert.ok(order.amount * order.amendPrice >= Number(spotPair.costmin));
+  assert.ok(order.amount * order.price <= LIVE_SMOKE_MAX_NOTIONAL);
+  assert.ok(Math.abs(order.amount / rules.amountStep - Math.round(order.amount / rules.amountStep)) < 1e-8);
 });

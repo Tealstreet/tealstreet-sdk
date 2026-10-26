@@ -53,6 +53,7 @@ import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wir
 import { isErrorReported, markErrorReported } from '../../commandOutcome';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
+import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
@@ -75,6 +76,7 @@ import {
   WORKER_WRITE_METHODS,
   workerCallClientOrderIds,
 } from '../base';
+import { mapBitunixClosedPosition } from '../bitunix/bitunix.income';
 import { mapBlofinClosedPosition } from '../blofin/blofin.income';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { mapBybitClosedPnl } from '../bybit/bybit.closed-pnl';
@@ -438,6 +440,16 @@ export class RustEngineExchange extends BaseExchange {
   }
   private capabilityRecord?: EngineCapabilities;
 
+  override get capabilities() {
+    const answers = super.capabilities;
+    if (!this.capabilityRecord?.options) {
+      answers.optionChain = false;
+      answers.optionExpiries = false;
+      answers.accountGreeks = false;
+    }
+    return answers;
+  }
+
   /** Venue-specific answers wait for the engine rather than guessing from the base contract. */
   private requireCapabilities(method: string): EngineCapabilities {
     if (this.capabilityRecord) return this.capabilityRecord;
@@ -518,6 +530,8 @@ export class RustEngineExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     assertBetaAccount(exchangeName, options);
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
+    const lighterL1Address = deriveSignerSetupMapping(exchangeName) === 'lighter'
+      && typeof options.key === 'string' ? options.key.match(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/)?.[0] : undefined;
     if (options.localSigner !== undefined && !bridgeConstruction.dispatchSigning) {
       const message = 'Local signer setup is not supported for this Rust venue yet';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
@@ -599,6 +613,7 @@ export class RustEngineExchange extends BaseExchange {
     this.bridgeConstruction = bridgeConstruction;
     this.signerSetup = signerSetup;
     this.asterPublicSetup = aster?.publicSetup;
+    this.lighterL1Address = lighterL1Address;
     this.setupError = setupError;
     if (signerSetup instanceof DelegatedSignerSetup) {
       this.delegatedIntent = signerSetup.intent;
@@ -638,6 +653,8 @@ export class RustEngineExchange extends BaseExchange {
         return this.blofinJournal(opts);
       case 'wooOrders':
         return this.wooJournal(opts);
+      case 'bitunix':
+        return this.bitunixJournal(opts);
       case 'unsupported':
         return this.defaultHistoricalPositions(opts);
     }
@@ -668,6 +685,7 @@ export class RustEngineExchange extends BaseExchange {
   private delegatedUsesPayloadSigner?: boolean;
   /** Resolved by trusted setup before credentials were stripped. */
   private asterPublicSetup?: AsterDEXPublicSetup;
+  private lighterL1Address?: string;
   private setupError?: ExchangeError;
 
   private get asterApiVersion() {
@@ -916,6 +934,7 @@ export class RustEngineExchange extends BaseExchange {
         applicationId,
         subaccount: this.options.subaccount,
         apiKeyIndex: parseLighterApiKeyIndex(this.options.apiKeyIndex)?.toString() ?? this.options.apiKeyIndex,
+        lighterL1Address: this.lighterL1Address,
         lighterRemoteSigner: Boolean(this.options.remoteSigner),
         lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)
           ?.lighterSignerProvider,
@@ -2210,6 +2229,24 @@ export class RustEngineExchange extends BaseExchange {
     return copyHistoryCompleteness(rows, records);
   };
 
+  /**
+   * The reported closed axis TS `BitunixExchange.fetchHistoricalPositions` reads (fills fold to nothing).
+   * Unlike TS, which returned [] or partial rows, a failed read throws under the journal rule above.
+   */
+  private bitunixJournal = async (opts: { account: string; from?: number; to?: number }) => {
+    if (this.isPublicDataOnly) return [];
+    const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to }, false);
+    const records = [];
+    for (const row of rows) {
+      const record = mapBitunixPositionHistory(row, {
+        account: opts.account,
+        resolveSettleCurrency: (symbol: string) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+      });
+      if (record) records.push(record);
+    }
+    return copyHistoryCompleteness(rows, records);
+  };
+
   /** As the TS venues: reported rows only, newest close first; a failed read reports and yields []. */
   private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
     if (this.isPublicDataOnly) return [];
@@ -2218,7 +2255,7 @@ export class RustEngineExchange extends BaseExchange {
     const format = capabilities.closedPositionFormat;
     let rows: Array<Record<string, any>>;
     try {
-      // TS okx/blofin treat an empty symbol as account-wide; bybit sends it as given.
+      // TS okx/blofin treat an empty symbol as account-wide; bybit and bitunix send it as given.
       const symbol = format === 'okx' || format === 'blofin' ? opts.symbol || undefined : opts.symbol;
       rows = await this.fetchClosedPositionRows({ ...opts, symbol });
     } catch {
@@ -2233,6 +2270,8 @@ export class RustEngineExchange extends BaseExchange {
         entry = mapOkxClosedPosition(row, market, this.okxContractsToBase, account);
       } else if (format === 'blofin') {
         entry = mapBlofinClosedPosition(row, (instId) => this.store.marketsById[instId]?.symbol, account);
+      } else if (format === 'bitunix') {
+        entry = mapBitunixClosedPosition(row, account);
       } else {
         entry = mapBybitClosedPnl(
           row,

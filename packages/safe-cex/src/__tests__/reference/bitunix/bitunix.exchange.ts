@@ -55,7 +55,7 @@ import { BaseExchange } from '../../../exchanges/base';
 import { patternClientOrderIdRule } from '../../../exchanges/clientOrderId';
 import { createAPI } from './bitunix.api';
 import { mapBitunixPositionHistory } from '../../../journal/bitunix.position-adapter';
-import { mapBitunixClosedPosition, mapBitunixTradeToIncomeRecords } from './bitunix.income';
+import { mapBitunixClosedPosition, mapBitunixTradeToIncomeRecords } from '../../../exchanges/bitunix/bitunix.income';
 import { mapBitunixHistoricalOrder } from './bitunix.order-history';
 import {
   ENDPOINTS,

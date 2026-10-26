@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -37,7 +42,7 @@ const setup = (options: Partial<ExchangeOptions> = {}, name: ExchangeName = 'lig
     httpFailed: noop,
     timer: noop,
   };
-  const construct = vi.fn(function (_venue: string, _options: string) {
+  const construct = vi.fn(function (_venue: string, _options: string, _setup?: string) {
     return engine;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
@@ -60,9 +65,9 @@ afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
 describe.each(['lighter', 'lighter-robinhood'] as const)('Rust %s wrapper contract', (name) => {
   const variantSetup = (options: Partial<ExchangeOptions> = {}) => setup(options, name);
-  it('registers lighter and the distinct Robinhood deployment', () => {
+  it('admits Lighter beta while leaving Robinhood disabled', () => {
     expect(isRustVenue('lighter')).toBe(true);
-    expect(isRustVenue('lighter-robinhood')).toBe(true);
+    expect(isRustVenue('lighter-robinhood')).toBe(false);
   });
   it.each([{}, { apiKeyIndex: '1' }, { secret: 'private' }])(
     'starts public without a complete signer tuple %j',
@@ -86,11 +91,17 @@ describe.each(['lighter', 'lighter-robinhood'] as const)('Rust %s wrapper contra
     expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({
       applicationId: '718895',
       apiKeyIndex: '0',
-      secret: 'private',
       publicDataOnly: false,
       lighterIntegratorAccountIndex: '158385',
       lighterStopSlippagePct: 2.5,
     });
+    const nativeOptions = JSON.parse(construct.mock.calls[0][1]);
+    expect(nativeOptions).not.toHaveProperty('key');
+    expect(nativeOptions).not.toHaveProperty('secret');
+    expect(JSON.parse(construct.mock.calls[0][2]!)).toMatchObject({
+      primary: { key: '', secret: 'private' },
+    });
+    expect(exchange.options.secret).toBeUndefined();
   });
   it('preserves remote-only private account reads without serializing callbacks', async () => {
     const sign = vi.fn();

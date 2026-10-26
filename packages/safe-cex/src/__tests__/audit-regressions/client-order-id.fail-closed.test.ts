@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { Market, PlaceOrderOpts } from '../../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';

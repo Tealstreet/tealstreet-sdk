@@ -1,9 +1,7 @@
 import type { ExchangeOptions } from '../../../types';
 import type { IsSignatureRejection } from '../../../utils/signatureRejection';
 
-import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
-import qs from 'qs';
 
 import { uuid } from '@tealstreet/safe-cex/src/utils/uuid';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../../safeCexAxiosCreate';
@@ -11,6 +9,7 @@ import { v } from '../../../utils/get-key';
 import { appendHttpFailure } from '../../../utils/httpFailure';
 import { virtualClock } from '../../../utils/virtualClock';
 import { BaseExchange } from '../../../exchanges/base';
+import { finishBitunixRequest, isBitunixUnsignedRequest, prepareBitunixRequest } from '../../../exchanges/bitunix/bitunix.signing';
 import { BASE_URL } from './bitunix.types';
 import { sha256Hex } from './bitunix.utils';
 import { networkErrorOnRead } from '../../../utils/retryReadsOnly';
@@ -41,52 +40,12 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   }
 
   xhr.interceptors.request.use((config) => {
-    if (config?.url?.includes('public')) {
+    if (isBitunixUnsignedRequest(config?.url)) {
       return config;
     }
-
-    const nextConfig = { ...config };
-
-    const params = config.params
-      ? decodeURIComponent(
-          qs.stringify(config.params, {
-            arrayFormat: 'repeat',
-            sort: (a, b) => a.localeCompare(b),
-          }),
-        )
-      : null;
-    // A replayed config carries the body axios already serialized: sign those bytes.
-    const data = typeof config.data === 'string' ? config.data : config.data ? JSON.stringify(config.data) : null;
-
-    const timestamp = +virtualClock.getCurrentTime();
-    const nonce = uuid();
-    const toSign = [nonce, timestamp, options.key, params?.replace(/[=&]/g, '') || ''];
-
-    if (data) {
-      toSign.push(data);
-    }
-
-    const digest = sha256Hex(toSign.join(''));
-
-    // console.log('toSign', toSign.join(''));
-    // console.log('digest', digest);
-
-    const signature = sha256Hex(digest + options.secret);
-    //console.log('signature', signature);
-
-    // const signature = this.binaryToBase64(
-    //   this.encode(this.hmac(this.encode(auth), this.encode(this.secret), 'sha256', 'hex')),
-    // );
-
-    const headers = new AxiosHeaders({
-      ...nextConfig.headers,
-      'api-key': options.key,
-      sign: signature,
-      nonce: nonce,
-      timestamp: timestamp,
-    });
-
-    return { ...nextConfig, headers };
+    const prepared = prepareBitunixRequest(config, options.key, +virtualClock.getCurrentTime(), uuid());
+    const signature = sha256Hex(sha256Hex(prepared.payload) + options.secret);
+    return finishBitunixRequest(prepared, options.key, signature);
   });
 
   const seenResponses = new WeakSet<object>();

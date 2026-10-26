@@ -1,6 +1,6 @@
-import type { ClosedPnlEntry, IncomeRecord } from '../../../types';
+import type { ClosedPnlEntry, IncomeRecord } from '../../types';
 
-import { PositionSide } from '../../../types';
+import { PositionSide } from '../../types';
 
 /**
  * BitUnix ledger and closed positions — two different endpoints, so the second can

@@ -45,10 +45,14 @@ describe('readConfig', () => {
     expect(readConfig(signerEnv).options.enableOptionMarkets).toBe(false);
   });
 
-  it('turns options on for an exchange that trades only options, with or without EXCHANGE_OPTIONS', () => {
-    expect(readConfig({ EXCHANGE: 'binanceoptions' }).options.enableOptionMarkets).toBe(true);
-    expect(readConfig({ EXCHANGE: 'binanceoptions', EXCHANGE_OPTIONS: 'true' }).options.enableOptionMarkets).toBe(true);
-  });
+  it.each(['binanceoptions', 'txflow', 'hyrotrader'])(
+    'refuses OUT beta accounts before construction: %s',
+    (exchange) => {
+      expect(() => readConfig({ EXCHANGE: exchange })).toThrowError(
+        expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }),
+      );
+    },
+  );
 
   it('turns inverse on only when asked', () => {
     expect(readConfig({ ...signerEnv, EXCHANGE_INVERSE: 'true' }).options.enableInverseMarkets).toBe(true);
@@ -69,15 +73,8 @@ describe('readConfig', () => {
     expect(readConfig({ EXCHANGE: 'bitunix' }).options.engine).toBeUndefined();
   });
 
-  it('accepts the registered TxFlow Rust testnet adapter', () => {
-    const config = readConfig({ EXCHANGE: 'txflow', EXCHANGE_ENGINE: 'rust', EXCHANGE_TESTNET: 'true' });
-    expect(config.exchange).toBe('txflow');
-    expect(config.options.engine).toBe('rust');
-    expect(config.options.testnet).toBe(true);
-  });
-
   it.each([
-    [{ EXCHANGE: 'nope' }, 'EXCHANGE must be one of'],
+    [{ EXCHANGE: 'nope' }, 'unsupported in this build'],
     [{ ...signerEnv, EXCHANGE_ENGINE: 'typo' }, 'EXCHANGE_ENGINE must be rust'],
     [{ ...signerEnv, EXCHANGE_SIGNER_SIGNATURE: '' }, 'must be set together'],
     [{ ...signerEnv, EXCHANGE_API_SECRET: 'secret' }, 'set one'],
@@ -87,7 +84,7 @@ describe('readConfig', () => {
     [{ EXCHANGE: 'bybit', EXCHANGE_INVERSE: '1' }, 'EXCHANGE_INVERSE must be true or false'],
     [{ EXCHANGE: 'bybitinverse', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on bybitinverse'],
     [{ EXCHANGE: 'bybitdemo', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on bybitdemo'],
-    [{ EXCHANGE: 'hyrotrader', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on hyrotrader'],
+    [{ EXCHANGE: 'hyrotrader', EXCHANGE_INVERSE: 'true' }, 'unsupported in this build'],
   ])('refuses %j', (env, message) => {
     expect(() => readConfig(env)).toThrow(message);
   });

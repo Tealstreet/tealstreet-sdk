@@ -20,7 +20,7 @@ fn before_quotes(
     pnl: Option<f64>,
     price: f64,
 ) -> (Engine<Lighter>, SocketId, SocketId, Vec<String>) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options()));
+    let mut engine = support::engine(options());
     engine.start(NOW);
     let mut private = None;
     let mut public = None;

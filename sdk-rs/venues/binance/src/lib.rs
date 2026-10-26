@@ -18,7 +18,7 @@ use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::request_context::Context;
+use safe_cex_engine::request_context::{Context, Operation};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{Command, Cx, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num};
 use sign::{Credentials, Query};
@@ -1331,8 +1331,30 @@ impl Venue for BinanceFutures {
             Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
             Variant::CoinM => safe_cex_engine::Capabilities {
                 quantity_units: safe_cex_engine::QuantityUnits::InverseContractSized,
+                balance_info: true,
                 ..safe_cex_engine::Capabilities::NO_HISTORY
             },
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            // TS marks a COIN-M balance coin-margined, so an inverse market whose
+            // margin coin has no row reads zero instead of the USD total.
+            safe_cex_engine::VenueAction::FetchBalanceInfo
+                if self.options.variant == Variant::CoinM =>
+            {
+                let Ok(context) = Self::read_context(cx, None) else {
+                    return;
+                };
+                let _ = cx.done_context(&context, r#"{"coinMargined":true}"#.into());
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 
@@ -1758,7 +1780,7 @@ impl Venue for BinanceFutures {
                 }
             }
             Command::FetchCandles {
-                command,
+                command: _,
                 symbol,
                 interval,
                 limit,
@@ -1766,13 +1788,20 @@ impl Venue for BinanceFutures {
                 to_ms,
             } => {
                 if !self.supports(interval) {
-                    cx.fail(command, interval.unsupported("Binance"));
+                    // Typed Unsupported, never a bare message (better than TS).
+                    let error = safe_cex_engine::VenueError::new(interval.unsupported("Binance"))
+                        .kind(safe_cex_engine::ErrorKind::Unsupported)
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    cx.refuse_command(Operation::Read, error);
                     return;
                 }
                 let query = match candles::query(&symbol, interval, limit, from_ms, to_ms, cx.now) {
                     Ok(query) => query,
                     Err(error) => {
-                        cx.fail(command, error);
+                        let error = safe_cex_engine::VenueError::new(error)
+                            .kind(safe_cex_engine::ErrorKind::InvalidInput)
+                            .outcome(safe_cex_engine::Outcome::NotSent);
+                        cx.refuse_command(Operation::Read, error);
                         return;
                     }
                 };

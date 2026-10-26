@@ -541,15 +541,10 @@ impl AsterDex {
             })
             .and_then(|mut job| {
                 // Validate the shared auth shape before reserving any split step.
-                if let Some(step) = job.steps.front() {
-                    let valid = self
-                        .credentials
-                        .select(step.call.role())
-                        .map_err(|_| "Missing required Aster credentials".to_owned())
-                        .and_then(|(_, slot)| self.auth(slot).map(drop));
-                    if let Err(error) = valid {
-                        return Err((VenueError::new(error).kind(ErrorKind::AuthInvalid), prune_on_refusal));
-                    }
+                if let Some(step) = job.steps.front()
+                    && let Err((error, kind)) = self.check_signing(step.call.role())
+                {
+                    return Err((VenueError::new(error).kind(kind), prune_on_refusal));
                 }
                 job.reserved_places = job
                     .steps
@@ -606,7 +601,7 @@ impl AsterDex {
             .credentials
             .select(CredentialRole::Mutation)
             .ok()
-            .map(|(selection, slot)| selection.credential(slot.identity.credential.clone()));
+            .map(|(selection, identity)| selection.credential(identity.credential.clone()));
         let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
             read_credential: None,
@@ -657,7 +652,7 @@ impl AsterDex {
             .credentials
             .select(CredentialRole::Mutation)
             .ok()
-            .map(|(selection, slot)| selection.credential(slot.identity.credential.clone()));
+            .map(|(selection, identity)| selection.credential(identity.credential.clone()));
         // A job with no native step sends nothing: it ends on its preflight.
         if job.steps.is_empty() {
             let _ = match job.error {
@@ -1410,6 +1405,7 @@ pub(crate) fn serial() -> SerialCall {
         operation: Operation::Mutation,
         timeout_ms: 20_000,
         attempts: 2,
+        pacing: None,
     }
 }
 
