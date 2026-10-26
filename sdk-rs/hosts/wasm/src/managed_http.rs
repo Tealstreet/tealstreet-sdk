@@ -420,3 +420,84 @@ mod sign_meta {
         }
     }
 }
+
+#[cfg(all(test, feature = "sign-meta"))]
+mod sign_meta_wire_tests {
+    //! Golden business wire bytes: the SignKind cutover must keep them exact.
+    use super::sign_meta::Out;
+    use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
+    use safe_cex_engine::sign_meta::{SignMeta, SignOwner};
+    use safe_cex_engine::{AccountReadScope, CredentialSlot, RequestId};
+
+    const MANAGED: SignOwner = SignOwner::Managed {
+        request: RequestId(19),
+        generation: 3,
+    };
+    fn wire(owner: SignOwner, slot: CredentialSlot, role: CredentialRole) -> String {
+        serde_json::to_string(&Out::from(SignMeta {
+            task: RequestId(7),
+            owner,
+            deadline_ms: 20001.25,
+            slot,
+            role,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn business_metadata_bytes_keep_the_landed_shape_and_order() {
+        for (slot, slot_text) in [
+            (CredentialSlot::Primary, "primary"),
+            (CredentialSlot::Secondary, "secondary"),
+        ] {
+            for (scope, text) in [
+                (None, "null"),
+                (Some(AccountReadScope::Account), "\"account\""),
+                (Some(AccountReadScope::Balance), "\"balance\""),
+                (Some(AccountReadScope::Orders), "\"orders\""),
+                (Some(AccountReadScope::Positions), "\"positions\""),
+                (Some(AccountReadScope::Settings), "\"settings\""),
+            ] {
+                assert_eq!(
+                    wire(MANAGED, slot, CredentialRole::Read { scope }),
+                    format!(
+                        "{{\"task\":7,\"owner\":{{\"kind\":\"managed\",\"request\":19,\"generation\":3}},\"deadlineMs\":20001.25,\"slot\":\"{slot_text}\",\"role\":{{\"kind\":\"read\",\"scope\":{text}}}}}"
+                    )
+                );
+            }
+        }
+        for (reason, text) in [
+            (PrimaryReason::ClientOrderLookup, "clientOrderLookup"),
+            (PrimaryReason::PostUnknownOrderRead, "postUnknownOrderRead"),
+            (PrimaryReason::DegradedRead, "degradedRead"),
+            (PrimaryReason::Catalog, "catalog"),
+            (PrimaryReason::History, "history"),
+        ] {
+            assert_eq!(
+                wire(
+                    MANAGED,
+                    CredentialSlot::Primary,
+                    CredentialRole::PrimaryRead {
+                        reason,
+                        scope: None
+                    }
+                ),
+                format!(
+                    "{{\"task\":7,\"owner\":{{\"kind\":\"managed\",\"request\":19,\"generation\":3}},\"deadlineMs\":20001.25,\"slot\":\"primary\",\"role\":{{\"kind\":\"primaryRead\",\"reason\":\"{text}\",\"scope\":null}}}}"
+                )
+            );
+        }
+        assert_eq!(
+            wire(
+                SignOwner::Session { generation: 3 },
+                CredentialSlot::Primary,
+                CredentialRole::SessionAuth
+            ),
+            r#"{"task":7,"owner":{"kind":"session","generation":3},"deadlineMs":20001.25,"slot":"primary","role":{"kind":"sessionAuth"}}"#
+        );
+        assert_eq!(
+            wire(MANAGED, CredentialSlot::Primary, CredentialRole::Mutation),
+            r#"{"task":7,"owner":{"kind":"managed","request":19,"generation":3},"deadlineMs":20001.25,"slot":"primary","role":{"kind":"mutation"}}"#
+        );
+    }
+}
