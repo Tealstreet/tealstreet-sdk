@@ -34,8 +34,9 @@ impl<P> Io<P> {
 
 #[cfg(feature = "write-preflight-wait")]
 impl<P> Io<P> {
-    /// A parked write Preflight's cap timer; an early fire re-arms for the
-    /// exact cap (true: consumed here).
+    /// A parked write Preflight's cap timer; an early or non-finite fire
+    /// re-arms for the exact cap (true: consumed here), so a host's one wake
+    /// is never spent without the cap staying armed.
     pub(super) fn write_preflight_timer(&mut self, timer: TimerId, now: f64) -> bool {
         let Some(&(at_ms, ..)) = self
             .core
@@ -45,7 +46,7 @@ impl<P> Io<P> {
         else {
             return false;
         };
-        if now < at_ms {
+        if !now.is_finite() || now < at_ms {
             self.core.actions.push(Action::SetTimer { timer, at_ms });
         }
         true

@@ -442,3 +442,29 @@ fn a_plan_admitted_before_the_cap_runs_past_it() {
         "a write Plan never inherits the caller cap (RED18)"
     );
 }
+
+#[test]
+fn a_non_finite_cap_fire_keeps_the_cap_armed_until_it_expires_once() {
+    let (mut e, actions) = queued(Probe::default());
+    let timer = cap_timer(&actions);
+    let cap = 10. + f64::from(WAIT_MS);
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        e.handle(now, Event::TimerFired { timer });
+        let rearmed: Vec<_> = e.drain_actions().collect();
+        assert!(
+            rearmed
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { timer: t, at_ms } if *t == timer && *at_ms == cap)),
+            "a {now} fire re-arms the exact cap"
+        );
+        assert!(failures(&rearmed, 2).is_empty(), "no terminal at {now}");
+        assert_eq!(e.venue.retired, 0);
+    }
+    e.handle(cap, Event::TimerFired { timer });
+    let settled: Vec<_> = e.drain_actions().collect();
+    assert_eq!(failures(&settled, 2).len(), 1, "one terminal at the cap");
+    assert_eq!(e.venue.retired, 1, "the hook fires once");
+    e.handle(cap + 1., Event::TimerFired { timer });
+    assert!(failures(&e.drain_actions().collect::<Vec<_>>(), 2).is_empty());
+    assert_eq!(e.venue.retired, 1, "a duplicate fire is inert");
+}
