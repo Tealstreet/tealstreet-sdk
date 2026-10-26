@@ -9924,3 +9924,12 @@ off. OKX opts in. Not covered yet: venues with no placement scope
 (`guard_pending_placements` or `guard_order_mutations` false: Bybit, Crypto.com,
 BingX, ApeX, Lighter), and amend roots whose replacement places
 (the zs5e83 audit, /tmp/codex-beta-plan-fence-audit/report.md).
+
+Crypto.com opts in ahead of its scope. `reconcile_uncertain` owes one fresh
+Orders+AdvancedOrders read (idempotent across the engine's re-asks) and starts it
+at once when no account read is in flight. A read already in flight when the
+hook is asked can no longer release; `orders_reconciled` follows only a fresh read
+whose two lists committed cleanly. Crypto.com has no placement scope, so this
+fence engages only once the engine's Phase B marker records an Unknown placement
+without one. Until then `an_unknown_placement_fences_its_symbol_until_a_fresh_order_read`
+fails at the retry (admitted today) and blocks the opt-in from landing.
