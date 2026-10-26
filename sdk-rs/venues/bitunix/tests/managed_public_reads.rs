@@ -61,9 +61,7 @@ fn seeded<V: Venue>(v: V) -> Engine<V> {
         let request = released(&mut e, 0., path);
         response(&mut e, 0., request.id, 200, "", body);
     }
-    safe_cex_engine::test_support::prepared_now(&mut e)
-        .into_iter()
-        .for_each(drop);
+    e.drain_actions().for_each(drop);
     e
 }
 
@@ -133,9 +131,7 @@ fn claim<V: Venue>(e: &mut Engine<V>, now: f64, preparation: Preparation) {
         })
         .expect("exact prepared binding");
     assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
-    safe_cex_engine::test_support::prepared_now(e)
-        .into_iter()
-        .for_each(drop);
+    e.drain_actions().for_each(drop);
 }
 
 fn terminals(actions: &[Action], command: u32) -> Vec<Result<Value, VenueError>> {
@@ -168,26 +164,14 @@ fn failed(actions: &[Action], command: u32) -> VenueError {
 fn markets_require_preparation_and_exact_delivery_before_store_or_followup() {
     let mut e = safe_cex_engine::test_support::seeded_engine(venue(false));
     e.start(0.);
-    let (token, request) = preparation(
-        &safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>(),
-        "/trading_pairs",
-    );
+    let (token, request) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/trading_pairs");
     response(&mut e, 0., request.id, 200, "", PAIRS);
     assert!(!e.store().loaded().markets);
-    assert!(
-        safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .next()
-            .is_none()
-    );
+    assert!(e.drain_actions().next().is_none());
     claim(&mut e, 0., token);
     response(&mut e, 0., request.id, 200, "", PAIRS);
     assert!(e.store().loaded().markets);
-    let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-        .into_iter()
-        .collect::<Vec<_>>();
+    let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(
         actions
             .iter()
@@ -202,26 +186,15 @@ fn tickers_cannot_publish_or_open_public_shards_before_claim() {
     e.start(0.);
     let request = released(&mut e, 0., "/trading_pairs");
     response(&mut e, 0., request.id, 200, "", PAIRS);
-    let (token, ticker) = preparation(
-        &safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>(),
-        "/tickers",
-    );
+    let (token, ticker) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/tickers");
     response(&mut e, 0., ticker.id, 200, "", TICKERS);
     assert!(!e.store().loaded().tickers);
-    assert!(
-        safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .next()
-            .is_none()
-    );
+    assert!(e.drain_actions().next().is_none());
     claim(&mut e, 0., token);
     response(&mut e, 0., ticker.id, 200, "", TICKERS);
     assert!(e.store().loaded().tickers);
     assert_eq!(
-        safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
+        e.drain_actions()
             .filter(|a| matches!(a, Action::WsConnect { .. }))
             .count(),
         2
@@ -232,44 +205,17 @@ fn tickers_cannot_publish_or_open_public_shards_before_claim() {
 fn candle_result_requires_the_released_original_read() {
     let mut e = seeded(venue(false));
     candles(&mut e, 100., 7, Interval::M1, Some(1), None, None);
-    let (token, request) = preparation(
-        &safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>(),
-        "/kline?",
-    );
+    let (token, request) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/kline?");
     response(&mut e, 100., request.id, 200, "", CANDLES);
-    assert!(
-        terminals(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        )
-        .is_empty()
-    );
+    assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 7).is_empty());
     claim(&mut e, 100., token);
     response(&mut e, 100., request.id, 200, "", CANDLES);
     assert_eq!(
-        terminals(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        )
-        .len(),
+        terminals(&e.drain_actions().collect::<Vec<_>>(), 7).len(),
         1
     );
     response(&mut e, 100., request.id, 200, "", CANDLES);
-    assert!(
-        terminals(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        )
-        .is_empty()
-    );
+    assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 7).is_empty());
 }
 
 #[test]
@@ -278,12 +224,7 @@ fn physical_expiry_is_timeout_and_cannot_publish_candle_rows() {
     candles(&mut e, 100., 7, Interval::M1, None, None, None);
     let request = released(&mut e, 100., "/kline?");
     response(&mut e, 20_100., request.id, 200, "", CANDLES);
-    let error = failed(
-        &safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>(),
-        7,
-    );
+    let error = failed(&e.drain_actions().collect::<Vec<_>>(), 7);
     assert_eq!(error.kind, Some(ErrorKind::Timeout));
     assert_eq!(error.outcome, None);
 }
@@ -292,12 +233,7 @@ fn physical_expiry_is_timeout_and_cannot_publish_candle_rows() {
 fn parked_provider_refusal_preserves_every_supplied_typed_field() {
     let mut e = seeded(venue(false));
     candles(&mut e, 100., 7, Interval::M1, None, None, None);
-    let (token, _) = preparation(
-        &safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>(),
-        "/kline?",
-    );
+    let (token, _) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/kline?");
     let error = VenueError::new("provider refusal without auth inference")
         .kind(ErrorKind::Unsupported)
         .outcome(Outcome::NotSent)
@@ -305,15 +241,7 @@ fn parked_provider_refusal_preserves_every_supplied_typed_field() {
         .venue_message("fixture-native")
         .retry_after_ms(1234.);
     e.http_preparation_failed(100., token, Error::Invalid, error.clone());
-    assert_eq!(
-        failed(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        ),
-        error
-    );
+    assert_eq!(failed(&e.drain_actions().collect::<Vec<_>>(), 7), error);
     assert_eq!(e.health().auth_failures, 0);
 }
 
@@ -341,12 +269,7 @@ fn malformed_candle_body_and_transport_failure_keep_distinct_typed_kinds() {
                 r#"{"code":0,"data":[false]}"#,
             );
         }
-        let error = failed(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7,
-        );
+        let error = failed(&e.drain_actions().collect::<Vec<_>>(), 7);
         assert_eq!(
             error.kind,
             Some(if transport {
@@ -365,9 +288,7 @@ fn duplicate_candle_command_does_not_allocate_a_second_request() {
     candles(&mut e, 100., 7, Interval::M1, None, None, None);
     let first = released(&mut e, 100., "/kline?");
     candles(&mut e, 100., 7, Interval::M1, None, None, None);
-    let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-        .into_iter()
-        .collect::<Vec<_>>();
+    let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -376,13 +297,7 @@ fn duplicate_candle_command_does_not_allocate_a_second_request() {
     assert!(terminals(&actions, 7).is_empty());
     response(&mut e, 100., first.id, 200, "", CANDLES);
     assert_eq!(
-        terminals(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        )
-        .len(),
+        terminals(&e.drain_actions().collect::<Vec<_>>(), 7).len(),
         1
     );
 }
@@ -399,9 +314,7 @@ fn unsigned_public_auth_failure_neither_retries_nor_spends_private_auth_budget()
         response(&mut e, 0., request.id, status, "", body);
         assert!(!e.store().loaded().markets);
         assert_eq!(e.health().auth_failures, 0);
-        let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(
             !actions
                 .iter()
@@ -499,12 +412,7 @@ fn native_candle_query_bytes_header_and_result_order_remain_compatible() {
             assert_eq!(request.body, None);
             response(&mut e, 100., request.id, 200, "", CANDLES);
             assert_eq!(
-                terminals(
-                    &safe_cex_engine::test_support::prepared_now(&mut e)
-                        .into_iter()
-                        .collect::<Vec<_>>(),
-                    7
-                ),
+                terminals(&e.drain_actions().collect::<Vec<_>>(), 7),
                 [Ok(json!([
                     {"timestamp":2.0,"open":3.0,"high":4.0,"low":1.0,"close":2.0,"volume":8.0},
                     {"timestamp":1.0,"open":1.0,"high":3.0,"low":1.0,"close":2.0,"volume":99.0}
@@ -522,15 +430,7 @@ fn candle_success_preserves_legacy_permissive_code_coercions() {
         let request = released(&mut e, 100., "/kline?");
         let body = CANDLES.replacen("\"code\":0", &format!("\"code\":{code}"), 1);
         response(&mut e, 100., request.id, 200, "", &body);
-        assert!(
-            terminals(
-                &safe_cex_engine::test_support::prepared_now(&mut e)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-                7
-            )[0]
-            .is_ok()
-        );
+        assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 7)[0].is_ok());
     }
 }
 
@@ -656,14 +556,10 @@ fn genuine_entry_capacity_refuses_local_and_remote_candles_then_recovers() {
         held: vec![],
     });
     probe_command(&mut e, "hold");
-    safe_cex_engine::test_support::prepared_now(&mut e)
-        .into_iter()
-        .for_each(drop);
+    e.drain_actions().for_each(drop);
     for interval in [Interval::M1, Interval::S1].into_iter().cycle().take(270) {
         candles(&mut e, 100., 7, interval, None, None, None);
-        let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let actions = e.drain_actions().collect::<Vec<_>>();
         let error = failed(&actions, 7);
         assert_eq!(error.kind, Some(ErrorKind::Internal));
         assert_eq!(error.message, Error::Capacity.to_string());
@@ -675,20 +571,12 @@ fn genuine_entry_capacity_refuses_local_and_remote_candles_then_recovers() {
         );
     }
     probe_command(&mut e, "release");
-    safe_cex_engine::test_support::prepared_now(&mut e)
-        .into_iter()
-        .for_each(drop);
+    e.drain_actions().for_each(drop);
     candles(&mut e, 100., 7, Interval::M1, None, None, None);
     let request = released(&mut e, 100., "/kline?");
     response(&mut e, 100., request.id, 200, "", CANDLES);
     assert_eq!(
-        terminals(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        )
-        .len(),
+        terminals(&e.drain_actions().collect::<Vec<_>>(), 7).len(),
         1
     );
 }
@@ -698,9 +586,7 @@ fn unsupported_interval_retirement_and_typed_preflight_survive_fixed_clock_reuse
     let mut e = seeded(venue(false));
     for _ in 0..270 {
         candles(&mut e, 100., 7, Interval::S1, None, None, None);
-        let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let actions = e.drain_actions().collect::<Vec<_>>();
         let error = failed(&actions, 7);
         assert_eq!(error.kind, Some(ErrorKind::Unsupported));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
@@ -731,16 +617,12 @@ fn background_seed_owners_retire_at_one_clock_across_success_and_failure() {
                         error: "background transport",
                     },
                 );
-                safe_cex_engine::test_support::prepared_now(&mut e)
-                    .into_iter()
-                    .for_each(drop);
+                e.drain_actions().for_each(drop);
             } else {
                 response(&mut e, 100., request.id, 200, "", PAIRS);
                 let ticker = released(&mut e, 100., "/tickers");
                 response(&mut e, 100., ticker.id, 200, "", TICKERS);
-                safe_cex_engine::test_support::prepared_now(&mut e)
-                    .into_iter()
-                    .for_each(drop);
+                e.drain_actions().for_each(drop);
             }
         }
         probe_command(&mut e, "restart");
@@ -749,9 +631,7 @@ fn background_seed_owners_retire_at_one_clock_across_success_and_failure() {
         let ticker = released(&mut e, 100., "/tickers");
         response(&mut e, 100., ticker.id, 200, "", TICKERS);
         assert!(e.store().loaded().markets && e.store().loaded().tickers);
-        safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .for_each(drop);
+        e.drain_actions().for_each(drop);
         probe_command(&mut e, "hold");
         probe_command(&mut e, "release");
     }
@@ -762,9 +642,7 @@ fn invalid_clock_entry_refuses_candles_before_transport() {
     for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let mut e = seeded(venue(false));
         candles(&mut e, now, 7, Interval::M1, None, None, None);
-        let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let actions = e.drain_actions().collect::<Vec<_>>();
         assert_eq!(failed(&actions, 7).kind, Some(ErrorKind::InvalidInput));
         assert!(
             !actions
@@ -779,12 +657,7 @@ fn parked_expiry_and_expired_prepared_binding_never_release_or_publish() {
     for prepared_expiry in [false, true] {
         let mut e = seeded(venue(false));
         candles(&mut e, 100., 7, Interval::M1, None, None, None);
-        let (token, request) = preparation(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            "/kline?",
-        );
+        let (token, request) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/kline?");
         e.http_prepared(
             if prepared_expiry { 100. } else { 20_100. },
             token,
@@ -793,14 +666,12 @@ fn parked_expiry_and_expired_prepared_binding_never_release_or_publish() {
                 expires_at: prepared_expiry.then_some(100.),
             },
         );
-        let mut actions = safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))
             || matches!(a,
             Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Bind { .. }))));
         response(&mut e, 20_100., request.id, 200, "", CANDLES);
-        actions.extend(safe_cex_engine::test_support::prepared_now(&mut e).into_iter());
+        actions.extend(e.drain_actions());
         let error = failed(&actions, 7);
         assert_eq!(error.kind, Some(ErrorKind::Timeout));
         assert_eq!(error.outcome, Some(Outcome::NotSent));
@@ -814,44 +685,17 @@ fn retired_attempt_cannot_settle_a_reused_candle_command() {
     let old = released(&mut e, 100., "/kline?");
     response(&mut e, 100., old.id, 200, "", CANDLES);
     assert_eq!(
-        terminals(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        )
-        .len(),
+        terminals(&e.drain_actions().collect::<Vec<_>>(), 7).len(),
         1
     );
     candles(&mut e, 100., 7, Interval::M1, None, None, None);
-    let (token, request) = preparation(
-        &safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>(),
-        "/kline?",
-    );
+    let (token, request) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/kline?");
     response(&mut e, 100., old.id, 200, "", CANDLES);
     response(&mut e, 100., RequestId(u64::MAX), 200, "", CANDLES);
-    assert!(
-        terminals(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        )
-        .is_empty()
-    );
+    assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 7).is_empty());
     claim(&mut e, 100., token);
     response(&mut e, 100., request.id, 200, "", CANDLES);
-    assert!(
-        terminals(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        )[0]
-        .is_ok()
-    );
+    assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 7)[0].is_ok());
 }
 
 #[test]
@@ -874,12 +718,7 @@ fn both_background_seed_failures_retire_prepared_and_released_owners() {
                     "/trading_pairs"
                 };
                 if preparation_failure {
-                    let (token, _) = preparation(
-                        &safe_cex_engine::test_support::prepared_now(&mut e)
-                            .into_iter()
-                            .collect::<Vec<_>>(),
-                        path,
-                    );
+                    let (token, _) = preparation(&e.drain_actions().collect::<Vec<_>>(), path);
                     e.http_preparation_failed(
                         100.,
                         token,
@@ -897,9 +736,7 @@ fn both_background_seed_failures_retire_prepared_and_released_owners() {
                         },
                     );
                 }
-                safe_cex_engine::test_support::prepared_now(&mut e)
-                    .into_iter()
-                    .for_each(drop);
+                e.drain_actions().for_each(drop);
             }
             probe_command(&mut e, "restart");
             let request = released(&mut e, 100., "/trading_pairs");
@@ -927,9 +764,7 @@ fn success_messages_cannot_hide_empty_seed_or_candle_decoder_failures() {
         "",
         r#"{"code":0,"msg":"Success","data":[]}"#,
     );
-    let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-        .into_iter()
-        .collect::<Vec<_>>();
+    let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(
         actions
             .iter()
@@ -944,12 +779,7 @@ fn success_messages_cannot_hide_empty_seed_or_candle_decoder_failures() {
         candles(&mut e, 100., 7, Interval::M1, None, None, None);
         let r = released(&mut e, 100., "/kline?");
         response(&mut e, 100., r.id, status, "", body);
-        let error = failed(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7,
-        );
+        let error = failed(&e.drain_actions().collect::<Vec<_>>(), 7);
         assert_ne!(error.message, "Success");
         if status == 500 {
             assert_eq!(error.message, "Bitunix HTTP 500");
@@ -977,9 +807,7 @@ fn malformed_discovery_stream_preserves_rate_headers_without_raw_preview() {
             "Retry-After: 15",
             r#"{"data":[{"RAW_BODY_SENTINEL":"secret"},"#,
         );
-        let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(!format!("{actions:?}").contains("RAW_BODY_SENTINEL"));
         assert_eq!(
             actions
@@ -1011,9 +839,7 @@ fn a_fresh_native_initialization_recovers_after_each_public_auth_refusal() {
             "",
             r#"{"code":10007,"msg":"bad signature","data":[]}"#,
         );
-        let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let actions = e.drain_actions().collect::<Vec<_>>();
         assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.message.contains("bad signature"))));
         assert!(
             !actions
@@ -1027,9 +853,7 @@ fn a_fresh_native_initialization_recovers_after_each_public_auth_refusal() {
     response(&mut e, 100., r.id, 200, "", PAIRS);
     let r = released(&mut e, 100., "/tickers");
     response(&mut e, 100., r.id, 200, "", TICKERS);
-    safe_cex_engine::test_support::prepared_now(&mut e)
-        .into_iter()
-        .for_each(drop);
+    e.drain_actions().for_each(drop);
     probe_command(&mut e, "hold");
     probe_command(&mut e, "release");
 }
@@ -1038,12 +862,7 @@ fn a_fresh_native_initialization_recovers_after_each_public_auth_refusal() {
 fn invalid_prepared_binding_refuses_before_release_without_losing_typed_failure() {
     let mut e = seeded(venue(false));
     candles(&mut e, 100., 7, Interval::M1, None, None, None);
-    let (token, request) = preparation(
-        &safe_cex_engine::test_support::prepared_now(&mut e)
-            .into_iter()
-            .collect::<Vec<_>>(),
-        "/kline?",
-    );
+    let (token, request) = preparation(&e.drain_actions().collect::<Vec<_>>(), "/kline?");
     e.http_prepared(
         100.,
         token,
@@ -1052,22 +871,12 @@ fn invalid_prepared_binding_refuses_before_release_without_losing_typed_failure(
             expires_at: Some(f64::NAN),
         },
     );
-    let actions = safe_cex_engine::test_support::prepared_now(&mut e)
-        .into_iter()
-        .collect::<Vec<_>>();
+    let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))
         || matches!(a,Action::ManagedHttp(a) if matches!(a.as_ref(),HttpAction::Bind{..}))));
     let error = failed(&actions, 7);
     assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     response(&mut e, 100., request.id, 200, "", CANDLES);
-    assert!(
-        terminals(
-            &safe_cex_engine::test_support::prepared_now(&mut e)
-                .into_iter()
-                .collect::<Vec<_>>(),
-            7
-        )
-        .is_empty()
-    );
+    assert!(terminals(&e.drain_actions().collect::<Vec<_>>(), 7).is_empty());
 }

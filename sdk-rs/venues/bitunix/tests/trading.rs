@@ -769,7 +769,7 @@ fn orders_refresh(
             },
         );
     }
-    safe_cex_engine::test_support::prepared_now(&mut e)
+    safe_cex_engine::test_support::prepared_now(e)
         .into_iter()
         .for_each(drop);
 }
