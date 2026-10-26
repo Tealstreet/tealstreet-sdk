@@ -51,6 +51,7 @@ enum ReadData {
     Orders {
         rows: SnapshotBuilder<String, Order>,
         repairs: Vec<crate::trading::Repair>,
+        observations: Vec<crate::repair::Observation>,
         /// Native mapping-time decisions, applied only after whole-read admission.
         unpriced: Vec<(String, bool)>,
         /// A working order on a catalogue-malformed market keeps the last snapshot.
@@ -315,56 +316,6 @@ impl Backpack {
     pub(crate) fn order_stream_time(&self, id: &str) -> f64 {
         self.account.order_times.get(id).copied().unwrap_or(0.0)
     }
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn signed(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        params: Params,
-        body: Option<String>,
-        pending: Pending,
-    ) -> Result<(), String> {
-        let read_credentials = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get)
-            .map(|read| {
-                let mut c = Credentials::new(read.key.clone(), &read.secret)?;
-                c.window = self
-                    .account
-                    .credentials
-                    .as_ref()
-                    .map_or(60000, |primary| primary.window);
-                Ok::<_, String>(c)
-            })
-            .transpose()?;
-        let credentials = read_credentials
-            .as_ref()
-            .or(self.account.credentials.as_ref())
-            .ok_or("Backpack credentials unavailable")?;
-        let headers = credentials.headers(
-            instruction(method, path),
-            std::slice::from_ref(&params),
-            cx.now,
-        );
-        let query = if method == Method::Get {
-            crate::sign::query(&params)
-        } else {
-            String::new()
-        };
-        let url = format!(
-            "{REST}{path}{}",
-            if query.is_empty() {
-                String::new()
-            } else {
-                format!("?{query}")
-            }
-        );
-        cx.request(method, url, headers, body, pending);
-        Ok(())
-    }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.options.public_data_only || self.options.key.as_ref().is_none_or(String::is_empty) {
             return;
@@ -393,6 +344,11 @@ impl Backpack {
             self.leverage_settings(cx);
             self.account_info(cx);
         }
+    }
+    pub(crate) fn repair_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.orders_read(cx, Next::None);
+        self.positions_read(cx, Next::None);
+        self.balance_read(cx, false, Next::None);
     }
     fn account_recover(&mut self, cx: &mut Cx<'_, Pending>) {
         if cx.now.is_finite() && self.account.tick.is_none() {
@@ -525,6 +481,7 @@ impl Backpack {
             ReadData::Orders {
                 rows: SnapshotBuilder::default(),
                 repairs: vec![],
+                observations: vec![],
                 unpriced: vec![],
                 hold: false,
                 token,
@@ -606,15 +563,20 @@ impl Backpack {
             ReadData::Orders {
                 rows,
                 repairs,
+                observations,
                 unpriced: pending_unpriced,
                 hold,
                 ..
             } => {
+                observations.push(crate::repair::Observation::capture(item));
+                let observation = observations.last_mut().expect("captured order evidence");
                 let Ok(r) = serde_json::from_str::<OrderRow<'_>>(item) else {
+                    observation.rejected();
                     self.reject_order(cx, rows, hold, item);
                     return;
                 };
                 if cx.store.market(&r.symbol).is_none() {
+                    observation.rejected();
                     // Only a working order on a malformed market holds the snapshot.
                     if self.report_skipped_market(cx, &r.symbol) {
                         *hold |= status(&r.status) == OrderStatus::Open;
@@ -625,11 +587,13 @@ impl Backpack {
                     // Prepare a candidate without queuing any side effect. The native
                     // amount still has to pass the shared strict order mapper below.
                     let repair = if r.trigger_price.is_some() && r.trigger_by.is_none() {
-                        self.trigger_repair(cx, &r).ok()
+                        self.trigger_repair(cx, &r, crate::repair::fill_proof(item))
+                            .ok()
                     } else {
                         None
                     };
                     let Ok(mapped) = order(r, cx.store) else {
+                        observation.rejected();
                         self.reject_order(cx, rows, hold, item);
                         return;
                     };
@@ -746,7 +710,7 @@ impl Backpack {
             return;
         }
         let mut corrective_balance = None;
-        let mut repairs = Vec::new();
+        let mut repairs = false;
         let result = (|| {
             match data {
                 ReadData::Info { revision } => {
@@ -811,6 +775,7 @@ impl Backpack {
                 ReadData::Orders {
                     rows,
                     repairs: native_repairs,
+                    observations,
                     unpriced,
                     hold,
                     token,
@@ -819,8 +784,9 @@ impl Backpack {
                     if hold {
                         return Err("Backpack invalid orders".into());
                     }
+                    let complete = rows.rejected() == 0;
                     let account = &mut self.account;
-                    let accepted = cx.store.commit_orders_snapshot([token], |current| {
+                    let accepted = cx.commit_repair_snapshot(read.context(), [token], |current| {
                         if rows.rejected() == 0 {
                             account.order_skips.clear();
                         }
@@ -833,8 +799,16 @@ impl Backpack {
                         }
                         rows.commit(current.iter().cloned(), |o| o.id.clone())
                     });
-                    if accepted {
-                        repairs = native_repairs;
+                    if let Some(receipt) = accepted {
+                        self.repair_snapshot(
+                            cx,
+                            &receipt,
+                            read.context().leg(),
+                            native_repairs,
+                            observations,
+                            complete,
+                        );
+                        repairs = true;
                     }
                 }
             }
@@ -850,8 +824,8 @@ impl Backpack {
             if let Some(recalculate) = corrective_balance {
                 self.balance_read(cx, recalculate, Next::None);
             }
-            for repair in repairs {
-                self.start_repair(cx, repair);
+            if repairs {
+                self.start_repairs(cx);
             }
         }
         self.next_account(cx, next);
@@ -960,7 +934,16 @@ impl Backpack {
             return Ok(());
         };
         if envelope.stream.starts_with("account.orderUpdate") {
-            let d: OrderEvent<'_> = serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
+            let d: OrderEvent<'_> = match serde_json::from_str(raw.get()) {
+                Ok(d) => d,
+                Err(error) => {
+                    self.repair_stream_unknown(cx);
+                    return Err(error.to_string());
+                }
+            };
+            self.repair_stream(&d.i, &d.s, d.z, d.status == "Filled");
+            self.retire_unsafe_replacements(cx);
+
             if cx.store.market(&d.s).is_none() {
                 self.report_skipped_market(cx, &d.s);
                 return Ok(());
@@ -1019,6 +1002,7 @@ impl Backpack {
                     ),
                 });
             }
+            self.retire_unsafe_replacements(cx);
             if d.e == "orderFill"
                 && let Some(executed) = d.l.filter(|n| n.0 > 0.0)
             {
@@ -1137,23 +1121,6 @@ impl Backpack {
     }
 }
 
-fn instruction(method: Method, path: &str) -> &'static str {
-    match (method, path) {
-        (Method::Get, "/api/v1/account") => "accountQuery",
-        (Method::Patch, "/api/v1/account") => "accountUpdate",
-        (Method::Get, "/api/v1/position") => "positionQuery",
-        (Method::Get, "/api/v1/capital/collateral") => "collateralQuery",
-        (Method::Get, "/api/v1/orders") => "orderQueryAll",
-        (Method::Post, "/api/v1/order" | "/api/v1/orders") => "orderExecute",
-        (Method::Delete, "/api/v1/order") => "orderCancel",
-        (Method::Delete, "/api/v1/orders") => "orderCancelAll",
-        (Method::Get, "/wapi/v1/history/fills") => "fillHistoryQueryAll",
-        (Method::Get, "/wapi/v1/history/orders") => "orderHistoryQueryAll",
-        (Method::Get, "/wapi/v1/history/funding") => "fundingHistoryQueryAll",
-        _ => unreachable!("unregistered Backpack instruction"),
-    }
-}
-
 impl crate::Backpack {
     /// A trigger read before any price defaults to StopLoss; relabel it from
     /// the seeded price once that exists.
@@ -1208,3 +1175,7 @@ mod tests {
         assert_eq!(classify(&store), OrderType::StopLoss);
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/repair_readiness.rs"]
+mod repair_readiness_tests;
