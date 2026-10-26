@@ -11,17 +11,6 @@
   "venues/backpack/src/trading.rs": {
     "9ecfe514716e00b34e5c7703e920e8dc9024caab0837bbf2949a3a78d4eb842b": 1
   },
-  "venues/binance/src/lib.rs": {
-    "088924f3ac9b1699da1a2b0c712052ec5d14e133e51b4a93094827c12109ef7e": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-  },
-  "venues/binance/src/trading.rs": {
-    "6e210fe58ad43aa0e3e10552f5f02fc159b7f2834cfcfb58b8995928a865ed82": 1,
-    "decfc9145fb5f3bece5c8acf7ca6bb8223662d280f6420c871883bffd1fb0726": 1,
-    "381b75be020e93e75013d035f50eb1891b6e831dbcc5c265756a70bf0dddd12e": 1,
-    "ea0ff1d0bf1689d0410b0bcc1cbbeedc2fa1bec60349440b50760648369edf0e": 1,
-    "59986a25934dee446e195bbc70a37615fcbaf0fd4e657cbe1bb7f4fbeebeee1d": 1
-  },
   "venues/bingx/src/account.rs": {
     "f025fc43a750a2590ced1ab109e5ee504164bf8505fdfb4ffec28b246dacd511": 2,
     "4fd69fe1e61d7806268e180e1316430a4f1412b5b180eee8a9d78451ac57c7d9": 1,
