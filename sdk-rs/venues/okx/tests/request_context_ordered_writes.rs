@@ -815,3 +815,72 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
         "the fresh snapshot clears the fence"
     );
 }
+
+#[test]
+fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
+    let refuse = |engine: &mut Engine<Okx>, action: &Action, status, body, now| {
+        let Action::Http(r) = action else {
+            panic!("expected request")
+        };
+        engine.handle(
+            now,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    };
+    let failures = |output: &[Action]| -> Vec<safe_cex_engine::VenueError> {
+        output
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    // A lost 503 answer: the order may exist, so the placement seals Unknown.
+    refuse(
+        &mut engine,
+        post(&first),
+        503,
+        r#"{"code":"1","msg":"busy"}"#,
+        6.,
+    );
+    let sealed = prepared(&mut engine, 6.);
+    assert!(
+        failures(&sealed)
+            .iter()
+            .any(|error| error.outcome == Some(safe_cex_engine::Outcome::Unknown)),
+        "the placement seals Unknown"
+    );
+    // A user retry on the same symbol must not send a second placement.
+    engine.handle(
+        7.,
+        Event::Command(Command::PlaceOrders {
+            command: OWNER + 1,
+            orders: vec![order(1)],
+        }),
+    );
+    let retry = prepared(&mut engine, 7.);
+    assert!(
+        !retry
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "no second placement while the first is Unknown"
+    );
+    assert!(
+        failures(&retry).iter().any(|error| {
+            error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.legacy_text().contains("uncertain")
+        }),
+        "the retry is refused NotSent with the reason"
+    );
+}

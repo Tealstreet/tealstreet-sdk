@@ -6951,13 +6951,15 @@ mod streaming_tests {
         engine.io.core.order_locks.note_write();
         complete_held(&mut engine, 1, true);
         assert!(engine.io.core.order_locks.uncertain("A"));
-        for (command, symbol) in [(2, "A"), (3, "B")] {
-            engine.handle(0., Event::Command(held_place(command, symbol)));
-            engine.io.core.order_locks.note_write();
-            // Every batch row has either an exact native identity or a definite rejection.
-            engine.io.core.order_locks.resolved(command);
-            complete_held(&mut engine, command, true);
-        }
+        // A later placement on the ambiguous symbol is refused at entry, so it
+        // can neither duplicate nor clear the earlier one.
+        engine.handle(0., Event::Command(held_place(2, "A")));
+        assert_eq!(engine.venue.commands.len(), 1);
+        engine.handle(0., Event::Command(held_place(3, "B")));
+        engine.io.core.order_locks.note_write();
+        // Every batch row has either an exact native identity or a definite rejection.
+        engine.io.core.order_locks.resolved(3);
+        complete_held(&mut engine, 3, true);
         assert!(
             engine.io.core.order_locks.uncertain("A"),
             "known later error cannot clear earlier ambiguous placement"
@@ -6973,7 +6975,7 @@ mod streaming_tests {
                 symbol: "B".into(),
             }),
         );
-        assert_eq!(engine.venue.commands.len(), 4);
+        assert_eq!(engine.venue.commands.len(), 3);
     }
 
     #[cfg(feature = "order-locks")]
