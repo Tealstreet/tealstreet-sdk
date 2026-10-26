@@ -627,6 +627,10 @@ impl Blofin {
 }
 
 impl Venue for Blofin {
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }
@@ -668,8 +672,7 @@ impl Venue for Blofin {
     /// An uncertain or absent-order seal: a fresh order snapshot reports
     /// through `orders_reconciled`.
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
-        self.settle_retired_trade(cx);
-        self.reconcile_orders(cx);
+        self.reconcile_uncertain_orders(cx);
     }
 
     type Pending = Pending;
