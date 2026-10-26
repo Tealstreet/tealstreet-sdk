@@ -446,6 +446,11 @@ duplicated in every listen-key venue (see the timer table above).
 - **Single reconnect owner.** No venue that adopts sessions in Phase B may adopt
   the #1771 `FeedId` before Phase C. Each venue therefore has one reconnect
   owner at a time.
+  - Exception by ruling (ddi2il, 2026-10-26): AsterDEX adopts the `FeedId`
+    early. The engine owns socket reconnects. The venue owns only listen-key
+    acquisition (a 10 s deadline and a jittered 1 s to 30 s backoff) until
+    Phase C absorbs it. See
+    [RUST_ASTERDEX_SOCKET_ADOPTION.md](RUST_ASTERDEX_SOCKET_ADOPTION.md).
 - Phase C deletes the native timers listed above. Phases A and B do not depend
   on the #1771 types.
 

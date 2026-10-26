@@ -6,8 +6,10 @@ use safe_cex_venue_asterdex::AsterDex;
 use support::Options;
 
 const MARKETS: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"}]}]}"#;
-const DEPTH: &str = r#"{"stream":"btcusdt@depth20@100ms","data":{"u":10,"b":[["100","1"]],"a":[["101","1"]]}}"#;
-const LATER_DEPTH: &str = r#"{"stream":"btcusdt@depth20@100ms","data":{"u":11,"b":[["90","1"]],"a":[["91","1"]]}}"#;
+const DEPTH: &str =
+    r#"{"stream":"btcusdt@depth20@100ms","data":{"u":10,"b":[["100","1"]],"a":[["101","1"]]}}"#;
+const LATER_DEPTH: &str =
+    r#"{"stream":"btcusdt@depth20@100ms","data":{"u":11,"b":[["90","1"]],"a":[["91","1"]]}}"#;
 const LIST_PUBLIC: &str = r#"{"id":-1,"method":"LIST_SUBSCRIPTIONS"}"#;
 const LIST_PRIVATE: &str = r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#;
 
@@ -139,9 +141,11 @@ impl H {
         self.event(Event::WsMessage { socket, text });
     }
     fn subscribe_book(&mut self) {
-        self.event(Event::Command(safe_cex_engine::Command::SubscribeOrderBook {
-            symbol: "BTCUSDT".into(),
-        }));
+        self.event(Event::Command(
+            safe_cex_engine::Command::SubscribeOrderBook {
+                symbol: "BTCUSDT".into(),
+            },
+        ));
     }
     /// Fires every timer due by `now + ms`, in order.
     fn advance(&mut self, ms: f64) {
@@ -232,7 +236,10 @@ fn private_frame_before_open_is_not_reduced() {
     h.reply("/openOrders", "[]");
     let frame = h.order_frame(778);
     h.message(socket, &frame);
-    assert!(h.engine.store().order("778").is_some(), "an open epoch reduces");
+    assert!(
+        h.engine.store().order("778").is_some(),
+        "an open epoch reduces"
+    );
 }
 
 #[test]
@@ -243,7 +250,10 @@ fn private_frame_at_idle_equality_is_not_reduced() {
     h.reply("/openOrders", "[]");
     let frame = h.order_frame(776);
     h.message(socket, &frame);
-    assert!(h.engine.store().order("776").is_some(), "a live epoch reduces");
+    assert!(
+        h.engine.store().order("776").is_some(),
+        "a live epoch reduces"
+    );
     h.now += 20_000.0;
     let frame = h.order_frame(777);
     h.message(socket, &frame);
@@ -275,7 +285,10 @@ fn opening_order_is_list_then_one_subscribe_and_ids_increase_across_reconnects()
     h.event(Event::WsOpened { socket });
     let opening: Vec<_> = h.sent.iter().filter(|(s, _)| *s == socket).collect();
     assert_eq!(opening[0].1, LIST_PUBLIC);
-    let subscribes: Vec<_> = opening.iter().filter(|(_, t)| t.contains("\"SUBSCRIBE\"")).collect();
+    let subscribes: Vec<_> = opening
+        .iter()
+        .filter(|(_, t)| t.contains("\"SUBSCRIBE\""))
+        .collect();
     assert_eq!(subscribes.len(), 1);
     for topic in ["!ticker@arr", "!markPrice@arr@1s", "btcusdt@depth20@100ms"] {
         assert!(subscribes[0].1.contains(topic), "{topic}");
@@ -309,7 +322,11 @@ fn private_open_lists_then_refreshes_orders_once() {
     let socket = h.private_socket();
     h.event(Event::WsOpened { socket });
     assert_eq!(
-        h.sent.iter().filter(|(s, _)| *s == socket).map(|(_, t)| t.as_str()).collect::<Vec<_>>(),
+        h.sent
+            .iter()
+            .filter(|(s, _)| *s == socket)
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>(),
         [LIST_PRIVATE]
     );
     assert_eq!(h.count("/openOrders"), 1);
@@ -336,7 +353,11 @@ fn failed_listen_key_create_is_retried_until_the_private_stream_opens() {
     }
     h.reply("/listenKey", r#"{"listenKey":"second"}"#);
     let socket = h.private_socket();
-    assert!(h.sockets.iter().any(|(s, url)| *s == socket && url.ends_with("/ws/second")));
+    assert!(
+        h.sockets
+            .iter()
+            .any(|(s, url)| *s == socket && url.ends_with("/ws/second"))
+    );
     h.event(Event::WsOpened { socket });
     assert_eq!(h.sent_on(socket, LIST_PRIVATE), 1);
 }
@@ -353,5 +374,9 @@ fn listen_key_expiry_reconnects_on_a_new_key() {
     h.reply("/listenKey", r#"{"listenKey":"renewed"}"#);
     let replacement = h.private_socket();
     assert_ne!(replacement, socket);
-    assert!(h.sockets.iter().any(|(s, url)| *s == replacement && url.ends_with("/ws/renewed")));
+    assert!(
+        h.sockets
+            .iter()
+            .any(|(s, url)| *s == replacement && url.ends_with("/ws/renewed"))
+    );
 }
