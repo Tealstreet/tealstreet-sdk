@@ -208,13 +208,6 @@
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1,
     "e2059285572e975717f09275846f33678d7bf1e78ddd4d40100025ab825c118f": 1
   },
-  "venues/lighter/src/history.rs": {
-    "5b3fa60c35b90d7d54c1c78a6208717da15fe27f3581b790ac0bc0f5cc640ca1": 1,
-    "2cb4373904a9bd645f5f03689ee4a667afacb9de41ec48ddb42d1b05efe59004": 1
-  },
-  "venues/lighter/src/trading.rs": {
-    "0bc3151ddc1e8889eb3a752d5431f3ab5643750a38409c18c5e239d38dcfc4b2": 1
-  },
   "venues/mexc/src/account.rs": {
     "b7dc68beffbce5993cd986ca76deaba009d76529c9a08dd7cba43c5f61aa74e8": 1,
     "9baacdfca9e0cc474c05532c9e1e6137179f1860fb215900cb3875863da3c055": 1,

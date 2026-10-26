@@ -3701,7 +3701,7 @@ impl<V: Venue> Engine<V> {
         let release_domain = V::http_release_domain();
         #[cfg(feature = "release-domains")]
         if let Some(domain) = release_domain {
-            release_domain::validate(domain, venue.http_pacing()).map_err(|_| {
+            release_domain::validate(domain, &http_pacing).map_err(|_| {
                 VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
             })?;
         }
