@@ -1,6 +1,6 @@
 # Lighter secret-only setup principal
 
-Status: shared API proposal, before inert originals and source. Owner:
+Status: shared API proposal, API CLEAR from m26ps4 and uufub4 at 25b7d8a4edf; before inert originals and source. Owner:
 codex-ih35js. Credential reviewer: claude-m26ps4; core reviewer:
 codex-uufub4. Base: #2204 head 01cdbacc21200d37eb0c5ddf7b5b06544dc74763.
 
@@ -47,13 +47,16 @@ Lighter family row. Bare family-name matching is not the policy.
 Compute SetupFacts from the original key before decoding or normalization.
 Omitted and null remain Absent; an empty string remains Empty; whitespace
 remains Blank; a nonblank value remains Nonblank. The principal never changes
-those facts, the cached public/private intent, or a supplied stable_id.
+those facts, the cached public/private intent, or a supplied stable_id. Lighter
+does not consume SetupFacts::primary_login(), the separate GRVT login seam.
 
 A nonblank supplied key keeps the ordinary credential path and takes precedence.
 For absent, empty or blank keys, install the principal only when a primary
 signing ref exists and public_data_only is false. Its provider-issued opaque
 credential reference is distinct from the signing ref. Provider state retains
-the typed index; no principal material goes into the ordinary key map.
+the typed index; no principal material goes into the ordinary key map. Its ref
+name is a fixed provider-owned slot name independent of index digits; different
+indices cannot encode data into the opaque ref name.
 
 Present, Credential interpolation, MAC/signing, public-key and address operations
 on the principal ref refuse. This stays true if trusted insertion is attempted
@@ -99,7 +102,8 @@ REDs with ordinary setup as the working control:
 5. Invalid index, wrong declaration, secondary, malformed scalar and feature-off
    refuse without installing partial material or changing ordinary families.
 6. Public-only and no-private-material setups do not acquire a principal.
-7. Native and private-JSON mapping preserve key facts and reject arbitrary
+7. Different indices have the same fixed ref name and separate provider state.
+   Native and private-JSON mapping preserve key facts and reject arbitrary
    principal fields; undeclared families retain the old empty-credential shape.
 8. Consumer controls retain secret-only account lookup and key-supplied L1
    lookup after stripping, with key-present precedence and no private work in

@@ -20,6 +20,25 @@ pub struct LocalSetup {
     pub primary: Option<LocalIdentity>,
     pub secondary: Option<LocalIdentity>,
 }
+
+/// Trusted Lighter setup's public API-index principal, never wire material.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LighterPrincipal {
+    api_key_index: u8,
+}
+impl LighterPrincipal {
+    pub fn new(api_key_index: u64) -> Result<Self, SignError> {
+        if api_key_index > 254 {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(Self {
+            api_key_index: api_key_index as u8,
+        })
+    }
+    pub fn api_key_index(&self) -> u8 {
+        self.api_key_index
+    }
+}
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalIdentity {
@@ -233,6 +252,8 @@ impl DecodedIdentity {
 
 #[derive(Default)]
 pub struct LocalSigner {
+    #[cfg(feature = "schnorr")]
+    lighter_principal: Option<(KeyRef, LighterPrincipal)>,
     keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
     /// Extra refs are usable only by their own algorithm, never presented,
     /// interpolated or used as an ordinary MAC/digest key.
@@ -248,6 +269,14 @@ pub struct LocalSigner {
 impl LocalSigner {
     pub fn new() -> Self {
         Self::default()
+    }
+    pub fn from_setup_with_lighter_principal(
+        _setup: LocalSetup,
+        _policy: CredentialSetupPolicy,
+        _public_data_only: bool,
+        _principal: LighterPrincipal,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        Err(SignError::Unsupported)
     }
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     /// Replaced material is undeclared: a declaration describes the bytes setup
@@ -727,6 +756,9 @@ impl LocalSigner {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod lighter_principal_tests;
 /// Semantic check of one provider's public answer at the trusted setup
 /// boundary; widths alone admit off-curve and non-canonical values.
 pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
