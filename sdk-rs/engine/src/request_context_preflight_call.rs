@@ -29,6 +29,11 @@ impl State {
         self.session_root.as_ref()
     }
 
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(in crate::engine) fn session_write(&self) -> Option<&crate::request_context::Credential> {
+        self.policy.write_credential.as_ref()
+    }
+
     /// The admitted write-after-reads credential, for repair mint custody.
     #[cfg(feature = "repair-mutations")]
     pub(in crate::engine) fn repair_write_credential(
@@ -725,7 +730,7 @@ impl crate::engine::CoreCx<'_> {
             .io
             .core
             .request_contexts
-            .keyless_session_egress(handle.owner())?;
+            .keyless_session_egress(handle.owner(), &self.io.core.identities)?;
         let bound = self
             .io
             .core
@@ -828,7 +833,7 @@ impl crate::engine::CoreRef<'_> {
         self.io
             .core
             .request_contexts
-            .validate_keyless_session(handle.owner())?;
+            .validate_keyless_session(handle.owner(), &self.io.core.identities)?;
         let state = self.io.core.request_contexts.preflight_state(handle)?;
         if let Some(call) = state.call.first() {
             self.validate_preflight_delivery(handle, &call.context)?;

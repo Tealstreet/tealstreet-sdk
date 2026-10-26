@@ -72,6 +72,14 @@ impl Sessions {
         Some(Egress::Session(SessionEgress::new(generation)))
     }
 
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(super) fn credential(
+        &self,
+        generation: u64,
+    ) -> Option<&crate::request_context::Credential> {
+        self.live.get(&generation)?.policy.credential.as_ref()
+    }
+
     pub(super) fn retire(&mut self, generation: u64) -> bool {
         self.live.remove(&generation).is_some()
     }
