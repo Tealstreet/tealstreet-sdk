@@ -204,7 +204,10 @@ fn missing_or_rejected_semantic_ack_never_sends_bracket() {
         let r = http(&mut e, "sendorder");
         reply(&mut e, &r, 200, body);
         let all = e.drain_plain().collect::<Vec<_>>();
-        assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !all.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+        );
         assert!(
             all.iter()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
@@ -397,7 +400,9 @@ fn ambiguous_write_is_not_retried_and_next_command_is_independent() {
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
     );
     assert_eq!(
-        all.iter().filter(|a| matches!(a, Action::Http(_))).count(),
+        all.iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("sendorder")))
+            .count(),
         1
     );
 }
@@ -628,7 +633,10 @@ fn execution_or_full_fill_racing_cancel_suppresses_protective_replacement() {
         message(&mut e, socket, NOW, fill);
         cancel_ack(&mut e, &r, "old");
         let all = e.drain_plain().collect::<Vec<_>>();
-        assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !all.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+        );
         assert!(
             all.iter()
                 .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
@@ -1059,13 +1067,13 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             503,
             "<html>".to_owned(),
-            unknown,
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
             "Invalid Kraken trading response",
         ),
         (
             503,
             r#"{"result":"error"}"#.to_owned(),
-            unknown,
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
             "Kraken HTTP 503",
         ),
         (
@@ -1101,7 +1109,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"result":"error","error":"somethingNew"}"#.to_owned(),
-            (None, None),
+            unknown,
             "somethingNew",
         ),
         (
@@ -1113,7 +1121,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             send("partiallyFilled"),
-            (None, None),
+            unknown,
             "Kraken placement rejected or incomplete: partiallyFilled",
         ),
         (
@@ -1175,9 +1183,9 @@ fn a_refusal_after_an_accepted_placement_is_never_rejected() {
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(
         error.legacy_text(),
-        "insufficientFunds; already accepted order IDs: accepted"
+        r#"{"message":"insufficientFunds","partialOrderIds":["accepted"],"partialOrderCount":1}"#
     );
-    assert_eq!(error.outcome, None);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
 }
 
 #[test]
@@ -1186,8 +1194,8 @@ fn edit_and_cancel_statuses_never_claim_a_refusal_after_an_effect() {
     for (status, outcome) in [
         ("invalidSize", Some(Outcome::Rejected)),
         // These cancel the resting order, possibly after fills.
-        ("postWouldExecute", None),
-        ("iocWouldNotExecute", None),
+        ("postWouldExecute", Some(Outcome::Unknown)),
+        ("iocWouldNotExecute", Some(Outcome::Unknown)),
     ] {
         let (mut e, _) = ready();
         inject(&mut e, "old", OrderType::Limit, None);
@@ -1234,4 +1242,161 @@ fn edit_and_cancel_statuses_never_claim_a_refusal_after_an_effect() {
         error.legacy_text(),
         "Kraken cancellation rejected or identity mismatch: notFound"
     );
+}
+
+#[test]
+fn beta_partial_placement_retains_ids_and_reconciles_uncertainty() {
+    for body in [
+        r#"{"result":"error","error":"insufficientFunds"}"#,
+        "<html>",
+    ] {
+        let (mut e, _) = ready();
+        place(&mut e, vec![limit(), limit(), limit()]);
+        let first = http(&mut e, "sendorder");
+        ack(&mut e, &first, "accepted", "placed");
+        let second = http(&mut e, "sendorder");
+        reply(
+            &mut e,
+            &second,
+            if body == "<html>" { 503 } else { 200 },
+            body,
+        );
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted"]);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("openorders")))
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("sendorder")))
+        );
+    }
+}
+
+#[test]
+fn beta_non_success_status_keeps_native_error_classification() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (status, code, kind, outcome) in [
+        (
+            400,
+            "apiLimitExceeded",
+            Some(ErrorKind::RateLimited),
+            Outcome::Rejected,
+        ),
+        (
+            403,
+            "authenticationError",
+            Some(ErrorKind::AuthInvalid),
+            Outcome::Rejected,
+        ),
+        (400, "unknownError", None, Outcome::Unknown),
+        (
+            503,
+            "insufficientFunds",
+            Some(ErrorKind::VenueUnavailable),
+            Outcome::Unknown,
+        ),
+        (
+            408,
+            "invalidArgument",
+            Some(ErrorKind::Timeout),
+            Outcome::Unknown,
+        ),
+    ] {
+        let (mut e, _) = ready();
+        place(&mut e, vec![limit()]);
+        let request = http(&mut e, "sendorder");
+        reply(
+            &mut e,
+            &request,
+            status,
+            &json!({"result":"error","error":code}).to_string(),
+        );
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(
+            (error.kind, error.outcome),
+            (kind, Some(outcome)),
+            "{status} {code}"
+        );
+        assert_eq!(error.venue_code.as_deref(), Some(code));
+    }
+}
+
+#[test]
+fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let request = http(&mut e, "sendorder");
+    reply(&mut e, &request, 503, "<html>");
+    let old = http(&mut e, "openorders");
+    place(&mut e, vec![limit()]);
+    let request = http(&mut e, "sendorder");
+    reply(&mut e, &request, 503, "<html>");
+    assert!(
+        !requests(&mut e)
+            .iter()
+            .any(|r| r.url.ends_with("openorders"))
+    );
+    reply(&mut e, &old, 200, OPEN);
+    let fresh = http(&mut e, "openorders");
+    assert_ne!(old.id, fresh.id);
+    command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 81,
+            symbol: "PF_XBTUSD".into(),
+        },
+    );
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:81, error}) if error.message.contains("uncertain"))));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    reply(&mut e, &fresh, 200, OPEN);
+    command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 82,
+            symbol: "PF_XBTUSD".into(),
+        },
+    );
+    assert!(
+        e.drain_plain()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 82, .. })))
+    );
+}
+
+#[test]
+fn beta_mixed_cancel_keeps_confirmed_ids_and_unknown() {
+    let (mut e, _) = ready();
+    inject(&mut e, "a", OrderType::Limit, None);
+    inject(&mut e, "b", OrderType::Limit, None);
+    command(
+        &mut e,
+        Command::CancelOrders {
+            command: 81,
+            ids: vec!["a".into(), "b".into()],
+        },
+    );
+    let request = http(&mut e, "batchorder");
+    reply(
+        &mut e,
+        &request,
+        200,
+        r#"{"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"notFound","order_id":"b"}]}"#,
+    );
+    let [error] = failures(&mut e).try_into().unwrap();
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(e.store().order("a").is_none());
+    assert!(e.store().order("b").is_some());
 }
