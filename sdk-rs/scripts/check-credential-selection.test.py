@@ -55,7 +55,12 @@ class CredentialSelectionBan(unittest.TestCase):
             'path_module_inside_crate': {'src/lib.rs': '#[path = "inner/wire.rs"] mod wire;\n' + P + FIELD + USE,
                                          'src/inner/wire.rs': '#[derive(Default)]\npub struct Wire { a: u8 }\n'},
             'std_default_import': 'use std::default::Default;\n' + P + FIELD + USE,
+            # A `'static` lifetime before a root path is not a `static` item.
+            'static_lifetime_root_path': P + FIELD + USE
+                + "fn d() -> Option<&'static safe_cex_engine::nonce::NonceDomain> { None }\n",
             # A value-namespace fn named like a root binds no path root.
+            # A value-namespace static named like a root binds no path root.
+            'static_named_like_engine_root': P + FIELD + USE + 'static safe_cex_engine: u8 = 0;\n',
             'fn_named_like_serde_root': P + '#[derive(serde::Deserialize)]\npub struct W { a: u8 }\n'
                                         'fn serde(error: u8) -> u8 { error }\n' + FIELD + USE,
             'impl_only_workspace_macro': P + FIELD + 'safe_cex_crypto::redacted_debug!(Options);\n'

@@ -6,6 +6,10 @@ use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::RetryPolicy;
+use safe_cex_engine::selected_read::{
+    BackgroundReadError, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
 use safe_cex_engine::socket::Tick as SocketTick;
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
 use serde::Serialize;
@@ -48,6 +52,11 @@ pub enum Request {
         stamps: HashMap<String, (Option<u64>, u64)>,
         coverage: RowAdmission<String>,
     },
+}
+impl Request {
+    pub(crate) fn is_info(&self) -> bool {
+        matches!(self, Self::Info)
+    }
 }
 #[derive(Clone)]
 pub struct Proof {
@@ -331,38 +340,78 @@ fn merge_stamp(
 }
 
 impl Orderly {
-    pub(crate) fn request_signed(
+    /// Every private account read is signed by the installed provider over the
+    /// Primary identity's refs; the venue never holds signing material for it.
+    pub(crate) fn signed(&self) -> bool {
+        !self.options.public_data_only && self.options.identities.primary.is_some()
+    }
+    /// Orderly has one account key: every signed read selects the Primary.
+    pub(crate) fn read_selection(
         &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        body: Option<String>,
-        pending: Pending,
-        stream: bool,
-    ) -> Result<(), String> {
-        let credentials = self
-            .account
-            .credentials
-            .as_ref()
-            .ok_or("Orderly credentials unavailable")?;
-        let headers = credentials.headers(method, path, body.as_deref(), cx.now)?;
-        let url = format!("{}{path}", self.rest());
-        if stream {
-            cx.request_streamed_body(
-                method,
-                url,
-                headers,
-                body,
-                ArrayAt::Path(&["data", "rows"]),
-                pending,
-            );
-        } else {
-            cx.request(method, url, headers, body, pending);
+    ) -> Result<SelectedRead, safe_cex_engine::credential_selection::CredentialUnavailable> {
+        let slots = safe_cex_engine::credential_selection::Slots::new(
+            self.options
+                .identities
+                .primary
+                .clone()
+                .filter(|_| !self.options.public_data_only),
+            None,
+            safe_cex_engine::credential_selection::SlotPolicy {
+                secondary_requires_primary: true,
+            },
+        );
+        SelectedRead::select(&slots, ReadRole::Read { scope: None })
+    }
+    /// One Background read per account leg; the native revision checks stay
+    /// the join. A refused selection, admission or queue settles the leg
+    /// through `account_failed` before any send.
+    fn private_read(&mut self, cx: &mut Cx<'_, Pending>, path: String, request: Request) {
+        let read = match SelectedRead::background(
+            cx,
+            self.read_selection(),
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(read) => read,
+            Err(BackgroundReadError::Selection(_)) => {
+                return self.account_failed(cx, request, "Orderly credentials unavailable");
+            }
+            Err(BackgroundReadError::Admission(error)) => {
+                let error = error.read_venue_error().message;
+                return self.account_failed(cx, request, &error);
+            }
+        };
+        let stream = !request.is_info();
+        let origin = self.rest();
+        let account = self.options.application_id.clone().unwrap_or_default();
+        if let Err((Pending::Account(_, request), error)) = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{origin}{path}"),
+                body: None,
+                stream: stream.then_some(ArrayAt::Path(&["data", "rows"])),
+            },
+            |identity| {
+                Box::new(sign::Http::new(
+                    identity.clone(),
+                    &account,
+                    Method::Get,
+                    origin,
+                    &path,
+                ))
+            },
+            |read| Pending::Account(read, request),
+        ) {
+            let error = error.read_venue_error().message;
+            self.account_failed(cx, request, &error);
         }
-        Ok(())
     }
     pub(crate) fn initialize_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.options.public_data_only || self.options.key.as_ref().is_none_or(String::is_empty) {
+        if !self.signed() {
             self.seed(cx, Seed::Markets);
             return;
         }
@@ -405,7 +454,7 @@ impl Orderly {
         };
         format!(
             "wss://{host}/v2/ws/private/stream/{}",
-            self.account.credentials.as_ref().unwrap().account
+            self.options.application_id.as_deref().unwrap_or_default()
         )
     }
     fn account_ready(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -513,25 +562,15 @@ impl Orderly {
     }
     fn account_read(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let path = match &request {
-            Request::Info => "/v1/client/info".into(),
-            Request::Modes { .. } => "/v1/client/margin_modes".into(),
-            Request::Positions { .. } => "/v1/positions".into(),
+            Request::Info => "/v1/client/info".to_owned(),
+            Request::Modes { .. } => "/v1/client/margin_modes".to_owned(),
+            Request::Positions { .. } => "/v1/positions".to_owned(),
             Request::Orders { algo, page, .. } => format!(
                 "/v1/{}orders?status=INCOMPLETE&page={page}&size=500",
                 if *algo { "algo/" } else { "" }
             ),
         };
-        let stream = !matches!(request, Request::Info);
-        if let Err(e) = self.request_signed(
-            cx,
-            Method::Get,
-            &path,
-            None,
-            Pending::Account(request),
-            stream,
-        ) {
-            cx.notice(Level::Error, code::CONFIG_INVALID, e);
-        }
+        self.private_read(cx, path, request);
     }
     pub(crate) fn position(
         &self,
@@ -1092,7 +1131,7 @@ impl Orderly {
     ) {
         let parsed = checked(response);
         if let Err(e) = parsed {
-            if matches!(request, Request::Info)
+            if request.is_info()
                 && (400..500).contains(&response.status)
                 && !matches!(response.status, 408 | 429)
             {
@@ -1399,38 +1438,17 @@ impl Orderly {
         self.account.authenticated = false;
         self.account.socket.open = true;
         self.account.socket.supervisor.opened(cx);
-        let timestamp = cx.now as u64;
-        let credentials = self.account.credentials.as_ref().unwrap();
-        #[derive(Serialize)]
-        struct Params<'a> {
-            orderly_key: &'a str,
-            sign: String,
-            timestamp: u64,
-        }
-        #[derive(Serialize)]
-        struct Auth<'a> {
-            event: &'a str,
-            params: Params<'a>,
-        }
-        match credentials.signature(&timestamp.to_string()) {
-            Ok(sign) => cx.send(
-                socket,
-                serde_json::to_string(&Auth {
-                    event: "auth",
-                    params: Params {
-                        orderly_key: &credentials.key,
-                        sign,
-                        timestamp,
-                    },
-                })
-                .unwrap(),
-            ),
-            Err(e) => {
-                cx.notice(Level::Error, code::CONFIG_INVALID, e);
-                cx.close(socket);
-                self.private_close(cx, socket);
-            }
-        }
+        let Some(primary) = self.options.identities.primary.clone() else {
+            cx.close(socket);
+            self.private_close(cx, socket);
+            return;
+        };
+        let url = self.private_url();
+        cx.send_signed(
+            socket,
+            String::new(),
+            Box::new(sign::WsAuth::new(primary, &url)),
+        );
     }
     pub(crate) fn private_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket != Some(socket) {
@@ -2009,247 +2027,5 @@ mod security_poll_interval {
 }
 
 #[cfg(test)]
-mod margin_mode_rows {
-    use super::*;
-    use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice};
-
-    fn respond(e: &mut Engine<Orderly>, r: &HttpRequest, status: u16, body: &str) {
-        e.handle(
-            1000.0,
-            Event::HttpResponse {
-                request: r.id,
-                response: Response {
-                    status,
-                    headers: "",
-                    body,
-                },
-            },
-        );
-    }
-
-    fn pending(defaults: &[(&str, MarginType)]) -> (Engine<Orderly>, HttpRequest) {
-        let mut venue = Orderly::new(crate::Options {
-            key: Some(format!("ed25519:{}", bs58::encode([0; 32]).into_string())),
-            secret: Some(bs58::encode([7; 32]).into_string()),
-            application_id: Some("test-account".into()),
-            ..Default::default()
-        });
-        venue.account.defaults = defaults.iter().map(|(s, m)| ((*s).into(), *m)).collect();
-        let mut e = safe_cex_engine::test_support::seeded_engine(venue);
-        e.start(1000.0);
-        for _ in 0..8 {
-            let out = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
-            for action in out {
-                if let Action::Http(r) = action {
-                    if r.url.ends_with("/v1/client/margin_modes") {
-                        return (e, r);
-                    }
-                    let body = if r.url.ends_with("/v1/client/info") {
-                        r#"{"success":true,"data":{"max_leverage":20}}"#
-                    } else {
-                        assert!(r.url.ends_with("/v1/public/info"), "{}", r.url);
-                        r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":20,"base_imr":0.01},{"symbol":"PERP_ETH_USDC","base_tick":0.001,"quote_tick":0.01,"base_min":0.001,"base_max":100,"base_imr":0.02}]}}"#
-                    };
-                    respond(&mut e, &r, 200, body);
-                }
-            }
-        }
-        panic!("margin-mode startup read not issued");
-    }
-
-    fn read(
-        defaults: &[(&str, MarginType)],
-        rows: &str,
-    ) -> (Engine<Orderly>, Vec<safe_cex_engine::LogEvent>) {
-        let (mut e, r) = pending(defaults);
-        respond(
-            &mut e,
-            &r,
-            200,
-            &format!(r#"{{"success":true,"data":{{"rows":{rows}}}}}"#),
-        );
-        let skipped = e
-            .drain_actions()
-            .filter_map(|a| match a {
-                Action::Notice(Notice::Event(event)) if event.code == code::ROW_SKIPPED => {
-                    Some(event)
-                }
-                _ => None,
-            })
-            .collect();
-        (e, skipped)
-    }
-
-    #[test]
-    fn identified_rejection_keeps_only_its_old_mode_and_commits_valid_peers() {
-        for bad in [
-            r#"{"symbol":"PERP_BTC_USDC","default_margin_mode":"UNKNOWN"}"#,
-            r#"{"symbol":"PERP_BTC_USDC","default_margin_mode":null}"#,
-            r#"{"symbol":"PERP_BTC_USDC"}"#,
-        ] {
-            let (e, skipped) = read(
-                &[
-                    ("BTCUSDC", MarginType::Isolated),
-                    ("ETHUSDC", MarginType::Cross),
-                    ("gone", MarginType::Isolated),
-                ],
-                &format!(
-                    r#"[{bad},{{"symbol":"PERP_ETH_USDC","default_margin_mode":"ISOLATED"}}]"#
-                ),
-            );
-            assert_eq!(
-                e.venue().account.defaults.get("BTCUSDC"),
-                Some(&MarginType::Isolated)
-            );
-            assert_eq!(
-                e.venue().account.defaults.get("ETHUSDC"),
-                Some(&MarginType::Isolated)
-            );
-            assert!(!e.venue().account.defaults.contains_key("gone"));
-            assert_eq!(
-                e.store().setting("ETHUSDC").unwrap().margin_type,
-                Some(MarginType::Isolated)
-            );
-            assert_eq!(skipped.len(), 1);
-            assert_eq!(skipped[0].level, Level::Warn);
-            assert_eq!(
-                skipped[0].message,
-                "Orderly skipped malformed margin-mode row"
-            );
-        }
-    }
-
-    #[test]
-    fn unidentified_rejection_protects_old_scope_while_valid_peer_wins() {
-        for bad in [
-            "42",
-            r#"{"default_margin_mode":"ISOLATED"}"#,
-            r#"{"symbol":null}"#,
-            r#"{"symbol":"BROKEN","default_margin_mode":"CROSS"}"#,
-        ] {
-            let (e, skipped) = read(
-                &[
-                    ("BTCUSDC", MarginType::Isolated),
-                    ("ETHUSDC", MarginType::Cross),
-                ],
-                &format!(
-                    r#"[{bad},{{"symbol":"PERP_ETH_USDC","default_margin_mode":"ISOLATED"}}]"#
-                ),
-            );
-            assert_eq!(
-                e.venue().account.defaults.get("BTCUSDC"),
-                Some(&MarginType::Isolated)
-            );
-            assert_eq!(
-                e.venue().account.defaults.get("ETHUSDC"),
-                Some(&MarginType::Isolated)
-            );
-            assert_eq!(skipped.len(), 1);
-        }
-    }
-
-    #[test]
-    fn valid_replacements_empty_modes_and_empty_lists_keep_existing_contract() {
-        let defaults = [("BTCUSDC", MarginType::Isolated)];
-        let (e, _) = read(&defaults, "[]");
-        assert!(e.venue().account.defaults.is_empty());
-        let (e, _) = read(
-            &defaults,
-            r#"[{"symbol":"PERP_BTC_USDC","default_margin_mode":"ISOLATED"},{"symbol":"PERP_BTC_USDC","default_margin_mode":""}]"#,
-        );
-        assert_eq!(
-            e.venue().account.defaults.get("BTCUSDC"),
-            Some(&MarginType::Cross)
-        );
-        let (e, _) = read(
-            &defaults,
-            r#"[{"symbol":"PERP_BTC_USDC","default_margin_mode":"INVALID"},{"symbol":"PERP_BTC_USDC","default_margin_mode":"CROSS"}]"#,
-        );
-        assert_eq!(
-            e.venue().account.defaults.get("BTCUSDC"),
-            Some(&MarginType::Cross)
-        );
-    }
-
-    #[test]
-    fn rejected_broker_symbol_retains_its_exact_suffix() {
-        let (e, skipped) = read(
-            &[("XLMUSDC_mythos", MarginType::Isolated)],
-            r#"[{"symbol":"PERP_XLM_USDC_mythos","default_margin_mode":"UNKNOWN"},{"symbol":"PERP_BTC_USDC","default_margin_mode":"ISOLATED"}]"#,
-        );
-        assert_eq!(
-            e.venue().account.defaults.get("XLMUSDC_mythos"),
-            Some(&MarginType::Isolated)
-        );
-        assert_eq!(
-            e.venue().account.defaults.get("BTCUSDC"),
-            Some(&MarginType::Isolated)
-        );
-        assert_eq!(skipped.len(), 1);
-    }
-
-    #[test]
-    fn failed_response_keeps_the_whole_old_map() {
-        for (status, body) in [
-            (503, "{}"),
-            (200, r#"{"success":false,"message":"failed"}"#),
-            (200, "{broken"),
-            (200, r#"{"success":true,"data":{}}"#),
-            (200, r#"{"success":true,"data":{"rows":null}}"#),
-            (
-                200,
-                r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","default_margin_mode":"CROSS"},"#,
-            ),
-        ] {
-            let (mut e, r) = pending(&[("BTCUSDC", MarginType::Isolated)]);
-            respond(&mut e, &r, status, body);
-            assert_eq!(
-                e.venue().account.defaults.get("BTCUSDC"),
-                Some(&MarginType::Isolated)
-            );
-        }
-    }
-
-    #[test]
-    fn late_modes_read_cannot_overwrite_a_newer_margin_write() {
-        let (mut e, modes) = pending(&[]);
-        // Cached private state permits a write while the older mode read is pending.
-        e.store_mut().set_orders(vec![]);
-        e.store_mut().set_positions(vec![]);
-        e.store_mut().set_balance(Default::default());
-        e.handle(
-            1000.0,
-            Event::Command(Command::SetMarginType {
-                command: 7,
-                symbol: "BTCUSDC".into(),
-                isolated: true,
-            }),
-        );
-        let write = e
-            .drain_actions()
-            .find_map(|a| match a {
-                Action::Http(r) if r.url.ends_with("/v1/client/margin_mode") => Some(r),
-                _ => None,
-            })
-            .expect("margin write");
-        respond(&mut e, &write, 200, r#"{"success":true}"#);
-        assert_eq!(
-            e.venue().account.defaults.get("BTCUSDC"),
-            Some(&MarginType::Isolated)
-        );
-        respond(
-            &mut e,
-            &modes,
-            200,
-            r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","default_margin_mode":"CROSS"}]}}"#,
-        );
-        assert_eq!(
-            e.venue().account.defaults.get("BTCUSDC"),
-            Some(&MarginType::Isolated)
-        );
-        assert_eq!(
-            e.store().setting("BTCUSDC").unwrap().margin_type,
-            Some(MarginType::Isolated)
-        );
-    }
-}
+#[path = "../tests/unit/margin_mode_rows.rs"]
+mod margin_mode_rows;

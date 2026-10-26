@@ -19,6 +19,7 @@ export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
   apexomni: 'https://api-docs.pro.apex.exchange/#get-configs',
   backpack: 'https://docs.backpack.exchange/#tag/Markets/operation/get_markets',
   kraken: 'https://support.kraken.com/articles/4844359082772-linear-multi-collateral-derivatives-contract-specifications',
+  krakenspot: 'https://docs.kraken.com/api-reference/market-data/get-tradable-asset-pairs',
   kucoin: 'https://www.kucoin.com/docs-new/rest/futures-trading/market-data/get-all-symbols',
   mexc: 'https://mexcdevelop.github.io/apidocs/contract_v1_en/#get-contract-details',
   weex: 'https://www.weex.com/legacy-docs/contract/Market_API/GetContractInfo',
@@ -83,6 +84,7 @@ const hosts = {
   apexomni: /^(?:testnet\.)?omni\.apex\.exchange$/,
   backpack: /^api\.backpack\.exchange$/,
   kraken: /^(?:demo-)?futures\.kraken\.com$/,
+  krakenspot: /^api\.kraken\.com$/,
   kucoin: /^api-futures\.kucoin\.com$/,
   mexc: /^api\.mexc\.com$/,
   weex: /^api-contract\.weex\.com$/,
@@ -128,6 +130,9 @@ export function venueMarketRules(venue, records, market) {
     try {
       url = new URL(record.url);
       if (url.protocol !== 'https:' || url.port || url.username || url.password || !hosts[family].test(url.hostname)) continue;
+      // AssetPairs is a complete catalog: a later failed or malformed reply
+      // cannot authorize sizing from a previously selected pair.
+      if (family === 'krakenspot' && record.method?.toUpperCase() === 'GET' && url.pathname === '/0/public/AssetPairs') result = unknown();
       if (!(record.status >= 200 && record.status < 300)) continue;
       payload = JSON.parse(record.body);
       if (!payload || typeof payload !== 'object') continue;
@@ -259,6 +264,14 @@ export function venueMarketRules(venue, records, market) {
         rule = (row) => typeof row.symbol === 'string' && row.symbol.startsWith('PF_') &&
           decimalStep(row.contractValueTradePrecision, true) ?
           known(0, decimalStep(row.contractValueTradePrecision, true), decimalStep(row.contractValueTradePrecision, true), row.contractSize) : unknown(); break;
+      case 'krakenspot':
+        if (method !== 'GET' || path !== '/0/public/AssetPairs' || !Array.isArray(payload.error) || payload.error.length ||
+          !payload.result || typeof payload.result !== 'object' || Array.isArray(payload.result)) continue;
+        rows = Object.entries(payload.result).filter(([id]) => !id.endsWith('.d')).map(([, row]) => row);
+        match = (row) => row.wsname === market.symbol;
+        rule = (row) => market.id === `${market.base}/${market.quote}` &&
+          row.status === 'online' && row.lot_multiplier === 1 ?
+          known(row.costmin, row.ordermin, decimalStep(row.lot_decimals)) : unknown(); break;
       case 'kucoin':
         if (method !== 'GET' || path !== '/api/v1/contracts/active' || !code(payload.code, '200000')) continue;
         rows = array(payload.data);
