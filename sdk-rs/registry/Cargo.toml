@@ -6,6 +6,7 @@ publish.workspace = true
 description = "Every Rust venue, constructed by name from one options shape"
 
 [features]
+address-nonce = ["dispatch-signing", "safe-cex-engine/address-nonce", "safe-cex-crypto/address-nonce"]
 # Additive provider bootstrap; at least one venue feature is still required.
 dispatch-signing = ["dep:safe-cex-crypto"]
 default = [

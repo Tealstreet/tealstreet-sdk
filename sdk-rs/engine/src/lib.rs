@@ -80,3 +80,7 @@ pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::{OrderSnapshotToken, Store};
 
 pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};
+
+#[cfg(feature = "address-nonce")]
+pub use engine::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
+pub use engine::{AddressSetupSlots, SetupRetirement};
