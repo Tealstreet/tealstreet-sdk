@@ -1053,6 +1053,7 @@ impl BinanceFutures {
                 Ok(Some(grant))
                     if may_resend(stopped, self.trading.jobs.contains_key(&command)) =>
                 {
+                    // Undo the stop this refusal just set: the leg is resent, not failed.
                     if let Some(job) = self.trading.jobs.get_mut(&command) {
                         job.stop = stopped;
                     }
