@@ -9,7 +9,7 @@ safe-cex-types.workspace = true
 indexmap = { version = "=2.14.2", features = ["serde"] }
 ryu-js = "1"
 serde.workspace = true
-serde_json = { workspace = true, features = ["raw_value"] }
+serde_json = { version = "=1.0.152", features = ["float_roundtrip", "preserve_order", "arbitrary_precision", "raw_value"] }
 num-bigint = "=0.4.6"
 num-traits = "=0.2.19"
 

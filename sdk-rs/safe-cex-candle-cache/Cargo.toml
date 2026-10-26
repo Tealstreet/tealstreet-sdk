@@ -8,7 +8,7 @@ publish.workspace = true
 safe-cex-num.workspace = true
 safe-cex-types.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { version = "=1.0.152", features = ["float_roundtrip", "preserve_order", "arbitrary_precision"] }
 
 [lints]
 workspace = true

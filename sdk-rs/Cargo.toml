@@ -6,6 +6,11 @@ members = [
     "hosts/native",
     "hosts/wasm",
     "registry",
+    # Restored verbatim from master for the monorepo candle-server image
+    # (`-p safe-cex-candle-cache`); CI builds these three on their own.
+    "safe-cex-candle-cache",
+    "safe-cex-num",
+    "safe-cex-types",
     "venues/*",
 ]
 
@@ -15,6 +20,12 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+# The restored candle-cache crates only; never an engine or venue dependency.
+safe-cex-types = { path = "safe-cex-types" }
+safe-cex-num = { path = "safe-cex-num" }
+ryu-js = "1"
+ts-rs = "12.0.1"
+syn = { version = "3.0.7", features = ["full", "visit"] }
 hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
