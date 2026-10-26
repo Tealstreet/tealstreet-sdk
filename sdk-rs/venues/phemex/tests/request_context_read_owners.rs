@@ -387,6 +387,72 @@ fn reconciliation_response_at_deadline_cannot_reveal_an_order_without_timer() {
 }
 
 #[test]
+fn an_unrecognized_live_order_cannot_release_an_uncertain_placement() {
+    for (status, kind) in [("UnknownStatus", "Limit"), ("New", "UnknownType")] {
+        let (mut e, actions, wake) = uncertain();
+        let read = request(&actions, "activeList");
+        let body = serde_json::json!({"code":0,"data":{"rows":[{
+            "orderID":"possibly-live", "clOrdID":"uncertain", "symbol":"BTCUSDT",
+            "side":"Buy", "posSide":"Merged", "orderType":kind, "ordStatus":status,
+            "orderQtyRq":"0.01", "cumQtyRq":"0", "leavesQtyRq":"0.01", "priceRp":"69000"
+        }]}})
+        .to_string();
+        response(&mut e, wake + 1., read.id, 200, &body);
+        let incomplete: Vec<_> = e.drain_actions().collect();
+        e.handle(
+            wake + 2.,
+            Event::Command(Command::PlaceOrders {
+                command: 740,
+                orders: vec![opts("blocked-after-unrecognized")],
+            }),
+        );
+        let refused = safe_cex_engine::test_support::prepared_actions(&mut e, wake + 2.);
+        assert!(
+            requests(&refused)
+                .iter()
+                .all(|r| !r.url.contains("/g-orders/create")),
+            "{status}/{kind}: unreadable live evidence must retain the fence"
+        );
+        assert!(refused.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: 740, error })
+            if error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
+        let (timer, at) = incomplete
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms > wake + 1. => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .expect("incomplete evidence retains bounded native retry");
+        e.handle(at, Event::TimerFired { timer });
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, at);
+        let fresh = request(&out, "activeList");
+        response(
+            &mut e,
+            at + 1.,
+            fresh.id,
+            200,
+            r#"{"code":10002,"data":null}"#,
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            at + 2.,
+            Event::Command(Command::PlaceOrders {
+                command: 741,
+                orders: vec![opts("clean-after-unrecognized")],
+            }),
+        );
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, at + 2.);
+        assert_eq!(
+            requests(&out)
+                .iter()
+                .filter(|r| r.url.contains("/g-orders/create"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
 fn an_unknown_placement_stays_fenced_through_expiry_until_fresh_reconciliation() {
     let (mut e, actions, socket) = started();
     seed(&mut e, &actions);
