@@ -10072,6 +10072,25 @@ the fence standing. This slice adds no venue retry loop or write resend.
 Multi-DEX reads release symbol-scoped marks only; an unknown-ID amend is refused
 NotSent before dispatch and cannot create an all-symbol mark on this venue.
 
+### Lighter: an Unknown placement fences its symbol
+
+Lighter opts into `guard_pending_placements` and `fence_uncertain_placements`.
+After a placement whose outcome is Unknown (a lost or 5xx `sendTx`), on that
+symbol:
+- `placeOrders` and `amendOrder` fail NotSent with "Placement outcome is
+  uncertain; reconcile before placing or amending" and send nothing;
+- `cancelSymbolOrders` fails with "Placement outcome is uncertain; reconcile
+  before cancel-all" and sends nothing: Lighter composes cancel-all from known
+  ids, so it would miss the uncertain order. Cancelling a known order by id is
+  still admitted.
+The Unknown starts an active-orders read at once. The fence clears on the first
+complete orders snapshot requested after the write: a read already in flight
+when the write went out, a failed read, or a snapshot with an unmappable row
+does not clear it. If a read was in flight, another follows as soon as it
+settles, and a failed read is followed at once by a fresh one, so the fence
+normally lasts about one orders round trip. The engine's reconcile re-asks
+(1 s doubling to 30 s) join an outstanding read rather than restarting it.
+
 ### Binance: an Unknown placement fences its symbol
 
 All four Binance products (USD-M, Portfolio Margin, Spot, COIN-M) opt into
