@@ -9962,3 +9962,23 @@ until its opt-in) from managed, single-Context and legacy `cx.request` writes,
 and amend roots whose replacement places (zs5e83's audits,
 /tmp/codex-beta-plan-fence-audit/report.md and followup.md). Paradex's
 venue-local same-ID amend fence stays as is.
+
+## Lighter public beta data
+
+Market snapshots seed last price and start ticker hydration before socket Open.
+The existing single-flight guard prevents duplicate pending reads. Stats decode base and
+USD open interest independently, preferring the base field when both exist.
+REST depth sums are rounded to the market's declared amount precision to remove
+binary addition residue. Public close requests a recovery snapshot immediately
+when existing pacing permits; one inflight request per book remains the limit.
+A newer socket snapshot invalidates an older recovery reply. Grouped limit
+TP/SL remains a separately tested beta blocker, not part of this public slice.
+
+Before socket Open, the first ticker seed also publishes real exchangeStats
+daily volume, quote volume and percentage. TypeScript's REST fallback drops
+those fields. The overseer accepts this more complete bootstrap in readiness
+comparison; the raw replay still reports these differences without relaxed
+tolerances. Prices, books and later checkpoints must agree.
+The CI verifier declares only exact recorded bootstrap paths with TS zero and
+finite Rust values. Later checkpoints and other fields remain strict; existing
+private fill/order baseline declarations remain separate and unchanged.

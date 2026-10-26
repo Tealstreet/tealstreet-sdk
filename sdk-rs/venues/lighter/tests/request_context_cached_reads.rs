@@ -117,6 +117,19 @@ fn started(robinhood: bool, testnet: bool) -> Engine<Lighter> {
         })
         .unwrap();
     reply_at(&mut engine, NOW, &request, 200, META);
+    for action in safe_cex_engine::test_support::prepared_actions(&mut engine, NOW) {
+        if let Action::Http(request) = action
+            && request.url.ends_with("exchangeStats")
+        {
+            reply_at(
+                &mut engine,
+                NOW,
+                &request,
+                200,
+                r#"{"code":200,"order_book_stats":[]}"#,
+            );
+        }
+    }
     engine.drain_actions().for_each(drop);
     engine
         .store_mut()
