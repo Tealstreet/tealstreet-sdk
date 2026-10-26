@@ -23,6 +23,8 @@ const KEPT_VENUE_FILES = [
   'binance/binancespot.types.ts',
   'bitget/bitget.signing.ts',
   'bitget/bitget.types.ts',
+  'bitunix/bitunix.income.ts',
+  'bitunix/bitunix.signing.ts',
   'blofin/blofin.income.ts',
   'blofin/blofin.types.ts',
   'bybit/bybit.closed-pnl.ts',
