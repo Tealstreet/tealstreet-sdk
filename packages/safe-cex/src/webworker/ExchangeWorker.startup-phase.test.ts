@@ -110,7 +110,7 @@ describe('ExchangeWorker startup phase tagging', () => {
     await expect(worker.start()).resolves.toBe(false);
 
     expect(phaseOf(messages)).toBe('startup');
-    expect(errorPayloads(messages)[0].data[0]).toContain('Unknown exchange');
+    expect(errorPayloads(messages)[0].data[0]).toContain('not-a-venue is unsupported in this build');
   });
 
   it('does not tag a successful startup', async () => {
@@ -134,12 +134,12 @@ it('forwards coded diagnostics and legacy metadata only from the current worker 
   const listener = onMock.mock.calls.find(([name]) => name === 'engine-event')?.[1];
   expect(listener).toBeTypeOf('function');
   listener(event);
-  expect(messages.filter(message => message.op === 'engine-event')).toEqual([{ op: 'engine-event', data: [event] }]);
+  expect(messages.filter((message) => message.op === 'engine-event')).toEqual([{ op: 'engine-event', data: [event] }]);
   const errorListener = onMock.mock.calls.find(([name]) => name === 'error')![1];
   errorListener(event.message, { engineEvent: event });
   expect(errorPayloads(messages).at(-1).data).toEqual([event.message, { engineEvent: event }]);
   // A restart invalidates callbacks held by the old exchange.
   await worker.start();
   listener(event);
-  expect(messages.filter(message => message.op === 'engine-event')).toHaveLength(1);
+  expect(messages.filter((message) => message.op === 'engine-event')).toHaveLength(1);
 });

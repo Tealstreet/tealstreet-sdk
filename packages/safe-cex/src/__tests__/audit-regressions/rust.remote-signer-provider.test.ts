@@ -1,9 +1,11 @@
 import type { SignRequest, SignResult } from '@tealstreet/safe-cex-wasm/host';
 import type { PayloadSigner, RemoteSigner } from '../../types';
 
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createRemoteSignerProvider } from '../../exchanges/rust/remoteSignerProvider';
+import { prepareBitunixRequest } from '../../exchanges/bitunix/bitunix.signing';
+import { createRemoteSignerProvider, remoteSignerAlgorithms } from '../../exchanges/rust/remoteSignerProvider';
 
 const primary = { credential: 'owned/primary/public', signing: 'owned/primary/hmac', publicCredential: 'public+é' };
 const secondary = { credential: 'owned/read/public', signing: 'owned/read/hmac', publicCredential: 'read-public' };
@@ -328,6 +330,135 @@ describe('standalone account-owned remote primitive provider', () => {
     ]) {
       expect(() => createRemoteSignerProvider({ exchangeName: 'binance', identities: { primary, secondary: invalid }, payloadSigner: vi.fn() }))
         .toThrow('Remote signing request refused');
+    }
+  });
+});
+
+describe('Bitunix fused double-SHA256 remote admission', () => {
+  const material = 'test-secret-value';
+  const own = { credential: 'owned/bitunix/public', signing: 'owned/bitunix/signing', publicCredential: 'api-key-xyz' };
+  const read = { credential: 'owned/bitunix/read', signing: 'owned/bitunix/read-signing', publicCredential: 'read-key' };
+  const slots = { primary: own, secondary: read };
+  const bytes = (text: string) => Array.from(Buffer.from(text, 'utf8'));
+  // Independent Node crypto oracle of the browser's `bitunix-double-sha256`.
+  const doubleSha256 = (toSign: string) => createHash('sha256')
+    .update(createHash('sha256').update(toSign).digest('hex') + material).digest('hex');
+  const fused = (signed: string, slot = own): SignRequest => ({
+    receipt: { stampMs: 1700000000000 },
+    context: { venue: 'untrusted', method: 'POST', host: 'untrusted.invalid', path: '/not-authority' },
+    operations: [
+      { kind: 'sha256', payload: [{ kind: 'bytes', bytes: bytes('nonce-abc1700000000') },
+        { kind: 'credential', key: slot.credential }, { kind: 'bytes', bytes: bytes(signed) }] },
+      { kind: 'sign', algorithm: 'sha256SecretSuffix', key: slot.signing, payload: [{ kind: 'result', index: 0, encoding: 'hex' }] },
+      { kind: 'present', key: slot.credential },
+    ],
+  });
+  const browser = (answer?: (toSign: string) => unknown) =>
+    remote(async ({ id, wsAuth }) => ({ id, wsAuthSignature: (answer ?? doubleSha256)(wsAuth!.toSign) as string }));
+
+  it.each([
+    // Python hashlib vectors: the TS REST preimage of a signed POST, and the login.
+    ['rest', 'symbolBTCUSDT{"qty":"1"}', '7ddef339d8ec2d6edade44ed8013ff647e2ae9b7b51926b438342c9dfe3721d3'],
+    // Node crypto vector from base.ws-auth-signing.test.ts.
+    ['login', '', 'c99d3e027fcb8cbefc05f7a38dfc710011d07e79dbefd8b0bc7b44347bb0e624'],
+  ])('signs the %s preimage through the legacy wire and returns the local-key values', async (_, signed, golden) => {
+    const r = browser();
+    const fallback = vi.fn();
+    const signer = createRemoteSignerProvider({ exchangeName: 'bitunix', identities: slots, remoteSigner: r.value, payloadSigner: fallback });
+    const input = fused(signed);
+    const output = await signer(input, context());
+    const toSign = `nonce-abc1700000000api-key-xyz${signed}`;
+    if (signed) {
+      const config = { url: '/api/v1/futures/trade/place_order', params: { symbol: 'BTCUSDT' }, data: { qty: '1' }, headers: {} };
+      expect(prepareBitunixRequest(config as never, 'api-key-xyz', 1700000000, 'nonce-abc').payload).toBe(toSign);
+    }
+    // One envelope, no extraData: the browser ignores it and HTTP shares the login shape.
+    expect(r.value.sign).toHaveBeenCalledOnce();
+    expect(r.value.sign).toHaveBeenCalledWith({ id: expect.any(String), type: 'ws-auth', exchangeName: 'bitunix',
+      accountName: 'account-one', wsAuth: { toSign, outputFormat: 'bitunix-double-sha256' } });
+    expect(Buffer.from(output.values[1]).toString('hex')).toBe(golden);
+    expect(output).toEqual({ receipt: input.receipt, values: [
+      Array.from(createHash('sha256').update(toSign).digest()), Array.from(Buffer.from(golden, 'hex')), bytes('api-key-xyz')] });
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('accepts an uppercase 64-hex answer as the same 32 bytes', async () => {
+    const r = browser((toSign) => doubleSha256(toSign).toUpperCase());
+    const output = await createRemoteSignerProvider({ exchangeName: 'bitunix', identities: slots, remoteSigner: r.value })(fused(''), context());
+    expect(Buffer.from(output.values[1]).toString('hex')).toBe('c99d3e027fcb8cbefc05f7a38dfc710011d07e79dbefd8b0bc7b44347bb0e624');
+  });
+
+  const mutations: [string, (operations: SignRequest['operations']) => SignRequest['operations']][] = [
+    ['foreign credential part', ([, sign, present]) => [{ kind: 'sha256', payload: [
+      { kind: 'bytes', bytes: bytes('nonce-abc1700000000') }, { kind: 'credential', key: read.credential }] }, sign, present]],
+    ['unowned credential part', ([, sign, present]) => [{ kind: 'sha256', payload: [{ kind: 'credential', key: 'another-account/public' }] }, sign, present]],
+    ['present first', ([digest, sign, present]) => [present, digest, sign]],
+    ['sign before sha256', ([digest, sign, present]) => [sign, digest, present]],
+    ['duplicated sha256', ([digest, sign, present]) => [digest, digest, sign, present]],
+    ['duplicated sign', ([digest, sign, present]) => [digest, sign, sign, present]],
+    ['extra present', ([digest, sign, present]) => [digest, sign, present, present]],
+    ['missing present', ([digest, sign]) => [digest, sign]],
+    ['missing sha256', ([, sign, present]) => [sign, present]],
+    ['foreign present', ([digest, sign]) => [digest, sign, { kind: 'present', key: read.credential }]],
+    ['secondary signing key', ([digest, , present]) => [digest,
+      { kind: 'sign', algorithm: 'sha256SecretSuffix', key: read.signing, payload: [{ kind: 'result', index: 0, encoding: 'hex' }] }, present]],
+    ['hmac over the digest', ([digest, , present]) => [digest,
+      { kind: 'sign', algorithm: 'hmacSha256', key: own.signing, payload: [{ kind: 'result', index: 0, encoding: 'hex' }] }, present]],
+    ['wrong result index', ([digest, , present]) => [digest,
+      { kind: 'sign', algorithm: 'sha256SecretSuffix', key: own.signing, payload: [{ kind: 'result', index: 1, encoding: 'hex' }] }, present]],
+    ['raw result encoding', ([digest, , present]) => [digest,
+      { kind: 'sign', algorithm: 'sha256SecretSuffix', key: own.signing, payload: [{ kind: 'result', index: 0, encoding: 'raw' }] }, present]],
+    ['extra sign part', ([digest, , present]) => [digest,
+      { kind: 'sign', algorithm: 'sha256SecretSuffix', key: own.signing, payload: [{ kind: 'result', index: 0, encoding: 'hex' }, { kind: 'bytes', bytes: [65] }] }, present]],
+    ['bytes in place of the result', ([digest, , present]) => [digest,
+      { kind: 'sign', algorithm: 'sha256SecretSuffix', key: own.signing, payload: [{ kind: 'bytes', bytes: [65] }] }, present]],
+    ['result inside the digest', ([, sign, present]) => [{ kind: 'sha256', payload: [{ kind: 'result', index: 0, encoding: 'hex' }] }, sign, present]],
+    ['empty digest', ([, sign, present]) => [{ kind: 'sha256', payload: [] }, sign, present]],
+    ['invalid byte', ([, sign, present]) => [{ kind: 'sha256', payload: [{ kind: 'bytes', bytes: [256] }] }, sign, present]],
+    ['split UTF-8', ([, sign, present]) => [{ kind: 'sha256', payload: [{ kind: 'bytes', bytes: [0xc3] }] }, sign, present]],
+    ['lone suffix sign', () => [{ kind: 'sign', algorithm: 'sha256SecretSuffix', key: own.signing, payload: [{ kind: 'bytes', bytes: [65] }] }]],
+    ['lone sha256', ([digest]) => [digest]],
+  ];
+  it.each(mutations)('refuses %s before any callback', async (_, mutate) => {
+    const r = browser();
+    const signer = createRemoteSignerProvider({ exchangeName: 'bitunix', identities: slots, remoteSigner: r.value });
+    const input = fused('');
+    await expect(signer({ ...input, operations: mutate(input.operations) }, context())).rejects.toThrow(/^Remote signing request refused$/);
+    expect(r.value.sign).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['non-hex', () => 'z'.repeat(64)], ['short', (t: string) => doubleSha256(t).slice(2)], ['long', (t: string) => `${doubleSha256(t)}00`],
+    ['prefixed', (t: string) => `0x${doubleSha256(t).slice(2)}`], ['padded', (t: string) => ` ${doubleSha256(t)}`],
+    ['base64', () => 'SL/xd+lRj5sirx9sxjcCAiy6l78Q3WwR8844XzqxcNs='], ['number', () => 1], ['absent', () => undefined],
+  ])('refuses a %s browser answer without publishing any value', async (_, answer) => {
+    const r = browser(answer as (toSign: string) => unknown);
+    const signer = createRemoteSignerProvider({ exchangeName: 'bitunix', identities: slots, remoteSigner: r.value });
+    await expect(signer(fused(''), context())).rejects.toThrow(/^Remote signing request refused$/);
+    expect(r.value.sign).toHaveBeenCalledOnce();
+  });
+
+  it('refuses the fused shape for PayloadSigner, for other venues and for HMAC on Bitunix', async () => {
+    const callback = vi.fn(async () => ({ signature: hex }));
+    const payload = createRemoteSignerProvider({ exchangeName: 'bitunix', identities: slots, payloadSigner: callback });
+    await expect(payload(fused(''), context())).rejects.toThrow(/^Remote signing request refused$/);
+    expect(callback).not.toHaveBeenCalled();
+    for (const exchangeName of ['bybit', 'binance', 'okx', 'bitget'] as const) {
+      const r = browser();
+      const signer = createRemoteSignerProvider({ exchangeName, identities: slots, remoteSigner: r.value });
+      await expect(signer(fused(''), context())).rejects.toThrow(/^Remote signing request refused$/);
+      expect(r.value.sign).not.toHaveBeenCalled();
+    }
+    const r = browser();
+    const bitunix = createRemoteSignerProvider({ exchangeName: 'bitunix', identities, remoteSigner: r.value });
+    await expect(bitunix(request(), context())).rejects.toThrow(/^Remote signing request refused$/);
+    expect(r.value.sign).not.toHaveBeenCalled();
+  });
+
+  it('advertises sha256SecretSuffix only for Bitunix', () => {
+    expect(remoteSignerAlgorithms('bitunix')).toEqual(['sha256SecretSuffix']);
+    for (const name of ['bybit', 'bybitinverse', 'binance', 'binancespot', 'okx', 'okxeu', 'bitget', 'bitgetusdc', 'hyrotrader'] as const) {
+      expect(remoteSignerAlgorithms(name), name).toEqual(['hmacSha256']);
     }
   });
 });

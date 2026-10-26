@@ -16,6 +16,7 @@
 | File                    | Description                                                             |
 | ----------------------- | ----------------------------------------------------------------------- |
 | `bitunix.api.ts`        | REST API client with double-SHA256 signature scheme, axios interceptors |
+| `bitunix.signing.ts`    | Standalone REST preimage codec shared by `bitunix.api.ts` and hosted Rust signing |
 | `bitunix.exchange.ts`   | Main exchange class extending `BaseExchange`                            |
 | `bitunix.types.ts`      | Type definitions, endpoint constants, type mapping objects              |
 | `bitunix.utils.ts`      | SHA256 hex hashing utility (uses `@noble/hashes`)                       |
@@ -802,6 +803,13 @@ before the first engine start and supplies its virtual clock for authenticated
 REST and private-login timestamps, including later socket epochs. Signing keeps
 its existing millisecond flooring and byte format. This does not add automatic
 signature-rejection retries or resend writes.
+
+Hosted signing on Rust (P7, `docs/plans/RUST_BITUNIX_HOSTED_SIGNING.md`): the
+construction row enables `remoteSigning` (no PayloadSigner). A keyless account's
+provider admits only the engine's fused `sha256` → `sign sha256SecretSuffix` →
+`present` batch, sends one `bitunix-double-sha256` envelope (no `extraData`),
+and accepts only a 64-hex answer. A keyed browser engine answers through the
+registry's Bitunix hosted family; REST captures use `bitunix.signing.ts`.
 
 Rust private-login controls are inspected even without `data`. An explicit false
 `data.result` keeps the existing rejection diagnostic; absent/null/malformed
