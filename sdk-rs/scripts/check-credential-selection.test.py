@@ -58,6 +58,11 @@ class CredentialSelectionBan(unittest.TestCase):
             # A `'static` lifetime before a root path is not a `static` item.
             'static_lifetime_root_path': P + FIELD + USE
                 + "fn d() -> Option<&'static safe_cex_engine::nonce::NonceDomain> { None }\n",
+            # A value-namespace fn named like a root binds no path root.
+            # A value-namespace static named like a root binds no path root.
+            'static_named_like_engine_root': P + FIELD + USE + 'static safe_cex_engine: u8 = 0;\n',
+            'fn_named_like_serde_root': P + '#[derive(serde::Deserialize)]\npub struct W { a: u8 }\n'
+                                        'fn serde(error: u8) -> u8 { error }\n' + FIELD + USE,
             'impl_only_workspace_macro': P + FIELD + 'safe_cex_crypto::redacted_debug!(Options);\n'
                 '#[derive(Clone, Debug, serde::Deserialize)]\n#[serde(default)]\npub struct Wire { a: u8 }\n'
                 'fn g() { assert!(true); format!("x"); }\n' + USE,
@@ -138,7 +143,8 @@ class CredentialSelectionBan(unittest.TestCase):
             'aliased_core_root': 'use foreign as core;\nuse core::default::Default;\n#[derive(Default)]\npub struct W;\n'
                                  + P + FIELD + USE,
             'local_std_module': 'mod std { pub mod default { pub use foreign::Default; } }\n' + P + FIELD + USE,
-            'static_item_binding_root': P + FIELD + USE + 'static safe_cex_engine: u8 = 0;\n',
+            'mod_named_like_serde_root': P + '#[derive(serde::Deserialize)]\npub struct W { a: u8 }\n'
+                                         'mod serde {}\n' + FIELD + USE,
         }
         with tempfile.TemporaryDirectory() as directory:
             try:

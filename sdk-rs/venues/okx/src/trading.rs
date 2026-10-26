@@ -20,9 +20,11 @@ const BROKER: &str = "e847386590ce4dBC";
 
 /// Every write is one call with its own 20 s bound and no resend.
 const SERIAL: SerialCall = SerialCall {
+    auth: safe_cex_engine::request_context::plan::CallAuth::Preflight,
     operation: Operation::Mutation,
     timeout_ms: 20_000,
     attempts: 1,
+    pacing: None,
 };
 
 /// OKX's native write codes. 51xxx are trading-rule refusals, and the listed
@@ -40,11 +42,18 @@ pub(crate) const CODES: CodeTable = CodeTable {
         refused(50016, ErrorKind::InvalidInput),
         refused(50011, ErrorKind::RateLimited),
         refused(50061, ErrorKind::RateLimited),
+        // The read side's documented key refusals (docs-v5 "Error Code", 501xx),
+        // pinned equal by account::write_and_read_key_refusals_agree.
+        refused(50101, ErrorKind::AuthInvalid),
+        refused(50103, ErrorKind::AuthInvalid),
+        refused(50104, ErrorKind::AuthInvalid),
+        refused(50105, ErrorKind::AuthInvalid),
         refused(50111, ErrorKind::AuthInvalid),
         refused(50113, ErrorKind::AuthInvalid),
         refused(50114, ErrorKind::AuthInvalid),
         refused(50119, ErrorKind::AuthInvalid),
         refused(50030, ErrorKind::AuthPermission),
+        refused(50100, ErrorKind::AuthPermission),
         refused(50110, ErrorKind::AuthPermission),
         refused(50120, ErrorKind::AuthPermission),
     ],

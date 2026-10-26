@@ -86,6 +86,8 @@ pub enum KeyEncoding {
     Base64Text,
     /// Bitcoin-alphabet base58 (Orderly ed25519 seeds); no prefix is stripped.
     Base58,
+    /// URL-safe or standard base64, padding optional (Polymarket API secrets).
+    Base64Url,
 }
 
 /// Closed vocabulary of additional per-identity signing material. These refs
@@ -411,6 +413,18 @@ impl Identity {
         self.checked(false)
     }
 
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(crate) fn accepts_session_root(
+        &self,
+        credential: &crate::request_context::Credential,
+        write: Option<&crate::request_context::Credential>,
+    ) -> bool {
+        credential.slot == crate::CredentialSlot::Primary
+            && credential.reference == self.credential
+            && self.validate_credential().is_ok()
+            && write.is_none_or(|write| write == credential && self.signing_ref().is_ok())
+    }
+
     fn checked(&self, signing_required: bool) -> Result<(), &'static str> {
         if !valid_key_ref(&self.credential)
             || self
@@ -503,6 +517,9 @@ pub enum Encoding {
     Base64,
     /// BloFin's base64(ASCII lowercase hex(MAC)).
     Base64Hex,
+    /// Lowercase hex of a Secp256k1Digest `r || s || recovery` with the
+    /// recovery id rendered as 27 or 28 (EVM `v`). Any other shape refuses.
+    EvmHex,
 }
 
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -765,6 +782,20 @@ impl SignRequest {
                             PayloadPart::Result { index: prior, .. } if *prior >= index => {
                                 return Err(SignError::InvalidRequest);
                             }
+                            // Only a secp256k1 digest signature renders as an EVM `v`.
+                            PayloadPart::Result {
+                                index: prior,
+                                encoding: Encoding::EvmHex,
+                            } if !matches!(
+                                self.operations[*prior],
+                                Operation::Sign {
+                                    algorithm: Algorithm::Secp256k1Digest,
+                                    ..
+                                }
+                            ) =>
+                            {
+                                return Err(SignError::InvalidRequest);
+                            }
                             _ => {}
                         }
                     }
@@ -992,6 +1023,35 @@ redacted_debug!(PayloadPart, Operation, SignRequest, SignResult);
 
 #[cfg(test)]
 mod setup_field_policy_tests {
+
+    #[test]
+    fn evm_hex_splices_only_a_secp256k1_digest_signature() {
+        let request = |algorithm| SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![
+                Operation::Sign {
+                    algorithm,
+                    key: KeyRef("wallet".into()),
+                    payload: vec![PayloadPart::Bytes { bytes: vec![1; 32] }],
+                },
+                Operation::Sign {
+                    algorithm: Algorithm::HmacSha256,
+                    key: KeyRef("secret".into()),
+                    payload: vec![PayloadPart::Result {
+                        index: 0,
+                        encoding: Encoding::EvmHex,
+                    }],
+                },
+            ],
+        };
+        assert_eq!(request(Algorithm::Secp256k1Digest).validate(), Ok(()));
+        assert_eq!(
+            request(Algorithm::Ed25519).validate(),
+            Err(SignError::InvalidRequest),
+            "another algorithm's bytes never render as an EVM signature"
+        );
+    }
     use super::*;
 
     fn policy() -> CredentialSetupPolicy {

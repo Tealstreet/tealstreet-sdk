@@ -57,9 +57,11 @@ pub(crate) fn headers(
                     .admit_serial_plan(
                         &preflight,
                         SerialCall {
+                            auth: Default::default(),
                             operation: Operation::Mutation,
                             timeout_ms: 20_000,
                             attempts: 1,
+                            pacing: None,
                         },
                         SerialPolicy {
                             credential: Some(credential),

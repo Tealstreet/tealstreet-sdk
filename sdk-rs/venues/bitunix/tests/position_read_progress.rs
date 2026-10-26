@@ -10,7 +10,9 @@ fn notify(e: &mut TestEngine, socket: SocketId, now: f64) -> Vec<Action> {
             text: UPDATE,
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn timer(actions: &[Action]) -> (TimerId, f64) {
     actions
@@ -25,7 +27,9 @@ fn read(e: &mut TestEngine, socket: SocketId) -> (HttpRequest, Vec<Action>) {
     let actions = notify(e, socket, 100.0);
     let (timer, at) = timer(&actions);
     e.handle(at, Event::TimerFired { timer });
-    let mut actions: Vec<_> = e.drain_actions().collect();
+    let mut actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     let at = actions
         .iter()
         .position(|a| matches!(a, Action::Http(r) if r.url.contains("get_pending_positions")))
@@ -65,7 +69,8 @@ fn continuous_position_notifications_do_not_postpone_the_first_read() {
     }
     e.handle(at, Event::TimerFired { timer: first });
     assert!(
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("get_pending_positions")))
     );
 }
@@ -83,7 +88,7 @@ fn slow_position_snapshot_advances_financial_state_during_continuous_notificatio
             }) {
                 e.handle(at, Event::TimerFired { timer });
                 assert!(
-                    !e.drain_actions().any(
+                    !safe_cex_engine::test_support::prepared_now(&mut e).into_iter().any(
                         |a| matches!(a, Action::Http(r) if r.url.contains("get_pending_positions"))
                     ),
                     "a pending position read must keep its serial"
@@ -101,12 +106,15 @@ fn slow_position_snapshot_advances_financial_state_during_continuous_notificatio
         } else {
             assert_eq!(e.store().positions()[0].contracts, 0.02);
         }
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         let (followup, at) = timer(&actions);
         assert_eq!(at, 6000.0);
         e.handle(at, Event::TimerFired { timer: followup });
         assert!(
-            e.drain_actions()
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
                 .any(|a| matches!(a, Action::Http(r) if r.url.contains("get_pending_positions")))
         );
     }
@@ -121,7 +129,9 @@ fn lost_position_read_is_replaced_at_a_bound_and_late_reply_or_failure_cannot_re
         assert_eq!(at, 11_100.0);
         notify(&mut e, socket, 2000.0);
         e.handle(at, Event::TimerFired { timer: deadline });
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         let replacement = actions
             .iter()
             .find_map(|a| match a {
@@ -143,10 +153,14 @@ fn lost_position_read_is_replaced_at_a_bound_and_late_reply_or_failure_cannot_re
             answer(&mut e, old.id, at + 1.0, &POSITIONS.replace("0.01", "0.09"));
         }
         assert_eq!(e.store().positions()[0].contracts, 0.01);
-        assert!(!e.drain_actions().any(
-            |a| matches!(a, Action::ClearTimer { timer } if timer == new_watch)
-                || matches!(a, Action::SetTimer { .. })
-        ));
+        assert!(
+            !safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .any(
+                    |a| matches!(a, Action::ClearTimer { timer } if timer == new_watch)
+                        || matches!(a, Action::SetTimer { .. })
+                )
+        );
         answer(
             &mut e,
             replacement,
@@ -155,7 +169,8 @@ fn lost_position_read_is_replaced_at_a_bound_and_late_reply_or_failure_cannot_re
         );
         assert_eq!(e.store().positions()[0].contracts, 0.02);
         assert!(
-            e.drain_actions()
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
                 .any(|a| matches!(a, Action::ClearTimer { timer } if timer == new_watch))
         );
     }
@@ -185,7 +200,9 @@ fn failed_position_reads_release_the_matching_token_keep_state_and_retry() {
             ),
         }
         assert_eq!(e.store().positions()[0].contracts, 0.01, "{failure}");
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         let (timer, at) = actions
             .iter()
             .filter_map(|a| match a {
@@ -198,7 +215,8 @@ fn failed_position_reads_release_the_matching_token_keep_state_and_retry() {
             .expect("actual jittered failed-position retry");
         e.handle(at, Event::TimerFired { timer });
         assert!(
-            e.drain_actions()
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
                 .any(|a| matches!(a, Action::Http(r) if r.url.contains("get_pending_positions")))
         );
     }
@@ -216,7 +234,9 @@ fn background_notifications_cannot_supersede_owned_preflight_or_approve_it_after
             orders: vec![order],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let owned = actions
         .iter()
         .find_map(|a| match a {
@@ -233,7 +253,9 @@ fn background_notifications_cannot_supersede_owned_preflight_or_approve_it_after
             .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == deadline))
     );
     answer(&mut e, owned, 2000.0, POSITIONS);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -248,7 +270,8 @@ fn background_notifications_cannot_supersede_owned_preflight_or_approve_it_after
     let (repair, at) = timer(&actions);
     e.handle(at, Event::TimerFired { timer: repair });
     assert!(
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("get_pending_positions")))
     );
 }

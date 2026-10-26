@@ -701,7 +701,7 @@ class MacroImportProof:
         if len(chains) != 1 or path not in self.tracked:
             return lambda index: None
         root, names, parents = chains[0]
-        if any(parent not in self.tracked or source_macro_hazard(self.streams[parent], True)
+        if any(parent not in self.tracked or self.ancestor_hazard(parent, root.parent)
                for parent in parents):
             return lambda index: None
         chain_proof = [{'path': str(item.relative_to(ROOT.resolve())),
@@ -786,15 +786,40 @@ class MacroImportProof:
 
         return lambda index: macro_imports_at(self.streams[path], index, glob_proof, chain_proof)
 
+    def scope(self):
+        if not hasattr(self, '_scope'):
+            spec = importlib.util.spec_from_file_location(
+                'rust_scope', pathlib.Path(__file__).with_name('rust_scope.py'))
+            self._scope = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(self._scope)
+        return self._scope
+
+    def ancestor_hazard(self, parent, source_dir):
+        """An ancestor's top-level invocation may install textual macros, except a
+        workspace macro proven to expand only to `impl` blocks, in a crate whose
+        root proof shows `safe_cex_crypto` is the workspace dependency."""
+        stream = self.streams[parent]
+        if not source_macro_hazard(stream, True):
+            return False
+        if source_macro_hazard(stream):
+            return True
+        braces = brace_ranges(stream)
+        for i, token in enumerate(stream):
+            if stream[i + 1:i + 2] != ['!'] or any(a < i < b for a, b in braces):
+                continue
+            workspace = stream[max(0, i - 2):i] == ['safe_cex_crypto', '::'] \
+                and stream[i - 3:i - 2] != ['::'] \
+                and self.scope().impl_only_macro(ENGINE_SOURCES, 'safe_cex_crypto', token)
+            if not workspace:
+                return True
+        return not self.engine_root_proven(source_dir)
+
     def engine_root_proven(self, source_dir):
         """Whether the crate binds no local `safe_cex_engine` (item, alias, module or
         generated name) and every glob and generator in it is closed, so the root of
         `use safe_cex_engine::...` is the dependency."""
         if source_dir not in self.engine_root_cache:
-            spec = importlib.util.spec_from_file_location(
-                'rust_scope', pathlib.Path(__file__).with_name('rust_scope.py'))
-            scope = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(scope)
+            scope = self.scope()
             streams = {path: stream for path, stream in self.streams.items()
                        if source_dir in path.parents}
             self.engine_root_cache[source_dir] = not scope.crate_refusals(
@@ -1067,10 +1092,25 @@ def data_macro_proof(stream, index, end, imports):
         return False
 
     def rebound(name):
-        if any(bound == name and body <= start < body_end and (start, stop) != (body, body_end)
+        # Block items are visible across their whole block, so an item or
+        # import binding the name refuses wherever it sits in the body.
+        for i in range(body + 1, body_end - 1):
+            if stream[i] in {'const', 'static', 'struct'}:
+                k = i + 1 + (stream[i + 1] == 'mut')
+                if stream[k].removeprefix('r#') == name:
+                    return True
+            if stream[i] == 'use':
+                stop = i
+                while stop < body_end and stream[stop] != ';':
+                    stop += 1
+                if name in [token.removeprefix('r#') for token in stream[i + 1:stop]]:
+                    return True
+        # Other bindings scope forward: only a construct that starts before the
+        # macro can rebind the name the macro reads.
+        if any(bound == name and body <= start < index and (start, stop) != (body, body_end)
                for bound, _, start, stop in found):
             return True
-        for i in range(body + 1, body_end):
+        for i in range(body + 1, index):
             if closure_bar(stream, i):
                 closing = i + 1
                 while closing < body_end and stream[closing] != '|':
@@ -1431,6 +1471,16 @@ def subset(counts, baseline):
     return all(count <= baseline.get(digest, 0) for digest, count in counts.items())
 
 
+def maximum_manifest(manifests):
+    result = {}
+    for value in manifests:
+        for path, counts in value.items():
+            inherited = result.setdefault(path, {})
+            for digest, count in counts.items():
+                inherited[digest] = max(inherited.get(digest, 0), count)
+    return result
+
+
 def check(current, allowed, previous):
     failures = []
     if current != allowed:
@@ -1446,12 +1496,19 @@ def git(*args):
     return subprocess.run(['git', '-C', str(ROOT), *args], text=True, capture_output=True, check=True).stdout
 
 
-def previous_manifests(inventory=None, predecessor=None):
-    """Per-ref baselines; a ref without `inventory` is bounded by `predecessor`."""
+def previous_manifests(inventory=None, predecessor=None, merge_parents=False):
+    """Request inventories may join parent bounds; other consumers keep per-ref bounds."""
     inventory = inventory or MANIFEST
     base = os.environ.get('GITHUB_BASE_REF') or 'feat/rust-rewrite'
     parents = git('rev-list', '--parents', '-n', '1', 'HEAD').split()[1:]
-    refs = ['HEAD', *parents, f'refs/remotes/origin/{base}']
+    remote = f'refs/remotes/origin/{base}'
+    refs = [('HEAD', ['HEAD'])]
+    if parents:
+        if merge_parents:
+            refs.append(('merge parents' if len(parents) > 1 else parents[0], parents))
+        else:
+            refs.extend((parent, [parent]) for parent in parents)
+    refs.append((remote, [remote]))
     if event_file := os.environ.get('GITHUB_EVENT_PATH'):
         event = json.loads(pathlib.Path(event_file).read_text())
         if 'pull_request' in event:
@@ -1459,25 +1516,30 @@ def previous_manifests(inventory=None, predecessor=None):
             exact = event['pull_request']['base']['sha']
             if not re.fullmatch(r'[a-f0-9]{40}', exact):
                 raise ValueError('invalid event base commit')
-            refs.append(exact)
+            refs.append((exact, [exact]))
     previous = []
-    for ref in refs:
-        # A missing ref is not a missing manifest. CI must fetch history first.
-        git('rev-parse', '--verify', f'{ref}^{{commit}}')
-        for name in [inventory, predecessor]:
-            path = git('rev-parse', '--show-prefix').strip() + name if name else None
-            if path and path in git('ls-tree', '--full-name', '--name-only', ref, '--', name).splitlines():
-                previous.append((ref, manifest(git('show', f'{ref}:{path}'))))
-                break
+    for label, group in refs:
+        found = []
+        for ref in group:
+            # A missing ref is not a missing manifest. CI must fetch history first.
+            git('rev-parse', '--verify', f'{ref}^{{commit}}')
+            for name in [inventory, predecessor]:
+                path = git('rev-parse', '--show-prefix').strip() + name if name else None
+                if path and path in git('ls-tree', '--full-name', '--name-only', ref, '--', name).splitlines():
+                    found.append(manifest(git('show', f'{ref}:{path}')))
+                    break
+        if found:
+            previous.append((label, maximum_manifest(found) if len(found) > 1 else found[0]))
     return previous
 
 
 def main():
     try:
         prod, test = request_sites()
-        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests())
+        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests(merge_parents=True))
         failures += ['test inventory: ' + failure for failure in check(
-            test, manifest((ROOT / TEST_MANIFEST).read_text()), previous_manifests(TEST_MANIFEST, MANIFEST))]
+            test, manifest((ROOT / TEST_MANIFEST).read_text()),
+            previous_manifests(TEST_MANIFEST, MANIFEST, merge_parents=True))]
     except InventoryRefusal as refusal:
         failures = [f'cannot verify legacy inventory: {refusal}']
     except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError) as error:

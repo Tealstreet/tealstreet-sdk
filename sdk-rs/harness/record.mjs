@@ -13,7 +13,7 @@ import { canonicalUrl } from './requests.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 import { createRecordingPolicy, createRecordingTimeline, recordingReady } from './polling.mjs';
 import { replayStoreReady } from './tape.mjs';
-import { tapeHeaders } from './tape-fields.mjs';
+import { recordingHttp } from './record-http.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -66,7 +66,9 @@ if (values['tealstreet-ws-route']) {
   }, live);
 }
 const ordinals = new Map();
-let requestOrdinal = 0;
+const http = recordingHttp(live, venue, write, (status) => {
+  if (status >= 200 && status < 300) httpResponses++;
+});
 const tickerSymbols = new Set();
 const recording = {
   ...live,
@@ -110,45 +112,8 @@ const recording = {
       close: () => connection.close(),
     };
   },
-  async request(request) {
-    // Concurrent equal requests can finish out of order (e.g. socket tokens).
-    const ordinal = requestOrdinal++;
-    // A native recorder may explicitly declare direct egress for public CORS
-    // reads. Browser/account hosts still require their configured route.
-    const outgoing = request.route === 'publicCors' && venue.recordPublicCorsDirect
-      ? { ...request, route: 'direct' }
-      : request;
-    const response = await live.request(outgoing);
-    const recorded = (body) => {
-      write({
-        type: 'http',
-        requestOrdinal: ordinal,
-        method: request.method,
-        url: request.url,
-        ...(request.body === undefined ? {} : { requestBody: request.body }),
-        status: response.status,
-        headers: tapeHeaders(response.headers).map(([name, value]) => `${name}: ${value}`).join('\n'),
-        body,
-      });
-      if (response.status >= 200 && response.status < 300) httpResponses++;
-    };
-    if (response.body instanceof Uint8Array) {
-      recorded(new TextDecoder().decode(response.body));
-      return response;
-    }
-    return {
-      ...response,
-      body: (async function* () {
-        const decoder = new TextDecoder();
-        let body = '';
-        for await (const chunk of response.body) {
-          body += decoder.decode(chunk, { stream: true });
-          yield chunk;
-        }
-        recorded(body + decoder.decode());
-      })(),
-    };
-  },
+  // Spread once; `prepareHttp` exists only when the live transport has it.
+  ...http,
 };
 
 const { WasmEngine } = await loadEngine();

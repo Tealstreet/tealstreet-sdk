@@ -398,9 +398,11 @@ mod repair {
                     cx.admit_serial_plan(
                         &preflight,
                         crate::request_context::plan::SerialCall {
+                            auth: Default::default(),
                             operation: Operation::Mutation,
                             timeout_ms: 20_000,
                             attempts: 1,
+                            pacing: None,
                         },
                         crate::request_context::plan::SerialPolicy {
                             credential: Some(primary()),

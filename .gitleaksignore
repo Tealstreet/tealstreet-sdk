@@ -35,6 +35,7 @@ a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/s
 a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:125
 a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:146
 a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:164
+37cb0677150e831f00f0753dd699217cd5e50979:sdk-rs/hosts/wasm/src/lib.rs:generic-api-key:1573
 
 # Polymarket actual-Wasm replay fixture only: base64 of the literal
 # "safe-fake-secret", paired with "documented-fake-api-key"; never an account.
@@ -114,3 +115,6 @@ ea5ec84ee69b5a6e4f7f90322f9afd285a718a0f:sdk-rs/venues/blofin/tests/hmac_dispatc
 # Public Git commit SHA in the Lighter principal plan, beside reviewer prose.
 # Exact historical documentation fingerprint only; no credential bytes.
 25b7d8a4edf1fb1bb7c839783f458b252db6e937:docs/plans/RUST_LIGHTER_SETUP_PRINCIPAL.md:generic-api-key:4
+
+# Deterministic public Kraken replay fixture, replaced by encoding replay-secret.
+5453dc4802960a9b5e19c7f60b027438d46331c8:sdk-rs/harness/kraken-beta-errors.integration.mts:generic-api-key:6

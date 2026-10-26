@@ -83,6 +83,19 @@ impl State {
     pub(super) fn session_root(&self) -> Option<&crate::request_context::Session> {
         self.body.first()?.serial.as_ref()?.session_root.as_ref()
     }
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(in crate::engine) fn session_write(&self) -> Option<&crate::request_context::Credential> {
+        self.body.first()?.policy.credential.as_ref()
+    }
+
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(in crate::engine) fn session_call(&self) -> bool {
+        self.body
+            .first()
+            .and_then(|body| body.serial.as_ref())
+            .is_some_and(|serial| serial.session_call())
+    }
+
     /// A Mutation Plan's admitted credential, for repair mint custody.
     #[cfg(feature = "repair-mutations")]
     pub(in crate::engine) fn repair_write_credential(
@@ -1149,7 +1162,7 @@ impl<P> Cx<'_, P> {
             .io
             .core
             .request_contexts
-            .keyless_session_egress(plan.owner())?;
+            .keyless_session_egress(plan.owner(), &self.io.core.identities)?;
         let body = self
             .io
             .core
@@ -1182,15 +1195,22 @@ impl<P> Cx<'_, P> {
         );
         // A domain Plan's calls are members by their own operation: a Read call
         // in a Mutations domain is not paced.
+        // A serial call carries its own resolved pacing.
         #[cfg(feature = "release-domains")]
-        let pacing = match self.io.core.release_domain {
-            Some(domain) if body.policy.pacing == Some(domain.pacing) => {
-                self.io.core.domain_pacing(operation, None)?
-            }
-            _ => body.policy.pacing,
+        let pacing = match body.serial.as_ref() {
+            Some(serial) => serial.pacing(),
+            None if self.io.core.domain_paces(body.policy.pacing) => self
+                .io
+                .core
+                .domain_member(operation)
+                .and(body.policy.pacing),
+            None => body.policy.pacing,
         };
         #[cfg(all(feature = "serial-plans", not(feature = "release-domains")))]
-        let pacing = body.policy.pacing;
+        let pacing = body
+            .serial
+            .as_ref()
+            .map_or(body.policy.pacing, |serial| serial.pacing());
         #[cfg(feature = "serial-plans")]
         let mut context = Context::new(
             plan.owner(),
@@ -2400,7 +2420,7 @@ impl ContextRegistry {
             return Ok(None);
         };
         let current = self.plan_body(&plan)?;
-        let Some(serial) = current.serial.as_ref().filter(|s| s.session_root.is_some()) else {
+        let Some(serial) = current.serial.as_ref().filter(|s| s.session_call()) else {
             return Ok(None);
         };
         let fingerprint = super::keyless_session::wire_fingerprint(method, url, headers, body);
