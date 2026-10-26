@@ -695,7 +695,13 @@ impl KrakenSpot {
                 }
                 // A status alone is not permanent account evidence. Only the exhausted
                 // definitive signature refusal retains the existing terminal policy.
-                if signature_refused && request.signature_retries == 1 {
+                let credential_refused = response.status != 408
+                    && response.status < 500
+                    && (e.contains("EAPI:Invalid key")
+                        || (e.contains("EGeneral:Permission denied")
+                            && !matches!(request.kind, Kind::Trade(_)))
+                        || (signature_refused && request.signature_retries == 1));
+                if credential_refused {
                     self.reject_auth(cx, &e);
                 }
                 let error = super::trading::write_failure(response.status, response.body, e);

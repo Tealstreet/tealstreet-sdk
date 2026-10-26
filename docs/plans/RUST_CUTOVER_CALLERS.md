@@ -9661,7 +9661,10 @@ installed providers and genuine test command entry; native assertions retained.
 ### Kraken beta partial writes and request authentication
 
 Kraken Futures and Spot failures retain proven placement, amendment and
-cancellation IDs in `VenueError.partial.order_ids`. A failure after any known
+cancellation-command IDs in `VenueError.partial.order_ids`. For cancellation
+commands these name confirmed cancellations, not live placements. An amend-as-
+replace never includes its cancelled original in the replacement-ID partial.
+A failure after any known
 write effect reports `Unknown`; transport loss, unrecognized ACKs and unknown
 native codes also stay explicit `Unknown`. No failed command becomes success or
 loses its accepted prefix. Successful cancellation/replacement result shapes stay
@@ -9675,7 +9678,8 @@ cannot clear it. Reconciliation adds reads, never a write resend.
 
 A single Spot HTTP 401/403 fails that request with its auth kind and does not
 emit Deactivate. The existing one definitive invalid-signature resend and its
-exhausted-refusal policy remain; 408/5xx cannot grant that resend. Futures uses a
+exhausted-refusal policy remain, as do definitive revoked-key and read-permission
+refusals; 408/5xx cannot grant that resend or terminal auth policy. Futures uses a
 CodeTable on both 2xx error envelopes and non-2xx bodies, retaining native code
 and message while shared 408/5xx precedence preserves uncertainty.
 

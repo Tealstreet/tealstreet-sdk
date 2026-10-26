@@ -865,7 +865,9 @@ impl Kraken {
                         && seen.insert(status.order_id.clone())
                     {
                         cancelled = true;
-                        if let Some(job) = self.trading.active.as_mut() {
+                        if let Some(job) = self.trading.active.as_mut()
+                            && job.amend.is_none()
+                        {
                             job.canceled_ids.push(status.order_id.clone());
                         }
                         self.account_order_removed(cx, &status.order_id);
