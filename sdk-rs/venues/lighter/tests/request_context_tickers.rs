@@ -7,18 +7,19 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, SocketId, TimerId, VenueError,
 };
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use support::{META, NOW, reply_at};
 const ROW: &str = r#"{"market_id":1,"mark_price":"100","index_price":"99","last_trade_price":"101","best_bid_price":"98","best_ask_price":"102","open_interest":"12","current_funding_rate":"0.0012","daily_base_token_volume":"20","daily_quote_token_volume":"2000","daily_price_change":"3"}"#;
 const BODY: &str = r#"{"code":200,"order_book_stats":[{"market_id":1,"mark_price":"100"}]}"#;
 const ISSUE: f64 = NOW + 2_000.;
 fn boot(robinhood: bool, testnet: bool) -> (Engine<Lighter>, TimerId, SocketId) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut engine = support::engine(Options {
         public_data_only: true,
         robinhood,
         testnet,
         ..Options::default()
-    }));
+    });
     engine.start(NOW);
     let request = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
         .into_iter()

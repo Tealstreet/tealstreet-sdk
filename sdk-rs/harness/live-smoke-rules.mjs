@@ -2,6 +2,8 @@
 // unknown unless the cited venue contract defines a quantity-only minimum.
 export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
   binance: 'https://developers.binance.com/docs/derivatives/usds-margined-futures/common-definition',
+  binancespot: 'https://developers.binance.com/docs/binance-spot-api-docs/filters',
+  phemex: 'https://api.phemex.com/public/products',
   asterdex: 'https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md',
   bybit: 'https://bybit-exchange.github.io/docs/v5/market/instrument',
   bitget: 'https://www.bitget.com/docs/catalog/classic-contract-market/classic-contract-market',
@@ -12,11 +14,13 @@ export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
   lighter: 'https://github.com/elliottech/lighter-python/blob/main/lighter/models/order_book_details.py',
   paradex: 'https://docs.paradex.trade/api/testnet/markets/get-markets',
   hyperliquid: 'https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses',
+  hyperliquidspot: 'https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses',
   okx: 'https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments',
   blofin: 'https://docs.blofin.com/index.html#get-instruments',
   apexomni: 'https://api-docs.pro.apex.exchange/#get-configs',
   backpack: 'https://docs.backpack.exchange/#tag/Markets/operation/get_markets',
   kraken: 'https://support.kraken.com/articles/4844359082772-linear-multi-collateral-derivatives-contract-specifications',
+  krakenspot: 'https://docs.kraken.com/api-reference/market-data/get-tradable-asset-pairs',
   kucoin: 'https://www.kucoin.com/docs-new/rest/futures-trading/market-data/get-all-symbols',
   mexc: 'https://mexcdevelop.github.io/apidocs/contract_v1_en/#get-contract-details',
   weex: 'https://www.weex.com/legacy-docs/contract/Market_API/GetContractInfo',
@@ -27,8 +31,8 @@ export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
 // These engine discovery shapes do not establish the complete monetary floor.
 // Do not turn their absence into an inferred zero.
 export const LIVE_SMOKE_UNKNOWN_RULES = Object.freeze({
-  phemex: 'PerpetualV2 qtyStepSize alone does not establish a minimum order value.',
   cryptocom: 'qty_tick_size alone does not establish a minimum order value.',
+  bitunix: 'trading_pairs basePrecision alone does not establish a minimum order value.',
   hyrotrader: 'No reviewed endpoint profile.',
   grvt: 'No reviewed endpoint profile or sizing contract.',
   kucoinspot: 'No reviewed Spot endpoint profile or sizing contract.',
@@ -63,6 +67,8 @@ const familyOf = (name) => {
 };
 const hosts = {
   binance: /^(?:demo-)?fapi\.binance\.com$/,
+  binancespot: /^(?:api\.binance\.com|testnet\.binance\.vision)$/,
+  phemex: /^(?:testnet-)?api\.phemex\.com$/,
   asterdex: /^fapi\.asterdex(?:-testnet)?\.com$/,
   bybit: /^api(?:-testnet|-demo)?\.bybit\.com$/,
   bitget: /^api\.bitget\.com$/,
@@ -73,11 +79,13 @@ const hosts = {
   lighter: /^(?:testnet-api\.lighter\.xyz|mainnet\.zklighter\.elliot\.ai)$/,
   paradex: /^api\.(?:prod|testnet)\.paradex\.trade$/,
   hyperliquid: /^api\.hyperliquid(?:-testnet)?\.xyz$/,
+  hyperliquidspot: /^api\.hyperliquid(?:-testnet)?\.xyz$/,
   okx: /^(?:www|openapi|eea)\.okx\.com$/,
   blofin: /^(?:openapi|demo-trading-openapi)\.blofin\.com$/,
   apexomni: /^(?:testnet\.)?omni\.apex\.exchange$/,
   backpack: /^api\.backpack\.exchange$/,
   kraken: /^(?:demo-)?futures\.kraken\.com$/,
+  krakenspot: /^api\.kraken\.com$/,
   kucoin: /^api-futures\.kucoin\.com$/,
   mexc: /^api\.mexc\.com$/,
   weex: /^api-contract\.weex\.com$/,
@@ -123,6 +131,9 @@ export function venueMarketRules(venue, records, market) {
     try {
       url = new URL(record.url);
       if (url.protocol !== 'https:' || url.port || url.username || url.password || !hosts[family].test(url.hostname)) continue;
+      // AssetPairs is a complete catalog: a later failed or malformed reply
+      // cannot authorize sizing from a previously selected pair.
+      if (family === 'krakenspot' && record.method?.toUpperCase() === 'GET' && url.pathname === '/0/public/AssetPairs') result = unknown();
       if (!(record.status >= 200 && record.status < 300)) continue;
       payload = JSON.parse(record.body);
       if (!payload || typeof payload !== 'object') continue;
@@ -135,6 +146,16 @@ export function venueMarketRules(venue, records, market) {
         if (method !== 'GET' || !(family === 'asterdex' ? ['/fapi/v1/exchangeInfo', '/fapi/v3/exchangeInfo'] :
           ['/fapi/v1/exchangeInfo']).includes(path)) continue;
         rows = array(payload.symbols); rule = filtered; break;
+      case 'binancespot':
+        // Spot LOT_SIZE/NOTIONAL as futures; PERCENT_PRICE_BY_SIDE claims no lower bound here.
+        if (method !== 'GET' || path !== '/api/v3/exchangeInfo') continue;
+        rows = array(payload.symbols); rule = filtered; break;
+      case 'phemex':
+        if (method !== 'GET' || path !== '/public/products' || !code(payload.code)) continue;
+        rows = array(payload.data?.perpProductsV2);
+        rule = (row) => row.type === 'PerpetualV2' && row.status === 'Listed' &&
+          row.quoteCurrency === market.quote && row.settleCurrency === market.quote && positive(row.maxOrderQtyRq) ?
+          known(row.minOrderValueRv, row.qtyStepSize, row.qtyStepSize, 1, false, undefined, row.maxOrderQtyRq) : unknown(); break;
       case 'bybit': {
         if (method !== 'GET' || path !== '/v5/market/instruments-info' || !code(payload.retCode)) continue;
         const category = name === 'bybitspot' ? 'spot' : name === 'bybitinverse' ? 'inverse' : 'linear';
@@ -198,6 +219,30 @@ export function venueMarketRules(venue, records, market) {
         // Official MinTradeNtl defines $10 for perps; never apply it to spot.
         rule = (row) => known(10, decimalStep(row.szDecimals), decimalStep(row.szDecimals)); break;
       }
+      case 'hyperliquidspot': {
+        if (method !== 'POST' || path !== '/info' || market.quote !== 'USDC') continue;
+        let request;
+        try { request = JSON.parse(record.requestBody); } catch { continue; }
+        if (request?.type !== 'spotMetaAndAssetCtxs') continue;
+        result = unknown();
+        if (!Array.isArray(payload)) continue;
+        const meta = payload[0];
+        rows = array(meta?.universe).filter((row) => row?.name === market.id);
+        match = () => true;
+        rule = (row) => {
+          if (array(meta.universe).filter((candidate) => candidate?.index === row.index).length !== 1 ||
+            !Number.isSafeInteger(row.index) || row.index < 0 ||
+            (row.name.startsWith('@') && row.name !== `@${row.index}`) ||
+            !Array.isArray(row.tokens) || row.tokens.length !== 2 ||
+            row.tokens.some((index) => !Number.isSafeInteger(index) || index < 0) || row.tokens[0] === row.tokens[1]) return unknown();
+          const base = array(meta.tokens).filter((token) => token?.index === row.tokens[0]);
+          const quote = array(meta.tokens).filter((token) => token?.index === row.tokens[1]);
+          if (base.length !== 1 || quote.length !== 1 || base[0].name !== market.base || quote[0].name !== market.quote) return unknown();
+          const step = decimalStep(base[0].szDecimals);
+          // MinTradeSpotNtl is 10 quote tokens; only USDC is dollar-bounded here.
+          return known(10, step, step);
+        }; break;
+      }
       case 'okx':
         if (method !== 'GET' || path !== '/api/v5/public/instruments' || !code(payload.code)) continue;
         rows = array(payload.data); match = (row) => matches(row, market, 'instId');
@@ -226,6 +271,14 @@ export function venueMarketRules(venue, records, market) {
         rule = (row) => typeof row.symbol === 'string' && row.symbol.startsWith('PF_') &&
           decimalStep(row.contractValueTradePrecision, true) ?
           known(0, decimalStep(row.contractValueTradePrecision, true), decimalStep(row.contractValueTradePrecision, true), row.contractSize) : unknown(); break;
+      case 'krakenspot':
+        if (method !== 'GET' || path !== '/0/public/AssetPairs' || !Array.isArray(payload.error) || payload.error.length ||
+          !payload.result || typeof payload.result !== 'object' || Array.isArray(payload.result)) continue;
+        rows = Object.entries(payload.result).filter(([id]) => !id.endsWith('.d')).map(([, row]) => row);
+        match = (row) => row.wsname === market.symbol;
+        rule = (row) => market.id === `${market.base}/${market.quote}` &&
+          row.status === 'online' && row.lot_multiplier === 1 ?
+          known(row.costmin, row.ordermin, decimalStep(row.lot_decimals)) : unknown(); break;
       case 'kucoin':
         if (method !== 'GET' || path !== '/api/v1/contracts/active' || !code(payload.code, '200000')) continue;
         rows = array(payload.data);

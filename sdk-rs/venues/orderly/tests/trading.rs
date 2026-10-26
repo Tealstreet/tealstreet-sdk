@@ -760,7 +760,14 @@ fn lost_pair_response_blocks_queued_protection_until_fresh_reconciliation() {
             r#"{"success":true,"data":{"rows":[],"meta":{"total":0}}}"#,
         );
     }
-    actions(&mut e);
+    // Even after its reconcile tick runs (O1 interim), the fence holds.
+    for a in actions(&mut e) {
+        if let Action::SetTimer { timer, at_ms } = a
+            && at_ms <= 1000.0
+        {
+            e.handle(1000.0, Event::TimerFired { timer });
+        }
+    }
     place(&mut e, 4, stop);
     assert!(done(actions(&mut e), 4).is_err());
     e.handle(3000.0, Event::WsClosed { socket, code: 1006 });
@@ -798,7 +805,14 @@ fn lost_pair_response_blocks_queued_protection_until_fresh_reconciliation() {
             );
         }
     }
-    actions(&mut e);
+    // The fresh snapshot clears the fence on the next reconcile tick (O1 interim).
+    for a in actions(&mut e) {
+        if let Action::SetTimer { timer, at_ms } = a
+            && at_ms <= 1000.0
+        {
+            e.handle(1000.0, Event::TimerFired { timer });
+        }
+    }
     place(&mut e, 5, stop);
     assert!(
         requests(&mut e)

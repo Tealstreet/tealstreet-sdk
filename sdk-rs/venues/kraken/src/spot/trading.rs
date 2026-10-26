@@ -330,13 +330,15 @@ impl KrakenSpot {
                     }
                     job.ids.push(id);
                 }
-                Step::Cancel { .. } => {
+                Step::Cancel { id } => {
                     let r: Canceled = serde_json::from_str(text)
                         .map_err(|_| unproven("Kraken Spot missing cancel count"))?;
                     if r.count == 0 {
                         // An explicit answer that nothing was cancelled.
-                        return Err(VenueError::new("Kraken Spot order was not canceled"));
+                        return Err(VenueError::new("Kraken Spot order was not canceled")
+                            .outcome(Outcome::Rejected));
                     }
+                    job.ids.push(id);
                 }
             }
             job.effective = true;
@@ -353,10 +355,9 @@ impl KrakenSpot {
     pub(super) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, mut error: VenueError) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
-            if (job.effective || !job.ids.is_empty())
-                && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-            {
-                error.outcome = None;
+            error = error.partial_ids(&job.ids);
+            if job.effective || !job.ids.is_empty() {
+                error.outcome = Some(Outcome::Unknown);
             }
             cx.fail(job.command, error);
         }
@@ -532,7 +533,7 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         code if code.starts_with("EOrder:") || code.starts_with("EGeneral:Invalid arguments") => {
             rejected(error, ErrorKind::Rejected)
         }
-        _ => error,
+        _ => error.outcome(Outcome::Unknown),
     };
     error.venue_code(code)
 }

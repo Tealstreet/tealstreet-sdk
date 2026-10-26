@@ -1,7 +1,8 @@
 // Payloads follow https://apidocs.lighter.xyz/docs/websocket-reference.
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use support::{Timers, advance, drain};
 const MARKETS: &str = r#"{"code":200,"order_book_details":[{"market_id":0,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"10","min_initial_margin_fraction":"200"},{"market_id":1,"symbol":"BTC","status":"active","supported_size_decimals":5,"supported_price_decimals":1,"min_initial_margin_fraction":"100"},{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot"}]}"#;
 fn reply(e: &mut Engine<Lighter>, id: RequestId, body: &str) {
@@ -22,10 +23,10 @@ fn seeded() -> (Engine<Lighter>, SocketId) {
     (engine, socket)
 }
 fn seeded_with_poll() -> (Engine<Lighter>, SocketId, safe_cex_engine::TimerId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(1_000.0);
     let id = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
         .into_iter()
@@ -216,10 +217,10 @@ fn candle_ms_seconds_ordering_and_invalid_interval() {
 }
 #[test]
 fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(1_000.0);
     let id = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
         .into_iter()
@@ -261,7 +262,7 @@ fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
 }
 #[test]
 fn metadata_failure_falls_back_but_invalid_success_never_clears() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options::default()));
+    let mut e = support::engine(Options::default());
     e.start(1_000.0);
     let id = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
         .into_iter()
@@ -283,10 +284,10 @@ fn metadata_failure_falls_back_but_invalid_success_never_clears() {
 
 #[test]
 fn subscription_can_be_cancelled_before_markets_arrive() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(1000.0);
     let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
         .into_iter()
@@ -359,7 +360,7 @@ fn empty_quotes_and_bad_market_rows_do_not_drop_other_market_statistics() {
 
 #[test]
 fn primary_and_fallback_catalogues_retry_with_backoff_then_keep_valid_neighbors() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options::default()));
+    let mut e = support::engine(Options::default());
     e.start(0.);
     let mut transport_now = 0.;
     for delay in [1000., 2000., 4000.] {
