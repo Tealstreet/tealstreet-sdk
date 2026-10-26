@@ -3583,12 +3583,16 @@ projects every outcome.
 - **Store effects.** Creating rows, Canceling marks and the order revision bump
   now apply per call, after admission and before release, rather than all at job
   start. Commit effects still apply only after a successful terminal.
-- **W1-to-W2 interim (hedged isolated leverage).** The long leg goes first and the
-  short leg only after long is Accepted, at the cost of one extra round trip. A
-  long 503 or refusal means short is never sent. A short refusal or 503 after
-  long keeps long's effect (outcome None, or Unknown for the 503), applies no
-  commit and refreshes the account as before. W2's barrier restores native
-  parallel release.
+- **Hedged isolated leverage: serial, permanent (overseer ruling (b),
+  2026-10-26).** The long leg goes first and the short leg only after long is
+  Accepted, at the cost of one extra round trip. A long 503 or refusal means
+  short is never sent. A short refusal or 503 after long keeps long's effect
+  (outcome None, or Unknown for the 503), applies no commit and refreshes the
+  account as before. This replaces native's parallel release for good. The W2
+  barrier join (#2179, closed) linked `http-mutation-barriers` into every
+  monomorphized `Engine<V>` of the combined bundle (+395,294 combined, over
+  budget). Parallel release returns only if the per-venue feature-runtime
+  investigation produces a per-venue gate.
 - **Unchanged.** Paths, bodies, batch sizes (20/10/1), the 1000-lot split, the
   350/1000 ms pauses, client-ID rules, broker attribution, receipts and result
   JSON.
@@ -9190,3 +9194,31 @@ and sibling liveness. The injected Ready Capacity is a boundary control, not
 proof of normal pressure reachability. Any normally reachable fail-closed row
 goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
 supervision constants are unchanged; no generic coexistence/recovery seam.
+
+## Bitrue reads and listen-key sessions leave the legacy funnel (B1, #2173)
+
+Every Bitrue HTTP request except trading now runs under engine-managed authority. Trading writes stay on the legacy funnel until B2.
+
+- **Markets.** With keys, `PrimaryRead { Catalog }`, as before, including in public-data-only mode. Keyless, an unsigned Background read with `Egress::Primary`. Both keep the native `Content-Type` and `X-Referer` headers. Managed requests carry the Primary route as their preparation intent rather than in `HttpRequest::route`.
+- **Account reads** (snapshot, open orders) are Background `SelectedRead`s on the read key. Native's three Network or Timeout retries on GETs, and the one `-1022` re-sign, retry under the read's own authority.
+- **Listen key.** The create opens a Session; native's three retries and the keepalive are further operations of it. Two creates are never in flight, and a finished create's late key is refused.
+- **Client-order lookup, fills history and leverage brackets** are pages under the command's own caller Read root. They complete through that root, so a caller-wait expiry is one Timeout.
+- **FetchLeverage join** (fe7lgm's D2 ruling). One Background snapshot serves every joined owner; each owner keeps its own root. Owners complete one tick after the snapshot, from a zero-delay venue timer: a delivery never completes another command's root. Result values are unchanged; this one-tick deferral is the caller-visible timing change. An owner that expired first gets its own Timeout and never blocks the others.
+- **B1 interim (deleted by B2).** While a protective census is pending, an order read's census result and its queue bookkeeping run one tick later from a zero-delay timer, in native order, because the census still completes a legacy trading command.
+- **Fixtures.** Tests drive managed reads through `prepared_actions`, take socket and request IDs from their actions, and read routes from the preparation intent.
+
+
+## Hosted signing ownership metadata
+
+EngineHost reads signMeta once for a current Action::Sign before the provider
+microtask. A provider may receive a deeply frozen meta beside its AbortSignal;
+the engine supplies task, genuine owner, raw absolute deadline, slot and role.
+This is local ownership metadata, not peer capability or a caller-selected ref.
+Legacy engines and invalid/ordinary-failing exports retain exactly {signal}.
+WASM traps and RangeError remain fatal with no callback or pending revival.
+The closed parser also drops impossible Session/role and Secondary/role pairs.
+These rules are pinned by 55 host controls; they change no request, retry,
+financial outcome or authentication latch. Negotiated v2 refuses missing
+ownership before transport; no route, timeout or method fabricates metadata.
+Setup ownership remains a distinct reviewed extension with its own negotiated
+owned-execution and retirement support, not a SessionAuth substitute.
