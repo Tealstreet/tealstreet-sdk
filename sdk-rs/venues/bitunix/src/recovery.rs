@@ -202,28 +202,12 @@ pub(crate) fn pause(response: &Response<'_>) -> f64 {
 }
 pub(crate) fn failed(response: &Response<'_>) -> VenueError {
     let native = native(response);
-    let kind = if refused(response) {
-        if native == Some(10003) {
-            safe_cex_engine::ErrorKind::AuthInvalid
-        } else {
-            safe_cex_engine::ErrorKind::AuthPermission
-        }
-    } else if pause(response) > 0.0 {
-        safe_cex_engine::ErrorKind::RateLimited
-    } else if response.status >= 500 {
-        safe_cex_engine::ErrorKind::VenueUnavailable
-    } else if !(200..300).contains(&response.status) {
-        safe_cex_engine::ErrorKind::Network
-    } else {
-        match native {
-            Some(10001) => safe_cex_engine::ErrorKind::Network,
-            Some(10002 | 10007 | 10008 | 10010 | 10011) => safe_cex_engine::ErrorKind::InvalidInput,
-            Some(20001..=20016 | 30001..=30042 | 40001..=40008) => {
-                safe_cex_engine::ErrorKind::Rejected
-            }
-            _ => safe_cex_engine::ErrorKind::Internal,
-        }
-    };
+    // The shared table decides, as for writes: HTTP status classifies a
+    // non-2xx answer, and a native code (10007 included) classifies a 2xx.
+    let kind = crate::codes::read_failure(response, "")
+        .error
+        .kind
+        .unwrap_or(safe_cex_engine::ErrorKind::Internal);
     let message = if let Some(native) = native.filter(|code| response.status == 200 && *code != 0) {
         format!("Bitunix account read failed: code {native}")
     } else if !(200..300).contains(&response.status) {

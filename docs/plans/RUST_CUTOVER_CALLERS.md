@@ -9621,3 +9621,7 @@ Session calls keep Mutation journal evidence, order locks and Unknown on an
 unproven released send. Their resend freezes codec bytes while refreshing the
 bundle at Bind; Preflight signed calls repeat their existing provider work.
 No current venue enables a new auth mode in this engine slice.
+
+### Bitunix account read classification (P1 #33)
+
+A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
