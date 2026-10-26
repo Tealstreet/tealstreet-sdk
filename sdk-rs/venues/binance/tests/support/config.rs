@@ -52,3 +52,35 @@ pub fn engine(options: Options) -> Engine<BinanceFutures> {
     engine.set_signer(Some(signer)).unwrap();
     engine
 }
+
+/// A Primary-keyed account of `variant`; the fixture strings stay here.
+pub fn keyed(variant: Variant, key: &str, seed: &str) -> Options {
+    Options {
+        variant,
+        key: Some(key.into()),
+        secret: Some(seed.into()),
+        ..Options::default()
+    }
+}
+
+/// The two-identity fixture the crate's selection tests share.
+pub fn with_read_identity() -> Options {
+    Options {
+        key: Some("primary-key".into()),
+        secret: Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".into()),
+        read_credentials: Some(ReadCredentials {
+            key: "read-key".into(),
+            secret: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=".into(),
+            passphrase: Some("read-pass".into()),
+        }),
+        ..Options::default()
+    }
+}
+
+/// The read identity without signing material: an invalid Secondary.
+pub fn without_read_signing(mut options: Options) -> Options {
+    if let Some(read) = options.read_credentials.as_mut() {
+        read.secret.clear();
+    }
+    options
+}

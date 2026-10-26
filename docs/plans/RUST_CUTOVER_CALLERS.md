@@ -9517,3 +9517,7 @@ The remaining conservative request/signing/credential inventory describes manage
 failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
 identity options. This slice retains those rows and all checker rules; completion
 of the custody audit does not claim inventory zero or a new endpoint migration.
+
+### Binance signing residue: legacy test oracle retired
+
+No caller-visible change. Binance already signed every request through the provider. The remaining legacy signing code was a test-only HMAC oracle and fixtures, now replaced by provider-path proofs of the documented vector and of every configured receive window ([RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md)). Signing inventory for Binance: 27 → 4, the four being the dispatch recipe's own lines.
