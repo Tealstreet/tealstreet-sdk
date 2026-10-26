@@ -2,7 +2,7 @@
 use crate::{Lighter, Pending, sign};
 use safe_cex_engine::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact};
 use safe_cex_engine::model::*;
-use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
+use safe_cex_engine::request_context::plan::{CallAuth, SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
 };
@@ -1554,6 +1554,7 @@ fn refuse(cx: &mut Cx<'_, Pending>, error: VenueError) {
 
 pub(crate) fn serial_call(operation: Operation) -> SerialCall {
     SerialCall {
+        auth: CallAuth::Preflight,
         operation,
         timeout_ms: 20_000,
         attempts: 1,
