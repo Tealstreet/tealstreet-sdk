@@ -158,3 +158,21 @@ Plan/API review -> working native controls plus intended assertion REDs -> exact
 source review -> execution/fixture/typed-failure/credit/size qualification ->
 immutable preservation carry -> one source push/PR run -> full green CI family
 record plus current local combined -> auditor exact-tree GO and guarded merge.
+
+## Local originals checkpoint
+
+On the actual25ca8466d63 landing, the new public_seed_context target has31 tests:
+7 native working controls pass and24 intended custody/policy assertions fail,
+with0 ignored or filtered tests. Runtime, Cargo, inventories and every existing
+fixture are unchanged. The explicit NEW20s deadline also excludes an older
+funding response after the next60s cadence; that is an assertion RED, not a
+native-parity positive. The seven positives pin financial/wire values, native
+empty/partial catalogue behavior, saved-primary unsigned reads, failure
+presentation, independent funding cadence and duplicate success.
+
+The managed-release, typed precommit, expired-owned cleanup, sole-credit turnover,
+full256-slot funding refusal/cadence and recovery suffixes remain honestly gated
+on the legacy runtime. All infinity variants and the full type matrix must
+execute after source adoption; this checkpoint does not claim they passed.
+Exact original/source/fixture review remains before any production candidate.
+The checkpoint is local and unpushed, with no new PR or CI dispatch.
