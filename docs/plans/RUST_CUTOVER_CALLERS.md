@@ -10076,3 +10076,8 @@ mark advances the generation; an ordinary re-ask does not.
 Either change blocks clearance and requires a new complete census. A real
 pre-mark first page/post-mark final family control is RED with both guards
 disabled, and green with them intact; ordinary re-asks still join the read.
+
+BingX's provider-refusal retry control distinguishes the engine's required
+reconciliation re-ask from another mutation attempt: its captured timer issues
+only a managed Orders GET, retains one caller terminal and no new identity,
+and preserves the engine's bounded backoff when that read signer also refuses.
