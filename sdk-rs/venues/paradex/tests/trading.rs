@@ -174,8 +174,11 @@ fn a_lost_write_response_is_never_retried() {
         },
     );
     h.collect();
-    assert!(h.pending.is_empty());
     assert!(h.result(8).is_err());
+    // Nothing is resent; the only request is the fence's reconcile read.
+    let reconcile = h.pending.iter().map(|r| r.method).collect::<Vec<_>>();
+    assert_eq!(reconcile, vec![Method::Get]);
+    h.take("/orders");
 }
 #[test]
 fn brackets_have_individual_signatures_and_accept_child_responses_without_a_client_identity() {
@@ -908,6 +911,16 @@ fn definitive_amend_rejection_allows_unchanged_reconciliation_but_transport_fail
         amend(&mut h, 141, None, Some(3.));
         if ambiguous {
             assert!(h.result(141).is_err());
+            assert!(h.pending.iter().all(|r| r.method == Method::Get));
+            // A complete read of the unchanged row releases the engine's
+            // placement fence; the venue's amend fence still needs evidence.
+            if let Some(i) = h.pending.iter().position(|r| r.url.contains("/orders")) {
+                let read = h.pending.remove(i);
+                h.respond(read, 200, &format!(r#"{{"results":[{AMEND_ROW}]}}"#));
+            }
+            assert!(h.pending.is_empty());
+            amend(&mut h, 143, None, Some(3.));
+            assert!(h.result(143).is_err());
             assert!(h.pending.is_empty());
             let matching = AMEND_ROW.replace("\"price\":\"99\"", "\"price\":\"101\"");
             amendment_update(&mut h, socket, &matching);
