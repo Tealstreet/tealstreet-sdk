@@ -332,12 +332,11 @@ fn initial_halves() -> (
     Vec<HttpRequest>,
     Vec<(safe_cex_engine::TimerId, f64)>,
 ) {
-    use safe_cex_venue_bitunix::{BitunixFutures, Options};
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(0.0);
     let mut halves = Vec::new();
     let mut repairs = Vec::new();

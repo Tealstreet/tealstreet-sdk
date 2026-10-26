@@ -5,7 +5,7 @@ use safe_cex_engine::{
     Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Notice, Outcome, PublicFeedPolicy,
     Query, Response, SocketId, TimerId, Venue, VenueError,
 };
-use safe_cex_venue_bitunix::{BitunixFutures, Options, Pending};
+use safe_cex_venue_bitunix::{BitunixFutures, Pending};
 
 fn policy() -> Policy {
     Policy {
@@ -74,14 +74,17 @@ impl Venue for Probe {
     }
 }
 fn seeded(keyed: bool) -> Engine<Probe> {
+    let (inner, provider, ids) = support::Options {
+        key: keyed.then(|| "fixture-key".into()),
+        secret: keyed.then(|| "fixture-secret".into()),
+        ..support::Options::default()
+    }
+    .build();
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
-        inner: BitunixFutures::new(Options {
-            key: keyed.then(|| "fixture-key".into()),
-            secret: keyed.then(|| "fixture-secret".into()),
-            ..Options::default()
-        }),
+        inner,
         held: vec![],
     });
+    support::install(&mut e, provider, ids);
     e.set_public_feed_policy(PublicFeedPolicy::Direct).unwrap();
     e.start(0.);
     loop {

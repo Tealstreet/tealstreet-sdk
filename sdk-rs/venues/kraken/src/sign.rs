@@ -1,5 +1,6 @@
 //! Kraken Futures signs the exact encoded bytes sent; Spot uses a different scheme.
 pub mod dispatch;
+pub mod hosted;
 pub mod setup;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
