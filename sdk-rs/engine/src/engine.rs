@@ -1,5 +1,11 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
+#[path = "address_nonce_setup.rs"]
+pub(crate) mod address_nonce_setup;
+#[cfg(feature = "address-nonce")]
+pub use address_nonce_setup::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
+pub use address_nonce_setup::{AddressSetupSlots, SetupRetirement};
+
 use crate::book::{Book, BookSide};
 use crate::capabilities::{AccountLookup, Capabilities};
 use crate::error::{ErrorKind, VenueError};
@@ -467,7 +473,7 @@ impl From<&String> for SocketSpec {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub enum Action {
     WsConnect {
         /// Preserve application binary frames rather than decoding UTF-8.
@@ -512,6 +518,85 @@ pub enum Action {
         timer: TimerId,
     },
     Notice(Notice),
+    RetireAddressSetup {
+        task: RequestId,
+        token: std::sync::Arc<SetupRetirement>,
+    },
+}
+
+impl PartialEq for Action {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::RetireAddressSetup { task: a, token: x },
+                Self::RetireAddressSetup { task: b, token: y },
+            ) => a == b && std::sync::Arc::ptr_eq(x, y),
+            (
+                Self::WsConnect {
+                    binary: a,
+                    socket: b,
+                    url: c,
+                    headers: d,
+                    channel: e,
+                    context: f,
+                },
+                Self::WsConnect {
+                    binary: g,
+                    socket: h,
+                    url: i,
+                    headers: j,
+                    channel: k,
+                    context: l,
+                },
+            ) => (a, b, c, d, e, f) == (g, h, i, j, k, l),
+            (Self::WsSend { socket: a, text: b }, Self::WsSend { socket: c, text: d }) => {
+                (a, b) == (c, d)
+            }
+            (Self::WsClose { socket: a }, Self::WsClose { socket: b }) => a == b,
+            (Self::Http(a), Self::Http(b)) => a == b,
+            (Self::ManagedHttp(a), Self::ManagedHttp(b)) => a == b,
+            (
+                Self::SignedOutbound {
+                    attempt: a,
+                    outbound: b,
+                },
+                Self::SignedOutbound {
+                    attempt: c,
+                    outbound: d,
+                },
+            ) => (a, b) == (c, d),
+            (
+                Self::Sign {
+                    attempt: a,
+                    work: b,
+                    timeout_ms: c,
+                },
+                Self::Sign {
+                    attempt: d,
+                    work: e,
+                    timeout_ms: f,
+                },
+            ) => (a, b, c) == (d, e, f),
+            (
+                Self::SignPayload {
+                    request: a,
+                    payload: b,
+                    timeout_ms: c,
+                },
+                Self::SignPayload {
+                    request: d,
+                    payload: e,
+                    timeout_ms: f,
+                },
+            ) => (a, b, c) == (d, e, f),
+            (Self::SetTimer { timer: a, at_ms: b }, Self::SetTimer { timer: c, at_ms: d }) => {
+                (a, b) == (c, d)
+            }
+            (Self::ClearTimer { timer: a }, Self::ClearTimer { timer: b }) => a == b,
+            (Self::Notice(a), Self::Notice(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl std::fmt::Debug for Action {
@@ -1537,6 +1622,8 @@ where
 /// Every Io field that does not name the venue's pending type, so engine
 /// code that only touches these can be shared across venues.
 struct IoCore {
+    #[cfg(feature = "address-nonce")]
+    address_setup: address_nonce_setup::AddressNonceSetup,
     nonce_unscheduled: bool,
     #[cfg(feature = "dispatch-nonce")]
     nonce_enabled: bool,
@@ -1686,6 +1773,8 @@ impl Default for IoCore {
     #[inline]
     fn default() -> Self {
         Self {
+            #[cfg(feature = "address-nonce")]
+            address_setup: Default::default(),
             nonce_unscheduled: false,
             #[cfg(feature = "dispatch-nonce")]
             nonce_enabled: false,
@@ -3010,6 +3099,12 @@ impl<V: Venue> Clone for HttpRelease<V> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
+    fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
+        None
+    }
+    fn public_address_slots(&self) -> AddressSetupSlots {
+        AddressSetupSlots::None
+    }
     /// A fully parsed native refusal may exempt this delivery from unproven
     /// HTTP status handling. The default keeps the strict shared policy.
     fn status_exempt_refusal(&self, _pending: &Self::Pending, _response: Response<'_>) -> bool {
@@ -3604,6 +3699,8 @@ impl<V: Venue> Engine<V> {
             return Err(VenueError::new("Signer must be configured before startup")
                 .kind(ErrorKind::InvalidInput));
         }
+        #[cfg(feature = "address-nonce")]
+        self.invalidate_address_setup()?;
         self.io.core.signer = signer;
         Ok(())
     }
@@ -3623,6 +3720,19 @@ impl<V: Venue> Engine<V> {
                     .kind(ErrorKind::InvalidInput),
             );
         }
+        #[cfg(feature = "address-nonce")]
+        self.invalidate_address_setup()?;
+        #[cfg(feature = "address-nonce")]
+        let identities = {
+            let mut identities = identities;
+            for identity in [&mut identities.primary, &mut identities.secondary]
+                .into_iter()
+                .flatten()
+            {
+                identity.address = Default::default();
+            }
+            identities
+        };
         self.io.core.identities = identities;
         Ok(())
     }
@@ -3639,6 +3749,8 @@ impl<V: Venue> Engine<V> {
             return Err(VenueError::new("Signer must be configured before startup")
                 .kind(ErrorKind::InvalidInput));
         }
+        #[cfg(feature = "address-nonce")]
+        self.invalidate_address_setup()?;
         self.io.core.host_algorithms = algorithms;
         Ok(())
     }
@@ -3922,6 +4034,8 @@ impl<V: Venue> Engine<V> {
         if std::mem::replace(&mut self.started, true) {
             return;
         }
+        #[cfg(feature = "address-nonce")]
+        self.seal_address_setup();
         let mut cx = Cx {
             now,
             store: &mut self.store,
@@ -3985,6 +4099,23 @@ impl<V: Venue> Engine<V> {
     fn handle_received(&mut self, now: f64, event: Event<'_>) {
         self.assert_live();
         self.io.core.dispatch_now = now;
+        #[cfg(feature = "address-nonce")]
+        {
+            self.poll_address_setup(
+                now,
+                &mut std::task::Context::from_waker(std::task::Waker::noop()),
+            );
+            if let Event::Signed { attempt, result } = &event
+                && self.address_setup_signed(now, *attempt, result.clone())
+            {
+                return;
+            }
+            if let Event::TimerFired { timer } = &event
+                && self.address_setup_timer(now, *timer)
+            {
+                return;
+            }
+        }
         self.expire_read_roots(now);
         if let Event::TimerFired { timer } = &event
             && self.io.read_root_timer(*timer, now)
@@ -5171,11 +5302,15 @@ impl<V: Venue> Engine<V> {
     /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        self.flush_keyless_session_roots(now);
         if self.io.core.request_contexts.has_plans() {
             self.flush_live_http_plans(now);
         }
         // Bearer fences first, then parked Slots (which drain fences per pass).
         self.flush_bearer_fences(now);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        self.flush_keyless_session_roots(now);
         // Last, at every outer Plan flush, including after the final Plan
         // sealed: parked Slots whose Session ended or whose Plan sealed.
         self.flush_plan_session_waits(now);
@@ -5298,7 +5433,17 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn signing_pending(&self, attempt: RequestId) -> bool {
-        !self.failed() && self.io.core.signing.signature_pending(attempt)
+        !self.failed()
+            && (self.io.core.signing.signature_pending(attempt) || {
+                #[cfg(feature = "address-nonce")]
+                {
+                    self.io.core.address_setup.current_meta(attempt).is_some()
+                }
+                #[cfg(not(feature = "address-nonce"))]
+                {
+                    false
+                }
+            })
     }
 
     /// The latest event time, for fixtures that prepare after `handle`.
@@ -5309,6 +5454,11 @@ impl<V: Venue> Engine<V> {
 
     pub fn prepare_dispatch(&mut self, now: f64) {
         self.assert_live();
+        #[cfg(feature = "address-nonce")]
+        self.poll_address_setup(
+            now,
+            &mut std::task::Context::from_waker(std::task::Waker::noop()),
+        );
         self.expire_read_roots(now);
         self.flush_http_owner_retirements();
         self.io.core.dispatch_now = now;

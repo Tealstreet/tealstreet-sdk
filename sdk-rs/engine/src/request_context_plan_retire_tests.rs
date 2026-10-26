@@ -22,6 +22,9 @@ mod retire_unissued_plan_calls {
         width: usize,
         /// End with fail_plan even without a failed call.
         force_fail: bool,
+        /// Raise the failing Plan's projection to Unknown before fail_plan.
+        inherit_on_fail: bool,
+        inherited: Option<Result<(), Error>>,
         /// Every target is already closed at planning: complete before admission.
         all_closed: bool,
         /// Admit a serial Plan and try to retire its first call.
@@ -64,6 +67,9 @@ mod retire_unissued_plan_calls {
                         return;
                     }
                     if self.failed || self.force_fail {
+                        if self.inherit_on_fail {
+                            self.inherited = Some(cx.inherit_plan_uncertainty(&plan));
+                        }
                         cx.fail_plan(&plan, "batch had a failure").unwrap();
                     } else {
                         cx.done_plan(&plan, "[]".into()).unwrap();
@@ -158,7 +164,7 @@ mod retire_unissued_plan_calls {
                             attempts: 1,
                         },
                         crate::request_context::plan::SerialPolicy {
-                            credential: credential.clone().unwrap(),
+                            credential: Some(credential.clone().unwrap()),
                             pacing: None,
                             refusals_complete: false,
                         },
@@ -545,5 +551,36 @@ mod retire_unissued_plan_calls {
             ..Skipper::new(1, &[])
         });
         assert_eq!(e.venue.retires, vec![Err(Error::Invalid)]);
+    }
+
+    #[test]
+    fn an_inherited_plan_uncertainty_projects_unknown_with_accepted_ids() {
+        let run = |inherit: bool| {
+            let (mut e, actions) = start(Skipper {
+                force_fail: true,
+                inherit_on_fail: inherit,
+                ..Skipper::new(1, &[])
+            });
+            let only = release(&mut e, &actions, 0.);
+            let actions = answer(&mut e, only, 200, 1.);
+            let [Err(error)] = &terminals(&actions)[..] else {
+                panic!("one failure terminal: {:?}", terminals(&actions));
+            };
+            (e.venue.inherited, error.clone())
+        };
+        let (inherited, raised) = run(true);
+        let (_, control) = run(false);
+        assert_eq!(inherited, Some(Ok(())));
+        assert_eq!(raised.outcome, Some(crate::Outcome::Unknown));
+        assert_ne!(control.outcome, Some(crate::Outcome::Unknown), "the control differs");
+        assert_eq!(
+            raised.partial.as_ref().map(|p| &p.order_ids),
+            control.partial.as_ref().map(|p| &p.order_ids),
+            "accepted IDs are kept"
+        );
+        assert_eq!(
+            raised.partial.as_ref().map(|p| p.order_ids.as_slice()),
+            Some(&["canceled-1".to_owned()][..])
+        );
     }
 }

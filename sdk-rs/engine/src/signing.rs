@@ -320,6 +320,9 @@ pub struct Identity {
     /// setup policy, never transported: a serialized copy loses it.
     #[serde(skip)]
     signing_not_configured: bool,
+    #[cfg(feature = "address-nonce")]
+    #[serde(skip)]
+    pub(crate) address: crate::engine::address_nonce_setup::AddressCapability,
 }
 impl Identity {
     #[inline]
@@ -331,6 +334,8 @@ impl Identity {
             stable_id: None,
             extra: Default::default(),
             signing_not_configured: false,
+            #[cfg(feature = "address-nonce")]
+            address: Default::default(),
         }
     }
 
@@ -373,6 +378,10 @@ impl Identity {
     #[inline]
     pub fn set_signing_ref(&mut self, signing: Option<KeyRef>) {
         self.signing = signing;
+        #[cfg(feature = "address-nonce")]
+        {
+            self.address = Default::default();
+        }
     }
 
     pub fn require_stable_id(&self) -> Result<&str, SignError> {
@@ -889,8 +898,31 @@ impl<T: Send + Sync> ProviderBounds for T {}
 pub trait ProviderBounds {}
 #[cfg(target_arch = "wasm32")]
 impl<T> ProviderBounds for T {}
+/// An execution whose join includes all owned work and cleanup, not a timeout wrapper.
+/// Poll::Ready from poll_joined requires actual resource settlement, including on Err.
+pub trait OwnedSetupExecution: SetupExecutionBounds {
+    fn start(&mut self) -> Result<(), SignError>;
+    fn cancel(&mut self) -> Result<(), SignError>;
+    fn poll_result(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<SignResult, SignError>>;
+    fn poll_joined(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), SignError>>;
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub trait SetupExecutionBounds: Send {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + ?Sized> SetupExecutionBounds for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait SetupExecutionBounds {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> SetupExecutionBounds for T {}
+
 /// Host-injected signing. Providers own secrets and may complete asynchronously.
-/// Hosts enforce cancellation/timeout independently of this future settling.
+/// Hosts enforce cancellation/timeout independently of the signing future settling.
 pub trait Signer: ProviderBounds {
     fn sign(&self, request: SignRequest) -> SignFuture;
     /// True only when sign_ready always completes inline (normal local provider).
@@ -906,6 +938,18 @@ pub trait Signer: ProviderBounds {
     /// Release-time signing remains the choke point.
     fn can_sign(&self, _key: &KeyRef, _algorithm: Algorithm) -> Capability {
         Capability::Unknown
+    }
+    fn owned_public_address_capability(&self) -> Capability {
+        Capability::Unsupported
+    }
+    /// Dormant owned work; refuse anything except one own-ref Secp256k1 PublicAddress
+    /// with an empty receipt/context. Pure local derivation may happen here;
+    /// asynchronous emission starts only through the retained execution's start.
+    fn create_public_address_setup(
+        &self,
+        _request: SignRequest,
+    ) -> Option<Box<dyn OwnedSetupExecution>> {
+        None
     }
 }
 pub type Provider = Arc<dyn Signer>;
@@ -969,6 +1013,8 @@ mod setup_field_policy_tests {
             stable_id: None,
             extra: Default::default(),
             signing_not_configured: false,
+            #[cfg(feature = "address-nonce")]
+            address: Default::default(),
         }
     }
 
@@ -1021,6 +1067,8 @@ mod setup_field_policy_tests {
                 stable_id: None,
                 extra: Default::default(),
                 signing_not_configured: false,
+                #[cfg(feature = "address-nonce")]
+                address: Default::default(),
             }),
             secondary: Some(identity("secondary", None)),
         };
@@ -1039,6 +1087,8 @@ mod setup_field_policy_tests {
                 stable_id: None,
                 extra: Default::default(),
                 signing_not_configured: false,
+                #[cfg(feature = "address-nonce")]
+                address: Default::default(),
             }),
         };
         let original = ids.clone();
