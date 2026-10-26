@@ -38,6 +38,20 @@ pub(super) fn decode(
             output.truncate(length);
             Ok(output)
         }
+        KeyEncoding::Base64Url => {
+            // Native Polymarket: map the URL-safe alphabet, pad, then decode as
+            // standard base64, so either alphabet with or without padding works.
+            let mut mapped = Zeroizing::new(Vec::with_capacity(input.len().div_ceil(4) * 4));
+            mapped.extend(input.iter().map(|byte| match byte {
+                b'-' => b'+',
+                b'_' => b'/',
+                byte => *byte,
+            }));
+            while !mapped.len().is_multiple_of(4) {
+                mapped.push(b'=');
+            }
+            base64(&mapped)
+        }
         KeyEncoding::Base58 => {
             // Base58 never decodes longer than its input; decode into a guarded buffer.
             let mut output = Zeroizing::new(vec![0; input.len()]);
