@@ -142,7 +142,7 @@ class RequestContextBan(unittest.TestCase):
             event.write_text(json.dumps({'pull_request': {'base': {'sha': tip}}}))
             with mock.patch.object(ban, 'ROOT', root), mock.patch.dict(
                     os.environ, {'GITHUB_EVENT_PATH': str(event)}, clear=True):
-                previous = ban.previous_manifests()
+                previous = ban.previous_manifests(merge_parents=True)
                 self.assertFalse(ban.check(inherited, inherited, previous))
                 self.assertIn(('merge parents', inherited), previous)
                 self.assertIn((tip, inherited), previous)
@@ -151,6 +151,11 @@ class RequestContextBan(unittest.TestCase):
                 # limits and growth beyond every parent remain enforced.
                 self.assertTrue(ban.check(first, inherited, previous))
                 self.assertTrue(ban.check(inherited, inherited, [('older base', first)]))
+                # Socket inventories use another schema and retain the old
+                # per-ref interface without invoking the request-map reducer.
+                with mock.patch.object(ban, 'maximum_manifest', side_effect=AssertionError):
+                    independent = ban.previous_manifests()
+                self.assertTrue(ban.check(inherited, inherited, independent))
 
     def test_base_ref_and_exact_event_commit_are_required(self):
         sha = '1' * 40

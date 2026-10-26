@@ -1496,15 +1496,18 @@ def git(*args):
     return subprocess.run(['git', '-C', str(ROOT), *args], text=True, capture_output=True, check=True).stdout
 
 
-def previous_manifests(inventory=None, predecessor=None):
-    """Parents share a maximum bound; HEAD and landing refs stay independent."""
+def previous_manifests(inventory=None, predecessor=None, merge_parents=False):
+    """Request inventories may join parent bounds; other consumers keep per-ref bounds."""
     inventory = inventory or MANIFEST
     base = os.environ.get('GITHUB_BASE_REF') or 'feat/rust-rewrite'
     parents = git('rev-list', '--parents', '-n', '1', 'HEAD').split()[1:]
     remote = f'refs/remotes/origin/{base}'
     refs = [('HEAD', ['HEAD'])]
     if parents:
-        refs.append(('merge parents' if len(parents) > 1 else parents[0], parents))
+        if merge_parents:
+            refs.append(('merge parents' if len(parents) > 1 else parents[0], parents))
+        else:
+            refs.extend((parent, [parent]) for parent in parents)
     refs.append((remote, [remote]))
     if event_file := os.environ.get('GITHUB_EVENT_PATH'):
         event = json.loads(pathlib.Path(event_file).read_text())
@@ -1526,16 +1529,17 @@ def previous_manifests(inventory=None, predecessor=None):
                     found.append(manifest(git('show', f'{ref}:{path}')))
                     break
         if found:
-            previous.append((label, maximum_manifest(found)))
+            previous.append((label, maximum_manifest(found) if len(found) > 1 else found[0]))
     return previous
 
 
 def main():
     try:
         prod, test = request_sites()
-        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests())
+        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests(merge_parents=True))
         failures += ['test inventory: ' + failure for failure in check(
-            test, manifest((ROOT / TEST_MANIFEST).read_text()), previous_manifests(TEST_MANIFEST, MANIFEST))]
+            test, manifest((ROOT / TEST_MANIFEST).read_text()),
+            previous_manifests(TEST_MANIFEST, MANIFEST, merge_parents=True))]
     except InventoryRefusal as refusal:
         failures = [f'cannot verify legacy inventory: {refusal}']
     except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError) as error:
