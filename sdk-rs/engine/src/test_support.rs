@@ -46,6 +46,14 @@ pub fn http_requests<V: Venue>(engine: &mut Engine<V>) -> Vec<HttpRequest> {
         .collect()
 }
 
+/// `prepared_actions` at the latest handled event's time: managed requests
+/// leave only through preparation, so fixtures that drained after `handle`
+/// prepare at that same instant.
+pub fn prepared_now<V: Venue>(engine: &mut Engine<V>) -> Vec<Action> {
+    let now = engine.dispatch_now();
+    prepared_actions(engine, now)
+}
+
 /// Immediate fake routes for native venue fixtures. Physical HTTP is returned
 /// only after prepare, bind and the engine's final synchronous release claim.
 /// Delayed pacing/routes and delegated signing deliberately remain unsupported.

@@ -48,7 +48,9 @@ fn begin(e: &mut TestEngine) -> HttpRequest {
             interval: Interval::M1,
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     settings(&actions)
 }
 fn notify(e: &mut TestEngine, socket: SocketId, at: f64, symbol: &str) {
@@ -62,7 +64,9 @@ fn notify(e: &mut TestEngine, socket: SocketId, at: f64, symbol: &str) {
             text: &text,
         },
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .for_each(drop);
 }
 fn answer(e: &mut TestEngine, r: &HttpRequest, at: f64, body: &str) -> Vec<Action> {
     e.handle(
@@ -76,7 +80,9 @@ fn answer(e: &mut TestEngine, r: &HttpRequest, at: f64, body: &str) -> Vec<Actio
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn auth(actions: &[Action]) -> Vec<(CredentialSlot, AuthOutcome)> {
     actions
@@ -105,7 +111,9 @@ fn timer_between(actions: &[Action], lo: f64, hi: f64) -> (TimerId, f64) {
 }
 fn fire(e: &mut TestEngine, timer: TimerId, at: f64) -> Vec<Action> {
     e.handle(at, Event::TimerFired { timer });
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 #[test]
 fn current_flat_settings_and_scoped_auth_advance_across_same_or_other_symbol_notifications() {
@@ -177,7 +185,9 @@ fn failed_settings_attempts_still_increase_backoff_during_position_notifications
                     error: "settings network unavailable",
                 },
             );
-            e.drain_actions().collect()
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect()
         } else {
             answer(&mut e, &r, 200.0, r#"{"code":0,"data":{"leverage":0}}"#)
         };
@@ -223,7 +233,9 @@ fn accepted_settings_writes_keep_the_fence_while_unproved_writes_leave_the_read_
                 },
             };
             e.handle(150.0, Event::Command(command));
-            let actions: Vec<_> = e.drain_actions().collect();
+            let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect();
             let write = actions
                 .iter()
                 .find_map(|a| match a {
@@ -239,7 +251,9 @@ fn accepted_settings_writes_keep_the_fence_while_unproved_writes_leave_the_read_
                         error: "lost settings ACK",
                     },
                 );
-                e.drain_actions().collect()
+                safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .collect()
             } else {
                 answer(
                     &mut e,

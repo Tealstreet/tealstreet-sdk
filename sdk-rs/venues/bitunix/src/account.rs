@@ -9,6 +9,10 @@ use safe_cex_engine::execution::{Arithmetic, Cursor, ExecutionRounding};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::request_context::{Context, RetryPolicy, Scope};
+use safe_cex_engine::selected_read::{
+    AdmittedRead, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, Method, Response, TimerId};
 use std::collections::{HashMap, HashSet};
@@ -46,7 +50,20 @@ pub struct PositionAdmission {
     route: String,
     mode: PositionMode,
 }
+/// The engine authority a released account read answers under.
+pub enum ReadCustody {
+    /// A Background read on the read key (else Primary).
+    Background(AdmittedRead),
+}
+impl ReadCustody {
+    pub(crate) fn context(&self) -> &Context {
+        match self {
+            Self::Background(read) => read.context(),
+        }
+    }
+}
 pub struct Read {
+    pub custody: Option<ReadCustody>,
     pub axis: Axis,
     pub generation: u64,
     pub balance_write_revision: u64,
@@ -288,6 +305,14 @@ impl BitunixFutures {
         body: Option<String>,
         pending: Pending,
     ) {
+        let background = match &pending {
+            Pending::Private(read) => read.after.is_none(),
+            Pending::SymbolSettings { .. } => true,
+            _ => false,
+        };
+        if background {
+            return self.issue_read(cx, path, params, pending);
+        }
         // By role, not method: a GET inside a trading job signs Primary.
         let role = match &pending {
             Pending::Private(read) => CredentialRole::Read {
@@ -337,6 +362,74 @@ impl BitunixFutures {
             cx.request(method, url, headers, body, pending)
         };
         selection.sign(cx, id, Box::new(recipe));
+    }
+    /// An account or settings read as a managed Background read on the read
+    /// key (else Primary). Native recovery owns retries: the engine sends once.
+    fn issue_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        params: Params,
+        pending: Pending,
+    ) {
+        let scope = match &pending {
+            Pending::Private(read) => match read.axis {
+                Axis::Balance => safe_cex_engine::AccountReadScope::Balance,
+                Axis::Positions => safe_cex_engine::AccountReadScope::Positions,
+                Axis::Orders | Axis::Tpsl => safe_cex_engine::AccountReadScope::Orders,
+            },
+            _ => safe_cex_engine::AccountReadScope::Settings,
+        };
+        let stream = matches!(&pending, Pending::Private(read) if read.axis != Axis::Balance)
+            .then_some(crate::recovery::LIST);
+        let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: Some(scope) });
+        let policy = ReadPolicy {
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        };
+        let read = match SelectedRead::scoped(cx, selected, Scope::Background, policy) {
+            Ok(read) => read,
+            Err(_) => {
+                return self.fail_private(
+                    cx,
+                    pending,
+                    "Bitunix managed read lifecycle is unavailable",
+                );
+            }
+        };
+        let query = params.query();
+        let url = format!(
+            "{REST}{path}{}{}",
+            if query.is_empty() { "" } else { "?" },
+            query
+        );
+        let signing = params.signing();
+        let testnet = self.options.testnet;
+        let recipe_url = url.clone();
+        let queued = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url,
+                body: None,
+                stream,
+            },
+            |identity| {
+                Box::new(sign::dispatch::Http::new(
+                    identity.clone(),
+                    Method::Get,
+                    recipe_url,
+                    signing,
+                    None,
+                    testnet,
+                ))
+            },
+            |read| pending.with_custody(ReadCustody::Background(read)),
+        );
+        if let Err((pending, error)) = queued {
+            self.fail_private(cx, pending, &error.venue_error().message);
+        }
     }
     pub(crate) fn read_axis(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
         self.read_axis_for(cx, axis, None);
@@ -442,6 +535,7 @@ impl BitunixFutures {
             self.account.balance_polled_at = cx.now;
         }
         let read = Read {
+            custody: None,
             after,
             serial: self.account.serials[slot],
             axis,
@@ -500,6 +594,7 @@ impl BitunixFutures {
             symbol: symbol.into(),
             write_revision: self.account.position_write_revision,
             serial,
+            custody: None,
         };
         self.signed_request(cx, Method::Get, SYMBOL_SETTINGS, params, None, pending);
     }
@@ -565,6 +660,7 @@ impl BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => self.settings_failed(cx, &symbol, write_revision, serial, None),
             _ => cx.retried_failure("bitunix.account:2", error),
         }
@@ -958,6 +1054,7 @@ impl BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } if *write_revision == self.account.position_write_revision
                 && self.account.recovery.settings_current(symbol, *serial) =>
             {

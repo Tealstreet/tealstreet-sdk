@@ -74,6 +74,7 @@ fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
                         symbol: "BTCUSDT".into(),
                         write_revision: 0,
                         serial: 0,
+                        custody: None,
                     },
                 );
                 for method in [Method::Get, Method::Post] {

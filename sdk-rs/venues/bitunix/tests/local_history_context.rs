@@ -164,7 +164,9 @@ fn public() -> Query {
 }
 fn query(e: &mut Engine<Probe>, now: f64, query: Query) -> Vec<Action> {
     e.handle(now, Event::Command(Command::Query { command: 71, query }));
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn failure(actions: &[Action]) -> &VenueError {
     assert_eq!(actions.len(), 1, "one terminal, no companion or opaque I/O");
@@ -268,7 +270,12 @@ fn initial_capacity_refusal_does_not_consume_other_owners_and_recovers_at_same_c
                 symbols: vec!["roots".into()],
             }),
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .next()
+                .is_none()
+        );
         assert_eq!(
             e.venue().held.len(),
             256,
@@ -288,7 +295,12 @@ fn initial_capacity_refusal_does_not_consume_other_owners_and_recovers_at_same_c
             100.,
             Event::Command(Command::SetTickerSymbols { symbols: vec![] }),
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .next()
+                .is_none()
+        );
         assert!(e.venue().held.is_empty());
         empty(&query(&mut e, 100., fills(None, None)));
     }

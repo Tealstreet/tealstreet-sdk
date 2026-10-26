@@ -8,7 +8,9 @@ fn order(extra: &str) -> PlaceOrderOpts {
 }
 
 fn classified_failure(e: &mut TestEngine, command: u32) -> safe_cex_engine::VenueError {
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     assert_eq!(
         actions
             .iter()
@@ -159,7 +161,9 @@ fn batch_item_failures_complete_once_with_partials_and_do_not_block_independent_
         first.id,
         r#"{"code":0,"data":{"successList":[{"orderId":"accepted-first"},{"orderId":"accepted-2"},{"orderId":"accepted-3"},{"orderId":"accepted-4"}],"failureList":[{"errorCode":20003,"errorMsg":"Insufficient balance"}]}}"#,
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(!actions.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
@@ -294,7 +298,9 @@ fn uncertain_amend_answer_never_enters_cancel_recreate_fallback() {
             status,
             r#"{"code":20003,"msg":"The order does not support this operation"}"#,
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandFailed {command:1007,error}) if error.outcome==Some(Outcome::Unknown))));
     }
@@ -400,7 +406,9 @@ fn successful_single_ack_without_native_id_preserves_existing_client_identity_co
     );
     let request = requests(&mut e).remove(0);
     reply(&mut e, request.id, r#"{"code":0,"data":{}}"#);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(actions.iter().any(|action| matches!(action,
         Action::Notice(Notice::CommandDone {command:1010,result}) if result==r#"["ack-client"]"#)));
     assert!(!actions.iter().any(|action| matches!(

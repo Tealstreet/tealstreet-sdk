@@ -34,7 +34,9 @@ fn notify(e: &mut TestEngine, socket: SocketId, at: f64) -> Vec<Action> {
             text: UPDATE,
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn timer_at(actions: &[Action], at: f64) -> TimerId {
     actions
@@ -47,7 +49,9 @@ fn timer_at(actions: &[Action], at: f64) -> TimerId {
 }
 fn fire(e: &mut TestEngine, timer: TimerId, at: f64) -> Vec<Action> {
     e.handle(BASE + at, Event::TimerFired { timer });
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn order_requests(actions: Vec<Action>) -> Vec<HttpRequest> {
     actions
@@ -75,7 +79,9 @@ fn answer(
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn begin(e: &mut TestEngine, socket: SocketId) -> Vec<Action> {
     let first = notify(e, socket, 100.0);
@@ -156,7 +162,9 @@ fn lost_endpoint_replacement_and_late_callbacks_leave_the_other_deadline_intact(
                     error: "late old read",
                 },
             );
-            e.drain_actions().for_each(drop);
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .for_each(drop);
         } else {
             answer(&mut e, regular.id, 11200.0, ORDERS);
         }
@@ -195,7 +203,7 @@ fn failed_reads_release_both_tokens_for_independent_bounded_repair() {
                         error: "read unavailable",
                     },
                 );
-                actions.extend(e.drain_actions());
+                actions.extend(safe_cex_engine::test_support::prepared_now(&mut e).into_iter());
             } else {
                 actions.extend(answer(
                     &mut e,

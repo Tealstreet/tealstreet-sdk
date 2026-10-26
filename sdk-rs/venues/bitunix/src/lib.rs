@@ -65,7 +65,53 @@ pub enum Pending {
         symbol: String,
         write_revision: u64,
         serial: u64,
+        custody: Option<account::ReadCustody>,
     },
+}
+impl Pending {
+    pub(crate) fn with_custody(self, custody: account::ReadCustody) -> Self {
+        match self {
+            Self::Private(mut read) => {
+                read.custody = Some(custody);
+                Self::Private(read)
+            }
+            Self::SymbolSettings {
+                symbol,
+                write_revision,
+                serial,
+                ..
+            } => Self::SymbolSettings {
+                symbol,
+                write_revision,
+                serial,
+                custody: Some(custody),
+            },
+            other => other,
+        }
+    }
+    fn custody(&self) -> Option<&account::ReadCustody> {
+        match self {
+            Self::Private(read) => read.custody.as_ref(),
+            Self::SymbolSettings { custody, .. } => custody.as_ref(),
+            _ => None,
+        }
+    }
+    /// Settle whatever read authority the request held; idempotent.
+    pub(crate) fn release(&mut self, cx: &mut Cx<'_, Pending>) {
+        let custody = match self {
+            Self::Private(read) => read.custody.take(),
+            Self::SymbolSettings { custody, .. } => custody.take(),
+            _ => None,
+        };
+        if let Some(custody) = custody {
+            let _ = cx.finish_http_context(custody.context());
+        }
+    }
+    /// Exact delivery precedes any decoding or Store effect.
+    fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.custody()
+            .is_none_or(|custody| cx.validate_http_context(custody.context()).is_ok())
+    }
 }
 #[derive(Clone)]
 enum Feed {
@@ -623,6 +669,9 @@ impl Venue for BitunixFutures {
         {
             return;
         }
+        if !pending.delivered(cx) {
+            return;
+        }
         match pending {
             Pending::Private(read) => self.account_item(cx, read, item),
             Pending::History(read) => self.history_item(cx, read, item),
@@ -703,7 +752,19 @@ impl Venue for BitunixFutures {
             _ => {}
         }
     }
-    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+    fn on_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut pending: Pending,
+        response: Response<'_>,
+    ) {
+        if pending.custody().is_some() {
+            let delivered = pending.delivered(cx);
+            pending.release(cx);
+            if !delivered {
+                return;
+            }
+        }
         let pending = match pending {
             Pending::History(read) => {
                 self.history_response(cx, read, response);
@@ -740,6 +801,7 @@ impl Venue for BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => {
                 self.symbol_settings_response(cx, &symbol, write_revision, serial, response);
                 return;
@@ -841,9 +903,10 @@ impl Venue for BitunixFutures {
     fn on_stream_error(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Pending,
+        mut pending: Pending,
         response: Response<'_>,
     ) {
+        pending.release(cx);
         let pending = match pending {
             Pending::Private(read) => {
                 self.account_failed(cx, read, Some(&response));
@@ -853,6 +916,7 @@ impl Venue for BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => {
                 self.settings_failed(cx, &symbol, write_revision, serial, Some(&response));
                 return;
@@ -880,11 +944,12 @@ impl Venue for BitunixFutures {
     fn on_stream_malformed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        pending: Pending,
+        mut pending: Pending,
         status: u16,
         headers: &str,
         error: &str,
     ) {
+        pending.release(cx);
         let response = Response {
             status,
             headers,
@@ -899,6 +964,7 @@ impl Venue for BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => {
                 self.settings_failed(cx, &symbol, write_revision, serial, Some(&response));
                 return;
@@ -932,7 +998,8 @@ impl Venue for BitunixFutures {
             pending => self.public_typed_failed(cx, pending, error),
         }
     }
-    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
+        pending.release(cx);
         match pending {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, read, error),
@@ -947,6 +1014,7 @@ impl Venue for BitunixFutures {
                 symbol,
                 write_revision,
                 serial,
+                ..
             } => self.settings_failed(cx, &symbol, write_revision, serial, None),
             pending @ (Pending::Markets { .. } | Pending::Tickers { .. }) => {
                 let failure = classify::read(&codes::BITUNIX, Released::Transport, None, error);
