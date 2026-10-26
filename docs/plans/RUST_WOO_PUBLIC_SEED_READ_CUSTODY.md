@@ -2,12 +2,17 @@
 
 ## Status and prerequisites
 
-Local source, originals and reviewed fixture adoption are committed and unpushed.
-Source/API/control/fixture direction is CLEAR (codex-hcmq3f). On the actual
-74a0ba44d38 composition, the complete WOO family executes264PASS/0FAIL with no
-ignored or filtered tests; strict all-target Clippy and formatting pass. The
-source/map bans and ratchets pass on the source-exact e4f9 checkpoint. CI is not
-started: this local-only checkpoint is not READY or a CI family-size record.
+Publication is authorized as one venue-only PR containing the plan, originals,
+source and reviewed fixture adoption. Source/API/control/fixture review is CLEAR
+(codex-hcmq3f). The first qualified composition executes264PASS/0FAIL with no
+ignored or filtered tests; strict all-target Clippy and formatting pass. That
+checkpoint and its first-source measurements below retain their original pins.
+
+The current landing tipfff73624e85 is plain-merged. README and CALLERS retain
+full incoming text plus the unchanged own suffix once; all non-doc paths merge
+automatically. Current scoped checks and an exact composed local combined build
+qualify publication; the single PR-triggered run supplies the CI family record.
+READY requires those gates plus exact composition review and full green CI.
 
 #2169 landed as25ca8466d63d8f39954618635305cc083f9ec3f2 and was integrated
 without rebase. The landing tip74a0ba44d3838f0ddf9885a5bc7358107f068eea was
@@ -221,7 +226,7 @@ byte-identical, all eight saved artifacts are hash-verified, and every tracked
 source blob in both archives matches its pinned Git tree. All scratch targets
 were deleted after each measurement. No budget or performance gate is changed.
 The local WOO pair was the specifically requested first-source qualification;
-CI remains the authoritative family record when publication is authorized.
+CI remains the authoritative family record for the published PR.
 
 The final two reviewed fixture corrections release the positional-engine seed
 at its original0/10 clocks and explicitly fail each genuinely released Funding
@@ -229,5 +234,5 @@ request at its cadence observation in the socket-only supervision harness.
 Returned cleanup goes through the unchanged timer ledger; no timer filtering
 or blanket flush hides managed deadlines. Original financial/assertion tokens
 remain intact. The earlier261PASS/3FAIL result stays historical; after adoption,
-all264 family tests, strict Clippy and fmt pass on661ce15abb1. Nothing is pushed,
-no PR or CI run is created, and no READY/landing claim is made here.
+all264 family tests, strict Clippy and fmt pass on661ce15abb1. Publication
+qualification is tracked separately from that historical local checkpoint.
