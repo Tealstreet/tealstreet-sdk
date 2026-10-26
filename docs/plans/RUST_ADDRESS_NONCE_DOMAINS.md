@@ -492,3 +492,10 @@ there is no blocking startup scheduler, automatic retry or hosted activation.
 Initialization errors are reported through the existing StartupFailed notice.
 All runtime additions are compiled only with `address-nonce`; CI records family
 sizes and an exact combined comparison verifies non-adopter shipping growth.
+
+The private capability uses an optional boxed state: uninitialized identities
+hold no allocation, while verified/refused slots retain the existing exact
+proof/error. This keeps Identity compact when Cargo unifies `address-nonce`
+across non-adopting venues; BingX/Phemex read custody must remain within clippy's
+200-byte variant-size difference. Slot/ref/domain/issuer/generation equality,
+serde omission, resets, setup ownership and final-Claim checks are unchanged.
