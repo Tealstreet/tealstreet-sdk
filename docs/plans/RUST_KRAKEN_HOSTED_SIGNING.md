@@ -44,6 +44,9 @@ setup. Its exact TS spelling is a reviewer gate before source; the contract is:
 - remoteSigner retains existing precedence over payloadSigner, including when
   both are configured. Neither may fall back to a local secret or the other
   callback after a refusal, timeout or capability mismatch;
+- hosted construction refuses a nonempty raw secret alongside either configured
+  hosted signer, before local installation or work. The public API key remains
+  a presentation input checked against the binding. Pin no dual custody;
 - plain callbacks or old peers lacking this capability refuse before private
   task allocation or transport. Export presence and HmacSha512 advertisement do
   not establish peer support. Do not infer support from kraken-challenge;
@@ -110,7 +113,9 @@ Namespace continuity is an explicit source gate, not an assumed deployment
 fact. The legacy domain uses SHA256(decoded secret); dispatch uses a tagged
 trusted stable subject. The current core still exports the bare legacy u64
 reservation and no completed takeover API. Trusted local setup must associate
-installed bytes/slot to the subject without exporting the digest; delegated
+installed bytes/slot to the subject without exporting the digest. That association remains inside the trusted
+LocalSigner/executor and surfaces only an opaque tagged subject; no secret hash
+becomes stable_id, binding metadata or a notice. Delegated
 setup receives the peer-confirmed subject rather than inventing a random one.
 
 Before switching an owned issuer, fence its generation, join actual provider,
@@ -126,6 +131,19 @@ replay a write. Resource retirement is not proof of remote nonexecution.
 
 ## Futures authentication and Spot token
 
+Engine API review at 5624866e3ec found a blocking gap: current sign_meta reads
+managed HTTP or address-setup tasks only. Existing send_signed WS Pending is
+ownerless and cannot produce this metadata. A real Session in the venue alone
+does not fix that. fe7lgm owns the proposed separate shared entry
+`Cx::send_session_signed(socket, &Session, text, step)`: it must validate the
+live Session and socket epoch, retain Owner::Session/SessionAuth/Primary,
+stamp nonce-less work from the dispatch clock, preserve same-socket ordering
+and the original epoch/deadline, and avoid the unrelated HTTP sequence barrier.
+Its exact API, originals, implementation, non-adopter costs and assignment are
+separate source gates. Do not call an imagined current entry or fake HTTP work.
+HTTP and token metadata need no new engine entry after their actual adoption.
+
+
 Add the separately negotiated closed `kraken.futures.challenge/1` recipe to the
 shared Kraken codec. Its descriptor contains the actual challenge, environment
 and engine-prepared signing stamp; its owner is the genuine current Session,
@@ -137,7 +155,10 @@ The signing step supplies a genuine stamp-bearing, nonce-less receipt and a
 frozen deadline; the peer checks the raw deadline first and stamp freshness at
 the signing moment. replayUntil uses that finite freshness end, not an
 unbounded challenge lifetime. Validation and rechecks after async work happen
-before results can release subscriptions. Preserve the current socket epoch,
+before results can release subscriptions. On every recipe, including the
+challenge, returned Present bytes must equal binding.expectedCredential exactly
+before headers or subscription frames are rendered; a peer cannot substitute a
+public key under otherwise valid result widths. Preserve the current socket epoch,
 one accepted challenge, three distinct ACKs, initial payload completion and
 shared retirement. A stale challenge or old Session cannot publish frames.
 Do not enable Futures hosted eligibility without this required recipe.
@@ -158,8 +179,10 @@ enters an operation frame. No separate Spot WS MAC capability is needed.
    form/query, body absence, ordered headers, challenge and subscriptions.
    Compare independent 64-byte MACs, not just descriptor equality.
 3. Refuse old/missing negotiation, wrong account/incarnation/slot/ref, malformed
-   graph, arbitrary digest, forbidden path, wrong/missing/extra result, protected
+   graph, arbitrary digest, forbidden path, wrong/missing/extra result, wrong returned Present, protected
    header injection, unsafe/ambiguous nonce, mismatched receipt and stale task.
+   Add setup negatives proving no secret-derived stable_id/notice/binding and
+   no local provider installation when hosted mode and a raw secret coexist.
    Pre-validation refusals make zero callbacks and no HTTP; post-callback
    failures make no HTTP, subscription or partial result.
 4. Exercise >2^53 nonces, genuine reversed Claim/repair, complete replay inside
@@ -172,8 +195,9 @@ enters an operation frame. No separate Spot WS MAC capability is needed.
    and output-width checks. Run scoped TS tests/typecheck, native Kraken tests
    and strict clippy/fmt/bans, registry/host feature modes, Rust replay and actual
    browser-host public gates. No native-only beta readiness claim.
-6. One local composed combined measurement for this shared PR, jobs 4 and one
-   cargo build at a time; CI records family sizes. Report the actual measured
+6. One local composed combined measurement for this shared PR, jobs 4 for that
+   single WASM/size build. Tests/checks use CARGO_BUILD_JOBS=2, one cargo
+   invocation per lane at a time; rerun an exit-137 resource kill. CI records family sizes. Report the actual measured
    tip, delta and Kraken/Spot cap; no local family matrix. The urgent cap fix is
    separate. Inventory changes are removal-only evidence after real adoption,
    never cosmetic relocation or diagnostic/oracle deletion.
