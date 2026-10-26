@@ -406,9 +406,65 @@ fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
         assert_eq!(payload.kind, "MARKET");
         assert_eq!(payload.client_id.as_deref(), Some("next"));
         h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
-        assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
+        if ambiguous {
+            // Nothing is resent; the Unknown outcome only queues the fence's read.
+            reconcile_read_only(&mut h);
+        }
         assert!(h.pending.is_empty());
+        if ambiguous {
+            // A lost entry may have been accepted: never success, and the
+            // accepted next order stays visible.
+            let error = failed(&h, 71);
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            assert_eq!(error.partial.unwrap().order_ids, ["accepted-next"]);
+        } else {
+            assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
+        }
     }
+}
+
+#[test]
+fn a_child_leg_lost_in_transport_makes_the_command_unknown_with_accepted_ids() {
+    let mut h = private();
+    bracket_entry(&mut h, 12, None);
+    let tp = h.take("/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: tp.id,
+            error: "response lost after possible acceptance",
+        },
+    );
+    h.collect();
+    // The sibling stop-loss is still placed.
+    let sl = h.take("/orders");
+    h.respond(sl, 200, r#"{"id":"sl"}"#);
+    reconcile_read_only(&mut h);
+    let error = failed(&h, 12);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.partial.unwrap().order_ids, ["entry", "sl"]);
+}
+
+/// After an Unknown write the only pending request is the fence's order read.
+fn reconcile_read_only(h: &mut Harness) {
+    let read = h.take("/orders");
+    assert_eq!(read.method, Method::Get);
+    assert!(h.pending.is_empty(), "{:?}", h.pending);
+}
+
+fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
+    h.actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error })
+                if *command == id =>
+            {
+                Some(error.clone())
+            }
+            _ => None,
+        })
+        .expect("command failed")
 }
 
 #[test]
@@ -1474,4 +1530,32 @@ fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_
         symbol: "BTC-USD-PERP".into(),
     });
     take_method(&mut h, Method::Delete, "/orders?market=");
+}
+
+#[test]
+fn a_refused_auth_is_a_typed_terminal_failure_without_retries() {
+    let mut h = private();
+    // Past the JWT refresh point, the next private request re-authenticates.
+    h.now += 180_000.;
+    place(&mut h, 80, vec![opts(OrderType::Limit)]);
+    let auth = h.take("/auth/");
+    h.respond(
+        auth,
+        401,
+        r#"{"error":"INVALID_SIGNATURE","message":"unknown subkey"}"#,
+    );
+    let error = failed(&h, 80);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    // No 2 s retry is armed, and nothing re-authenticates later.
+    let at = h.now + 2_000.;
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if (*at_ms - at).abs() < 1.))
+    );
+    place(&mut h, 81, vec![opts(OrderType::Limit)]);
+    assert!(!h.pending.iter().any(|r| r.url.contains("/auth/")));
+    let error = failed(&h, 81);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
 }
