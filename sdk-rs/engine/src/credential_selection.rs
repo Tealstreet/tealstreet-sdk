@@ -57,9 +57,18 @@ pub struct Selection {
     secondary_supplied: bool,
     evidence: Option<AccountReadScope>,
     session_auth: bool,
+    /// The exact role this selection was made for, for signing metadata.
+    #[cfg(feature = "sign-meta")]
+    role: CredentialRole,
 }
 
 impl Selection {
+    /// The exact role, including any primary reason and read scope.
+    #[cfg(feature = "sign-meta")]
+    pub fn role(&self) -> CredentialRole {
+        self.role
+    }
+
     /// Primary egress for a keyless session whose unsigned requests carry
     /// this key's login or token (`SessionPolicy.private_egress`).
     pub fn session_egress(&self) -> Option<PrivateEgress> {
@@ -170,6 +179,8 @@ impl<T> Slots<T> {
             secondary_supplied: self.secondary_supplied(),
             evidence,
             session_auth: role == CredentialRole::SessionAuth,
+            #[cfg(feature = "sign-meta")]
+            role,
         };
         Ok((selection, material))
     }
@@ -249,6 +260,34 @@ mod tests {
                 scope: None,
             };
             assert_eq!(chosen(&both, role), Some(("primary", primary)));
+        }
+    }
+
+    /// "A Secondary slot never signs a write or a login" holds by construction.
+    #[cfg(feature = "dispatch-nonce")]
+    #[test]
+    fn nonce_selection_keeps_writes_and_logins_primary_while_reads_use_the_secondary() {
+        let identity = |name: &str| {
+            crate::signing::Identity::new(
+                crate::signing::KeyRef(format!("{name}-key")),
+                Some(crate::signing::KeyRef(format!("{name}-sign"))),
+            )
+            .with_stable_id(Some(format!("{name}/account")))
+        };
+        let both = Slots::new(
+            Some(identity("primary")),
+            Some(identity("secondary")),
+            SlotPolicy::default(),
+        );
+        let (read, ..) = both.select(Read { scope: BALANCE }).unwrap();
+        assert_eq!(
+            read.slot(),
+            CredentialSlot::Secondary,
+            "the secondary serves reads"
+        );
+        for role in [Mutation, SessionAuth] {
+            let (selection, ..) = both.select_with_nonce(role, &crate::nonce::KRAKEN).unwrap();
+            assert_eq!(selection.slot(), CredentialSlot::Primary);
         }
     }
 
