@@ -9555,6 +9555,23 @@ failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
 identity options. This slice retains those rows and all checker rules; completion
 of the custody audit does not claim inventory zero or a new endpoint migration.
 
+## Bitunix trading on Preflight roots and serial Plans (#2207)
+
+Every Bitunix trading command opens a Preflight root before validation and runs one serial Plan; account, settings and history reads are managed. Bitunix leaves the legacy request funnel (request sites 9 → 0).
+
+- **Refusals.** A validation refusal is the command's one NotSent terminal. Keyless trading keeps the local "Bitunix credentials required" refusal.
+- **Concurrency (better than TypeScript).** Jobs stay concurrent with no FIFO, so a by-ID cancel is never held behind a batch place's 1000 ms chunk gap. `CancelSymbolOrders` still waits behind a placing job, as the engine's order lock defers it. The order lock now refuses a second mutation of an order for its whole job, which native allowed, including inside the amend fallback. The engine lock now maps `__tp`/`__sl` leg IDs to their parent order (engine `order_locks` `native()`): any venue whose order IDs end in `__tp` or `__sl` is affected, which today is Bitunix alone.
+- **Settings holds.** A second leverage or margin change on the same symbol, or a second position-mode change, is refused NotSent while one is in flight. A change whose outcome is Unknown keeps that scope held until a fresh read issued after it lands: the symbol's settings read, or the account read for position mode. Native's late write could otherwise silently reverse a newer change.
+- **Prerequisite reads.** Positions, orders and TP/SL reads before a placement sign Primary inside the command, even with a read key configured. A failed or superseded one is NotSent ("Bitunix preflight reconciliation failed") with no write.
+- **Write outcomes ride the journal.** The venue's `aggregate`, `append` and `effective` bookkeeping is gone. Batch place and cancel ACKs use `http_write_batch`, and a malformed or missing ACK row makes the batch Unknown while keeping the observed IDs.
+  - A refused chunk keeps the earlier accepted IDs as partial, and later chunks still go out, as native.
+  - **Changed:** an uncertain chunk now ends the job before later chunks; native kept sending them.
+- **Classification.** HTTP status classifies a non-2xx write: 400 Rejected, 401 AuthInvalid, 403 AuthPermission and 429 RateLimited are refusals, and 408 and 5xx are the engine's Unknown ("HTTP response does not prove the write outcome").
+  - **Changed:** the body's code is not evidence on a non-2xx, so `venueCode` is absent there.
+  - Code `10007` in a 2xx write answer re-signs once with a fresh nonce; reads keep it as a plain refusal.
+- **Recoveries stay in the job.** "Position does not exist" re-reads and re-places once. The amend fallback (cancel, final-state read, replacement) runs as continuations under the same order lock, and its replacement is fenced as a placement, so a lost ACK sets the cancel-all uncertainty fence. A lost in-job read keeps the journal's selected error and appends its own text.
+- **Reconcile.** An uncertain seal restores the job's optimistic rows and reads Primary order and TP/SL snapshots (`PrimaryRead { PostUnknownOrderRead }`). Both complete snapshots release the engine's placement fence (`orders_reconciled`). Callers see those GETs after an Unknown write.
+
 
 ### Shared hosted operation foundation
 
@@ -9604,3 +9621,39 @@ Session calls keep Mutation journal evidence, order locks and Unknown on an
 unproven released send. Their resend freezes codec bytes while refreshing the
 bundle at Bind; Preflight signed calls repeat their existing provider work.
 No current venue enables a new auth mode in this engine slice.
+
+### Primary key-permission verification reads
+
+`PrimaryReason::KeyPermissions` (`keyPermissions` in signMeta) names a primary
+read that verifies the trading key's own capabilities before private startup,
+such as Coinbase `GET /api/v3/brokerage/key_permissions`. It is primary-only,
+like every `PrimaryRead`. A secondary read-key verification stays an ordinary
+`Read`. No existing reason was reused, because none describes it truthfully.
+
+
+## MEXC installed signing and selected private Reads
+
+All private REST and login signing uses installed immutable provider recipes.
+Trusted JS/native setup preserves mexc: plus12 SHA256 bytes of the raw Primary
+before provider trim as explicit stableId; conflicting metadata refuses. Identity
+may use complete Secondary with credential-only Primary; other private callers
+retain native usable-Primary eligibility. Private history stays Primary-only.
+Background account observations are independent20s/Never selected Reads; exact
+DATA gates rows/status/publication, and exact retirement precedes successors.
+Permanent precommit failures clean up/warn without adding recovery; transient
+and released failures retain native recovery. Nonfinite venue callbacks clean up exact custody, including one correlated
+failure terminal for an owned caller Read. Existing financial reducers and wire controls remain.
+
+Trading FIFO/pacing/reducers and legacy sockets stay native in this slice. ONE
+new interim sign_http attachment remains visible outside the frozen allowance:
+account.rs6805c7c16738 count0->1, explicitly accepted bans RED by the overseer
+under #2195 precedent, with8x5tm1 GO required. The second trading PR removes it.
+It waits for shared admissible sets, per-call serial pacing and response-derived
+defer_pacing; this slice invents no write Context or pacing substitute.
+
+Fixture collection uses actual event observations and genuine Prepare/Bind/Claim.
+History delivery uses the query clock instead of the unrelated100ms startup
+clock; payload financial timestamps/values stay. Paused capacity uses254 depth
+peers then two independent candle peers after genuine429. Exact completion
+Cancel is captured/checked once. The secondary helper is test support with real
+installed providers and genuine test command entry; native assertions retained.

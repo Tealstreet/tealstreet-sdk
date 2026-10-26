@@ -25,6 +25,21 @@ pub(super) const TABLE: CodeTable = CodeTable {
             only: None,
         },
         Row {
+            key: Key::Int(100004),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100413),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100419),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
             key: Key::Int(101204),
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: Some(Intent::Place),
@@ -178,5 +193,31 @@ mod tests {
     #[test]
     fn bingx_table_is_well_formed() {
         safe_cex_engine::classify::assert_table(&super::TABLE);
+    }
+}
+
+#[cfg(test)]
+mod key_refusal_tests {
+    use super::*;
+    use safe_cex_engine::classify::{Native, NativeCode};
+
+    /// Every key refusal the read side rejects on is an auth refusal on writes.
+    #[test]
+    fn every_read_key_refusal_is_an_auth_refusal_on_writes() {
+        for code in KEY_REFUSALS {
+            let native = Native {
+                code: NativeCode::Int(code),
+                message: "native",
+            };
+            let verdict = TABLE.verdict(&native, Intent::Place);
+            assert!(
+                matches!(
+                    verdict,
+                    Verdict::Refused(ErrorKind::AuthInvalid | ErrorKind::AuthPermission)
+                        | Verdict::RefusedResend(ErrorKind::AuthInvalid)
+                ),
+                "{code}: {verdict:?}"
+            );
+        }
     }
 }

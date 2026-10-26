@@ -41,7 +41,9 @@ fn first_authenticated_rest_and_private_login_use_the_supplied_engine_time() {
             },
         },
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut engine)
+        .into_iter()
+        .collect();
     let mut signed = 0;
     let mut private = None;
     for action in actions {

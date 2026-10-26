@@ -5515,6 +5515,12 @@ impl<V: Venue> Engine<V> {
             })
     }
 
+    /// The latest event time, for fixtures that prepare after `handle`.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn dispatch_now(&self) -> f64 {
+        self.io.core.dispatch_now
+    }
+
     pub fn prepare_dispatch(&mut self, now: f64) {
         self.assert_live();
         #[cfg(feature = "address-nonce")]
