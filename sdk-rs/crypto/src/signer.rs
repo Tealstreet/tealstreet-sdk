@@ -20,6 +20,25 @@ pub struct LocalSetup {
     pub primary: Option<LocalIdentity>,
     pub secondary: Option<LocalIdentity>,
 }
+
+/// Trusted Lighter setup's public API-index principal, never wire material.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LighterPrincipal {
+    api_key_index: u8,
+}
+impl LighterPrincipal {
+    pub fn new(api_key_index: u64) -> Result<Self, SignError> {
+        if api_key_index > 254 {
+            return Err(SignError::InvalidRequest);
+        }
+        Ok(Self {
+            api_key_index: api_key_index as u8,
+        })
+    }
+    pub fn api_key_index(&self) -> u8 {
+        self.api_key_index
+    }
+}
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalIdentity {
@@ -261,6 +280,8 @@ impl DecodedIdentity {
 
 #[derive(Default)]
 pub struct LocalSigner {
+    #[cfg(feature = "schnorr")]
+    lighter_principal: Option<(KeyRef, LighterPrincipal)>,
     keys: HashMap<KeyRef, Zeroizing<Vec<u8>>>,
     /// Extra refs are usable only by their own algorithm, never presented,
     /// interpolated or used as an ordinary MAC/digest key.
@@ -277,12 +298,59 @@ impl LocalSigner {
     pub fn new() -> Self {
         Self::default()
     }
+    pub fn from_setup_with_lighter_principal(
+        setup: LocalSetup,
+        policy: CredentialSetupPolicy,
+        public_data_only: bool,
+        principal: LighterPrincipal,
+    ) -> Result<(Self, Identities, SetupFacts), SignError> {
+        #[cfg(feature = "schnorr")]
+        {
+            if setup.secondary.is_some()
+                || policy.primary.and_then(|policy| policy.signing_algorithm)
+                    != Some(Algorithm::SchnorrDigest)
+            {
+                return Err(SignError::InvalidRequest);
+            }
+            let (mut signer, mut identities, facts) =
+                Self::from_setup_with_facts(setup, policy, public_data_only)?;
+            if !public_data_only
+                && facts.primary_key() != KeyPresence::Nonblank
+                && let Some(primary) = identities.primary.as_mut()
+                && primary.signing_ref().is_ok()
+            {
+                if !primary.credential.0.is_empty() {
+                    signer.remove(&primary.credential);
+                }
+                let reference = KeyRef("primary.principal".into());
+                primary.credential = reference.clone();
+                signer.lighter_principal = Some((reference, principal));
+            }
+            Ok((signer, identities, facts))
+        }
+        #[cfg(not(feature = "schnorr"))]
+        {
+            let _ = (setup, policy, public_data_only, principal);
+            Err(SignError::Unsupported)
+        }
+    }
+    #[cfg(feature = "schnorr")]
+    fn is_lighter_principal(&self, reference: &KeyRef) -> bool {
+        self.lighter_principal
+            .as_ref()
+            .is_some_and(|(issued, _)| issued == reference)
+    }
     /// Consumes bytes; neither this provider nor its keys implement Debug/export.
     /// Replaced material is undeclared: a declaration describes the bytes setup
     /// installed, never later ones. A role ref keeps its role, which is its
     /// declaration, and a ref an aliased slot shares keeps its slots' algorithm;
     /// neither's type changes this way.
     pub fn insert(&mut self, reference: KeyRef, bytes: Vec<u8>) {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(&reference) {
+            drop(Zeroizing::new(bytes));
+            return;
+        }
         match self.shared.get(&reference) {
             Some(Some(algorithm)) => {
                 self.algorithms.insert(reference.clone(), *algorithm);
@@ -521,6 +589,10 @@ impl LocalSigner {
         Self::from_setup_with_facts(setup, policy, public_data_only)
     }
     pub fn remove(&mut self, reference: &KeyRef) {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(reference) {
+            self.lighter_principal = None;
+        }
         self.keys.remove(reference);
         self.roles.remove(reference);
         self.algorithms.remove(reference);
@@ -579,6 +651,11 @@ impl LocalSigner {
         bytes: Vec<u8>,
         algorithm: Algorithm,
     ) -> Result<(), SignError> {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(&reference) {
+            drop(Zeroizing::new(bytes));
+            return Err(SignError::InvalidRequest);
+        }
         if !asymmetric(algorithm)
             || self.roles.contains_key(&reference)
             || self
@@ -604,6 +681,10 @@ impl LocalSigner {
     }
     /// A local signer's missing ref never appears later.
     fn raw_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
+        #[cfg(feature = "schnorr")]
+        if self.is_lighter_principal(reference) {
+            return Err(SignError::InvalidRequest);
+        }
         self.keys
             .get(reference)
             .map(|key| key.as_slice())
@@ -770,6 +851,9 @@ impl LocalSigner {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod lighter_principal_tests;
 /// Semantic check of one provider's public answer at the trusted setup
 /// boundary; widths alone admit off-curve and non-canonical values.
 pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
