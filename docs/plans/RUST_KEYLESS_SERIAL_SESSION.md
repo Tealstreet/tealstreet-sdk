@@ -80,7 +80,8 @@ can fail_preflight or done_empty_plan without retiring the Session.
 
 Use genuine engine command admission, real Session creation and readiness,
 Prepare/Bind/Claim, exact DATA and real timers. An inert entry stub may expose
-the new API while refusing without effects; missing methods and compiler errors
+the new API by delegating unchanged admission; it adds no keyless write authority.
+It need not refuse an already-valid ordinary ReadOnly policy; missing methods and compiler errors
 are not REDs. No synthetic issuer, fake Credential or manually forged delivery.
 
 Required controls:
@@ -127,19 +128,24 @@ unlanded public-address setup is inferred from this engine prerequisite.
 
 ## Original checkpoint receipt
 
-The mechanical Option and Some wrappers are isolated in d373d770924: twelve
-single-line edits, with no assertion changes. The following checkpoint adds
+There are thirteen mechanical edits: d373d770924 contains twelve single-line
+Option/Some edits, and 7e7584505b5 carries the required PlanPolicy projection
+Some(policy.credential) -> policy.credential. d373d770924 is not independently
+buildable: before that thirteenth edit its projection is a nested Option. No
+history is rewritten and no assertion changes are part of those edits. The following checkpoint adds
 only an inert begin_preflight_with_session delegator to existing admission,
 a mandatory-Some guard preserving the old serial behavior, the new test include,
 and its controls. It grants no keyless write authority.
 
-Thirteen controls execute: twelve behavior assertion REDs and one GREEN, zero
-ignored. Seven fail at the genuine keyless entry assertion, the empty-cleanup
-and mixed-policy controls likewise stop at entry, foreign and retired controls
-observe Invalid instead of Revoked, and the ReadOnly rejection control observes
-that the stub still delegates ordinary ReadOnly admission. Missing methods,
-fixture signature/import/timer spelling compile errors from development are
-excluded from the RED count. The ordinary keyless refusal is the GREEN.
+Thirteen controls execute: twelve assertion REDs and one GREEN, zero ignored.
+They expose four distinct behaviors: valid keyless entry is refused, a foreign
+Session yields Invalid instead of Revoked, a retired Session yields Invalid
+instead of Revoked, and ReadOnly is admitted rather than refused by the new
+boundary. Nine RED tests stop at the valid-entry precondition: six at admitted(),
+and three direct entry checks (mixed policy, empty cleanup, missing/foreign
+bearer). Their intended runtime suffixes are entry-gated, not nine independent
+runtime failures. Development compiler errors are excluded. The ordinary
+keyless refusal is the GREEN.
 Every fixture first completes a real managed Empty-body login using the typed
 PrimaryLogin selection to obtain SessionAuth egress, with no Identity/KeyRef or
 provider work. This is engine custody evidence, not constructor certification.
@@ -157,3 +163,58 @@ Existing signed Session controls: 35 PASS; existing serial controls: 32 PASS,
 zero ignored. Scoped strict clippy passes with serial-plans, session-bearer,
 condition-waits and mutation barriers. Logs and exact hashes are retained in
 /tmp/codex-keyless-serial. No size, runtime source or CI clearance is claimed.
+
+The exact original test command was `cargo test --manifest-path sdk-rs/Cargo.toml
+-p safe-cex-engine --lib --features
+serial-plans,session-bearer,http-mutation-barriers,condition-waits keyless_serial
+-- --nocapture`. Signed controls used the same command with filters
+`serial_session::` and `serial_plans::`. Strict used `cargo clippy` with the same
+manifest/package/features plus `--lib --tests -- -D warnings`; its cached
+Finished line is not evidence of a separate rebuild. The no-Session control used
+`cargo test --manifest-path sdk-rs/Cargo.toml -p safe-cex-engine --lib --features
+serial-plans serial_plans::` (32 PASS). All logs retain owner execution attribution.
+
+## Source checkpoint contract
+
+The source retains the full issuer-bound Session handle privately in both
+Preflight and Serial state. Only the dedicated entry can bypass the existing
+mandatory-write-credential policy check, with both read and write credentials
+absent. The ordinary entry is unchanged. Normal, owned physical and barrier
+complete-Plan routes all refuse the retained Session root before reservation.
+Every new Context uses only its Session's declared egress, without interpreting
+missing credentials as a Primary selection. Each call must supply that exact
+live Session; continuation and Session resend recheck the retained authority.
+
+Keyless managed recipes refuse before inspecting signing freshness, nonce
+claims or provider work. Prepare explicitly has no signing credential, recipe,
+attempt, role or signer headers. The legacy sign_http attachment cannot attach
+to a managed request. An installed secondary remains unused by the keyless Read.
+The ordinary signed Some path and its request-level Session bearer are retained.
+
+A keyless serial physical call freezes a SHA-256 fingerprint of length-delimited
+method, URL, optional body and static codec headers on successful first queueing.
+Its authentication resend must match before any new Prepare or reservation;
+Session headers are deliberately excluded and re-read at Bind. Only the digest
+is retained, not cached signed bytes or secret headers. A fresh serial logical
+call clears this fingerprint, so cancel then leverage can have different bodies.
+A changed body or attempted signed resend returns Invalid and seals through
+existing Plan admission/journal handling. Earlier released work may project the
+command to Unknown; an accepted earlier call projects None, not whole-command
+NotSent. These projections do not change the shared journal policy.
+
+Session retirement fences unreleased bound packets and retires a root with no
+pending delivery through the existing Preflight/Plan seal and owner-retirement
+paths. Released work keeps its delivery and financial evidence; its next call
+is refused and its final command outcome follows the journal. Foreign/retired
+refusals change no auth health or signing latch. Empty completion preserves the
+Session and its revision. Equality expiry is Timeout/NotSent for an unreleased
+operation, and late completion cannot re-open it.
+
+The first source execution exposed the disclosed second-refusal grant.unwrap
+fixture bug. Its correction maps absent grants to RetryForbidden, as the
+existing serial Session controls do, and retains every original assertion.
+Additional source-stage controls cover physical-owned admission, non-finite
+entry, nonce/signing-intent refusal, legacy/selected attachment, genuine installed
+secondary isolation, duplicate old DATA, parked retirement, exact equality and
+late completion, changed resend body, and accepted-prefix journal retirement.
+They are source evidence, not retroactively counted as original REDs.
