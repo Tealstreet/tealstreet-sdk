@@ -271,3 +271,17 @@ core fix, 255-peer single-credit turnover, all-256-credit reuse, both command/
 repair lock directions, raw REST proof and held/released effect distinctions.
 The original 28 controls pass on the locally adopted source. Full composed
 native, strict/fmt/bans and CI/replay results remain separate final evidence.
+
+## Composed correctness checkpoint
+
+The b37013c4c1d landing tip is merged (0f4d893ad31), including the actual
+#2202 repair-settlement fix and #2203 affected-venue CI path. The merged
+Backpack suite passed 427 tests across 28 targets, with no failures and one
+existing ignore. The reviewed test-only module relocation then passed all
+nine unit tests; all-target strict Clippy and workspace formatting passed.
+The relocation keeps both private module parents and every signing/header
+assertion, and moves no production sender outside the scanner. The raw
+account request entry and its three raw credential-selection sites are
+removed; the conservative trading macro entry remains. Test inventories and
+signing/socket manifests receive no allowances. Exact final bans and frozen
+PR correctness/replay results remain separate gates.
