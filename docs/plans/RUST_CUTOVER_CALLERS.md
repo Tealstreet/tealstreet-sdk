@@ -9336,7 +9336,8 @@ the exact physical epoch; obsolete token responses/retries are inert, and the
 two native subscription frames use an epoch-bound one-shot queue with final
 release expiry checks. Native HTTP signing and nonce namespace stay unchanged.
 The newly linked managed-sockets feature has a family cost (#2189); CI records
-Kraken size, and the source PR measures the composed combined bundle.
+Kraken size. The venue-only policy waives a local combined measurement while
+combined headroom exceeds 200K.
 
 Public subscription Capacity retires the current epoch once and recovers through
 shared Closed/backoff, preserving native ticker/book/OHLC demand. Repeated

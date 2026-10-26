@@ -187,14 +187,13 @@ request/signing/credential inventories remain exact. Publish the caller-visible
 managed expiry/resource/retirement differences in CALLERS, without implying a
 nonce takeover, remote nonexecution or journal rewrite.
 
-CI records Kraken family sizes. Measure one local composed combined on the
-current landing tip before READY. CI is the family size record; do not run a
-local family matrix. Attribute the newly linked managed lifecycle cost per #2189.
-Generic engine/provider changes require their own shared gates. No profile or
-gate changes are part of this venue slice. Delete each own scratch target after measurement, keep sources/logs and
-the size table, and run no competing size builds in this lane. Source CLEAR,
-qualified green CI and auditor exact-tree GO precede guarded SDK landing. This
-plan records source inspection only; no originals, builds or execution claimed.
+CI records Kraken family sizes. Under the venue-only speed policy, no local
+combined measurement is required while combined headroom exceeds 200K. Attribute
+the newly linked managed lifecycle cost per #2189. Shared engine/provider changes
+retain their separate gates. No profile or gate changes belong to this slice.
+Delete own scratch targets after checks and retain source/log evidence. One
+reviewer CLEAR plus the green correctness set, including Kraken replay, permits
+a guarded owner merge without auditor GO. CPU and certification are not gates.
 
 ## Local ingress originals checkpoint
 
@@ -220,7 +219,7 @@ The archived source and logs are bound in
 
 Source uses the landed shared modes and removes all nine socket inventory
 occurrences together, retaining REST/signing custody separately. CI is the
-family size record; the source PR also needs a composed combined measurement.
+family size record; the venue-only speed policy governs combined measurement.
 Record the managed-sockets feature-link cost identified by #2189 alongside
 Kraken's measured family result; do not attribute that cost solely to codec code.
 
