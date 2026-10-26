@@ -164,7 +164,7 @@ mod retire_unissued_plan_calls {
                             attempts: 1,
                         },
                         crate::request_context::plan::SerialPolicy {
-                            credential: credential.clone().unwrap(),
+                            credential: Some(credential.clone().unwrap()),
                             pacing: None,
                             refusals_complete: false,
                         },
