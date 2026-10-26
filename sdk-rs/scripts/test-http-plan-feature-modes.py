@@ -81,6 +81,7 @@ def modes():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--list', action='store_true', help='Resolve and print modes without compiling')
+    parser.add_argument('--shard', help='Fixed zero-based INDEX/COUNT partition of sorted feature modes')
     args = parser.parse_args()
     closures, grouped = modes()
     print(json.dumps({'family_features': closures,
@@ -92,7 +93,13 @@ def main():
     env = dict(os.environ)
     env['RUSTFLAGS'] = (env.get('RUSTFLAGS', '') + ' -Dwarnings').strip()
     started = time.monotonic()
-    for features, families in sorted(grouped.items()):
+    selected = sorted(grouped.items())
+    if args.shard:
+        index, count = map(int, args.shard.split('/'))
+        if count < 1 or not 0 <= index < count:
+            parser.error('shard must have 0 <= INDEX < COUNT')
+        selected = selected[index::count]
+    for features, families in selected:
         mode_started = time.monotonic()
         flags = ['--features', ','.join(features)] if features else []
         print(f'Engine feature mode: {features or "empty"}; families={families}', flush=True)
@@ -103,7 +110,7 @@ def main():
                 command += ['--', '-D', 'warnings']
             subprocess.run(command, cwd=ROOT, env=env, check=True)
         print(f'Mode completed in {time.monotonic() - mode_started:.1f}s', flush=True)
-    print(f'All {len(grouped)} engine modes completed in {time.monotonic() - started:.1f}s',
+    print(f'All {len(selected)} selected engine modes completed in {time.monotonic() - started:.1f}s',
           flush=True)
 
 

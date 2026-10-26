@@ -669,7 +669,7 @@ impl BitgetFutures {
                             );
                         };
                         let policy = SerialPolicy {
-                            credential,
+                            credential: Some(credential),
                             pacing: None,
                             refusals_complete: true,
                         };

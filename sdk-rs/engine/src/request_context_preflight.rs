@@ -17,10 +17,29 @@ impl ContextRegistry {
         command: CommandId,
         policy: &PreflightPolicy,
         now: f64,
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))] session: Option<
+            &crate::request_context::Session,
+        >,
     ) -> Result<(), Error> {
         if !now.is_finite() {
             return Err(Error::Invalid);
         }
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        if let Some(session) = session {
+            let generation = self.validate_session(session)?;
+            if self.sessions.egress(generation).is_none() {
+                return Err(Error::Invalid);
+            }
+            if policy.purpose != PreflightPurpose::WriteAfterReads
+                || policy.read_credential.is_some()
+                || policy.write_credential.is_some()
+            {
+                return Err(Error::Invalid);
+            }
+        } else {
+            policy.validate()?;
+        }
+        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
         policy.validate()?;
         self.prune(now);
         if self.commands.contains_key(&command) {
@@ -205,6 +224,19 @@ impl<P> Cx<'_, P> {
         self.with_command_entry(operation, |cx, command| cx.issue_preflight(command, policy))
     }
 
+    /// Retain one live Session for unsigned serial calls without a credential.
+    /// Trusted Empty-login consumers only; this grants no signing authority.
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub fn begin_preflight_with_session(
+        &mut self,
+        policy: PreflightPolicy,
+        session: &crate::request_context::Session,
+    ) -> Result<Preflight, crate::request_context::CommandEntryError> {
+        self.with_command_entry(Operation::Mutation, |cx, command| {
+            cx.issue_preflight_bound(command, policy, Some(session))
+        })
+    }
+
     /// Opt into the exact caller receipt cap. A ReadOnly cap bounds its Read
     /// work; a WriteAfterReads cap bounds only the Preflight phase, and its
     /// Plan never inherits it. Missing receipt uses the shared typed refusal.
@@ -253,6 +285,22 @@ impl<P> Cx<'_, P> {
         command: CommandId,
         policy: PreflightPolicy,
     ) -> Result<Preflight, Error> {
+        self.issue_preflight_bound(
+            command,
+            policy,
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            None,
+        )
+    }
+
+    fn issue_preflight_bound(
+        &mut self,
+        command: CommandId,
+        policy: PreflightPolicy,
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))] session: Option<
+            &crate::request_context::Session,
+        >,
+    ) -> Result<Preflight, Error> {
         if self.io.core.http_delivery.is_some() {
             return Err(Error::Revoked);
         }
@@ -263,10 +311,13 @@ impl<P> Cx<'_, P> {
         {
             return Err(Error::State);
         }
-        self.io
-            .core
-            .request_contexts
-            .prepare_preflight(command, &policy, self.now)?;
+        self.io.core.request_contexts.prepare_preflight(
+            command,
+            &policy,
+            self.now,
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            session,
+        )?;
         let generation = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let writes = policy.purpose == PreflightPurpose::WriteAfterReads;
         let preflight = self
@@ -274,6 +325,18 @@ impl<P> Cx<'_, P> {
             .core
             .request_contexts
             .begin_preflight(command, generation, policy, self.now);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        {
+            self.io
+                .core
+                .request_contexts
+                .preflight_state_mut(&preflight)
+                .expect("new Preflight")
+                .session_root = session.cloned();
+            if session.is_some() {
+                self.io.core.request_contexts.keyless_roots += 1;
+            }
+        }
         #[cfg(feature = "order-locks")]
         if writes {
             self.io.core.order_locks.manage(command);
