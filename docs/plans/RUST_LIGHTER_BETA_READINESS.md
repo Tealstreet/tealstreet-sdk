@@ -48,6 +48,10 @@ counter differences and zero differences outside that class. Its tape SHA256 is
 4fedc4a2150c0fd5460db15feb612b678232f7c3c4b7c6e9c5d350281f6934aa.
 The composed native suite passes 327 tests, with strict all-target clippy; these
 support regression coverage and are separate from the JS/WASM evidence above.
+CI's retained public fixture reports 588 differences in the same accepted
+startup-counter class, with none outside it. Its construction-test failure was
+the tip-wide missing Lighter mapping, fixed separately by #2286 and composed
+here without changing Lighter runtime or assertions.
 
 ## Remaining beta blocker
 
