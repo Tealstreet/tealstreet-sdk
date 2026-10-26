@@ -145,7 +145,9 @@ fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
     }
 }
 #[test]
-fn every_account_axis_settings_and_history_get_uses_read_identity() {
+/// History signs with the read key too; tests/history.rs pins it on its own
+/// caller root (a probe has no genuine command entry).
+fn every_account_axis_and_settings_get_uses_read_identity() {
     let (opts, provider) = options();
     let venue = ProbeVenue::new(
         BitunixFutures::new(opts),
@@ -185,17 +187,6 @@ fn every_account_axis_settings_and_history_get_uses_read_identity() {
                 v.read_axis(cx, axis);
             }
             v.read_symbol_settings(cx, "BTCUSDT");
-            v.query(
-                cx,
-                7,
-                safe_cex_engine::Query::Income {
-                    from_ms: None,
-                    to_ms: None,
-                    symbol: None,
-                    kind: None,
-                    limit: None,
-                },
-            );
         },
     );
     let mut e = safe_cex_engine::test_support::seeded_engine(venue);
@@ -208,7 +199,7 @@ fn every_account_axis_settings_and_history_get_uses_read_identity() {
             _ => None,
         })
         .collect();
-    assert_eq!(requests.len(), 6);
+    assert_eq!(requests.len(), 5);
     for r in requests {
         let query = r
             .url

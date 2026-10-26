@@ -331,9 +331,7 @@ impl BitunixFutures {
             body.clone(),
             testnet,
         );
-        let id = if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance)
-            || matches!(&pending, Pending::History(_))
-        {
+        let id = if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance) {
             cx.request_streamed(method, url, headers, crate::recovery::LIST, pending)
         } else {
             cx.request(method, url, headers, body, pending)
@@ -562,7 +560,6 @@ impl BitunixFutures {
                 };
                 self.trade_error(cx, request, crate::error::not_sent(error, kind));
             }
-            Pending::History(read) => self.history_sign_failed(cx, read, error),
             Pending::Private(read) => self.account_failed(cx, read, None),
             Pending::SymbolSettings {
                 symbol,

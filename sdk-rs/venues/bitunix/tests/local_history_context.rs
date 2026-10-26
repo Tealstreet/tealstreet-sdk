@@ -324,18 +324,26 @@ fn fixed_clock_local_terminals_retire_their_owner_before_reuse() {
     }
 }
 #[test]
-fn valid_private_history_still_uses_its_unchanged_legacy_dispatch() {
+fn valid_private_history_is_one_managed_page_of_its_caller_root() {
     let mut e = seeded(true);
-    let a = query(&mut e, 100., orders(None));
-    assert_eq!(a.iter().filter(|a| matches!(a, Action::Http(_))).count(), 1);
-    assert!(!a.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
-    let r = a
+    e.handle(
+        100.,
+        Event::Command(Command::Query {
+            command: 71,
+            query: orders(None),
+        }),
+    );
+    // Managed pages leave only through preparation; nothing is dispatched raw.
+    let prepared = safe_cex_engine::test_support::prepared_actions(&mut e, 100.);
+    let requests: Vec<_> = prepared
         .iter()
-        .find_map(|a| match a {
+        .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
         })
-        .unwrap();
+        .collect();
+    assert_eq!(requests.len(), 1);
+    let r = requests[0];
     assert!(r.url.contains("/get_history_orders?"));
     assert!(r.url.contains("limit=100"));
     assert!(
@@ -354,5 +362,12 @@ fn valid_private_history_still_uses_its_unchanged_legacy_dispatch() {
             },
         },
     );
-    empty(&e.drain_actions().collect::<Vec<_>>());
+    let done = safe_cex_engine::test_support::prepared_actions(&mut e, 100.);
+    assert!(!done.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(
+        done.iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 71, result }) if result == "[]"))
+            .count(),
+        1
+    );
 }

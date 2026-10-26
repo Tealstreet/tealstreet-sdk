@@ -732,7 +732,12 @@ fn signing_preparation_refusal_stays_strict_after_accepted_rows() {
     let request = start_history(&mut e, 1);
     refused.store(true, Ordering::SeqCst);
     reply(&mut e, request.id, &history_page(1, 0));
-    typed_rejection(&e.drain_actions().collect::<Vec<_>>(), 41, true);
+    // A managed page signs when it is prepared.
+    typed_rejection(
+        &safe_cex_engine::test_support::prepared_actions(&mut e, 0.0),
+        41,
+        true,
+    );
 }
 
 #[test]
@@ -828,4 +833,28 @@ fn a_requested_order_limit_does_not_short_circuit_native_paging() {
     let rows: Vec<serde_json::Value> = serde_json::from_str(&done(&mut e).unwrap()).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["id"], "0");
+}
+
+/// History pages sign with the read key when one is configured; each page is a
+/// leg of the command's own caller root.
+#[test]
+fn history_pages_sign_with_the_read_key() {
+    let (mut e, _) = startup_with_engine(support::engine(support::Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-material".into()),
+        read_credentials: Some(safe_cex_engine::ReadCredentials {
+            key: "read-key".into(),
+            secret: "read-material".into(),
+            passphrase: None,
+        }),
+        ..Default::default()
+    }));
+    let request = start_history(&mut e, 1);
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| *name == "api-key" && value == "read-key"),
+        "the read key signs history"
+    );
 }
