@@ -330,3 +330,56 @@ fn duplicate_cancel_response_cannot_create_a_second_replacement() {
     respond(&mut e, &c, 1000., &ack("\"0\""));
     no_place(&drain(&mut e));
 }
+
+macro_rules! unsafe_baseline {
+    ($name:ident, $fill:expr) => {
+        #[test]
+        fn $name() {
+            let (mut e, _, p) = cancel($fill);
+            let c = release(&mut e, &p, 1000.);
+            respond(&mut e, &c, 1000., &ack("\"0\""));
+            no_place(&drain(&mut e));
+        }
+    };
+}
+unsafe_baseline!(nan_snapshot_is_not_zero_fill_proof, "\"NaN\"");
+unsafe_baseline!(infinite_snapshot_is_not_zero_fill_proof, "\"Infinity\"");
+unsafe_baseline!(
+    negative_infinite_snapshot_is_not_zero_fill_proof,
+    "\"-Infinity\""
+);
+unsafe_baseline!(negative_snapshot_is_not_zero_fill_proof, "\"-1\"");
+
+fn stream_fill(e: &mut Driver, socket: SocketId, fill: &str, stamp: u64) {
+    let body = format!(
+        r#"{{"stream":"account.orderUpdate","data":{{"e":"orderUpdate","i":"123","E":{stamp},"X":"New","s":"SOL_USDC_PERP","o":"Market","S":"Bid","P":"130","Y":"5","q":"5","z":"{fill}"}}}}"#
+    );
+    e.handle(
+        2000.,
+        Event::WsMessage {
+            socket,
+            text: &body,
+        },
+    );
+}
+#[test]
+fn stream_fill_high_water_survives_a_later_store_rollback() {
+    let (mut e, socket, p) = cancel("\"0\"");
+    let c = release(&mut e, &p, 1000.);
+    stream_fill(&mut e, socket, "1", 2_000_000);
+    assert_eq!(e.store().order("123").unwrap().filled, 1.);
+    stream_fill(&mut e, socket, "0", 3_000_000);
+    assert_eq!(e.store().order("123").unwrap().filled, 0.);
+    e.drain_actions().for_each(drop);
+    respond(&mut e, &c, 2000., &ack("\"0\""));
+    no_place(&drain(&mut e));
+}
+#[test]
+fn nonfinite_cancel_delivery_cannot_create_a_placement() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let (mut e, _, p) = cancel("\"0\"");
+        let c = release(&mut e, &p, 1000.);
+        respond(&mut e, &c, now, &ack("\"0\""));
+        no_place(&drain(&mut e));
+    }
+}
