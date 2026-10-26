@@ -134,6 +134,8 @@ pub enum Request {
         quotes: HashMap<String, f64>,
         /// Duplicate ids or an oversized lookup: the whole read is discarded.
         invalid: bool,
+        /// A post-Unknown reconcile snapshot: Primary-signed, Primary egress.
+        primary: bool,
     },
 }
 impl Request {
@@ -172,15 +174,6 @@ impl Request {
             _ => {}
         }
     }
-}
-/// A finished order read's tail: its census result for trading, the failure
-/// a census owner reports, and the read's queue bookkeeping.
-pub(crate) struct CensusTail {
-    symbol: String,
-    revision: u64,
-    ok: bool,
-    diagnostic: Option<(CommandId, String)>,
-    read: OrderRead,
 }
 /// One joined FetchLeverage owner and the result of the snapshot it joined.
 struct Served {
@@ -246,11 +239,8 @@ pub struct Account {
     leverage_served: Vec<Served>,
     leverage_diagnostic: Option<String>,
     leverage_timer: Option<TimerId>,
-    /// A finished order read's tail, run by `census_timer` outside its
-    /// delivery in native order: trading's census, then the read's queue
-    /// bookkeeping (B1 interim: B2 runs the census as the job's own reads).
-    pub(crate) census_due: Vec<CensusTail>,
-    census_timer: Option<TimerId>,
+    /// Symbols owed a Primary reconcile snapshot after an Unknown seal.
+    order_primary: HashSet<String>,
     progress_queue: VecDeque<String>,
     terminal: HashMap<String, OrderStatus>,
     terminal_queue: VecDeque<String>,
@@ -653,10 +643,28 @@ impl Bitrue {
             self.next_orders(cx);
         }
     }
+    /// After an Unknown seal: every symbol's snapshot as a Primary read.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        let symbols: Vec<String> = cx
+            .store
+            .markets()
+            .iter()
+            .map(|m| m.symbol.clone())
+            .collect();
+        self.account.order_primary.extend(symbols.iter().cloned());
+        // An in-flight read predates the seal: a Primary snapshot follows it.
+        if let Some(active) = self.account.order_active.clone()
+            && !self.account.order_queue.contains(&active)
+        {
+            self.account.order_queue.push_back(active);
+        }
+        self.refresh_orders(cx, symbols);
+    }
     fn next_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         let Some(symbol) = self.account.order_queue.pop_front() else {
             return;
         };
+        let primary = self.account.order_primary.remove(&symbol);
         self.account.order_active = Some(symbol.clone());
         self.send(
             cx,
@@ -671,6 +679,7 @@ impl Bitrue {
                 rows: SnapshotBuilder::default(),
                 quotes: HashMap::new(),
                 invalid: false,
+                primary,
             }),
         );
     }
@@ -767,6 +776,7 @@ impl Bitrue {
                 rows: SnapshotBuilder::default(),
                 quotes: HashMap::new(),
                 invalid: false,
+                primary: false,
             }),
         );
     }
@@ -884,13 +894,6 @@ impl Bitrue {
             }
             Tick::Handled | Tick::Ping => return true,
             Tick::Unhandled => {}
-        }
-        if self.account.census_timer == Some(timer) {
-            self.account.census_timer = None;
-            for tail in std::mem::take(&mut self.account.census_due) {
-                self.finish_census(cx, tail);
-            }
-            return true;
         }
         if self.account.leverage_timer == Some(timer) {
             self.account.leverage_timer = None;
@@ -1707,23 +1710,6 @@ impl Bitrue {
             self.account.leverage_timer = Some(cx.set_timer(0.0));
         }
     }
-    fn defer_census(&mut self, cx: &mut Cx<'_, Pending>, tail: CensusTail) {
-        // Only a pending protective census completes a command from here.
-        if !self.census_pending() {
-            return self.finish_census(cx, tail);
-        }
-        self.account.census_due.push(tail);
-        if self.account.census_timer.is_none() {
-            self.account.census_timer = Some(cx.set_timer(0.0));
-        }
-    }
-    fn finish_census(&mut self, cx: &mut Cx<'_, Pending>, tail: CensusTail) {
-        if let Some((command, message)) = tail.diagnostic {
-            cx.command_error(command, message);
-        }
-        self.trade_census(cx, &tail.symbol, tail.revision, tail.ok);
-        self.order_finished(cx, tail.symbol, tail.read);
-    }
     /// Completes each served owner outside any delivery. An owner the engine
     /// already sealed (expired) refuses its completion; that is a no-op.
     fn complete_leverage(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -2057,6 +2043,7 @@ impl Bitrue {
                 rows,
                 quotes,
                 invalid,
+                ..
             } => {
                 #[derive(Deserialize)]
                 struct OrdersEnvelope {
@@ -2084,88 +2071,8 @@ impl Bitrue {
                     return;
                 }
                 let complete = schema && !invalid;
-                let success = complete && revision == self.account.orders_revision;
-                // A rejected row may be the order a census is looking for.
-                let census = success && rows.rejected() == 0;
-                if success {
-                    let mut retained = cx
-                        .store
-                        .orders()
-                        .iter()
-                        .filter(|o| o.symbol != symbol)
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    if census {
-                        let prefix = format!("{symbol} ");
-                        self.account
-                            .order_skips
-                            .retain(|key| !key.starts_with(&prefix));
-                    }
-                    let accepted = rows.rows().len();
-                    let mut rows = rows.commit(
-                        cx.store
-                            .orders()
-                            .iter()
-                            .filter(|o| o.symbol == symbol)
-                            .cloned(),
-                        |o| o.id.clone(),
-                    );
-                    // Stored copies kept for rejected rows are not new observations.
-                    retained.extend(rows.split_off(accepted));
-                    for row in rows {
-                        if self.account.terminal.contains_key(&row.id) && !terminal(row.status)
-                            || self.account.terminal.get(&row.id) == Some(&OrderStatus::Closed)
-                                && row.status == OrderStatus::Canceled
-                        {
-                            continue;
-                        }
-                        if row.filled < self.filled_native(&row.id) {
-                            if let Some(old) = cx.store.orders().iter().find(|o| o.id == row.id) {
-                                retained.push(old.clone());
-                            }
-                            continue;
-                        }
-                        if self.account.initial_orders.contains(&symbol) {
-                            self.account
-                                .execution_fills
-                                .entry(row.id.clone())
-                                .or_insert(row.filled);
-                            if let Some(value) = quotes.get(&row.id) {
-                                self.account
-                                    .execution_quotes
-                                    .entry(row.id.clone())
-                                    .or_insert((row.filled, *value));
-                            }
-                        }
-                        self.account
-                            .progress(&row.id, row.filled, row.amount, row.last_update);
-                        if let Some(value) = quotes.get(&row.id) {
-                            self.account
-                                .quotes
-                                .insert(row.id.clone(), (row.filled, *value));
-                        }
-                        if terminal(row.status) {
-                            self.account.remember_terminal(&row.id, row.status);
-                        }
-                        retained.push(row);
-                    }
-                    let remove = cx
-                        .store
-                        .orders()
-                        .iter()
-                        .filter(|o| o.symbol == symbol)
-                        .map(|o| o.id.clone())
-                        .collect::<Vec<_>>();
-                    cx.store
-                        .remove_orders(&remove.iter().map(String::as_str).collect::<Vec<_>>());
-                    for order in retained {
-                        cx.store.upsert_order(order);
-                    }
-                }
-                let read = if census {
-                    cx.orders_reconciled(Some(&symbol));
-                    OrderRead::Reconciled
-                } else if success {
+                let (success, _) = self.apply_orders(cx, &symbol, revision, rows, quotes, complete);
+                let read = if success {
                     OrderRead::Reconciled
                 } else if complete {
                     OrderRead::Superseded
@@ -2174,18 +2081,105 @@ impl Bitrue {
                         "incomplete open-order snapshot; retaining previous state".into(),
                     )
                 };
-                self.defer_census(
-                    cx,
-                    CensusTail {
-                        symbol,
-                        revision,
-                        ok: census,
-                        diagnostic: None,
-                        read,
-                    },
-                );
+                self.order_finished(cx, symbol, read);
             }
         }
+    }
+    /// Commits one symbol's complete open-order snapshot. `census` is a clean
+    /// snapshot of the current revision with no rejected row: it reconciles
+    /// the symbol and clears a protective fence it postdates.
+    pub(crate) fn apply_orders(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        revision: u64,
+        rows: SnapshotBuilder<String, Order>,
+        quotes: HashMap<String, f64>,
+        complete: bool,
+    ) -> (bool, bool) {
+        let success = complete && revision == self.account.orders_revision;
+        // A rejected row may be the order a census is looking for.
+        let census = success && rows.rejected() == 0;
+        if success {
+            let mut retained = cx
+                .store
+                .orders()
+                .iter()
+                .filter(|o| o.symbol != symbol)
+                .cloned()
+                .collect::<Vec<_>>();
+            if census {
+                let prefix = format!("{symbol} ");
+                self.account
+                    .order_skips
+                    .retain(|key| !key.starts_with(&prefix));
+            }
+            let accepted = rows.rows().len();
+            let mut rows = rows.commit(
+                cx.store
+                    .orders()
+                    .iter()
+                    .filter(|o| o.symbol == symbol)
+                    .cloned(),
+                |o| o.id.clone(),
+            );
+            // Stored copies kept for rejected rows are not new observations.
+            retained.extend(rows.split_off(accepted));
+            for row in rows {
+                if self.account.terminal.contains_key(&row.id) && !terminal(row.status)
+                    || self.account.terminal.get(&row.id) == Some(&OrderStatus::Closed)
+                        && row.status == OrderStatus::Canceled
+                {
+                    continue;
+                }
+                if row.filled < self.filled_native(&row.id) {
+                    if let Some(old) = cx.store.orders().iter().find(|o| o.id == row.id) {
+                        retained.push(old.clone());
+                    }
+                    continue;
+                }
+                if self.account.initial_orders.contains(symbol) {
+                    self.account
+                        .execution_fills
+                        .entry(row.id.clone())
+                        .or_insert(row.filled);
+                    if let Some(value) = quotes.get(&row.id) {
+                        self.account
+                            .execution_quotes
+                            .entry(row.id.clone())
+                            .or_insert((row.filled, *value));
+                    }
+                }
+                self.account
+                    .progress(&row.id, row.filled, row.amount, row.last_update);
+                if let Some(value) = quotes.get(&row.id) {
+                    self.account
+                        .quotes
+                        .insert(row.id.clone(), (row.filled, *value));
+                }
+                if terminal(row.status) {
+                    self.account.remember_terminal(&row.id, row.status);
+                }
+                retained.push(row);
+            }
+            let remove = cx
+                .store
+                .orders()
+                .iter()
+                .filter(|o| o.symbol == symbol)
+                .map(|o| o.id.clone())
+                .collect::<Vec<_>>();
+            cx.store
+                .remove_orders(&remove.iter().map(String::as_str).collect::<Vec<_>>());
+            for order in retained {
+                cx.store.upsert_order(order);
+            }
+        }
+        if census {
+            cx.orders_reconciled(Some(symbol));
+            self.protection_observed(symbol, revision);
+        }
+        (success, census)
     }
     fn listen_failed(&mut self, cx: &mut Cx<'_, Pending>, code: Option<i64>, malformed: bool) {
         cx.notice(
@@ -2252,12 +2246,7 @@ impl Bitrue {
                     self.refresh_account(cx);
                 }
             }
-            Request::Orders {
-                symbol,
-                revision,
-                lookup,
-                ..
-            } => {
+            Request::Orders { symbol, lookup, .. } => {
                 let message =
                     private_diagnostic(&format!("Bitrue order read for {symbol} failed"), code);
                 // Backoff dedupes and logs this reason; it must not carry transport text.
@@ -2266,26 +2255,8 @@ impl Bitrue {
                     let _ = cx.command_error_context(root.context(), message);
                     Self::finish_lookup(cx, root.context(), &symbol, &client_order_id, None);
                 } else {
-                    // A census owned by a placement fails that command, which reports it;
-                    // otherwise order_finished logs the failure once per change.
-                    let diagnostic = self.census_owner(&symbol, revision).map(|command| {
-                        self.account
-                            .order_backoff
-                            .entry(symbol.clone())
-                            .or_default()
-                            .error = reason.clone();
-                        (command, message)
-                    });
-                    self.defer_census(
-                        cx,
-                        CensusTail {
-                            symbol,
-                            revision,
-                            ok: false,
-                            diagnostic,
-                            read: OrderRead::Failed(reason),
-                        },
-                    );
+                    // order_finished logs the failure once per change.
+                    self.order_finished(cx, symbol, OrderRead::Failed(reason));
                 }
             }
             _ => {}

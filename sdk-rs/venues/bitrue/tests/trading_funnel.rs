@@ -87,8 +87,8 @@ fn level_edits(h: &Harness) -> usize {
         .count()
 }
 
-/// 7. A parked command whose caller wait expires never writes, even once the
-/// job ahead of it finishes; the expiry is its one NotSent terminal.
+/// 7. A parked command whose caller wait expires never writes: at its wake
+/// the expiry is its one NotSent terminal.
 #[test]
 fn an_expired_parked_command_never_writes() {
     let mut h = Harness::new();
@@ -98,22 +98,10 @@ fn an_expired_parked_command_never_writes() {
     h.e.handle_command(h.now, leverage(8), Some(50)).unwrap();
     h.collect();
     assert_eq!(level_edits(&h), 0, "parked behind the amend");
-    let later = h.now + 1_000.0;
-    let due: Vec<_> = h
-        .timers
-        .iter()
-        .filter(|(_, at)| *at <= later)
-        .copied()
-        .collect();
-    h.timers.retain(|(_, at)| *at > later);
-    for (timer, at) in due {
-        h.handle(at, Event::TimerFired { timer });
-    }
-    h.now = later;
-    h.collect();
+    h.now += 1_000.0;
+    h.reply(inspect, &detail("FILLED", 0.01, ""));
     let error = failure(&h, 8).expect("the parked command expired");
     assert_eq!(error.outcome, Some(Outcome::NotSent));
-    h.reply(inspect, &detail("FILLED", 0.01, ""));
     assert_eq!(level_edits(&h), 0, "an expired command never writes");
     assert_eq!(terminals(&h, 8), 1);
 }
@@ -126,14 +114,18 @@ fn a_dequeue_re_plan_refusal_is_not_sent() {
     h.order(0.0);
     h.amend();
     let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    let mut other = h.e.store().order(ORDER).unwrap().clone();
+    other.id = "222".into();
+    h.e.store_mut().upsert_order(other);
     h.command(Command::AmendOrder {
         command: 8,
-        id: ORDER.into(),
+        id: "222".into(),
         price: Some(1980.0),
         amount: None,
     });
-    // The order closes while command 8 is parked.
-    h.e.store_mut().set_order_status(ORDER, OrderStatus::Closed);
+    assert!(failure(&h, 8).is_none(), "parked behind the amend");
+    // Its order closes while command 8 is parked.
+    h.e.store_mut().set_order_status("222", OrderStatus::Closed);
     h.reply(inspect, &detail("FILLED", 0.01, ""));
     let error = failure(&h, 8).expect("the re-plan refused");
     assert_eq!(error.outcome, Some(Outcome::NotSent));
@@ -187,7 +179,8 @@ fn an_inspect_chains_three_retries_and_never_a_fourth() {
     assert_eq!(h.writes(), 0);
 }
 
-/// 8. A Verify that does not prove the cancel prepares no replacement.
+/// 8. A Verify that does not prove the cancel prepares no replacement; the
+/// terminal keeps the accepted cancel as known-partial evidence.
 #[test]
 fn an_unproven_verify_prepares_no_replacement() {
     let mut h = Harness::new();
@@ -208,8 +201,13 @@ fn an_unproven_verify_prepares_no_replacement() {
             .any(|r| r.method == Method::Post && r.url.ends_with("/fapi/v2/order")),
         "no replacement without final cancellation proof"
     );
+    // The accepted cancel is a known effect: the journal's partial contract.
     let error = failure(&h, 7).expect("one terminal");
-    assert_ne!(error.outcome, None, "a write job never ends unclassified");
+    assert_eq!(error.outcome, None);
+    assert_eq!(
+        error.partial.as_ref().map(|p| p.order_ids.clone()),
+        Some(vec![ORDER.to_owned()])
+    );
     assert_eq!(terminals(&h, 7), 1);
 }
 
@@ -364,6 +362,14 @@ fn the_protective_census_is_the_jobs_final_primary_read() {
 #[test]
 fn a_lost_protective_create_fences_cancel_all_until_a_primary_reconcile() {
     let mut h = keyed_with_read();
+    while let Some(index) = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("/fapi/v2/openOrders"))
+    {
+        let startup = h.requests.remove(index);
+        h.reply(startup, r#"{"code":"0","data":[]}"#);
+    }
     position(&mut h);
     h.place(r#"[{"symbol":"E-BTC-USDT","type":"stop_market","side":"sell","amount":0.001,"price":1800}]"#);
     let create = h.take(Method::Post, "/fapi/v2/order");
@@ -378,18 +384,27 @@ fn a_lost_protective_create_fences_cancel_all_until_a_primary_reconcile() {
         symbol: "E-BTC-USDT".into(),
     });
     assert!(failure(&h, 8).is_some_and(|e| e.message.contains("uncertain")));
-    let reconcile = h
-        .requests
-        .iter()
-        .find(|r| r.url.contains("/fapi/v2/openOrders"))
-        .cloned()
-        .expect("an Unknown seal reconciles");
-    assert_eq!(
-        api_key(&reconcile),
-        "replay-key",
-        "PrimaryRead PostUnknownOrderRead"
-    );
-    h.requests.retain(|r| r.id != reconcile.id);
+    // Answer reads that predate the seal; the reconcile is Primary-signed.
+    let reconcile = loop {
+        let Some(read) = h
+            .requests
+            .iter()
+            .find(|r| r.url.contains("/fapi/v2/openOrders"))
+            .cloned()
+        else {
+            // The order queue paces its next read on a timer.
+            h.timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let (timer, at) = h.timers.remove(0);
+            h.handle(at, Event::TimerFired { timer });
+            h.collect();
+            continue;
+        };
+        h.requests.retain(|r| r.id != read.id);
+        if api_key(&read) == "replay-key" {
+            break read;
+        }
+        h.reply(read, r#"{"code":"-1","msg":"busy"}"#);
+    };
     h.reply(reconcile, r#"{"code":"0","data":[]}"#);
     h.command(Command::CancelSymbolOrders {
         command: 9,

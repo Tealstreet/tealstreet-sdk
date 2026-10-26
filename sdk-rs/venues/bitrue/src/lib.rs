@@ -26,7 +26,7 @@ use safe_cex_engine::{
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use wire::{CandleWire, Contract, ContractKey, Message, Payload};
-const REST: &str = "https://fapi.bitrue.com";
+pub(crate) const REST: &str = "https://fapi.bitrue.com";
 const PUBLIC: &str = "wss://fmarket-ws.bitrue.com/kline-api/ws";
 /// ```compile_fail
 /// let _ = safe_cex_venue_bitrue::Options { key: None, ..Default::default() };
@@ -63,6 +63,35 @@ enum Custody {
     Leg(ReadLeg),
     /// A listen-key Session operation, or a keyless catalog read.
     Context(Context),
+}
+impl Pending {
+    /// A trading call: its Plan Context travels in the request itself.
+    pub(crate) fn trade(
+        method: Method,
+        path: String,
+        body: Option<String>,
+        request: trading::Request,
+    ) -> Self {
+        Self {
+            wire: sign::Request {
+                method,
+                path,
+                body,
+                at: None,
+                floor: None,
+            },
+            job: Job::Trade(request),
+            signature_resent: false,
+            attempts: 0,
+            custody: None,
+        }
+    }
+    pub(crate) fn into_trade(self) -> Option<trading::Request> {
+        match self.job {
+            Job::Trade(request) => Some(request),
+            _ => None,
+        }
+    }
 }
 impl Custody {
     fn context(&self) -> &Context {
@@ -368,10 +397,7 @@ impl Bitrue {
             return self.queue_leg(cx, leg, pending);
         }
         match &pending.job {
-            Job::Trade(request) => {
-                let role = request.credential_role();
-                self.issue_trade(cx, pending, role)
-            }
+            Job::Trade(_) => unreachable!("trading calls queue under their Plan"),
             Job::Account(account::Request::Listen { .. } | account::Request::Keepalive { .. }) => {
                 self.issue_session(cx, pending)
             }
@@ -389,6 +415,16 @@ impl Bitrue {
                 } else {
                     self.issue_public(cx, pending)
                 }
+            }
+            Job::Account(account::Request::Orders { primary: true, .. }) => {
+                let selected = SelectedRead::select(
+                    &self.slots(),
+                    ReadRole::Primary {
+                        reason: PrimaryReason::PostUnknownOrderRead,
+                        scope: Some(safe_cex_engine::AccountReadScope::Orders),
+                    },
+                );
+                self.issue_read(cx, selected, pending)
             }
             Job::Account(_) | Job::History(_) => {
                 let selected = SelectedRead::select(&self.slots(), ReadRole::Read { scope: None });
@@ -568,34 +604,6 @@ impl Bitrue {
         if let Some(session) = self.account.session.take() {
             // Nothing parks on a listen-key session: it never has waiters.
             let _ = cx.retire_session(&session);
-        }
-    }
-    /// Trading stays on the legacy funnel until its Plans land (B2).
-    fn issue_trade(&self, cx: &mut Cx<'_, Pending>, pending: Pending, role: CredentialRole) {
-        let selected = self
-            .slots()
-            .select(role)
-            .ok()
-            .map(|(selection, identity)| (selection, identity.clone()));
-        let headers = sign::dispatch::HEADERS
-            .iter()
-            .map(|(n, v)| (*n, (*v).to_owned()))
-            .collect();
-        let recipe = selected
-            .as_ref()
-            .map(|(selection, identity)| (*selection, self.recipe(identity, &pending.wire)));
-        let (method, url, body, at) = (
-            pending.wire.method,
-            Self::url(&pending.wire.path),
-            pending.wire.body.clone(),
-            pending.wire.at,
-        );
-        let id = cx.request(method, url, headers, body, pending);
-        if let Some((selection, recipe)) = recipe {
-            selection.sign(cx, id, recipe);
-        }
-        if let Some(at) = at {
-            cx.stream_response(id, at);
         }
     }
     /// Settle whatever authority the request held.
@@ -870,6 +878,36 @@ impl Venue for Bitrue {
     fn guard_order_mutations(&self) -> bool {
         true
     }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match &pending.job {
+            Job::Trade(request) => trading::trade_reconciliation(request),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trading_preflight_ready(cx, preflight);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trading_retired(owner)
+    }
+    /// An uncertain or absent-order seal: restore the retired job's rows and
+    /// reconcile through a Primary open-order snapshot.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_trading(cx);
+    }
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -1138,6 +1176,9 @@ impl Venue for Bitrue {
         mut pending: Pending,
         response: Response<'_>,
     ) {
+        if let Job::Trade(request) = pending.job {
+            return self.trade_response(cx, request, response);
+        }
         if !Self::delivered(cx, &pending) {
             return;
         }
@@ -1209,7 +1250,7 @@ impl Venue for Bitrue {
                 }
             }
             Job::Account(r) => self.account_response(cx, r, response),
-            Job::Trade(r) => self.trade_response(cx, r, response),
+            Job::Trade(_) => unreachable!(),
             Job::History(r) => self.history_response(cx, r, leg, response),
         }
         if let Some(custody) = custody {
@@ -1231,6 +1272,9 @@ impl Venue for Bitrue {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Job::Trade(request) = pending.job {
+            return self.trade_response(cx, request, response);
+        }
         if !pending.signature_resent && codes::resend(&response) {
             self.on_response(cx, pending, response);
         } else {
@@ -1250,6 +1294,9 @@ impl Venue for Bitrue {
         mut pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        if let Job::Trade(request) = pending.job {
+            return self.trade_call_failed(cx, request, error, true);
+        }
         let safe = pending.wire.method == Method::Get
             || (pending.wire.method == Method::Post
                 && pending.wire.path
@@ -1279,12 +1326,7 @@ impl Venue for Bitrue {
             return;
         }
         match pending.job {
-            Job::Trade(request) => self.trade_sign_failed(
-                cx,
-                request,
-                error,
-                pending.signature_resent || pending.attempts > 0,
-            ),
+            Job::Trade(request) => self.trade_call_failed(cx, request, error, false),
             Job::History(request) => request.sign_failed(cx, error),
             _ => self.on_request_failed(cx, pending, &error.message),
         }
@@ -1306,7 +1348,12 @@ impl Venue for Bitrue {
                 self.startup_retry.failed(cx, ());
             }
             Job::Account(r) => self.account_failed(cx, r, error),
-            Job::Trade(r) => self.trade_lost(cx, r, error),
+            Job::Trade(r) => self.trade_call_failed(
+                cx,
+                r,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+                true,
+            ),
             Job::History(r) => self.history_failed(cx, r, error),
         }
     }
