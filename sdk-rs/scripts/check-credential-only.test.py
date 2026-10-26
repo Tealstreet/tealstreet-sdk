@@ -25,6 +25,11 @@ class CredentialOnlyBans(unittest.TestCase):
         self.assertEqual(check.violations('crypto/src/signer.rs', pinned), [])
         self.assertEqual(len(check.violations('crypto/src/signer.rs', 'let k = KeyRef("".into());\n')), 1)
 
+    def test_only_trusted_local_setup_marks_a_scalar_only_primary(self):
+        text = 'fn f(p: &CredentialSetupPolicy, i: &mut Identities) { p.install_scalar_only_primary(i); }\n'
+        self.assertEqual(check.violations('crypto/src/signer.rs', text), [])
+        self.assertEqual(len(check.violations('registry/src/lib.rs', text)), 1)
+
     def test_owners_may_use_the_restricted_accessors(self):
         text = 'fn f(i: &mut Identity) { i.set_signing_ref(None); i.validate_credential(); }\n'
         self.assertEqual(check.violations('engine/src/signing.rs', text), [])

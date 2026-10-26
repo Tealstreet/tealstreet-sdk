@@ -31,6 +31,25 @@ pub struct IdentitySetupPolicy {
     /// Whether a credential-only slot (no signing ref) is accepted.
     #[serde(skip_serializing_if = "SigningPolicy::is_required")]
     pub signing: SigningPolicy,
+    /// Whether trusted local setup may install a primary with no credential.
+    #[serde(skip_serializing_if = "PrimarySource::is_required")]
+    pub source: PrimarySource,
+}
+
+/// `Required` keeps today's behaviour exactly. `ScalarOnly` (primary only,
+/// declared `Secp256k1Digest`) lets trusted local setup install a signing-only
+/// primary whose credential is explicitly absent; injected identities never are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PrimarySource {
+    #[default]
+    Required,
+    ScalarOnly,
+}
+impl PrimarySource {
+    pub fn is_required(&self) -> bool {
+        *self == Self::Required
+    }
 }
 
 /// `Required` keeps today's behaviour exactly; only `Optional` families accept
@@ -244,6 +263,36 @@ impl CredentialSetupPolicy {
         }
         Ok(())
     }
+
+    /// Trusted local setup only (bans-scoped): marks a `ScalarOnly` primary
+    /// that setup built without a credential as explicitly credential-absent.
+    /// Injected identities never pass through here, so they cannot be absent.
+    pub fn install_scalar_only_primary(
+        &self,
+        identities: &mut Identities,
+    ) -> Result<(), SignError> {
+        let scalar_only = |policy: Option<IdentitySetupPolicy>| {
+            policy.is_some_and(|policy| policy.source == PrimarySource::ScalarOnly)
+        };
+        if scalar_only(self.secondary) {
+            return Err(SignError::InvalidRequest);
+        }
+        let Some(policy) = self.primary.filter(|policy| scalar_only(Some(*policy))) else {
+            return Ok(());
+        };
+        if policy.signing_algorithm != Some(Algorithm::Secp256k1Digest)
+            || !policy.signing.is_required()
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        if let Some(identity) = identities.primary.as_mut()
+            && identity.credential.0.is_empty()
+            && identity.signing.as_ref().is_some_and(valid_key_ref)
+        {
+            identity.credential_absent = true;
+        }
+        Ok(())
+    }
 }
 
 /// Raw presence of the primary key, classified by trusted setup before any
@@ -316,6 +365,10 @@ pub struct Identity {
     /// setup policy, never transported: a serialized copy loses it.
     #[serde(skip)]
     signing_not_configured: bool,
+    /// A `ScalarOnly` primary's explicit credential absence. Set only by
+    /// trusted local setup, never transported: a serialized copy loses it.
+    #[serde(skip)]
+    credential_absent: bool,
     #[cfg(feature = "address-nonce")]
     #[serde(skip)]
     pub(crate) address: crate::engine::address_nonce_setup::AddressCapability,
@@ -330,6 +383,7 @@ impl Identity {
             stable_id: None,
             extra: Default::default(),
             signing_not_configured: false,
+            credential_absent: false,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
         }
@@ -387,9 +441,16 @@ impl Identity {
             .ok_or(SignError::InvalidRequest)
     }
 
+    /// Whether this primary has no credential by trusted `ScalarOnly` setup;
+    /// nothing may be presented for it.
+    #[inline]
+    pub fn credential_absent(&self) -> bool {
+        self.credential_absent
+    }
+
     /// Whether `key` is one of this slot's refs.
     pub fn owns(&self, key: &KeyRef) -> bool {
-        self.credential == *key
+        !self.credential_absent && self.credential == *key
             || self.signing.as_ref() == Some(key)
             || self.passphrase.as_ref() == Some(key)
             || self.extra.values().any(|extra| extra == key)
@@ -408,7 +469,12 @@ impl Identity {
     }
 
     fn checked(&self, signing_required: bool) -> Result<(), &'static str> {
-        if !valid_key_ref(&self.credential)
+        let credential = if self.credential_absent {
+            self.credential.0.is_empty() && self.signing.is_some()
+        } else {
+            valid_key_ref(&self.credential)
+        };
+        if !credential
             || self
                 .signing
                 .as_ref()
@@ -1009,6 +1075,7 @@ mod setup_field_policy_tests {
             stable_id: None,
             extra: Default::default(),
             signing_not_configured: false,
+            credential_absent: false,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
         }
@@ -1063,6 +1130,7 @@ mod setup_field_policy_tests {
                 stable_id: None,
                 extra: Default::default(),
                 signing_not_configured: false,
+                credential_absent: false,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
             }),
@@ -1083,6 +1151,7 @@ mod setup_field_policy_tests {
                 stable_id: None,
                 extra: Default::default(),
                 signing_not_configured: false,
+                credential_absent: false,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
             }),

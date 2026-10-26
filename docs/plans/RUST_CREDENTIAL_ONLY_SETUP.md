@@ -389,3 +389,29 @@ G3 and G6 are decided above (D3, D6).
   needs credential-only support; those boundaries stay (D2 refuses them). The
   hosted `LocalSetup` with an API key and no scalar is the intended
   credential-only path; caller-supplied external `Identities` JSON is not.
+
+## Scalar-only primary (`PrimarySource::ScalarOnly`, Hyperliquid)
+
+The mirror image of credential-only: a primary that signs with a declared
+secp256k1 scalar and has no credential at all. It is owned here (m26ps4) and
+consumed by the Hyperliquid lane (zs5e83). Lighter's principal (#2208) is
+separate and stays Lighter-only.
+
+- `IdentitySetupPolicy.source` is a trusted per-family declaration. The default
+  `Required` is unchanged and is never serialized. `ScalarOnly` is valid only on
+  the primary, with `signing_algorithm: Secp256k1Digest` and Required signing;
+  anything else refuses setup with `InvalidRequest`.
+- Only trusted local setup (`LocalSigner`, through
+  `CredentialSetupPolicy::install_scalar_only_primary`, which
+  `check-credential-only.py` bans elsewhere) marks a primary credential-absent.
+  It does so only when setup built no credential (key Absent or Empty, or Blank
+  under the family's trim) and installed a valid signing ref. A Nonblank key
+  takes the ordinary installed path.
+- `Identity::credential_absent()` is the typed state. `validate()` accepts it,
+  `owns()` never matches its credential, and the provider refuses to present
+  it. The marker is `serde(skip)`, so injected JSON, the registry's
+  `apply_to_identities`, and a transported copy can never produce it.
+- `SetupFacts` keep the original key presence. The account and nonce subject
+  come only from the engine-sealed `VerifiedAddress` (#2193, initialized at
+  host start, #2222), never from the identity.
+- Pinned in `sdk-rs/crypto/tests/scalar_only_primary.rs`.

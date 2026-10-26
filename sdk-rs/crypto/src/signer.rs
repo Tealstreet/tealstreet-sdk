@@ -388,6 +388,7 @@ impl LocalSigner {
         }
         policy.apply_to_identities(&mut validation, public_data_only)?;
         policy.apply_to_identities(&mut identities, public_data_only)?;
+        policy.install_scalar_only_primary(&mut identities)?;
         let mut signer = Self::new();
         if let Some(primary) = primary {
             primary.install(&mut signer, "primary");
