@@ -341,6 +341,7 @@ fn nonfinite_initialization_and_delivery_are_inert() {
 struct State {
     result: bool,
     joined: bool,
+    join_error: Option<SignError>,
     starts: usize,
     cancels: usize,
 }
@@ -382,8 +383,9 @@ impl OwnedSetupExecution for Execution {
         }
     }
     fn poll_joined(&mut self, _: &mut TaskContext<'_>) -> Poll<Result<(), SignError>> {
-        if self.0.lock().unwrap().joined {
-            Poll::Ready(Ok(()))
+        let state = self.0.lock().unwrap();
+        if state.joined {
+            Poll::Ready(state.join_error.map_or(Ok(()), Err))
         } else {
             Poll::Pending
         }
@@ -705,4 +707,52 @@ fn nonfinite_timer_observation_keeps_immutable_timeout_armed() {
     e.handle(20_100., Event::TimerFired { timer });
     assert_eq!(e.sign_meta(id), None);
     assert!(mint(&e).is_err());
+}
+
+#[test]
+fn settled_cleanup_error_refuses_binding_but_allows_explicit_reinitialize() {
+    for result_arrived in [false, true] {
+        let (mut e, state) = owned(Some(&HYPERLIQUID_AGENT));
+        e.initialize_address_nonce(100.).unwrap();
+        {
+            let mut s = state.lock().unwrap();
+            s.result = result_arrived;
+            s.joined = true;
+            s.join_error = Some(SignError::Unavailable);
+        }
+        poll(&mut e, 101.);
+        assert!(
+            e.address_nonce_setup_ready(),
+            "actual settled error must retire the owner"
+        );
+        assert_eq!(
+            e.identities()
+                .primary
+                .as_ref()
+                .unwrap()
+                .verified_signing_address(),
+            Err(SignError::Unavailable)
+        );
+        assert!(mint(&e).is_err());
+        assert_eq!(state.lock().unwrap().starts, 2, "no automatic retry");
+        {
+            let mut s = state.lock().unwrap();
+            s.result = false;
+            s.joined = false;
+            s.join_error = None;
+        }
+        assert_eq!(
+            e.reinitialize_address_nonce(102.).unwrap(),
+            AddressSetupProgress::Pending
+        );
+        assert_eq!(state.lock().unwrap().starts, 4);
+        assert!(mint(&e).is_err());
+        {
+            let mut s = state.lock().unwrap();
+            s.result = true;
+            s.joined = true;
+        }
+        poll(&mut e, 103.);
+        assert!(mint(&e).is_ok());
+    }
 }
