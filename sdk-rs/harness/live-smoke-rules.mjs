@@ -31,6 +31,7 @@ export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
 export const LIVE_SMOKE_UNKNOWN_RULES = Object.freeze({
   phemex: 'PerpetualV2 qtyStepSize alone does not establish a minimum order value.',
   cryptocom: 'qty_tick_size alone does not establish a minimum order value.',
+  bitunix: 'trading_pairs basePrecision alone does not establish a minimum order value.',
   hyrotrader: 'No reviewed endpoint profile.',
   grvt: 'No reviewed endpoint profile or sizing contract.',
   kucoinspot: 'No reviewed Spot endpoint profile or sizing contract.',
