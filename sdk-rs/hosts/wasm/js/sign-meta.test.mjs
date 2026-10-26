@@ -38,7 +38,7 @@ for (const [name, owner, slot, role] of [
   ['primary mutation', { kind: 'managed', request: 31, generation: 0 }, 'primary', { kind: 'mutation' }],
   ...['account', 'balance', 'orders', 'positions', 'settings'].map((scope) =>
     [`read scope ${scope}`, { kind: 'managed', request: 37, generation: 1 }, 'secondary', { kind: 'read', scope }]),
-  ...['clientOrderLookup', 'postUnknownOrderRead', 'degradedRead', 'catalog', 'history'].map((reason) =>
+  ...['clientOrderLookup', 'postUnknownOrderRead', 'degradedRead', 'catalog', 'history', 'keyPermissions'].map((reason) =>
     [`primary read reason ${reason}`, { kind: 'managed', request: 41, generation: 1 }, 'primary', { kind: 'primaryRead', reason, scope: null }]),
 ]) {
   test(`${name} forwards the engine's complete immutable ownership metadata`, async () => {
