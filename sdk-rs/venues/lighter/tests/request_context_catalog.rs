@@ -464,10 +464,13 @@ impl Venue for CapacityProbe {
 #[test]
 fn saturated_registry_frees_each_catalog_root_before_fallback_retry_and_success() {
     let mut e = safe_cex_engine::test_support::seeded_engine(CapacityProbe {
-        venue: Lighter::new((Options {
-            public_data_only: true,
-            ..Default::default()
-        }).into()),
+        venue: Lighter::new(
+            (Options {
+                public_data_only: true,
+                ..Default::default()
+            })
+            .into(),
+        ),
         roots: vec![],
     });
     for command in 1..=255 {

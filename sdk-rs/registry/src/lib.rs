@@ -38,10 +38,10 @@ compile_error!(
 #[cfg(feature = "asterdex")]
 mod asterdex_setup;
 mod construction;
-#[cfg(feature = "lighter")]
-mod lighter_setup;
 #[cfg(feature = "dispatch-signing")]
 pub mod hosted_signing;
+#[cfg(feature = "lighter")]
+mod lighter_setup;
 pub use construction::{
     BridgeConstruction, PublicMode, remote_signing_policy, signer_setup_policy,
     signer_setup_public_data_only,
@@ -1565,22 +1565,46 @@ pub fn build_with_signer<T: Visit>(
         #[cfg(feature = "lighter")]
         "lighter" | "lighter-robinhood" => {
             lighter_setup::capture_lookup(&mut options);
-            if options.key.is_some() || options.secret.is_some() || options.read_credentials.is_some() { return Err(invalid("Lighter credentials belong in trusted signer setup")); }
+            if options
+                .lighter_l1_address
+                .as_deref()
+                .is_some_and(|address| {
+                    address.len() != 42
+                        || !address.starts_with("0x")
+                        || !address[2..].bytes().all(|b| b.is_ascii_hexdigit())
+                })
+            {
+                return Err(invalid("Invalid Lighter public L1 lookup address"));
+            }
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Lighter credentials belong in trusted signer setup",
+                ));
+            }
             let identities = options.signing.take().unwrap_or_default();
-            if identities.secondary.is_some() || (identities.primary.is_some() && signer.is_none()) { return Err(invalid("Lighter requires its installed primary signer")); }
-            let mut engine = Engine::new(Lighter::new(LighterOptions {
-                robinhood: venue == "lighter-robinhood",
-                remote_signer: options.lighter_remote_signer,
-                signer_provider: options.lighter_signer_provider.take(),
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                identity: identities.primary.clone(),
-                l1_address: options.lighter_l1_address.take(),
-                application_id: options.application_id.take(),
-                api_key_index: options.api_key_index.take(),
-                integrator_account_index: options.lighter_integrator_account_index.take(),
-                stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
-            }), entropy)?;
+            if identities.secondary.is_some() || (identities.primary.is_some() && signer.is_none())
+            {
+                return Err(invalid("Lighter requires its installed primary signer"));
+            }
+            let mut engine = Engine::new(
+                Lighter::new(LighterOptions {
+                    robinhood: venue == "lighter-robinhood",
+                    remote_signer: options.lighter_remote_signer,
+                    signer_provider: options.lighter_signer_provider.take(),
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    identity: identities.primary.clone(),
+                    l1_address: options.lighter_l1_address.take(),
+                    application_id: options.application_id.take(),
+                    api_key_index: options.api_key_index.take(),
+                    integrator_account_index: options.lighter_integrator_account_index.take(),
+                    stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
+                }),
+                entropy,
+            )?;
             engine.set_signer(signer)?;
             engine.set_identities(identities)?;
             finish(visitor, policy, startup, engine)

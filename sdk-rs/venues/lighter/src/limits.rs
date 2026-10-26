@@ -194,7 +194,7 @@ impl Lighter {
                             .account
                             .identity
                             .as_ref()
-                            .map(|id| crate::primary_credential(id)),
+                            .map(crate::primary_credential),
                     })
                 else {
                     return;
@@ -240,7 +240,11 @@ impl Lighter {
                         return;
                     }
                 };
-                let context = match cx.plan_leg_context(&plan, &slot) {
+                let context = match cx.plan_leg_context_with_intent(
+                    &plan,
+                    &slot,
+                    safe_cex_engine::classify::Intent::Setting,
+                ) {
                     Ok(context) => context,
                     Err(error) => {
                         let _ = cx.fail_plan(&plan, error.venue_error());

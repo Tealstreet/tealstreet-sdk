@@ -74,10 +74,17 @@ fn ack(e: &mut Engine<Lighter>, r: &HttpRequest) {
     ack_at(e, NOW, r);
 }
 fn ack_at(e: &mut Engine<Lighter>, now: f64, r: &HttpRequest) {
-    reply_at(e, now, r, 200, r#"{"code":200,"tx_hash":"transaction-hash"}"#);
+    reply_at(
+        e,
+        now,
+        r,
+        200,
+        r#"{"code":200,"tx_hash":"transaction-hash"}"#,
+    );
 }
 fn timer(e: &mut Engine<Lighter>) -> TimerId {
-    safe_cex_engine::test_support::prepared_actions(e, NOW).into_iter()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms < NOW + 500.0 => Some(timer),
             _ => None,
@@ -85,7 +92,8 @@ fn timer(e: &mut Engine<Lighter>) -> TimerId {
         .expect("submission pace")
 }
 fn failure(e: &mut Engine<Lighter>) -> String {
-    safe_cex_engine::test_support::prepared_actions(e, NOW).into_iter()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message),
             _ => None,
@@ -99,7 +107,9 @@ fn caller_id_on_later_batch_item_rejects_before_any_read_or_write() {
     let mut bad = limit();
     bad.client_order_id = Some("caller".into());
     place(&mut e, vec![limit(), bad]);
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         actions
@@ -113,7 +123,9 @@ fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
     let before = e.snapshot_frame(NOW).to_vec();
     e.take_frame(NOW);
     place(&mut e, vec![limit(), bad]);
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         actions.iter().all(|action| matches!(
             action,
@@ -182,7 +194,9 @@ fn market_uses_side_bbo_before_mark_and_conditional_is_ioc_with_slippage_overrid
     assert_eq!(wire(&r)["TimeInForce"], 0);
     assert_eq!(wire(&r)["OrderExpiry"], 0);
     ack(&mut e, &r);
-    safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().for_each(drop);
+    safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .for_each(drop);
     place(
         &mut e,
         vec![order(
@@ -220,7 +234,9 @@ fn generated_client_order_indices_are_receipted_before_the_signed_batch() {
     place(&mut e, vec![limit(), limit()]);
     let nonce = http(&mut e, "nextNonce");
     reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let (progress_at, receipts) = actions
         .iter()
         .enumerate()
@@ -295,7 +311,9 @@ fn lost_write_response_never_replays_and_next_command_refreshes_nonce() {
             error: "response lost",
         },
     );
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -322,7 +340,13 @@ fn known_invalid_nonce_rejection_allows_only_one_fresh_nonce_retry() {
     let t = timer(&mut e);
     e.handle(NOW + 150.0, Event::TimerFired { timer: t });
     let nonce = http_at(&mut e, NOW + 150.0, "nextNonce");
-    reply_at(&mut e, NOW + 150.0, &nonce, 200, r#"{"code":200,"nonce":20}"#);
+    reply_at(
+        &mut e,
+        NOW + 150.0,
+        &nonce,
+        200,
+        r#"{"code":200,"nonce":20}"#,
+    );
     let retry = http_at(&mut e, NOW + 150.0, "sendTx");
     assert_eq!(wire(&retry)["Nonce"], 20);
     assert_eq!(
@@ -478,7 +502,9 @@ fn uncertain_settings_write_fences_queued_composition_until_fresh_snapshot() {
             error: "lost",
         },
     );
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let nonce = actions
         .into_iter()
         .find_map(|a| match a {
@@ -665,7 +691,9 @@ fn an_omitted_flat_market_does_not_clear_uncertain_settings_barrier() {
     );
     let read = http(&mut e, "/account?");
     reply(&mut e, &read, 200, ACCOUNT);
-    safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().for_each(drop);
+    safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         NOW,
         Event::Command(Command::SetMarginType {
@@ -745,7 +773,8 @@ fn amend_infers_protection_from_requested_price() {
 }
 
 fn completion(e: &mut Engine<Lighter>) -> (String, Option<Outcome>) {
-    safe_cex_engine::test_support::prepared_actions(e, NOW).into_iter()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => {
                 Some((error.message, error.outcome))
@@ -786,7 +815,9 @@ fn trailing_stop_is_rejected_instead_of_placing_a_market_order() {
             json!({"symbol":"ETH","type":"trailing_stop_market","side":"sell","amount":0.2,"price":95,"reduceOnly":true}),
         )],
     );
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -804,7 +835,8 @@ fn trailing_stop_is_rejected_instead_of_placing_a_market_order() {
 fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::ErrorKind;
     let failures = |e: &mut Engine<Lighter>| {
-        safe_cex_engine::test_support::prepared_actions(e, NOW).into_iter()
+        safe_cex_engine::test_support::prepared_actions(e, NOW)
+            .into_iter()
             .filter_map(|a| match a {
                 Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
                 _ => None,
@@ -866,7 +898,9 @@ fn reduce_buy() -> PlaceOrderOpts {
 fn reduce_only_waits_for_slow_account_completion_instead_of_a_fixed_delay() {
     let (mut e, _) = ready_unattributed();
     place(&mut e, vec![reduce_buy()]);
-    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let account = out
         .iter()
         .find_map(|a| match a {
@@ -906,14 +940,19 @@ fn reduce_only_waits_for_slow_account_completion_instead_of_a_fixed_delay() {
     assert_eq!(wire(&submit)["ReduceOnly"], 1);
     ack_at(&mut e, NOW + 3000.0, &submit);
     assert!(
-        safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter()
+        safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
     );
     e.handle(NOW + 11000.0, Event::TimerFired { timer: timer.0 });
-    assert!(!safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        !safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .any(|a| matches!(
+                a,
+                Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+            ))
+    );
 }
 #[test]
 fn explicit_invalid_margin_rejection_refreshes_account_without_resubmitting() {
@@ -925,7 +964,9 @@ fn explicit_invalid_margin_rejection_refreshes_account_without_resubmitting() {
         400,
         r#"{"code":21613,"message":"invalid margin mode"}"#,
     );
-    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         out.iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.contains("/account?")))
@@ -947,7 +988,9 @@ fn proven_rate_limit_refusals_keep_rejected_and_never_replay() {
             status,
             r#"{"code":23000,"message":"native throttle"}"#,
         );
-        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert_eq!(out.iter().filter(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { command: 7, error })
                 if error.kind == Some(ErrorKind::Rejected) && error.outcome == Some(Outcome::Rejected)
@@ -961,7 +1004,9 @@ fn proven_rate_limit_refusals_keep_rejected_and_never_replay() {
 
 fn position_wait(e: &mut Engine<Lighter>) -> (HttpRequest, TimerId) {
     place(e, vec![reduce_buy()]);
-    let out = safe_cex_engine::test_support::prepared_actions(e, NOW).into_iter().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let account = out
         .iter()
         .find_map(|a| match a {
@@ -982,7 +1027,9 @@ fn position_wait(e: &mut Engine<Lighter>) -> (HttpRequest, TimerId) {
     (account, timer)
 }
 fn assert_position_read_refused(e: &mut Engine<Lighter>) {
-    let out = safe_cex_engine::test_support::prepared_actions(e, NOW).into_iter().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let failures=out.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:7,error}) if error.outcome==Some(Outcome::NotSent))).count();
     assert_eq!(failures, 1, "{out:?}");
     assert!(!out.iter().any(
@@ -1009,10 +1056,14 @@ fn incomplete_empty_rejected_and_failed_position_reads_never_authorize_placement
         reply_at(&mut e, NOW + 500.0, &account, status, body);
         assert_position_read_refused(&mut e);
         e.handle(NOW + 11000.0, Event::TimerFired { timer });
-        assert!(!safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().any(|a| matches!(
-            a,
-            Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            !safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+                .into_iter()
+                .any(|a| matches!(
+                    a,
+                    Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+                ))
+        );
     }
     let (mut e, _) = ready_unattributed();
     let (account, _) = position_wait(&mut e);
@@ -1039,7 +1090,9 @@ fn settings_only_or_malformed_target_cannot_confirm_retained_exposure() {
             NOW + 100.0,
             r#"{"type":"update/account_all","channel":"account_all:718895","positions":{"1":{"market_id":1,"position":"2","sign":-1,"avg_entry_price":"100"}}}"#,
         );
-        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert!(!out.iter().any(
             |a| matches!(a,Action::Http(r) if r.url.contains("nextNonce")||r.url.contains("sendTx"))
         ));
@@ -1060,9 +1113,15 @@ fn timed_out_position_snapshot_cannot_release_a_queued_order() {
             orders: vec![reduce_buy()],
         }),
     );
-    assert!(!safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        !safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .any(|a| matches!(a, Action::Http(_)))
+    );
     e.handle(NOW + 10000.0, Event::TimerFired { timer });
-    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     for command in [7, 8] {
         assert_eq!(out.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:id,error}) if *id==command&&error.outcome==Some(Outcome::NotSent))).count(),1,"{out:?}");
     }
@@ -1105,11 +1164,11 @@ fn rate_limit_without_rejection_proof_keeps_unknown_outcome() {
     let [error] = typed_failures(&mut e).try_into().unwrap();
     assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.outcome, Some(Outcome::Unknown));
-
 }
 
 fn typed_failures(e: &mut Engine<Lighter>) -> Vec<safe_cex_engine::VenueError> {
-    safe_cex_engine::test_support::prepared_actions(e, NOW).into_iter()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
             _ => None,
@@ -1145,7 +1204,9 @@ fn rate_limits_do_not_enter_nonce_retry_and_failed_prerequisites_are_not_sent() 
         405,
         r#"{"code":21104,"message":"invalid nonce"}"#,
     );
-    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         !out.iter()
             .any(|a| matches!(a,Action::SetTimer {at_ms,..} if *at_ms < NOW+500.0))
@@ -1192,7 +1253,9 @@ fn bare_rate_code_fences_dependent_settings_until_reconciliation() {
         }),
     );
     reply(&mut e, &write, 405, r#"{"code":23000}"#);
-    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:8,error}) if error.outcome==Some(Outcome::Unknown))));
     let nonce = out
         .into_iter()
@@ -1202,7 +1265,9 @@ fn bare_rate_code_fences_dependent_settings_until_reconciliation() {
         })
         .unwrap();
     reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":20}"#);
-    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         !out.iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.contains("sendTx")))

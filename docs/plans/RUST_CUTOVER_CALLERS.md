@@ -9429,3 +9429,37 @@ An accepted placement with a malformed financial row retains the original Store
 identity and publishes no fabricated replacement. It still fences older Orders
 reads before reconciliation. Existing native financial formatting and private
 socket authentication remain unchanged.
+
+## Lighter managed remaining funnel
+
+Lighter and Lighter-Robinhood use the trusted installed Schnorr provider for
+transaction and auth recipes. The venue retains only public account/API indices,
+validated public L1 metadata and opaque issued identities. Secret-only private
+setup uses #2208's nonpresentable principal; original key presence remains
+unchanged, and a supplied nonblank key keeps its ordinary Present precedence.
+The principal is neither account proof nor a nonce subject. Public account lookup
+still validates the resolved account; private recipes bind that account and API
+index to the actual installed signing ref. Hosted recipe activation stays held.
+
+Every prerequisite and transaction waits for managed preparation. Approval and
+nextNonce reads retain the genuine command Preflight; successful handoff uses
+finish_preflight_call. Serial write DATA records facts before effects and never
+replays transport loss or an unproven result. One definitive current-call 21104
+may wait 150 ms, read a fresh nonce, and rebuild the same unresolved transaction
+once. The job retains its client indices and one-reseed budget through the walk.
+
+Position proof uses shared condition readiness, so its read can start immediately
+after an accepted step; a fill already observed at cancel ACK rejects amendment
+before the old pacing delay. These timing changes cannot authorize a replacement.
+Provider refusal diagnostics may use Rejected rather than RateLimited; definitive
+financial outcomes and native codes remain pinned. Unproven released responses
+stay Unknown without trusting the response body or retrying. Caller history keeps
+accepted prefixes plus incomplete coverage on transport failure, while preparation
+refusal and cursor proof failure reject strictly and discard provisional rows.
+
+Invalid local scalar/index/provider configurations refuse before startup instead
+of silently falling back to unsigned account snapshots. Valid remote-only setups
+retain unsigned account discovery, snapshots and public trades; no hosted signing
+capability is activated. Expired Background reads clear only their native
+inflight state via the engine failure callback, permitting a fresh poll without
+publishing expired DATA or issuing any command terminal.

@@ -526,9 +526,6 @@ pub fn send_body(signed: &[SignedTransaction]) -> (&'static str, String) {
     )
 }
 
-/// Dispatch recipe for one `sendTx`/`sendTxBatch` POST. Each preparation
-/// re-stamps the expiry and draws fresh entropy, but keeps the transaction
-
 fn auth_message(account: &Account, deadline_seconds: u64) -> Result<(String, Vec<u8>), String> {
     bounded(deadline_seconds, MAX_ORDER_VALUE, "authentication deadline")?;
     let message = format!(

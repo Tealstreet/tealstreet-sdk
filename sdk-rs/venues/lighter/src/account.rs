@@ -599,7 +599,11 @@ impl Lighter {
             cx.store.set_balance(Balance::default());
             return;
         }
-        self.account.identity = self.options.identity.clone();
+        self.account.identity = self
+            .options
+            .identity
+            .clone()
+            .filter(|identity| identity.signing_ref().is_ok());
         self.account.api_key_index = self
             .options
             .api_key_index
@@ -691,8 +695,14 @@ impl Lighter {
         }
     }
     fn identity_ready(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
-        if let Some(expected) = self.options.application_id.as_deref().and_then(index) && expected != account {
-            cx.notice(Level::Error, code::CONFIG_INVALID, "Lighter account lookup returned a different account index");
+        if let Some(expected) = self.options.application_id.as_deref().and_then(index)
+            && expected != account
+        {
+            cx.notice(
+                Level::Error,
+                code::CONFIG_INVALID,
+                "Lighter account lookup returned a different account index",
+            );
             return;
         }
         self.account.account_index = Some(account);
@@ -743,7 +753,7 @@ impl Lighter {
             Scope::Background,
             Policy {
                 operation: Operation::Read,
-                credential: identity.as_ref().map(|id| crate::primary_credential(id)),
+                credential: identity.as_ref().map(crate::primary_credential),
                 timeout_ms: 20_000,
                 pacing: None,
                 retry: RetryPolicy::Never,

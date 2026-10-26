@@ -152,13 +152,26 @@ pub fn jittered(actual: f64, nominal: f64) -> bool {
     (0.75 * nominal..=nominal).contains(&actual)
 }
 
-pub fn engine(mut options: Options) -> Engine<Lighter> {
+pub fn engine(options: Options) -> Engine<Lighter> {
+    try_engine(options).expect("valid trusted fixture setup")
+}
+pub fn try_engine(
+    mut options: Options,
+) -> Result<Engine<Lighter>, safe_cex_engine::signing::SignError> {
     use safe_cex_crypto::signer::{
         LighterPrincipal, LocalIdentity, LocalSetup, LocalSigner, Secret,
     };
     use safe_cex_engine::signing::{
         Algorithm, CredentialSetupPolicy, IdentitySetupPolicy, KeyEncoding,
     };
+    if !options.public_data_only
+        && options
+            .signer_provider
+            .as_deref()
+            .is_some_and(|provider| !provider.is_empty() && provider != "tealstreet-sdk")
+    {
+        return Err(safe_cex_engine::signing::SignError::Unsupported);
+    }
     let key = options.key.take();
     options.l1_address = key.clone();
     let secret = options.secret.take();
@@ -183,25 +196,28 @@ pub fn engine(mut options: Options) -> Engine<Lighter> {
         }),
         ..Default::default()
     };
-    let index = options
-        .api_key_index
-        .as_deref()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+    let index = if options.public_data_only || setup.primary.is_none() {
+        0
+    } else {
+        options
+            .api_key_index
+            .as_deref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    };
     let (signer, identities, _) = LocalSigner::from_setup_with_lighter_principal(
         setup,
         policy,
         options.public_data_only,
-        LighterPrincipal::new(index).unwrap(),
-    )
-    .unwrap();
+        LighterPrincipal::new(index)?,
+    )?;
     options.identity = identities.primary.clone();
     let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options.into()));
     engine
         .set_signer(Some(std::sync::Arc::new(signer)))
         .unwrap();
     engine.set_identities(identities).unwrap();
-    engine
+    Ok(engine)
 }
 
 #[derive(Clone, Debug)]
@@ -239,5 +255,21 @@ impl From<Options> for safe_cex_venue_lighter::Options {
 }
 
 impl Default for Options {
-    fn default() -> Self { Self { testnet: false, robinhood: false, public_data_only: false, key: None, secret: None, identity: None, l1_address: None, remote_signer: false, signer_provider: None, application_id: None, api_key_index: None, integrator_account_index: None, stop_slippage_pct: 1.0 } }
+    fn default() -> Self {
+        Self {
+            testnet: false,
+            robinhood: false,
+            public_data_only: false,
+            key: None,
+            secret: None,
+            identity: None,
+            l1_address: None,
+            remote_signer: false,
+            signer_provider: None,
+            application_id: None,
+            api_key_index: None,
+            integrator_account_index: None,
+            stop_slippage_pct: 1.0,
+        }
+    }
 }

@@ -1,6 +1,7 @@
 # Lighter remaining request and signing funnel
 
-Status: local plan and reviewed originals; composed on adb6555aeac27d1c4947c88ed5a3cdd76b6a0bf8.
+Status: local venue source with reviewed originals; source qualification and review pending.
+The source stack consumes recipe PR #2204 and principal PR #2208; neither is duplicated.
 Original RED/GREEN baseline: unchanged fff73624e8578c623a41875b3946d0c665f561af.
 Owner: codex-ih35js. One venue PR will contain this plan, original regressions
 and the source. Reviewer: claude-dazzy3 or claude-55ao7t. The overseer confirms sole venue ownership; codex-zs5e83’s old lane is inactive.
@@ -93,31 +94,25 @@ this admission cutover, in the same change that deletes the eager holder.
 Remote recipe IDs and verification remain held behind #1926; no unsupported
 remote capability is advertised.
 
-The pinned API is /tmp/m26ps4-lighter-auth-pubkey-api.md, SHA256
-e39c539593fd395473613e08686ece486fa9fe60c7ec17391f516017afd66aff.
-AuthRecipe::new(identity, account, placement) accepts AuthPlacement::Query,
-Header, or WsSubscribe { channel }. Query appends the final auth parameter;
-Header appends authorization; WS owns the escaped subscription frame. It
-refuses an existing auth parameter/header. Preparation binds the outbound
-method/host/path, uses floor(stamp/1000)+60 and fresh dispatch entropy; apply
-requires exactly one 80-byte result. Receipt expiry is deadline*1000 and the
-signing window is five seconds. Query and Header fit their native placements. WsSubscribe still needs explicit
-public socket URL metadata: WsSend carries only socket/text, and DispatchContext
-has no socket URL. The recipe owner is correcting this API before freezing it;
-do not infer the signing host from a chain ID shared by two deployments.
-The provider public-key result is canonical, on-curve, 40 bytes; malformed or
-zero scalar material is refused at trusted setup. codex-uufub4 or
-claude-55ao7t supplies API/plan-fit review; historical venue ownership does not
-substitute for that review.
+The #2204 API is AuthRecipe::new(identity, account, origin, placement), with
+AuthPlacement::Query, Header, or WsSubscribe { socket, url, channel }. The WS
+context uses the explicit public socket URL; chain ID never supplies an origin.
+Preparation binds exact method, host, path, body and outbound bytes. Apply
+refuses altered bytes or a different socket. Auth query-name collisions and
+foreign authorization headers refuse before signing. The provider public-key
+result is canonical, on-curve and 40 bytes; malformed or zero scalar material
+is refused at trusted setup. Existing recipe and financial vectors remain gates.
 
 ### Trusted setup capability pins
 
 A local scalar plus account index and API-key index works today without key.
 The generic local-provider capsule requires a nonempty credential value to issue
-an admissible Primary. The core audit found no reviewed secret-only Required selection seam. The
-recipe/setup owner must specify an explicit trusted provider-backed nonsecret
-principal carrier before cutover; never fabricate venue Identity/KeyRef values
-or add an arbitrary placeholder to pass Primary. Preserve original KeyPresence
+an admissible Primary. The reviewed principal API is LocalSigner::from_setup_with_lighter_principal
+from shared PR #2208. Its typed LighterPrincipal API index issues opaque managed
+membership through trusted setup, never a venue-created Identity/KeyRef or an
+arbitrary label. The registry receives the original SetupFacts before any
+mapping. Lighter never interprets primary_login; Blank remains Blank even though
+other families use that fact for login intent. Preserve original KeyPresence
 (absent, empty, blank or null), so no label becomes a claimed supplied API key.
 The principal is not a wire credential, nonce subject or address proof; actual
 signing capability and resolved Account/API-index provenance remain authority.
@@ -320,3 +315,56 @@ failures or ignored; scratch target deleted). They preserve the first public
 lookup URL and unsigned headers for a key-supplied L1 selector versus an absent
 key with explicit account index. The original fourteen bodies are unchanged
 from the strengthened 1513268d185 set.
+
+## Local source dispositions
+
+Sequential prerequisite DATA hands off with finish_preflight_call, preserving
+its Preflight generation; a generic HTTP retirement is insufficient. A native
+position confirmation uses shared condition readiness and may start immediately
+after a prior accepted leg rather than the old 100 ms venue timer. A fill already
+observed before the cancel ACK rejects an amendment immediately, before pacing.
+Neither permits an extra placement.
+
+Definitive documented provider refusals remain Rejected with native codes;
+classification may expose Rejected instead of the old RateLimited diagnostic.
+Unproven released responses and transport loss remain Unknown without replay,
+and need not retain untrusted body text. Transport history failures retain only
+accepted prefixes and an incomplete marker; signing/provider preparation refusal
+and cursor-integrity proof failure stay strict. Provisional failed pages never
+enter accepted history.
+
+The frozen eager signing codec remains only in tests/support/reference_signer.rs
+as an independent financial vector oracle. Production Options contains public
+account selectors and opaque issued Identity refs; no key or scalar holder.
+Native and JSON setup controls pin all original key presences, nonblank Present
+precedence, principal nonpresentation, invalid scalar/index/secondary/provider
+refusal, and public L1 extraction before credential stripping. Longer hex material
+is never copied as a truncated address. Raw injected public lookup metadata must
+be exactly an address.
+
+Local qualification so far: 27 history, 18 funnel and 37 trading controls pass.
+Full scoped native, registry, JS setup, strict lint, inventories, replay and
+shipping size qualification remain required on the frozen composed source.
+
+The request map retains three unchanged opaque observations: trading's
+0bc3151ddc1e8889eb3a752d5431f3ab5643750a38409c18c5e239d38dcfc4b2
+(matches!(&request, Request::Submit(_))), and history's
+5b3fa60c35b90d7d54c1c78a6208717da15fe27f3581b790ac0bc0f5cc640ca1 and
+2cb4373904a9bd645f5f03689ee4a667afacb9de41ec48ddb42d1b05efe59004
+(matches!(request.read, Read::Trades / Read::Income(IncomeKind::All))). They
+are inherited checker false positives, not sends. Seventeen observations are
+removed; every actual remaining send is managed. No source rewrite hides these
+payloads; the checker owner receives the shapes for its separate precision work.
+
+Expired Background preparations and physical reads release their own inflight
+state from the engine failure callback even when the Context is past its clock.
+Live DATA still needs exact delivery validation before any Store effect. Two
+additive expiry controls fail before that cleanup and pass after it; a late
+preparation never binds and a later independent poll recovers.
+
+Malformed/noncanonical scalar setup, a private API index outside 0..=254, and an
+unsupported local signer provider now refuse at trusted setup rather than
+silently degrading that invalid local configuration into unsigned snapshots.
+Valid remote-only configurations keep public account snapshots and unsigned
+public history, with no private signing or order submission. Their controls
+remain separate from the invalid-setup refusal controls.

@@ -349,7 +349,7 @@ impl Lighter {
                             .account
                             .identity
                             .as_ref()
-                            .map(|id| crate::primary_credential(id)),
+                            .map(crate::primary_credential),
                     }) {
                         cx.store.set_hedged(false);
                         let _ = cx.done_empty_plan(&preflight, "null".into());
@@ -366,7 +366,7 @@ impl Lighter {
                 .account
                 .identity
                 .as_ref()
-                .map(|id| crate::primary_credential(id)),
+                .map(crate::primary_credential),
         }) else {
             return;
         };
@@ -591,7 +591,12 @@ impl Lighter {
             }
         };
         let count = txs.len();
-        let Some(context) = self.trade_context(cx, Operation::Mutation) else {
+        let intent = match &effect {
+            Effect::Place => Some(safe_cex_engine::classify::Intent::Place),
+            Effect::Setting { .. } => Some(safe_cex_engine::classify::Intent::Setting),
+            Effect::Cancel => None,
+        };
+        let Some(context) = self.trade_context(cx, Operation::Mutation, intent) else {
             return;
         };
         let mut reserved = Vec::with_capacity(count);
@@ -1542,70 +1547,6 @@ fn refuse(cx: &mut Cx<'_, Pending>, error: VenueError) {
     cx.refuse_command(Operation::Mutation, error);
 }
 
-#[cfg(test)]
-mod client_index_parity_tests {
-    use super::*;
-    use safe_cex_engine::test_support::{ProbeVenue, seeded_engine};
-
-    #[test]
-    fn client_index_maximum_is_reserved_once_then_exhaustion_never_wraps() {
-        let mut venue = Lighter::new(crate::Options::default());
-        venue.trading.next_id = MAX_CLIENT_INDEX - 1;
-        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
-            assert_eq!(venue.mint_id(cx), Ok(MAX_CLIENT_INDEX));
-            assert_eq!(
-                venue.mint_id(cx).unwrap_err(),
-                "Lighter client order index namespace exhausted."
-            );
-            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
-            assert!(venue.mint_id(cx).is_err());
-            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
-        }));
-        engine.start(1000.);
-        assert!(!engine.drain_actions().any(|action| matches!(
-            action,
-            safe_cex_engine::Action::Http(_) | safe_cex_engine::Action::Sign { .. }
-        )));
-    }
-
-    #[test]
-    fn a_zero_timestamp_and_entropy_candidate_still_reserves_positive_indices() {
-        let entropy = safe_cex_engine::entropy::Entropy::new(
-            Box::new(|bytes| {
-                bytes.fill(0);
-                Ok(())
-            }),
-            Box::new(|bytes| {
-                bytes.fill(0);
-                Ok(())
-            }),
-        );
-        let venue = Lighter::new(crate::Options::default());
-        let mut engine = safe_cex_engine::Engine::new(
-            ProbeVenue::new(venue, |venue, cx| {
-                assert_eq!(venue.mint_id(cx), Ok(1));
-                assert_eq!(venue.mint_id(cx), Ok(2));
-            }),
-            Some(entropy),
-        )
-        .unwrap();
-        engine.start(0.);
-    }
-
-    #[test]
-    fn each_reservation_reconsiders_the_current_timestamp_candidate() {
-        let mut venue = Lighter::new(crate::Options::default());
-        venue.trading.next_id = 7;
-        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
-            let first = venue.mint_id(cx).unwrap();
-            assert!((170_000_000_000_000..=170_000_000_000_099).contains(&first));
-            let next = venue.mint_id(cx).unwrap();
-            assert!(next > first && next <= MAX_CLIENT_INDEX);
-        }));
-        engine.start(1_700_000_000_000.);
-    }
-}
-
 pub(crate) fn serial_call(operation: Operation) -> SerialCall {
     SerialCall {
         operation,
@@ -1614,7 +1555,12 @@ pub(crate) fn serial_call(operation: Operation) -> SerialCall {
     }
 }
 impl Lighter {
-    fn trade_context(&mut self, cx: &mut Cx<'_, Pending>, operation: Operation) -> Option<Context> {
+    fn trade_context(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        operation: Operation,
+        intent: Option<safe_cex_engine::classify::Intent>,
+    ) -> Option<Context> {
         let job = self.trading.active.as_mut()?;
         let result = if let Some(plan) = &job.plan {
             if job.live.is_some() {
@@ -1639,13 +1585,13 @@ impl Lighter {
                 } else {
                     cx.continue_serial_plan(plan, &slot, &context, serial_call(operation))
                         .and_then(|slot| {
-                            let context = cx.plan_leg_context(plan, &slot)?;
+                            let context = Self::trade_plan_context(cx, plan, &slot, intent)?;
                             job.slot = Some(slot);
                             Ok(context)
                         })
                 }
             } else if let Some(slot) = &job.slot {
-                cx.plan_leg_context(plan, slot)
+                Self::trade_plan_context(cx, plan, slot, intent)
             } else {
                 return None;
             }
@@ -1678,7 +1624,7 @@ impl Lighter {
                 },
             )
             .and_then(|(plan, slot)| {
-                let context = cx.plan_leg_context(&plan, &slot)?;
+                let context = Self::trade_plan_context(cx, &plan, &slot, intent)?;
                 job.plan = Some(plan);
                 job.slot = Some(slot);
                 Ok(context)
@@ -1695,8 +1641,19 @@ impl Lighter {
             }
         }
     }
+    fn trade_plan_context(
+        cx: &mut Cx<'_, Pending>,
+        plan: &Plan,
+        slot: &Slot,
+        intent: Option<safe_cex_engine::classify::Intent>,
+    ) -> Result<Context, safe_cex_engine::request_context::Error> {
+        match intent {
+            Some(intent) => cx.plan_leg_context_with_intent(plan, slot, intent),
+            None => cx.plan_leg_context(plan, slot),
+        }
+    }
     fn trade_read(&mut self, cx: &mut Cx<'_, Pending>, url: String, request: Request) {
-        let Some(context) = self.trade_context(cx, Operation::Read) else {
+        let Some(context) = self.trade_context(cx, Operation::Read, None) else {
             return;
         };
         self.trading.inflight = true;
@@ -1807,11 +1764,11 @@ impl Lighter {
             }
             self.trading.active.as_mut().unwrap().builder_stage = 1;
         }
-        if let Some(wait) = self.trading.position_wait.take() {
-            if wait.confirmed != Some(true) {
-                self.trade_finish(cx, not_sent("Lighter account snapshot could not confirm reduce-only exposure; order was not sent"));
-                return;
-            }
+        if let Some(wait) = self.trading.position_wait.take()
+            && wait.confirmed != Some(true)
+        {
+            self.trade_finish(cx, not_sent("Lighter account snapshot could not confirm reduce-only exposure; order was not sent"));
+            return;
         }
         self.trade_kick(cx);
     }
@@ -1894,10 +1851,10 @@ impl Lighter {
             return;
         }
         self.trading.inflight = false;
-        if let Request::Submit(submission) = request {
-            if error.outcome != Some(Outcome::NotSent) {
-                self.submission_uncertain(cx, &submission.effect);
-            }
+        if let Request::Submit(submission) = request
+            && error.outcome != Some(Outcome::NotSent)
+        {
+            self.submission_uncertain(cx, &submission.effect);
         }
         self.trade_finish(cx, error);
     }
@@ -1922,5 +1879,69 @@ impl Lighter {
         if matches {
             self.trade_finish(cx, error);
         }
+    }
+}
+
+#[cfg(test)]
+mod client_index_parity_tests {
+    use super::*;
+    use safe_cex_engine::test_support::{ProbeVenue, seeded_engine};
+
+    #[test]
+    fn client_index_maximum_is_reserved_once_then_exhaustion_never_wraps() {
+        let mut venue = Lighter::new(crate::Options::default());
+        venue.trading.next_id = MAX_CLIENT_INDEX - 1;
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            assert_eq!(venue.mint_id(cx), Ok(MAX_CLIENT_INDEX));
+            assert_eq!(
+                venue.mint_id(cx).unwrap_err(),
+                "Lighter client order index namespace exhausted."
+            );
+            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
+            assert!(venue.mint_id(cx).is_err());
+            assert_eq!(venue.trading.next_id, MAX_CLIENT_INDEX);
+        }));
+        engine.start(1000.);
+        assert!(!engine.drain_actions().any(|action| matches!(
+            action,
+            safe_cex_engine::Action::Http(_) | safe_cex_engine::Action::Sign { .. }
+        )));
+    }
+
+    #[test]
+    fn a_zero_timestamp_and_entropy_candidate_still_reserves_positive_indices() {
+        let entropy = safe_cex_engine::entropy::Entropy::new(
+            Box::new(|bytes| {
+                bytes.fill(0);
+                Ok(())
+            }),
+            Box::new(|bytes| {
+                bytes.fill(0);
+                Ok(())
+            }),
+        );
+        let venue = Lighter::new(crate::Options::default());
+        let mut engine = safe_cex_engine::Engine::new(
+            ProbeVenue::new(venue, |venue, cx| {
+                assert_eq!(venue.mint_id(cx), Ok(1));
+                assert_eq!(venue.mint_id(cx), Ok(2));
+            }),
+            Some(entropy),
+        )
+        .unwrap();
+        engine.start(0.);
+    }
+
+    #[test]
+    fn each_reservation_reconsiders_the_current_timestamp_candidate() {
+        let mut venue = Lighter::new(crate::Options::default());
+        venue.trading.next_id = 7;
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            let first = venue.mint_id(cx).unwrap();
+            assert!((170_000_000_000_000..=170_000_000_000_099).contains(&first));
+            let next = venue.mint_id(cx).unwrap();
+            assert!(next > first && next <= MAX_CLIENT_INDEX);
+        }));
+        engine.start(1_700_000_000_000.);
     }
 }

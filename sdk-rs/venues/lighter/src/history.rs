@@ -387,8 +387,8 @@ impl Lighter {
             }
         };
         let credential = account
-            .and_then(|_| self.account.identity.as_ref())
-            .map(|id| crate::primary_credential(id));
+            .and(self.account.identity.as_ref())
+            .map(crate::primary_credential);
         let root = match cx.admit_caller_read_root(credential, None) {
             Ok(root) => root,
             Err(CommandEntryError::Rejected(_)) => return,

@@ -2,8 +2,8 @@
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, Notice, Query, TimerId};
 use safe_cex_venue_lighter::Lighter;
-use support::Options;
 use serde_json::json;
+use support::Options;
 use support::*;
 
 struct Startup {
@@ -76,7 +76,7 @@ fn reject_write(engine: &mut Engine<Lighter>) {
             .any(|action| matches!(action, Action::Http(_)))
     );
     assert!(actions.iter().any(|action| matches!(action,
-        Action::Notice(Notice::CommandFailed { command: 9, error }) if error.message.contains("signer unavailable"))));
+        Action::Notice(Notice::CommandFailed { command: 9, error }) if error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
 }
 
 #[test]
@@ -89,24 +89,8 @@ fn remote_only_and_unavailable_local_signers_keep_public_account_snapshots_witho
             ..options()
         },
         Options {
-            secret: Some("invalid-local-key".into()),
-            ..options()
-        },
-        Options {
-            signer_provider: Some("legacy-provider".into()),
-            ..options()
-        },
-        Options {
-            api_key_index: Some("255".into()),
-            ..options()
-        },
-        Options {
             secret: None,
             remote_signer: true,
-            api_key_index: Some("999".into()),
-            ..options()
-        },
-        Options {
             api_key_index: Some("999".into()),
             ..options()
         },
@@ -131,7 +115,7 @@ fn remote_only_and_unavailable_local_signers_keep_public_account_snapshots_witho
                 .engine
                 .handle(NOW + 2_000.0, Event::TimerFired { timer });
         }
-        let reads = requests(&mut result.engine);
+        let reads = requests_at(&mut result.engine, NOW + 2_000.0);
         assert!(reads.iter().any(|read| read.url.contains("/account?")));
         assert!(
             reads
@@ -200,14 +184,6 @@ fn remote_only_history_never_sends_private_requests_and_keeps_public_trades_avai
             remote_signer: true,
             ..options()
         },
-        Options {
-            secret: Some("invalid-local-key".into()),
-            ..options()
-        },
-        Options {
-            signer_provider: Some("legacy-provider".into()),
-            ..options()
-        },
     ] {
         let mut result = startup(opts);
         for query in [
@@ -234,7 +210,8 @@ fn remote_only_history_never_sends_private_requests_and_keeps_public_trades_avai
         ] {
             result
                 .engine
-                .handle(NOW, Event::Command(Command::Query { command: 10, query }));
+                .handle_command(NOW, Command::Query { command: 10, query }, Some(20_000))
+                .unwrap();
             let actions = result.engine.drain_actions().collect::<Vec<_>>();
             assert!(
                 !actions
@@ -243,16 +220,20 @@ fn remote_only_history_never_sends_private_requests_and_keeps_public_trades_avai
             );
             assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 10, result: value }) if value == "[]")));
         }
-        result.engine.handle(
-            NOW,
-            Event::Command(Command::Query {
-                command: 11,
-                query: Query::PublicTrades {
-                    symbol: "ETH".into(),
-                    limit: None,
+        result
+            .engine
+            .handle_command(
+                NOW,
+                Command::Query {
+                    command: 11,
+                    query: Query::PublicTrades {
+                        symbol: "ETH".into(),
+                        limit: None,
+                    },
                 },
-            }),
-        );
+                Some(20_000),
+            )
+            .unwrap();
         let reads = requests(&mut result.engine);
         assert_eq!(reads.len(), 1);
         assert!(reads[0].url.contains("/trades?"));

@@ -316,18 +316,19 @@ fn invalid_fill_cannot_consume_a_later_valid_execution_and_market_scopes_do_not_
     }
 }
 #[test]
-fn api_key_zero_signs_and_255_keeps_unsigned_account_snapshots() {
+fn api_key_zero_signs_and_invalid_private_index_refuses_at_setup() {
     let mut opts = options();
     opts.api_key_index = Some("0".into());
     let (e, _) = ready_with(opts);
     assert_eq!(e.store().positions().len(), 1);
     let mut opts = options();
     opts.api_key_index = Some("255".into());
-    let (e, _) = ready_with(opts);
-    assert_eq!(e.store().positions().len(), 1);
-    assert_eq!(e.store().balance().free, 900.0);
-    assert!(e.store().orders().is_empty());
+    assert!(matches!(
+        try_engine(opts),
+        Err(safe_cex_engine::signing::SignError::InvalidRequest)
+    ));
 }
+
 #[test]
 fn sparse_position_aggregate_does_not_close_existing_exposure() {
     let (mut e, s) = ready();

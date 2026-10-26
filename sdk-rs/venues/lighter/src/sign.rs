@@ -794,6 +794,32 @@ impl SignStep for AuthRecipe {
     }
 }
 
+/// A tier POST has the native form header before the recipe binds its unsigned bytes.
+pub(crate) struct FormRecipe<T>(pub T);
+impl<T: SignStep> SignStep for FormRecipe<T> {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        if let Action::Http(http) = outbound
+            && http.method == Method::Post
+        {
+            http.headers
+                .retain(|(name, _)| !name.eq_ignore_ascii_case("content-type"));
+            http.headers
+                .push(("Content-Type", "application/x-www-form-urlencoded".into()));
+        }
+        self.0.prepare(outbound, dispatch)
+    }
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        self.0.apply(outbound, result)
+    }
+    fn freshness_ms(&self) -> f64 {
+        self.0.freshness_ms()
+    }
+}
+
 #[cfg(test)]
 mod security_hedging {
     use super::*;
@@ -821,33 +847,5 @@ mod security_hedging {
         let public = safe_cex_crypto::lighter::public_key(&[3; 40]).unwrap();
         assert!(safe_cex_crypto::lighter::schnorr_verify(&[1; 8], &public, &first).unwrap());
         assert!(safe_cex_crypto::lighter::schnorr_verify(&[2; 8], &public, &second).unwrap());
-    }
-}
-
-/// A tier POST has the native form header before the recipe binds its unsigned bytes.
-pub(crate) struct FormRecipe<T>(pub T);
-impl<T: SignStep> SignStep for FormRecipe<T> {
-    fn prepare(
-        &mut self,
-        outbound: &mut Action,
-        dispatch: &DispatchContext<'_>,
-    ) -> Result<SignRequest, SignError> {
-        if let Action::Http(http) = outbound
-            && http.method == Method::Post
-        {
-            http.headers
-                .retain(|(name, _)| !name.eq_ignore_ascii_case("content-type"));
-            http.headers.push((
-                "Content-Type".into(),
-                "application/x-www-form-urlencoded".into(),
-            ));
-        }
-        self.0.prepare(outbound, dispatch)
-    }
-    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
-        self.0.apply(outbound, result)
-    }
-    fn freshness_ms(&self) -> f64 {
-        self.0.freshness_ms()
     }
 }

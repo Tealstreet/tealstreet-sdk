@@ -614,7 +614,7 @@ export class RustEngineExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
     const lighterL1Address = deriveSignerSetupMapping(exchangeName) === 'lighter'
-      && typeof options.key === 'string' && /^0x[0-9a-fA-F]{40}$/.test(options.key) ? options.key : undefined;
+      && typeof options.key === 'string' ? options.key.match(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/)?.[0] : undefined;
     if (options.localSigner !== undefined && !bridgeConstruction.dispatchSigning) {
       const message = 'Local signer setup is not supported for this Rust venue yet';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });

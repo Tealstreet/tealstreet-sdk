@@ -3,8 +3,8 @@ use safe_cex_engine::book::Book;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
-    Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Notice,
-    Query, Response, SocketId, TimerId, Venue, VenueError,
+    Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Notice, Query, Response, SocketId,
+    TimerId, Venue, VenueError,
 };
 use safe_cex_venue_lighter::{Lighter, Options, Pending};
 const NOW: f64 = 1_700_000_000_000.;
@@ -395,11 +395,27 @@ fn duplicate_id_cannot_consume_a_retained_peer() {
 }
 #[test]
 fn saturated_remote_public_trades_refuses_before_preparation() {
-    for robinhood in [false, true] { for testnet in [false, true] {
-        let mut e = engine(Local::Empty, robinhood, testnet);
-        for id in 1..=256 { peer(&mut e, id); }
-        let actions = ask_query(&mut e, NOW, 800, Query::PublicTrades { symbol: "ETH".into(), limit: Some(999) });
-        assert!(!actions.iter().any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_))));
-        assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 800, error }) if error.kind == Some(ErrorKind::Internal))).count(), 1);
-    } }
+    for robinhood in [false, true] {
+        for testnet in [false, true] {
+            let mut e = engine(Local::Empty, robinhood, testnet);
+            for id in 1..=256 {
+                peer(&mut e, id);
+            }
+            let actions = ask_query(
+                &mut e,
+                NOW,
+                800,
+                Query::PublicTrades {
+                    symbol: "ETH".into(),
+                    limit: Some(999),
+                },
+            );
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
+            );
+            assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 800, error }) if error.kind == Some(ErrorKind::Internal))).count(), 1);
+        }
+    }
 }
