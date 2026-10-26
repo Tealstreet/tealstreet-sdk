@@ -25,7 +25,7 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
   insist(candidates.length === 1, 'missing/duplicate paired physical producer');
   const checkoutSha = gitRead('rev-parse', 'HEAD'), checkoutTree = gitRead('rev-parse', 'HEAD^{tree}');
   let pull, landing, mergeTree;
-  if (run.event === 'push' && run.head_branch === 'feat/rust-rewrite') {
+  if (['push', 'workflow_dispatch'].includes(run.event) && run.head_branch === 'feat/rust-rewrite') {
     landing = await reader.getCommit(run.head_sha); mergeTree = checkoutTree;
   } else {
     const associated = await reader.listCommitPulls(run.head_sha);

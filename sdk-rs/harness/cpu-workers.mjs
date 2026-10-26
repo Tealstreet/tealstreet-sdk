@@ -33,7 +33,8 @@ export async function runCpuWorkers(context, phase, destination) {
       try {
         await new Promise((accept, reject) => {
           const child = spawn(process.execPath, ['sdk-rs/harness/cpu-ci.mjs', '--command', `${phase}-worker`,
-            '--worker-suites', JSON.stringify(suites), '--out', out], { cwd: root, env: context.env, stdio: ['ignore', log, log] });
+            '--worker-suites', JSON.stringify(suites), '--out', out], { cwd: root,
+            env: { ...context.env, NODE_PATH: resolve(context.root, 'node_modules') }, stdio: ['ignore', log, log] });
           child.once('error', reject);
           child.once('exit', (code, signal) => code === 0 && !signal ? accept() : reject(new Error(`CPU verifier ${index} failed (${code ?? signal}); see ${out}/verification.log`)));
         });

@@ -43,7 +43,7 @@ export function bitgetPairedAuthority({ run, pull, landing, job, checkoutSha, ch
     run.run_attempt === 1 && ['pull_request', 'workflow_dispatch', 'push'].includes(run.event), 'original repository run required');
   insist(run.event !== 'push' || run.head_branch === 'feat/rust-rewrite', 'push must be the Rust landing branch');
   let baseline, pullNumber = null;
-  if (run.event === 'push' && run.head_branch === 'feat/rust-rewrite') {
+  if (['push', 'workflow_dispatch'].includes(run.event) && run.head_branch === 'feat/rust-rewrite') {
     insist(landing?.sha === run.head_sha && checkoutSha === landing.sha && landing.tree?.sha === checkoutTree &&
       oid(landing.parents?.[0]?.sha), 'landing baseline must be the authenticated actual first parent');
     baseline = landing.parents[0].sha;

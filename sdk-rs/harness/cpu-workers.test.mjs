@@ -21,10 +21,15 @@ test('verification processes have isolated checkouts/output roots and retain all
   const root = resolve(parent, 'source'), out = resolve(parent, 'results'); mkdirSync(root);
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
   git('init', '-q', '-b', 'master'); git('config', 'user.name', 'fixture'); git('config', 'user.email', 'fixture@example.test');
+  writeFileSync(resolve(root, '.gitignore'), 'node_modules/\n');
+  mkdirSync(resolve(root, 'node_modules/fixture-dependency'), { recursive: true });
+  writeFileSync(resolve(root, 'node_modules/fixture-dependency/index.js'), "module.exports = 'locked parent dependency';\n");
   mkdirSync(resolve(root, 'sdk-rs/harness'), { recursive: true });
   writeFileSync(resolve(root, 'sdk-rs/harness/cpu-ci.mjs'), `
 import {mkdirSync,writeFileSync,existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
+import {createRequire} from 'node:module';
+if(createRequire(import.meta.url)('fixture-dependency')!=='locked parent dependency')throw new Error('wrong parent dependency');
 const args=process.argv.slice(2), value=k=>args[args.indexOf(k)+1];
 const suites=JSON.parse(value('--worker-suites'));
 if(existsSync('own-output'))throw new Error('shared output tree');

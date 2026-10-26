@@ -206,9 +206,12 @@ test('gate rejects a missing CI artifact before starting either replay', (t) => 
 
 test('CI retains wasm separately for three days without extending report storage', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  const archive = workflow.indexOf('name: Archive the matching CI replay engine');
-  assert.ok(archive > workflow.indexOf('name: Build the venue wasm engine'));
-  assert.ok(archive < workflow.indexOf('name: Check the wasm size budget'));
+  const build = workflow.indexOf('name: Build and lint the selected venue family');
+  const archive = workflow.indexOf('--archive sdk-rs/hosts/wasm/pkg/ci-replay', build);
+  assert.ok(build >= 0 && archive > build);
+  assert.ok(archive < workflow.indexOf('name: Check family isolation, every alias and the shipped size'));
+  const verify = workflow.indexOf('name: Verify the same-run matching family capsule');
+  assert.match(workflow.slice(verify, verify + 280), /ci-wasm\.mjs.*--verify sdk-rs\/hosts\/wasm\/pkg\/ci-replay/);
   const upload = workflow.slice(workflow.indexOf('name: Retain the matching CI replay engine briefly'));
   assert.match(upload, /name: ci-wasm-\$\{\{ matrix\.venue \}\}/);
   assert.match(upload, /path: sdk-rs\/hosts\/wasm\/pkg\/ci-replay\//);

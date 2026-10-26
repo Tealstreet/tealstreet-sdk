@@ -26,13 +26,15 @@ on:
       - 'thirdparty/**'
       - '.cargo/**'
       - 'rust-toolchain*'
-      - 'packages/safe-cex/**'
-      - 'packages/safe-cex-server/**'
+      - 'packages/**'
+      - 'apps/cli/**'
       - '.github/workflows/rust.yml'
       - '.github/actions/prepare-yarn/**'
       - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
+      - '.github/actions/install-binaryen/**'
   pull_request:
+    branches: [feat/rust-rewrite]
     paths:
       - 'sdk-rs/**'
       - 'package.json'
@@ -41,12 +43,13 @@ on:
       - 'thirdparty/**'
       - '.cargo/**'
       - 'rust-toolchain*'
-      - 'packages/safe-cex/**'
-      - 'packages/safe-cex-server/**'
+      - 'packages/**'
+      - 'apps/cli/**'
       - '.github/workflows/rust.yml'
       - '.github/actions/prepare-yarn/**'
       - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
+      - '.github/actions/install-binaryen/**'
 
 permissions:
   contents: read
@@ -80,8 +83,11 @@ jobs:
     timeout-minutes: 5
     outputs:
       full: ${{ steps.select.outputs.full }}
+      checkoutSha: ${{ steps.select.outputs.checkoutSha }}
       nativeFull: ${{ steps.select.outputs.nativeFull }}
+      combinedRequired: ${{ steps.select.outputs.combinedRequired }}
       nativeCrates: ${{ steps.select.outputs.nativeCrates }}
+      native: ${{ steps.select.outputs.native }}
       replay: ${{ steps.select.outputs.replay }}
       families: ${{ steps.select.outputs.families }}
       replayRequired: ${{ steps.select.outputs.replayRequired }}
@@ -98,9 +104,12 @@ jobs:
           node-version: 22
       - name: Select coverage from the actual checkout composition
         id: select
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: node sdk-rs/harness/ci-selection.mjs
 
   harness:
+    needs: selection
     name: Rust / replay harness tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -110,6 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -124,12 +134,14 @@ jobs:
       - run: corepack yarn rust:test-harness
 
   bans:
+    needs: selection
     name: Rust / banned patterns
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
           # The shrink-only request provenance ratchet verifies immutable base
           # and parent manifests, never a caller-supplied enlarged inventory.
           fetch-depth: 0
@@ -144,36 +156,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - check: fmt
-            command: cargo fmt --all --check
-          - check: clippy
-            command: cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p safe-cex-crypto --all-targets --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 -- -D warnings
-          - check: test
-            # Workspace builds unify crypto features; prove disabled and enabled provider arms.
-            command: 'RUSTFLAGS=-Dwarnings cargo test --locked --workspace && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --lib signer:: && RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-crypto --features ed25519,es256,secp256k1,stark,schnorr,hmac-sha512 --lib signer::'
-          # Workspace resolution unifies family features. Exercise each
-          # standalone engine closure, including both Plan configurations.
-          - check: engine-feature-modes-0
-            command: python3 scripts/test-http-plan-feature-modes.py --shard 0/4
-          - check: engine-feature-modes-1
-            command: python3 scripts/test-http-plan-feature-modes.py --shard 1/4
-          - check: engine-feature-modes-2
-            command: python3 scripts/test-http-plan-feature-modes.py --shard 2/4
-          - check: engine-feature-modes-3
-            command: python3 scripts/test-http-plan-feature-modes.py --shard 3/4
-          - check: mutation-barriers
-            command: |
-              cargo clippy --locked -p safe-cex-engine --all-targets --no-default-features --features http-mutation-barriers,test-support,order-locks,managed-sockets -- -D warnings
-              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-engine --no-default-features --features http-mutation-barriers,test-support,order-locks,managed-sockets --test plan_mutation_prepare_barrier --test multi_constraint_pacing
-              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-engine --no-default-features --features http-plans,test-support --lib disabled_barrier_refusal
-              cargo clippy --locked -p safe-cex-native --no-default-features --features http-mutation-barriers --all-targets -- -D warnings
-              RUSTFLAGS=-Dwarnings cargo test --locked -p safe-cex-native --no-default-features --features http-mutation-barriers --lib managed_http
-              CARGO_TARGET_DIR=target cargo test --locked --manifest-path hosts/native/tests/barrier-feature-unification/Cargo.toml
-              CARGO_TARGET_DIR=target cargo test --locked --manifest-path hosts/native/tests/barrier-feature-unification/Cargo.toml --features host-barriers
-              node --test hosts/wasm/js/hostmanagedhttp.test.mjs hosts/wasm/js/hostmanagedhttp-group.test.mjs
+        include: ${{ fromJSON(needs.selection.outputs.native) }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
       - uses: actions/cache@v6
         with:
           path: |
@@ -186,7 +173,6 @@ jobs:
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
       - uses: actions/setup-node@v4
-        if: startsWith(matrix.check, 'engine-feature-modes') || matrix.check == 'mutation-barriers'
         with:
           node-version: 22
       - name: Run ${{ matrix.check }}
@@ -205,6 +191,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
       - uses: actions/cache@v6
         with:
           path: |
@@ -224,11 +212,13 @@ jobs:
         run: cargo clippy --locked -p safe-cex-wasm --no-default-features --features bitunix,http-mutation-barriers --target wasm32-unknown-unknown -- -D warnings
 
   mutation-barrier-size:
+    needs: selection
     name: Rust / Bybit Mutation-barrier size comparison
     if: github.event_name == 'workflow_dispatch' && inputs.mutation_barrier_size
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      RUST_CHECKOUT_SHA: ${{ needs.selection.outputs.checkoutSha }}
       WASM_BINDGEN_VERSION: 0.2.129
       SAFE_CEX_WASM_OPT: required
     defaults:
@@ -236,6 +226,8 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -255,8 +247,7 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - uses: ./.github/actions/prefetch-cargo
-      - name: Install pinned binaryen (wasm-opt)
-        run: bash sdk-rs/harness/install-binaryen.sh
+      - uses: ./.github/actions/install-binaryen
       - name: Build and measure both capabilities from this checkout
         run: |
           for mode in off on; do
@@ -281,7 +272,7 @@ jobs:
             copyFileSync(path, `${out}/${target}.wasm`);
             return { target, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), error: wasmBudgetError(bytes.length, 'venue', 'bybit') ?? null };
           });
-          const report = { revision: process.env.GITHUB_SHA, mode, budgetBytes: wasmBudgetBytes('venue', 'bybit'), artifacts };
+          const report = { revision: process.env.RUST_CHECKOUT_SHA, mode, budgetBytes: wasmBudgetBytes('venue', 'bybit'), artifacts };
           writeFileSync(`${out}/report.json`, JSON.stringify(report, null, 2) + '\n');
           console.log(JSON.stringify(report, null, 2));
           JS
@@ -293,7 +284,7 @@ jobs:
           const read = (mode) => JSON.parse(readFileSync(`sdk-rs/harness/out/barrier-size/${mode}/report.json`));
           const off = read('off');
           const on = read('on');
-          if (off.revision !== on.revision || off.revision !== process.env.GITHUB_SHA) throw new Error('comparison revision mismatch');
+          if (off.revision !== on.revision || off.revision !== process.env.RUST_CHECKOUT_SHA) throw new Error('comparison revision mismatch');
           for (const artifact of off.artifacts) {
             const enabled = on.artifacts.find(({ target }) => target === artifact.target);
             if (!enabled) throw new Error('comparison target missing');
@@ -328,6 +319,8 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -351,8 +344,7 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - uses: ./.github/actions/prefetch-cargo
-      - name: Install pinned binaryen (wasm-opt)
-        run: bash sdk-rs/harness/install-binaryen.sh
+      - uses: ./.github/actions/install-binaryen
       - uses: ./.github/actions/install-yarn
         with:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
@@ -384,7 +376,7 @@ jobs:
   combined:
     name: Rust / combined consumers
     needs: selection
-    if: github.event_name != 'pull_request' || needs.selection.outputs.full == 'true'
+    if: needs.selection.outputs.combinedRequired == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -395,6 +387,8 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -416,8 +410,7 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - uses: ./.github/actions/prefetch-cargo
-      - name: Install pinned binaryen (wasm-opt)
-        run: bash sdk-rs/harness/install-binaryen.sh
+      - uses: ./.github/actions/install-binaryen
       - uses: ./.github/actions/install-yarn
         with:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
@@ -434,6 +427,7 @@ jobs:
       - name: Combined capability command conformance
         run: corepack yarn -s node --test sdk-rs/harness/capabilities-combined.integration.mjs
       - name: Check the shipped combined wasm size budget
+        if: needs.selection.outputs.sizeRequired == 'true'
         run: corepack yarn -s rust:wasm-budget --combined
       # Capture web bytes BEFORE the standalone family build overwrites pkg/web.
       - name: Archive same-run combined browser diagnostic
@@ -478,7 +472,7 @@ jobs:
   browser:
     name: Rust / browser cold start
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite')
-    needs: [families, combined]
+    needs: [selection, families, combined]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -486,6 +480,8 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -544,6 +540,8 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -763,7 +761,8 @@ jobs:
           if-no-files-found: error
 
   bitget-paired:
-    if: github.event_name != 'pull_request'
+    needs: selection
+    if: github.event_name != 'pull_request' && needs.selection.result == 'success'
     name: Rust / Bitget counterbalanced steady CPU
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -778,6 +777,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -799,8 +799,7 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - uses: ./.github/actions/prefetch-cargo
-      - name: Install pinned Binaryen
-        run: bash sdk-rs/harness/install-binaryen.sh
+      - uses: ./.github/actions/install-binaryen
       - uses: ./.github/actions/install-yarn
         with:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
@@ -821,8 +820,8 @@ jobs:
 
   cpu-plan:
     name: Rust / CPU remeasurement plan
-    needs: [gate, bitget-paired]
-    if: always() && github.event_name != 'pull_request'
+    needs: [selection, gate, bitget-paired]
+    if: always() && github.event_name != 'pull_request' && needs.selection.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 32
     outputs:
@@ -834,6 +833,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -861,7 +861,7 @@ jobs:
 
   cpu-second:
     name: Rust / CPU remeasurement (${{ matrix.suite }})
-    needs: cpu-plan
+    needs: [selection, cpu-plan]
     if: github.event_name != 'pull_request' && needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'
     strategy:
       fail-fast: false
@@ -874,6 +874,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -894,8 +895,8 @@ jobs:
 
   cpu-certify:
     name: Rust / shared CPU certification
-    needs: [gate, bitget-paired, cpu-plan, cpu-second]
-    if: always() && github.event_name != 'pull_request'
+    needs: [selection, gate, bitget-paired, cpu-plan, cpu-second]
+    if: always() && github.event_name != 'pull_request' && needs.selection.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 42
     outputs:
@@ -906,6 +907,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -933,7 +935,7 @@ jobs:
 
   cpu-final:
     name: Rust / CPU gate (${{ matrix.suite }})
-    needs: cpu-certify
+    needs: [selection, cpu-certify]
     if: always() && github.event_name != 'pull_request'
     strategy:
       fail-fast: false
@@ -946,6 +948,8 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -955,3 +959,25 @@ jobs:
           CPU_CERT_RESULTS: ${{ needs.cpu-certify.outputs.results }}
         run: node sdk-rs/harness/cpu-ci.mjs --command status --suite '${{ matrix.suite }}'
 
+
+  result:
+    name: Rust / required coverage
+    needs: [selection, bans, harness, native, wasm, families, combined, browser, gate, bitget-paired, cpu-plan, cpu-certify, cpu-final]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.selection.outputs.checkoutSha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require selected coverage and record landing fix ownership on red
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CI_JOB_RESULTS: ${{ toJSON(needs) }}
+        run: node sdk-rs/harness/ci-result.mjs

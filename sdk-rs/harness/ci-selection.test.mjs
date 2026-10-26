@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
-import { selectCi, checkoutBase } from './ci-selection.mjs';
+import { selectCi, checkoutBase, ciOutputs } from './ci-selection.mjs';
 import { GATE_SUITES } from './ci-gate-suites.mjs';
 import { venueFamilies } from '../hosts/wasm/js/venues.mjs';
 
@@ -20,7 +20,18 @@ test('each leaf selects its whole family, including aliases and dependent crates
   assert.deepEqual(select('sdk-rs/venues/hyperliquid/src/lib.rs').families, ['hyperliquid', 'txflow']);
   assert.deepEqual(select('sdk-rs/venues/bitget/src/lib.rs').replay.map(x => x.venue), ['bitget', 'bitgetusdc']);
   assert.deepEqual(select('sdk-rs/venues/kucoin/src/lib.rs').families, ['kucoin', 'kucoinspot']);
-  assert.deepEqual(select('packages/safe-cex/src/exchanges/kraken/message.ts').families, ['kraken', 'krakenspot']);
+  assert.deepEqual(select('packages/safe-cex/src/exchanges/kraken/message.ts').families, ['kraken']);
+  for (const [venue, crate] of [['bitgetusdc', 'bitget'], ['bybitinverse', 'bybit'], ['kucoinspot', 'kucoin'], ['krakenspot', 'kraken']]) {
+    const result = select(`packages/safe-cex/src/exchanges/${venue}/message.ts`);
+    assert.deepEqual(result.nativeCrates, [crate]);
+    assert(result.families.includes(venue === 'kucoinspot' ? venue : crate));
+  }
+});
+
+test('checkout outputs are literal SHAs while matrices remain JSON', () => {
+  const sha = 'a'.repeat(40);
+  assert.equal(ciOutputs({ checkoutSha: sha, full: false, native: [{ check: 'fmt' }] }),
+    `checkoutSha=${sha}\nfull=false\nnative=[{"check":"fmt"}]\n`);
 });
 
 test('docs and inert tests skip replay/size, but unknown and shared inputs select everything', () => {
@@ -39,6 +50,12 @@ test('docs and inert tests skip replay/size, but unknown and shared inputs selec
     else { assert.deepEqual(result.families, venueFamilies, path); assert.equal(result.replay.length, GATE_SUITES.length, path); }
   }
   assert.equal(selectCi({ paths: ['docs/X.md'], manifests, full: true }).replay.length, GATE_SUITES.length);
+  for (const path of ['sdk-rs/hosts/wasm/js/workers.test.mjs', 'sdk-rs/harness/frame-wire.integration.mjs']) {
+    const result = select(path);
+    assert.equal(result.combinedRequired, true, path);
+    assert.equal(result.sizeRequired, false, path);
+    assert.equal(result.replayRequired, false, path);
+  }
 });
 
 test('base dependency edges and transitive users survive removed dependencies', () => {
