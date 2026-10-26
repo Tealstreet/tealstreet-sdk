@@ -1340,3 +1340,31 @@ fn public_rest_book_refusal_does_not_invalidate_or_refresh_existing_jwt() {
         "9007199254740993"
     );
 }
+
+#[test]
+fn a_refused_auth_is_a_typed_terminal_failure_without_retries() {
+    let mut h = private();
+    // Past the JWT refresh point, the next private request re-authenticates.
+    h.now += 180_000.;
+    place(&mut h, 80, vec![opts(OrderType::Limit)]);
+    let auth = h.take("/auth/");
+    h.respond(
+        auth,
+        401,
+        r#"{"error":"INVALID_SIGNATURE","message":"unknown subkey"}"#,
+    );
+    let error = failed(&h, 80);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    // No 2 s retry is armed, and nothing re-authenticates later.
+    let at = h.now + 2_000.;
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if (*at_ms - at).abs() < 1.))
+    );
+    place(&mut h, 81, vec![opts(OrderType::Limit)]);
+    assert!(!h.pending.iter().any(|r| r.url.contains("/auth/")));
+    let error = failed(&h, 81);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+}
