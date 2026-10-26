@@ -174,3 +174,126 @@ fn candle_callback_composition_preserves_login_preparation_failure_delegation() 
         Ok(Claim::Released(_))
     ));
 }
+
+fn login_engine(revision: u64) -> Engine<Probe> {
+    let mut venue = Grvt::new(crate::Options {
+        key: Some("fixture-api-key".into()),
+        trading_account_id: Some("777".into()),
+        ..crate::Options::default()
+    });
+    venue.account.generation = revision;
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Probe { venue, retired: 0 });
+    engine.start(NOW);
+    engine
+}
+
+fn released_login(engine: &mut Engine<Probe>, now: f64) -> safe_cex_engine::HttpRequest {
+    safe_cex_engine::test_support::prepared_actions(engine, now)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("/auth/api_key/login") => Some(request),
+            _ => None,
+        })
+        .expect("genuine released login")
+}
+
+fn login_reply(engine: &mut Engine<Probe>, request: safe_cex_engine::HttpRequest, now: f64) {
+    engine.handle(
+        now,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "x-ts-grvt-session: fixture-session\nx-grvt-account-id: 0xaccount",
+                body: r#"{"status":"success","sub_account_id":"777"}"#,
+            },
+        },
+    );
+}
+
+#[test]
+fn successful_refresh_with_identical_values_still_advances_bundle_revision() {
+    let mut engine = login_engine(0);
+    let request = released_login(&mut engine, NOW);
+    login_reply(&mut engine, request, NOW + 1.);
+    assert_eq!(engine.venue().venue.account.generation, 1);
+    let login = engine.venue().venue.account.login_session.clone().unwrap();
+    let summary = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW + 1.)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("aggregated_account_summary") => {
+                Some(request)
+            }
+            _ => None,
+        })
+        .expect("native account summary");
+    engine.handle(
+        NOW + 2.,
+        Event::HttpResponse {
+            request: summary.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"c":1000,"m":"refresh"}"#,
+            },
+        },
+    );
+    let request = released_login(&mut engine, NOW + 2.);
+    login_reply(&mut engine, request, NOW + 3.);
+    let venue = &engine.venue().venue;
+    assert_eq!(venue.account.generation, 2);
+    assert_eq!(venue.account.login_session.as_ref(), Some(&login));
+    let safe_cex_engine::request_context::Owner::Session { generation } = login.owner() else {
+        unreachable!()
+    };
+    assert_eq!(venue.account_bearer_revision(generation), Some(2));
+    assert!(matches!(
+        venue.account_bearer(generation),
+        safe_cex_engine::request_context::SessionBearer::Ready { revision: 2, .. }
+    ));
+    assert_eq!(venue.account_bearer_revision(generation + 1), None);
+}
+
+#[test]
+fn account_id_only_change_advances_the_whole_bundle_revision() {
+    let mut engine = login_engine(0);
+    let request = released_login(&mut engine, NOW);
+    login_reply(&mut engine, request, NOW + 1.);
+    let summary = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW + 1.)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("aggregated_account_summary") => {
+                Some(request)
+            }
+            _ => None,
+        })
+        .expect("native account summary");
+    engine.handle(
+        NOW + 2.,
+        Event::HttpResponse {
+            request: summary.id,
+            response: Response {
+                status: 200,
+                headers: "x-grvt-account-id: 0xrotated",
+                body: r#"{"r":{"te":"100","ts2":"80","tu":"2","sas":[{"si":"777"}]}}"#,
+            },
+        },
+    );
+    let venue = &engine.venue().venue;
+    assert_eq!(venue.account.generation, 2);
+    let bundle = venue.account.session.as_ref().unwrap();
+    assert_eq!(bundle.cookie, "fixture-session");
+    assert_eq!(bundle.account_id, "0xrotated");
+}
+
+#[test]
+fn bundle_revision_exhaustion_retires_the_session_without_wrapping() {
+    let mut engine = login_engine(u64::MAX);
+    let request = released_login(&mut engine, NOW);
+    login_reply(&mut engine, request, NOW + 1.);
+    let venue = &engine.venue().venue;
+    assert_eq!(venue.account.generation, u64::MAX);
+    assert!(venue.account.session.is_none());
+    assert!(venue.account.login_session.is_none());
+    assert!(venue.account.authentication_failed);
+}
