@@ -19,7 +19,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // #2223 shared credential core: CI Bitget/USDC 1,481,804 and AsterDEX 1,385,869 rounded up to
 // KiB, each a <=2 KiB shared-code raise pre-approved by the overseer while the combined holds.
 // #2223 composed with #2219 on the #2245 tip: CI Bitget 1,482,944, AsterDEX 1,386,952 and Kraken
-// 1,402,082, each rounded up to the KiB as a <=2 KiB shared-code raise (standing ruling).
+// 1,402,082, each rounded up to the KiB as a <=2 KiB shared-code raise (standing ruling);
+// the overseer confirmed Bitget 1449 KiB with a 1452 KiB ceiling.
 export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_483_776, bitgetusdc: 1_483_776, bybit: 1_446_912, asterdex: 1_387_520, kraken: 1_402_880, krakenspot: 1_402_880 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
