@@ -151,6 +151,10 @@ for (const [name, change] of [
   ['extra role field', (m) => { m.role.account = 'private-descriptor-sentinel'; }],
   ['Session owner with extra request', (m) => { m.owner = { kind: 'session', generation: 1, request: 19 }; }],
   ['mutation role with extra scope', (m) => { m.role = { kind: 'mutation', scope: null }; }],
+  ['Session owner with read role', (m) => { m.owner = { kind: 'session', generation: 1 }; }],
+  ['managed owner with SessionAuth role', (m) => { m.slot = 'primary'; m.role = { kind: 'sessionAuth' }; }],
+  ['secondary mutation', (m) => { m.role = { kind: 'mutation' }; }],
+  ['secondary primary-only read', (m) => { m.role = { kind: 'primaryRead', reason: 'history', scope: 'account' }; }],
 ]) {
   test(`${name} is queried but never forwarded to the provider`, async () => {
     const malformed = validMeta();
