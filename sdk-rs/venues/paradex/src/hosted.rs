@@ -260,34 +260,35 @@ impl ParadexDescriptor {
     /// Parse and check one descriptor. Every accepted value obeys the native
     /// presence table; anything else refuses.
     pub fn from_json(json: &str) -> Result<Self, DescriptorError> {
-        let value: serde_json::Value =
-            serde_json::from_str(json).map_err(|_| DescriptorError::Malformed)?;
-        let op = value
-            .get("op")
-            .and_then(serde_json::Value::as_str)
-            .ok_or(DescriptorError::Malformed)?;
+        // Read only the tag first; each closed wire struct then parses the
+        // whole object and refuses unknown fields.
+        #[derive(Deserialize)]
+        struct Tag {
+            op: String,
+        }
+        let tag: Tag = serde_json::from_str(json).map_err(|_| DescriptorError::Malformed)?;
         let malformed = |_| DescriptorError::Malformed;
-        let descriptor = match op {
+        let descriptor = match tag.op.as_str() {
             "auth" => {
-                let wire: AuthWire = serde_json::from_value(value).map_err(malformed)?;
+                let wire: AuthWire = serde_json::from_str(json).map_err(malformed)?;
                 Self::Auth {
                     timestamp_s: wire.timestamp_s,
                     expiration_s: wire.expiration_s,
                 }
             }
             "orderCreate" => {
-                let wire: CreateWire = serde_json::from_value(value).map_err(malformed)?;
+                let wire: CreateWire = serde_json::from_str(json).map_err(malformed)?;
                 Self::OrderCreate {
                     target: wire.target,
                     order: wire.order,
                 }
             }
             "orderBatch" => {
-                let wire: BatchWire = serde_json::from_value(value).map_err(malformed)?;
+                let wire: BatchWire = serde_json::from_str(json).map_err(malformed)?;
                 Self::OrderBatch { items: wire.items }
             }
             "orderModify" => {
-                let wire: ModifyWire = serde_json::from_value(value).map_err(malformed)?;
+                let wire: ModifyWire = serde_json::from_str(json).map_err(malformed)?;
                 Self::OrderModify(Modify {
                     id: wire.id,
                     timestamp_ms: wire.timestamp_ms,
