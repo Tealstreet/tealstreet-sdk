@@ -9333,3 +9333,9 @@ shared Closed/backoff, preserving native ticker/book/OHLC demand. Repeated
 capacity while already retired cannot erase or renew that retry. Permanent
 encoder errors and private admission errors remain explicit fail-closed stops;
 this recovery grants no HTTP, auth, signing or venue-owned supervisor authority.
+
+Replacement admission follows the same public Capacity recovery: an engine
+issued epoch and its native socket reference exist before fallible interest
+staging, so a refusal retires that exact epoch and takes shared exponential
+backoff instead of permanently failing the feed. Controls saturate resources at
+the captured real retry and prove subsequent demand replay and private liveness.

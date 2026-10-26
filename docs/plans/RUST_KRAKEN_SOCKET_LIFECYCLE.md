@@ -274,3 +274,22 @@ replay and actual private sibling publication. Initial fixture mistakes (assumin
 an invalidated book stayed exposed, comparing Spot display symbols to wire aliases,
 and hitting permanent InvalidCoverage instead of queue Capacity) are retained
 separately and never counted as source regression REDs.
+
+## Replacement admission and publication
+
+Public connect installs a genuine engine epoch and the matching native socket
+reference before fallible interest staging. A staging Capacity is handled by
+Closed retirement and an Ok return, so Reconnect cannot propagate it into the
+engine's permanent failed-feed path. Both real venues have a captured-retry
+control that saturates 512 valid proposal credits at replacement admission,
+observes a distinct retired epoch with no exposed connect/frame/HTTP, verifies
+one exponential retry, then proves A/B/ticker/Spot OHLC replay and live private
+publication. All seven pressure controls pass at the local correction.
+
+Under the overseer's speed policy this is a venue-only slice: no engine/shared
+runtime, checker, budget or inventory addition. CI remains the family-size
+record; no local combined measurement is required while the declared combined
+headroom exceeds 200K. One reviewer CLEAR and the green correctness set, including
+Kraken replay, permit the guarded owner merge without auditor GO. CPU and
+certification are not the landing gate. The full hosted route and nonce takeover
+remain separate; no activation is asserted here.

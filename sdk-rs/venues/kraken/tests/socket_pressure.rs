@@ -32,6 +32,8 @@ struct Trace {
     retired: usize,
     callbacks: usize,
     encoder_pressure: bool,
+    replacement_pressure: bool,
+    retired_epochs: Vec<Epoch>,
 }
 struct Observed<V: Venue> {
     native: V,
@@ -146,6 +148,16 @@ impl<V: Venue> Venue for Observed<V> {
         cx: &mut Cx<'_, Self::Pending>,
         e: LifecycleEvent,
     ) -> Result<(), SocketError> {
+        let saturate = self.trace.borrow().replacement_pressure;
+        if let LifecycleEvent::Reconnect(feed) = &e
+            && saturate
+        {
+            self.trace.borrow_mut().replacement_pressure = false;
+            let desired: Vec<_> = self.trace.borrow().desired.values().cloned().collect();
+            for _ in 0..MAX_FEEDS {
+                cx.set_socket_interests(*feed, desired.clone()).unwrap();
+            }
+        }
         match &e {
             LifecycleEvent::Opened(epoch) if self.trace.borrow().public == Some(epoch.socket()) => {
                 self.trace.borrow_mut().feed = Some(epoch.feed())
@@ -154,9 +166,11 @@ impl<V: Venue> Venue for Observed<V> {
                 self.trace.borrow_mut().refused.push(*error)
             }
             LifecycleEvent::Retired { epoch, .. }
-                if self.trace.borrow().public == Some(epoch.socket()) =>
+                if self.trace.borrow().feed == Some(epoch.feed()) =>
             {
-                self.trace.borrow_mut().retired += 1
+                let mut trace = self.trace.borrow_mut();
+                trace.retired += 1;
+                trace.retired_epochs.push(*epoch);
             }
             _ => (),
         }
@@ -360,7 +374,15 @@ fn spot() -> Harness<KrakenSpot> {
         spot_response,
     )
 }
-fn exercise<V: Venue>(mut h: Harness<V>, mode: Pressure, spot: bool) {
+fn exercise<V: Venue>(h: Harness<V>, mode: Pressure, spot: bool) {
+    exercise_replacement(h, mode, spot, false);
+}
+fn exercise_replacement<V: Venue>(
+    mut h: Harness<V>,
+    mode: Pressure,
+    spot: bool,
+    replacement_pressure: bool,
+) {
     let symbols: Vec<_> = h
         .engine
         .store()
@@ -509,9 +531,66 @@ fn exercise<V: Venue>(mut h: Harness<V>, mode: Pressure, spot: bool) {
     }
     h.command(Command::SetTickerSymbols { symbols: vec![] });
     let (timer, at) = retries[0];
+    h.trace.borrow_mut().replacement_pressure = replacement_pressure;
     h.now = at;
     h.engine.handle(at, Event::TimerFired { timer });
-    let actions = h.collect();
+    let mut actions = h.collect();
+    if replacement_pressure {
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::WsConnect { .. } | Action::WsSend { .. } | Action::Http(_)
+        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a,Action::WsClose{socket} if *socket==private))
+        );
+        assert_eq!(h.trace.borrow().retired, 2);
+        let failed_epoch = h.trace.borrow().retired_epochs[1];
+        assert_ne!(
+            failed_epoch.socket(),
+            public,
+            "replacement admission owns a genuine new epoch"
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a,Action::WsClose{socket} if *socket==failed_epoch.socket()))
+                .count(),
+            1
+        );
+        let next: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if (at + 1500. ..=at + 2000.).contains(at_ms) => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            next.len(),
+            1,
+            "replacement Capacity must keep shared exponential retry: {actions:?}"
+        );
+        if spot {
+            h.engine.store_mut().set_balance(model::Balance::default());
+            h.message(
+                private,
+                r#"{"channel":"balances","type":"update","data":[]}"#,
+            );
+            assert_eq!(h.engine.store().balance().total, 1355.);
+        } else {
+            h.message(private,r#"{"feed":"open_orders_snapshot","orders":[{"instrument":"PF_XBTUSD","order_id":"replacement-peer","qty":3,"filled":0,"type":"limit","direction":0,"limit_price":99,"last_update_time":1700000000000}]}"#);
+            assert!(h.engine.store().order("replacement-peer").is_some());
+        }
+        let (retry, when) = next[0];
+        h.now = when;
+        h.engine.handle(when, Event::TimerFired { timer: retry });
+        actions = h.collect();
+        h.engine.handle(when + 1., Event::TimerFired { timer });
+        assert!(h.collect().is_empty());
+    }
     let replacement = h.trace.borrow().public.unwrap();
     assert_ne!(replacement, public);
     let wire_symbols: Vec<_> = symbols
@@ -565,4 +644,13 @@ fn futures_valid_key_frame_pressure_recovers_without_partial_frames() {
 #[test]
 fn spot_valid_key_frame_pressure_recovers_without_partial_frames() {
     exercise(spot(), Pressure::Frames, true)
+}
+
+#[test]
+fn futures_replacement_admission_capacity_keeps_shared_backoff_and_native_demand() {
+    exercise_replacement(futures(), Pressure::Proposals, false, true);
+}
+#[test]
+fn spot_replacement_admission_capacity_keeps_shared_backoff_and_native_demand() {
+    exercise_replacement(spot(), Pressure::Proposals, true, true);
 }

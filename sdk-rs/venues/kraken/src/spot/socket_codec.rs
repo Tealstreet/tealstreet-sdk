@@ -61,9 +61,6 @@ impl KrakenSpot {
             self.public.feed
         }
         .ok_or(SocketError::NotPermitted)?;
-        if !private {
-            cx.set_socket_interests(feed, self.public_interests(cx.store))?;
-        }
         let epoch = cx.connect_socket(
             feed,
             if private {
@@ -79,6 +76,11 @@ impl KrakenSpot {
         };
         connection.socket = Some(epoch.socket());
         connection.open = false;
+        if !private
+            && let Err(error) = cx.set_socket_interests(feed, self.public_interests(cx.store))
+        {
+            self.socket_error(cx, false, error);
+        }
         Ok(())
     }
     pub(super) fn socket_error(&self, cx: &mut Cx<'_, Pending>, private: bool, error: SocketError) {
