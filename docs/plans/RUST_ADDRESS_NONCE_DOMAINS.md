@@ -80,30 +80,43 @@ There is no secret in this carrier. Debug may show the public address but must
 not disclose its binding KeyRef. Serialization or an incoming wire object
 cannot create the binding; deserialized identities need trusted initialization.
 
-Local trusted setup derives the address while installing the slot's signing
-material, using the same declared-key primitive as Operation::PublicAddress.
-The result is20 bytes, not the credential presentation or a caller's address.
-Hosted/asynchronous providers answer an engine-owned pre-start PublicAddress
-operation for that exact installed signing ref. This is an assertion by the
-already trusted provider, not independent proof of possession of its secret.
-Unsupported providers cannot activate the address-nonce path.
+Every provider follows ONE engine-owned pre-start PublicAddress operation for
+the exact installed signing ref. LocalSigner answers that operation
+synchronously using its existing declared-key primitive; hosted/asynchronous
+providers answer the same operation. Only the engine seals the validated20-byte
+result into the identity. There is no separate LocalSigner install path,
+cross-crate address bridge, public setter or raw-result injection. This is an
+assertion by the already trusted provider, not independent proof of possession
+of its secret. Neither credential presentation nor a configured address is a
+setup answer.
 
-Only engine-owned trusted initialization installs VerifiedAddress. The precise
-cross-crate bridge for LocalSigner and the pre-start async setup operation are
-mandatory m26 source-review gates: no public address setter or raw result
-injection is silently authorized. Setup must carry a real initialization
-generation/correlation; it cannot fabricate a business Attempt or Session.
+The engine-owned pre-start operation and sealing are mandatory m26 source-review
+gates. Setup must carry a real initialization generation/correlation; it cannot
+fabricate a business Attempt or Session.
 Changing provider, identities, signing refs or algorithm before start invalidates
 both pending answers and installed bindings. Duplicate, late or foreign answers
 cannot bind a replacement. After start, existing identity/signer sealing stays.
 
 Each slot gets its own validated binding. A deliberately shared signing ref may
 produce equal addresses, but an unverified secondary cannot copy a primary
-binding to become eligible. Missing signing, including phase3 optional absence,
-produces no binding. An address claim then refuses InvalidSubject before nonce
-reservation/provider signing; absence is not an authentication-health failure.
+binding to become eligible. Before inspecting a binding, claim selection asks
+for the selected identity's signing_ref and preserves phase3's typed absence:
+Optional absence is SigningNotConfigured (InvalidInput/NotSent, no auth latch);
+MissingKey remains MissingKey where already applicable. Neither produces a
+binding, reservation or provider signing. InvalidSubject is reserved for a
+PRESENT signing ref with a missing, stale or mismatched binding. The exact
+selection error carrier/mapping must preserve that distinction at source.
 Public-only or otherwise unused identities must not gain an unwanted signing
 requirement or setup call. Consumer eligibility precedes required attestation.
+
+If a declared address-domain slot has a signing ref but its provider refuses or
+does not support pre-start PublicAddress, record a typed SETUP-CAPABILITY refusal
+for that slot's private address-signing path before start. The path reports
+NotSent without latching authentication health. Public and claim-free work
+continues; do not globally disable the engine or revoke an otherwise usable
+identity. Do not defer this known setup failure into repeated per-request
+InvalidSubject errors. Keep setup-capability refusal distinct from typed
+signing absence, invalid subject and a later business signing refusal.
 
 ## Declaration and selected claim
 
@@ -122,7 +135,8 @@ cannot create arbitrary domain names or change their arithmetic.
 
 Keep existing `Slots<Identity>::select_with_nonce` and the recipe-owned
 NonceClaim. Mint from the exact immutable member selected by Slots, according
-to the domain's subject strategy. For an address domain, obtain only that
+to the domain's subject strategy. For an address domain, resolve typed signing
+absence and any recorded setup-capability refusal first, then obtain only that
 member's verified binding and check exact signing ref/algorithm. Stable_id is
 neither required nor accepted as a substitute. Do not add an API accepting an
 arbitrary Selection plus an unrelated Identity or address.
@@ -187,11 +201,17 @@ in the target. Arbitrary external issuers remain the disclosed native exposure.
 
 ## Required originals and source gates
 
-1. Actual setup/provider address binding: local scalar and async PublicAddress
-   agree for the exact selected refs; malformed lengths, wrong algorithm/ref,
+1. Actual setup/provider address binding: local scalar derivation equals the
+   engine-sealed binding for the same input, and local/async providers use the
+   same engine operation for exact selected refs; malformed lengths, wrong
+   algorithm/ref,
    unsolicited/stale/duplicate setup answers and serialized forged metadata
    cannot mint. Provider/identity replacement invalidates old proofs. Missing
-   or optional signing stays absent without an auth latch.
+   signing preserves MissingKey; optional absence preserves
+   SigningNotConfigured/InvalidInput/NotSent without an auth latch. A provider's
+   pre-start Unsupported/refusal produces the slot's setup-capability NotSent
+   outcome before private activation, while public/claim-free work remains
+   usable. It is not a stream of later InvalidSubject failures.
 2. Primary/secondary selection and alias controls: same actual signer across
    different credential refs/stable IDs shares a sequence; different signers
    with equal stable-id text do not. Swap slots/ref/provider/domain and require
