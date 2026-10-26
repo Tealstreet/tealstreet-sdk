@@ -1,9 +1,19 @@
-//! Trading commands are preflighted completely, then issued one write at a time.
+//! Trading commands are preflighted completely, then issued one write at a time:
+//! ordered writes on a streamed serial Plan, native continue-on-error cancels as
+//! independent calls of a complete Plan.
 use crate::Pending;
+#[path = "trading/context.rs"]
+mod context;
 use crate::sign::{Credentials, Params};
+use context::{Entry, SERIAL, TABLE};
+use safe_cex_engine::classify::{Intent, Native, NativeCode, Verdict, WriteFact};
 use safe_cex_engine::model::{
     MarginType, Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
+};
+use safe_cex_engine::request_context::plan::Slot;
+use safe_cex_engine::request_context::{
+    Context, Error, HttpOwnerRetirement, Plan, ReconciliationData,
 };
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -22,6 +32,12 @@ const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
 pub struct Request {
     command: CommandId,
     call: Call,
+    plan: Plan,
+    slot: Slot,
+    context: Context,
+    method: Method,
+    path: &'static str,
+    params: Params,
 }
 impl Request {
     pub fn settings_scope(&self) -> Option<Option<&str>> {
@@ -31,6 +47,13 @@ impl Request {
             _ => None,
         }
     }
+    pub(crate) fn validate(&self, cx: &Cx<'_, Pending>) -> bool {
+        cx.validate_plan_delivery(&self.plan, &self.context).is_ok()
+    }
+    pub(crate) fn reconciliation(&self) -> Result<ReconciliationData, Error> {
+        ReconciliationData::new(self.command.to_string())
+    }
+
     pub fn changes_settings(&self) -> bool {
         matches!(
             self.call,
@@ -85,13 +108,17 @@ struct Step {
 #[derive(Default)]
 struct Job {
     steps: VecDeque<Step>,
-    ids: Vec<String>,
-    error: Option<VenueError>,
     continue_on_error: bool,
     // A trigger move cancels before placing; a failed placement must say so.
     replaces_cancelled: bool,
-    /// A step took effect, so a later rejection cannot mean nothing happened.
-    effective: bool,
+}
+struct Run {
+    job: Job,
+    plan: Plan,
+    /// A serial Plan's next admitted call; independent Plans list their slots.
+    next: Option<Slot>,
+    native_ids: Vec<String>,
+    error: Option<VenueError>,
 }
 struct Observation {
     order: Order,
@@ -102,7 +129,9 @@ struct Observation {
 }
 #[derive(Default)]
 pub struct Trading {
-    jobs: HashMap<CommandId, Job>,
+    jobs: HashMap<CommandId, Run>,
+    /// Retired settings writes whose metadata custody finishes at the next callback.
+    retired_settings: Vec<CommandId>,
     observed: HashMap<String, Observation>,
 }
 
@@ -133,11 +162,11 @@ struct Data<'a> {
     status: Cow<'a, str>,
     #[serde(default, borrow)]
     quantity: Option<Number<'a>>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "object_order")]
     order: Option<Box<Data<'a>>>,
     #[serde(default, borrow)]
     new_order_id: Option<Id<'a>>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "object_order")]
     new_order_response: Option<Box<Data<'a>>>,
     #[serde(default, borrow)]
     cancel_result: Cow<'a, str>,
@@ -149,6 +178,35 @@ struct Data<'a> {
     failed: Vec<serde::de::IgnoredAny>,
 }
 impl Data<'_> {
+    fn has_order_claim(&self) -> bool {
+        self.order_id.is_some()
+            || self.order_id_text.is_some()
+            || self.new_order_id.is_some()
+            || self.order.is_some()
+            || self.new_order_response.is_some()
+            || !self.status.is_empty()
+            || self.quantity.is_some()
+            || !self.cancel_result.is_empty()
+            || !self.new_order_result.is_empty()
+            || !self.replace_result.is_empty()
+    }
+    fn evidence_ids(&self, ids: &mut Vec<String>) {
+        for id in self
+            .order_id
+            .iter()
+            .chain(self.order_id_text.iter())
+            .chain(self.new_order_id.iter())
+        {
+            let id = id.text();
+            if !id.trim().is_empty() {
+                ids.push(id);
+            }
+        }
+        for nested in self.order.iter().chain(self.new_order_response.iter()) {
+            nested.evidence_ids(ids);
+        }
+    }
+
     fn id(&self) -> Result<Option<String>, String> {
         let nested = self.order.as_ref().map(|o| o.id()).transpose()?.flatten();
         matching_id(
@@ -224,50 +282,59 @@ struct Envelope<'a> {
     code: i64,
     #[serde(default, borrow)]
     msg: Cow<'a, str>,
-    #[serde(default, borrow)]
+    #[serde(default, borrow, deserialize_with = "object_data")]
     data: Option<Data<'a>>,
 }
 
-fn response_data<'a>(
-    response: Response<'a>,
-    absent_ok: bool,
-) -> Result<(Data<'a>, bool), VenueError> {
-    let envelope: Envelope<'_> = serde_json::from_str(response.body)
-        .map_err(|e| unknown(format!("Invalid BingX trading response: {e}")))?;
-    let absent = absent_ok && envelope.code == 80016;
-    if !(200..300).contains(&response.status) || (envelope.code != 0 && !absent) {
-        let message = format!("BingX {}: {}", envelope.code, envelope.msg);
-        let mut error = rejection(envelope.code, message, &envelope.msg);
-        // A gateway failure is unproven whatever body it carries.
-        if response.status == 408 || response.status >= 500 {
-            error.outcome = Some(Outcome::Unknown);
+fn object_data<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Data<'de>>, D::Error> {
+    struct OptionalObject;
+    struct Object;
+    impl<'de> serde::de::Visitor<'de> for Object {
+        type Value = Data<'de>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a BingX acknowledgement object")
         }
-        return Err(error);
+        fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Self::Value, M::Error> {
+            Data::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+        }
     }
-    Ok((envelope.data.unwrap_or_default(), absent))
-}
-/// A BingX coded failure; internal errors may follow execution.
-/// Codes not listed here (e.g. 80001 "request failed", 109500 "busy") leave
-/// the outcome unclassified rather than claim the write did not execute.
-fn rejection(code: i64, message: String, venue_message: &str) -> VenueError {
-    let (kind, outcome) = match code {
-        100001 | 100412 | 100413 => (Some(ErrorKind::AuthInvalid), Some(Outcome::Rejected)),
-        100004 | 100419 => (Some(ErrorKind::AuthPermission), Some(Outcome::Rejected)),
-        100410 => (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
-        80014 | 100400 => (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
-        80016 | 80020 | 100202 | 100440 | 101204 => {
-            (Some(ErrorKind::Rejected), Some(Outcome::Rejected))
+    impl<'de> serde::de::Visitor<'de> for OptionalObject {
+        type Value = Option<Data<'de>>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a BingX acknowledgement object or null")
         }
-        80012 | 100500 | 100503 => (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
-        _ => (None, None),
-    };
-    let mut error = VenueError::new(message)
-        .venue_code(code.to_string())
-        .venue_message(venue_message);
-    error.kind = kind;
-    error.outcome = outcome;
-    error
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_some<D: serde::Deserializer<'de>>(
+            self,
+            value: D,
+        ) -> Result<Self::Value, D::Error> {
+            value.deserialize_map(Object).map(Some)
+        }
+    }
+    deserializer.deserialize_option(OptionalObject)
 }
+
+fn object_order<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Box<Data<'de>>>, D::Error> {
+    object_data(deserializer).map(|data| data.map(Box::new))
+}
+fn parse_envelope(body: &str) -> Result<Envelope<'_>, serde_json::Error> {
+    if !body.trim_start().starts_with('{') {
+        return Err(serde::de::Error::custom(
+            "BingX acknowledgement is not an object",
+        ));
+    }
+    serde_json::from_str(body)
+}
+
 /// The write may have executed; reconcile before resending.
 fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
@@ -283,11 +350,22 @@ fn placement_id(data: &Data<'_>) -> Result<String, VenueError> {
         .ok_or_else(|| unknown("BingX place response omitted the order id"))
 }
 fn validated_placement(response: Response<'_>) -> Result<String, VenueError> {
-    let (data, _) = response_data(response, false)?;
-    placement_id(&data)
+    let envelope: Envelope<'_> =
+        parse_envelope(response.body).map_err(|e| unknown(e.to_string()))?;
+    if envelope.code != 0 {
+        return Err(unknown("BingX refused placement"));
+    }
+    placement_id(&envelope.data.unwrap_or_default())
 }
 
 impl Trading {
+    /// Retirement has no Store authority: finish its metadata writes here.
+    fn settle_retired(&mut self, cx: &mut Cx<'_, Pending>) {
+        for command in self.retired_settings.drain(..) {
+            cx.store.metadata_write_finished(command);
+        }
+    }
+
     pub fn observe_order(
         &mut self,
         order: &Order,
@@ -325,8 +403,24 @@ impl Trading {
         cx: &mut Cx<'_, Pending>,
         credentials: Option<&Credentials>,
         command: Command,
+        on_entry: impl FnOnce(),
     ) -> bool {
-        self.retain_open_orders(cx.store);
+        self.settle_retired(cx);
+        if !matches!(
+            &command,
+            Command::PlaceOrders { .. }
+                | Command::CancelOrders { .. }
+                | Command::AmendOrder { .. }
+                | Command::CancelSymbolOrders { .. }
+                | Command::SetLeverage { .. }
+                | Command::SetMarginType { .. }
+                | Command::SetPositionMode { .. }
+        ) {
+            return false;
+        }
+        let Some(entry) = Entry::begin(cx, credentials) else {
+            return true;
+        };
         let (id, result) = match command {
             Command::PlaceOrders { command, orders } => (command, self.place(cx, &orders)),
             Command::CancelOrders { command, ids } => (command, self.cancel(cx, &ids)),
@@ -381,21 +475,43 @@ impl Trading {
         };
         if credentials.is_none() {
             let error = not_sent("BingX trading requires an API key and secret");
-            cx.fail(id, error.kind(ErrorKind::AuthInvalid));
+            entry.reject(cx, error.kind(ErrorKind::AuthInvalid));
             return true;
         }
         if self.jobs.contains_key(&id) {
-            cx.fail(id, not_sent("Command id is already in progress"));
+            entry.reject(cx, not_sent("Command id is already in progress"));
             return true;
         }
         match result {
             Ok(job) => {
-                self.jobs.insert(id, job);
-                self.advance(cx, credentials, id);
+                let admitted = if job.continue_on_error {
+                    entry
+                        .admit_independent(cx, job.steps.len())
+                        .map(|plan| (plan, None))
+                } else {
+                    entry
+                        .admit_serial(cx, job.steps.len())
+                        .map(|(plan, slot)| (plan, Some(slot)))
+                };
+                if let Some((plan, next)) = admitted {
+                    on_entry();
+                    self.retain_open_orders(cx.store);
+                    self.jobs.insert(
+                        id,
+                        Run {
+                            job,
+                            plan,
+                            next,
+                            native_ids: Vec::new(),
+                            error: None,
+                        },
+                    );
+                    self.advance(cx, credentials, id);
+                }
             }
             Err(error) => {
-                cx.command_error(id, error.clone());
-                cx.fail(id, not_sent(error).kind(ErrorKind::InvalidInput));
+                on_entry();
+                entry.reject(cx, not_sent(error).kind(ErrorKind::InvalidInput));
             }
         }
         true
@@ -407,13 +523,48 @@ impl Trading {
         credentials: Option<&Credentials>,
         command: CommandId,
     ) {
-        let Some(job) = self.jobs.get_mut(&command) else {
+        let Some(run) = self.jobs.get_mut(&command) else {
             return;
         };
-        if job.error.is_some() && !job.continue_on_error {
-            job.steps.clear();
+        if run.error.is_some() && !run.job.continue_on_error {
+            let plan = run.plan.clone();
+            let error = run.error.clone().unwrap();
+            let _ = cx.fail_plan(&plan, error);
+            return;
         }
-        if let Some(step) = job.steps.pop_front() {
+        if let Some(step) = run.job.steps.pop_front() {
+            let plan = run.plan.clone();
+            let next = match run.next.take() {
+                Some(slot) => Ok(slot),
+                None => cx
+                    .plan_slots(&plan)
+                    .and_then(|slots| slots.into_iter().next().ok_or(Error::State)),
+            };
+            let slot = match next {
+                Ok(slot) => slot,
+                Err(error) => {
+                    let _ = cx.fail_plan(&plan, error.venue_error());
+                    return;
+                }
+            };
+            let intent = match &step.call {
+                Call::Place => Some(Intent::Place),
+                Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. } => {
+                    Some(Intent::Setting)
+                }
+                _ => None,
+            };
+            let issued = match intent {
+                Some(intent) => cx.plan_leg_context_with_intent(&plan, &slot, intent),
+                None => cx.plan_leg_context(&plan, &slot),
+            };
+            let context = match issued {
+                Ok(context) => context,
+                Err(error) => {
+                    let _ = cx.fail_plan(&plan, error.venue_error());
+                    return;
+                }
+            };
             if matches!(
                 &step.call,
                 Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
@@ -425,39 +576,67 @@ impl Trading {
                     _ => None,
                 };
                 if let Err(error) = cx.store.metadata_write_started(command, scope) {
-                    job.error = Some(error);
-                    job.steps.clear();
-                    self.advance(cx, credentials, command);
+                    let _ = cx.fail_plan(&plan, error);
                     return;
                 }
             }
             cx.command_progress(command, step.receipts);
-            crate::issue(
+            self.queue(
                 cx,
                 credentials,
-                step.method,
-                step.path,
-                step.params,
-                None,
-                Pending::Trade(Request {
+                Request {
                     command,
                     call: step.call,
-                }),
+                    plan,
+                    slot,
+                    context,
+                    method: step.method,
+                    path: step.path,
+                    params: step.params,
+                },
             );
         } else {
-            let job = self.jobs.remove(&command).expect("job exists");
-            match job.error {
-                Some(mut error) => {
-                    // A later rejection after a step took effect cannot mean nothing happened.
-                    if job.effective && error.outcome == Some(Outcome::Rejected) {
-                        error.outcome = None;
-                    }
-                    if job.effective && error.outcome == Some(Outcome::NotSent) {
-                        error.outcome = Some(Outcome::Unknown);
-                    }
-                    cx.fail(command, error.partial_ids(&job.ids));
-                }
-                None => cx.done(command, serde_json::to_string(&job.ids).unwrap_or_default()),
+            let plan = run.plan.clone();
+            let result = serde_json::to_string(&run.native_ids).unwrap_or_default();
+            let _ = cx.done_plan(&plan, result);
+        }
+    }
+
+    fn queue(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: Option<&Credentials>,
+        request: Request,
+    ) {
+        let Some(credentials) = credentials else {
+            let plan = request.plan.clone();
+            let _ = cx.fail_plan(
+                &plan,
+                not_sent("BingX credentials unavailable").kind(ErrorKind::AuthInvalid),
+            );
+            return;
+        };
+        let recipe = crate::sign::dispatch::Http::new(
+            credentials.primary.clone(),
+            request.method,
+            request.path,
+            request.params.clone(),
+        );
+        let (url, _, body) = recipe.unsigned();
+        let plan = request.plan.clone();
+        if let Err((pending, error)) = cx.request_signed_managed(
+            request.context.clone(),
+            None,
+            request.method,
+            url,
+            body,
+            Box::new(recipe),
+            Pending::Trade(request),
+        ) {
+            if let Some(request) = pending.into_trade() {
+                self.on_sign_failed(cx, Some(credentials), request, error.venue_error());
+            } else {
+                let _ = cx.fail_plan(&plan, error.venue_error());
             }
         }
     }
@@ -469,11 +648,26 @@ impl Trading {
         request: Request,
         error: VenueError,
     ) {
+        self.settle_retired(cx);
         cx.store.metadata_write_finished(request.command);
-        let places = request.places_order();
-        self.finish(cx, credentials, request.command, places, Err(error));
+        let Some(run) = self
+            .jobs
+            .get_mut(&request.command)
+            .filter(|run| run.plan.owner() == request.plan.owner())
+        else {
+            return;
+        };
+        let _ = run.error.get_or_insert(error.clone());
+        if run.job.continue_on_error
+            && cx
+                .finish_plan_failed_call(&request.plan, &request.slot, &request.context)
+                .is_ok()
+        {
+            self.advance(cx, credentials, request.command);
+        } else {
+            let _ = cx.fail_plan(&request.plan, error);
+        }
     }
-
     pub fn on_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -481,207 +675,199 @@ impl Trading {
         request: Request,
         error: &str,
     ) {
-        cx.store.metadata_write_finished(request.command);
-        let places = request.places_order();
-        let error = unknown(error).kind(ErrorKind::Network);
-        self.finish(cx, credentials, request.command, places, Err(error));
+        self.on_sign_failed(
+            cx,
+            credentials,
+            request,
+            unknown(error).kind(ErrorKind::Network),
+        );
+    }
+    pub(crate) fn retired(&mut self, retired: &HttpOwnerRetirement) {
+        let commands = self
+            .jobs
+            .iter()
+            .filter_map(|(command, run)| retired.matches_plan(&run.plan).then_some(*command))
+            .collect::<Vec<_>>();
+        for command in commands {
+            self.jobs.remove(&command);
+            self.retired_settings.push(command);
+        }
     }
 
     pub fn on_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         credentials: Option<&Credentials>,
-        request: Request,
+        mut request: Request,
         response: Response<'_>,
+        on_effects: impl FnOnce(&mut Cx<'_, Pending>, &Request),
     ) {
-        cx.store.metadata_write_finished(request.command);
-        let places = request.places_order();
-        let result = (|| {
-            let absent_ok = matches!(
-                &request.call,
+        self.settle_retired(cx);
+        if !request.validate(cx) {
+            return;
+        }
+        let envelope = parse_envelope(response.body);
+        let data = envelope.as_ref().ok().and_then(|e| e.data.as_ref());
+        let mut evidence = Vec::new();
+        if let Some(data) = data {
+            data.evidence_ids(&mut evidence);
+        }
+        let call = &request.call;
+        let absent = envelope.as_ref().is_ok_and(|e| e.code == 80016)
+            && matches!(
+                call,
                 Call::Cancel {
                     absent_ok: true,
                     ..
                 }
             );
-            let replace = matches!(&request.call, Call::Replace { .. });
-            let (data, absent) = response_data(response, absent_ok).map_err(|mut error| {
-                // STOP_ON_FAILURE can cancel the original before the new order fails.
-                if replace && error.outcome == Some(Outcome::Rejected) {
-                    error.outcome = None;
+        let canceled = matches!(call, Call::Replace { .. })
+            && data.is_some_and(|data| {
+                matches!(data.cancel_result.as_ref(), "SUCCESS" | "true" | "TRUE")
+            });
+        let decoded = envelope
+            .as_ref()
+            .map_err(|e| unknown(format!("Invalid BingX trading response: {e}")))
+            .and_then(|e| {
+                if e.code != 0 && !absent {
+                    return Err(unknown(format!("BingX {}: {}", e.code, e.msg)));
                 }
-                error
-            })?;
-            match request.call {
-                Call::Place => Ok(vec![placement_id(&data)?]),
-                Call::Cancel { ids, .. } => {
-                    if !absent {
-                        data.canceled()?;
-                        if let Some(id) = data.id().map_err(unknown)?
-                            && ids.len() == 1
-                            && id != ids[0]
-                        {
-                            return Err(unknown(
-                                "BingX cancellation acknowledgement identifies another order",
-                            ));
-                        }
-                    }
-                    if !data.failed.is_empty() {
-                        return Err("BingX cancel response reports failed cancellations".into());
-                    }
-                    for id in &ids {
-                        if cx
-                            .store
-                            .order(id)
-                            .is_some_and(|o| o.status != OrderStatus::Closed)
-                        {
-                            cx.store.set_order_status(id, OrderStatus::Canceled);
-                        }
-                        self.observed.remove(id);
-                    }
-                    Ok(Vec::new())
-                }
-                Call::Amend {
-                    id,
-                    symbol,
-                    quantity,
-                    step,
-                } => {
-                    data.accepted()?;
-                    if data.id().map_err(unknown)?.as_deref() != Some(&id)
-                        || data.symbol.replace('-', "") != symbol
-                        || data.quantity.as_ref().map(|v| num::adjust(v.value(), step))
-                            != Some(quantity)
-                    {
-                        return Err(unknown(
-                            "BingX amendment acknowledgement does not confirm order, symbol and quantity",
-                        ));
-                    }
-                    self.observed.remove(&id);
-                    Ok(vec![id])
-                }
-                Call::Replace { old_id } => {
-                    let success = |s: &str| matches!(s, "SUCCESS" | "true" | "TRUE");
-                    if !success(&data.cancel_result) {
-                        return Err(unknown("BingX replacement did not confirm cancellation"));
-                    }
-                    if cx
-                        .store
-                        .order(&old_id)
-                        .is_some_and(|o| o.status != OrderStatus::Closed)
-                    {
-                        cx.store.set_order_status(&old_id, OrderStatus::Canceled);
-                    }
-                    self.observed.remove(&old_id);
-                    if !success(&data.new_order_result) && !success(&data.replace_result) {
-                        return Err(unknown("BingX replacement did not confirm placement"));
-                    }
-                    let nested = if let Some(order) = &data.new_order_response {
-                        order.accepted()?;
-                        order.id().map_err(unknown)?
-                    } else {
-                        None
-                    };
-                    let id = matching_id(
-                        nested
-                            .into_iter()
-                            .chain(data.new_order_id.as_ref().map(Id::text)),
-                    )
-                    .map_err(unknown)?
-                    .filter(|id| *id != old_id)
-                    .ok_or_else(|| {
-                        unknown("BingX replacement response omitted a fresh order id")
-                    })?;
-                    // The account stream and reconciliation own the replacement row.
-                    Ok(vec![id])
-                }
-                Call::Leverage {
-                    symbol,
-                    leverage,
-                    side,
-                } => {
-                    cx.store.update_setting(&symbol, |s| match side {
-                        Some(PositionSide::Long) => {
-                            s.leverage = leverage;
-                            s.buy_leverage = Some(leverage);
-                        }
-                        Some(PositionSide::Short) => s.sell_leverage = Some(leverage),
-                        None => {
-                            s.leverage = leverage;
-                            s.buy_leverage = Some(leverage);
-                            s.sell_leverage = Some(leverage);
-                        }
-                    });
-                    cx.store.update_positions(|p| {
-                        if p.symbol == symbol && side.is_none_or(|side| p.side == side) {
-                            p.leverage = leverage;
-                        }
-                    });
-                    Ok(Vec::new())
-                }
-                Call::Margin { symbol, isolated } => {
-                    cx.store.update_setting(&symbol, |s| {
-                        s.margin_type = Some(if isolated {
-                            MarginType::Isolated
-                        } else {
-                            MarginType::Cross
-                        })
-                    });
-                    Ok(Vec::new())
-                }
-                Call::Mode { hedged } => {
-                    cx.store.set_hedged(hedged);
-                    Ok(Vec::new())
+                decode(
+                    &request.call,
+                    e.data.as_ref().unwrap_or(&Data::default()),
+                    absent,
+                )
+            });
+        let result = if let (true, Ok(ids)) = (
+            envelope.as_ref().is_ok_and(|e| e.code == 0),
+            decoded.as_ref(),
+        ) {
+            let ids = ids.clone();
+            match cx.http_write_fact(
+                &request.context,
+                WriteFact::Accepted {
+                    order_ids: ids.clone(),
+                },
+                None,
+            ) {
+                Ok(_) => Ok(ids),
+                Err(error) => {
+                    let _ = cx.fail_plan(&request.plan, error.venue_error());
+                    return;
                 }
             }
-        })();
-        self.finish(cx, credentials, request.command, places, result);
-    }
-
-    fn finish(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        credentials: Option<&Credentials>,
-        command: CommandId,
-        places: bool,
-        result: Result<Vec<String>, VenueError>,
-    ) {
-        let Some(job) = self.jobs.get_mut(&command) else {
+        } else {
+            let mut message = decoded
+                .as_ref()
+                .err()
+                .map(|error| error.message.clone())
+                .unwrap_or_else(|| "BingX order is already absent".into());
+            if request.places_order()
+                && self
+                    .jobs
+                    .get(&request.command)
+                    .is_some_and(|run| run.job.replaces_cancelled)
+            {
+                message = format!("original bracket cancelled; replacement failed: {message}");
+            }
+            let native = envelope.as_ref().ok().map(|e| Native {
+                code: NativeCode::Int(e.code),
+                message: &e.msg,
+            });
+            let fact = match cx.classify_write(&request.context, &TABLE, native.as_ref(), message) {
+                Ok(fact) => fact,
+                Err(error) => {
+                    let _ = cx.fail_plan(&request.plan, error.venue_error());
+                    return;
+                }
+            };
+            let fact = if data.is_some_and(Data::has_order_claim)
+                || canceled
+                || envelope.as_ref().is_ok_and(|e| e.code == 0)
+                || (matches!(fact.verdict(), Verdict::Satisfied(_))
+                    && (!absent || decoded.is_err()))
+            {
+                fact.unproven().with_order_ids(&evidence)
+            } else {
+                fact
+            };
+            let satisfied = matches!(fact.verdict(), Verdict::Satisfied(_));
+            // STOP_ON_FAILURE may cancel before refusing the placement: native
+            // leaves a refused cancelReplace without an outcome, and never resends it.
+            let replace_refused = matches!(call, Call::Replace { .. })
+                && matches!(
+                    fact.verdict(),
+                    Verdict::Refused(_) | Verdict::RefusedResend(_)
+                );
+            let error = fact.error().clone();
+            let grant = match cx.http_write_fact(
+                &request.context,
+                WriteFact::Failed {
+                    fact,
+                    known_effects: canceled || replace_refused,
+                },
+                None,
+            ) {
+                Ok(grant) => grant,
+                Err(error) => {
+                    let _ = cx.fail_plan(&request.plan, error.venue_error());
+                    return;
+                }
+            };
+            if let Some(grant) = grant {
+                match cx.plan_resend_context(&request.plan, &request.slot, &request.context, grant)
+                {
+                    Ok(context) => {
+                        request.context = context;
+                        self.queue(cx, credentials, request);
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_plan(&request.plan, error.venue_error());
+                    }
+                }
+                return;
+            }
+            if satisfied {
+                Ok(Vec::new())
+            } else {
+                Err(error)
+            }
+        };
+        cx.store.metadata_write_finished(request.command);
+        if !absent
+            && (result.is_ok() || canceled)
+            && cx.validate_http_write_effects(&request.context).is_ok()
+        {
+            apply(self, cx, &request.call, canceled);
+            on_effects(cx, &request);
+        }
+        let Some(run) = self
+            .jobs
+            .get_mut(&request.command)
+            .filter(|run| run.plan.owner() == request.plan.owner())
+        else {
+            let _ = cx.finish_plan_call(&request.plan, &request.slot, &request.context);
             return;
         };
         match result {
-            Ok(ids) => {
-                job.effective = true;
-                job.ids.extend(ids);
-            }
-            Err(mut error) => {
-                if places && job.replaces_cancelled {
-                    error.message = format!(
-                        "original bracket cancelled; replacement failed: {}",
-                        error.message
-                    );
-                }
-                cx.command_error(command, error.message.clone());
-                // Preserve the first diagnostic independently of sent evidence.
-                // Unsent sibling legs cannot erase a native refusal or uncertainty.
-                if let Some(recorded) = &mut job.error {
-                    if recorded.outcome.is_none()
-                        || error.outcome.is_none()
-                        || recorded.outcome == Some(Outcome::Unknown)
-                        || error.outcome == Some(Outcome::Unknown)
-                    {
-                        recorded.outcome = Some(Outcome::Unknown);
-                    } else if recorded.outcome == Some(Outcome::NotSent)
-                        && error.outcome == Some(Outcome::Rejected)
-                    {
-                        recorded.outcome = Some(Outcome::Rejected);
-                    }
-                } else {
-                    job.error = Some(error);
-                }
+            Ok(ids) => run.native_ids.extend(ids),
+            Err(error) => {
+                let _ = run.error.get_or_insert(error);
             }
         }
-        self.advance(cx, credentials, command);
+        // An ordered write continues only from this call's accepted DATA.
+        let settled =
+            if !run.job.continue_on_error && run.error.is_none() && !run.job.steps.is_empty() {
+                cx.continue_serial_plan(&request.plan, &request.slot, &request.context, SERIAL)
+                    .map(|slot| run.next = Some(slot))
+            } else {
+                cx.finish_plan_call(&request.plan, &request.slot, &request.context)
+            };
+        if settled.is_err() {
+            let _ = cx.fail_plan(&request.plan, unknown("BingX write settlement refused"));
+            return;
+        }
+        self.advance(cx, credentials, request.command);
     }
 
     fn place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
@@ -1348,4 +1534,153 @@ fn split(amount: f64, max: f64, step: f64) -> Result<Vec<f64>, String> {
         result.push(rest);
     }
     Ok(result)
+}
+
+fn decode(call: &Call, data: &Data<'_>, absent: bool) -> Result<Vec<String>, VenueError> {
+    match call {
+        Call::Place => Ok(vec![placement_id(data)?]),
+        Call::Cancel { ids, .. } => {
+            data.canceled()?;
+            if !absent
+                && let Some(id) = data.id().map_err(unknown)?
+                && ids.len() == 1
+                && id != ids[0]
+            {
+                return Err(unknown(
+                    "BingX cancellation acknowledgement identifies another order",
+                ));
+            }
+            if !data.failed.is_empty() {
+                return Err(unknown(
+                    "BingX cancel response reports failed cancellations",
+                ));
+            }
+            Ok(Vec::new())
+        }
+        Call::Amend {
+            id,
+            symbol,
+            quantity,
+            step,
+        } => {
+            data.accepted()?;
+            if data.id().map_err(unknown)?.as_deref() != Some(id)
+                || data.symbol.replace('-', "") != *symbol
+                || data
+                    .quantity
+                    .as_ref()
+                    .map(|v| num::adjust(v.value(), *step))
+                    != Some(*quantity)
+            {
+                return Err(unknown(
+                    "BingX amendment acknowledgement does not confirm order, symbol and quantity",
+                ));
+            }
+            Ok(vec![id.clone()])
+        }
+        Call::Replace { old_id } => {
+            let success = |s: &str| matches!(s, "SUCCESS" | "true" | "TRUE");
+            if !success(&data.cancel_result) {
+                return Err(unknown("BingX replacement did not confirm cancellation"));
+            }
+            if !success(&data.new_order_result) && !success(&data.replace_result) {
+                return Err(unknown("BingX replacement did not confirm placement"));
+            }
+            let nested = if let Some(order) = &data.new_order_response {
+                order.accepted()?;
+                order.id().map_err(unknown)?
+            } else {
+                None
+            };
+            let id = matching_id(
+                nested
+                    .into_iter()
+                    .chain(data.new_order_id.as_ref().map(Id::text)),
+            )
+            .map_err(unknown)?
+            .filter(|id| id != old_id)
+            .ok_or_else(|| unknown("BingX replacement response omitted a fresh order id"))?;
+            Ok(vec![id])
+        }
+        Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. } => Ok(Vec::new()),
+    }
+}
+fn apply(trading: &mut Trading, cx: &mut Cx<'_, Pending>, call: &Call, canceled: bool) {
+    match call {
+        Call::Place => {}
+        Call::Cancel { ids, .. } => {
+            for id in ids {
+                if cx
+                    .store
+                    .order(id)
+                    .is_some_and(|o| o.status != OrderStatus::Closed)
+                {
+                    cx.store.set_order_status(id, OrderStatus::Canceled);
+                }
+                trading.observed.remove(id);
+            }
+        }
+        Call::Amend { id, .. } => {
+            trading.observed.remove(id);
+        }
+        Call::Replace { old_id } if canceled => {
+            if cx
+                .store
+                .order(old_id)
+                .is_some_and(|o| o.status != OrderStatus::Closed)
+            {
+                cx.store.set_order_status(old_id, OrderStatus::Canceled);
+            }
+            trading.observed.remove(old_id);
+        }
+        Call::Replace { .. } => {}
+        Call::Leverage {
+            symbol,
+            leverage,
+            side,
+        } => {
+            cx.store.update_setting(symbol, |s| match side {
+                Some(PositionSide::Long) => {
+                    s.leverage = *leverage;
+                    s.buy_leverage = Some(*leverage);
+                }
+                Some(PositionSide::Short) => s.sell_leverage = Some(*leverage),
+                None => {
+                    s.leverage = *leverage;
+                    s.buy_leverage = Some(*leverage);
+                    s.sell_leverage = Some(*leverage);
+                }
+            });
+            cx.store.update_positions(|p| {
+                if p.symbol == *symbol && side.is_none_or(|side| p.side == side) {
+                    p.leverage = *leverage;
+                }
+            });
+        }
+        Call::Margin { symbol, isolated } => {
+            cx.store.update_setting(symbol, |s| {
+                s.margin_type = Some(if *isolated {
+                    MarginType::Isolated
+                } else {
+                    MarginType::Cross
+                })
+            });
+        }
+        Call::Mode { hedged } => cx.store.set_hedged(*hedged),
+    }
+}
+
+pub(crate) fn evidence(
+    body: &str,
+    evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+) {
+    if let Ok(envelope) = parse_envelope(body)
+        && let Some(data) = envelope.data
+    {
+        let mut ids = Vec::new();
+        data.evidence_ids(&mut ids);
+        for id in ids {
+            evidence.order_id(&id);
+        }
+    }
 }
