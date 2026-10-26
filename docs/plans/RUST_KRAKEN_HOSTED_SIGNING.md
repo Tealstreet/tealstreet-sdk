@@ -1,8 +1,9 @@
 # Kraken Futures and Spot hosted signing on Rust
 
 Owner: codex-9czdjh. Plan-first on rewrite tip
-`b24911c14d562e257a901f64355d6d75cdee3c2e`. Both products are beta IN.
-One shared PR carries the plan, originals and source after review. Shared
+`b24911c14d562e257a901f64355d6d75cdee3c2e`. Both products are beta IN with local keys only.
+The overseer defers hosted implementation until after beta. This docs-only PR
+records the plan; originals and source follow in a separate shared PR. Shared
 provider/setup and codec review: m26ps4 and 4yjlw0; dispatch/nonce: uufub4;
 engine API: fe7lgm; auditor GO: 8x5tm1. This checkpoint changes docs only.
 
@@ -60,7 +61,8 @@ setup. Its exact TS spelling is a reviewer gate before source; the contract is:
 A channel adapter for the beta consumer uses this SDK module; there is no
 NX-local crypto/descriptor implementation or production-bundle change. This
 plan does not claim an old shipped consumer can negotiate the new route.
-Actual beta eligibility requires both halves and their capability negotiation.
+Future hosted eligibility requires both halves and their capability negotiation.
+Current beta admission remains local-key only and refuses hosted work NotSent.
 
 The intended construction rows declare dispatchSigning, protected headers
 (APIKey/Authent/Nonce for Futures; API-Key/API-Sign for Spot), Base64 output,
@@ -200,7 +202,7 @@ enters an operation frame. No separate Spot WS MAC capability is needed.
    family sizes. Report the actual measured tip, delta and Kraken/Spot cap; no local family matrix. The urgent cap fix is
    separate. Inventory changes are removal-only evidence after real adoption,
    never cosmetic relocation or diagnostic/oracle deletion.
-7. Plan/API CLEAR precedes originals and source in this PR. Freeze and request
+7. Plan/API CLEAR precedes originals and source in the post-beta shared PR. Freeze and request
    auditor GO on correctness green; CPU/certification is nonblocking. The
    structured peer route must work end to end before its construction rows
    grant hosted eligibility. No deploy, secret upload, TS venue fallback,
