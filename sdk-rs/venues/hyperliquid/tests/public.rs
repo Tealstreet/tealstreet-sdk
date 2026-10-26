@@ -305,6 +305,8 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
 fn malformed_nested_rows_keep_positional_native_asset_mapping_and_valid_peers() {
     let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options::default()));
     e.start(0.);
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     let id = request(&mut e);
     response(
         &mut e,
@@ -359,6 +361,7 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         let mut e =
             safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options::default()));
         e.start(0.);
+        e.set_log_level(safe_cex_engine::Level::Debug);
         let id = request(&mut e);
         response(
             &mut e,

@@ -4818,7 +4818,8 @@ impl<V: Venue> Engine<V> {
                                 if self.venue.fence_uncertain_cancel_all()
                                     && cx.io.core.order_locks.uncertain(symbol) =>
                             {
-                                UNCERTAIN_CANCEL_ALL.into()
+                                VenueError::new(UNCERTAIN_CANCEL_ALL)
+                                    .outcome(crate::Outcome::NotSent)
                             }
                             _ => "Order amendment or cancellation is already in flight".into(),
                         };
@@ -4950,7 +4951,7 @@ impl<V: Venue> Engine<V> {
                 };
                 cx.refuse_before_entry(
                     command,
-                    "Placement outcome is uncertain; reconcile before cancel-all",
+                    VenueError::new(UNCERTAIN_CANCEL_ALL).outcome(crate::Outcome::NotSent),
                 );
             } else {
                 if let Some(id) = command.completion_id() {
@@ -7083,7 +7084,7 @@ mod streaming_tests {
         );
         let actions: Vec<_> = engine.drain_actions().collect();
         for command in [2, 3] {
-            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "Placement outcome is uncertain; reconcile before cancel-all")));
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: id, error }) if *id == command && error.legacy_text() == "Placement outcome is uncertain; reconcile before cancel-all" && error.outcome == Some(crate::Outcome::NotSent))));
         }
         engine
             .io

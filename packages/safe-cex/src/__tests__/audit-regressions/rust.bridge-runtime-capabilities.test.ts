@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName } from '../../types';
 import { afterEach, expect, it, vi } from 'vitest';

@@ -63,6 +63,8 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
             })
             .expect("fresh catalogue request");
     }
+    // Skipped discovery rows log at Debug.
+    engine.set_log_level(safe_cex_engine::Level::Debug);
     engine.handle(
         now,
         Event::HttpResponse {
@@ -326,6 +328,7 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
                 _ => None,
             })
             .expect("catalogue request");
+        engine.set_log_level(safe_cex_engine::Level::Debug);
         engine.handle(
             0.0,
             Event::HttpResponse {
