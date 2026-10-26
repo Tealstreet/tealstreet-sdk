@@ -6,7 +6,6 @@ import {
   betaVenueFamilies,
   betaVenueFamily,
   betaVenueNames,
-  betaVenueSigners,
 } from './beta-venues.mjs';
 import { familyLoader } from './family-loader.mjs';
 import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
@@ -48,12 +47,6 @@ test('the beta loader refuses an OUT venue before importing any engine', async (
   await assert.rejects(load('woo'), BetaVenueUnavailableError);
   await load('okxeu');
   assert.deepEqual(imports, ['okx']);
-});
-
-test('Paradex is local-key only; other venues set no signer restriction', () => {
-  assert.deepEqual(betaVenueSigners('paradex'), ['local']);
-  assert.equal(betaVenueSigners('bybit'), undefined);
-  assert.equal(betaVenueSigners('woo'), undefined);
 });
 
 test('engine.beta.web.mjs is generated from the table and imports only beta families', () => {

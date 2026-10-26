@@ -1,7 +1,9 @@
 // The Rust-only beta bundle's eligibility table (docs/plans/RUST_BETA_BUNDLE.md),
 // the single source for its family build list, its generated web loader
 // (engine.beta.web.mjs) and its venue check. Every other Rust venue is OUT and
-// refused by name before any wasm is fetched.
+// refused by name before any wasm is fetched. Account-mode policy (local key vs
+// remote or payload signer, Paradex local only) is not here: it is enforced at
+// construction by safe-cex's assertBetaAccount (exchanges/rust/betaVenues.ts).
 import { venueFamily } from './venues.mjs';
 
 const betaVenues = Object.freeze({
@@ -30,8 +32,7 @@ const betaVenues = Object.freeze({
   okxdemo: { family: 'okx' },
   okxeu: { family: 'okx' },
   okxeudemo: { family: 'okx' },
-  // Local key only: remote or hosted Paradex signer shapes are not in the beta.
-  paradex: { family: 'paradex', signers: ['local'] },
+  paradex: { family: 'paradex' },
   phemex: { family: 'phemex' },
 });
 
@@ -52,9 +53,4 @@ export function betaVenueFamily(venue) {
   const family = venueFamily(venue);
   if (!Object.hasOwn(betaVenues, venue)) throw new BetaVenueUnavailableError(venue);
   return family;
-}
-
-/** The signer shapes a beta venue accepts, or `undefined` when its table entry sets no restriction. */
-export function betaVenueSigners(venue) {
-  return Object.hasOwn(betaVenues, venue) ? betaVenues[venue].signers : undefined;
 }

@@ -9,5 +9,3 @@ export class BetaVenueUnavailableError extends Error {
 }
 /** The family of a beta venue; throws for an unknown venue or an OUT one. */
 export function betaVenueFamily(venue: string): string;
-/** The signer shapes a beta venue accepts, or `undefined` when unrestricted. */
-export function betaVenueSigners(venue: string): readonly string[] | undefined;
