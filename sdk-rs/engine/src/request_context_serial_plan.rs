@@ -15,6 +15,10 @@ pub(super) struct Serial {
     call: SerialCall,
     #[cfg(feature = "session-bearer")]
     pub(super) session_seed: Option<(u64, u64)>,
+    #[cfg(feature = "session-bearer")]
+    pub(super) session_root: Option<crate::request_context::Session>,
+    #[cfg(feature = "session-bearer")]
+    pub(super) wire_fingerprint: Option<[u8; 32]>,
     /// Read calls sign with the Preflight's read role (or go unsigned), never
     /// with the Plan's write credential.
     read: Option<Credential>,
@@ -134,6 +138,13 @@ impl<P> Cx<'_, P> {
         }
         validate_call(first)?;
         let (intent, _) = self.preflight_plan_origin(preflight)?;
+        #[cfg(feature = "session-bearer")]
+        let session_root = self
+            .io
+            .core
+            .request_contexts
+            .keyless_session(preflight.owner())
+            .cloned();
         // A domain member is paced by its domain; any other serial Plan stays unpaced.
         #[cfg(feature = "release-domains")]
         let pacing = self
@@ -166,7 +177,7 @@ impl<P> Cx<'_, P> {
                 policy: PlanPolicy {
                     independent_calls: false,
                     operation: Operation::Mutation,
-                    credential: Some(policy.credential),
+                    credential: policy.credential,
                     pacing,
                     retry: retry_policy(first),
                 },
@@ -181,6 +192,10 @@ impl<P> Cx<'_, P> {
                 call: first,
                 #[cfg(feature = "session-bearer")]
                 session_seed: None,
+                #[cfg(feature = "session-bearer")]
+                session_root,
+                #[cfg(feature = "session-bearer")]
+                wire_fingerprint: None,
                 read: intent.read_credential,
                 #[cfg(feature = "condition-waits")]
                 condition: None,
@@ -273,6 +288,11 @@ impl crate::engine::CoreCx<'_> {
         wake: Next,
     ) -> Result<Slot, Error> {
         validate_call(next)?;
+        #[cfg(feature = "session-bearer")]
+        self.io
+            .core
+            .request_contexts
+            .validate_keyless_session(plan.owner())?;
         let body = self
             .io
             .core
@@ -440,6 +460,10 @@ impl crate::engine::CoreCx<'_> {
                 .expect("validated serial Plan")
                 .session_seed = None;
         }
+        #[cfg(feature = "session-bearer")]
+        {
+            body.serial.as_mut().expect("serial call").wire_fingerprint = None;
+        }
         let slot = body.schedule.available().next().expect("next serial call");
         self.io.core.request_contexts.reserved_contexts += 1;
         self.rearm_plan(plan);
@@ -460,6 +484,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<Context, Error> {
         self.validate_plan_delivery(plan, context)?;
         let registry = &self.io.core.request_contexts;
+        registry.validate_keyless_session(plan.owner())?;
         let body = registry.validate_plan(plan, self.now)?;
         if body.serial.is_none() {
             return Err(Error::State);

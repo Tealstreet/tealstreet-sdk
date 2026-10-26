@@ -5,6 +5,8 @@ use crate::request_context::{RetryPolicy, plan::CallTerms};
 
 pub(in super::super) struct State {
     pub(super) policy: PreflightPolicy,
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(super) session_root: Option<crate::request_context::Session>,
     pub(super) receipt_cap: Option<(u64, f64)>,
     // At most one entry; storage is reserved fallibly before ID admission.
     pub(super) call: Vec<Call>,
@@ -22,6 +24,11 @@ pub(in super::super) struct State {
 }
 
 impl State {
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(in crate::engine) fn session_root(&self) -> Option<&crate::request_context::Session> {
+        self.session_root.as_ref()
+    }
+
     /// The admitted write-after-reads credential, for repair mint custody.
     #[cfg(feature = "repair-mutations")]
     pub(in crate::engine) fn repair_write_credential(
@@ -35,6 +42,8 @@ impl State {
     pub(super) fn new(policy: PreflightPolicy) -> Self {
         Self {
             policy,
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            session_root: None,
             receipt_cap: None,
             call: Vec::new(),
             handoff: None,
@@ -711,6 +720,12 @@ impl crate::engine::CoreCx<'_> {
             pacing: self.io.core.domain_pacing(Operation::Read, policy.pacing)?,
             ..policy
         };
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let session_egress = self
+            .io
+            .core
+            .request_contexts
+            .keyless_session_egress(handle.owner())?;
         let bound = self
             .io
             .core
@@ -761,6 +776,10 @@ impl crate::engine::CoreCx<'_> {
         .and_then(|context| context.with_retry(policy.retry))
         .expect("validated read policy");
         ids.start += 1;
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        {
+            context = context.with_egress(session_egress)?;
+        }
         context.bind_issuer(&self.io.core.request_contexts.issuer);
         let signing = signed.then(|| {
             self.io
@@ -805,6 +824,11 @@ impl crate::engine::CoreRef<'_> {
         handle: &Preflight,
     ) -> Result<(PreflightPolicy, Option<Context>), Error> {
         self.validate_preflight_activation(handle)?;
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        self.io
+            .core
+            .request_contexts
+            .validate_keyless_session(handle.owner())?;
         let state = self.io.core.request_contexts.preflight_state(handle)?;
         if let Some(call) = state.call.first() {
             self.validate_preflight_delivery(handle, &call.context)?;

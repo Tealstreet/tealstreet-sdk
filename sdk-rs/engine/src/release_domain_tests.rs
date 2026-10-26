@@ -347,7 +347,7 @@ fn serial_leg<const D: u8>(engine: &mut Engine<Fifo<D>>) -> Context {
                 attempts: 1,
             },
             crate::request_context::plan::SerialPolicy {
-                credential: credential(),
+                credential: Some(credential()),
                 pacing: None,
                 refusals_complete: false,
             },
