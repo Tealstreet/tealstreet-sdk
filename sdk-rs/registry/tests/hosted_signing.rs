@@ -223,8 +223,9 @@ fn closed_schema_rejects_caller_refs_secret_exports_and_unknown_families() {
     ] {
         assert!(serde_json::from_str::<Input>(input).is_err());
     }
+    // Unmigrated control family: MEXC (moved from Bitunix by #2190).
     for venue in [
-        "bitunix",
+        "mexc",
         "okx-unknown",
         "binance-unknown",
         "bybit-unknown",

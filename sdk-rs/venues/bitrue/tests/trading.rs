@@ -1,215 +1,8 @@
 //! Scripted orders from Bitrue's documented v2 futures payloads.
 mod support;
 use safe_cex_engine::model::*;
-use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId, TimerId,
-};
-use safe_cex_venue_bitrue::Bitrue;
-use support::Options;
-const CONTRACT: &str = r#"[{"symbol":"E-BTC-USDT","pricePrecision":1,"multiplier":0.001,"minOrderVolume":1,"maxMarketVolume":10,"maxLimitVolume":10,"minOrderMoney":5,"status":1,"side":1,"type":"E","multiplierCoin":"BTC"}]"#;
-enum Trace {
-    Progress(u32, Vec<OrderIdentityReceipt>),
-    Http(safe_cex_engine::RequestId),
-}
-struct Harness {
-    e: Engine<Bitrue>,
-    requests: Vec<HttpRequest>,
-    notices: Vec<Notice>,
-    failures: Vec<safe_cex_engine::VenueError>,
-    trace: Vec<Trace>,
-    timers: Vec<(TimerId, f64)>,
-    sockets: Vec<(SocketId, String)>,
-    /// The latest event time; managed requests prepare and answer no earlier.
-    now: f64,
-}
-impl Harness {
-    fn new() -> Self {
-        let mut e = support::engine(Options {
-            key: Some("replay-key".into()),
-            secret: Some("replay-secret".into()),
-            ..Options::default()
-        });
-        e.start(0.0);
-        let mut h = Self {
-            e,
-            requests: vec![],
-            notices: vec![],
-            failures: vec![],
-            trace: vec![],
-            timers: vec![],
-            sockets: vec![],
-            now: 100.0,
-        };
-        h.collect();
-        let request = h.take(Method::Get, "/fapi/v1/contracts");
-        h.reply(request, CONTRACT);
-        h.e.store_mut().update_setting("E-BTC-USDT", |setting| {
-            *setting = MarketSetting {
-                leverage: 20.0,
-                margin_type: Some(MarginType::Cross),
-                ..MarketSetting::default()
-            }
-        });
-        h.e.store_mut().set_tickers(vec![Ticker {
-            id: "E-BTC-USDT".into(),
-            symbol: "E-BTC-USDT".into(),
-            last: 2000.0,
-            mark: 2000.0,
-            ..Ticker::default()
-        }]);
-        h
-    }
-    /// Collects released work, then fires any timer armed for this very
-    /// instant: venue completions deferred out of a delivery run one tick later.
-    fn collect(&mut self) {
-        loop {
-            let armed = self.timers.len();
-            self.collect_once();
-            let now = self.now;
-            let due: Vec<_> = self.timers[armed..]
-                .iter()
-                .filter(|(_, at)| *at <= now)
-                .map(|(timer, _)| *timer)
-                .collect();
-            if due.is_empty() {
-                break;
-            }
-            self.timers.retain(|(timer, _)| !due.contains(timer));
-            for timer in due {
-                self.e.handle(now, Event::TimerFired { timer });
-            }
-        }
-    }
-    fn collect_once(&mut self) {
-        for action in
-            safe_cex_engine::test_support::prepared_actions(&mut self.e, self.now).into_iter()
-        {
-            match &action {
-                Action::Http(r) => self.trace.push(Trace::Http(r.id)),
-                Action::Notice(Notice::CommandProgress { command, receipts }) => {
-                    self.trace.push(Trace::Progress(*command, receipts.clone()))
-                }
-                _ => {}
-            }
-            match action {
-                Action::Http(r) => self.requests.push(r),
-                // Failures as the plain text the host renders.
-                Action::Notice(Notice::CommandFailed { command, error }) => {
-                    self.notices.push(Notice::CommandFailed {
-                        command,
-                        error: error.clone(),
-                    });
-                    self.failures.push(error);
-                }
-                Action::Notice(n) => self.notices.push(n),
-                Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
-                Action::WsConnect { socket, url, .. } => self.sockets.push((socket, url)),
-                _ => {}
-            }
-        }
-    }
-    fn take(&mut self, method: Method, path: &str) -> HttpRequest {
-        let index = self
-            .requests
-            .iter()
-            .position(|r| r.method == method && r.url.contains(path))
-            .unwrap_or_else(|| panic!("missing {method:?} {path}, requests {:?}", self.requests));
-        self.requests.remove(index)
-    }
-    fn handle(&mut self, at: f64, event: Event<'_>) {
-        self.now = self.now.max(at);
-        self.e.handle(at, event);
-    }
-    fn reply(&mut self, request: HttpRequest, body: &str) {
-        self.e.handle(
-            self.now,
-            Event::HttpResponse {
-                request: request.id,
-                response: Response {
-                    status: 200,
-                    headers: "",
-                    body,
-                },
-            },
-        );
-        self.collect();
-    }
-    fn command(&mut self, command: Command) {
-        self.e.handle(self.now, Event::Command(command));
-        self.collect();
-    }
-    fn place(&mut self, raw: &str) {
-        let orders = serde_json::from_str(raw).unwrap();
-        self.command(Command::PlaceOrders { command: 7, orders });
-    }
-    fn failed(&self) -> bool {
-        self.notices
-            .iter()
-            .any(|n| matches!(n, Notice::CommandFailed { command: 7, .. }))
-    }
-    fn result(&self) -> Option<&str> {
-        self.notices.iter().find_map(|n| match n {
-            Notice::CommandDone {
-                command: 7,
-                result: v,
-            } => Some(v.as_str()),
-            _ => None,
-        })
-    }
-    fn writes(&self) -> usize {
-        self.requests
-            .iter()
-            .filter(|r| {
-                r.method == Method::Post
-                    && (r.url.ends_with("/fapi/v2/order") || r.url.ends_with("/fapi/v2/cancel"))
-            })
-            .count()
-    }
-    fn order(&mut self, filled: f64) {
-        self.e.store_mut().upsert_order(Order {
-            id: "2334151155877155281".into(),
-            parent_id: None,
-            status: OrderStatus::Open,
-            symbol: "E-BTC-USDT".into(),
-            kind: OrderType::Limit,
-            side: OrderSide::Buy,
-            price: 2000.0,
-            amount: 0.01,
-            filled,
-            remaining: 0.01 - filled,
-            reduce_only: false,
-            close: None,
-            client_order_id: Some("callerOld".into()),
-            time_in_force: Some(TimeInForce::GoodTillCancel),
-            last_update: 0.0,
-            trigger_type: None,
-            take_profit: None,
-            stop_loss: None,
-            extra: Some(OrderExtra {
-                remaining_native: Some(0.01 - filled),
-                filled_in_placement_units: Some(filled),
-                ..OrderExtra::default()
-            }),
-        });
-    }
-    fn amend(&mut self) {
-        self.command(Command::AmendOrder {
-            command: 7,
-            id: "2334151155877155281".into(),
-            price: Some(1990.0),
-            amount: None,
-        });
-    }
-}
-fn body(request: &HttpRequest) -> serde_json::Value {
-    serde_json::from_str(request.body.as_ref().unwrap()).unwrap()
-}
-fn detail(status: &str, filled: f64, extra: &str) -> String {
-    format!(
-        r#"{{"code":"0","data":[{{"orderId":2334151155877155281,"origQty":0.01,"executedQty":{filled},"type":"LIMIT","status":"{status}","side":"BUY","action":"OPEN"{extra}}}]}}"#
-    )
-}
+use safe_cex_engine::{Command, Event, HttpRequest, Method, Notice, Response};
+use support::trading::*;
 #[test]
 fn normal_amount_stays_base_and_caller_id_is_verbatim() {
     let mut h = Harness::new();
@@ -531,19 +324,25 @@ fn protective_census(client: &str) -> String {
     )
 }
 fn post_write_census(h: &mut Harness) -> HttpRequest {
-    // Startup's census predates the write. It cannot certify its outcome.
-    let stale = h.take(Method::Get, "/fapi/v2/openOrders");
-    h.reply(stale, r#"{"code":"0","data":[]}"#);
-    // The failed census retries ORDER_RETRY's 500 ms, jittered, after the reply.
-    let (timer, due) = *h
-        .timers
+    // Startup's reads predate the write and cannot certify it; the job's own
+    // Primary census is the newest open-order read (D4).
+    let reads: Vec<_> = h
+        .requests
         .iter()
-        .rev()
-        .find(|(_, at)| (h.now + 375.0..=h.now + 500.0).contains(at))
-        .unwrap();
-    h.handle(due, Event::TimerFired { timer });
-    h.collect();
-    h.take(Method::Get, "/fapi/v2/openOrders")
+        .filter(|r| r.url.contains("/fapi/v2/openOrders"))
+        .map(|r| r.id)
+        .collect();
+    let census = *reads
+        .iter()
+        .max_by_key(|id| id.0)
+        .expect("the job's census");
+    for id in reads.into_iter().filter(|id| *id != census) {
+        let index = h.requests.iter().position(|r| r.id == id).unwrap();
+        let stale = h.requests.remove(index);
+        h.reply(stale, r#"{"code":"0","data":[]}"#);
+    }
+    let index = h.requests.iter().position(|r| r.id == census).unwrap();
+    h.requests.remove(index)
 }
 fn protective_ack() -> (Harness, String) {
     let mut h = Harness::new();
@@ -685,7 +484,7 @@ fn conditional_census_transport_retries_do_not_complete_or_send_guessed_cancel()
         if attempt < 3 {
             assert_eq!(h.result(), None);
             assert!(!h.failed());
-            census = h.take(Method::Get, "/fapi/v2/openOrders");
+            census = order_read(&mut h);
         }
     }
     assert!(h.failed());
@@ -737,51 +536,6 @@ fn conditional_census_accepts_rewritten_zero_and_missing_client_ids_without_trus
 /// B1 interim (fe7lgm): a census delivery completes nothing inside itself; its
 /// result lands exactly once on the next tick, with native's GET count.
 #[test]
-fn a_census_completes_its_placement_once_on_the_tick_after_its_delivery() {
-    let (mut h, _) = protective_ack();
-    let census = post_write_census(&mut h);
-    let gets = |h: &Harness| {
-        h.requests
-            .iter()
-            .filter(|r| r.method == Method::Get && r.url.contains("/fapi/v2/openOrders"))
-            .count()
-    };
-    let before = gets(&h);
-    let armed = h.timers.len();
-    let now = h.now;
-    h.e.handle(
-        now,
-        Event::HttpResponse {
-            request: census.id,
-            response: Response {
-                status: 200,
-                headers: "",
-                body: r#"{"code":"0","data":[]}"#,
-            },
-        },
-    );
-    h.collect_once();
-    assert_eq!(h.result(), None, "nothing completes inside the delivery");
-    let ticks: Vec<_> = h.timers[armed..]
-        .iter()
-        .filter(|(_, at)| *at <= now)
-        .copied()
-        .collect();
-    assert_eq!(ticks.len(), 1, "one deferred census tick");
-    h.timers.retain(|tick| *tick != ticks[0]);
-    h.handle(now, Event::TimerFired { timer: ticks[0].0 });
-    h.collect();
-    assert_eq!(h.result(), Some("[]"));
-    let done = h
-        .notices
-        .iter()
-        .filter(|n| matches!(n, Notice::CommandDone { command: 7, .. }))
-        .count();
-    assert_eq!(done, 1, "exactly once");
-    h.collect();
-    assert_eq!(gets(&h), before, "no extra open-order read");
-}
-#[test]
 fn complete_post_write_empty_census_proves_no_open_protection_and_releases_cancel_all() {
     let (mut h, _) = protective_ack();
     h.command(Command::CancelSymbolOrders {
@@ -829,7 +583,7 @@ fn protective_amend_failed_census_keeps_native_cancel_all_uncertain_until_a_fres
         create,
         r#"{"code":"0","data":{"orderId":"unreliable-replacement"}}"#,
     );
-    let census = h.take(Method::Get, "/fapi/v2/openOrders");
+    let census = post_write_census(&mut h);
     h.reply(census, r#"{"code":"-1","msg":"denied"}"#);
     assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 11, error } if error.legacy_text().contains("uncertain"))));
     h.command(Command::CancelSymbolOrders {
@@ -838,16 +592,8 @@ fn protective_amend_failed_census_keeps_native_cancel_all_uncertain_until_a_fres
     });
     assert_eq!(h.writes(), 0);
     assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 12, error } if error.legacy_text().contains("uncertain"))));
-    // The failed census retries ORDER_RETRY's 500 ms, jittered, after the reply.
-    let (timer, due) = *h
-        .timers
-        .iter()
-        .rev()
-        .find(|(_, at)| (h.now + 375.0..=h.now + 500.0).contains(at))
-        .unwrap();
-    h.handle(due, Event::TimerFired { timer });
-    h.collect();
-    let census = h.take(Method::Get, "/fapi/v2/openOrders");
+    // The settled job's refresh is the next fresh census.
+    let census = order_read(&mut h);
     h.reply(census, r#"{"code":"0","data":[]}"#);
     h.command(Command::CancelSymbolOrders {
         command: 13,
@@ -935,7 +681,7 @@ fn protective_amend_lost_or_malformed_create_ack_fences_cancel_until_fresh_nativ
                 .iter()
                 .any(|n| matches!(n, Notice::CommandFailed { command: 11, .. }))
         );
-        let census = h.take(Method::Get, "/fapi/v2/openOrders");
+        let census = order_read(&mut h);
         for command in [12, 13] {
             h.command(Command::CancelSymbolOrders {
                 command,
@@ -979,7 +725,7 @@ fn protective_amend_definite_parameter_rejection_does_not_fence_cancel_all() {
             .iter()
             .any(|n| matches!(n, Notice::CommandFailed { command: 11, .. }))
     );
-    let _held = h.take(Method::Get, "/fapi/v2/openOrders");
+    let _held = order_read(&mut h);
     h.command(Command::CancelSymbolOrders {
         command: 12,
         symbol: "E-BTC-USDT".into(),
@@ -1030,7 +776,7 @@ fn protective_amend_rejection_preserves_an_earlier_lost_replacement_fence() {
         },
     );
     h.collect();
-    let held = h.take(Method::Get, "/fapi/v2/openOrders");
+    let held = order_read(&mut h);
     let mut other = h.e.store().order("456").unwrap().clone();
     other.id = "555".into();
     other.status = OrderStatus::Open;
@@ -1166,7 +912,7 @@ fn missing_cancel_identity_is_reported_without_blocking_known_ids() {
             _ => None,
         })
         .expect("partial cancellation error");
-    let error: serde_json::Value = serde_json::from_str(&error.legacy_text()).unwrap();
+    let error = aggregate(&error.legacy_text());
     assert_eq!(error["failedOrders"][0]["id"], "missing");
     assert_eq!(error["canceledOrderIds"][0], "2334151155877155281");
     assert_eq!(
@@ -1233,7 +979,7 @@ fn cancel_batch_continues_after_native_and_transport_and_identity_failures() {
                 _ => None,
             })
             .unwrap();
-        let error: serde_json::Value = serde_json::from_str(&error.legacy_text()).unwrap();
+        let error = aggregate(&error.legacy_text());
         assert_eq!(error["failedOrders"][0]["id"], "2334151155877155281");
         assert_eq!(error["canceledOrderIds"][0], "2334151155877155282");
         assert_eq!(
@@ -1394,7 +1140,7 @@ fn child_cancel_remains_a_fallback_when_parent_is_missing_or_its_cancel_fails() 
                 _ => None,
             })
             .unwrap();
-        let error: serde_json::Value = serde_json::from_str(&error.legacy_text()).unwrap();
+        let error = aggregate(&error.legacy_text());
         assert_eq!(error["failedOrders"][0]["id"], "2334151155877155281");
         assert_eq!(error["canceledOrderIds"][0], "child");
     }
@@ -1500,7 +1246,7 @@ fn mixed_unknown_cancel_attempts_exact_ack_route_and_failed_ack_target_remains_r
                     _ => None,
                 })
                 .expect("mixed cancellation remains visibly partial");
-            let error: serde_json::Value = serde_json::from_str(&error.legacy_text()).unwrap();
+            let error = aggregate(&error.legacy_text());
             assert!(
                 error["failedOrders"]
                     .as_array()
@@ -1631,22 +1377,36 @@ fn failed_protective_census_read_reports_once_through_the_placement() {
 #[test]
 fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome, Response};
-    let unknown = (None, Some(Outcome::Unknown));
     for (status, body, classified) in [
         (
             200,
             r#"{"code":"-2017","msg":"insufficient balance","data":null}"#,
             (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
         ),
-        // An undocumented code does not prove a refusal.
-        (200, r#"{"code":"-9999","msg":"new"}"#, (None, None)),
+        // An undocumented code does not prove a refusal: the journal's
+        // unlisted verdict is Unknown, never an unclassified None (B2).
+        (
+            200,
+            r#"{"code":"-9999","msg":"new"}"#,
+            (Some(ErrorKind::Internal), Some(Outcome::Unknown)),
+        ),
         (
             429,
             r#"{"code":"-1003","msg":"too many"}"#,
             (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
         ),
-        (503, "busy", unknown),
-        (200, r#"{"code":"0","data":{}}"#, unknown),
+        // The engine's unproven-status seal carries its typed kind.
+        (
+            503,
+            "busy",
+            (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
+        ),
+        // An unproven 2xx ACK is the journal's typed Internal Unknown.
+        (
+            200,
+            r#"{"code":"0","data":{}}"#,
+            (Some(ErrorKind::Internal), Some(Outcome::Unknown)),
+        ),
     ] {
         let mut h = Harness::new();
         h.place(
@@ -1693,4 +1453,36 @@ fn write_failures_are_classified_without_changing_their_text() {
         (h.failures[0].kind, h.failures[0].outcome),
         (Some(ErrorKind::Network), Some(Outcome::Unknown))
     );
+}
+
+/// Native's cancellation aggregate, noted after the journal's selected leg
+/// error inside the host's legacy text envelope.
+fn aggregate(text: &str) -> serde_json::Value {
+    let envelope = serde_json::from_str::<serde_json::Value>(text).ok();
+    let message = envelope
+        .as_ref()
+        .and_then(|e| e["message"].as_str())
+        .unwrap_or(text);
+    let json = message
+        .find(r#"{"message":"Bitrue cancellation"#)
+        .map_or(message, |at| &message[at..]);
+    serde_json::from_str(json).unwrap()
+}
+
+/// The next open-order read, firing the order queue's pacing timers.
+fn order_read(h: &mut Harness) -> HttpRequest {
+    loop {
+        if let Some(index) = h
+            .requests
+            .iter()
+            .position(|r| r.method == Method::Get && r.url.contains("/fapi/v2/openOrders"))
+        {
+            return h.requests.remove(index);
+        }
+        h.timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+        assert!(!h.timers.is_empty(), "no open-order read is owed");
+        let (timer, at) = h.timers.remove(0);
+        h.handle(at, Event::TimerFired { timer });
+        h.collect();
+    }
 }

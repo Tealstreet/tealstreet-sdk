@@ -27,6 +27,7 @@ mod serial_plans {
     }
     fn mutation() -> SerialCall {
         SerialCall {
+            auth: Default::default(),
             operation: Operation::Mutation,
             timeout_ms: 20_000,
             attempts: 1,
@@ -35,6 +36,7 @@ mod serial_plans {
     }
     fn read() -> SerialCall {
         SerialCall {
+            auth: Default::default(),
             operation: Operation::Read,
             timeout_ms: 20_000,
             attempts: 1,
@@ -1158,6 +1160,22 @@ mod serial_plans {
         assert_eq!(writes.refusal_count(), 29_999, "the count stays exact");
         let (actions, _) = drive_from(&mut e, actions, now, ["reject"]);
         assert_eq!(done(&actions).as_deref(), Some("[]"));
+    }
+
+    #[cfg(not(feature = "session-bearer"))]
+    #[test]
+    fn session_auth_without_the_feature_refuses_before_ids() {
+        let mut e = engine(Serial {
+            total: 1,
+            first: Some(SerialCall {
+                auth: crate::request_context::plan::CallAuth::Session,
+                ..mutation()
+            }),
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        assert_eq!(e.venue.admitted, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.refusal_spent_nothing, Some(true));
     }
 
     #[test]

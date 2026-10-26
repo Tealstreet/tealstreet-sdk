@@ -284,7 +284,7 @@ impl<P> Cx<'_, P> {
         self.io
             .core
             .request_contexts
-            .validate_keyless_session(handle.owner())?;
+            .validate_keyless_session(handle.owner(), &self.io.core.identities)?;
         self.io.core.request_contexts.queue_preflight_ready(handle)
     }
 

@@ -3468,6 +3468,16 @@ persisted MEXC key-derived user IDs. Those mappings are later cutover work.
 
 [Provider contract and prerequisites](RUST_SIGNER_PREREQUISITES.md).
 
+**Bitunix signing-key trim (overseer decision, 2026-10-23).**
+- Setup policy `trimSigning` trims the signing-key text once at trusted setup,
+  alongside `trimCredential`. Bitunix declares both for the primary and
+  secondary slots, so REST and WS login sign with the same trimmed material.
+- Once Bitunix adopts dispatch signing, REST with a whitespace-padded key or
+  secret changes behaviour: it signed exactly before. Such keys could not
+  authenticate REST at the exchange anyway.
+- Today Bitunix has no dispatch-signing bridge, so REST still signs exactly
+  and callers need no change.
+
 
 ### BloFin general histories: owned cursor completion
 
@@ -9252,6 +9262,30 @@ proof of normal pressure reachability. Any normally reachable fail-closed row
 goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
 supervision constants are unchanged; no generic coexistence/recovery seam.
 
+## Lighter Schnorr auth recipe and public key (P3 parts 2+3)
+
+Shared prerequisites for the Lighter venue cutover (owner codex-ih35js). Nothing
+calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
+`cfg!(feature = "schnorr")` and declares Lighter's signing ref
+`signingAlgorithm: schnorrDigest` in the same change as the eager-holder removal.
+
+- **Auth token deadline from the signing stamp.** `AuthRecipe` derives the
+  60-second deadline from the dispatch `stamp_ms` (the preparation moment), where
+  legacy `account_auth` uses `cx.now` at issue. The stamp is equal or later, so a
+  parked request's token is valid for 60 s from signing rather than from
+  queueing. Pinned by `re_preparation_replaces_entropy_and_deadline`.
+- **WS subscribe escaping.** The private subscribe frame is serialized, so it is
+  byte-equal to legacy for the real `account_all_orders/{account}` channel but
+  escapes a hostile channel instead of splicing it into JSON.
+- **Canonical public keys.** `lighter::public_key` reduces each little-endian
+  limb below the Goldilocks prime. The field could hold a limb as an unreduced
+  p (it did for the scalar n-1), where Go always reduces; all Go fixture keys
+  are canonical. Pinned by `lighter_public_keys_are_canonically_encoded`.
+- **Declared keys refused at setup.** A ref declared `schnorrDigest` with a
+  non-canonical, zero or wrong-width scalar is refused at trusted setup
+  (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
+  ref is declared at the cutover.
+
 ## Bitrue reads and listen-key sessions leave the legacy funnel (B1, #2173)
 
 Every Bitrue HTTP request except trading now runs under engine-managed authority. Trading writes stay on the legacy funnel until B2.
@@ -9427,6 +9461,19 @@ An accepted placement with a malformed financial row retains the original Store
 identity and publishes no fabricated replacement. It still fences older Orders
 reads before reconciliation. Existing native financial formatting and private
 socket authentication remain unchanged.
+
+## Bitrue trading writes on Preflight roots and Plans (B2, #2201)
+
+Every Bitrue trading command now owns a Preflight root, and the legacy funnel is gone. Placements, amends and leverage run as one streamed serial Plan. A cancel batch runs as one complete Plan of independent calls. Every call signs with the Primary.
+
+- **Entry and FIFO.** A validation refusal is the command's own NotSent terminal. A command behind a live job parks, is re-planned against the current Store when it wakes, and an expired parked command gets one NotSent terminal there. A keyless command keeps the local refusal ("Bitrue trading requires API credentials"). Margin type and hedged position mode remain local Unsupported refusals.
+- **In-job reads sign with the Primary (D3).** Inspect, Verify and census GETs used the read key by method before; they now sign with the Primary. Each keeps native's three Network/Timeout retries, chained per call, never a fourth. A read's -1022 re-signs once.
+- **Resend.** A write's -1022 resends once with the same client order ID, stamped strictly after the released attempt.
+- **Write facts.** The code table carries native's documented refusals. -2017 is now Rejected, as native classified it. 401, 403 and 429 are cited status refusals. An unlisted code or an unproven 2xx is Unknown; before, it was unclassified (None). A 5xx write is the engine's unproven seal ("HTTP response does not prove the write outcome", VenueUnavailable). Accepted IDs ride the journal, so a failure after an accepted write keeps them as `partial`. An unproven Verify after an accepted cancel is a known partial: outcome None with the cancel's ID.
+- **Cancel batches (Q1).** Each target is an independent call. A child closed by its parent's ACK or by the stream is retired unissued, and all targets closed is a successful empty Plan. The terminal message is the journal's selected leg error followed by native's aggregate JSON (`canceledOrderIds`, `failedOrders`), bounded at 4 KiB. An Unknown leg projects Unknown, with the confirmed IDs.
+- **Protective census (D4).** The census is the job's own final Primary open-order read, issued right after the placement. A clean census completes the command. A failed one carries native's "order read failed" diagnostic and the "outcome is uncertain" text, and projects Unknown with the accepted placement IDs (fe7lgm's `inherit_plan_uncertainty`, #2205). The B1 interim deferral is gone.
+- **Reconcile.** An Unknown seal reconciles through Primary open-order snapshots (`PrimaryRead { PostUnknownOrderRead }`). A clean snapshot postdating a protective fence releases cancel-all.
+
 ## AsterDEX V3 configured signer mismatch (approved, adoption pending)
 
 The address-nonce consumer must refuse at trusted setup when the configured
@@ -9481,6 +9528,20 @@ Address-keyed nonce claims without the feature now refuse instead of accepting
 stable-id text as an address subject. No current adopter uses that unsupported
 path. The additive selection errors preserve typed missing/signing-not-configured
 and setup-capability refusals without adding an auth-health latch.
+
+## Bitunix signs through the engine provider (#2190)
+
+Bitunix REST and its private socket login now sign at dispatch through the engine provider, from trusted-setup identities. The venue no longer holds a key or secret. The request lifecycle is unchanged; trading moves onto managed Contexts in the Bitunix trading PR.
+
+- **Setup.** `construction-rules.json` gives `bitunix` `bridge.dispatchSigning: true`. Raw `key`/`secret`/`read_credentials` beside setup identities are refused ("Bitunix credentials belong in signer setup, not engine options"), and identities without a provider are refused. Legacy raw input through `build()` converges on the same local provider. Unchanged for callers: the TS `LocalSignerSetup` path, which already trims both slots (#1868).
+- **Trimming once at setup (better than TS).** Both slots trim the key and the signing secret, so REST and the login sign with the same material. Native trimmed only for the login, so a padded key could never authenticate REST. A whitespace-only secret is absent: the account starts public-only, as with no credentials, and never signs with an empty key.
+- **Selection by role, not method.** Account, settings and history reads sign with the read key (Secondary, else Primary); trading-job requests and the socket login sign Primary. The one caller-visible change: trading's ReconcileReplacement GET, inside a write job, now signs Primary rather than with the read key. Reads route through the selected egress as before.
+- **Signing refusal.** A provider refusal on a trading write sends no HTTP and fails the command `notSent` (composite jobs keep earlier attempts' outcomes), together with the engine's signing notices. Reads keep their native failure paths.
+- **Login signing failure.** The engine's socket path handles it: an entropy failure closes the session and the reconnect re-signs; a provider refusal latches the role. Native's venue-side `STREAM_UNAVAILABLE` on entropy failure is replaced by the engine's signing diagnostics. The login still follows the ping on the wire.
+- **Wire.** Headers, the login frame and the double-SHA scheme are byte-identical to native; the wire stamp is clamped to be nonnegative.
+- **Controls moved.** The shared "unmigrated family" controls (registry `dispatch_provider` and `hosted_signing`, the WASM shared-provider test and the TS hosted-signing and WASM signer tests) now use MEXC. Crypto.com, named in the plan, already has `dispatchSigning`. Hosted Bitunix signing (P7) is a separate PR.
+- **Inventory.** Bitunix signing sites 25 → 6. Production keeps the user-facing "key and secret" message and the `Sha256SecretSuffix` algorithm name; the doc-vector and the provider fixture account for the rest. Its sign modules are now under the migrated-family ban. Credential selection 9 → 1: the `ReadCredentials` Options type.
+
 ### WEEX remaining inventory and identity custody
 
 WEEX keeps one immutable `Slots<Identity>` owner for selected reads, required
@@ -9493,6 +9554,56 @@ The remaining conservative request/signing/credential inventory describes manage
 failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
 identity options. This slice retains those rows and all checker rules; completion
 of the custody audit does not claim inventory zero or a new endpoint migration.
+
+
+### Shared hosted operation foundation
+
+The opt-in structured-operation provider/peer uses immutable per-slot negotiated
+bindings and closed native family codecs. Legacy v1 signing contexts and routes
+stay unchanged. Missing business ownership, unknown recipes, replay, deadline or
+clock-revision changes refuse without a fallback. Peer validation failures are
+sanitized NotSent refusals, not credential latch evidence. Late work cannot
+publish a signature or HTTP request, and cancellation grants no joined-resource
+acknowledgement. The 64-entry per-account bound refuses new work rather than
+forgetting replay decisions before the codec freshness horizon.
+
+Kraken's advisory SignRequest context retains the exact wire path instead of the
+stripped signing path; the native preimage builder still strips /derivatives at
+the same cryptographic boundary. HTTP bytes, financial fields and native MACs are
+unchanged. This foundation does not enable hosted Kraken or alter nonce issuers.
+
+### Address setup at host start
+
+With `address-nonce`, native Host, frame-server and WASM startup initialize the
+installed provider before the existing engine seal. Synchronous local providers
+therefore expose genuine verified public addresses to `Venue::start`, including
+independently sealed aliased slots. Unsupported providers retain their per-slot
+NotSent refusal while public work starts. Hosted/asynchronous callers must finish
+the explicit pre-start result and actual-cleanup join before invoking start;
+unfinished work is still retired and refused at that boundary. No host support,
+nonce permission, retry or peer activation is inferred by these automatic calls.
+
+In address-nonce builds the frame-server account actor retains the same independent
+cleanup owner as native Host. Normal shutdown waits for actual setup cleanup;
+cleanup/task failures return a sanitized server error. Aborted actors retain the
+original cleanup in the live runtime and grant no retirement or replacement
+acknowledgement. Runtime teardown remains no join.
+
+### Explicit authentication on serial calls
+
+SerialCall declares Preflight or Session authentication. Existing adopters use
+Preflight with their previous read/write policy. A Session call carries no
+credential, signing or nonce authority and uses the retained login Session's
+explicit egress. Installed unsigned-only commands may deliberately use a Session
+root; sign-requiring commands never fall back to it. Credential-bearing login
+Sessions must match the engine's own installed Primary slot and credential ref.
+The venue selects the actual login Session: the engine checks authority and
+liveness but cannot distinguish its business purpose from a listen-key Session.
+Mixed roots retain the exact write credential for their later Preflight calls.
+Session calls keep Mutation journal evidence, order locks and Unknown on an
+unproven released send. Their resend freezes codec bytes while refreshing the
+bundle at Bind; Preflight signed calls repeat their existing provider work.
+No current venue enables a new auth mode in this engine slice.
 
 ### Per-call pacing on serial Plans
 

@@ -4,6 +4,10 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
+#[cfg(feature = "hosted-operation-proof")]
+mod hosted_operation_proof;
+#[cfg(feature = "kraken")]
+mod hosted_operations;
 #[cfg(not(any(
     feature = "grvt",
     feature = "paradex",
@@ -48,6 +52,10 @@ mod managed_http;
 use managed_http::{HttpPacket, HttpPhaseOut};
 
 trait AnyEngine {
+    #[cfg(feature = "address-nonce")]
+    fn has_started(&self) -> bool {
+        false
+    }
     #[cfg(feature = "address-nonce")]
     fn address_setup_support(
         &mut self,
@@ -172,6 +180,10 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    #[cfg(feature = "address-nonce")]
+    fn has_started(&self) -> bool {
+        Engine::has_started(self)
+    }
     #[cfg(feature = "address-nonce")]
     fn address_setup_support(
         &mut self,
@@ -1189,6 +1201,12 @@ impl WasmEngine {
     }
 
     pub fn start(&mut self, now: f64) -> String {
+        #[cfg(feature = "address-nonce")]
+        if !self.inner.has_started()
+            && let Err(error) = self.inner.initialize_address_setup(now, false)
+        {
+            return encode(&[Action::Notice(Notice::StartupFailed { error })]);
+        }
         self.inner.start(now);
         self.flush()
     }
@@ -1785,13 +1803,14 @@ mod tests {
             ));
         }
 
-        #[cfg(feature = "bitunix")]
+        // Unmigrated control family: MEXC (moved from Bitunix by #2190).
+        #[cfg(feature = "mexc")]
         #[test]
-        fn shared_provider_feature_keeps_managed_public_bitunix_unsigned() {
+        fn shared_provider_feature_keeps_managed_public_mexc_unsigned() {
             let Ok(mut engine) =
-                super::super::WasmEngine::new("bitunix", r#"{"publicDataOnly":true}"#, None)
+                super::super::WasmEngine::new("mexc", r#"{"publicDataOnly":true}"#, None)
             else {
-                panic!("public Bitunix setup must remain native-safe and successful");
+                panic!("public MEXC setup must remain native-safe and successful");
             };
             assert!(!engine.dispatch_signing);
             assert!(!engine.requires_external_signer());
@@ -1820,7 +1839,7 @@ mod tests {
                         && action
                             .packet
                             .as_ref()
-                            .is_some_and(|packet| packet.url.contains("/api/v1/futures/market/"))
+                            .is_some_and(|packet| packet.url.contains("/api/v1/contract/"))
                 })
                 .expect("managed public discovery must prepare before release");
             assert_eq!(preparation.intent.as_deref(), Some("public"));
@@ -2911,3 +2930,9 @@ mod tests {
         ));
     }
 }
+
+#[cfg(all(test, feature = "address-nonce", feature = "asterdex"))]
+#[path = "../../native/tests/support/address_start.rs"]
+mod address_start_fixture;
+#[cfg(all(test, feature = "address-nonce", feature = "asterdex"))]
+mod address_start_tests;

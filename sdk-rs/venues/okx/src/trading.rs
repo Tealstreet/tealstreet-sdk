@@ -20,6 +20,7 @@ const BROKER: &str = "e847386590ce4dBC";
 
 /// Every write is one call with its own 20 s bound and no resend.
 const SERIAL: SerialCall = SerialCall {
+    auth: safe_cex_engine::request_context::plan::CallAuth::Preflight,
     operation: Operation::Mutation,
     timeout_ms: 20_000,
     attempts: 1,

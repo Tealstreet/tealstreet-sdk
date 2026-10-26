@@ -354,6 +354,7 @@ fn serial_call_leg<const D: u8>(
             timeout_ms: 20_000,
             attempts: 1,
             pacing,
+            auth: crate::request_context::plan::CallAuth::Preflight,
         },
         crate::request_context::plan::SerialPolicy {
             credential: Some(credential()),

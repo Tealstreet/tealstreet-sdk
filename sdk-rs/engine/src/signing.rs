@@ -20,6 +20,10 @@ pub struct CredentialSetupPolicy {
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct IdentitySetupPolicy {
     pub trim_credential: Option<bool>,
+    /// Trim the signing key text (Unicode White_Space) once, before decoding.
+    /// Omitted when undeclared, so existing policies serialize unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trim_signing: Option<bool>,
     pub passphrase: Option<SetupFieldPolicy>,
     /// Declared secret decoding is authoritative over caller metadata.
     pub secret_encoding: Option<KeyEncoding>,
@@ -407,6 +411,18 @@ impl Identity {
         self.checked(false)
     }
 
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(crate) fn accepts_session_root(
+        &self,
+        credential: &crate::request_context::Credential,
+        write: Option<&crate::request_context::Credential>,
+    ) -> bool {
+        credential.slot == crate::CredentialSlot::Primary
+            && credential.reference == self.credential
+            && self.validate_credential().is_ok()
+            && write.is_none_or(|write| write == credential && self.signing_ref().is_ok())
+    }
+
     fn checked(&self, signing_required: bool) -> Result<(), &'static str> {
         if !valid_key_ref(&self.credential)
             || self
@@ -776,6 +792,7 @@ impl SignRequest {
 fn public_key_len(algorithm: Algorithm) -> Option<usize> {
     match algorithm {
         Algorithm::Ed25519 | Algorithm::StarkDigest => Some(32),
+        Algorithm::SchnorrDigest => Some(40),
         _ => None,
     }
 }

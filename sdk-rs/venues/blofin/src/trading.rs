@@ -2108,6 +2108,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 /// One call of the job's streamed Plan; BloFin never resends a write.
 fn serial(step: &Step) -> SerialCall {
     SerialCall {
+        auth: Default::default(),
         operation: if step.read() {
             Operation::Read
         } else {

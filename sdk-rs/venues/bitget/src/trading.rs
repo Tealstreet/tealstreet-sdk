@@ -3135,6 +3135,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 
 fn serial(operation: Operation) -> SerialCall {
     SerialCall {
+        auth: Default::default(),
         operation,
         timeout_ms: CALL_MS,
         // Mutations carry the one native 40009 resend; reads never resend.

@@ -29,6 +29,7 @@ mod serial_session {
     }
     fn call(operation: Operation, attempts: u8) -> SerialCall {
         SerialCall {
+            auth: Default::default(),
             operation,
             timeout_ms: 20_000,
             attempts,

@@ -50,6 +50,7 @@ impl Probe {
             refusals_complete: false,
         };
         let first = SerialCall {
+            auth: Default::default(),
             operation: Operation::Mutation,
             timeout_ms: 20_000,
             attempts: 1,
