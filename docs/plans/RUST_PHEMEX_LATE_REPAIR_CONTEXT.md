@@ -1,6 +1,6 @@
 # Phemex late cancel repair: final four legacy request sites
 
-Status: plan/API/lifecycle and corrected originals CLEAR at 99f8941b1d3; consumer source in local implementation. Original runtime base is 49a5b54f362 (includes repair core 8f5f9a2f957); the native audit below remains pinned to 035948b564a. This consumer includes Phemex runtime adoption, repair-mutations Cargo activation, the exact four request-site removals and one orphan credential-site decrement. No generic engine, host, crypto, budget or CI change is included. Reviewer: claude-fe7lgm (core/API and custody), with claude-dazzy3 as alternate. Bitget history PR #2170 stays on its separate branch.
+Status: source and trusted-fixture carry CLEAR at 510eb5a1b6e, composed on actual tip 74a0ba44d38 including repair fixes #2181. Native 346/0/0, strict clippy and fmt pass; the affected fixture controls pass again after their setup extraction. Publication awaits the checker-precision dependency and combined measurement. Original runtime base is 49a5b54f362 (includes repair core 8f5f9a2f957); the native audit below remains pinned to 035948b564a. This consumer includes Phemex runtime adoption, repair-mutations Cargo activation, the exact four request-site removals and one orphan credential-site decrement. No generic engine, host, crypto, budget or CI change is included. Reviewer: claude-fe7lgm (core/API and custody), with claude-dazzy3 as alternate. Bitget history PR #2170 stays on its separate branch.
 
 ## Scope and prerequisite
 
@@ -177,3 +177,30 @@ Required consumer proof is the unchanged synchronous send-refusal/FIFO control
 and unchanged open_order_read_started_before_a_later_failure_cannot_settle_it
 on the composed core/consumer tree. Review execution and source clearance are
 separate from the engine PR's CI and its actual landing.
+
+## Landed-core composition and fixture validation
+
+Repair fixes #2181 landed as 7cbef1fc55a. The plain merge into 4acd7727f9d
+contains actual tip 74a0ba44d38. Every SDK path merges automatically; only README
+and CALLERS retain incoming text plus this slice once. The Phemex subtree at
+that merge equals reviewed 95a5c3c81b6, and native trading.rs equals original
+2fac5e37fbbe. The full native suite passes 346 tests with no failures or ignored
+tests, including both previously blocked controls unchanged. Strict clippy and
+fmt pass. The review target was deleted.
+
+The signing ratchet rejects new fixture material in production source files,
+even under cfg(test). Commit 510eb5a1b6e places only the genuine LocalSigner
+factory in tests/support/repair_signer.rs, loaded through a cfg(test)-only path
+module. The synthetic key/material and identities are unchanged; neither the
+non-test production prefix nor either unit assertion body changes. The support
+module does not declare this factory, so integration tests do not load it.
+Both affected unit controls, strict clippy and fmt pass again; that target was
+also deleted. There is no signing-map exemption or production credential holder.
+
+The remaining request-test ratchet entries are conservative macro false
+positives: nested matches! observes HttpAction::Prepare { request, .. } and reads
+request.method/url. These are handed to 19pt8s's checker-precision work, with
+the exact two payloads and unchanged regression bodies. This consumer will
+compose that landing before publication; it adds no inventory allowance or
+macro-hiding workaround. CI supplies the family-size record, and a local
+combined measurement on the composed source is required before READY.
