@@ -52,6 +52,30 @@ mod managed_http;
 use managed_http::{HttpPacket, HttpPhaseOut};
 
 trait AnyEngine {
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_support(
+        &mut self,
+        _supported: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        Err(safe_cex_engine::signing::SignError::Unsupported.venue_error())
+    }
+    #[cfg(feature = "address-nonce")]
+    fn initialize_address_setup(
+        &mut self,
+        _now: f64,
+        _reinitialize: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        Err(safe_cex_engine::signing::SignError::Unsupported.venue_error())
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_ready(&self) -> bool {
+        false
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_retired(&mut self, _token: &str, _now: f64) -> bool {
+        false
+    }
+
     fn failed(&self) -> bool {
         false
     }
@@ -152,6 +176,38 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_support(
+        &mut self,
+        supported: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.set_address_setup_host_support(if supported {
+            safe_cex_engine::SetupHostSupport::OwnedPublicAddress1
+        } else {
+            safe_cex_engine::SetupHostSupport::Unavailable
+        })
+    }
+    #[cfg(feature = "address-nonce")]
+    fn initialize_address_setup(
+        &mut self,
+        now: f64,
+        reinitialize: bool,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        if reinitialize {
+            self.reinitialize_address_nonce(now).map(|_| ())
+        } else {
+            self.initialize_address_nonce(now).map(|_| ())
+        }
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_ready(&self) -> bool {
+        self.address_nonce_setup_ready()
+    }
+    #[cfg(feature = "address-nonce")]
+    fn address_setup_retired(&mut self, token: &str, now: f64) -> bool {
+        self.address_setup_retired_wire(token, now)
+    }
+
     #[cfg(feature = "dispatch-signing")]
     fn signer(&self) -> Option<safe_cex_engine::signing::Provider> {
         Engine::signer(self)
@@ -328,6 +384,11 @@ impl safe_cex_venues::Visit for Boxed {
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    #[cfg(feature = "address-nonce")]
+    RetireAddressSetup {
+        task: u64,
+        token: String,
+    },
     AccountAuth {
         credential: safe_cex_engine::CredentialSlot,
         scope: safe_cex_engine::AccountReadScope,
@@ -451,6 +512,13 @@ fn encode(actions: &[Action]) -> String {
     let out: Vec<ActionOut<'_>> = actions
         .iter()
         .map(|action| match action {
+            #[cfg(feature = "address-nonce")]
+            Action::RetireAddressSetup { task, token } => ActionOut::RetireAddressSetup {
+                task: task.0,
+                token: token.to_wire(),
+            },
+            #[cfg(not(feature = "address-nonce"))]
+            Action::RetireAddressSetup { .. } => std::process::abort(),
             Action::WsConnect {
                 binary,
                 socket,
@@ -962,6 +1030,41 @@ impl WasmEngine {
         })
     }
 
+    #[cfg(feature = "address-nonce")]
+    #[wasm_bindgen(js_name = setAddressSetupSupport)]
+    pub fn set_address_setup_support(&mut self, protocol: &str) -> Result<(), js_sys::Error> {
+        if protocol != "publicAddressOwned" {
+            return Err(construction_error(
+                safe_cex_engine::signing::SignError::Unsupported.venue_error(),
+            ));
+        }
+        self.inner
+            .address_setup_support(true)
+            .map_err(construction_error)
+    }
+    #[cfg(feature = "address-nonce")]
+    #[wasm_bindgen(js_name = initializeAddressSetup)]
+    pub fn initialize_address_setup(
+        &mut self,
+        now: f64,
+        reinitialize: bool,
+    ) -> Result<String, js_sys::Error> {
+        self.inner
+            .initialize_address_setup(now, reinitialize)
+            .map_err(construction_error)?;
+        Ok(self.flush())
+    }
+    #[cfg(feature = "address-nonce")]
+    #[wasm_bindgen(js_name = addressSetupReady)]
+    pub fn address_setup_ready(&self) -> bool {
+        self.inner.address_setup_ready()
+    }
+    #[cfg(feature = "address-nonce")]
+    #[wasm_bindgen(js_name = addressSetupRetired)]
+    pub fn address_setup_retired(&mut self, token: &str, now: f64) -> String {
+        self.inner.address_setup_retired(token, now);
+        self.flush()
+    }
     #[wasm_bindgen(js_name = setEntropy)]
     pub fn set_entropy(&mut self, source: js_sys::Function) -> Result<(), js_sys::Error> {
         self.inner

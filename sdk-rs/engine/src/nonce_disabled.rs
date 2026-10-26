@@ -16,10 +16,18 @@ pub(crate) enum ClaimAuthority {}
 pub enum NonceSelectionError {
     MissingCredential,
     InvalidSubject,
+    MissingSigningKey,
+    SigningNotConfigured,
+    SetupCapability(SignError),
 }
 impl NonceSelectionError {
     pub fn sign_error(self) -> SignError {
-        SignError::InvalidRequest
+        match self {
+            Self::MissingSigningKey => SignError::MissingKey,
+            Self::SigningNotConfigured => SignError::SigningNotConfigured,
+            Self::SetupCapability(error) => error,
+            Self::MissingCredential | Self::InvalidSubject => SignError::InvalidRequest,
+        }
     }
 }
 impl NonceClaim {

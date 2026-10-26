@@ -83,6 +83,9 @@ impl Rig {
                     Action::ManagedHttp(_) => {
                         panic!("managed HTTP requires the prepared test-driver handshake")
                     }
+                    Action::RetireAddressSetup { .. } => {
+                        panic!("unexpected address setup retirement")
+                    }
                     Action::Sign { .. }
                     | Action::SignedOutbound { .. }
                     | Action::SignPayload { .. } => {
