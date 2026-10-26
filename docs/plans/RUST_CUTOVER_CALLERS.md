@@ -10132,3 +10132,94 @@ went out (another is owed behind it), a failed read, or one with an unmappable
 row does not clear it. Binance writes are single managed Contexts with no
 placement scope, so the mark comes from the Unknown write fact itself (engine
 Phase B); until Phase B lands the fence does not engage for Binance.
+
+### BloFin and Phemex uncertain-placement fences
+
+Both venues opt into the symbol fence from #2279: after an Unknown placement,
+a retry or amend is refused NotSent until a clean complete order read dispatched
+after the mark publishes and calls orders_reconciled. Older, incomplete or
+expired reads cannot release it. Cancel-by-ID admission is unchanged. BloFin
+keeps its default cancel-all fence; Phemex keeps its deliberate cancel-all opt-out.
+
+BloFin joins its existing Primary reconciliation snapshot, retaining the owed
+refresh and native backoff when an older snapshot is already in flight.
+Phemex settles retired trading custody, then joins its existing single read or
+scheduled reconciliation. Repeated hook calls preserve that scheduled timer.
+Its native signing-expiry plus five-second lower bound remains authoritative:
+an early empty snapshot cannot prove that a late placement will not arrive.
+The engine owns re-asking; the hooks add no retry loop or write resend.
+
+Four Phemex trading controls now pin the earlier symbol-level NotSent refusal
+instead of dispatching another placement while the first is Unknown. A refused
+retry cannot clear uncertainty or add a late-cancel subject; panic cancel-all
+still runs, and a foreign order is not canceled merely because that retry's
+client ID appeared in a later snapshot. The old two-unknown-origin entry
+sequence is prevented by the fence; no production repair grouping is changed.
+Relevant Phemex rows with an unknown status or type make reconciliation
+incomplete. They retain the bounded retry/abandon policy and cannot release
+the placement fence; only a later clean complete read can do that.
+
+### BingX uncertain-placement fence: Phase B
+
+BingX opts into the uncertain-placement fence and joins an already current
+Primary reconciliation read when the engine re-asks. Its four-step managed
+control is assertion-RED on #2279 Phase A and green on #2288 Phase B, which marks
+Unknown write facts independently of guard_pending_placements. This change
+does not enable that guard. A stale pre-mark read cannot release the fence.
+BingX keeps its default cancel-all fence for beta: an Unknown create can land
+after its native DELETE, and there is no automatic late-landing cancellation.
+Cancel-all is refused NotSent until a fresh read, rather than reporting an
+all-cancelled result while an unseen order can still appear. Phemex retains its
+opt-out because its existing late-landing cancellation covers that race.
+
+All three venues pin a slow held read across the engine's first two re-asks:
+the same census still publishes and releases, without restarting its floor or
+paid work. Phemex also pins re-asks while its native expiry-bound timer is owed.
+
+BloFin joins only an active census or its scheduled retry. After three failed
+attempts leave an idle owed flag, the next engine re-ask starts a fresh Primary
+census without depending on periodic polling; a clean complete census releases.
+
+The fence census freshness proof is single-context for BingX's whole Orders
+snapshot and single-context per symbol for Phemex's activeList; Phemex clears
+only that symbol. BloFin spans pages and three families: every page retains
+the census-start order revision and uncertainty generation. Only a new engine
+mark advances the generation; an ordinary re-ask does not.
+Either change blocks clearance and requires a new complete census. A real
+pre-mark first page/post-mark final family control is RED with both guards
+disabled, and green with them intact; ordinary re-asks still join the read.
+
+BingX's provider-refusal retry control distinguishes the engine's required
+reconciliation re-ask from another mutation attempt: its captured timer issues
+only a managed Orders GET, retains one caller terminal and no new identity,
+and preserves the engine's bounded backoff when that read signer also refuses.
+
+Phemex's late-repair fixtures release all concurrent placements before any
+Unknown outcome, then issue genuine cancel-all commands. A later same-symbol
+Place is NotSent and adds no owed subject. The renamed concurrent/repeated
+cancel-all control no longer claims separate grants: a clean reconciliation
+needed to admit a sequential placement also settles the older unspent subject.
+The existing core `two_cancel_all_origins_share_one_native_request` control
+continues to pin cross-entitlement authority. Venue controls retain exact bulk
+paths, IDs, position sides, ten-plus-singleton chunking, mixed-ack Store effects
+and independent-side FIFO/no-resend assertions. Concurrent setup necessarily
+changes observation timing; single-placement helpers retain their clocks.
+Incomplete reads now pin the fence's typed NotSent/uncertain refusal.
+
+Phemex's reconciliation hook settles retired placement custody immediately on
+Unknown, before the next command or stream callback. Two remaining-funnel
+fixtures pin the single native expiry-plus-five-second timer and cleanup at
+that delivery; later cancel-all/stream callbacks preserve it without duplicate
+warnings, timers or caller terminals. The old delayed-cleanup oracle is
+superseded; runtime cleanup and financial row handling are unchanged.
+
+### Engine: settle-only condition wait for stream-proven writes
+
+Venue authors gain `serial_plan_settle_wait(plan, slot, context, bound_ms)`
+(feature `condition-waits`). After a write's accepted DATA it settles the call
+and parks the serial Plan with no next call; the venue releases it on exact
+stream proof and calls `done_plan`, or on expiry calls
+`inherit_plan_uncertainty` then `fail_plan`, so the caller sees Unknown with
+every accepted order ID and the scope stays fenced. It is never Done without
+proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
+grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).

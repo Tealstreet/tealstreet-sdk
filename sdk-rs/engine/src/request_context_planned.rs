@@ -1168,6 +1168,10 @@ impl<P> Cx<'_, P> {
             .core
             .request_contexts
             .validate_plan(plan, self.now)?;
+        #[cfg(feature = "condition-waits")]
+        if body.serial.as_ref().is_some_and(|serial| serial.settled) {
+            return Err(Error::Invalid);
+        }
         let index = body.schedule.ordinal(slot)?;
         let entry = &body.entries[index];
         if entry.credit != Credit::Unissued
@@ -1461,6 +1465,14 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .validate_plan(plan, self.now)?;
         if !body.schedule.is_complete() {
+            return Err(Error::State);
+        }
+        #[cfg(feature = "condition-waits")]
+        if body
+            .serial
+            .as_ref()
+            .is_some_and(|serial| serial.condition.is_some())
+        {
             return Err(Error::State);
         }
         self.seal_plan(plan, Some(result), None, None)
@@ -1849,6 +1861,11 @@ impl Body {
             .filter(|entry| entry.credit == Credit::Unissued && !entry.notified && !entry.parked)
             .filter_map(|entry| entry.eligible_at)
             .fold(self.handle.deadline(), f64::min);
+        let wake = self
+            .serial
+            .as_ref()
+            .and_then(|serial| serial.settle_ready)
+            .map_or(wake, |at| wake.min(at));
         self.serial
             .as_ref()
             .and_then(|serial| serial.condition_deadline())
@@ -2031,6 +2048,13 @@ impl ContextRegistry {
             };
             let body = &mut state.body[0];
             if now >= body.handle.deadline() {
+                return Some(body.handle.clone());
+            }
+            #[cfg(feature = "condition-waits")]
+            if let Some(serial) = body.serial.as_mut()
+                && serial.settle_ready.is_some_and(|at| at <= now)
+            {
+                serial.settle_ready = None;
                 return Some(body.handle.clone());
             }
             let mut due = false;
