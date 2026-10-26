@@ -670,7 +670,6 @@ impl Cryptocom {
         request: Request,
         error: VenueError,
     ) {
-        self.note_write_settled();
         match &request.physical {
             Physical::Prerequisite { preflight, .. } => {
                 let _ = cx.fail_preflight(preflight, error);
@@ -686,7 +685,6 @@ impl Cryptocom {
         request: Request,
         error: VenueError,
     ) {
-        self.note_write_settled();
         let Physical::Write {
             plan,
             slot,
@@ -813,7 +811,6 @@ impl Cryptocom {
         mut request: Request,
         response: Response<'_>,
     ) {
-        self.note_write_settled();
         if !request.delivered(cx) {
             return;
         }

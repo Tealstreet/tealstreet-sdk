@@ -180,10 +180,6 @@ pub struct Account {
     reconcile_owed: bool,
     /// The orders read in flight started after every such ask, so it may release the fence.
     order_read_fresh: bool,
-    /// Trading writes answered or lost so far; every uncertain seal follows one.
-    writes_settled: u64,
-    /// `writes_settled` at the last reconcile ask, telling a new seal from an engine re-ask.
-    asked_at: u64,
     snapshot: Option<Snapshot>,
     generation: u64,
     revision: u64,
@@ -772,16 +768,11 @@ impl ApexOmni {
             self.request_positions(cx, None);
         }
     }
-    /// A trading write was answered or lost: the next reconcile ask may be a new seal.
-    pub(crate) fn note_write_settled(&mut self) {
-        self.account.writes_settled += 1;
-    }
-    /// A new seal follows a settled write: a read already in flight may predate its mark,
-    /// so it can no longer release and a fresh read is owed. An engine re-ask (no write
-    /// settled since) joins the read in flight, or starts a fresh one when none is.
+    /// A new seal: a read already in flight may predate its mark, so it can no longer
+    /// release and a fresh read is owed. An engine re-ask (`Cx::reconcile_reask`, no
+    /// write turned uncertain since) joins the read in flight, or starts one when none is.
     pub(crate) fn reconcile_uncertain_placement(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.writes_settled != self.account.asked_at {
-            self.account.asked_at = self.account.writes_settled;
+        if !cx.reconcile_reask() {
             self.account.order_read_fresh = false;
             self.account.reconcile_owed = true;
         } else if !self.account.orders_pending {

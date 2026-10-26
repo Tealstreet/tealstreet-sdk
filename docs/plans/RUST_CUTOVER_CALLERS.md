@@ -9944,8 +9944,7 @@ Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
 same-ID amend fence stays as is.
 
 Crypto.com opts in with no lock scope, through Phase B. Both Crypto.com and ApeX
-tell a new seal from an engine re-ask by counting settled trading writes (every
-seal follows one). A new seal demotes a read in flight, which may predate its
+tell a new seal from an engine re-ask with `Cx::reconcile_reask`. A new seal demotes a read in flight, which may predate its
 mark, and owes a fresh read. A re-ask joins the read in flight, or starts a fresh
 one when none is. Crypto.com's fresh read is Orders+AdvancedOrders, started at
 once when no account read is in flight, and `orders_reconciled` follows only when
