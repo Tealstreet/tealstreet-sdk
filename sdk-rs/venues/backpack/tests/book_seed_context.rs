@@ -290,6 +290,9 @@ mod lifecycle {
         }
     }
     impl Venue for Audit {
+        fn managed_sockets() -> bool {
+            true
+        }
         type Pending = safe_cex_venue_backpack::Pending;
         fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
             self.reserve(cx);

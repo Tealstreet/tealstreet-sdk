@@ -471,6 +471,9 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn managed_sockets() -> bool {
+        true
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }

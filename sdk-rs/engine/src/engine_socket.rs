@@ -85,6 +85,9 @@ impl<P> Cx<'_, P> {
         self.io.core.socket_effects.extend(effects);
     }
     pub fn register_socket_feed(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
+        if !self.io.core.managed_sockets_declared {
+            return Err(SocketError::NotPermitted);
+        }
         self.io.opaque_entry_activity();
         if self.io.core.socket_failed {
             return Err(SocketError::NotPermitted);
@@ -99,6 +102,9 @@ impl<P> Cx<'_, P> {
         policy: FeedPolicy,
         timing: crate::socket_lifecycle::NativeTiming,
     ) -> Result<FeedId, SocketError> {
+        if !self.io.core.managed_sockets_declared {
+            return Err(SocketError::NotPermitted);
+        }
         self.io.assert_actions_safe();
         self.io.opaque_entry_activity();
         if self.io.core.socket_failed {
@@ -132,6 +138,9 @@ impl<P> Cx<'_, P> {
         &mut self,
         policy: FeedPolicy,
     ) -> Result<FeedId, SocketError> {
+        if !self.io.core.managed_sockets_declared {
+            return Err(SocketError::NotPermitted);
+        }
         self.io.assert_actions_safe();
         self.io.opaque_entry_activity();
         if self.io.core.socket_failed {
@@ -487,6 +496,9 @@ impl<V: Venue> Engine<V> {
         result
     }
     fn socket_enqueue(&mut self, now: f64, effects: Vec<Effect>) {
+        if !V::managed_sockets() {
+            return;
+        }
         let mut cx = Cx {
             now,
             store: &mut self.store,
@@ -531,6 +543,9 @@ impl<V: Venue> Engine<V> {
     }
     #[inline(always)]
     pub(super) fn process_socket_work(&mut self, now: f64) {
+        if !V::managed_sockets() {
+            return;
+        }
         self.assert_live();
         if !self.io.core.managed_sockets {
             return;
@@ -724,6 +739,9 @@ impl<V: Venue> Engine<V> {
         self.socket_enqueue(now, effects);
     }
     pub(super) fn handle_managed_socket(&mut self, now: f64, event: &Event<'_>) -> bool {
+        if !V::managed_sockets() {
+            return false;
+        }
         if !self.io.core.managed_sockets {
             return false;
         }
@@ -858,6 +876,9 @@ impl<V: Venue> Engine<V> {
         true
     }
     pub(super) fn socket_gate(&mut self, now: f64, socket: SocketId, connect: bool) -> bool {
+        if !V::managed_sockets() {
+            return true;
+        }
         if !self.io.core.managed_sockets {
             return true;
         }
@@ -887,6 +908,9 @@ impl<V: Venue> Engine<V> {
         }
     }
     pub(super) fn fence_socket_actions(&mut self, now: f64) {
+        if !V::managed_sockets() {
+            return;
+        }
         if !self.io.core.managed_sockets {
             return;
         }
@@ -902,6 +926,9 @@ impl<V: Venue> Engine<V> {
         });
     }
     pub(super) fn drain_socket_frames(&mut self, now: f64) {
+        if !V::managed_sockets() {
+            return;
+        }
         if !self.io.core.managed_sockets || self.io.core.socket_failed {
             return;
         }
@@ -1055,6 +1082,9 @@ impl<V: Venue> Engine<V> {
         }
     }
     pub(super) fn arm_socket_continuations(&mut self, now: f64) {
+        if !V::managed_sockets() {
+            return;
+        }
         if self.io.socket_continuations.is_empty() || self.io.core.socket_failed {
             return;
         }
@@ -1233,6 +1263,9 @@ mod tests {
         }
     }
     impl Venue for Probe {
+        fn managed_sockets() -> bool {
+            true
+        }
         type Pending = ();
         fn start(&mut self, cx: &mut Cx<'_, ()>) {
             let mut declared = policy();
@@ -2192,6 +2225,7 @@ mod tests {
             let mut io = Io::<()> {
                 core: IoCore {
                     next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                    managed_sockets_declared: true,
                     ..IoCore::default()
                 },
                 ..Default::default()
@@ -2222,6 +2256,7 @@ mod tests {
     fn snapshot_invalid_policy_does_not_register_a_feed() {
         let mut store = Store::default();
         let mut io = Io::<()>::default();
+        io.core.managed_sockets_declared = true;
         let mut cx = Cx {
             now: 0.,
             store: &mut store,
@@ -2241,6 +2276,7 @@ mod tests {
             let mut io = Io::<()> {
                 core: IoCore {
                     next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                    managed_sockets_declared: true,
                     ..IoCore::default()
                 },
                 ..Default::default()
@@ -2290,6 +2326,10 @@ mod handoff_tests;
 #[cfg(test)]
 #[path = "socket_capability_tests.rs"]
 mod capability_tests;
+
+#[cfg(test)]
+#[path = "socket_declaration_tests.rs"]
+mod declaration_tests;
 
 #[cfg(all(test, feature = "socket-native-timing"))]
 #[path = "socket_native_timing_tests.rs"]

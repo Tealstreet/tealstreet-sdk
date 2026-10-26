@@ -58,6 +58,9 @@ impl Probe {
     }
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         let result = if self.snapshot {

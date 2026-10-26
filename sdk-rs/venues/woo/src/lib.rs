@@ -579,6 +579,9 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn managed_sockets() -> bool {
+        true
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }

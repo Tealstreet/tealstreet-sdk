@@ -971,6 +971,9 @@ fn spot_rows(
 }
 
 impl Venue for Hyperliquid {
+    fn managed_sockets() -> bool {
+        true
+    }
     fn on_open(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId) {}
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
     fn cancel_needs_stored_order(&self) -> bool {

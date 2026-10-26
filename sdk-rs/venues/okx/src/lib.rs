@@ -840,6 +840,9 @@ impl Okx {
 }
 
 impl Venue for Okx {
+    fn managed_sockets() -> bool {
+        true
+    }
     fn socket_control(
         &self,
         _store: &safe_cex_engine::Store,
