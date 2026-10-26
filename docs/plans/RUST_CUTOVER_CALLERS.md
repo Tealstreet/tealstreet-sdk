@@ -9913,6 +9913,30 @@ bootstrap features; AsterDEX additionally requires address setup and signing
 metadata. Combined default features cannot satisfy an isolated family's check.
 Negative controls pin missing features and reject unknown setup mappings.
 
+## Rust-only beta SDK admission
+
+SDK web/native registries, saved-account/public factories and worker startup
+select `RustEngineExchange` without an engine opt-in. The single SDK beta roster
+is `packages/safe-cex/src/exchanges/rust/betaVenues.ts`; names outside it refuse
+with typed `Unsupported` / `NotSent` before clock, runtime or transport work.
+Previously saved OUT accounts cannot start in this build. The `engine: 'rust'`
+input remains compatible but no longer selects between implementations.
+
+There is no TypeScript venue or hosted-signing venue fallback. An IN account
+using `remoteSigner` / `payloadSigner` without enabled Rust remote policy
+refuses with `Unsupported` / `NotSent`; Paradex beta supports local keys only.
+Enabled Rust provider paths retain their existing custody and wire contracts.
+Bitunix is hosted-enabled after #2262's declared remote policy landed. The SDK
+continues to derive eligibility from that policy, without a separate beta
+override.
+
+Metadata and standalone `*.signing.ts` codecs used by `rust/legacySigning.ts`
+remain runtime dependencies. Independent TS/native financial, transport and
+signing reference oracles remain test-only. Historical Rust adapter fixtures
+mock the beta admission layer explicitly; real SDK/worker refusal controls do
+not use that fixture. Retained oracle execution is not beta activation. R2 owns
+adapter relocation/deletion and retargets those test-only imports.
+
 ## Lighter public beta data
 
 Market snapshots seed last price and start ticker hydration before socket Open.

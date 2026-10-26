@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isRustVenue, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
@@ -47,9 +52,9 @@ describe('Rust WOO execution history boundary', () => {
   });
 
   it('registers WOO beside Orderly brokers and preserves caller IDs and slippage through placement', async () => {
-    expect(isRustVenue('woo')).toBe(true);
-    expect(isRustVenue('woofi')).toBe(true);
-    expect(isRustVenue('kodiakfi')).toBe(true);
+    expect(isRustVenue('woo')).toBe(false);
+    expect(isRustVenue('woofi')).toBe(false);
+    expect(isRustVenue('kodiakfi')).toBe(false);
     const { exchange, command } = setup();
     const opts = { symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 1,
       maxSlippagePct: 0.25, clientOrderId: '9007199254740991' };
