@@ -389,29 +389,81 @@ fn credential() -> crate::request_context::Credential {
 }
 
 fn serial_leg<const D: u8>(engine: &mut Engine<Fifo<D>>) -> Context {
+    serial_call_leg(engine, Operation::Mutation, None).expect("a serial Plan joins the domain")
+}
+
+/// The first leg of a serial Plan whose first call names `pacing`.
+fn serial_call_leg<const D: u8>(
+    engine: &mut Engine<Fifo<D>>,
+    operation: Operation,
+    pacing: Option<Pacing>,
+) -> Result<Context, crate::request_context::Error> {
     let preflight = write_preflight(engine, 7);
     let mut cx = Cx {
         now: 0.,
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    let (plan, slot) = cx
-        .admit_serial_plan(
-            &preflight,
-            crate::request_context::plan::SerialCall {
-                auth: crate::request_context::plan::CallAuth::Preflight,
-                operation: Operation::Mutation,
-                timeout_ms: 20_000,
-                attempts: 1,
-            },
-            crate::request_context::plan::SerialPolicy {
-                credential: Some(credential()),
-                pacing: None,
-                refusals_complete: false,
-            },
-        )
-        .expect("a serial Plan joins the domain");
-    cx.plan_leg_context(&plan, &slot).unwrap()
+    let (plan, slot) = cx.admit_serial_plan(
+        &preflight,
+        crate::request_context::plan::SerialCall {
+            operation,
+            timeout_ms: 20_000,
+            attempts: 1,
+            pacing,
+            auth: crate::request_context::plan::CallAuth::Preflight,
+        },
+        crate::request_context::plan::SerialPolicy {
+            credential: Some(credential()),
+            pacing: None,
+            refusals_complete: false,
+        },
+    )?;
+    cx.plan_leg_context(&plan, &slot)
+}
+
+#[test]
+fn a_serial_call_names_only_its_domain_pacing() {
+    let mut e = engine::<3>();
+    assert_eq!(
+        serial_call_leg(&mut e, Operation::Mutation, Some(GROUP)).map(|leg| leg.pacing()),
+        Ok(Some(GROUP)),
+        "a member call may name the domain pacing"
+    );
+    for (operation, pacing) in [
+        (Operation::Mutation, ZERO),
+        // A Read is no Mutations member, so it cannot borrow the domain's gap.
+        (Operation::Read, GROUP),
+    ] {
+        let mut e = engine::<3>();
+        assert_eq!(
+            serial_call_leg(&mut e, operation, Some(pacing)).err(),
+            Some(crate::request_context::Error::Invalid),
+            "{operation:?} naming {pacing:?}"
+        );
+    }
+    let mut e = engine::<3>();
+    assert_eq!(
+        serial_call_leg(&mut e, Operation::Read, None).map(|leg| leg.pacing()),
+        Ok(None),
+        "a Read call does not inherit the domain-paced root"
+    );
+}
+
+#[test]
+fn outside_a_domain_a_serial_call_names_only_a_zero_gap_group() {
+    let mut e = engine::<0>();
+    assert_eq!(
+        serial_call_leg(&mut e, Operation::Mutation, Some(ZERO)).map(|leg| leg.pacing()),
+        Ok(Some(ZERO)),
+        "the leg carries the call's own pacing"
+    );
+    let mut e = engine::<0>();
+    assert_eq!(
+        serial_call_leg(&mut e, Operation::Mutation, Some(GROUP)).err(),
+        Some(crate::request_context::Error::Invalid),
+        "a nonzero gap needs a domain"
+    );
 }
 
 #[test]
