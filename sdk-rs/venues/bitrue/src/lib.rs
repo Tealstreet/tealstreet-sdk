@@ -904,9 +904,10 @@ impl Venue for Bitrue {
         self.trading_retired(owner)
     }
     /// An uncertain or absent-order seal: restore the retired job's rows and
-    /// reconcile through a Primary open-order snapshot.
-    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
-        self.reconcile_trading(cx);
+    /// reconcile the named symbols (every market when unnamed) through Primary
+    /// open-order snapshots.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
+        self.reconcile_trading(cx, symbols);
     }
 
     type Pending = Pending;

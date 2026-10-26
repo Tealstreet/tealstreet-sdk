@@ -450,3 +450,83 @@ fn a_503_restores_rows_and_the_next_queued_command_proceeds() {
     assert_eq!(terminals(&h, 7), 1);
     assert_eq!(level_edits(&h), 1, "the next queued command proceeds");
 }
+
+/// fe7lgm H1: a -1022 grants the protective replacement its one resend, so
+/// the venue's cancel-all fence stays until that resend's own answer. An amend
+/// is not an engine placement scope: only the venue fence covers it.
+#[test]
+fn a_signature_refusal_then_a_lost_resend_keeps_cancel_all_fenced() {
+    let mut h = Harness::new();
+    position(&mut h);
+    h.e.store_mut().upsert_order(Order {
+        id: "456".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: "E-BTC-USDT".into(),
+        kind: OrderType::StopLoss,
+        side: OrderSide::Sell,
+        price: 1800.0,
+        amount: 0.001,
+        filled: 0.0,
+        remaining: 0.001,
+        reduce_only: true,
+        close: None,
+        client_order_id: None,
+        time_in_force: Some(TimeInForce::GoodTillCancel),
+        last_update: 0.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    });
+    h.command(Command::AmendOrder {
+        command: 7,
+        id: "456".into(),
+        price: Some(1790.0),
+        amount: None,
+    });
+    let detail = |status| {
+        format!(
+            r#"{{"code":"0","data":[{{"orderId":456,"contractName":"E-BTC-USDT","status":"{status}","origQty":0.001,"executedQty":0,"side":"SELL","type":"MARKET","action":"CLOSE","conditionOrder":true,"triggerType":1,"triggerPriceType":2}}]}}"#
+        )
+    };
+    let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(inspect, &detail("INIT"));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(cancel, r#"{"code":"0","data":{"orderId":456}}"#);
+    let verify = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(verify, &detail("CANCELED"));
+    let first = h.take(Method::Post, "/fapi/v2/order");
+    h.e.handle(
+        h.now,
+        Event::HttpResponse {
+            request: first.id,
+            response: safe_cex_engine::Response {
+                status: 400,
+                headers: "",
+                body: r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#,
+            },
+        },
+    );
+    h.collect();
+    let resend = h.take(Method::Post, "/fapi/v2/order");
+    fail(&mut h, resend);
+    assert!(failure(&h, 7).is_some());
+    h.command(Command::CancelSymbolOrders {
+        command: 8,
+        symbol: "E-BTC-USDT".into(),
+    });
+    assert!(
+        failure(&h, 8).is_some_and(|e| e
+            .message
+            .starts_with("Bitrue protective placement outcome is uncertain")),
+        "the venue fence holds cancel-all: {:?}",
+        failure(&h, 8)
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.ends_with("/fapi/v2/cancel")),
+        "no cancel without the protective order's identity"
+    );
+}

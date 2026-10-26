@@ -643,14 +643,21 @@ impl Bitrue {
             self.next_orders(cx);
         }
     }
-    /// After an Unknown seal: every symbol's snapshot as a Primary read.
-    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        let symbols: Vec<String> = cx
-            .store
-            .markets()
-            .iter()
-            .map(|m| m.symbol.clone())
-            .collect();
+    /// After an Unknown seal: the named (else every) symbol's snapshot as a Primary read.
+    pub(crate) fn reconcile_orders(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbols: Option<&[String]>,
+    ) {
+        let symbols: Vec<String> = match symbols {
+            Some(symbols) => symbols.to_vec(),
+            None => cx
+                .store
+                .markets()
+                .iter()
+                .map(|m| m.symbol.clone())
+                .collect(),
+        };
         self.account.order_primary.extend(symbols.iter().cloned());
         // An in-flight read predates the seal: a Primary snapshot follows it.
         if let Some(active) = self.account.order_active.clone()

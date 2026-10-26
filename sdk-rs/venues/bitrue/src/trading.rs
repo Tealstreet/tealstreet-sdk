@@ -1439,12 +1439,16 @@ impl Bitrue {
             .map(|queued| queued.preflight.clone())
     }
     /// Native restore for a job the engine sealed, then a Primary reconcile.
-    pub(crate) fn reconcile_trading(&mut self, cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn reconcile_trading(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbols: Option<&[String]>,
+    ) {
         if let Some(work) = self.trading.retired.take() {
             self.cleanup(cx, &work);
             self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
         }
-        self.reconcile_orders(cx);
+        self.reconcile_orders(cx, symbols);
     }
     /// A clean census of `revision` or later clears that symbol's fence.
     pub(crate) fn protection_observed(&mut self, symbol: &str, revision: u64) {
@@ -1503,7 +1507,7 @@ impl Bitrue {
             {
                 active.work.read_retries += 1;
                 request.census = None;
-                return self.issue_call(cx, active, slot, request.step, true, request.floor);
+                return self.issue_call(cx, active, slot, request.step, false, request.floor);
             }
             // Transport text stays behind native's private diagnostic boundary.
             if let Effect::Census(symbol) = &request.step.effect {
@@ -1747,18 +1751,6 @@ impl Bitrue {
                     matches!(&*reply.code, "-1022" | "-1102" | "-1121" | "-2017")
                         && reply.data.is_none_or(|data| data.get() == "null")
                 });
-            if rejected
-                && let Some(fence) = &request.protection
-                && self.trading.unresolved_protection.get(&fence.symbol) == Some(&fence.revision)
-            {
-                if let Some(previous) = fence.previous {
-                    self.trading
-                        .unresolved_protection
-                        .insert(fence.symbol.clone(), previous);
-                } else {
-                    self.trading.unresolved_protection.remove(&fence.symbol);
-                }
-            }
             if let Effect::Leverage { symbol, .. } = &request.step.effect {
                 self.learn_leverage_limit(cx, symbol, response.body);
             }
@@ -1771,7 +1763,7 @@ impl Bitrue {
                 message: "",
             });
             let error = answer_failure(response, message, rejected);
-            return match cx.classify_write(
+            let answer = match cx.classify_write(
                 context,
                 &codes::BITRUE,
                 native.as_ref(),
@@ -1789,11 +1781,27 @@ impl Bitrue {
                     Ok(_) => Answer::Failed(error),
                     Err(_) => Answer::Stopped,
                 },
-                Err(_) => {
-                    let _ = cx.http_write_unproven(context, error.message.clone());
-                    Answer::Failed(error)
-                }
+                Err(_) => match cx.http_write_unproven(context, error.message.clone()) {
+                    Ok(_) => Answer::Failed(error),
+                    Err(_) => Answer::Stopped,
+                },
             };
+            // A resent placement keeps its fence until its own answer: a lost
+            // resend may still leave native protection live.
+            if rejected
+                && matches!(answer, Answer::Failed(_))
+                && let Some(fence) = &request.protection
+                && self.trading.unresolved_protection.get(&fence.symbol) == Some(&fence.revision)
+            {
+                if let Some(previous) = fence.previous {
+                    self.trading
+                        .unresolved_protection
+                        .insert(fence.symbol.clone(), previous);
+                } else {
+                    self.trading.unresolved_protection.remove(&fence.symbol);
+                }
+            }
+            return answer;
         }
         let accepted = match &request.step.effect {
             Effect::Place {
@@ -1865,10 +1873,10 @@ impl Bitrue {
                 }
             }
             // A 2xx that does not prove the write is Unknown.
-            Err(message) => {
-                let _ = cx.http_write_unproven(context, message.clone());
-                Answer::Failed(VenueError::new(message).outcome(Outcome::Unknown))
-            }
+            Err(message) => match cx.http_write_unproven(context, message.clone()) {
+                Ok(_) => Answer::Failed(VenueError::new(message).outcome(Outcome::Unknown)),
+                Err(_) => Answer::Stopped,
+            },
         }
     }
     /// A refused leverage write names the venue's ceiling; learn it.

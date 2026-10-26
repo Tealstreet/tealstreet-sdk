@@ -17,7 +17,7 @@ Base: `feat/rust-rewrite` `49a5b54f362`. Area plan: [RUST_BITRUE_REQUEST_CONTEXT
 | signing | `lib.rs` | 1 | The secondary-identity validation message; stays (user-visible text) |
 | credential | `lib.rs` | 4 | Funnel-side credential selection |
 
-Targets: request 18 → 0. Signing 12 → 3 (dispatch 2, lib 1). B1 measured signing at 6: `secondary_tests.rs` keeps 3 sites because it drives the crate-private legacy `send()`. B2 must reach 3 by rewriting that test over managed selection, not by moving it (fe7lgm). Credential lib.rs drops to whatever the managed selection leaves, measured at source.
+Targets: request 18 → 0. Signing 12 → 3 (dispatch 2, lib 1). B1 measured signing at 6: `secondary_tests.rs` keeps 3 sites because it drives the crate-private legacy `send()`. B2 reached 3 by deleting it: request_funnel_reads, dispatch_signer_adoption and trading_funnel already pin each role-based key choice through public managed paths. Credential lib.rs drops to whatever the managed selection leaves, measured at source.
 
 The matches are not ten dispatchers (area plan). They leave with the pending representation they read: `sign::Request` stops being a field named `request` and the `matches!` bodies bind the step or call instead. Their assertions are kept.
 
@@ -75,7 +75,7 @@ Splitting keeps each size and review scoped: B1 links nothing new; B2 links `ser
   - Each next call comes from the previous call's DATA (`continue_serial_plan`).
   - Replacements keep "requires final cancellation proof". The amend replacement is prepared only after a Verify that proves the cancel, and the execution-progress abort (`filled_native` or a closed target) ends the job before the next call.
 - **Native read retries inside a job (D3).** Inspect, Verify and census GETs keep native's 3 retries on Network or Timeout, with no caller-visible change. The serial-Plan rule is per call: a released Read failure may `continue_serial_plan[_after]` to a fresh Read call (the `Stage::Active { failed: true }` branch), and that retry's own released failure may continue again. The venue keeps the 3-attempt counter and chains Read continuations; a 4th is never sent. If an original proves the chain refused, this goes back to fe7lgm.
-- **Read calls sign with Primary (recorded caller-visible key change).** Every serial-Plan call signs with the Plan's single admitted credential, Primary for a write Plan. So Inspect, Verify and census GETs, which today use the read key by method, sign with Primary. That is safer. `secondary_tests.rs` is rewritten to pin it.
+- **Read calls sign with Primary (recorded caller-visible key change).** Every serial-Plan call signs with the Plan's single admitted credential, Primary for a write Plan. So Inspect, Verify and census GETs, which today use the read key by method, sign with Primary. That is safer. trading_funnel's control 8 pins it.
 - **Cancel batches** (CancelOrders and CancelSymbolOrders) keep native independent continuation. Like BingX: a complete Plan with `independent_calls`, one step per target, with no retry.
   - Native skips a child step at dispatch time whenever its Store row is terminal by any route (parent cancel, the stream), including after a sibling's failure. A complete Plan declares its steps up front.
   - **Q1 (fe7lgm owns the core seam, a separate small core PR with paired Bybit, Bitget and combined sizes):** `retire_unissued_plan_call(plan, slot)`.
@@ -102,7 +102,7 @@ Splitting keeps each size and review scoped: B1 links nothing new; B2 links `ser
 
 ## Signing
 
-- The test-only `sign::signature` and its docs vector are deleted, not moved. `dispatch_signer_adoption.rs`'s independent HMAC vectors pin the dispatch recipe's bytes. `secondary_tests.rs` is rewritten over managed selection: role-based (`Read` for account reads, `Mutation` for writes), never method-inferred.
+- The test-only `sign::signature` and its docs vector are deleted, not moved. `dispatch_signer_adoption.rs`'s independent HMAC vectors pin the dispatch recipe's bytes. `secondary_tests.rs` is deleted: role-based selection (`Read` for account reads, `Mutation` for writes) is pinned through public managed paths in request_funnel_reads, dispatch_signer_adoption and trading_funnel.
 - `sign.rs` keeps only `Request` (renamed off `request` with B1).
 
 ## Original controls (RED first, per phase)
