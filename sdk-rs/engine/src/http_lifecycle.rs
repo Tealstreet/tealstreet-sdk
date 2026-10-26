@@ -1636,8 +1636,17 @@ impl<V: Venue> Engine<V> {
     /// role was captured at admission. Descriptive only: it grants nothing.
     #[cfg(feature = "sign-meta")]
     pub fn sign_meta(&self, task: RequestId) -> Option<crate::sign_meta::SignMeta> {
+        let prepared = self.io.core.signing.prepared_task(task);
+        #[cfg(feature = "address-nonce")]
+        {
+            let setup = self.io.core.address_setup.current_meta(task);
+            debug_assert!(prepared.is_none() || setup.is_none());
+            if prepared.is_none() {
+                return setup;
+            }
+        }
         use crate::sign_meta::{SignKind, SignMeta};
-        let (request, deadline_ms) = self.io.core.signing.prepared_task(task)?;
+        let (request, deadline_ms) = prepared?;
         let managed = self.io.core.managed_http.get(&request)?;
         if managed.signing_attempt != Some(task) {
             return None;
@@ -2051,6 +2060,20 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
+        #[cfg(feature = "address-nonce")]
+        if managed
+            .recipe
+            .as_ref()
+            .is_some_and(|recipe| !recipe.nonce_identity_current(&self.io.core.identities))
+        {
+            self.http_preparation_failed(
+                now,
+                preparation,
+                Error::Revoked,
+                crate::signing::SignError::InvalidRequest.venue_error(),
+            );
+            return Err(Error::Revoked);
+        }
         if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,
