@@ -9352,3 +9352,4 @@ Orderly's private reads and its socket auth now sign through an installed Ed2551
   - A lost page keeps its `Network` kind; it was `Internal`.
   - A signing refusal fails the query outright, even after accepted pages, as before.
 - **Socket auth.** A provider refusal sends no frame and closes the socket. Without a Primary identity the socket closes without signing.
+- **Interim (until O2).** A protective placement that an account snapshot confirms completes one tick after that snapshot, rather than inside it. The result is unchanged.

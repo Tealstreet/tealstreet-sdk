@@ -985,7 +985,7 @@ impl Venue for Orderly {
             let _ = cx.finish_http_context(read.context());
             if current {
                 self.account_response(cx, request, response);
-                self.trade_reconcile(cx);
+                self.defer_trade_reconcile(cx);
             }
             return;
         }
