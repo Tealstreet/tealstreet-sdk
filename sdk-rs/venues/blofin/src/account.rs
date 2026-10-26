@@ -748,11 +748,7 @@ impl Blofin {
     /// A Primary order snapshot that may clear an order fence; owed when
     /// another snapshot is in flight.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        if cx.reconcile_reask()
-            && (self.account.orders_busy
-                || self.account.reconcile_owed
-                || self.account.retry.is_some())
-        {
+        if cx.reconcile_reask() && (self.account.orders_busy || self.account.retry.is_some()) {
             return;
         }
         self.account.reconcile_owed = true;

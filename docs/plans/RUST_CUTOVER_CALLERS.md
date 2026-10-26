@@ -9985,3 +9985,7 @@ opt-out because its existing late-landing cancellation covers that race.
 All three venues pin a slow held read across the engine's first two re-asks:
 the same census still publishes and releases, without restarting its floor or
 paid work. Phemex also pins re-asks while its native expiry-bound timer is owed.
+
+BloFin joins only an active census or its scheduled retry. After three failed
+attempts leave an idle owed flag, the next engine re-ask starts a fresh Primary
+census without depending on periodic polling; a clean complete census releases.

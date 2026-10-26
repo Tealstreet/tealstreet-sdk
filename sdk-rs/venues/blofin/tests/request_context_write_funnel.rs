@@ -828,6 +828,52 @@ fn engine_reasks_join_a_slow_primary_reconciliation_read() {
 }
 
 #[test]
+fn an_engine_reask_restarts_reconciliation_after_native_retries_are_exhausted() {
+    let mut h = seeded();
+    command(&mut h, place(770, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 770).outcome, Some(Outcome::Unknown));
+    let sealed_at = h.now;
+
+    for delay in [0., 1_000., 3_000.] {
+        if delay > 0. {
+            fire_until(&mut h, sealed_at + delay);
+        }
+        assert_eq!(count(&h, "orders-pending?"), 1);
+        let request = h.take("orders-pending?");
+        assert!(request
+            .headers
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case("ACCESS-KEY") && value == "key"));
+        answer(&mut h, &request, 200, r#"{"code":"0","data":{}}"#);
+        assert_eq!(count(&h, "orders-pending?"), 0);
+    }
+
+    command(&mut h, place(771, 1.0));
+    assert_eq!(failure(&h, 771).outcome, Some(Outcome::NotSent));
+    assert_eq!(count(&h, "batch-orders"), 0);
+    let before_reask = h.actions.len();
+    fire_until(&mut h, sealed_at + 7_000.);
+    assert!(h.actions[before_reask..]
+        .iter()
+        .all(|a| !matches!(a, Action::Http(r) if r.url.contains("account/positions"))));
+    assert_eq!(
+        count(&h, "orders-pending?"),
+        1,
+        "the engine re-ask restarts the idle owed census without the periodic poll"
+    );
+    for path in [
+        "orders-pending?",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    command(&mut h, place(772, 1.0));
+    assert_eq!(count(&h, "batch-orders"), 1, "the clean census releases");
+}
+
+#[test]
 fn a_late_or_duplicate_response_after_a_terminal_changes_nothing() {
     let mut h = seeded();
     let intents = command(&mut h, place(7, 1.0));
