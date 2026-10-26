@@ -49,6 +49,9 @@ def modes():
              'serial-plans', 'session-bearer', 'test-support')] = ['serial Session resend control']
     # session-bearer OFF control: Session bindings are refused (session_bearer_off.rs).
     grouped.setdefault(('http-plans', 'test-support'), []).append('session-bearer OFF control')
+    # write-preflight-wait OFF control: a WriteAfterReads caller-wait capture stays
+    # Revoked (plan_receipt_cap_tests Mode::RefuseWrite, compiled only without it).
+    grouped.setdefault(('http-plans', 'test-support'), []).append('write Preflight wait OFF control')
     grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'order-locks', 'test-support')] = ['explicit nonce control']
     grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'serial-plans', 'test-support')] = [
         'Kraken serial nonce prerequisite control']
