@@ -50,3 +50,38 @@ fn selection_error_variant_set_is_feature_invariant() {
         assert_eq!(error.sign_error(), expected);
     }
 }
+
+#[test]
+fn downstream_venue_declarations_are_feature_invariant() {
+    use safe_cex_engine::book::Book;
+    use safe_cex_engine::*;
+    struct Declared;
+    impl Venue for Declared {
+        type Pending = ();
+        fn address_nonce_domain(&self) -> Option<&'static nonce::NonceDomain> {
+            Some(&nonce::HYPERLIQUID_AGENT)
+        }
+        fn public_address_slots(&self) -> AddressSetupSlots {
+            AddressSetupSlots::Both
+        }
+        fn start(&mut self, _: &mut Cx<'_, ()>) {}
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    assert_eq!(
+        Declared.address_nonce_domain(),
+        Some(&nonce::HYPERLIQUID_AGENT)
+    );
+    assert_eq!(Declared.public_address_slots(), AddressSetupSlots::Both);
+}
