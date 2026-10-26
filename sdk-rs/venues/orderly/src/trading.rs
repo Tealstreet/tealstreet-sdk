@@ -2179,7 +2179,9 @@ impl Orderly {
                             .rows
                             .iter()
                             .filter(|row| {
-                                row.algo_order_id.as_ref().is_some_and(|id| id.0 == waiting.parent)
+                                row.algo_order_id
+                                    .as_ref()
+                                    .is_some_and(|id| id.0 == waiting.parent)
                             })
                             .flat_map(|row| &row.child_orders)
                             .filter_map(|child| child.algo_order_id.as_ref().map(|id| id.0.clone()))

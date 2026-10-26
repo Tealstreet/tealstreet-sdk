@@ -2108,9 +2108,19 @@ fn a_parent_listed_with_one_of_two_legs_ends_unknown() {
         r#"[{"symbol":"BTCUSDC","type":"market","side":"buy","amount":1,"stopLoss":49000,"takeProfit":55000}]"#,
     );
     let entry = requests(&mut e).pop().unwrap();
-    reply(&mut e, &entry, 200, r#"{"success":true,"data":{"order_id":50}}"#);
+    reply(
+        &mut e,
+        &entry,
+        200,
+        r#"{"success":true,"data":{"order_id":50}}"#,
+    );
     let pair = requests(&mut e).pop().unwrap();
-    reply(&mut e, &pair, 200, r#"{"success":true,"data":{"order_id":51}}"#);
+    reply(
+        &mut e,
+        &pair,
+        200,
+        r#"{"success":true,"data":{"order_id":51}}"#,
+    );
     for (id, kind, seq) in [(510, "STOP_LOSS", 1), (511, "TAKE_PROFIT", 2)] {
         ws(
             &mut e,
@@ -2122,8 +2132,7 @@ fn a_parent_listed_with_one_of_two_legs_ends_unknown() {
     }
     let verify = settled_requests(&mut e, 2000.0)
         .into_iter()
-        .filter(|r| r.url.contains("/v1/algo/orders?"))
-        .last()
+        .rfind(|r| r.url.contains("/v1/algo/orders?"))
         .expect("the verification read");
     reply(
         &mut e,
@@ -2140,5 +2149,8 @@ fn a_parent_listed_with_one_of_two_legs_ends_unknown() {
         .expect("one terminal");
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
     let ids = error.partial.expect("the accepted IDs").order_ids;
-    assert!(ids.contains(&"50".to_owned()) && ids.contains(&"51".to_owned()), "{ids:?}");
+    assert!(
+        ids.contains(&"50".to_owned()) && ids.contains(&"51".to_owned()),
+        "{ids:?}"
+    );
 }

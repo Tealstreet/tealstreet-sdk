@@ -177,7 +177,10 @@ fn place(engine: &mut Engine<ReadyFirst>, command: u32, price: f64) {
         r#"[{{"symbol":"BTCUSDC","type":"stop_market","side":"sell","amount":1,"price":{price}}}]"#
     ))
     .unwrap();
-    engine.handle(NOW, Event::Command(Command::PlaceOrders { command, orders }));
+    engine.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders { command, orders }),
+    );
 }
 
 /// A keyed Orderly behind the wrapper, bootstrapped with every read answered.
@@ -206,7 +209,12 @@ fn ready() -> Engine<ReadyFirst> {
             }
         }
         for r in http(&actions) {
-            reply(&mut engine, &r, 200, &account_body(&r.url, ORDER, "[]", POSITIONS));
+            reply(
+                &mut engine,
+                &r,
+                200,
+                &account_body(&r.url, ORDER, "[]", POSITIONS),
+            );
         }
     }
     let socket = private.expect("the private socket");
@@ -226,7 +234,12 @@ fn ready() -> Engine<ReadyFirst> {
             break;
         }
         for r in reads {
-            reply(&mut engine, &r, 200, &account_body(&r.url, ORDER, "[]", POSITIONS));
+            reply(
+                &mut engine,
+                &r,
+                200,
+                &account_body(&r.url, ORDER, "[]", POSITIONS),
+            );
         }
     }
     engine
