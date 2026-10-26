@@ -61,7 +61,11 @@ operation; configuration text alone cannot install a verified subject.
 The overseer ruled that a configured Aster V3 signer address differing from
 the selected signing key's verified address must refuse at trusted setup with
 a clear typed error naming the mismatch. Never silently substitute the derived
-address for mismatched configuration. Matching configurations and legitimately
+address for mismatched configuration. Refuse only that slot's private address
+path, typed NotSent before business signing, without an auth-health latch;
+public work continues. The consumer reads the sealed verified address during
+trusted startup before enabling that private path. Do not fail all startup or
+defer this known failure into per-request InvalidSubject. Matching configurations and legitimately
 installed alias slots retain their behavior. The consumer must pin native
 venue refusal versus the new earlier setup refusal with an original and record
 the timing/diagnostic change in CALLERS. The generic mint still accepts no
@@ -328,6 +332,35 @@ refusal; a future unknown-field refusal cannot silently bypass the assertion.
 The earlier 8b0 qualification remains attributed to its original source.
 
 ## Scope, zero-growth and publication gates
+
+The shared public-address carrier also has a claim-free GRVT consumer. GRVT
+needs the actual selected Primary signing ref's sealed address before
+CreateOrder apply/private egress, without a nonce domain or NonceClaim. Its
+configured signer_address remains warning-only; Aster's mismatch refusal is
+not a shared option validator. Credential-only login/cancel/leverage continue
+without PublicAddress, and Optional absence retains SigningNotConfigured with
+no latch. Hosted and local providers use the same genuine setup task, never a
+builder business Read or a venue-owned binding installer. Setup-slot eligibility
+therefore needs its own captured declaration, independent of optional nonce
+domain selection. The exact API is under source review.
+
+The overseer approved one finite raw 20,000ms setup bound per genuine task,
+frozen at first emission; expiry is SetupCapability NotSent, no auth latch or
+automatic retry. Explicit pre-start reinitialize advances the generation and
+joins the actual old owner before launching new work. Timeout/abort wrappers,
+detached callbacks, dropped futures and cleared maps prove no join. The provider
+ownership contract must include actual work plus cleanup, including hosted
+downstream work; abort-ignoring work keeps Retiring and blocks replacement.
+
+fe7 accepted an unconditional public RetireAddressSetup Action variant and
+opaque retirement payload, with construction/emission only behind the adopting
+feature. Existing Sign/SignPayload bytes stay exact. Trusted pre-start setup
+and retirement support negotiation precedes any setup task/signing ID; missing
+support refuses typed before work. An old host receives neither setup nor
+retirement. The new host's known unsupported retirement arm disposes; ordinary
+unknown-op behavior keeps its existing batch-tail completion semantics. Exact
+provider hooks, token/Action cloning, host integration and genuine join proofs
+remain source-review gates, not approved runtime code.
 
 Proposed non-default engine feature: `address-nonce = ["dispatch-nonce"]`.
 Gate the carrier field, subject strategy, declaration capture, setup handling

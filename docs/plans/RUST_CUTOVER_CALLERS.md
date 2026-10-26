@@ -9117,7 +9117,10 @@ signer address differs from the selected signing key's verified public address,
 using a clear typed error that identifies the mismatch. Native currently sends
 the mismatched configured signer and fails at the venue; the approved change
 moves that refusal earlier and makes its reason precise. It must not silently
-substitute the derived address. Matching accounts and legitimately installed
+substitute the derived address. Refusal is NotSent for only that slot's private
+address path, before business signing, with no auth-health latch; public work
+continues. It is neither a startup-wide failure nor repeated InvalidSubject on
+each request. Matching accounts and legitimately installed
 primary/read aliases retain their behavior. A native-versus-new original must
 pin both refusals before consumer source closes this gate. This is a recorded
 ruling, not an implemented or activated path. The generic nonce mint accepts
