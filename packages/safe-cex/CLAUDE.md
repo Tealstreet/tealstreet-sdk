@@ -64,7 +64,8 @@ names; identity/nonce consumers require the caller's intended stable mapping.
 
 Trusted signer setup uses shared declarative per-family/per-slot normalization
 from construction-rules.json. Unspecified fields preserve caller trimCredential
-metadata; MEXC forces primary credential trimming and secondary preservation.
+metadata; MEXC forces primary credential trimming and secondary preservation. Bitunix declares `trimSigning` with `trimCredential` for both slots, so the
+signing key is trimmed once at setup too (applies once Bitunix adopts dispatch signing).
 The same field policy declares primary required-for-private passphrases and
 required secondary passphrases with primary fallback for OKX and Bitget aliases
 and WEEX.

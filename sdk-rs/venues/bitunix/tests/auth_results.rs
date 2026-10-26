@@ -3,7 +3,6 @@ mod support;
 use safe_cex_engine::{
     AccountReadScope, Action, AuthOutcome, CredentialSlot, Event, HttpRequest, Notice, Response,
 };
-use safe_cex_venue_bitunix::{BitunixFutures, Options};
 use support::*;
 fn http(actions: &[Action], path: &str) -> HttpRequest {
     actions
@@ -52,7 +51,7 @@ fn started(secondary: bool) -> (TestEngine, Vec<Action>) {
     started_at(secondary, 0.0)
 }
 fn started_at(secondary: bool, now: f64) -> (TestEngine, Vec<Action>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: Some("primary-key".into()),
         secret: Some("primary-secret".into()),
         read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
@@ -60,8 +59,8 @@ fn started_at(secondary: bool, now: f64) -> (TestEngine, Vec<Action>) {
             secret: "read-secret".into(),
             passphrase: None,
         }),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(now);
     let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
     let markets = http(&actions, "/trading_pairs");

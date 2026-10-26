@@ -1810,13 +1810,14 @@ mod tests {
             ));
         }
 
-        #[cfg(feature = "bitunix")]
+        // Unmigrated control family: MEXC (moved from Bitunix by #2190).
+        #[cfg(feature = "mexc")]
         #[test]
-        fn shared_provider_feature_keeps_managed_public_bitunix_unsigned() {
+        fn shared_provider_feature_keeps_managed_public_mexc_unsigned() {
             let Ok(mut engine) =
-                super::super::WasmEngine::new("bitunix", r#"{"publicDataOnly":true}"#, None)
+                super::super::WasmEngine::new("mexc", r#"{"publicDataOnly":true}"#, None)
             else {
-                panic!("public Bitunix setup must remain native-safe and successful");
+                panic!("public MEXC setup must remain native-safe and successful");
             };
             assert!(!engine.dispatch_signing);
             assert!(!engine.requires_external_signer());
@@ -1845,7 +1846,7 @@ mod tests {
                         && action
                             .packet
                             .as_ref()
-                            .is_some_and(|packet| packet.url.contains("/api/v1/futures/market/"))
+                            .is_some_and(|packet| packet.url.contains("/api/v1/contract/"))
                 })
                 .expect("managed public discovery must prepare before release");
             assert_eq!(preparation.intent.as_deref(), Some("public"));

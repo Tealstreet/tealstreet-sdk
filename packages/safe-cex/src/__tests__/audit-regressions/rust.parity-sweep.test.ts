@@ -128,15 +128,19 @@ describe('Rust parity query forwarding', () => {
     }
   });
 
-  it('bitunix forwards secondary credentials separately from the primary account', async () => {
+  it('bitunix provisions separate primary and read credentials through trusted signer setup', async () => {
     const { exchange, construct } = fixture('bitunix', { secondary_key: 'read-key', secondary_secret: 'read-secret' });
     await exchange.start();
     expect(construct).toHaveBeenCalledOnce();
-    expect(JSON.parse(construct.mock.calls[0]![1] as string)).toMatchObject({
-      key: 'primary-key',
-      secret: 'primary-secret',
-      readCredentials: { key: 'read-key', secret: 'read-secret', passphrase: 'primary-pass' },
+    const [, options, signerSetup] = construct.mock.calls[0]!;
+    expect(JSON.parse(signerSetup!)).toMatchObject({
+      primary: { key: 'primary-key', secret: 'primary-secret', trimCredential: true, trimSigning: true },
+      secondary: { key: 'read-key', secret: 'read-secret', trimCredential: true, trimSigning: true },
     });
+    for (const field of ['key', 'secret', 'passphrase', 'readCredentials', 'secondary_key', 'secondary_secret', 'secondary_passphrase']) {
+      expect(JSON.parse(options)).not.toHaveProperty(field);
+      expect(exchange.options).not.toHaveProperty(field);
+    }
   });
 });
 

@@ -89,6 +89,9 @@ struct Probe {
     errors: Vec<VenueError>,
 }
 impl Venue for Probe {
+    fn http_mutation_barriers() -> bool {
+        true
+    }
     type Pending = Context;
     fn start(&mut self, _: &mut Cx<'_, Context>) {}
     fn on_command(&mut self, cx: &mut Cx<'_, Context>, _: Command) {

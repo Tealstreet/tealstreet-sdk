@@ -401,6 +401,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Bitrue dispatch signing | Production candidate; original REDs green, review and CI pending | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
 | Bitrue request funnel and trading writes | Plan under review | Before converting Bitrue's HTTP funnel, account reads, listen key, lookup/leverage joins or trading writes. | [RUST_BITRUE_REQUEST_FUNNEL.md](RUST_BITRUE_REQUEST_FUNNEL.md) |
+| Bitunix dispatch signer | Source under review; plan CLEAR (dazzy3) | Before moving Bitunix REST or WS login signing off raw key/secret, or changing its identities or registry setup. | [RUST_BITUNIX_DISPATCH_SIGNER.md](RUST_BITUNIX_DISPATCH_SIGNER.md) |
 
 | GRVT unsigned candle Read Plan | Managed adoption under review | Before changing candle caller limits, streaming or the six-attempt transport budget. | [RUST_GRVT_CANDLE_CONTEXT.md](RUST_GRVT_CANDLE_CONTEXT.md) |
 
