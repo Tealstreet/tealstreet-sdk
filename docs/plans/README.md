@@ -284,6 +284,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | BloFin credential cutover | Plan in review; WebSocket login onto dispatch, raw options retired | Before changing BloFin's private login, credential options or its credential/signing inventories. | [RUST_BLOFIN_CREDENTIAL_CUTOVER.md](RUST_BLOFIN_CREDENTIAL_CUTOVER.md) |
 | Binance signing residue | In review | Before changing Binance's signing tests, fixtures or its signing inventory. | [RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md) |
+| Bitunix closed positions | Source in review | Before changing Bitunix journal, closed PnL, its position-history read or the Bitunix capability enums. | [RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md) |
 | Binance request refusals | In review | Before changing Binance's local command refusals or its request inventory. | [RUST_BINANCE_REQUEST_REFUSALS.md](RUST_BINANCE_REQUEST_REFUSALS.md) |
 | Orderly provider-signed reads | O1 in review; O2 trading writes outlined | Before changing Orderly's signer setup, private account reads, history legs, socket auth or its request/signing inventories. | [RUST_ORDERLY_PROVIDER_READS.md](RUST_ORDERLY_PROVIDER_READS.md) |
 | Lighter RequestContext adoption | Inventory and phased plan | Before migrating Lighter or Robinhood HTTP/completion sites; single-request candles first, shared multi-request/signing prerequisites later. | [RUST_LIGHTER_REQUEST_CONTEXT.md](RUST_LIGHTER_REQUEST_CONTEXT.md) |

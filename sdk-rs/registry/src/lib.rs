@@ -1135,8 +1135,17 @@ fn payload_signing_rules_in_mode(
     provider_ready: bool,
     public: bool,
 ) -> Result<(), VenueError> {
-    if !options.payload_signer || public || venue == "paradex" || !supported(venue) {
+    if !options.payload_signer || public || !supported(venue) {
         return Ok(());
+    }
+    // Hosted (device-key) Paradex has no Rust route in this release; its legacy
+    // digest-only delegate is never constructed.
+    if venue == "paradex" {
+        return Err(VenueError::new(
+            "Rust paradex delegated signing is unsupported in this build; configure the account's local Stark key or remove payloadSigner",
+        )
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent));
     }
     let policy = remote_signing_policy(venue);
     let identity_ready = options
@@ -1156,7 +1165,7 @@ fn payload_signing_rules_in_mode(
         format!("Rust {venue} payloadSigner requires a configured injected signing provider")
     } else {
         format!(
-            "Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."
+            "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
         )
     };
     Err(VenueError::new(message)
