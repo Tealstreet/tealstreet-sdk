@@ -1,6 +1,6 @@
 //! Immediate native read errors must use genuine bounded command custody.
 mod support;
-use safe_cex_engine::request_context::{Error, HttpAction, Preparation};
+use safe_cex_engine::request_context::{Claim, Error, HttpAction, Preparation, Prepared};
 use safe_cex_engine::{
     Action, Command, ErrorKind, Event, HttpRequest, Notice, Query, Response, VenueError,
 };
@@ -104,6 +104,10 @@ fn ready(private: bool) -> TestEngine {
     e
 }
 fn dispatch(e: &mut TestEngine, now: f64, owner: u32, read: Read) -> Vec<Action> {
+    issue(e, now, owner, read);
+    support::prepared(e, now)
+}
+fn issue(e: &mut TestEngine, now: f64, owner: u32, read: Read) {
     let command = match read {
         Read::History(query) => Command::Query {
             command: owner,
@@ -115,7 +119,52 @@ fn dispatch(e: &mut TestEngine, now: f64, owner: u32, read: Read) -> Vec<Action>
         },
     };
     e.handle(now, Event::Command(command));
-    e.drain_actions().collect()
+}
+fn released_read(e: &mut TestEngine, owner: u32, read: Read) -> (HttpRequest, Preparation) {
+    issue(e, NOW, owner, read);
+    let mut preparations = e.drain_actions().filter_map(|action| match action {
+        Action::ManagedHttp(action) => match *action {
+            HttpAction::Prepare {
+                preparation,
+                request,
+                ..
+            } => Some((preparation, request)),
+            _ => panic!("unexpected managed work before preparation"),
+        },
+        Action::SetTimer { .. } => None,
+        _ => panic!("unexpected read admission effect"),
+    });
+    let (preparation, unsigned) = preparations.next().expect("genuine read preparation");
+    assert!(preparations.next().is_none());
+    drop(preparations);
+    e.http_prepared(
+        NOW,
+        preparation,
+        Prepared {
+            id: unsigned.id.0,
+            expires_at: None,
+        },
+    );
+    let mut bindings = e.drain_actions().map(|action| match action {
+        Action::ManagedHttp(action) => match *action {
+            HttpAction::Bind {
+                preparation: actual,
+                permit,
+                request,
+            } => {
+                assert_eq!(actual, preparation);
+                (permit, request)
+            }
+            _ => panic!("unexpected managed preparation effect"),
+        },
+        _ => panic!("unexpected preparation effect"),
+    });
+    let (permit, request) = bindings.next().expect("real installed binding");
+    assert!(bindings.next().is_none());
+    drop(bindings);
+    assert!(matches!(e.claim_http(NOW, permit), Ok(Claim::Released(_))));
+    assert!(e.drain_actions().next().is_none());
+    (request, preparation)
 }
 fn terminal(actions: &[Action], owner: u32) -> Vec<Result<String, VenueError>> {
     actions
@@ -172,7 +221,7 @@ fn legacy_request(actions: Vec<Action>) -> HttpRequest {
 }
 fn fixture(case: &Case) -> (TestEngine, Option<HttpRequest>) {
     let mut e = ready(case.private);
-    // Hold a real legacy read before book peers; its later 429 pauses account and depth together.
+    // Hold a real Read root/leg; its later 429 pauses account and depth together.
     let pause = case
         .paused
         .then(|| legacy_request(dispatch(&mut e, NOW, 900, Read::Leverage("BTCUSDT"))));
@@ -197,12 +246,26 @@ fn pause(e: &mut TestEngine, request: Option<HttpRequest>) {
     }
 }
 fn book(e: &mut TestEngine, owner: u32) -> Preparation {
+    peer(e, owner, false)
+}
+fn peer(e: &mut TestEngine, owner: u32, candles: bool) -> Preparation {
     e.handle(
         NOW,
-        Event::Command(Command::FetchOrderBook {
-            command: owner,
-            symbol: "BTCUSDT".into(),
-            limit: Some(1),
+        Event::Command(if candles {
+            Command::FetchCandles {
+                command: owner,
+                symbol: "BTCUSDT".into(),
+                interval: safe_cex_engine::model::Interval::M1,
+                limit: Some(1),
+                from_ms: None,
+                to_ms: None,
+            }
+        } else {
+            Command::FetchOrderBook {
+                command: owner,
+                symbol: "BTCUSDT".into(),
+                limit: Some(1),
+            }
         }),
     );
     let actions: Vec<_> = e.drain_actions().collect();
@@ -222,8 +285,10 @@ fn book(e: &mut TestEngine, owner: u32) -> Preparation {
 fn capacity_case(index: usize) {
     let case = cases().swap_remove(index);
     let (mut e, pending_pause) = fixture(&case);
-    let peers: Vec<_> = (1..=256).map(|owner| book(&mut e, owner)).collect();
+    let mut peers: Vec<_> = (1..=254).map(|owner| book(&mut e, owner)).collect();
     pause(&mut e, pending_pause);
+    // The real 429 blocks new depth reads; independent candles fill the freed credits.
+    peers.extend((255..=256).map(|owner| peer(&mut e, owner, case.paused)));
     rejected(
         &dispatch(&mut e, NOW, 600, case.read.clone()),
         600,
@@ -438,7 +503,7 @@ fn valid_native_history_and_leverage_continuations_keep_dispatch_and_results() {
         ),
     ] {
         let mut e = ready(private);
-        let request = legacy_request(dispatch(&mut e, NOW, 606, read.clone()));
+        let (request, preparation) = released_read(&mut e, 606, read.clone());
         assert_eq!(request.url, format!("https://api.mexc.com{path}"));
         if private {
             assert!(
@@ -467,7 +532,26 @@ fn valid_native_history_and_leverage_continuations_keep_dispatch_and_results() {
                 },
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let mut cancelled = 0;
+        let actions: Vec<_> = e
+            .drain_actions()
+            .filter(|action| {
+                if let Action::ManagedHttp(action) = action
+                    && let HttpAction::Cancel {
+                        preparation: actual,
+                        signing,
+                    } = action.as_ref()
+                {
+                    assert_eq!(*actual, preparation);
+                    assert!(signing.is_none());
+                    cancelled += 1;
+                    assert_eq!(cancelled, 1);
+                    return false;
+                }
+                true
+            })
+            .collect();
+        assert_eq!(cancelled, 1);
         let expected = if matches!(read, Read::Leverage(_)) {
             r#"{"buyLeverage":10.0,"sellLeverage":15.0,"marginType":"isolated","positionMode":"oneway"}"#
         } else {

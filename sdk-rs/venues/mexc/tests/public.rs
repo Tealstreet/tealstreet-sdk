@@ -74,7 +74,9 @@ fn buffers_depth_discards_old_versions_and_invalidates_gaps() {
 
 #[test]
 fn streamed_200_error_does_not_commit_markets_even_with_an_empty_array() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options::default()));
+    let mut e = support::TestEngine::from(safe_cex_engine::test_support::seeded_engine(
+        MexcFutures::new(Options::default()),
+    ));
     e.start(0.0);
     let r = public_requests(&mut e, 0.).remove(0);
     response(
@@ -199,7 +201,9 @@ fn resubscribe_ignores_an_old_subscriptions_inflight_snapshot() {
 
 #[test]
 fn startup_network_failures_retry_reads_without_committing_partial_state() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options::default()));
+    let mut e = support::TestEngine::from(safe_cex_engine::test_support::seeded_engine(
+        MexcFutures::new(Options::default()),
+    ));
     e.start(0.0);
     let first = public_requests(&mut e, 0.).remove(0);
     e.handle(
@@ -370,10 +374,12 @@ fn malformed_live_or_buffered_deltas_invalidate_before_advancing_the_anchor() {
 
 #[test]
 fn all_market_prices_and_selected_ticker_details_survive_reconnect() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }));
+    let mut e = support::TestEngine::from(safe_cex_engine::test_support::seeded_engine(
+        MexcFutures::new(Options {
+            public_data_only: true,
+            ..Default::default()
+        }),
+    ));
     e.handle(
         0.0,
         Event::Command(Command::SetTickerSymbols {

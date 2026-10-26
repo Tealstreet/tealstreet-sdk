@@ -1,4 +1,4 @@
-//! Validate the selected read key, but retain the TS primary-key fingerprint namespace.
+//! Validation uses the selected Read; persisted identity is trusted Primary metadata.
 use crate::{
     MexcFutures, Pending,
     wire::{Asset, Envelope},
@@ -12,56 +12,40 @@ struct Identity {
     #[serde(skip_serializing_if = "Option::is_none")]
     affiliate_id: Option<String>,
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, String>) {
-    let result =
-        result.and_then(|identity| serde_json::to_string(&identity).map_err(|e| e.to_string()));
-    match result {
-        Ok(data) => cx.done(command, data),
-        Err(error) => {
-            cx.command_error(command, &error);
-            cx.fail(command, error);
-        }
-    }
-}
-
-fn fingerprint(key: &str) -> String {
-    let hash = safe_cex_crypto::sha256(key.as_bytes());
-    let prefix: String = hash[..12].iter().map(|b| format!("{b:02x}")).collect();
-    format!("mexc:{prefix}")
-}
 impl MexcFutures {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read.validate()
+    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>, _command: CommandId) {
+        let error = if self.options.read_credentials_valid == Some(false) {
+            Some("Invalid MEXC read credentials")
+        } else if self.options.public_data_only
+            || self.options.identities.primary.is_none()
+            || self.read_selection(false, None).is_err()
         {
-            finish(cx, command, Err(error.into()));
-            return;
-        }
-        let primary = self.options.key.as_deref().filter(|key| !key.is_empty());
-        let signer = self
+            Some("MEXC account identity requires credentials and a primary key")
+        } else if self
             .options
-            .read_credentials
+            .identities
+            .primary
             .as_ref()
-            .map(|read| read.secret.as_str())
-            .or_else(|| {
-                self.credentials
-                    .as_ref()
-                    .map(|credentials| credentials.secret.as_str())
-            });
-        if self.options.public_data_only || primary.is_none() || signer.is_none_or(str::is_empty) {
-            finish(
-                cx,
-                command,
-                Err("MEXC account identity requires credentials and a primary key".into()),
-            );
-            return;
-        }
-        if cx.now < self.account.paused_until {
-            finish(
-                cx,
-                command,
-                Err("MEXC account reads are rate limited".into()),
-            );
+            .is_none_or(|primary| primary.require_stable_id().is_err())
+        {
+            Some("MEXC primary account identity mapping is required")
+        } else if cx.now < self.account.paused_until {
+            Some("MEXC account reads are rate limited")
+        } else {
+            None
+        };
+        if let Some(error) = error {
+            let Ok(context) = cx.admit_http_command(safe_cex_engine::request_context::Policy {
+                operation: safe_cex_engine::request_context::Operation::Read,
+                credential: None,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: safe_cex_engine::request_context::RetryPolicy::Never,
+            }) else {
+                return;
+            };
+            let _ = cx.command_error_context(&context, error);
+            let _ = cx.fail_context(&context, error);
             return;
         }
         self.signed(
@@ -70,13 +54,13 @@ impl MexcFutures {
             "/api/v1/private/account/assets",
             String::new(),
             false,
-            Pending::Identity(command),
+            Pending::Identity(_command),
         );
     }
     pub(crate) fn identity_response(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        _command: CommandId,
         response: Response<'_>,
     ) {
         let result = Envelope::checked(response.body).and_then(|envelope| {
@@ -84,23 +68,31 @@ impl MexcFutures {
                 .map_err(|_| "Invalid MEXC identity assets")?;
             let primary = self
                 .options
-                .key
-                .as_deref()
-                .filter(|key| !key.is_empty())
+                .identities
+                .primary
+                .as_ref()
                 .ok_or("MEXC primary identity key is missing")?;
-            Ok(Identity {
-                user_id: fingerprint(primary),
+            let user_id = primary
+                .require_stable_id()
+                .map_err(|_| "MEXC primary account identity mapping is required")?
+                .into();
+            serde_json::to_string(&Identity {
+                user_id,
                 affiliate_id: None,
             })
+            .map_err(|e| e.to_string())
         });
-        finish(cx, command, result);
+        match result {
+            Ok(data) => self.private_done(cx, data),
+            Err(error) => self.private_fail(cx, error, true),
+        }
     }
     pub(crate) fn identity_failed(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        _command: CommandId,
         error: &str,
     ) {
-        finish(cx, command, Err(error.into()));
+        self.private_fail(cx, error, true);
     }
 }

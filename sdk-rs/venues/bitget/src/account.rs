@@ -2816,3 +2816,29 @@ mod secondary_policy_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod key_refusal_tests {
+    use super::*;
+    use safe_cex_engine::classify::{Intent, Native, NativeCode, Verdict};
+
+    /// A write and a read refused with the same key code carry the same kind;
+    /// 40009 keeps its one re-signed resend first.
+    #[test]
+    fn write_and_read_key_refusals_agree() {
+        for code in 40000..40100 {
+            let Some(kind) = key_rejection(code as f64, "") else {
+                continue;
+            };
+            let native = Native {
+                code: NativeCode::Int(code),
+                message: "native",
+            };
+            let verdict = crate::trading::CODES.verdict(&native, Intent::Place);
+            assert!(
+                matches!(verdict, Verdict::Refused(k) | Verdict::RefusedResend(k) if k == kind),
+                "{code}: {verdict:?}"
+            );
+        }
+    }
+}
