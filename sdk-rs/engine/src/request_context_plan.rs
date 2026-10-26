@@ -321,7 +321,7 @@ pub struct SerialCall {
 #[cfg(feature = "serial-plans")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SerialPolicy {
-    pub credential: super::Credential,
+    pub credential: Option<super::Credential>,
     pub pacing: Option<super::Pacing>,
     /// Definitive refusals permit `done_plan` (native `done []`); never an
     /// override of `fail_plan`.
