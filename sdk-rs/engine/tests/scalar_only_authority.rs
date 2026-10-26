@@ -33,7 +33,7 @@ enum Mode {
 struct Probe {
     mode: Mode,
     empty_credential_admitted: Option<bool>,
-    session_call_admitted: Option<bool>,
+    session_call: Option<Result<(), safe_cex_engine::request_context::Error>>,
 }
 impl Venue for Probe {
     type Pending = Context;
@@ -100,7 +100,7 @@ impl Venue for Probe {
             },
         );
         if self.mode == Mode::SessionCall {
-            self.session_call_admitted = Some(admitted.is_ok());
+            self.session_call = Some(admitted.map(drop));
             return;
         }
         let (plan, slot) = admitted.unwrap();
@@ -237,7 +237,7 @@ fn started(mode: Mode, identities: Identities) -> Engine<Probe> {
     let mut e = safe_cex_engine::test_support::seeded_engine(Probe {
         mode,
         empty_credential_admitted: None,
-        session_call_admitted: None,
+        session_call: None,
     });
     e.set_identities(identities).unwrap();
     e.set_address_setup_host_support(SetupHostSupport::OwnedPublicAddress1)
@@ -399,7 +399,11 @@ fn the_signing_only_ref_is_never_presented_or_interpolated_on_any_path() {
 #[test]
 fn the_signing_only_authority_never_borrows_a_session_root() {
     let e = started(Mode::SessionCall, absent_identities());
-    assert_eq!(e.venue().session_call_admitted, Some(false));
+    // The same call under CallAuth::Preflight is admitted (the genuine flow).
+    assert_eq!(
+        e.venue().session_call,
+        Some(Err(safe_cex_engine::request_context::Error::Invalid))
+    );
 }
 
 #[test]
