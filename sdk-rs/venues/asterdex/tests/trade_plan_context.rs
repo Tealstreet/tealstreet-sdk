@@ -601,3 +601,47 @@ fn a_fresh_order_read_with_a_rejected_row_keeps_the_fence() {
     let error = terminal(&retry).expect("one terminal").unwrap_err();
     assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
 }
+
+/// Cancel-all keeps the engine's default fence: refused NotSent while a
+/// placement is Unknown, because it could miss the uncertain order. Cancel by
+/// ID stays admitted; the fresh read releases cancel-all too.
+#[test]
+fn an_unknown_placement_fences_cancel_all_but_not_cancel_by_id() {
+    let mut e = engine();
+    let sent = command(&mut e, place());
+    let lost = write(&sent, Method::Post, "/order").clone();
+    let failed = answer(&mut e, &lost, 503, "upstream timeout");
+    let fresh = failed
+        .requests
+        .iter()
+        .find(|r| r.url.contains("/openOrders"))
+        .expect("the reconcile read starts at once")
+        .clone();
+    let cancel_all = || Command::CancelSymbolOrders {
+        command: COMMAND,
+        symbol: "BTCUSDT".into(),
+    };
+    let refused = command(&mut e, cancel_all());
+    assert!(
+        refused.requests.iter().all(|r| r.method != Method::Delete),
+        "no cancel-all while the placement is Unknown"
+    );
+    let error = terminal(&refused).expect("one terminal").unwrap_err();
+    assert_eq!(
+        error.legacy_text(),
+        "Placement outcome is uncertain; reconcile before cancel-all"
+    );
+    // Cancel by ID cannot place, so it is admitted.
+    let by_id = command(&mut e, cancel());
+    let delete = write(&by_id, Method::Delete, "/order").clone();
+    // The fresh read releases the fence; the cancel's reply then settles it.
+    answer(&mut e, &fresh, 200, "[]");
+    answer(&mut e, &delete, 200, r#"{"status":"CANCELED"}"#);
+    // Admitted now; the fresh read showed no open orders, so there is nothing to cancel.
+    let admitted = command(&mut e, cancel_all());
+    assert!(
+        terminal(&admitted).expect("one terminal").is_ok(),
+        "cancel-all is admitted after the fresh read: {:?}",
+        terminal(&admitted)
+    );
+}
