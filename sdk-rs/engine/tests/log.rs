@@ -442,17 +442,21 @@ fn discovery_row_events_count_even_when_their_warning_is_filtered() {
     engine.set_log_level(Level::Error);
     assert!(send(&mut engine, "skipped:row").is_empty());
     assert_eq!(engine.health().rows_skipped, 1);
+    // A skipped row is Debug, as TS: hidden at Warn, still counted.
     engine.set_log_level(Level::Warn);
+    assert!(send(&mut engine, "skipped:row").is_empty());
+    assert_eq!(engine.health().rows_skipped, 2);
+    engine.set_log_level(Level::Debug);
     let notices = send(&mut engine, "skipped:row");
     assert!(matches!(
         notices.as_slice(),
         [Notice::Event(LogEvent {
             code: code::ROW_SKIPPED,
-            level: Level::Warn,
+            level: Level::Debug,
             ..
         })]
     ));
-    assert_eq!(engine.health().rows_skipped, 2);
+    assert_eq!(engine.health().rows_skipped, 3);
 }
 
 #[test]
