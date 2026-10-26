@@ -1173,7 +1173,7 @@ impl PhemexPerpetuals {
                     &preflight,
                     serial_call(),
                     SerialPolicy {
-                        credential: credential.unwrap(),
+                        credential: Some(credential.unwrap()),
                         pacing: None,
                         refusals_complete: false,
                     },

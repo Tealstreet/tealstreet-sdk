@@ -388,7 +388,7 @@ mod repair {
                             attempts: 1,
                         },
                         crate::request_context::plan::SerialPolicy {
-                            credential: primary(),
+                            credential: Some(primary()),
                             pacing: None,
                             refusals_complete: true,
                         },
