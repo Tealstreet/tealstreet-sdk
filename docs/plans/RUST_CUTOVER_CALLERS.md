@@ -9983,6 +9983,21 @@ The CI verifier declares only exact recorded bootstrap paths with TS zero and
 finite Rust values. Later checkpoints and other fields remain strict; existing
 private fill/order baseline declarations remain separate and unchanged.
 
+### Restored candle-cache crates for the monorepo candle-server
+
+`sdk-rs/safe-cex-candle-cache`, `safe-cex-num` and `safe-cex-types` are restored
+verbatim from master (overseer ruling), because the monorepo
+`Dockerfile.candle-server` builds `-p safe-cex-candle-cache --bin
+candle-cache-owner` from this workspace. They keep master's serde_json features
+(`arbitrary_precision`, `preserve_order`). Every `--workspace` CI command
+excludes them so those features never unify into the port. The native
+`candle-cache` check builds, lints and tests them alone, and
+`scripts/check-serde-json-features.py` fails if any port package resolves those
+features. Not run: master's TypeScript-oracle tests (they need an isolated TS
+install), the candle-cache `fix_audit` and `monthly_behavior` targets and two
+lib tests, which load the TypeScript compiler over TS venue sources, and one `safe-cex-types` audit of a crate the port deleted. No port
+crate may depend on these three.
+
 ### Lighter: an Unknown placement fences its symbol
 
 Lighter opts into `guard_pending_placements` and `fence_uncertain_placements`.
