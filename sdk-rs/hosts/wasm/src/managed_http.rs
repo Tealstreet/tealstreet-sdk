@@ -143,6 +143,17 @@ impl WasmEngine {
         Ok(self.inner.signing_pending(RequestId(attempt)))
     }
 
+    /// Read-only metadata of the current managed signing task, as JSON, or
+    /// `undefined` (v1 only). Descriptive; it grants nothing.
+    #[cfg(feature = "sign-meta")]
+    #[wasm_bindgen(js_name = signMeta)]
+    pub fn sign_meta(&self, attempt: f64) -> Result<Option<String>, js_sys::Error> {
+        let attempt = host_resource_id(attempt)?;
+        Ok(self.inner.sign_meta(RequestId(attempt)).map(|meta| {
+            serde_json::to_string(&sign_meta::Out::from(meta)).expect("scalars serialize")
+        }))
+    }
+
     #[wasm_bindgen(js_name = httpPreparationPending)]
     pub fn http_preparation_pending(&self, preparation: &str) -> bool {
         Preparation::from_wire(preparation)
@@ -324,5 +335,88 @@ mod tests {
         assert_eq!(rows[1]["packet"]["request"].as_u64(), Some(id));
         assert_eq!(rows[1]["preparation"], text);
         assert_eq!(rows[2]["signing"].as_u64(), Some(id));
+    }
+}
+
+#[cfg(feature = "sign-meta")]
+mod sign_meta {
+    use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
+    use safe_cex_engine::sign_meta::{SignMeta, SignOwner};
+    use safe_cex_engine::{AccountReadScope, CredentialSlot};
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(super) struct Out {
+        task: u64,
+        owner: Owner,
+        deadline_ms: f64,
+        slot: &'static str,
+        role: Role,
+    }
+    #[derive(Serialize)]
+    #[serde(tag = "kind", rename_all = "camelCase")]
+    enum Owner {
+        Managed { request: u64, generation: u64 },
+        Session { generation: u64 },
+    }
+    #[derive(Serialize)]
+    #[serde(tag = "kind", rename_all = "camelCase")]
+    enum Role {
+        Read {
+            scope: Option<&'static str>,
+        },
+        PrimaryRead {
+            reason: &'static str,
+            scope: Option<&'static str>,
+        },
+        Mutation,
+        SessionAuth,
+    }
+    fn scope(scope: Option<AccountReadScope>) -> Option<&'static str> {
+        scope.map(|scope| match scope {
+            AccountReadScope::Account => "account",
+            AccountReadScope::Balance => "balance",
+            AccountReadScope::Orders => "orders",
+            AccountReadScope::Positions => "positions",
+            AccountReadScope::Settings => "settings",
+        })
+    }
+    impl From<SignMeta> for Out {
+        fn from(meta: SignMeta) -> Self {
+            Self {
+                task: meta.task.0,
+                owner: match meta.owner {
+                    SignOwner::Managed {
+                        request,
+                        generation,
+                    } => Owner::Managed {
+                        request: request.0,
+                        generation,
+                    },
+                    SignOwner::Session { generation } => Owner::Session { generation },
+                },
+                deadline_ms: meta.deadline_ms,
+                slot: match meta.slot {
+                    CredentialSlot::Primary => "primary",
+                    CredentialSlot::Secondary => "secondary",
+                },
+                role: match meta.role {
+                    CredentialRole::Read { scope: s } => Role::Read { scope: scope(s) },
+                    CredentialRole::PrimaryRead { reason, scope: s } => Role::PrimaryRead {
+                        reason: match reason {
+                            PrimaryReason::ClientOrderLookup => "clientOrderLookup",
+                            PrimaryReason::PostUnknownOrderRead => "postUnknownOrderRead",
+                            PrimaryReason::DegradedRead => "degradedRead",
+                            PrimaryReason::Catalog => "catalog",
+                            PrimaryReason::History => "history",
+                        },
+                        scope: scope(s),
+                    },
+                    CredentialRole::Mutation => Role::Mutation,
+                    CredentialRole::SessionAuth => Role::SessionAuth,
+                },
+            }
+        }
     }
 }
