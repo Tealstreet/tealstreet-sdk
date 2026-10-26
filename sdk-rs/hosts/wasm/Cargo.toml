@@ -9,6 +9,8 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 http-mutation-barriers = ["safe-cex-engine/http-mutation-barriers"]
+# Read-only signing-task metadata for hosted signing (Kraken and Paradex).
+sign-meta = ["safe-cex-engine/sign-meta"]
 # Additive provider bootstrap; at least one venue feature is still required.
 dispatch-signing = ["safe-cex-venues/dispatch-signing"]
 bitunix = ["safe-cex-venues/bitunix", "text-ingress"]
@@ -20,10 +22,10 @@ coinbase = ["safe-cex-venues/coinbase", "text-ingress"]
 # Polling-only builds isolate the startup subscription decoder.
 cold-subscriptions = []
 breakoutprop = ["safe-cex-venues/breakoutprop", "text-ingress", "cold-subscriptions"]
-paradex = ["safe-cex-venues/paradex"]
+paradex = ["safe-cex-venues/paradex", "sign-meta"]
 apexomni = ["safe-cex-venues/apexomni", "text-ingress", "safe-cex-engine/command-apexomni"]
 txflow = ["safe-cex-venues/txflow", "text-ingress"]
-kraken = ["safe-cex-venues/kraken", "text-ingress"]
+kraken = ["safe-cex-venues/kraken", "text-ingress", "sign-meta"]
 asterdex = ["safe-cex-venues/asterdex", "text-ingress", "safe-cex-engine/command-asterdex", "dispatch-signing"]
 lighter = ["safe-cex-venues/lighter", "text-ingress"]
 woo = ["safe-cex-venues/woo", "text-ingress"]
