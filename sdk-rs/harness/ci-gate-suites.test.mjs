@@ -97,15 +97,28 @@ test('unknown suites, unexpected cases and malformed or absent paths fail closed
 // Read the actual CI matrix/run blocks and expand their shell loops with a
 // mocked yarn function. No generator, build, network request or gate executes.
 // This checks the registry against all CLI identities, not only family counts.
-const workflowCases = (source) => {
-  const start = source.indexOf('\n  gate:\n');
-  assert(start >= 0, 'replay gate job exists');
-  const job = source.slice(start);
+const workflowCases = (source, name) => {
+  const match = new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [a-z][a-z-]*:\\n|$(?![\\s\\S]))`, 'm').exec(source);
+  assert(match, `${name} job exists`);
+  const job = match[1];
   const matrixStart = job.indexOf('      matrix:\n');
   const matrixEnd = job.indexOf('\n    env:', matrixStart);
   assert(matrixStart >= 0 && matrixEnd > matrixStart, 'matrix include table exists');
-  assert.match(job.slice(matrixStart, matrixEnd), /include: \$\{\{ fromJSON\(needs\.selection\.outputs\.replay\) \}\}/);
-  const rows = replayMatrix(GATE_SUITES, venueFamily);
+  let rows;
+  if (name === 'replay') {
+    assert.match(job.slice(matrixStart, matrixEnd), /include: \$\{\{ fromJSON\(needs\.selection\.outputs\.replay\) \}\}/);
+    rows = replayMatrix(GATE_SUITES, venueFamily);
+  } else {
+    rows = job.slice(matrixStart, matrixEnd).split(/^          - venue: /m).slice(1).map((block) => {
+    const [venue, ...lines] = block.split('\n');
+    const fields = { venue: venue.trim() };
+    for (const line of lines) {
+      const match = /^            ([a-z_]+): (.*)$/.exec(line);
+      if (match) fields[match[1]] = match[2].trim().replace(/^(['"])(.*)\1$/, '$2');
+    }
+    return fields;
+  });
+  }
   const steps = job.split(/^      - /m).slice(1);
   const selected = (condition, suite) => !condition || condition.split(/\s*\|\|\s*/).some((part) =>
     part.split(/\s*&&\s*/).every((clause) => {
@@ -155,9 +168,11 @@ const workflowCases = (source) => {
 
 test('CI matrix and every expanded CLI case exactly match declared suite coverage', () => {
   const source = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  const actual = workflowCases(source);
-  assert.deepEqual(Object.keys(actual).sort(), [...GATE_SUITES].sort());
-  for (const suite of GATE_SUITES) assert.deepEqual(validateGateCoverage(suite, actual[suite]), [], suite);
+  for (const name of ['replay', 'gate']) {
+    const actual = workflowCases(source, name);
+    assert.deepEqual(Object.keys(actual).sort(), [...GATE_SUITES].sort());
+    for (const suite of GATE_SUITES) assert.deepEqual(validateGateCoverage(suite, actual[suite]), [], `${name}: ${suite}`);
+  }
 });
 
 test('deferred strict results require mandatory final certification even after failures', () => {
