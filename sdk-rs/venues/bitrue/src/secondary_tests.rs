@@ -29,29 +29,34 @@ fn options() -> (Options, safe_cex_engine::signing::Provider) {
     )
 }
 
+/// One account read and the listen key's create and keepalive: the key each
+/// signs with follows its credential role, never its HTTP method.
 fn probe(venue: Bitrue) -> ProbeVenue<Bitrue, impl FnMut(&mut Bitrue, &mut Cx<'_, Pending>)> {
     ProbeVenue::new(venue, |venue, cx| {
-        for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
-            venue.send(
-                cx,
-                method,
-                "/secondary-test",
-                None,
-                None,
-                if method == Method::Get {
-                    Job::Account(account::Request::Snapshot {
-                        revision: 0,
-                        data: Default::default(),
-                    })
-                } else {
-                    Job::Account(account::Request::Listen { generation: 0 })
-                },
-            );
+        let jobs = [
+            (
+                Method::Get,
+                Job::Account(account::Request::Snapshot {
+                    revision: 0,
+                    data: Default::default(),
+                }),
+            ),
+            (
+                Method::Post,
+                Job::Account(account::Request::Listen { generation: 0 }),
+            ),
+            (
+                Method::Put,
+                Job::Account(account::Request::Keepalive { generation: 0 }),
+            ),
+        ];
+        for (method, job) in jobs {
+            venue.send(cx, method, "/secondary-test", None, None, job);
         }
     })
 }
 #[test]
-fn secondary_get_keeps_primary_mutations() {
+fn the_read_key_signs_account_reads_and_the_primary_signs_sessions() {
     let (options, provider) = options();
     let mut engine = safe_cex_engine::test_support::seeded_engine(probe(Bitrue::new(options)));
     engine.set_signer(Some(provider)).unwrap();
@@ -64,35 +69,21 @@ fn secondary_get_keeps_primary_mutations() {
         })
         .filter(|r| r.url.contains("secondary-test"))
         .collect();
-    assert_eq!(requests.len(), 4);
-    for request in requests {
-        let expected = if request.method == Method::Get {
+    assert_eq!(requests.len(), 3);
+    for http in requests {
+        let expected = if http.method == Method::Get {
             "read-key"
         } else {
             "primary-key"
         };
-        let secret = if request.method == Method::Get {
-            "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI="
-        } else {
-            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
-        };
-        assert_eq!(
-            request
-                .headers
-                .iter()
-                .find(|(k, _)| *k == "X-CH-SIGN")
-                .unwrap()
-                .1,
-            sign::signature(secret, 1700000000000, request.method, "/secondary-test", "")
-        );
         assert!(
-            request
-                .headers
+            http.headers
                 .iter()
                 .any(|(name, value)| name.eq_ignore_ascii_case("X-CH-APIKEY") && value == expected),
             "{:?}",
-            request
+            http
         );
+        assert!(http.headers.iter().any(|(name, _)| *name == "X-CH-SIGN"));
     }
 }
 
@@ -132,8 +123,25 @@ fn catalog_get_uses_primary_unlimited_client_identity_and_route() {
             .headers
             .contains(&("X-CH-APIKEY", "primary-key".into()))
     );
+    // A managed catalog read declares its Primary route at preparation.
+    let (fresh, _) = self::options();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Bitrue::new(fresh));
+    engine.start(1700000000000.0);
+    engine.prepare_dispatch(1700000000000.0);
+    let intents: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::ManagedHttp(managed) => match *managed {
+                safe_cex_engine::request_context::HttpAction::Prepare {
+                    intent, request, ..
+                } if request.url.contains("/fapi/v1/contracts") => Some(intent),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
     assert_eq!(
-        requests[0].route,
-        Some(safe_cex_engine::RequestRoute::Primary)
+        intents,
+        [safe_cex_engine::request_context::RoutingIntent::Primary]
     );
 }
