@@ -9317,3 +9317,15 @@ Covered reconciliation reads publish one merged Orders snapshot before retiring 
 The separately owned core CancelOnly overlap rule landed in #2181. Per the overseer's #2181 ruling, repair cancel and foreground cancel-all may coexist on the same symbol without capturing the cancel-all's IDs. Explicit-ID CancelOrders still conflicts on the same ID, and repair/Place-or-Amend conflicts stay fenced. A newer cancel-all racing the repair retains native refusal -> Rejected -> one manual-cancel error; no gone/Satisfied mapping is added. Existing trading.rs native controls and the frozen 19 repair originals are retained verbatim. No consumer deferral, re-queue, numeric completion or raw HTTP fallback is introduced.
 
 Phemex late-repair source corrections retain native envelope/row refusal codes and typed classification. A refused repair admission refreshes the account; non-capacity mint refusals give an explicit manual-cancel diagnostic. Retry reads can temporarily overlap the retiring Read by one Context to retain snapshot DATA custody. Phemex does not advance the selective snapshot fence; retirement relies on the receipt's begin-after-mint check and actual absence. The dispatch-signing fixture's Pending variant matcher changes; signing vectors do not.
+### WEEX remaining inventory and identity custody
+
+WEEX keeps one immutable `Slots<Identity>` owner for selected reads, required
+Primary history, Mutation signing and private SessionAuth. The redundant venue
+identity container and per-history slot reconstruction are removed. Existing
+completeness filters, public-only suppression, primary-private eligibility,
+secondary read preference, wire bytes and all failure/outcome policy are retained.
+
+The remaining conservative request/signing/credential inventory describes managed
+failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
+identity options. This slice retains those rows and all checker rules; completion
+of the custody audit does not claim inventory zero or a new endpoint migration.
