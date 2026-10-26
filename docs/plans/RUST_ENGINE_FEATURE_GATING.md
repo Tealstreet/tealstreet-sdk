@@ -86,12 +86,38 @@ pinned dyn compatibility of `Venue` (E0038).
 - `managed_sockets()` and #2161's `socket_capabilities()` compose: capabilities
   narrow inside an adopter, and `managed_sockets()` decides whether the venue
   adopts at all.
+- **Sites that cannot fold on `V`** (dazzy3 review). Code inside
+  `impl<P> Cx<'_, P>` cannot see `V`, so its checks stay runtime. Inventory and
+  measure each one:
+  - `managed_send_allowed`, reached from `Cx::send`, `send_signed` and possibly
+    `close`. It reads `io.core.managed_sockets`, then the Lifecycle epoch query,
+    which keeps some Lifecycle state-query code linked for legacy venues.
+  - `Cx` socket helpers reached from engine internals rather than the venue
+    (for example `socket_effects`). Fold them at their `Engine<V>` caller.
+  - `Engine::sign_failed`'s WsSend/WsConnect arm (`managed_socket_active`,
+    `socket_epoch`, `stop_socket_feed`). This one is `Engine<V>` and folds;
+    list it with the gated sites.
+  - The construction and drop glue of `IoCore`'s `socket_driver`,
+    `socket_effects` and `socket_after`: the expected residual.
+
+  Rule: copy the declaration into an `IoCore` bool at `Engine::new` (as
+  `nonce_enabled`) only for the registration refusal and true leaf checks. Move
+  every dispatch decision to an `Engine<V>` caller wherever one exists. The
+  prototype pair measures what is left.
 
 **Phase 2, http-mutation-barriers**, then any later per-venue feature: the same
 shape, `fn http_mutation_barriers() -> bool`. It comes after a measured
 attribution of the +395K and an inventory of barrier entry points (group release,
 `prepare_group_http_release`, the planned-mutation paths in `http_lifecycle` and
 `request_context_planned`).
+
+**Why gating beats erasure for barriers** (dazzy3 review): erasure keeps one
+shared copy plus a generic shell per adopter, and S1 showed it saves combined
+duplication but nothing per family. With a single barrier adopter, gating
+removes nearly all of it from the other `Engine<V>`. Erasure is worth a look
+only later, when several adopters make the shared copy dominant. Other engine
+features (dazzy3's write-preflight-wait and release-domains) can take the same
+declaration shape.
 
 **Alternatives considered:**
 
