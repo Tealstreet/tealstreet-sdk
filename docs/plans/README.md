@@ -461,7 +461,9 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Phemex remaining request funnel | [RUST_PHEMEX_REMAINING_FUNNEL.md](RUST_PHEMEX_REMAINING_FUNNEL.md) | codex-ih35js | Source correction: native gate precedence and income prefix recovery; source review/CI and composed landing size gates pending; four named repair holdouts. |
 
-| Shared hosted-signing envelope | Docs-only companion; required m26ps4 review | Before shared Kraken HMAC or Paradex Stark structured-preimage transport, provider/capture or capability changes. | [RUST_HOSTED_SIGNING_ENVELOPE.md](RUST_HOSTED_SIGNING_ENVELOPE.md) |
+| Shared hosted-signing envelope | Docs-only companion; required m26ps4 review; Paradex batch row amended by the overseer's ruling | Before shared Kraken HMAC or Paradex Stark structured-preimage transport, provider/capture or capability changes. | [RUST_HOSTED_SIGNING_ENVELOPE.md](RUST_HOSTED_SIGNING_ENVELOPE.md) |
+
+| Paradex hosted Stark consumer (mode 2) | Plan in review (codex-9czdjh, claude-kuhwxi); #2126 HELD | Before the Paradex descriptor, digest export, delegated-path cutover or device consumer. | [RUST_PARADEX_HOSTED_STARK_CONSUMER.md](RUST_PARADEX_HOSTED_STARK_CONSUMER.md) |
 
 | OKX ordered write ownership | Source GO (dazzy3); exact-head CI green | Before retiring the final ten OKX request/completion sites. | [RUST_OKX_ORDERED_WRITE_CONTEXT.md](RUST_OKX_ORDERED_WRITE_CONTEXT.md) |
 
