@@ -2,15 +2,16 @@
 mod support;
 use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{Action, Command, Engine, Event};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use support::{META, NOW, reply_at};
 
 #[test]
 fn stale_fallback_candle_cannot_overwrite_same_bar_from_recovered_stream() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(NOW);
     let markets = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
         .into_iter()
@@ -96,10 +97,10 @@ fn stale_fallback_candle_cannot_overwrite_same_bar_from_recovered_stream() {
 #[test]
 fn prior_subscription_candle_response_or_failure_cannot_touch_new_fallback() {
     for failed in [false, true] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+        let mut e = support::engine(Options {
             public_data_only: true,
             ..Options::default()
-        }));
+        });
         e.start(NOW);
         let markets = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
             .into_iter()

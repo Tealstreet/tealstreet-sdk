@@ -37,8 +37,8 @@ pub struct Options {
     pub testnet: bool,
     pub robinhood: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
+    pub identity: Option<safe_cex_engine::signing::Identity>,
+    pub l1_address: Option<String>,
     pub remote_signer: bool,
     pub signer_provider: Option<String>,
     pub application_id: Option<String>,
@@ -47,13 +47,6 @@ pub struct Options {
     pub stop_slippage_pct: f64,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        safe_cex_crypto::secrets::erase(&mut self.api_key_index);
-    }
-}
 
 impl Default for Options {
     fn default() -> Self {
@@ -61,8 +54,8 @@ impl Default for Options {
             testnet: false,
             robinhood: false,
             public_data_only: false,
-            key: None,
-            secret: None,
+            identity: None,
+            l1_address: None,
             remote_signer: false,
             signer_provider: None,
             application_id: None,
@@ -73,10 +66,18 @@ impl Default for Options {
     }
 }
 pub enum Pending {
-    Account(account::Request),
+    Account {
+        context: Context,
+        request: account::Request,
+    },
     History(history::Request),
     Identity(identity::Request),
     Trade(trading::Request),
+    Tier {
+        plan: safe_cex_engine::request_context::Plan,
+        slot: safe_cex_engine::request_context::plan::Slot,
+        context: Context,
+    },
     Markets {
         context: Context,
         fallback: bool,
@@ -159,7 +160,7 @@ struct CandleState {
     in_flight: bool,
 }
 pub struct Lighter {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     account: account::Account,
     trading: trading::Trading,
     limits: limits::Limits,
@@ -185,7 +186,6 @@ fn supported(interval: Interval) -> bool {
 }
 impl Lighter {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
             account: account::Account::default(),
@@ -707,7 +707,15 @@ impl Lighter {
     fn public_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Identity(request) => self.identity_failed(cx, request, error),
-            Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Account { context, request } => {
+                if cx.validate_http_context(&context).is_ok() {
+                    let _ = cx.finish_http_context(&context);
+                    self.account_failed(cx, request, error);
+                }
+            }
+            Pending::Tier { plan, .. } => {
+                let _ = cx.fail_plan(&plan, error);
+            }
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets {
@@ -746,6 +754,40 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.trade_retired(owner)
+    }
+    fn on_condition_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::ConditionOwner,
+        error: VenueError,
+    ) {
+        self.trade_condition_expired(cx, owner, error);
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
+        self.settle_retired_trades(cx);
+        self.refresh_account(cx);
+        self.refresh_orders(cx);
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        if !matches!(
+            pending,
+            Pending::Trade(trading::Request::Submit(_)) | Pending::Tier { .. }
+        ) {
+            return Err(safe_cex_engine::request_context::Error::Invalid);
+        }
+        safe_cex_engine::request_context::ReconciliationData::new(String::new())
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -763,6 +805,20 @@ impl Venue for Lighter {
     }
 
     type Pending = Pending;
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.trade_preflight_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trade_plan_ready(cx, plan);
+    }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         if !cx.store.loaded().positions {
             return;
@@ -966,7 +1022,12 @@ impl Venue for Lighter {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Account(request) => self.account_item(cx, request, item),
+            Pending::Tier { .. } => {}
+            Pending::Account { context, request } => {
+                if cx.validate_background_read_http_delivery(context).is_ok() {
+                    self.account_item(cx, request, item);
+                }
+            }
             Pending::Trade(_) | Pending::Identity(_) => {}
             Pending::History(request) => self.history_item(cx, request, item),
             Pending::Markets {
@@ -1171,8 +1232,19 @@ impl Venue for Lighter {
                 self.identity_response(cx, request, response);
                 return;
             }
-            Pending::Account(request) => {
-                self.account_response(cx, request, response);
+            Pending::Account { context, request } => {
+                if cx.validate_background_read_http_delivery(&context).is_ok() {
+                    self.account_response(cx, request, response);
+                }
+                let _ = cx.finish_http_context(&context);
+                return;
+            }
+            Pending::Tier {
+                plan,
+                slot,
+                context,
+            } => {
+                self.tier_changed(cx, plan, slot, context, response);
                 return;
             }
             Pending::Trade(request) => {
@@ -1195,7 +1267,8 @@ impl Venue for Lighter {
             return;
         }
         match pending {
-            Pending::Account(_)
+            Pending::Account { .. }
+            | Pending::Tier { .. }
             | Pending::Trade(_)
             | Pending::History(_)
             | Pending::Identity(_) => unreachable!(),
@@ -1386,8 +1459,11 @@ impl Venue for Lighter {
         {
             return;
         }
-        if let Pending::Account(request) = pending {
-            self.account_stream_error(cx, request, response);
+        if let Pending::Account { context, request } = pending {
+            if cx.validate_background_read_http_delivery(&context).is_ok() {
+                self.account_stream_error(cx, request, response);
+            }
+            let _ = cx.finish_http_context(&context);
             return;
         }
         self.public_failed(
@@ -1402,6 +1478,15 @@ impl Venue for Lighter {
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::Identity(request) => self.identity_failed(cx, request, error),
+            Pending::Trade(request) => self.trade_error(cx, request, error),
+            Pending::Account { context, request } => {
+                let _ = cx.finish_http_context(&context);
+                self.account_failed(cx, request, &error.message);
+            }
+            Pending::History(request) => self.history_transport_failed(cx, request, error),
+            Pending::Tier { plan, .. } => {
+                let _ = cx.fail_plan(&plan, error);
+            }
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
@@ -1420,6 +1505,15 @@ impl Venue for Lighter {
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::Identity(request) => self.identity_rejected(cx, request, error),
+            Pending::Trade(request) => self.trade_error(cx, request, error),
+            Pending::Account { context, request } => {
+                let _ = cx.finish_http_context(&context);
+                self.account_failed(cx, request, &error.message);
+            }
+            Pending::History(request) => self.history_rejected(cx, request, error),
+            Pending::Tier { plan, .. } => {
+                let _ = cx.fail_plan(&plan, error);
+            }
             Pending::Candles {
                 context,
                 command,
@@ -1445,6 +1539,7 @@ impl Venue for Lighter {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.settle_retired_trades(cx);
         if let Some(markets) = self.startup.on_timer(timer) {
             if markets {
                 self.markets(cx, false);
@@ -1540,6 +1635,22 @@ impl Venue for Lighter {
         self.tier_action(cx, command, action);
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let refresh = self.restore_retired_trades();
+        self.command(cx, command);
+        if refresh {
+            self.refresh_account(cx);
+            self.refresh_orders(cx);
+        }
+    }
+    fn book(&self, symbol: &str) -> Option<&Book> {
+        self.books.get(symbol).map(|s| &s.book)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(self.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
+    }
+}
+impl Lighter {
+    fn command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
             Command::FetchAccount { .. } => self.fetch_identity(cx),
             Command::SetTickerSymbols { .. } => {}
@@ -1662,23 +1773,13 @@ impl Venue for Lighter {
             other => self.trade_command(cx, other),
         }
     }
-    fn book(&self, symbol: &str) -> Option<&Book> {
-        self.books.get(symbol).map(|s| &s.book)
-    }
-    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(
-            self.books
-                .iter()
-                .filter(|(_, s)| s.subscribers > 0)
-                .map(|(s, state)| (s.as_str(), &state.book)),
-        )
-    }
 }
 
 #[cfg(test)]
 mod deployment_tests {
     use super::{Lighter, Options};
-    use crate::sign::{Signer, Transaction};
+    use crate::reference_signer::Signer;
+    use crate::sign::Transaction;
     use safe_cex_crypto::lighter::{SchnorrNonce, public_key, schnorr_verify};
 
     #[test]
@@ -1744,3 +1845,18 @@ mod deployment_tests {
         assert!(tokens.windows(2).all(|pair| pair[0] == pair[1]));
     }
 }
+
+fn primary_credential(
+    identity: &safe_cex_engine::signing::Identity,
+) -> safe_cex_engine::request_context::Credential {
+    safe_cex_engine::request_context::Credential {
+        slot: safe_cex_engine::CredentialSlot::Primary,
+        reference: identity.credential.clone(),
+    }
+}
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_lighter;
+#[cfg(test)]
+#[path = "../tests/support/reference_signer.rs"]
+mod reference_signer;

@@ -614,6 +614,8 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
+    const lighterL1Address = deriveSignerSetupMapping(exchangeName) === 'lighter'
+      && typeof options.key === 'string' ? options.key.match(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/)?.[0] : undefined;
     if (options.localSigner !== undefined && !bridgeConstruction.dispatchSigning) {
       const message = 'Local signer setup is not supported for this Rust venue yet';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
@@ -672,6 +674,7 @@ export class RustEngineExchange extends BaseExchange {
     this.bridgeConstruction = bridgeConstruction;
     this.signerSetup=signerSetup;
     this.asterPublicSetup = aster?.publicSetup;
+    this.lighterL1Address = lighterL1Address;
     this.setupError = setupError;
     if (signerSetup instanceof DelegatedSignerSetup) {
       this.delegatedIntent = signerSetup.intent;
@@ -732,6 +735,7 @@ export class RustEngineExchange extends BaseExchange {
   private delegatedUsesPayloadSigner?: boolean;
   /** Resolved by trusted setup before credentials were stripped. */
   private asterPublicSetup?: AsterDEXPublicSetup;
+  private lighterL1Address?: string;
   private setupError?: ExchangeError;
 
   private get asterApiVersion() {
@@ -941,6 +945,7 @@ export class RustEngineExchange extends BaseExchange {
         applicationId,
         subaccount: this.options.subaccount,
         apiKeyIndex: parseLighterApiKeyIndex(this.options.apiKeyIndex)?.toString() ?? this.options.apiKeyIndex,
+        lighterL1Address: this.lighterL1Address,
         lighterRemoteSigner: Boolean(this.options.remoteSigner),
         lighterSignerProvider: (this.options.extra as { lighterSignerProvider?: string } | undefined)
           ?.lighterSignerProvider,
