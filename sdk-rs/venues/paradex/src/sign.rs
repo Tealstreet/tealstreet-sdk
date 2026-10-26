@@ -75,7 +75,7 @@ fn unsigned(input: &str) -> Result<U256, String> {
     U256::from_str_radix(digits, radix).map_err(|_| "Invalid Paradex field value".into())
 }
 
-fn felt(input: &str) -> Result<Felt, String> {
+pub(crate) fn felt(input: &str) -> Result<Felt, String> {
     let number = unsigned(input)?;
     if number >= U256::from_str_radix(FIELD_PRIME, 16).expect("field prime") {
         return Err("Paradex field value is out of range".into());
@@ -92,7 +92,7 @@ fn secret(input: &str) -> Result<Felt, String> {
     Ok(Felt::from_bytes_be(&value.to_be_bytes()))
 }
 
-fn chain_id(input: &str) -> Result<Felt, String> {
+pub(crate) fn chain_id(input: &str) -> Result<Felt, String> {
     let value = if input.starts_with("0x")
         || input.starts_with("0X")
         || input.bytes().all(|b| b.is_ascii_digit())
@@ -313,7 +313,7 @@ impl Credentials {
     }
 }
 
-fn word(input: &str) -> Result<Felt, String> {
+pub(crate) fn word(input: &str) -> Result<Felt, String> {
     if input.is_empty() {
         return Ok(Felt::ZERO);
     }
