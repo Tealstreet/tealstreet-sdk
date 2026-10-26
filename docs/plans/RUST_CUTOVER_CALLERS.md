@@ -9472,3 +9472,12 @@ The remaining conservative request/signing/credential inventory describes manage
 failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
 identity options. This slice retains those rows and all checker rules; completion
 of the custody audit does not claim inventory zero or a new endpoint migration.
+
+### Per-call pacing on serial Plans
+
+`SerialCall.pacing` names the pacing a call's legs carry; `None` inherits the
+root. A release-domain member resolves through `domain_pacing` at admission and
+every continuation, so it names only what the domain admits; any other call,
+including a Read in a `Mutations` domain, stays unpaced and names only a
+zero-gap group. Legs are stamped from the call, not the root. Existing adopters
+pass `None` and are unchanged.
