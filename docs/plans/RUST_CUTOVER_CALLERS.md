@@ -9963,6 +9963,17 @@ and amend roots whose replacement places (zs5e83's audits,
 /tmp/codex-beta-plan-fence-audit/report.md and followup.md). Paradex's
 venue-local same-ID amend fence stays as is.
 
+Phase B (#2288) covers it: the fence no longer needs a lock scope. On an opted-in venue whose
+placements or amends hold no scope (guard flags off: Binance x4, Bybit,
+Crypto.com, BingX, ApeX, Hyperliquid, Paradex), entry still refuses a fenced
+symbol (cancel-all as its `fence_uncertain_cancel_all` declares), and every
+admitted placement or amend is marked with its symbols (all
+symbols for an amend whose symbol is unknown). An Unknown outcome on that
+command (managed, single-Context or legacy `cx.request`) fences them and queues
+their reconcile; any other end drops the mark. Amend roots are marked too, so an
+Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
+same-ID amend fence stays as is.
+
 ## Lighter public beta data
 
 Market snapshots seed last price and start ticker hydration before socket Open.

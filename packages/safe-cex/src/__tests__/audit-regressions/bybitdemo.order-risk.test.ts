@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { BybitDemoExchange } from '../../exchanges/bybit/bybitdemo.exchange';
+import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { Market, Position, PositionMode, PositionSide, Ticker } from '../../types';
 import { calculateOrdersRisk } from '../../utils/risk';

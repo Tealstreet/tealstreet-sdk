@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { PositionMode, PositionSide } from '../../types';
 

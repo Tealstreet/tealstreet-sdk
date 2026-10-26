@@ -7,9 +7,9 @@ import { ReconnectingWebSocket } from '../../../../../thirdparty/reconnecting-we
 import { unitTransportGuard } from '../../../config/test/transportGuard';
 import { getExchangeMetadata } from '../../exchangeMetadata';
 import { BaseWebSocket } from '../../exchanges/base.ws';
-import { signWeexMessage } from '../../exchanges/weex/weex.api';
-import { WeexExchange } from '../../exchanges/weex/weex.exchange';
-import { BASE_WS_URL } from '../../exchanges/weex/weex.types';
+import { signWeexMessage } from '../reference/weex/weex.api';
+import { WeexExchange } from '../reference/weex/weex.exchange';
+import { BASE_WS_URL } from '../reference/weex/weex.types';
 import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
 

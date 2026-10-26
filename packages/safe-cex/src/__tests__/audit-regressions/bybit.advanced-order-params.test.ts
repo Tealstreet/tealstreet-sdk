@@ -2,12 +2,12 @@ import type { BybitBboOrderOpts, BybitTickSizeMarketOrderOpts } from '../../inde
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange, formatBybitTradingAgreementError } from '../../exchanges/bybit/bybit.exchange';
+import { BybitExchange, formatBybitTradingAgreementError } from '../reference/bybit/bybit.exchange';
 import { getBybitOrderExecutionParams } from '../../exchanges/bybit/bybit.order-params';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { BybitDemoExchange } from '../../exchanges/bybit/bybitdemo.exchange';
-import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
-import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
+import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
+import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
 import { OrderSide, OrderTimeInForce, OrderType, PositionMode } from '../../types';
 
 class BybitOrderLinkIdExchange extends BybitExchange {

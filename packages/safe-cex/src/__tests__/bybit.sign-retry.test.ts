@@ -5,7 +5,7 @@ import axios from 'axios';
 import createHmac from 'create-hmac';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI, isBybitSignRejection, shouldRetryBybitRequest } from '../exchanges/bybit/bybit.api';
+import { createAPI, isBybitSignRejection, shouldRetryBybitRequest } from './reference/bybit/bybit.api';
 
 const NEW_SIGN_MESSAGE =
   'Error sign, please check your signature generation algorithm: origin_string[1791862469309keyx20000category=linear]';

@@ -2,8 +2,8 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LighterExchange } from '../../exchanges/lighter/lighter.exchange';
-import { createLighterSignerAdapter } from '../../exchanges/lighter/lighter.signer';
+import { LighterExchange } from '../reference/lighter/lighter.exchange';
+import { createLighterSignerAdapter } from '../reference/lighter/lighter.signer';
 import { ENDPOINTS } from '../../exchanges/lighter/lighter.types';
 import { DefaultStore } from '../../store/store.base';
 
@@ -34,17 +34,17 @@ vi.mock('@tealstreet/lighter-sdk', () => ({
     resetNonce = vi.fn();
   },
 }));
-vi.mock('../../exchanges/lighter/lighter.api', () => ({
+vi.mock('../reference/lighter/lighter.api', () => ({
   createLighterSDKClient: () => ({ get: mocks.get, sendRawTx: mocks.send }),
 }));
 vi.mock('../../utils/loop', () => ({ loop: mocks.loop }));
-vi.mock('../../exchanges/lighter/lighter.ws-public', () => ({
+vi.mock('../reference/lighter/lighter.ws-public', () => ({
   LighterPublicWebsocket: class {
     connectAndSubscribe = vi.fn();
     dispose = vi.fn();
   },
 }));
-vi.mock('../../exchanges/lighter/lighter.ws-private', () => ({
+vi.mock('../reference/lighter/lighter.ws-private', () => ({
   LighterPrivateWebsocket: class {
     connectAndSubscribe = vi.fn();
     dispose = vi.fn();

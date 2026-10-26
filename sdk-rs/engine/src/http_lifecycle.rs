@@ -5135,7 +5135,8 @@ mod tests {
                 .iter()
                 .filter(|action| matches!(action,
             Action::Notice(Notice::CommandFailed { command: 8, error })
-            if error.message == "Placement outcome is uncertain; reconcile before cancel-all"))
+            if error.message == "Placement outcome is uncertain; reconcile before cancel-all"
+                && error.outcome == Some(crate::Outcome::NotSent)))
                 .count(),
             1
         );
