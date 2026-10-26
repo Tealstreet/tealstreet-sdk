@@ -33,6 +33,7 @@ mod keyless_serial {
         ReadOnly,
         ReadKey,
         Mixed,
+        MixedAtEntry,
         Complete,
         EmptyDone,
         EmptyFail,
@@ -42,6 +43,15 @@ mod keyless_serial {
         Signed,
         Read,
         Auth,
+        ReadAuth,
+        AuthChangedBody,
+        SignedResend,
+        Selected,
+        ReadWithSecondary,
+        Forbidden,
+        LegacyAttach,
+        #[cfg(feature = "condition-waits")]
+        ParkRetire,
     }
     enum Pending {
         Login(Context),
@@ -65,6 +75,10 @@ mod keyless_serial {
         calls: usize,
         selected: usize,
         cleanup: bool,
+        preflight: Option<crate::request_context::Preflight>,
+        errors: Vec<VenueError>,
+        read_fact_absent: bool,
+        legacy_unchanged: bool,
     }
     fn credential() -> crate::request_context::Credential {
         crate::request_context::Credential {
@@ -97,16 +111,53 @@ mod keyless_serial {
             } else {
                 "https://venue.test/leverage"
             };
-            let body = if self.calls == 0 { CANCEL } else { LEVERAGE };
+            let body = if self.mode == Mode::AuthChangedBody && self.selected > 0 {
+                LEVERAGE
+            } else if self.calls == 0 {
+                CANCEL
+            } else {
+                LEVERAGE
+            };
             self.before = Some(cx.io.core.next_id);
-            let result = if self.mode == Mode::Signed {
+            #[cfg(feature = "sign-meta")]
+            if self.mode == Mode::Selected {
+                let slots = crate::credential_selection::Slots::new(
+                    None,
+                    cx.io.core.identities.secondary.clone(),
+                    Default::default(),
+                );
+                let (selection, _) = slots
+                    .select(crate::credential_selection::CredentialRole::Read { scope: None })
+                    .unwrap();
+                assert_eq!(selection.slot(), crate::CredentialSlot::Secondary);
+                let result = cx.request_selected_managed(
+                    context.clone(),
+                    &selection,
+                    session,
+                    Method::Post,
+                    url.into(),
+                    Some(body.into()),
+                    Box::new(ForbiddenRecipe),
+                    Pending::Call(context),
+                );
+                self.after = Some(cx.io.core.next_id);
+                self.issue = Some(result.map(drop).map_err(|(_, e)| e));
+                return;
+            }
+            let result = if matches!(self.mode, Mode::Signed | Mode::Forbidden)
+                || (self.mode == Mode::SignedResend && self.selected > 0)
+            {
                 cx.request_signed_managed(
                     context.clone(),
                     session,
                     Method::Post,
                     url.into(),
                     Some(body.into()),
-                    Box::new(Recipe),
+                    if matches!(self.mode, Mode::Forbidden | Mode::SignedResend) {
+                        Box::new(ForbiddenRecipe)
+                    } else {
+                        Box::new(Recipe)
+                    },
                     Pending::Call(context),
                 )
             } else {
@@ -119,6 +170,14 @@ mod keyless_serial {
                     Pending::Call(context),
                 )
             };
+            if self.mode == Mode::LegacyAttach {
+                if let Ok(id) = &result {
+                    let before = (cx.io.core.next_id, cx.io.core.actions.len());
+                    cx.sign_http(*id, Box::new(ForbiddenRecipe));
+                    self.legacy_unchanged =
+                        before == (cx.io.core.next_id, cx.io.core.actions.len());
+                }
+            }
             self.after = Some(cx.io.core.next_id);
             self.issue = Some(result.map(drop).map_err(|(_, e)| e));
         }
@@ -176,7 +235,7 @@ mod keyless_serial {
                     PreflightPurpose::WriteAfterReads
                 },
                 read_credential: (self.mode == Mode::ReadKey).then(credential),
-                write_credential: None,
+                write_credential: (self.mode == Mode::MixedAtEntry).then(credential),
             };
             self.before = Some(cx.io.core.next_id);
             let result = if self.mode == Mode::Ordinary {
@@ -199,6 +258,13 @@ mod keyless_serial {
             let Ok(preflight) = result else {
                 return;
             };
+            self.preflight = Some(preflight.clone());
+            #[cfg(feature = "condition-waits")]
+            if self.mode == Mode::ParkRetire {
+                cx.park_preflight_for(&preflight, None).unwrap();
+                self.timer = Some(cx.set_timer(1.));
+                return;
+            }
             if self.mode == Mode::EmptyDone {
                 self.selection = Some(cx.done_empty_plan(&preflight, "[]".into()));
                 self.cleanup = true;
@@ -231,6 +297,13 @@ mod keyless_serial {
                 self.selection = Some(cx.admit_plan(&preflight, &steps, policy.clone()).map(drop));
                 assert_eq!(self.selection, Some(Err(Error::Invalid)));
                 assert_eq!(cx.io.core.next_id, before);
+                assert_eq!(
+                    cx.admit_physical_plan(&preflight, &steps, policy.clone())
+                        .map(drop),
+                    Err(Error::Invalid),
+                    "owned physical Plan route"
+                );
+                assert_eq!(cx.io.core.next_id, before);
                 #[cfg(feature = "http-mutation-barriers")]
                 {
                     assert_eq!(
@@ -248,11 +321,16 @@ mod keyless_serial {
             }
             let result = cx.admit_serial_plan(
                 &preflight,
-                call(if self.mode == Mode::Read {
-                    Operation::Read
-                } else {
-                    Operation::Mutation
-                }),
+                call(
+                    if matches!(
+                        self.mode,
+                        Mode::Read | Mode::ReadAuth | Mode::ReadWithSecondary | Mode::Selected
+                    ) {
+                        Operation::Read
+                    } else {
+                        Operation::Mutation
+                    },
+                ),
                 SerialPolicy {
                     credential: (self.mode == Mode::Mixed).then(credential),
                     pacing: None,
@@ -317,31 +395,44 @@ mod keyless_serial {
             let slot = self.slot.clone().unwrap();
             cx.validate_plan_delivery(&plan, &context).unwrap();
             if response.body == "auth" {
-                let (_, grant) = cx
-                    .http_write_failure(
-                        &context,
-                        &TABLE,
-                        Some(&Native {
-                            code: NativeCode::Int(1000),
-                            message: "auth",
-                        }),
-                        "auth",
-                        None,
-                    )
-                    .unwrap();
+                let evidence = if context.operation() == Operation::Read {
+                    let request = cx.io.core.http_delivery.as_ref().unwrap().attempt.request;
+                    self.read_fact_absent = !cx
+                        .io
+                        .core
+                        .request_contexts
+                        .command_writes(7)
+                        .unwrap()
+                        .holds_attempt(request);
+                    Ok(SessionResend::Read)
+                } else {
+                    let (_, grant) = cx
+                        .http_write_failure(
+                            &context,
+                            &TABLE,
+                            Some(&Native {
+                                code: NativeCode::Int(1000),
+                                message: "auth",
+                            }),
+                            "auth",
+                            None,
+                        )
+                        .unwrap();
+                    grant.map(SessionResend::Write).ok_or(Error::RetryForbidden)
+                };
                 self.before = Some(cx.io.core.next_id);
-                let next = cx.serial_plan_session_resend(
-                    &plan,
-                    &slot,
-                    &context,
-                    SessionResend::Write(grant.unwrap()),
-                );
+                let next = evidence.and_then(|evidence| {
+                    cx.serial_plan_session_resend(&plan, &slot, &context, evidence)
+                });
                 self.after = Some(cx.io.core.next_id);
                 self.selected += 1;
                 self.selection = Some(next.as_ref().map(drop).map_err(|e| *e));
                 if let Ok(next) = next {
                     self.issue(cx, next);
                     self.timer = Some(cx.set_timer(1.));
+                } else {
+                    cx.fail_plan(&plan, "authentication attempts exhausted")
+                        .unwrap();
                 }
                 return;
             }
@@ -372,6 +463,18 @@ mod keyless_serial {
                 cx.done_plan(&plan, "[]".into()).unwrap();
             }
         }
+        fn on_http_preparation_failed(
+            &mut self,
+            cx: &mut Cx<'_, Pending>,
+            pending: Pending,
+            reason: Error,
+            error: VenueError,
+        ) {
+            assert!(matches!(pending, Pending::Call(_)));
+            self.issue = Some(Err(reason));
+            self.errors.push(error.clone());
+            cx.fail_plan(self.plan.as_ref().unwrap(), error).unwrap();
+        }
         fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {
             panic!("unexpected transport failure");
         }
@@ -387,6 +490,15 @@ mod keyless_serial {
         fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
         fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
             if self.timer == Some(timer) {
+                #[cfg(feature = "condition-waits")]
+                if self.mode == Mode::ParkRetire {
+                    cx.retire_session(self.session.as_ref().unwrap()).unwrap();
+                    let before = cx.io.core.next_id;
+                    self.selection =
+                        Some(cx.request_preflight_ready(self.preflight.as_ref().unwrap()));
+                    assert_eq!(cx.io.core.next_id, before);
+                    return;
+                }
                 self.revision += 1;
                 assert!(cx.session_ready(self.session.as_ref().unwrap()).is_empty());
             }
@@ -427,7 +539,30 @@ mod keyless_serial {
         for action in actions {
             if let Action::ManagedHttp(action) = action {
                 match *action {
-                    HttpAction::Prepare { preparation, .. } => {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => {
+                        let managed =
+                            e.io.core
+                                .managed_http
+                                .get(&preparation.attempt().request)
+                                .unwrap();
+                        assert!(
+                            managed.lifecycle.context().credential().is_none(),
+                            "Prepare has no signing credential"
+                        );
+                        assert!(
+                            managed.signing_attempt.is_none() && managed.recipe.is_none(),
+                            "Prepare has no signing intent"
+                        );
+                        assert!(request.signer_headers.is_empty());
+                        #[cfg(feature = "sign-meta")]
+                        assert!(
+                            managed.role.is_none(),
+                            "no provider role on keyless Prepare"
+                        );
                         e.http_prepared(
                             now,
                             preparation,
@@ -473,6 +608,16 @@ mod keyless_serial {
             mode,
             ..Default::default()
         });
+        if matches!(mode, Mode::ReadWithSecondary | Mode::Selected) {
+            e.set_identities(crate::signing::Identities {
+                primary: None,
+                secondary: Some(crate::signing::Identity::new(
+                    crate::signing::KeyRef("secondary.credential".into()),
+                    Some(crate::signing::KeyRef("secondary.signing".into())),
+                )),
+            })
+            .unwrap();
+        }
         e.start(0.);
         let actions = e.drain_actions().collect();
         let login = drive(&mut e, actions, 0.).pop().unwrap();
@@ -582,6 +727,10 @@ mod keyless_serial {
             assert_eq!(e.venue.entry, Some(Ok(())));
             assert_eq!(e.venue.selection, Some(Ok(())));
             assert!(e.venue.cleanup);
+            assert_eq!(
+                e.venue.revision, 1,
+                "empty command cleanup leaves Session revision unchanged"
+            );
             assert!(
                 e.io.core
                     .request_contexts
@@ -655,4 +804,5 @@ mod keyless_serial {
         let actions = e.drain_actions().collect();
         assert!(drive(&mut e, actions, 2.).is_empty(), "no third send");
     }
+    include!("request_context_keyless_serial_source_tests.rs");
 }
