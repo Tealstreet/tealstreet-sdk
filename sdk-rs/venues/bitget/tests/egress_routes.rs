@@ -183,3 +183,60 @@ fn other_login_refusals_keep_the_native_generic_failure() {
     );
     assert!(private(&h).iter().all(|(_, context)| !context.reject_route));
 }
+
+/// Closes the newest private socket without any login answer, then lets the
+/// supervisor redial and the new socket open.
+fn silent_close(h: &mut Harness) {
+    let socket = private(h).last().unwrap().0;
+    let dialed = private(h).len();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    // Fire timers one at a time until exactly the redial appears.
+    while private(h).len() == dialed {
+        let (timer, at) = h
+            .timers
+            .iter()
+            .copied()
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("a redial timer");
+        h.timers.retain(|(t, _)| *t != timer);
+        h.now = h.now.max(at);
+        h.event(Event::TimerFired { timer });
+    }
+    let socket = private(h).last().unwrap().0;
+    h.event(Event::WsOpened { socket });
+}
+
+#[test]
+fn two_silent_closes_before_login_leave_the_route() {
+    let mut h = pre_login();
+    let before = private(&h).len();
+    silent_close(&mut h);
+    assert!(
+        !private(&h).last().unwrap().1.reject_route,
+        "one silent close keeps the route"
+    );
+    silent_close(&mut h);
+    let sockets = private(&h);
+    assert_eq!(sockets.len(), before + 2);
+    assert!(
+        sockets.last().unwrap().1.reject_route,
+        "the second silent close in a row leaves the route"
+    );
+    assert_eq!(count(&h, "keeps closing before login"), 1);
+    assert_eq!(h.deactivations, 0);
+}
+
+#[test]
+fn a_login_answer_means_the_route_works_and_resets_the_streak() {
+    let mut h = pre_login();
+    silent_close(&mut h);
+    // The venue answered this connection: its close says nothing about the route.
+    h.private_message(r#"{"event":"login","code":0,"msg":""}"#);
+    silent_close(&mut h);
+    silent_close(&mut h);
+    assert!(
+        !private(&h).last().unwrap().1.reject_route,
+        "an answered login resets the streak, so one later silent close keeps the route"
+    );
+    assert_eq!(count(&h, "keeps closing before login"), 0);
+}

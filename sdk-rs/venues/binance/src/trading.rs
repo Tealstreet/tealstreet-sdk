@@ -2632,13 +2632,8 @@ mod audit_tests {
     fn engine(variant: Variant, fail_at: usize) -> Engine<BinanceFutures> {
         FAIL_AT.set(fail_at);
         IDS.set(0);
-        let (mut venue, signer) = crate::test_config::Options {
-            variant,
-            key: Some("api-key".into()),
-            secret: Some("secret".into()),
-            ..crate::test_config::Options::default()
-        }
-        .build();
+        let (mut venue, signer) =
+            crate::test_config::keyed(variant, "api-key", "fixture-seed").build();
         venue.trading.id_generator = Some(injected_uuid);
         let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         engine.set_signer(Some(signer)).unwrap();
