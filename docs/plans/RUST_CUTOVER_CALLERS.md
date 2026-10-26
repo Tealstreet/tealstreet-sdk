@@ -9698,3 +9698,7 @@ and message while shared 408/5xx precedence preserves uncertainty.
 Rust-native tests are regression evidence only. Browser beta readiness requires
 separate JS `EngineHost` plus compiled WASM replay/live-public results, using the
 managed-HTTP recorder fix; no native-host run counts as browser readiness.
+
+### Binance signing residue: legacy test oracle retired
+
+No caller-visible change. Binance already signed every request through the provider. The remaining legacy signing code was a test-only HMAC oracle and fixtures, now replaced by provider-path proofs of the documented vector and of every configured receive window ([RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md)). Signing inventory for Binance: 27 → 4, the four being the dispatch recipe's own lines.
