@@ -9877,3 +9877,9 @@ binary addition residue. Public close requests a recovery snapshot immediately
 when existing pacing permits; one inflight request per book remains the limit.
 A newer socket snapshot invalidates an older recovery reply. Grouped limit
 TP/SL remains a separately tested beta blocker, not part of this public slice.
+
+Before socket Open, the first ticker seed also publishes real exchangeStats
+daily volume, quote volume and percentage. TypeScript's REST fallback drops
+those fields. The overseer accepts this more complete bootstrap in readiness
+comparison; the raw replay still reports these differences without relaxed
+tolerances. Prices, books and later checkpoints must agree.

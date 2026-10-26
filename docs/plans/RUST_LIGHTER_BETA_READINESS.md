@@ -1,6 +1,6 @@
 # Lighter beta readiness
 
-Status: local public-data slice on the managed funnel in #2230. Grouped limit
+Status: reviewer-CLEAR public-data slice on the managed funnel in #2230. Grouped limit
 TP/SL is owned by kuhwxi as a separate slice; this slice does not enable it.
 
 The beta runs through `hosts/wasm/js/host.mjs`. A live public recording on #2230
@@ -28,6 +28,26 @@ The first four added public tests run on unmodified production source:
 controls will cover key order, optional values, reconnect flapping and a fresh
 socket snapshot beating the recovery read. Do not relax replay tolerances or
 filter the captured tape.
+
+## JS/WASM qualification
+
+The composed module at 59c0e290000 (tree 399218431955) is 1,255,487 bytes for
+both web and Node, SHA256
+ecc88700c81c26def6b69f2836d0537314ca8d3779385db0ac01d5ae903a3a5e.
+The unchanged retained tape now agrees on prices, books and later checkpoints.
+Its 576 remaining differences are checkpoint-zero volume, quoteVolume and
+percentage: Rust publishes real exchangeStats daily values while TypeScript's
+fallback drops those fields. The overseer accepts this class as Rust-better;
+the readiness gate passes with this disclosure. Other differences still block.
+The raw FAIL report and tape remain unchanged; comparison tolerances and filters
+are unchanged. A fresh JS/WASM EngineHost public capture ran for 15 seconds with
+five HTTP replies, 12,323 socket frames, two books and 60 Store updates. This is
+the Node binding of the browser host implementation, not a native-host test.
+Replaying that fresh capture reports exactly the same 576 accepted bootstrap
+counter differences and zero differences outside that class. Its tape SHA256 is
+4fedc4a2150c0fd5460db15feb612b678232f7c3c4b7c6e9c5d350281f6934aa.
+The composed native suite passes 327 tests, with strict all-target clippy; these
+support regression coverage and are separate from the JS/WASM evidence above.
 
 ## Remaining beta blocker
 
