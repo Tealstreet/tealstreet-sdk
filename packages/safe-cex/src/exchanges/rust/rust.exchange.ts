@@ -42,8 +42,7 @@ import type {
   ValidateAccountResult,
 } from '../../types';
 import type { AsterDEXPlaceOrderOpts, AsterDEXStpMode } from '../asterdex/asterdex.types';
-import type { CallableMethodsInWorker, EngineSnapshot, WorkerForwardedMethod } from '../base';
-import type { ExchangeCapabilities } from '../base';
+import type { CallableMethodsInWorker, EngineSnapshot, ExchangeCapabilities, WorkerForwardedMethod } from '../base';
 import type { BaseWebSocket } from '../base.ws';
 import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../clientOrderId';
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
@@ -112,6 +111,7 @@ import {
 import { DelegatedSignerSetup, selectDelegatedSigningMode, withoutDelegatedSigning } from './delegatedSignerSetup';
 import { signHostedHttp, signHostedWsAuth } from './legacySigning';
 import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from './localSignerSetup';
+import { mapMEXCSignerSetup } from './mexcSignerSetup';
 import { paradexSigningTransport } from './paradex.signing';
 import {
   IN_PROCESS_PUBLIC_FEED_TIMEOUT_MS,
@@ -554,7 +554,10 @@ export class RustEngineExchange extends BaseExchange {
                   false,
                   options.omniKeySeed || undefined,
                 )
-              : new LocalSignerSetup(options, deriveSignerSetupPolicy(exchangeName))
+              : new LocalSignerSetup(
+                  deriveSignerSetupMapping(exchangeName) === 'mexc' ? mapMEXCSignerSetup(options) : options,
+                  deriveSignerSetupPolicy(exchangeName),
+                )
         : undefined;
     const signingMode = signerSetup
       ? derivePublicMode(exchangeName, options, undefined, signerSetup.credentialPresence)

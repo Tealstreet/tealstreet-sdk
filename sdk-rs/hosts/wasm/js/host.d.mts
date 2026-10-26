@@ -254,7 +254,7 @@ export class EngineDisposedError extends Error {
 
 export type SignAlgorithm = 'hmacSha256' | 'hmacSha512' | 'sha256SecretSuffix' | 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest' | 'zkLinkContract';
 export type SignPart = { kind: 'bytes'; bytes: number[] } | { kind: 'credential'; key: string }
-  | { kind: 'result'; index: number; encoding: 'raw' | 'hex' | 'base64' | 'base64Hex' };
+  | { kind: 'result'; index: number; encoding: 'raw' | 'hex' | 'base64' | 'base64Hex' | 'evmHex' };
 export interface SigningIdentity {
   credential: string; signing: string; passphrase?: string;
   /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
@@ -295,7 +295,7 @@ export interface SignRequest {
 export type SigningScope = 'account' | 'balance' | 'orders' | 'positions' | 'settings';
 export type SigningRole = { readonly kind: 'read'; readonly scope: SigningScope | null }
   | { readonly kind: 'primaryRead'; readonly reason: 'clientOrderLookup' | 'postUnknownOrderRead'
-    | 'degradedRead' | 'catalog' | 'history'; readonly scope: SigningScope | null }
+    | 'degradedRead' | 'catalog' | 'history' | 'keyPermissions'; readonly scope: SigningScope | null }
   | { readonly kind: 'mutation' | 'sessionAuth' };
 /** Immutable engine ownership captured at Action::Sign delivery. */
 export interface SignMeta {

@@ -126,4 +126,25 @@ describe('OUT hosted accounts are refused while signing references remain availa
       }
     }
   });
+  it('an unsupported signing family refuses without a TS or raw-secret fallback', async () => {
+    const engine = new RustEngineExchange('blofin', { key: 'k', secret: 's' }, new DefaultStore());
+    try {
+      await expect(
+        engine.signHttpRequest(request('blofin', 'https://openapi.blofin.com', '/api/v1/private/order/create')),
+      ).resolves.toEqual({
+        id: 'sign-1',
+        error: 'Hosted HTTP signing is unsupported in this build',
+      });
+      await expect(
+        engine.signWsAuth({
+          id: 'ws-1',
+          type: 'ws-auth',
+          exchangeName: 'blofin',
+          wsAuth: { toSign: 'x', outputFormat: 'hex' },
+        }),
+      ).resolves.toEqual({ id: 'ws-1', error: 'Hosted WS auth signing is unsupported in this build' });
+    } finally {
+      engine.dispose();
+    }
+  });
 });

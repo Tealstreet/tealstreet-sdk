@@ -1482,3 +1482,9 @@ polling policy, including server slowdown and Infinity. Unknown, public,
 unsigned and retry-intermediate results do not clear or create failures.
 Coinbase currently uses primary JWT credentials only: saved read fields and
 their proxy are dropped from effective options with a warning before startup.
+
+MEXC trusted compatibility setup preserves its existing persisted account IDs:
+`mexc:` plus the first12 SHA256 bytes of the raw Primary API key are supplied as
+explicit Primary stableId before provider trimming. JS/native setup reject a
+conflicting supplied mapping. Generic LocalSigner never derives stable IDs;
+MEXC venue execution reads only installed metadata, never hashes credentials.
