@@ -7,6 +7,7 @@ use crate::{
 
 #[derive(Clone, Copy)]
 enum Mode {
+    #[cfg(not(feature = "write-preflight-wait"))]
     RefuseWrite,
     Spent,
     Borrowed,
@@ -77,6 +78,7 @@ impl Venue for Probe {
     fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
         self.calls += 1;
         match self.mode {
+            #[cfg(not(feature = "write-preflight-wait"))]
             Mode::RefuseWrite => {
                 self.refuse(
                     cx,
@@ -198,7 +200,13 @@ fn failures(e: &mut Engine<Probe>) -> Vec<VenueError> {
 }
 #[test]
 fn write_policy_and_resource_spent_capture_leave_every_pool_unchanged() {
-    for mode in [Mode::RefuseWrite, Mode::Spent] {
+    // With write-preflight-wait a WriteAfterReads capture binds its cap instead
+    // (docs/plans/RUST_WRITE_PREFLIGHT_WAIT.md, write_preflight_wait_tests).
+    #[cfg(not(feature = "write-preflight-wait"))]
+    let modes = [Mode::RefuseWrite, Mode::Spent];
+    #[cfg(feature = "write-preflight-wait")]
+    let modes = [Mode::Spent];
+    for mode in modes {
         let mut e = engine(mode);
         e.drain_actions().for_each(drop);
         e.handle_command(0., query(), Some(100)).unwrap();
