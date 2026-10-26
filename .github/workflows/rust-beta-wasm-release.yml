@@ -1,0 +1,203 @@
+# Build the Rust-only beta bundle's wasm families from one exact SDK commit and
+# publish them as an immutable GitHub Release that tealstreet-next pins file by
+# file (scripts/rust-beta-wasm.pin.json). Manual only: the first publication
+# follows Sam's SDK master merge, on the overseer's instruction.
+# Design: docs/plans/RUST_BETA_BUNDLE.md (Build and CI).
+name: Rust beta wasm release
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_sha:
+        description: Full 40-character SDK commit to build (no branch names)
+        required: true
+        type: string
+      tag:
+        description: New release tag, e.g. rust-beta-wasm-<first 11 of sdk_sha>
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-beta-wasm-release
+  cancel-in-progress: false
+
+jobs:
+  roster:
+    name: Beta wasm roster
+    runs-on: ubuntu-latest
+    outputs:
+      families: ${{ steps.roster.outputs.families }}
+    steps:
+      - name: Refuse anything but an exact commit and a tag that names it
+        env:
+          SDK_SHA: ${{ inputs.sdk_sha }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$SDK_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sdk_sha must be a full commit SHA"; exit 1; }
+          [[ "$TAG" =~ ^rust-beta-wasm-[0-9a-f]{11}$ ]] || { echo "tag must be rust-beta-wasm-<11 hex>"; exit 1; }
+          [[ "$TAG" == "rust-beta-wasm-${SDK_SHA:0:11}" ]] || { echo "tag must name sdk_sha"; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sdk_sha }}
+          fetch-depth: 0
+      # Before any SDK script runs: only reviewed, landed source is built or published.
+      # Publication follows Sam's SDK master merge, so master is the only protected line.
+      - name: Require sdk_sha on origin/master
+        env:
+          SDK_SHA: ${{ inputs.sdk_sha }}
+        run: |
+          git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$SDK_SHA" origin/master || {
+            echo "sdk_sha $SDK_SHA is not on origin/master; refusing to build or publish it"; exit 1
+          }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Only an authenticated 404 is absence; an existing tag or release, or any API error, fails.
+      - name: Require a fresh tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
+      - name: Read the 15 families from beta-venues.mjs
+        id: roster
+        run: |
+          families=$(node sdk-rs/hosts/wasm/js/generate-beta-loader.mjs --families)
+          count=$(wc -w <<<"$families")
+          [ "$count" -eq 15 ] || { echo "expected 15 beta families, got $count: $families"; exit 1; }
+          echo "families=$(jq -cn --arg f "$families" '$f | split(" ")')" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Beta wasm family (${{ matrix.family }})
+    needs: roster
+    strategy:
+      fail-fast: true
+      matrix:
+        family: ${{ fromJSON(needs.roster.outputs.families) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sdk_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+      - uses: ./.github/actions/prefetch-cargo
+      - uses: ./.github/actions/install-binaryen
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      # No cargo cache: a release builds from a clean target directory.
+      - name: Build the family
+        run: corepack yarn rust:build-wasm --venue '${{ matrix.family }}'
+      - name: Check family isolation, every alias and the shipped size
+        env:
+          RUST_TEST_FAMILY: ${{ matrix.family }}
+        run: |
+          mkdir -p 'sdk-rs/hosts/wasm/pkg/web/${{ matrix.family }}' 'sdk-rs/hosts/wasm/pkg/node/${{ matrix.family }}'
+          cp sdk-rs/hosts/wasm/pkg/web/*.* 'sdk-rs/hosts/wasm/pkg/web/${{ matrix.family }}/'
+          cp sdk-rs/hosts/wasm/pkg/node/*.* 'sdk-rs/hosts/wasm/pkg/node/${{ matrix.family }}/'
+          corepack yarn rust:test-families
+      - name: Stage flat release assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/assets"
+          for file in sdk-rs/hosts/wasm/pkg/web/${{ matrix.family }}/*; do
+            [ -f "$file" ] && [ ! -L "$file" ] || { echo "unexpected entry $file"; exit 1; }
+            cp "$file" "$RUNNER_TEMP/assets/beta-wasm-${{ matrix.family }}-$(basename "$file")"
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: beta-wasm-${{ matrix.family }}
+          path: ${{ runner.temp }}/assets/
+          retention-days: 3
+          if-no-files-found: error
+
+  release:
+    name: Publish beta wasm release
+    needs: [roster, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sdk_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: beta-wasm-*
+          path: ${{ runner.temp }}/assets
+          merge-multiple: true
+      - name: Write the pin manifest tealstreet-next commits
+        env:
+          SDK_SHA: ${{ inputs.sdk_sha }}
+          TAG: ${{ inputs.tag }}
+          FAMILIES: ${{ needs.roster.outputs.families }}
+          SOURCE: ${{ github.workspace }}
+        working-directory: ${{ runner.temp }}/assets
+        run: |
+          node --input-type=module - <<'EOF'
+          import { createHash } from 'node:crypto';
+          import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+          const { betaWasmInputs } = await import(`${process.env.SOURCE}/sdk-rs/harness/beta-wasm-inputs.mjs`);
+          const families = JSON.parse(process.env.FAMILIES);
+          const pin = {
+            status: 'published',
+            sdkSha: process.env.SDK_SHA,
+            tag: process.env.TAG,
+            assetUrl: 'https://github.com/Tealstreet/tealstreet-sdk/releases/download/{tag}/{asset}',
+            // tealstreet-next recomputes this over its mapped sdk-rs/ and refuses any mismatch.
+            inputs: betaWasmInputs(process.env.SOURCE, {
+              wasmBindgen: process.env.WASM_BINDGEN_VERSION,
+              wasmOpt: 'required',
+              profile: 'release',
+              target: 'wasm32-unknown-unknown',
+            }),
+            families: {},
+          };
+          for (const name of readdirSync('.').sort()) {
+            const family = families.find((f) => name.startsWith(`beta-wasm-${f}-`));
+            if (!family) throw new Error(`asset outside the beta roster: ${name}`);
+            const file = name.slice(`beta-wasm-${family}-`.length);
+            pin.families[family] ??= { files: {} };
+            pin.families[family].files[file] = createHash('sha256').update(readFileSync(name)).digest('hex');
+          }
+          const missing = families.filter((f) => !pin.families[f]);
+          if (missing.length) throw new Error(`families with no assets: ${missing}`);
+          writeFileSync('rust-beta-wasm.pin.json', JSON.stringify(pin, null, 2) + '\n');
+          EOF
+      - name: Re-check freshness, then create the tag at the exact commit and read it back
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
+          node sdk-rs/harness/beta-wasm-release-guard.mjs create "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
+      - name: Publish the release on the verified tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_SHA: ${{ inputs.sdk_sha }}
+          TAG: ${{ inputs.tag }}
+        working-directory: ${{ runner.temp }}/assets
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Rust beta wasm $TAG" \
+            --notes "Rust-only beta bundle wasm families built from $SDK_SHA. Pin: rust-beta-wasm.pin.json (commit it to tealstreet-next scripts/ by PR)." \
+            ./*
