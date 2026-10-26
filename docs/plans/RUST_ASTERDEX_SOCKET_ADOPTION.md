@@ -84,6 +84,9 @@ capacity or an invalid topic, and stopping would drop every live book.
 
 ## Size
 
-CI decides. Linking `managed-sockets` is expected to cost about 35 to 50 KB,
-inside the standing 5% venue allowance. The new cap is CI's number rounded up
-to the KiB. Combined is measured once.
+- **Family:** CI measured 1,384,485 bytes, against 1,326,481 before. That is
+  +58,004, or 4.4% of the previous 1,330,120 cap, inside the standing 5% venue
+  allowance. The new cap is that number rounded up to the KiB: 1,385,472
+  (1353 KiB).
+- **Combined:** measured once locally on ecb11c8e266, at 14,110,511 bytes
+  against the 14,680,064 budget.
