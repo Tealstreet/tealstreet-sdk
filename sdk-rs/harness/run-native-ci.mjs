@@ -17,8 +17,10 @@ if (NATIVE_FULL === 'true' || NATIVE_CHECK === 'fmt') {
     const args = [NATIVE_CHECK, '--locked', '-p', `safe-cex-venue-${crate}`, '--all-targets'];
     run('cargo', [...args, ...(NATIVE_CHECK === 'clippy' ? ['--', '-D', 'warnings'] : [])]);
     run('cargo', [NATIVE_CHECK, '--locked', '-p', 'safe-cex-venues', '--no-default-features',
-      '--features', crate, '--all-targets', ...(NATIVE_CHECK === 'clippy' ? ['--', '-D', 'warnings'] : [])]);
+      '--features', crate, '--lib', ...(NATIVE_CHECK === 'clippy' ? ['--', '-D', 'warnings'] : [])]);
   }
-  if (crates.length) run('cargo', [NATIVE_CHECK, '--locked', '-p', 'safe-cex-native', '--all-targets',
+  // Registry integration tests construct every family; the native host already
+  // enables those default features, so check both consumers together once.
+  if (crates.length) run('cargo', [NATIVE_CHECK, '--locked', '-p', 'safe-cex-venues', '-p', 'safe-cex-native', '--all-targets',
     ...(NATIVE_CHECK === 'clippy' ? ['--', '-D', 'warnings'] : [])]);
 } else console.log(`${NATIVE_CHECK}: no shared native change; covered by scoped crate tests`);
