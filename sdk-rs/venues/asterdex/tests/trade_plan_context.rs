@@ -627,6 +627,7 @@ fn an_unknown_placement_fences_cancel_all_but_not_cancel_by_id() {
         "no cancel-all while the placement is Unknown"
     );
     let error = terminal(&refused).expect("one terminal").unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
     assert_eq!(
         error.legacy_text(),
         "Placement outcome is uncertain; reconcile before cancel-all"
