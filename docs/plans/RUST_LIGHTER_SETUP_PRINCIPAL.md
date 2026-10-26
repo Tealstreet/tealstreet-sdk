@@ -1,9 +1,9 @@
 # Lighter secret-only setup principal
 
-Status: local shared source; API and originals CLEAR from m26ps4/uufub4;
-source correction and qualification in progress. Owner:
+Status: reviewed shared source, composed qualification in progress. Owner:
 codex-ih35js. Credential reviewer: claude-m26ps4; core reviewer:
-codex-uufub4. Base: #2204 head 01cdbacc21200d37eb0c5ddf7b5b06544dc74763.
+codex-uufub4. Scope: Lighter-only. Depends on #2204; the PR records the exact
+composition and qualification receipts.
 
 ## Purpose and dependency
 

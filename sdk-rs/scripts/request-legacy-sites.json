@@ -27,9 +27,6 @@
     "4fd69fe1e61d7806268e180e1316430a4f1412b5b180eee8a9d78451ac57c7d9": 1,
     "5a3ecde1bdd5b82ea5d3f97b6da8fa145ee3d7db5f208cc0f5157b22ac098f3c": 1
   },
-  "venues/bitget/src/account.rs": {
-    "82526deadb90ca87ae4b944fb55949a9d323406dbfcc1fff45cc9a5ea16df6a0": 1
-  },
   "venues/bitrue/src/lib.rs": {
     "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1
   },
@@ -37,8 +34,7 @@
     "2f0770d2ea5f5246cd2ddcd35b614bce738e564c2d95193ff5a84eb8479811e5": 1,
     "b780b823ba70712169e1be98fecae4d2a2655f7ca35f27bea4b99f09bd684696": 1,
     "dcb84cef5dcb71801d2b1b9562fcfc84b0431681917a0b6b9d2314f2e050630e": 1,
-    "afb3c3744f13da9606f5f456bd95797992a932cf227eb74b2fe4405e3c64ee98": 1,
-    "6d2c051bb24db8acd1986f4e47c2b6dbede5aa9dfff7fb877e64ef194107bd53": 4
+    "6d2c051bb24db8acd1986f4e47c2b6dbede5aa9dfff7fb877e64ef194107bd53": 3
   },
   "venues/bitunix/src/account.rs": {
     "37e060689327c1ad79d592ea1a9079e30ef97cf58ffc0b65967b779b8d5b97fa": 1,

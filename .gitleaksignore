@@ -104,3 +104,7 @@ ea5ec84ee69b5a6e4f7f90322f9afd285a718a0f:sdk-rs/venues/blofin/tests/hmac_dispatc
 # fixture-primary-material and public/auth1710000000000fixture-primary-key1710000000000.
 # Exact historical plan occurrence only; no path or rule exemption.
 317454665878720881c9de9635d8c1533e8db083:docs/plans/RUST_CRYPTOCOM_PRIVATE_REQUEST_CONTEXT.md:generic-api-key:121
+
+# Public Git commit SHA in the Lighter principal plan, beside reviewer prose.
+# Exact historical documentation fingerprint only; no credential bytes.
+25b7d8a4edf1fb1bb7c839783f458b252db6e937:docs/plans/RUST_LIGHTER_SETUP_PRINCIPAL.md:generic-api-key:4

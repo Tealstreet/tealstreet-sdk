@@ -6,6 +6,7 @@ publish.workspace = true
 description = "Native (tokio) host for the sans-I/O exchange engine"
 
 [features]
+address-nonce = ["safe-cex-engine/address-nonce", "safe-cex-crypto/address-nonce", "sign-meta"]
 dispatch-nonce = ["safe-cex-engine/dispatch-nonce"]
 nonce-drain = []
 default = ["venues"]
