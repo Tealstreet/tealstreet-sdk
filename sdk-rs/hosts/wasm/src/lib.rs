@@ -1631,9 +1631,10 @@ mod tests {
             }
         }
         assert!(
-            released
-                .iter()
-                .any(|url| url.contains("/stpMode") && url.contains("signature=")),
+            released.iter().any(|url| url.contains("/stpMode")
+                && url.contains("&signer=0x21cF8Ae13Bb72632562c6Fff438652Ba1a151bb0&")
+                && url.contains("&nonce=")
+                && url.contains("&signature=0x")),
             "a V3 signed read must release after start: {released:?}"
         );
     }
