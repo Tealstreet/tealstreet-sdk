@@ -270,7 +270,8 @@ test('shallow PR checkout refuses absent tested parents and single-parent commit
 // scripted, so this checks invocation rather than CPU acceptance.
 test('actual post-merge workflow invocation enters and completes the real collector with explicit nine pairs', t => {
   const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  const publicCommands = workflow.split('\n').filter(line => line.includes('rust:gate:record') && line.includes('-public.jsonl.gz'));
+  const measured = /^  gate:\n([\s\S]*?)(?=^  bitget-paired:)/m.exec(workflow)[1];
+  const publicCommands = measured.split('\n').filter(line => line.includes('rust:gate:record') && line.includes('-public.jsonl.gz'));
   assert.equal(publicCommands.length, 11);
   for (const command of publicCommands) assert.match(command, / --runs 9$/);
   const options = fixture(t, 'bitget');

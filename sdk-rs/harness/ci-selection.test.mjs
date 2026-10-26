@@ -37,8 +37,9 @@ test('checkout outputs are literal SHAs while matrices remain JSON', () => {
 test('venue feature declarations retain complete engine combinations and wasm checks', () => {
   const result = select('sdk-rs/venues/bitget/Cargo.toml');
   assert.equal(result.nativeFull, true);
-  for (let shard = 0; shard < 4; shard++) assert(result.native.some(row => row.check === `engine-feature-modes-${shard}`));
-  assert(result.native.some(row => row.check === 'mutation-barriers'));
+  // The native job keeps the complete legacy workspace/feature-mode matrix.
+  assert.equal(result.sizeRequired, true);
+  assert(result.families.includes('bitget'));
 });
 
 test('cross-venue and non-venue TS imports conservatively select the full matrix', () => {

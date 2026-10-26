@@ -5,9 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { posix } from 'node:path';
 import { GATE_SUITES, replayMatrix } from './ci-gate-suites.mjs';
 import { venueFamilies, venueFamily } from '../hosts/wasm/js/venues.mjs';
-import { nativeMatrix } from './native-ci-checks.mjs';
-import { createGithubReader } from './cpu-cohort.mjs';
-import { selectDispatchedCheckout } from './ci-checkout.mjs';
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }).trim();
 const family = (venue) => venueFamily(venue);
@@ -106,7 +103,6 @@ export function selectCi({ paths, manifests, full = false, documents = { paths: 
   const suites = GATE_SUITES.filter(suite => families.includes(suiteFamilies.get(suite)));
   const nativeCrates = [...new Set([...crates, ...tests])].sort();
   return { full, nativeFull: nativeFull || full, combinedRequired: full || consumerTests,
-    native: nativeMatrix(nativeFull || full, nativeCrates),
     reasons, families, replay: replayMatrix(suites, family), nativeCrates, integrationTests,
     replayRequired: suites.length > 0, sizeRequired: families.length > 0 };
 }
@@ -127,9 +123,6 @@ export function ciOutputs(result) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const isPr = process.env.GITHUB_EVENT_NAME === 'pull_request';
-  if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch') await selectDispatchedCheckout({ git,
-    runId: Number(process.env.GITHUB_RUN_ID), reader: createGithubReader({
-      repository: process.env.GITHUB_REPOSITORY, token: process.env.GITHUB_TOKEN }) });
   let base;
   if (isPr) {
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));

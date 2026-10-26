@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -47,7 +47,7 @@ test('margin expectation uses native input and preserves unsupported cases', () 
 
 // Exercise the actual CLI and comparison call sites. Stub only the expensive
 // replay subprocess, supplying independently controlled TS and Rust results.
-const gate = (venue, isPrivate = false, defect, correctnessOnly = false) => {
+const gate = (venue, isPrivate = false, defect, correctnessOnly = false, workflowInvocation = false) => {
   const cwd = mkdtempSync(join(tmpdir(), 'safe-cex-gate-'));
   const tape = join(cwd, 'tape.jsonl');
   const reportPath = join(cwd, 'gate.json');
@@ -356,18 +356,50 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false) => {
     } else assert.equal(calls.length, 4);
   `;
   try {
-    const runner = join(cwd, 'run.mjs');
-    writeFileSync(runner, script);
-    const result = spawnSync(process.execPath, [runner], {
+    let executable = process.execPath, args;
+    if (workflowInvocation) {
+      const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+      const replay = /^  replay:\n([\s\S]*?)(?=^  gate:)/m.exec(workflow)[1];
+      const template = replay.split('\n').find(line => line.includes('rust:gate:record --venue ${{ matrix.venue }}'));
+      assert(template); assert(!template.includes('--runs'));
+      const command = template.trim().replace(/^run: corepack yarn -s rust:gate:record/, 'exec "$NODE" "$RECORD"')
+        .replaceAll('${{ matrix.venue }}', venue).replaceAll('${{ matrix.books }}', 'BTCUSDT')
+        .replace(/sdk-rs\/harness\/fixtures\/[^ ]+/, JSON.stringify(tape));
+      mkdirSync(join(cwd, 'sdk-rs/harness'), { recursive: true });
+      // The actual recorder invokes the actual gate; only replay children are scripted.
+      writeFileSync(join(cwd, 'sdk-rs/harness/gate.mjs'), script.replace(/    process.argv = \['node', 'gate.mjs',[\s\S]*?;\n/, ''));
+      executable = 'bash'; args = ['-e', '-o', 'pipefail', '-c', command + (workflowInvocation === 'runs9' ? ' --runs 9' : '')];
+    } else {
+      const runner = join(cwd, 'run.mjs'); writeFileSync(runner, script); args = [runner];
+    }
+    const result = spawnSync(executable, args, {
       cwd,
       encoding: 'utf8',
       timeout: 10000,
+      env: { ...process.env, ...(workflowInvocation ? { NODE: process.execPath,
+        RECORD: new URL('./record-gate.mjs', import.meta.url).pathname, RUST_REPLAY_CORRECTNESS_ONLY: 'true',
+        RUST_REPLAY_CI_WASM: '', CPU_COLLECTION_STATE: '' } : {}) },
     });
+    if (workflowInvocation && existsSync(join(cwd, 'sdk-rs/harness/out/ci/ledger.jsonl'))) {
+      const ledger = readFileSync(join(cwd, 'sdk-rs/harness/out/ci/ledger.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+      assert.equal(ledger.length, 1); assert.equal(ledger[0].exitCode, 0);
+      writeFileSync(reportPath, readFileSync(ledger[0].reportPath));
+    }
     return { ...result, report: existsSync(reportPath) ? JSON.parse(readFileSync(reportPath, 'utf8')) : null };
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 };
+
+test('actual correctness workflow command runs through recorder and gate without runs; PR plus nine refuses', () => {
+  const valid = gate('bybitinverse', false, undefined, true, 'valid');
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.equal(valid.report.correctnessOnly, true); assert.equal(valid.report.runs, 0);
+  assert.equal(valid.report.correctnessRuns, 1); assert.equal(valid.report.artifacts.length, 2);
+  const invalid = gate('bybitinverse', false, undefined, true, 'runs9');
+  assert.notEqual(invalid.status, 0); assert.equal(invalid.report, null);
+  assert.match(invalid.stderr, /Correctness-only replay cannot supply CPU measurement evidence/);
+});
 
 test('PR correctness mode executes exactly one audited pair and retains all output refusals', () => {
   for (const isPrivate of [false, true]) {

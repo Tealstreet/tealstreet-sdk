@@ -146,7 +146,7 @@ test('all Yarn jobs prepare before probing caches or installing', () => {
     }
   }
   assert.deepEqual(jobs, ['ci.yml:ci', 'rust.yml:harness', 'rust.yml:families',
-    'rust.yml:combined', 'rust.yml:browser', 'rust.yml:gate', 'exchange-mcp-release.yml:release']);
+    'rust.yml:combined', 'rust.yml:browser', 'rust.yml:replay', 'rust.yml:gate', 'exchange-mcp-release.yml:release']);
   const rust = readFileSync(join(root, '.github/workflows/rust.yml'), 'utf8');
   assert.equal(rust.match(/'\.github\/actions\/prepare-yarn\/\*\*'/g)?.length, 2, 'helper changes must trigger push and PR Rust CI');
   const action = readFileSync(join(root, '.github/actions/prepare-yarn/action.yml'), 'utf8');

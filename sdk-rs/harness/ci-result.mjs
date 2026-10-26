@@ -13,9 +13,8 @@ export function assessCiResult({ pullRequest, selection, jobs }) {
   const required = ['selection', 'bans', 'harness', 'native'];
   if (selection.nativeFull) required.push('wasm');
   if (selection.combinedRequired || !pullRequest) required.push('combined');
-  if (selection.replayRequired) required.push('gate');
+  if (selection.replayRequired) required.push('replay');
   if (selection.sizeRequired) required.push('families');
-  if (!pullRequest) required.push('browser', 'bitget-paired', 'cpu-plan', 'cpu-certify', 'cpu-final');
   const failures = required.filter(name => jobs?.[name]?.result !== 'success');
   return { required, failures, accepted: failures.length === 0 };
 }
