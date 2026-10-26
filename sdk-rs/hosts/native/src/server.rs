@@ -353,7 +353,16 @@ impl<V: Venue, T: Transport> Account<V, T> {
         mut inbox: mpsc::Receiver<Control>,
         mut shutdown: watch::Receiver<bool>,
     ) {
-        self.host.turn(|host| host.engine.start((host.clock)()));
+        self.host.turn(|host| {
+            let now = (host.clock)();
+            #[cfg(feature = "address-nonce")]
+            if !host.engine.address_nonce_setup_ready()
+                && let Err(error) = host.engine.initialize_address_nonce(now)
+            {
+                host.engine.startup_failed(error);
+            }
+            host.engine.start(now);
+        });
         self.execute();
         let mut flush = tokio::time::interval(self.config.flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

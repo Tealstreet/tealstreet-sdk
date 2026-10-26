@@ -300,6 +300,12 @@ impl<V: Venue> AnyEngine for Engine<V> {
         Engine::apply_public_feed(self, now, update)
     }
     fn start(&mut self, now: f64) {
+        #[cfg(feature = "address-nonce")]
+        if !self.address_nonce_setup_ready()
+            && let Err(error) = self.initialize_address_nonce(now)
+        {
+            self.startup_failed(error);
+        }
         Engine::start(self, now);
     }
 

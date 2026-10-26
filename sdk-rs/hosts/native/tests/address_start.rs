@@ -115,3 +115,30 @@ async fn unsupported_host_remains_public_and_undeclared_slots_get_no_binding() {
         assert!(!engine.failed());
     }
 }
+
+#[tokio::test]
+async fn host_start_reuses_an_explicitly_completed_setup() {
+    let (mut host, observations) = host(Some(&HYPERLIQUID_AGENT), true, AddressSetupSlots::Both);
+    assert_eq!(
+        host.initialize_address_setup().unwrap(),
+        AddressSetupProgress::Ready
+    );
+    let (commands, inbox) = mpsc::unbounded_channel();
+    drop(commands);
+    let engine = host
+        .run(inbox, Duration::from_millis(1), |_| {}, |_| {})
+        .await;
+    assert_eq!(
+        *observations.lock().unwrap(),
+        vec![vec![Ok(ADDRESS), Ok(ADDRESS)]]
+    );
+    assert_eq!(
+        engine
+            .identities()
+            .primary
+            .as_ref()
+            .unwrap()
+            .verified_signing_address(),
+        Ok(ADDRESS)
+    );
+}

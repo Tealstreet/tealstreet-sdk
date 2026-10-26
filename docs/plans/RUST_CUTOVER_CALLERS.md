@@ -9472,3 +9472,14 @@ The remaining conservative request/signing/credential inventory describes manage
 failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
 identity options. This slice retains those rows and all checker rules; completion
 of the custody audit does not claim inventory zero or a new endpoint migration.
+
+### Address setup at host start
+
+With `address-nonce`, native Host, frame-server and WASM startup initialize the
+installed provider before the existing engine seal. Synchronous local providers
+therefore expose genuine verified public addresses to `Venue::start`, including
+independently sealed aliased slots. Unsupported providers retain their per-slot
+NotSent refusal while public work starts. Hosted/asynchronous callers must finish
+the explicit pre-start result and actual-cleanup join before invoking start;
+unfinished work is still retired and refused at that boundary. No host support,
+nonce permission, retry or peer activation is inferred by these automatic calls.
