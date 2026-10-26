@@ -9630,6 +9630,34 @@ such as Coinbase `GET /api/v3/brokerage/key_permissions`. It is primary-only,
 like every `PrimaryRead`. A secondary read-key verification stays an ordinary
 `Read`. No existing reason was reused, because none describes it truthfully.
 
+
+## MEXC installed signing and selected private Reads
+
+All private REST and login signing uses installed immutable provider recipes.
+Trusted JS/native setup preserves mexc: plus12 SHA256 bytes of the raw Primary
+before provider trim as explicit stableId; conflicting metadata refuses. Identity
+may use complete Secondary with credential-only Primary; other private callers
+retain native usable-Primary eligibility. Private history stays Primary-only.
+Background account observations are independent20s/Never selected Reads; exact
+DATA gates rows/status/publication, and exact retirement precedes successors.
+Permanent precommit failures clean up/warn without adding recovery; transient
+and released failures retain native recovery. Nonfinite venue callbacks clean up exact custody, including one correlated
+failure terminal for an owned caller Read. Existing financial reducers and wire controls remain.
+
+Trading FIFO/pacing/reducers and legacy sockets stay native in this slice. ONE
+new interim sign_http attachment remains visible outside the frozen allowance:
+account.rs6805c7c16738 count0->1, explicitly accepted bans RED by the overseer
+under #2195 precedent, with8x5tm1 GO required. The second trading PR removes it.
+It waits for shared admissible sets, per-call serial pacing and response-derived
+defer_pacing; this slice invents no write Context or pacing substitute.
+
+Fixture collection uses actual event observations and genuine Prepare/Bind/Claim.
+History delivery uses the query clock instead of the unrelated100ms startup
+clock; payload financial timestamps/values stay. Paused capacity uses254 depth
+peers then two independent candle peers after genuine429. Exact completion
+Cancel is captured/checked once. The secondary helper is test support with real
+installed providers and genuine test command entry; native assertions retained.
+
 ### Bitunix account read classification (P1 #33)
 
 A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
