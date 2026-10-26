@@ -1443,10 +1443,34 @@ fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_
         command: 10,
         ids: vec!["resting".into()],
     });
+    let cancel = take_method(&mut h, Method::Delete, "/orders/resting");
+    h.respond(cancel, 200, "{}");
     assert!(!h.result(10).is_err_and(|e| e.contains("uncertain")));
+    // The cancel changed the order store after that read began, so its
+    // snapshot cannot commit and cannot release the fence.
     h.respond(fresh, 200, r#"{"results":[]}"#);
     h.command(Command::CancelSymbolOrders {
         command: 11,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    assert!(h.result(11).unwrap_err().contains("uncertain"));
+    // The engine's re-ask starts a new read, whose clean snapshot releases it.
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("engine re-ask");
+    h.now = at;
+    h.e.handle(h.now, Event::TimerFired { timer });
+    h.collect();
+    let reread = take_method(&mut h, Method::Get, "/orders");
+    h.respond(reread, 200, r#"{"results":[]}"#);
+    h.command(Command::CancelSymbolOrders {
+        command: 12,
         symbol: "BTC-USD-PERP".into(),
     });
     take_method(&mut h, Method::Delete, "/orders?market=");
