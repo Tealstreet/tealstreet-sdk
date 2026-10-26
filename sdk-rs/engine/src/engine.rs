@@ -1653,6 +1653,10 @@ struct IoCore {
     // symbols (`None` = all) and the earliest time to ask.
     #[cfg(feature = "order-locks")]
     reconcile_due: Vec<(Option<Vec<String>>, f64)>,
+    /// An opted-in placement fence re-asks its reconcile read until a fresh read
+    /// clears it: the next re-ask and how many have run (bounded backoff).
+    #[cfg(feature = "order-locks")]
+    fence_reread: Option<(f64, u32)>,
     command_entry: Option<command_entry::Entry>,
     /// Caller waits stamped at each external command receipt.
     command_waits: command_entry::Waits,
@@ -1809,6 +1813,8 @@ impl Default for IoCore {
             http_status_exempt: None,
             #[cfg(feature = "order-locks")]
             reconcile_due: Vec::new(),
+            #[cfg(feature = "order-locks")]
+            fence_reread: None,
             command_entry: None,
             command_waits: Default::default(),
             #[cfg(feature = "http-plans")]
@@ -4968,12 +4974,39 @@ impl<V: Venue> Engine<V> {
             self.io.core.http_delivery = delivery;
             self.io.core.order_response_token = token;
         }
+        // A failed or lost reconcile read must not leave the fence standing: re-ask
+        // with bounded backoff (1 s doubling to 30 s) until a fresh read clears it.
+        // A new seal restarts the backoff, since its own read has just been asked for.
+        match self.io.core.order_locks.fence_reread() {
+            None => self.io.core.fence_reread = None,
+            Some(scope) => {
+                let (at, attempts) = self.io.core.fence_reread.unwrap_or((f64::NEG_INFINITY, 0));
+                let attempts = if any { 0 } else { attempts };
+                if any || at <= now {
+                    if !any {
+                        let delivery = self.io.core.http_delivery.take();
+                        let token = self.io.core.order_response_token.take();
+                        let mut cx = Cx {
+                            now,
+                            store: &mut self.store,
+                            io: &mut self.io,
+                        };
+                        self.venue.reconcile_uncertain(&mut cx, scope.as_deref());
+                        self.io.core.http_delivery = delivery;
+                        self.io.core.order_response_token = token;
+                    }
+                    let delay = (1_000. * f64::from(1u32 << attempts.min(5))).min(30_000.);
+                    self.io.core.fence_reread = Some((now + delay, attempts.saturating_add(1)));
+                }
+            }
+        }
         let next = self
             .io
             .core
             .reconcile_due
             .iter()
             .map(|(_, at)| *at)
+            .chain(self.io.core.fence_reread.map(|(at, _)| at))
             .min_by(f64::total_cmp);
         if self.reconcile_timer.map(|(_, at)| at) == next {
             return;
