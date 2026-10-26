@@ -113,8 +113,8 @@ Namespace continuity is an explicit source gate, not an assumed deployment
 fact. The legacy domain uses SHA256(decoded secret); dispatch uses a tagged
 trusted stable subject. The current core still exports the bare legacy u64
 reservation and no completed takeover API. Trusted local setup must associate
-installed bytes/slot to the subject without exporting the digest. That association remains inside the trusted
-LocalSigner/executor and surfaces only an opaque tagged subject; no secret hash
+installed bytes/slot to the subject without exporting the digest. That association
+remains inside the trusted LocalSigner/executor and surfaces only an opaque tagged subject; no secret hash
 becomes stable_id, binding metadata or a notice. Delegated
 setup receives the peer-confirmed subject rather than inventing a random one.
 
@@ -142,7 +142,6 @@ and the original epoch/deadline, and avoid the unrelated HTTP sequence barrier.
 Its exact API, originals, implementation, non-adopter costs and assignment are
 separate source gates. Do not call an imagined current entry or fake HTTP work.
 HTTP and token metadata need no new engine entry after their actual adoption.
-
 
 Add the separately negotiated closed `kraken.futures.challenge/1` recipe to the
 shared Kraken codec. Its descriptor contains the actual challenge, environment
@@ -197,8 +196,8 @@ enters an operation frame. No separate Spot WS MAC capability is needed.
    browser-host public gates. No native-only beta readiness claim.
 6. One local composed combined measurement for this shared PR, jobs 4 for that
    single WASM/size build. Tests/checks use CARGO_BUILD_JOBS=2, one cargo
-   invocation per lane at a time; rerun an exit-137 resource kill. CI records family sizes. Report the actual measured
-   tip, delta and Kraken/Spot cap; no local family matrix. The urgent cap fix is
+   invocation per lane at a time; rerun an exit-137 resource kill. CI records
+   family sizes. Report the actual measured tip, delta and Kraken/Spot cap; no local family matrix. The urgent cap fix is
    separate. Inventory changes are removal-only evidence after real adoption,
    never cosmetic relocation or diagnostic/oracle deletion.
 7. Plan/API CLEAR precedes originals and source in this PR. Freeze and request
