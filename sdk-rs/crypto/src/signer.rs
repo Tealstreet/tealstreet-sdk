@@ -1685,7 +1685,10 @@ mod tests {
         }
         raw[64] = 2;
         assert_eq!(evm_signature(&raw).err(), Some(SignError::InvalidRequest));
-        assert_eq!(evm_signature(&raw[..64]).err(), Some(SignError::InvalidRequest));
+        assert_eq!(
+            evm_signature(&raw[..64]).err(),
+            Some(SignError::InvalidRequest)
+        );
         assert_eq!(evm_signature(&[]).err(), Some(SignError::InvalidRequest));
     }
     #[test]
