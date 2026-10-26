@@ -1710,7 +1710,6 @@ impl BitunixFutures {
     pub(crate) fn reconcile_trading(&mut self, cx: &mut Cx<'_, Pending>) {
         self.restore_retired(cx);
         self.account.reconcile = true;
-        self.account.owed = [true, true];
         self.account.reconciled = [false, false];
         self.read_axis(cx, Axis::Orders);
         self.read_axis(cx, Axis::Tpsl);

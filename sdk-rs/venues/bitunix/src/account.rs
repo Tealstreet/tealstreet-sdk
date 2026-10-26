@@ -183,18 +183,21 @@ pub struct OrderReadProgress {
     issued: f64,
     timer: TimerId,
     dirty: bool,
+    /// Issued as an owed uncertain-write census: a later request joins it.
+    owed: bool,
     newer: RowAdmission<String>,
     rejected: RowAdmission<String>,
 }
 #[derive(Default)]
 pub struct AccountState {
     pub(crate) recovery: crate::recovery::State,
-    /// Set while an uncertain write's census is issued: it supersedes any
-    /// census already in flight instead of coalescing into it.
+    /// Set while an uncertain write's census is issued: it supersedes an
+    /// ordinary census in flight and joins an owed one.
     pub reconcile: bool,
-    /// Regular and TP/SL census still owed to an uncertain write: Primary-signed
-    /// until a complete snapshot of that slot commits.
-    pub owed: [bool; 2],
+    /// Regular and TP/SL census owed to an uncertain write: the first serial
+    /// issued after the request. Reads stay Primary-signed until a complete
+    /// snapshot at or past it commits.
+    pub owed: [Option<u64>; 2],
     /// Regular and TP/SL order snapshots committed since that reconcile.
     pub reconciled: [bool; 2],
     /// Symbols whose leverage/margin mode were read on first candle interest.
@@ -583,10 +586,14 @@ impl BitunixFutures {
             }
         }
         if let Some(slot) = axis.order_slot() {
+            if self.account.reconcile {
+                // A joined census predates this request; only a later one pays it.
+                self.account.owed[slot] = Some(self.account.serials[slot + 2] + 1);
+            }
             if after.is_none()
-                && !self.account.reconcile
                 && let Some(progress) = self.account.order_reads[slot].as_mut()
                 && cx.now < progress.issued + ORDER_STALL_MS
+                && (progress.owed || !self.account.reconcile)
             {
                 progress.dirty = true;
                 return;
@@ -638,7 +645,7 @@ impl BitunixFutures {
             baselines: vec![],
             reconcile: axis
                 .order_slot()
-                .is_some_and(|slot| self.account.owed[slot]),
+                .is_some_and(|slot| self.account.owed[slot].is_some()),
         };
         if let Some(slot) = axis.order_slot() {
             self.account.order_reads[slot] = Some(OrderReadProgress {
@@ -646,6 +653,7 @@ impl BitunixFutures {
                 issued: cx.now,
                 timer: cx.set_timer(ORDER_STALL_MS),
                 dirty: false,
+                owed: read.reconcile,
                 newer: Default::default(),
                 rejected: Default::default(),
             });
@@ -1345,10 +1353,11 @@ impl BitunixFutures {
         let Some(token) = read.order_token.take() else {
             return;
         };
-        let (reconcile, slot, partial) = (
+        let (reconcile, slot, partial, serial) = (
             read.reconcile,
             usize::from(read.axis == Axis::Tpsl),
             read.partial_orders(),
+            read.serial,
         );
         if !cx
             .store
@@ -1358,8 +1367,12 @@ impl BitunixFutures {
             return;
         }
         // Both complete Primary snapshots postdate the uncertain write.
+        // Each clean owed snapshot reports; the engine's epoch rule releases
+        // only marks that predate it. The debt clears at its own serial.
         if reconcile && !partial {
-            self.account.owed[slot] = false;
+            if self.account.owed[slot].is_some_and(|owed| serial >= owed) {
+                self.account.owed[slot] = None;
+            }
             self.account.reconciled[slot] = true;
             if self.account.reconciled == [true, true] {
                 self.account.reconciled = [false, false];

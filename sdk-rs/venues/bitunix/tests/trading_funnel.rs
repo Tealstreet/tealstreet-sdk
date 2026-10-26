@@ -734,3 +734,152 @@ fn an_unknown_placement_fences_retries_until_a_fresh_reconcile() {
         "the fresh census releases the fence"
     );
 }
+
+/// A second Unknown seal while the first's census is in flight joins it rather
+/// than superseding it, yet stays owed: the dirty follow-up, dispatched after
+/// the second mark, releases both symbols.
+#[test]
+fn a_second_seal_joins_the_owed_census_and_a_later_one_pays_it() {
+    let pairs = PAIRS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","base":"ETH","quote":"USDT","symbolStatus":"OPEN","basePrecision":2,"quotePrecision":2,"maxLimitOrderVolume":"1000"}]}"#,
+    );
+    let tickers = TICKERS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","last":"3000","open":"2900","markPrice":"3001","baseVol":"10","quoteVol":"30000"}]}"#,
+    );
+    let (mut e, _) = startup_serving(
+        engine(Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Options::default()
+        }),
+        &pairs,
+        &tickers,
+    );
+    let place = |command: u32, symbol: &str, price: f64| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol": symbol, "type": "limit", "side": "buy", "price": price, "amount": 1.0,
+            }))
+            .unwrap(),
+        ],
+    };
+    let reads = |actions: &[Action]| -> Vec<HttpRequest> {
+        http(actions)
+            .into_iter()
+            .filter(|r| r.url.ends_with("get_pending_orders"))
+            .collect()
+    };
+    // Every action, so due timers fire as a host would fire them.
+    let mut log: Vec<Action> = Vec::new();
+    let step = |e: &mut TestEngine, log: &mut Vec<Action>, at: f64| {
+        let out = prepared(e, at);
+        log.extend(out.iter().cloned());
+        out
+    };
+    let lose = |e: &mut TestEngine,
+                log: &mut Vec<Action>,
+                command: u32,
+                symbol: &str,
+                price: f64,
+                at: f64| {
+        e.handle(at, Event::Command(place(command, symbol, price)));
+        let write = post(&http(&step(e, log, at)), "place_order").expect("the placement");
+        e.handle(
+            at + 50.0,
+            Event::HttpFailed {
+                request: write.id,
+                error: "lost placement ACK",
+            },
+        );
+        let sealed = step(e, log, at + 50.0);
+        assert_eq!(
+            failure(&sealed, command).and_then(|e| e.outcome),
+            Some(Outcome::Unknown)
+        );
+        sealed
+    };
+    let admitted = |e: &mut TestEngine,
+                    log: &mut Vec<Action>,
+                    command: u32,
+                    symbol: &str,
+                    price: f64,
+                    at: f64| {
+        e.handle(at, Event::Command(place(command, symbol, price)));
+        writes_of(&step(e, log, at), "place_order") == 1
+    };
+    let census = |e: &mut TestEngine, log: &mut Vec<Action>, requests: &[HttpRequest], at: f64| {
+        for request in requests {
+            let body = if request.url.contains("/tpsl/") {
+                TPSL
+            } else {
+                ORDERS
+            };
+            log.extend(answer(e, at, request, body));
+        }
+    };
+    // Fire every armed, uncleared timer due by `until`, in order; return reads.
+    let advance = |e: &mut TestEngine, log: &mut Vec<Action>, until: f64| {
+        let mut sent = Vec::new();
+        let mut fired = std::collections::HashSet::new();
+        loop {
+            let cleared: std::collections::HashSet<_> = log
+                .iter()
+                .filter_map(|a| match a {
+                    Action::ClearTimer { timer } => Some(*timer),
+                    _ => None,
+                })
+                .collect();
+            let next = log
+                .iter()
+                .filter_map(|a| match a {
+                    Action::SetTimer { timer, at_ms }
+                        if *at_ms <= until
+                            && !cleared.contains(timer)
+                            && !fired.contains(timer) =>
+                    {
+                        Some((*timer, *at_ms))
+                    }
+                    _ => None,
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            let Some((timer, at)) = next else { return sent };
+            fired.insert(timer);
+            e.handle(at, Event::TimerFired { timer });
+            let out = prepared(e, at);
+            sent.extend(reads(&out));
+            log.extend(out);
+        }
+    };
+
+    let first = reads(&lose(&mut e, &mut log, 301, "BTCUSDT", 90000.0, 1000.0));
+    assert_eq!(first.len(), 2, "the first seal's census");
+    assert!(
+        reads(&lose(&mut e, &mut log, 302, "ETHUSDT", 2900.0, 1100.0)).is_empty(),
+        "the second seal joins the census in flight"
+    );
+    // The joined census predates ETH's write: its snapshot cannot commit, so
+    // both stay fenced until a later census.
+    census(&mut e, &mut log, &first, 1200.0);
+    assert!(
+        !admitted(&mut e, &mut log, 303, "BTCUSDT", 90000.0, 1300.0),
+        "BTC still fenced"
+    );
+    assert!(
+        !admitted(&mut e, &mut log, 304, "ETHUSDT", 2900.0, 1300.0),
+        "ETH still owed"
+    );
+    let later = advance(&mut e, &mut log, 2300.0);
+    assert_eq!(later.len(), 2, "the follow-up census");
+    census(&mut e, &mut log, &later, 2400.0);
+    assert!(
+        admitted(&mut e, &mut log, 305, "BTCUSDT", 90000.0, 2500.0),
+        "BTC released"
+    );
+    assert!(
+        admitted(&mut e, &mut log, 306, "ETHUSDT", 2900.0, 2500.0),
+        "ETH released"
+    );
+}
