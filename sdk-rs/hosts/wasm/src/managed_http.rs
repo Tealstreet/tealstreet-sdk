@@ -345,18 +345,13 @@ mod sign_meta {
     use safe_cex_engine::{AccountReadScope, CredentialSlot};
     use serde::Serialize;
 
+    /// A business task carries slot and role; a setup task carries only its
+    /// closed setup arm, never a business role.
     #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
     #[serde(untagged)]
     pub(super) enum Out {
         Business(Business),
-        Setup {
-            task: u64,
-            owner: Owner,
-            #[serde(rename = "deadlineMs")]
-            deadline_ms: f64,
-            setup: Setup,
-        },
+        Setup(SetupOut),
     }
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -368,14 +363,22 @@ mod sign_meta {
         role: Role,
     }
     #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(super) struct SetupOut {
+        task: u64,
+        owner: Owner,
+        deadline_ms: f64,
+        setup: Setup,
+    }
+    #[derive(Serialize)]
     #[serde(tag = "kind", rename_all = "camelCase")]
-    pub(super) enum Owner {
+    enum Owner {
         Managed { request: u64, generation: u64 },
         Session { generation: u64 },
         Setup { generation: u64 },
     }
     #[derive(Serialize)]
-    pub(super) struct Setup {
+    struct Setup {
         operation: &'static str,
         slot: &'static str,
     }
@@ -415,7 +418,7 @@ mod sign_meta {
                     operation: SetupOperation::PublicAddress,
                     slot,
                 } => {
-                    return Self::Setup {
+                    return Self::Setup(SetupOut {
                         task: meta.task.0,
                         owner: Owner::Setup { generation },
                         deadline_ms: meta.deadline_ms,
@@ -423,7 +426,7 @@ mod sign_meta {
                             operation: "publicAddress",
                             slot: slot_name(slot),
                         },
-                    };
+                    });
                 }
                 SignKind::Managed {
                     request,
@@ -471,11 +474,34 @@ mod sign_meta {
 
 #[cfg(all(test, feature = "sign-meta"))]
 mod sign_meta_wire_tests {
+    //! Golden business wire bytes: the SignKind cutover must keep them exact.
     use super::sign_meta::Out;
     use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
     use safe_cex_engine::sign_meta::{SetupOperation, SignKind, SignMeta};
     use safe_cex_engine::{AccountReadScope, CredentialSlot, RequestId};
-    fn wire(kind: SignKind) -> String {
+
+    #[derive(Clone, Copy)]
+    enum Owner {
+        Managed,
+        Session,
+    }
+    const MANAGED: Owner = Owner::Managed;
+    fn kind(owner: Owner, slot: CredentialSlot, role: CredentialRole) -> SignKind {
+        match owner {
+            Owner::Managed => SignKind::Managed {
+                request: RequestId(19),
+                generation: 3,
+                slot,
+                role,
+            },
+            Owner::Session => SignKind::Session {
+                generation: 3,
+                slot,
+                role,
+            },
+        }
+    }
+    fn encode(kind: SignKind) -> String {
         serde_json::to_string(&Out::from(SignMeta {
             task: RequestId(7),
             deadline_ms: 20001.25,
@@ -483,8 +509,12 @@ mod sign_meta_wire_tests {
         }))
         .unwrap()
     }
+    fn wire(owner: Owner, slot: CredentialSlot, role: CredentialRole) -> String {
+        encode(kind(owner, slot, role))
+    }
+
     #[test]
-    fn business_metadata_bytes_remain_landed_shape_and_order() {
+    fn business_metadata_bytes_keep_the_landed_shape_and_order() {
         for (slot, slot_text) in [
             (CredentialSlot::Primary, "primary"),
             (CredentialSlot::Secondary, "secondary"),
@@ -498,12 +528,7 @@ mod sign_meta_wire_tests {
                 (Some(AccountReadScope::Settings), "\"settings\""),
             ] {
                 assert_eq!(
-                    wire(SignKind::Managed {
-                        request: RequestId(19),
-                        generation: 3,
-                        slot,
-                        role: CredentialRole::Read { scope }
-                    }),
+                    wire(MANAGED, slot, CredentialRole::Read { scope }),
                     format!(
                         "{{\"task\":7,\"owner\":{{\"kind\":\"managed\",\"request\":19,\"generation\":3}},\"deadlineMs\":20001.25,\"slot\":\"{slot_text}\",\"role\":{{\"kind\":\"read\",\"scope\":{text}}}}}"
                     )
@@ -518,45 +543,40 @@ mod sign_meta_wire_tests {
             (PrimaryReason::History, "history"),
         ] {
             assert_eq!(
-                wire(SignKind::Managed {
-                    request: RequestId(19),
-                    generation: 3,
-                    slot: CredentialSlot::Primary,
-                    role: CredentialRole::PrimaryRead {
+                wire(
+                    MANAGED,
+                    CredentialSlot::Primary,
+                    CredentialRole::PrimaryRead {
                         reason,
                         scope: None
                     }
-                }),
+                ),
                 format!(
                     "{{\"task\":7,\"owner\":{{\"kind\":\"managed\",\"request\":19,\"generation\":3}},\"deadlineMs\":20001.25,\"slot\":\"primary\",\"role\":{{\"kind\":\"primaryRead\",\"reason\":\"{text}\",\"scope\":null}}}}"
                 )
             );
         }
         assert_eq!(
-            wire(SignKind::Session {
-                generation: 3,
-                slot: CredentialSlot::Primary,
-                role: CredentialRole::SessionAuth
-            }),
+            wire(
+                Owner::Session,
+                CredentialSlot::Primary,
+                CredentialRole::SessionAuth
+            ),
             r#"{"task":7,"owner":{"kind":"session","generation":3},"deadlineMs":20001.25,"slot":"primary","role":{"kind":"sessionAuth"}}"#
         );
         assert_eq!(
-            wire(SignKind::Managed {
-                request: RequestId(19),
-                generation: 3,
-                slot: CredentialSlot::Primary,
-                role: CredentialRole::Mutation
-            }),
+            wire(MANAGED, CredentialSlot::Primary, CredentialRole::Mutation),
             r#"{"task":7,"owner":{"kind":"managed","request":19,"generation":3},"deadlineMs":20001.25,"slot":"primary","role":{"kind":"mutation"}}"#
         );
     }
+
     #[test]
-    fn setup_metadata_has_only_its_closed_setup_arm() {
+    fn setup_metadata_carries_only_its_closed_setup_arm() {
         assert_eq!(
-            wire(SignKind::Setup {
+            encode(SignKind::Setup {
                 generation: 3,
                 operation: SetupOperation::PublicAddress,
-                slot: CredentialSlot::Secondary
+                slot: CredentialSlot::Secondary,
             }),
             r#"{"task":7,"owner":{"kind":"setup","generation":3},"deadlineMs":20001.25,"setup":{"operation":"publicAddress","slot":"secondary"}}"#
         );
