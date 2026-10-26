@@ -1,5 +1,11 @@
 # CLAUDE.md - safe-cex Package
 
+The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
+SDK factories and workers have no TypeScript venue fallback; OUT names refuse
+with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
+and test-only replay/reference implementations remain independent dependencies.
+
+
 Core exchange integration library. See also exchange-specific `CLAUDE.md` files in `src/exchanges/*/`.
 
 > **CLAUDE.md is a living spec.** When you change non-obvious
@@ -139,9 +145,8 @@ The delegated provider initializes UTF-8 codecs only when provider work begins.
 Importing the native registry before its host installs TextEncoder/TextDecoder
 must remain supported; signing and frame I/O require those runtime codecs.
 
-Explicit `ExchangeOptions.engine: 'rust'` selects a registered Rust venue in
-both `createExchange` (including saved-account/public factories) and
-`ExchangeWorker`. Registry defaults remain independent of that opt-in.
+The beta registry always selects Rust in SDK factories and `ExchangeWorker`;
+`ExchangeOptions.engine` remains an accepted compatibility input only.
 `src/__tests__/cutover/*.wasm.test.ts` verifies the worker frame/store consumer
 contract for every `RUST_VENUES` name; actual native startup and independent
 binary lifecycle fixtures have separate evidence scopes. See phase 9 of

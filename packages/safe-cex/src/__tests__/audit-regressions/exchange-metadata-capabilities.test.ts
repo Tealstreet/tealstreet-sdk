@@ -1,10 +1,12 @@
+import type { ExchangeCapabilities } from '../../exchanges/base';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { BaseExchange, CAPABILITY_METHODS, type ExchangeCapabilities } from '../../exchanges/base';
-import { exchangeRegistry } from '../../exchanges/registry';
+import { BaseExchange, CAPABILITY_METHODS } from '../../exchanges/base';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeName, ExchangeOptions } from '../../types';
+import { legacyVenueRegistry as exchangeRegistry } from '../reference/legacyVenueRegistry';
 
 vi.hoisted(() => {
   // HyroTrader builds Bybit REST clients during construction, before the test ever starts I/O.

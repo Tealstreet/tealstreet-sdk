@@ -11,8 +11,8 @@ import type { Store } from './store/store.interface';
 import type { ExchangeName, ExchangeOptions, PublicExchangeOptions } from './types';
 
 import { getExchangeMetadata } from './exchangeMetadata';
-import { hostedSigningVenues, isKeylessRemoteSigned } from './exchanges/hostedSigningVenues';
 import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
+import { assertBetaAccount, assertBetaVenue } from './exchanges/rust/betaVenues';
 import { DefaultStore } from './store/store.base';
 import { getTransport } from './transport/registry';
 import { virtualClock } from './utils/virtualClock';
@@ -85,18 +85,12 @@ export const createExchange = async (
   options: ExchangeOptions,
   store?: Store,
 ): Promise<BaseExchange> => {
-  // Start the virtual clock to synchronize with exchange servers
+  assertBetaAccount(exchangeName, options);
+  const Exchange = await loadExchange(exchangeName);
+  // Rejected venues never start the clock, load WASM or construct transports.
+  const exchange = new Exchange(exchangeName, { ...options, engine: 'rust' }, store || new DefaultStore());
   virtualClock.start();
-
-  if (options.engine === 'rust') {
-    const { runsOnRustEngine, RustEngineExchange } = await import('./exchanges/rust/rust.exchange');
-    if (runsOnRustEngine(exchangeName, options)) {
-      return new RustEngineExchange(exchangeName, options, store || new DefaultStore());
-    }
-  }
-  const hosted = isKeylessRemoteSigned(exchangeName, options) ? hostedSigningVenues[exchangeName] : undefined;
-  const Exchange = hosted ? await hosted() : await loadExchange(exchangeName);
-  return new Exchange(exchangeName, options, store || new DefaultStore());
+  return exchange;
 };
 
 export const buildPublicExchangeOptions = (
@@ -201,6 +195,7 @@ export const createPublicExchange = async (
   options?: Partial<Omit<PublicExchangeOptions, 'publicDataOnly'>>,
   store?: Store,
 ): Promise<BaseExchange> => {
+  assertBetaVenue(exchangeName);
   return createExchange(exchangeName, buildPublicExchangeOptions(exchangeName, options), store);
 };
 

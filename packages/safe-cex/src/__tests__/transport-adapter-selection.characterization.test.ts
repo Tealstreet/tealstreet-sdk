@@ -6,7 +6,6 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import '../transport/registerTealstreetTransport';
 
-import { exchangeRegistry } from '../exchanges/registry';
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import {
   axiosHttpOverWebsocketAdapter,
@@ -14,10 +13,11 @@ import {
   disposeHOWWebSockets,
 } from '../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { DefaultStore } from '../store/store.base';
+import { legacyVenueRegistry as exchangeRegistry } from './reference/legacyVenueRegistry';
 
 // Inspect REST adapter construction, without bootstrapping a remote SDK account.
 vi.mock('../exchanges/paradex/paradex.sdk', async (original) => ({
-  ...await original<typeof import('../exchanges/paradex/paradex.sdk')>(),
+  ...(await original<typeof import('../exchanges/paradex/paradex.sdk')>()),
   initializeParadexSDK: vi.fn(async () => null),
 }));
 
@@ -145,7 +145,11 @@ describe('transport adapter selection per exchange', () => {
       }
 
       const rust = Exchange === RustEngineExchange;
-      expect(Object.values(selection).every((instances) => rust ? Object.keys(instances).length === 0 : Object.keys(instances).length > 0)).toBe(true);
+      expect(
+        Object.values(selection).every((instances) =>
+          rust ? Object.keys(instances).length === 0 : Object.keys(instances).length > 0,
+        ),
+      ).toBe(true);
       expect(selection).toMatchSnapshot();
     },
     ADAPTER_SELECTION_TIMEOUT_MS,

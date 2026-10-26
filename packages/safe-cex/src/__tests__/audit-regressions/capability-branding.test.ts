@@ -3,12 +3,12 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITY_METHODS } from '../../exchanges/base';
-import { exchangeRegistry } from '../../exchanges/registry';
 import { DefaultStore } from '../../store/store.base';
+import { legacyVenueRegistry as exchangeRegistry } from '../reference/legacyVenueRegistry';
 
 // Capability discovery needs no Starknet account or remote SDK configuration.
 vi.mock('../../exchanges/paradex/paradex.sdk', async (original) => ({
-  ...await original<typeof import('../../exchanges/paradex/paradex.sdk')>(),
+  ...(await original<typeof import('../../exchanges/paradex/paradex.sdk')>()),
   initializeParadexSDK: vi.fn(async () => null),
 }));
 
