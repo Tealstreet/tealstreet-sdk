@@ -218,6 +218,8 @@ impl<V: Venue, T: Transport> Host<V, T> {
     /// Run until `commands` closes, handing each flush frame to `on_frame`
     /// and every log line or command result to `on_notice`. Returns the
     /// engine for inspection.
+    // This must construct the cleanup owner before even the first future poll.
+    #[allow(clippy::manual_async_fn)]
     pub fn run(
         self,
         mut commands: mpsc::UnboundedReceiver<Command>,
