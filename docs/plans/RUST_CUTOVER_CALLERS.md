@@ -9415,6 +9415,8 @@ credential, signing or nonce authority and uses the retained login Session's
 explicit egress. Installed unsigned-only commands may deliberately use a Session
 root; sign-requiring commands never fall back to it. Credential-bearing login
 Sessions must match the engine's own installed Primary slot and credential ref.
+The venue selects the actual login Session: the engine checks authority and
+liveness but cannot distinguish its business purpose from a listen-key Session.
 Mixed roots retain the exact write credential for their later Preflight calls.
 Session calls keep Mutation journal evidence, order locks and Unknown on an
 unproven released send. Their resend freezes codec bytes while refreshing the

@@ -41,6 +41,9 @@ that identity's signing ref.
 Foreign refs, accounts, slots, stale or retired Sessions refuse before IDs.
 Never trust a venue-supplied Identity or Selection as this comparison's source.
 The one real Present-only login Session suffices; no dummy header Session exists.
+The engine proves issuer, account, slot, refs and liveness, but cannot distinguish
+login from another Primary-credential Session such as a listen key. The venue
+must select its actual login Session; GRVT's account state owns that choice.
 `Sessions::open` keeps its global credential-xor-private-egress rule unchanged.
 
 Recheck this binding and liveness at issue, continuation and resend. A Session
@@ -141,7 +144,9 @@ provider rules. No Sessions::open constraint or global recipe validation changes
 
 The twelve original first assertions are preserved. Source fixture completion
 adds the required genuine reconciliation capture and finish_plan_call before
-done_plan; both were gated by entry in the inert checkpoint. Source controls add
+done_plan; both were gated by entry in the inert checkpoint. The harness also
+enables guard_order_mutations and seals transport failure through fail_plan
+instead of its original panic, so the new write/lock/Unknown control can execute. Source controls add
 selected/nonce refusal, refreshed-cookie immutable resend and late duplicate,
 changed-body refusal, retired resend, mixed Preflight create resend with fresh
 provider work, and a released Session Mutation failing Unknown. A terminal after
