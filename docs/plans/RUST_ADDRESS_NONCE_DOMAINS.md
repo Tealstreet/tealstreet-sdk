@@ -307,6 +307,17 @@ Clippy modes, fmt and diff-check pass. A first strict run found only a redundant
 helper return binding; the forward fix preserves every test body/assertion.
 Each owned qualification target was removed after its mode completed.
 
+The credential review correction consumes actual phase3 landing
+`174f6a4c90c6a08dbabe72623fe3a4d8226109f2`. An additive Optional-signing
+control uses CredentialSetupPolicy::apply_to_identities, confirms the genuine
+SigningNotConfigured/InvalidInput/NotSent setup disposition, then requires nonce
+selection to retain that error before the subject check. This pure selection
+control does not itself prove managed authentication-health behavior; that
+remains a source gate. The serialized-metadata control now requires successful
+deserialization and equality with the ordinary identity before testing claim
+refusal; a future unknown-field refusal cannot silently bypass the assertion.
+The earlier 8b0 qualification remains attributed to its original source.
+
 ## Scope, zero-growth and publication gates
 
 Proposed non-default engine feature: `address-nonce = ["dispatch-nonce"]`.

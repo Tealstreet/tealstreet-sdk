@@ -244,10 +244,9 @@ mod proposed_address_contract {
             "verifiedAddress": {"address": vec![0_u8; 20], "signing": "address-original/signing",
                 "algorithm": "secp256k1Digest"}
         });
-        let identity: Identity = match serde_json::from_value(incoming) {
-            Ok(identity) => identity,
-            Err(_) => return, // Refusing unknown forged metadata also denies the grant.
-        };
+        let identity: Identity = serde_json::from_value(incoming)
+            .expect("current Identity deserialization ignores forged verifiedAddress metadata");
+        assert_eq!(identity, super::identity(Some(address(12))));
         let slots = Slots::new(Some(identity), None, SlotPolicy::default());
         assert_eq!(
             slots
@@ -266,6 +265,42 @@ mod proposed_address_contract {
             .err()
             .expect("a missing signing ref cannot create a claim");
         assert_eq!(error.sign_error(), SignError::MissingKey);
+    }
+
+    #[test]
+    fn optional_signing_absence_is_classified_before_the_address_subject() {
+        use safe_cex_engine::signing::{CredentialSetupPolicy, Identities};
+        use safe_cex_engine::{ErrorKind, Outcome};
+
+        let mut identities = Identities {
+            primary: Some(Identity::new(
+                KeyRef("address-original/optional-credential".into()),
+                None,
+            )),
+            secondary: None,
+        };
+        let policy: CredentialSetupPolicy =
+            serde_json::from_str(r#"{"primary":{"signing":"optional"}}"#).unwrap();
+        policy.apply_to_identities(&mut identities, false).unwrap();
+        let identity = identities.primary.as_ref().unwrap();
+        assert_eq!(
+            identity.signing_ref().unwrap_err(),
+            SignError::SigningNotConfigured
+        );
+        let refusal = SignError::SigningNotConfigured.venue_error();
+        assert_eq!(refusal.kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(refusal.outcome, Some(Outcome::NotSent));
+
+        let slots = Slots::new(
+            identities.primary,
+            identities.secondary,
+            SlotPolicy::default(),
+        );
+        let error = slots
+            .select_with_nonce(CredentialRole::Mutation, &HYPERLIQUID_AGENT)
+            .err()
+            .expect("intentional signing absence cannot create a claim");
+        assert_eq!(error.sign_error(), SignError::SigningNotConfigured);
     }
 
     #[test]
