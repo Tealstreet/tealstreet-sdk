@@ -20,7 +20,7 @@ function verifyWorkflow(text) {
   assert.match(collect, /--command collect --suite '\$\{\{ matrix\.venue \}\}'/);
   assert.doesNotMatch(collect, /^          (?:if|else)\b|rust:gate:verify/m, 'no suite bypass of shared collection');
   assert.match(first, /name: Retain the eligible original runtime bytes\n        if: steps\.cpu_collect\.outputs\.has_eligible == 'true'/);
-  assert.match(plan, /needs: \[gate, bitget-paired\]\n    if: always\(\)/);
+  assert.match(plan, /needs: \[selection, gate, bitget-paired\]\n    if: always\(\)/);
   assert.match(plan, /matrix: \$\{\{ steps\.plan\.outputs\.matrix \}\}/);
   assert.match(plan, /--command plan --out /);
   assert.doesNotMatch(plan, /--suite /, 'planner covers the entire registered suite set');
@@ -30,8 +30,8 @@ function verifyWorkflow(text) {
   assert.match(second, /--command second --suite '\$\{\{ matrix\.suite \}\}'/);
   assert.match(second, /name: cpu-second-\$\{\{ matrix\.suite \}\}/);
   assert.match(final, /name: Rust \/ replay gate \(\$\{\{ matrix\.suite \}\}\)/);
-  assert.match(certify, /needs: \[gate, bitget-paired, cpu-plan, cpu-second\]\n    if: always\(\)/);
-  assert.match(final, /needs: cpu-certify\n    if: always\(\)/);
+  assert.match(certify, /needs: \[selection, gate, bitget-paired, cpu-plan, cpu-second\]\n    if: always\(\)/);
+  assert.match(final, /needs: \[selection, cpu-certify\]\n    if: always\(\)/);
   const suites = /suite: \[([^\]]+)\]/.exec(final);
   assert(suites);
   assert.deepEqual(suites[1].split(',').map(suite => suite.trim()).sort(), [...GATE_SUITES].sort());
@@ -74,8 +74,8 @@ test('Bitget paired producer is mandatory, bounded, source-selected and independ
   assert.match(paired, /name: bitget-paired-steady/);
   assert.match(paired, /name: Retain counterbalanced Bitget steady evidence\n        if: always\(\)/);
   assert.doesNotMatch(paired, /--baseline|--candidate|--tolerance|--threshold|continue-on-error|workflow_dispatch:/);
-  assert.match(job(source, 'cpu-plan'), /needs: \[gate, bitget-paired\]/);
-  assert.match(job(source, 'cpu-certify'), /needs: \[gate, bitget-paired, cpu-plan, cpu-second\]/);
+  assert.match(job(source, 'cpu-plan'), /needs: \[selection, gate, bitget-paired\]/);
+  assert.match(job(source, 'cpu-certify'), /needs: \[selection, gate, bitget-paired, cpu-plan, cpu-second\]/);
 });
 
 test('workflow controls reject skipped final checks, unconditional second jobs and suite/local bypasses', () => {
@@ -88,8 +88,8 @@ test('workflow controls reject skipped final checks, unconditional second jobs a
     text => text.replace(job(text, 'cpu-second'), job(text, 'cpu-second') + '      - uses: ./.github/actions/install-yarn\n'),
     text => text.replace(job(text, 'cpu-final'), job(text, 'cpu-final') + '      - uses: ./.github/actions/prepare-yarn\n'),
     text => text.replace("needs: cpu-plan\n    if: needs.cpu-plan.result == 'success' && needs.cpu-plan.outputs.has_eligible == 'true'", 'needs: cpu-plan\n    if: always()'),
-    text => text.replace('needs: [gate, bitget-paired, cpu-plan, cpu-second]\n    if: always()', 'needs: [gate, bitget-paired, cpu-plan, cpu-second]\n    if: success()'),
-    text => text.replace('needs: cpu-certify\n    if: always()', 'needs: cpu-certify\n    if: success()'),
+    text => text.replace('needs: [selection, gate, bitget-paired, cpu-plan, cpu-second]\n    if: always()', 'needs: [selection, gate, bitget-paired, cpu-plan, cpu-second]\n    if: success()'),
+    text => text.replace('needs: [selection, cpu-certify]\n    if: always()', 'needs: cpu-certify\n    if: success()'),
     text => text.replace('timeout-minutes: 5\n    defaults:\n      run:\n        working-directory: .', 'timeout-minutes: 5'),
     text => text.replace('suite: [breakoutprop,', 'suite: ['),
     text => text.replace('--command plan --out', '--command plan --suite bitget --out'),
