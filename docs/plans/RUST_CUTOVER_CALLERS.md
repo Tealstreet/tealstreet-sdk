@@ -9935,7 +9935,8 @@ native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
 opts in. Phase B: the fence no longer needs a lock scope. On an opted-in venue whose
 placements or amends hold no scope (guard flags off: Binance x4, Bybit,
 Crypto.com, BingX, ApeX, Hyperliquid, Paradex), entry still refuses a fenced
-symbol, and every admitted placement or amend is marked with its symbols (all
+symbol (cancel-all as its `fence_uncertain_cancel_all` declares), and every
+admitted placement or amend is marked with its symbols (all
 symbols for an amend whose symbol is unknown). An Unknown outcome on that
 command (managed, single-Context or legacy `cx.request`) fences them and queues
 their reconcile; any other end drops the mark. Amend roots are marked too, so an

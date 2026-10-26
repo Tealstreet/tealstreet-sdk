@@ -639,6 +639,8 @@ const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this ven
 #[cfg(feature = "order-locks")]
 const UNCERTAIN_PLACEMENT: &str =
     "Placement outcome is uncertain; reconcile before placing or amending";
+#[cfg(feature = "order-locks")]
+const UNCERTAIN_CANCEL_ALL: &str = "Placement outcome is uncertain; reconcile before cancel-all";
 
 pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
     cx.fail(command, UNSUPPORTED_VENUE_ACTION);
@@ -4816,7 +4818,7 @@ impl<V: Venue> Engine<V> {
                                 if self.venue.fence_uncertain_cancel_all()
                                     && cx.io.core.order_locks.uncertain(symbol) =>
                             {
-                                "Placement outcome is uncertain; reconcile before cancel-all".into()
+                                UNCERTAIN_CANCEL_ALL.into()
                             }
                             _ => "Order amendment or cancellation is already in flight".into(),
                         };
@@ -4827,17 +4829,27 @@ impl<V: Venue> Engine<V> {
                         return;
                     }
                 }
-                // A placement or amend no lock scope holds is still fenced, and
-                // marked so its own Unknown outcome fences its symbols.
+                // A command no lock scope holds is still fenced (cancel-all as the
+                // venue declares), and a placement or amend is marked so its own
+                // Unknown outcome fences its symbols.
                 #[cfg(feature = "order-locks")]
                 if !(self.venue.guard_order_mutations()
                     && (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements()))
-                    && let Err(id) = cx.io.core.order_locks.admit_unscoped(&command, cx.store)
+                    && let Err(id) = cx.io.core.order_locks.admit_unscoped(
+                        &command,
+                        cx.store,
+                        self.venue.fence_uncertain_cancel_all(),
+                    )
                 {
+                    let message = if matches!(command, Command::CancelSymbolOrders { .. }) {
+                        UNCERTAIN_CANCEL_ALL
+                    } else {
+                        UNCERTAIN_PLACEMENT
+                    };
                     cx.refuse_before_entry(
                         id,
-                        VenueError::new(UNCERTAIN_PLACEMENT).outcome(crate::Outcome::NotSent),
+                        VenueError::new(message).outcome(crate::Outcome::NotSent),
                     );
                     return;
                 }
@@ -6897,6 +6909,15 @@ mod streaming_tests {
                 },
             );
         };
+        // A placement refused later in admission (options) leaves no mark.
+        let mut options = held_place(9, "A");
+        if let Command::PlaceOrders { orders, .. } = &mut options {
+            orders[0].implied_volatility = Some(0.5);
+        }
+        engine.handle(0., Event::Command(options));
+        engine.drain_actions().for_each(drop);
+        assert_eq!(engine.io.core.order_locks.marked(), 0);
+        assert!(!engine.io.core.order_locks.uncertain("A"));
         let stale = engine.io.core.order_locks.token();
         engine.handle(0., Event::Command(held_place(1, "A")));
         unknown(&mut engine, 1);
@@ -6915,6 +6936,39 @@ mod streaming_tests {
         engine.handle(0., Event::Command(held_place(2, "A")));
         assert!(refused(&mut engine, 2));
         assert_eq!(engine.venue.commands.len(), admitted);
+        // Cancel-all keeps the venue's declared disposition: refused by default,
+        // admitted when the venue opts out; cancel by ID is always admitted.
+        let cancel_all = |command| Command::CancelSymbolOrders {
+            command,
+            symbol: "A".into(),
+        };
+        engine.handle(0., Event::Command(cancel_all(10)));
+        assert!(
+            engine.drain_actions().any(|a| matches!(a,
+                Action::Notice(Notice::CommandFailed { command: 10, error })
+                    if error.outcome == Some(crate::Outcome::NotSent)
+                        && error.legacy_text().contains("cancel-all"))),
+            "a fenced symbol's cancel-all is refused before any I/O"
+        );
+        assert_eq!(engine.venue.commands.len(), admitted);
+        engine.handle(
+            0.,
+            Event::Command(Command::CancelOrders {
+                command: 11,
+                ids: vec!["resting".into()],
+            }),
+        );
+        assert!(!refused(&mut engine, 11));
+        engine.venue.fence_uncertain = false;
+        engine.handle(0., Event::Command(cancel_all(12)));
+        assert!(!refused(&mut engine, 12));
+        assert_eq!(
+            engine.venue.commands.len(),
+            admitted + 2,
+            "both cancels reach the venue"
+        );
+        engine.venue.fence_uncertain = true;
+        let admitted = engine.venue.commands.len();
         // Another symbol is admitted; a definitive failure marks nothing.
         engine.handle(0., Event::Command(held_place(3, "B")));
         complete_held(&mut engine, 3, true);
