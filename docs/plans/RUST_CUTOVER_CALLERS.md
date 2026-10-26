@@ -9604,3 +9604,15 @@ Session calls keep Mutation journal evidence, order locks and Unknown on an
 unproven released send. Their resend freezes codec bytes while refreshing the
 bundle at Bind; Preflight signed calls repeat their existing provider work.
 No current venue enables a new auth mode in this engine slice.
+
+
+### Hyperliquid mixed batch effects and accepted identities
+
+Rust retains every proven Resting/Filled order ID from a correctly correlated
+batch, even when another row refuses. The failure carries structured partial
+order IDs and Unknown for a mixed result; it never reports the whole batch as
+rejected or resends it. Accepted rows run the normal account reducer. A mixed
+cancel removes successful/terminal legs and restores only refused legs, so a
+cancelled order is never resurrected. All-refused batches retain Rejected with
+no accepted IDs. This deliberately fixes the native early-error return; existing
+custody originals that described its dropped-ID behaviour now pin this contract.

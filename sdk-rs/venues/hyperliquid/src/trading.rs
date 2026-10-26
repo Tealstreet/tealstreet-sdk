@@ -965,32 +965,36 @@ impl Hyperliquid {
         }
         let errors = statuses
             .iter()
-            .filter_map(|s| {
-                if let Status::Error { error } = s {
-                    Some(error.as_str())
-                } else {
-                    None
-                }
+            .filter_map(|status| match status {
+                Status::Error { error } => Some(error.as_str()),
+                _ => None,
             })
             .collect::<Vec<_>>();
-        if !errors.is_empty()
+        let accepted = statuses.iter().any(|status| match status {
+            Status::Error { error } => {
+                idempotent_cancel
+                    && matches!(&request.effect, Effect::Cancel(_))
+                    && only_terminal_cancel(error)
+            }
+            _ => true,
+        });
+        let batch_error = if !errors.is_empty()
             && !(idempotent_cancel
                 && matches!(&request.effect, Effect::Cancel(_))
-                && errors.iter().all(|e| only_terminal_cancel(e)))
+                && errors.iter().all(|error| only_terminal_cancel(error)))
         {
-            self.restore_cancel(cx, &request.effect);
-            self.schedule_orders(cx);
-            // Per-order refusals; other orders in the same answer may have been accepted.
-            let accepted = statuses.iter().any(|s| !matches!(s, Status::Error { .. }));
-            let error = VenueError::new(errors.join(", ")).kind(ErrorKind::Rejected);
-            let error = if accepted {
-                error
-            } else {
-                error.outcome(Outcome::Rejected)
-            };
-            self.finish_trade(cx, Err(error));
-            return;
-        }
+            Some(
+                VenueError::new(errors.join(", "))
+                    .kind(ErrorKind::Rejected)
+                    .outcome(if accepted {
+                        Outcome::Unknown
+                    } else {
+                        Outcome::Rejected
+                    }),
+            )
+        } else {
+            None
+        };
         match request.effect {
             Effect::ScheduleCancel => unreachable!(),
             Effect::Place(records) => {
@@ -1002,6 +1006,7 @@ impl Hyperliquid {
                 }
                 for (index, status) in statuses.into_iter().enumerate() {
                     let (id, resting) = match status {
+                        Status::Error { .. } => continue,
                         Status::Resting { resting } => (Some(resting.oid.to_string()), true),
                         Status::Filled { filled } => (Some(filled.oid.to_string()), false),
                         Status::Text(s) if s == "waitingForTrigger" || s == "waitingForFill" => {
@@ -1051,7 +1056,17 @@ impl Hyperliquid {
                 }
             }
             Effect::Cancel(orders) => {
-                for o in orders {
+                for (o, status) in orders.into_iter().zip(statuses) {
+                    if let Status::Error { error } = status
+                        && !(idempotent_cancel && only_terminal_cancel(&error))
+                    {
+                        cx.store.update_order(&o.id, |live| {
+                            if live.status == OrderStatus::Canceling {
+                                live.status = o.status;
+                            }
+                        });
+                        continue;
+                    }
                     self.acknowledge_order_write(cx, &o.symbol);
                     self.account.suppressed.insert(o.id.clone(), cx.now);
                     cx.store.remove_orders(&[&o.id]);
@@ -1084,8 +1099,15 @@ impl Hyperliquid {
                 });
             }
         }
-        if let Some(job) = self.trading.active.as_mut() {
+        if let Some(job) = self.trading.active.as_mut()
+            && (batch_error.is_none() || accepted)
+        {
             job.effective = true;
+        }
+        if let Some(error) = batch_error {
+            self.schedule_orders(cx);
+            self.finish_trade(cx, Err(error));
+            return;
         }
         if self.spot {
             self.refresh_account(cx);
@@ -1131,6 +1153,7 @@ impl Hyperliquid {
         self.trading.inflight = false;
         if let Some(job) = self.trading.active.take() {
             if let Err(mut error) = result {
+                error = error.partial_ids(&job.ids);
                 if (job.effective || !job.ids.is_empty())
                     && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
                 {
