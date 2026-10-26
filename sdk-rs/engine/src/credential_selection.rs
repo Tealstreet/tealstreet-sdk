@@ -105,6 +105,11 @@ impl Selection {
         }
     }
 
+    /// Request-context credential naming this identity's authority ref.
+    pub fn authority(&self, identity: &crate::signing::Identity) -> Credential {
+        self.credential(identity.authority_ref().clone())
+    }
+
     /// Apply egress and evidence to a request issued on the non-managed path.
     pub fn bind<P>(&self, cx: &mut Cx<'_, P>, request: RequestId) {
         if let Some(route) = self.route() {

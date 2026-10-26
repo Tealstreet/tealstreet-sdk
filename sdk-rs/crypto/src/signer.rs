@@ -493,6 +493,14 @@ impl LocalSigner {
         }
         self.key(reference)
     }
+    /// Presented or interpolated material: never a declared asymmetric key,
+    /// whichever identity names it, so no private scalar is ever emitted.
+    fn presentable_key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
+        if self.algorithms.contains_key(reference) {
+            return Err(SignError::InvalidRequest);
+        }
+        self.key(reference)
+    }
     /// Ordinary material only; extra refs require `algorithm_key`.
     fn key(&self, reference: &KeyRef) -> Result<&[u8], SignError> {
         if self.roles.contains_key(reference) {
@@ -569,7 +577,7 @@ impl LocalSigner {
         for part in payload {
             let n = match part {
                 PayloadPart::Bytes { bytes } => bytes.len(),
-                PayloadPart::Credential { key } => self.key(key)?.len(),
+                PayloadPart::Credential { key } => self.presentable_key(key)?.len(),
                 PayloadPart::Result { index, encoding } => {
                     let n = results
                         .values
@@ -602,7 +610,9 @@ impl LocalSigner {
         for part in payload {
             match part {
                 PayloadPart::Bytes { bytes } => message.extend_from_slice(bytes),
-                PayloadPart::Credential { key } => message.extend_from_slice(self.key(key)?),
+                PayloadPart::Credential { key } => {
+                    message.extend_from_slice(self.presentable_key(key)?)
+                }
                 PayloadPart::Result { index, encoding } => {
                     let bytes = results
                         .values
@@ -644,7 +654,7 @@ impl LocalSigner {
                     Sha256::digest(&*self.expand(payload, &result)?).to_vec()
                 }
                 Operation::Present { key } => {
-                    let value = self.key(key)?;
+                    let value = self.presentable_key(key)?;
                     if value.len() > 1024 * 1024 {
                         return Err(SignError::InvalidRequest);
                     }

@@ -154,3 +154,69 @@ fn the_absent_primary_still_answers_its_declared_public_address() {
     .unwrap();
     assert!(signer.sign_now(&present).is_err());
 }
+
+fn operations(signer: &LocalSigner, operations: serde_json::Value) -> Result<usize, SignError> {
+    let request = serde_json::from_value(serde_json::json!({
+        "receipt": {}, "context": {"venue": "", "method": "", "host": "", "path": ""},
+        "operations": operations,
+    }))
+    .unwrap();
+    signer.sign_now(&request).map(|result| result.values.len())
+}
+
+/// A declared asymmetric key is never emitted, whichever identity names it;
+/// ordinary credential presentation and MAC interpolation are unchanged.
+#[test]
+fn declared_asymmetric_material_is_never_presented_or_interpolated() {
+    for policy in [
+        scalar_only(),
+        serde_json::from_str(
+            r#"{"primary":{"secretEncoding":"hex","signingAlgorithm":"secp256k1Digest"}}"#,
+        )
+        .unwrap(),
+    ] {
+        let (signer, ids, _) =
+            setup(policy, serde_json::json!({"key": "api", "secret": SCALAR})).unwrap();
+        let identity = ids.primary.unwrap();
+        let signing = identity.signing_ref().unwrap().clone();
+        for refused in [
+            serde_json::json!([{"kind": "present", "key": signing}]),
+            serde_json::json!([{"kind": "sha256", "payload": [{"kind": "credential", "key": signing}]}]),
+            serde_json::json!([{"kind": "sign", "algorithm": "secp256k1Digest", "key": signing,
+                "payload": [{"kind": "credential", "key": signing}]}]),
+        ] {
+            assert_eq!(operations(&signer, refused), Err(SignError::InvalidRequest));
+        }
+        let credential = identity.credential.clone();
+        assert_eq!(
+            operations(
+                &signer,
+                serde_json::json!([{"kind": "present", "key": credential}])
+            ),
+            Ok(1)
+        );
+        assert_eq!(
+            operations(
+                &signer,
+                serde_json::json!([{"kind": "sha256",
+                "payload": [{"kind": "credential", "key": credential}]}])
+            ),
+            Ok(1)
+        );
+    }
+    // An undeclared (MAC) secret keeps today's interpolation.
+    let (signer, ids, _) = setup(
+        CredentialSetupPolicy::default(),
+        serde_json::json!({"key": "api", "secret": "mac"}),
+    )
+    .unwrap();
+    let signing = ids.primary.unwrap().signing_ref().unwrap().clone();
+    assert_eq!(
+        operations(
+            &signer,
+            serde_json::json!([{"kind": "sha256",
+            "payload": [{"kind": "credential", "key": signing}]}])
+        ),
+        Ok(1)
+    );
+}

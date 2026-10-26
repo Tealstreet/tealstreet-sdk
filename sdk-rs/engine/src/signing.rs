@@ -285,12 +285,22 @@ impl CredentialSetupPolicy {
         {
             return Err(SignError::InvalidRequest);
         }
-        if let Some(identity) = identities.primary.as_mut()
-            && identity.credential.0.is_empty()
-            && identity.signing.as_ref().is_some_and(valid_key_ref)
-        {
-            identity.credential_absent = true;
+        let Some(identity) = identities.primary.as_mut() else {
+            return Ok(());
+        };
+        if !identity.credential.0.is_empty() {
+            return Ok(());
         }
+        let Some(signing) = identity.signing.as_ref().filter(|key| valid_key_ref(key)) else {
+            return Ok(());
+        };
+        // The authority ref must select exactly one identity.
+        if identities.secondary.as_ref().is_some_and(|other| {
+            other.credential == *signing || other.signing.as_ref() == Some(signing)
+        }) {
+            return Err(SignError::InvalidRequest);
+        }
+        identity.credential_absent = true;
         Ok(())
     }
 }
@@ -448,6 +458,17 @@ impl Identity {
         self.credential_absent
     }
 
+    /// The ref a request authority names for this identity: its credential,
+    /// or for a credential-absent primary its signing ref, which is then
+    /// signing-only (never presented or interpolated).
+    #[inline]
+    pub fn authority_ref(&self) -> &KeyRef {
+        match &self.signing {
+            Some(signing) if self.credential_absent => signing,
+            _ => &self.credential,
+        }
+    }
+
     /// Whether `key` is one of this slot's refs.
     pub fn owns(&self, key: &KeyRef) -> bool {
         !self.credential_absent && self.credential == *key
@@ -512,6 +533,15 @@ impl Identities {
                 .primary
                 .as_ref()
                 .is_some_and(|primary| work.any_key_ref(&|key| primary.owns(key)))
+    }
+
+    /// The signing-only ref of a credential-absent primary, which no request
+    /// may present or interpolate.
+    pub fn signing_only_ref(&self) -> Option<&KeyRef> {
+        self.primary
+            .as_ref()
+            .filter(|primary| primary.credential_absent)
+            .and_then(|primary| primary.signing.as_ref())
     }
 
     /// Setup requires a secondary's signing ref, so a step refused for an
@@ -774,6 +804,16 @@ impl SignRequest {
             }
         }
         false
+    }
+    /// Whether any operation presents `key` or interpolates it into a payload.
+    pub fn presents(&self, key: &KeyRef) -> bool {
+        self.operations.iter().any(|op| match op {
+            Operation::Present { key: presented } => presented == key,
+            Operation::Sign { payload, .. } | Operation::Sha256 { payload } => payload
+                .iter()
+                .any(|part| matches!(part, PayloadPart::Credential { key: part } if part == key)),
+            Operation::PublicAddress { .. } | Operation::PublicKey { .. } => false,
+        })
     }
     /// Shared structural bounds also apply to injected providers. Expanded secret
     /// input bounds are enforced privately by the provider before allocation.
