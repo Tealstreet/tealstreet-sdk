@@ -9956,7 +9956,11 @@ is true on a backoff re-ask with no new uncertain write since the last ask: the
 hook must then join any read already running or owed, never start or owe
 another (a slow read would otherwise never complete and release). A venue may hold the fence to its
 native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
-opts in. Not covered yet (Phase B): an Unknown marker for venues with no
+opts in. AsterDEX opts in: its hook starts an open-orders read at once, or, when a
+read is already in flight (which predates the seal and cannot clear the fence),
+starts the fresh one as that read completes. It releases only on a clean read,
+so a persistently malformed order row keeps that venue's placements refused
+(cancels by ID stay admitted) until the row parses. Not covered yet (Phase B): an Unknown marker for venues with no
 placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
 until its opt-in) from managed, single-Context and legacy `cx.request` writes,
 and amend roots whose replacement places (zs5e83's audits,
