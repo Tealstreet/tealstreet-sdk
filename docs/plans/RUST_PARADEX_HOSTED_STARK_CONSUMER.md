@@ -206,7 +206,11 @@ peer builds ONE SignRequest on its own installed same-slot refs:
 `Present(account credential)` followed by N StarkDigest `Sign` operations
 (N=1 except batch, N≤10, so at most 11 operations, inside the 32 limit). The
 result is exactly N+1 values in that order: first the exact credential bytes,
-then N 64-byte signatures in item order. Each r/s is range-checked and verified
+then N 64-byte signatures in item order. Present returns only the public
+account credential: the Paradex account address carried in
+PARADEX-STARKNET-ACCOUNT, in its exact validated native presentation. It is
+not the public-subkey metadata (checked separately by PublicKey), the Stark
+scalar or a JWT. No secret or bearer token crosses the frame. Each r/s is range-checked and verified
 against its own recomputed digest and the same bound public subkey.
 
 The result is all-or-nothing: if the deadline passes, a cancel arrives or a
@@ -242,7 +246,19 @@ body equality: the local path and the hosted path produce byte-equal bodies,
 signatures included. Digest equality alone is not enough. An independent Stark
 verifier checks each signature.
 
-Refusals, all with zero callbacks and no HTTP:
+Present control: a RED asserting that the Present value equals the configured
+public account address exactly, and that no frame or result carries the
+scalar, a JWT or the subkey.
+
+Refusals fall into two classes.
+- Pre-validation failures: zero signing callbacks and no HTTP. This covers every
+  descriptor-shape, batch, operation/target, credential-mismatch and time-input
+  failure below.
+- Post-callback failures: invalid, swapped, missing or extra returned
+  signatures, and a deadline or cancel during partial signing. Callbacks may
+  already have run; these guarantee no HTTP and no partial result.
+
+The refusals:
 - descriptor shape:
   - every unknown or missing key, and every null/absent swap;
   - an unsafe, negative, fractional or string integer;
