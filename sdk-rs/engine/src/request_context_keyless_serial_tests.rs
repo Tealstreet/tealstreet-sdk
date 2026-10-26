@@ -893,6 +893,7 @@ mod keyless_serial {
         assert_eq!(e.venue.selection, Some(Err(Error::Revoked)));
         assert_eq!(e.venue.before, e.venue.after);
         no_sign(&e.drain_actions().collect::<Vec<_>>());
+        later_signed_stages(&mut e);
     }
     #[test]
     fn keyless_read_uses_same_session_without_secondary_fallback() {
