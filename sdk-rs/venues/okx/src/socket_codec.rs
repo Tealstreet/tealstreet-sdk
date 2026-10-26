@@ -135,8 +135,12 @@ impl Okx {
                 },
                 // OKX EEA (772 markets, about 40 subscribe frames) resets a
                 // public socket that writes them all in the open tick; 50 ms
-                // between frames streams at line rate with no resets.
-                subscription_interval_ms: if channel == PUBLIC { 50. } else { 0. },
+                // between frames streams at line rate. Global takes the burst.
+                subscription_interval_ms: if channel == PUBLIC && self.options.eea {
+                    50.
+                } else {
+                    0.
+                },
             };
             let feed = cx.register_socket_feed(policy)?;
             self.connections[channel].feed = Some(feed);
