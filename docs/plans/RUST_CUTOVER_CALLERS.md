@@ -9908,3 +9908,19 @@ alias and transitive local Cargo features. Setup mappings declare their required
 bootstrap features; AsterDEX additionally requires address setup and signing
 metadata. Combined default features cannot satisfy an isolated family's check.
 Negative controls pin missing features and reject unknown setup mappings.
+
+### Uncertain-placement fence (Phase A)
+
+A placing scope that sealed Unknown marks its symbols uncertain until a fresh
+order read reconciles them. A venue that opts into
+`fence_uncertain_placements` now refuses a later `PlaceOrders` or amend on an
+uncertain symbol NotSent ("Placement outcome is uncertain; reconcile before
+placing or amending"), so a user retry cannot duplicate a possibly placed order.
+Cancel by ID and cancel-all stay admitted, because neither can place;
+`fence_uncertain_cancel_all` keeps its own opt-out (Phemex). A venue opts in only
+when `reconcile_uncertain` starts the fresh read at once, so the fence is
+short-lived; without that hook the fence could hang, which is why the default is
+off. OKX opts in. Not covered yet: venues with no placement scope
+(`guard_pending_placements` or `guard_order_mutations` false: Bybit, Crypto.com,
+BingX, ApeX, Lighter), and amend roots whose replacement places
+(the zs5e83 audit, /tmp/codex-beta-plan-fence-audit/report.md).
