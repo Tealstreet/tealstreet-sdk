@@ -2,9 +2,10 @@ import type { Signer, SignRequest } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeOptions, RemoteSigner } from '../../types';
 
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
 
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import {
@@ -27,7 +28,7 @@ const remote = (): RemoteSigner => ({
 });
 const payload = () =>
   vi.fn(async ({ payload }: { payload: string }) => ({ signature: mac(payload), headers: { 'X-Callback': 'owned' } }));
-const setup = (name: (typeof aliases)[number], input: Partial<ExchangeOptions> = {}, failCapabilities = false) => {
+const setup = (name: (typeof aliases)[number] | 'bitunix', input: Partial<ExchangeOptions> = {}, failCapabilities = false) => {
   const calls: unknown[][] = [];
   const installed = vi.fn();
   const signed = vi.fn((_attempt: number, _result: string, _now: number) => '[]');
@@ -166,6 +167,8 @@ describe('delegated signer SDK runtime admission', () => {
   it('keeps unrelated families closed and rejects malformed admitted providers synchronously', () => {
     expect(runsOnRustEngine('bybit', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(true);
     expect(runsOnRustEngine('bitunix', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(true);
+    // Unmigrated control family: MEXC (Bitunix gained hosted signing in P7).
+    expect(runsOnRustEngine('mexc', { engine: 'rust', secret: '', remoteSigner: remote() })).toBe(false);
     let error: unknown;
     try {
       setup('binance', { remoteSigner: {} as RemoteSigner });
@@ -195,5 +198,48 @@ describe('delegated signer SDK runtime admission', () => {
     expect(r.io).not.toHaveBeenCalled();
     r.exchange.dispose();
     expect(r.free).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Bitunix keyless RemoteSigner admission (R1)', () => {
+  const doubleSha256 = (toSign: string) => createHash('sha256')
+    .update(createHash('sha256').update(toSign).digest('hex') + 'audit-provider').digest('hex');
+  const browser = (): RemoteSigner => ({
+    accountName: 'owned-account',
+    sign: vi.fn(async (request) => ({ id: request.id, wsAuthSignature: doubleSha256(request.wsAuth!.toSign) })),
+    isAvailable: () => true, onAvailabilityChange: () => () => {},
+  });
+
+  it('constructs on Rust, advertises only sha256SecretSuffix and signs the fused login through the browser', async () => {
+    const upstream = browser();
+    expect(runsOnRustEngine('bitunix', { engine: 'rust', secret: '', remoteSigner: upstream })).toBe(true);
+    const r = setup('bitunix', { remoteSigner: upstream });
+    expect(r.exchange.isPublicDataOnly).toBe(false);
+    for (const field of ['key', 'secret', 'remoteSigner', 'payloadSigner']) expect(r.exchange.options).not.toHaveProperty(field);
+    await ensure(r.exchange);
+    expect(JSON.parse(r.calls[0][1] as string)).toMatchObject({ remoteSigning: true, payloadSigner: false });
+    expect(r.installed).toHaveBeenCalledWith('["sha256SecretSuffix"]');
+    const identity = JSON.parse(r.calls[0][1] as string).signing.primary;
+    const prefix = Array.from(new TextEncoder().encode('nonce-abc1000'));
+    execute(r.exchange, { receipt: { stampMs: 1000 }, context: { venue: 'bitunix', method: 'WS', host: 'fapi.bitunix.com', path: '/private/' }, operations: [
+      { kind: 'sha256', payload: [{ kind: 'bytes', bytes: prefix }, { kind: 'credential', key: identity.credential }, { kind: 'bytes', bytes: [] }] },
+      { kind: 'sign', algorithm: 'sha256SecretSuffix', key: identity.signing, payload: [{ kind: 'result', index: 0, encoding: 'hex' }] },
+      { kind: 'present', key: identity.credential },
+    ] });
+    await vi.waitFor(() => expect(r.signed).toHaveBeenCalledOnce());
+    expect(upstream.sign).toHaveBeenCalledWith(expect.objectContaining({ type: 'ws-auth', exchangeName: 'bitunix', accountName: 'owned-account',
+      wsAuth: { toSign: 'nonce-abc1000owned-public', outputFormat: 'bitunix-double-sha256' } }));
+    const result = JSON.parse(r.signed.mock.calls[0][1] as string);
+    expect(Buffer.from(result.values[1]).toString('hex')).toBe(doubleSha256('nonce-abc1000owned-public'));
+    expect(result.values[2]).toEqual(Array.from(new TextEncoder().encode('owned-public')));
+    expect(r.failed).not.toHaveBeenCalled(); expect(r.io).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a private PayloadSigner account before any engine work', () => {
+    const callback = payload();
+    let error: unknown;
+    try { setup('bitunix', { payloadSigner: callback }); } catch (failure) { error = failure; }
+    expect(error).toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+    expect(callback).not.toHaveBeenCalled();
   });
 });

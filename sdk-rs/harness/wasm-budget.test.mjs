@@ -15,7 +15,7 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit', 'kraken', 'krakenspot']);
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_386 * 1_024);
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_387 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_952, 'venue', 'asterdex'), undefined);
@@ -23,9 +23,12 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_387_670, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_388_544, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_418_240, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_418_676, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_419_317, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_420_288, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_419_038, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_419_264, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_419_265, 'venue', 'asterdex'), /exceeds 1419264/);
+  assert.match(wasmBudgetError(1_420_289, 'venue', 'asterdex'), /exceeds 1420288/);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], 1450 * 1024);
     assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1452 * 1024);

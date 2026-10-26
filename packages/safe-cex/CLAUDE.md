@@ -7,8 +7,8 @@ and test-only replay/reference implementations remain independent dependencies.
 Historical Rust-adapter fixtures mock only beta admission through
 `__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
 the real refusal boundary. These fixtures confer no beta activation.
-Bitunix hosted eligibility follows its declared remote policy: it joins the
-hosted-enabled set when #2262 lands; before that it remains local-key only.
+Bitunix is hosted-enabled after #2262; eligibility still follows its declared
+remote policy, with no separate beta override.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
 
