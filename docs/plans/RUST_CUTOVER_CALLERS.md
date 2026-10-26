@@ -9653,3 +9653,11 @@ while discarding its provider material and identities. Actual private intent
 without an API index refuses; empty or absent material stays public without authority. Unsupported PayloadSigner intent is refused
 before local scalar or setup-JSON validation. Standalone family builds enable
 the host dispatcher as well as the registry dispatcher.
+
+### Primary key-permission verification reads
+
+`PrimaryReason::KeyPermissions` (`keyPermissions` in signMeta) names a primary
+read that verifies the trading key's own capabilities before private startup,
+such as Coinbase `GET /api/v3/brokerage/key_permissions`. It is primary-only,
+like every `PrimaryRead`. A secondary read-key verification stays an ordinary
+`Read`. No existing reason was reused, because none describes it truthfully.
