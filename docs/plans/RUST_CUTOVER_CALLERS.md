@@ -9930,6 +9930,7 @@ until a post-mark `orders_reconciled` clears it, so a failed reconcile read
 cannot leave the fence standing; hooks stay single-shot and must absorb re-asks
 without restarting a running fresh read. A venue may hold the fence to its
 native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
+<<<<<<< HEAD
 opts in. Not covered yet (Phase B): an Unknown marker for venues with no
 placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
 until its opt-in) from managed, single-Context and legacy `cx.request` writes,
@@ -9956,3 +9957,14 @@ went out (another is owed behind it), a failed read, or one with an unmappable
 row does not clear it. Binance writes are single managed Contexts with no
 placement scope, so the mark comes from the Unknown write fact itself (engine
 Phase B); until Phase B lands the fence does not engage for Binance.
+=======
+opts in. Phase B: the fence no longer needs a lock scope. On an opted-in venue whose
+placements or amends hold no scope (guard flags off: Binance x4, Bybit,
+Crypto.com, BingX, ApeX, Hyperliquid, Paradex), entry still refuses a fenced
+symbol, and every admitted placement or amend is marked with its symbols (all
+symbols for an amend whose symbol is unknown). An Unknown outcome on that
+command (managed, single-Context or legacy `cx.request`) fences them and queues
+their reconcile; any other end drops the mark. Amend roots are marked too, so an
+Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
+same-ID amend fence stays as is.
+>>>>>>> origin/pr-2288
