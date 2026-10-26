@@ -9854,6 +9854,10 @@ a CloudFront host stays an auth kind. Native codes and a venue's own declared
 Bitget, Bitunix) keeps a CDN page as auth. Move the check ahead of the status
 rows if such a venue is ever fronted by CloudFront.
 
+### Bitunix closed positions and journal on Rust
+
+Bitunix on the Rust engine now serves the journal (historical positions) and closed PnL from the venue's reported position history, mapped by TypeScript's own Bitunix mappers, as TypeScript does ([RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md)). The journal previously threw "no journal records path declared", and closed PnL was always empty. Capability records gain `positionHistory: "bitunix"` and `closedPositionFormat: "bitunix"`. A failed journal read throws, as on every other reported-closed venue; a failed closed-PnL read yields `[]`.
+
 ### Bitunix account read classification (P1 #33)
 
 A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
@@ -9916,14 +9920,25 @@ order read reconciles them. A venue that opts into
 `fence_uncertain_placements` now refuses a later `PlaceOrders` or amend on an
 uncertain symbol NotSent ("Placement outcome is uncertain; reconcile before
 placing or amending"), so a user retry cannot duplicate a possibly placed order.
-Cancel by ID and cancel-all stay admitted, because neither can place;
-`fence_uncertain_cancel_all` keeps its own opt-out (Phemex). A venue opts in only
-when `reconcile_uncertain` starts the fresh read at once, so the fence is
-short-lived; without that hook the fence could hang, which is why the default is
-off. OKX opts in. Not covered yet: venues with no placement scope
-(`guard_pending_placements` or `guard_order_mutations` false: Bybit, Crypto.com,
-BingX, ApeX, Lighter), and amend roots whose replacement places
-(the zs5e83 audit, /tmp/codex-beta-plan-fence-audit/report.md).
+Cancel by ID stays admitted; cancel-all keeps each venue's existing
+`fence_uncertain_cancel_all` disposition (default refused until reconcile, Phemex
+admitted). A venue opts in only when `reconcile_uncertain` starts a fresh read
+(or joins one dispatched after the write); without that hook the fence could
+hang, which is why the default is off. While a symbol stays uncertain the engine
+re-asks the hook with backoff (1 s doubling to 30 s, restarted by a new seal)
+until a post-mark `orders_reconciled` clears it, so a failed reconcile read
+cannot leave the fence standing; hooks stay single-shot and must absorb re-asks
+without restarting a running fresh read. A venue may hold the fence to its
+native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
+opts in. Phase B: the fence no longer needs a lock scope. On an opted-in venue whose
+placements or amends hold no scope (guard flags off: Binance x4, Bybit,
+Crypto.com, BingX, ApeX, Hyperliquid, Paradex), entry still refuses a fenced
+symbol, and every admitted placement or amend is marked with its symbols (all
+symbols for an amend whose symbol is unknown). An Unknown outcome on that
+command (managed, single-Context or legacy `cx.request`) fences them and queues
+their reconcile; any other end drops the mark. Amend roots are marked too, so an
+Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
+same-ID amend fence stays as is.
 
 ### BloFin and Phemex uncertain-placement fences
 
@@ -9940,6 +9955,13 @@ scheduled reconciliation. Repeated hook calls preserve that scheduled timer.
 Its native signing-expiry plus five-second lower bound remains authoritative:
 an early empty snapshot cannot prove that a late placement will not arrive.
 The engine owns re-asking; the hooks add no retry loop or write resend.
+
+Four Phemex trading controls now pin the earlier symbol-level NotSent refusal
+instead of dispatching another placement while the first is Unknown. A refused
+retry cannot clear uncertainty or add a late-cancel subject; panic cancel-all
+still runs, and a foreign order is not canceled merely because that retry's
+client ID appeared in a later snapshot. The old two-unknown-origin entry
+sequence is prevented by the fence; no production repair grouping is changed.
 
 ### BingX uncertain-placement fence: Phase B prerequisite
 

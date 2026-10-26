@@ -1687,6 +1687,7 @@ impl PhemexPerpetuals {
                         row.order_id, row.status, row.kind
                     ),
                 );
+                complete = false;
                 continue;
             }
             if row.orders(cx.now).is_none() {
