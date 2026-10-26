@@ -400,8 +400,8 @@ impl AsterDex {
             let url = format!("{}{path}", self.urls.rest);
             return self.release_read(cx, request, url, public_read_policy(), None);
         }
-        // Start seals; work issued before start reads the same installed identities.
-        self.seal_signing(cx);
+        // Start latches; work issued before start reads the current identities.
+        self.seal_signing(cx, false);
         let signing = self.signing(request.role);
         let (selection, identity, auth) = match signing {
             Ok(signing) => signing,
@@ -1093,7 +1093,7 @@ mod tests {
             safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
         }
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-            self.inner.seal_signing(cx);
+            self.inner.seal_signing(cx, true);
             self.inner.requests.last_sync_success = Some(cx.now);
         }
         fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}

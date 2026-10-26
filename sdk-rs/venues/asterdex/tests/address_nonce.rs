@@ -215,3 +215,54 @@ fn v1_hmac_accounts_carry_no_nonce() {
     assert!(h.nonces().is_empty());
     assert!(h.signers().is_empty());
 }
+
+/// Setup may complete after private work was already dispatched before start:
+/// start reads the engine's current identities, never an earlier snapshot.
+#[test]
+fn private_work_before_setup_does_not_freeze_the_slots_at_start() {
+    let now = 1_700_000_000_000.0;
+    let (venue, signer, identities) = wallet().build_installed();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
+    engine.set_signer(Some(signer)).unwrap();
+    engine.set_identities(identities).unwrap();
+    engine.handle(
+        now,
+        Event::Command(safe_cex_engine::Command::FetchAccount { command: 1 }),
+    );
+    // The clock answers, so the queued private read dispatches before setup.
+    let mut early = support::drain(&mut engine, now);
+    for _ in 0..4 {
+        let Some(clock) = early.iter().find_map(|action| match action {
+            Action::Http(r) if r.url.ends_with("/time") => Some(r.id),
+            _ => None,
+        }) else {
+            break;
+        };
+        engine.handle(
+            now,
+            Event::HttpResponse {
+                request: clock,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: r#"{"serverTime":1700000000000}"#,
+                },
+            },
+        );
+        early = support::drain(&mut engine, now);
+    }
+    assert!(
+        !early
+            .iter()
+            .any(|action| matches!(action, Action::Http(r) if r.url.contains("signer="))),
+        "nothing signs before setup"
+    );
+    engine.initialize_address_nonce(0.0).unwrap();
+    let h = H::with(engine);
+    assert!(!h.signed.is_empty(), "fresh private work signs after start");
+    assert!(
+        h.signers().iter().all(|signer| *signer == WALLET),
+        "{:?}",
+        h.signers()
+    );
+}

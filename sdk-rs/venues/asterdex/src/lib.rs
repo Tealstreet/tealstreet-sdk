@@ -182,7 +182,7 @@ pub struct AsterDex {
     /// N1: a slot whose configured V3 wallet differs from the address its
     /// signing key proved at setup is refused, never silently re-addressed.
     signer_mismatch: [Option<String>; 2],
-    /// V3 slots were rebuilt from the engine's installed identities.
+    /// `start` latched the V3 slots from the engine's sealed identities.
     signing_sealed: bool,
     account: account::AccountState,
     trading: trading::TradingState,
@@ -328,11 +328,14 @@ impl AsterDex {
 
     /// Rebuilds V3 slots from the sealed identities and records any slot
     /// whose configured wallet differs from the address its key proved.
-    fn seal_signing(&mut self, cx: &mut Cx<'_, Pending>) {
+    /// Before start, setup may still be initialized or reinitialized, so each
+    /// call reads the engine's current identities; only `start` latches them.
+    fn seal_signing(&mut self, cx: &mut Cx<'_, Pending>, at_start: bool) {
         if self.version != Version::V3 || self.signing_sealed {
             return;
         }
-        self.signing_sealed = true;
+        self.signing_sealed = at_start;
+        self.signer_mismatch = [None, None];
         let sealed = cx.address_nonce_identities().clone();
         self.credentials = Self::slots(
             &self.options,
@@ -363,7 +366,9 @@ impl AsterDex {
                 let error = format!(
                     "Aster V3 API wallet address {configured} does not match the signing key's address {proved}"
                 );
-                cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
+                if at_start {
+                    cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
+                }
                 self.signer_mismatch[slot_index(slot)] = Some(error);
             }
         }
@@ -887,7 +892,7 @@ impl Venue for AsterDex {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
-        self.seal_signing(cx);
+        self.seal_signing(cx, true);
         self.start_requests(cx);
     }
 
