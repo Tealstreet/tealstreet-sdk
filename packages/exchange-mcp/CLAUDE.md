@@ -43,9 +43,9 @@ Rust accounts load `dist/wasm/rust/safe_cex_wasm.cjs` and its sibling WASM.
 Build the pinned Rust engine from the repository root with `corepack yarn -s
 rust:build-wasm` before the package build; the existing release job does this.
 The `rust-smoke.mjs` probe copies release-owned assets outside the checkout and
-starts a real native Coinbase catalog, so workspace resolution cannot mask a
-missing artifact. `EXCHANGE_ENGINE=rust` selects the supported native path;
-unset keeps the registry default. Tests selected by `SAFE_CEX_WASM_TESTS=1`
+starts a real native Binance Spot catalog, so workspace resolution cannot mask a
+missing artifact. `EXCHANGE_ENGINE=rust` remains a compatible input; the beta registry always
+selects Rust and rejects OUT names with typed Unsupported/NotSent before I/O. Tests selected by `SAFE_CEX_WASM_TESTS=1`
 exercise real protocol tool calls and account state, using documented inputs.
 Tools are chosen from `exchange.loadCapabilities()`, which creates the native
 engine without starting it; a failed load lists tools from base answers and
@@ -62,8 +62,9 @@ Rust accounts keep their public feeds active because native ticker tools read
 the current engine store. Do not apply the TS-only public-socket suppression to
 Rust; Binance's REST seed alone would freeze its quote tools. The protocol test
 replays actual recorded Binance socket traffic and requires changed tool quotes.
-The TS on-demand policy also disables TS adapter polling, after the actual
-instance has been selected. Keep native REST timers active as well as sockets:
+Historical MCP WASM fixtures explicitly mock beta admission to retain their
+protocol assertions for OUT reference venues; production admits no TS adapter.
+Keep native REST timers active as well as sockets:
 BreakoutProp has no stream and its tools depend on periodic reconciliation.
 A real native protocol regression requires changed quotes after its REST poll.
 History UTC mapping preserves the SDK's non-enumerable incompleteness marker.

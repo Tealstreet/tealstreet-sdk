@@ -22,18 +22,12 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./exchangeMetadata')>()),
   getExchangeMetadata: vi.fn((exchangeName: string) => ({
     exchangeName,
-    requiresCors: exchangeName === 'coinbase',
+    requiresCors: exchangeName === 'apexomni',
     enforceWsTunnel: exchangeName === 'bybit',
   })),
 }));
 
-vi.mock('./exchanges/registry', () => ({
-  exchangeRegistry: {
-    bybit: () => Promise.resolve(testState.MockExchange),
-    coinbase: () => Promise.resolve(testState.MockExchange),
-  },
-  getRegisteredExchangeNames: vi.fn(() => ['bybit', 'coinbase']),
-}));
+vi.mock('./exchanges/rust/rust.exchange', () => ({ RustEngineExchange: testState.MockExchange }));
 
 vi.mock('./utils/virtualClock', () => ({
   virtualClock: {
@@ -48,7 +42,7 @@ describe('createPublicExchange', () => {
   });
 
   it('adds metadata-driven proxy override for public exchanges that need proxying', async () => {
-    await createPublicExchange('coinbase');
+    await createPublicExchange('apexomni');
 
     expect(testState.constructorCalls[0]?.options).toMatchObject({
       key: '',
@@ -68,7 +62,7 @@ describe('createPublicExchange', () => {
   });
 
   it('disables all proxy routing when requested', async () => {
-    await createPublicExchange('coinbase', {
+    await createPublicExchange('apexomni', {
       forceAllProxiesOff: true,
       overrideProxyUrl: 'https://custom-proxy.example.com',
       tealstreetProxy: true,
