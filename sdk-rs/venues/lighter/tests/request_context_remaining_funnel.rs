@@ -409,3 +409,36 @@ fn proven_21104_reseed_then_acceptance_is_plain_success() {
             if serde_json::from_str::<Vec<String>>(result).unwrap()
                 == vec![first_tx["ClientOrderIndex"].as_u64().unwrap().to_string()]));
 }
+
+#[test]
+fn public_l1_setup_keeps_the_address_lookup_candidate() {
+    let address = "0x1111111111111111111111111111111111111111";
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(
+        safe_cex_venue_lighter::Options {
+            key: Some(address.into()),
+            application_id: None,
+            ..options()
+        },
+    ));
+    engine.start(NOW);
+    let catalog = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(packet) if packet.url.contains("orderBookDetails") => Some(packet),
+            _ => None,
+        })
+        .expect("released catalogue");
+    let actions = after_reply(&mut engine, &catalog, META);
+    let lookup = candidate(&actions, "/account?by=l1_address");
+    assert!(lookup.url.ends_with(&format!("value={address}")));
+    assert!(lookup.headers.is_empty());
+}
+
+#[test]
+fn secret_only_setup_keeps_the_explicit_account_lookup() {
+    assert!(options().key.is_none());
+    let (_, actions) = lookup();
+    let request = candidate(&actions, "/account?by=index");
+    assert!(request.url.ends_with("value=718895"));
+    assert!(request.headers.is_empty());
+}

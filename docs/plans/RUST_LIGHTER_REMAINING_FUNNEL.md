@@ -114,9 +114,13 @@ substitute for that review.
 
 A local scalar plus account index and API-key index works today without key.
 The generic local-provider capsule requires a nonempty credential value to issue
-an admissible Primary. The core reviewer must confirm the venue setup mapping
-for this secret-only shape before cutover; do not fabricate opaque refs or drop
-this supported configuration. No shared setup behavior changes without review.
+an admissible Primary. The core audit found no reviewed secret-only Required selection seam. The
+recipe/setup owner must specify an explicit trusted provider-backed nonsecret
+principal carrier before cutover; never fabricate venue Identity/KeyRef values
+or add an arbitrary placeholder to pass Primary. Preserve original KeyPresence
+(absent, empty, blank or null), so no label becomes a claimed supplied API key.
+The principal is not a wire credential, nonce subject or address proof; actual
+signing capability and resolved Account/API-index provenance remain authority.
 
 The optional key is also a public L1 address selector. Preserve only a validated
 public address as explicit venue metadata before the bridge strips credentials,
@@ -308,3 +312,11 @@ its scratch target was deleted. Source-stage gates explicitly include typed prov
 refusal kind/no write retry, scalar absence from options/serialized bridge/Debug,
 FIFO/coalesced tier/approval/exposure waits, tier success/refusal/Unknown once,
 and the second-21104 explicit failure/no third send.
+
+Two additional native capability controls passed on unchanged fff73624e85:
+public_l1_setup_keeps_the_address_lookup_candidate and
+secret_only_setup_keeps_the_explicit_account_lookup (two selected tests, zero
+failures or ignored; scratch target deleted). They preserve the first public
+lookup URL and unsigned headers for a key-supplied L1 selector versus an absent
+key with explicit account index. The original fourteen bodies are unchanged
+from the strengthened 1513268d185 set.
