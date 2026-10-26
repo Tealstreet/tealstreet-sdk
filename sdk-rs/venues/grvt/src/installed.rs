@@ -52,5 +52,5 @@ impl Installed {
 }
 
 #[cfg(test)]
-#[path = "../tests/installed_setup.rs"]
+#[path = "../tests/support/installed_setup.rs"]
 mod tests;
