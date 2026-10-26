@@ -285,3 +285,12 @@ account request entry and its three raw credential-selection sites are
 removed; the conservative trading macro entry remains. Test inventories and
 signing/socket manifests receive no allowances. Exact final bans and frozen
 PR correctness/replay results remain separate gates.
+
+The published successor is PR #2213. During its correctness run, #2217
+reverted the #2203 CI optimization. That actual landing (923246ecf96) is
+plain-merged automatically in 665af9d868c. Every owned Backpack source,
+control, fixture, Cargo and inventory blob remains exact to published7204;
+all CI/harness files follow the incoming revert. The earlier427/9/strict/
+fmt/bans evidence retains its original pins. The running7204 PR correctness
+and Backpack replay supply source-identical evidence; no CPU/certification
+or new combined gate is added to this venue-only slice by that infra revert.
