@@ -982,6 +982,16 @@ impl Venue for PhemexPerpetuals {
     ) {
         self.retire_trading(owner);
     }
+    fn unproven_http_evidence(
+        &self,
+        pending: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        if matches!(pending, Pending::PlannedTrade(_) | Pending::Repair(_)) {
+            trading::unproven_diagnostics(response, evidence);
+        }
+    }
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,
