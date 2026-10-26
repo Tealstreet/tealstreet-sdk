@@ -757,10 +757,12 @@ class MacroImportProof:
             if target not in self.tracked or names[:1] == (target_name,):
                 return None
             stream = self.streams[target]
-            # `#[cfg(test)]` modules are absent from the production module graph.
+            # Private `#[cfg(test)]` modules are absent from the production module
+            # graph and export nothing through the glob.
             tests = test_ranges(stream)
             if source_macro_hazard(stream) or any(
-                    token == 'mod' and not any(a <= i < b for a, b in tests)
+                    token == 'mod' and (not any(a <= i < b for a, b in tests)
+                                        or stream[i - 1:i] in (['pub'], [')']))
                     for i, token in enumerate(stream)):
                 return None
             # Re-exports with every visibility spelling are excluded.
@@ -1210,10 +1212,16 @@ def pattern_macro_proof(stream, index, end, imports, found, bound=frozenset()):
             nested.append(proof)
             k = inner_end
             continue
-        if token in {'!', '|', 'let', ';', '{', '$'} or token.startswith('r#'):
+        if token in {'|', 'let', ';', '{', '$'} or token.startswith('r#') \
+                or token == '!' and stream[k + 1:k + 2] != ['=']:
             return None
+        # A binding is only read as `name.field`: never called, assigned or passed.
         if token in METHODS and (token not in names or stream[k - 1] in {'.', '::'}
-                                 or stream[k + 1:k + 2] != ['.']):
+                                 or stream[k + 1:k + 2] != ['.'] or not IDENT.fullmatch(stream[k + 2])
+                                 or stream[k + 2] in METHODS or stream[k + 3:k + 4] == ['(']):
+            return None
+        if token == '=' and not (stream[k + 1:k + 2] == ['='] and stream[k + 2:k + 3] != ['=']
+                                 or stream[k - 1] in {'=', '!', '<', '>'} and stream[k + 1:k + 2] != ['=']):
             return None
         k += 1
     if not names - set(bound) and not nested and not any(stream[k] in METHODS for k in guard):

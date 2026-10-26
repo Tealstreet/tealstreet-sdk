@@ -563,6 +563,8 @@ class DataMacroProvenance(unittest.TestCase):
     def test_nested_guarded_pattern_bindings_named_like_methods_are_proven(self):
         self.assertEqual(self.prod(self.source(self.PHEMEX)), {})
         self.assertEqual(self.prod(self.source(
+            'matches!(step, Step::Send { request, .. } if request.a <= 1 && request.b != 2 && request.c >= 3);')), {})
+        self.assertEqual(self.prod(self.source(
             'assert!(ok); let v = vec![1]; matches!(step, Step::Send { request, .. } if request.ready);')), {})
 
     def test_pattern_proof_keeps_calls_cx_values_and_unbound_names_counted(self):
@@ -579,7 +581,13 @@ class DataMacroProvenance(unittest.TestCase):
                 'matches!(step, Step::Send { request, .. } if (|| request.ready)());',
                 'matches!(step, Step::Send { request, .. } if other!(request));',
                 'matches!(step, Step::Send { request, .. } if matches!(cx.request(1), Ok(_)));',
-                'matches!(step, Step::Send { r#request, .. } if r#request.ready);']:
+                'matches!(step, Step::Send { r#request, .. } if r#request.ready);',
+                'matches!(step, Step::Send { request, .. } if request.send(1).is_ok());',
+                'matches!(step, Step::Send { request, .. } if request.ready = true);',
+                'matches!(step, Step::Send { request, .. } if request.count += 1);',
+                'matches!(step, Step::Send { request, .. } if request.done.is_some());',
+                'matches!(step, Step::Send { request, .. } if request.0);',
+                'matches!(step, Step::Send { request, .. } if consume(request));']:
             with self.subTest(body=body):
                 self.assertTrue(self.prod(self.source(body)))
 
@@ -666,7 +674,9 @@ class DataMacroModuleProvenance(unittest.TestCase):
 
     def test_test_only_target_modules_do_not_block_the_crate_glob_proof(self):
         self.assertEqual(self.inventory(target='pub struct Request; #[cfg(test)] mod tests { use super::*; }'), {})
-        for target in ['pub struct Request; #[cfg(not(test))] mod nested {}',
+        for target in ['pub struct Request; #[cfg(test)] pub mod tests {}',
+                       'pub struct Request; #[cfg(test)] pub(crate) mod tests {}',
+                       'pub struct Request; #[cfg(not(test))] mod nested {}',
                        'pub struct Request; mod nested {}',
                        'pub struct Request; #[cfg(test)] mod tests { macro_rules! matches { () => {} } }']:
             with self.subTest(target=target):
