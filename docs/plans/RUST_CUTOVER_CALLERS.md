@@ -9318,6 +9318,63 @@ The separately owned core CancelOnly overlap rule landed in #2181. Per the overs
 
 Phemex late-repair source corrections retain native envelope/row refusal codes and typed classification. A refused repair admission refreshes the account; non-capacity mint refusals give an explicit manual-cancel diagnostic. Retry reads can temporarily overlap the retiring Read by one Context to retain snapshot DATA custody. Phemex does not advance the selective snapshot fence; retirement relies on the receipt's begin-after-mint check and actual absence. The dispatch-signing fixture's Pending variant matcher changes; signing vectors do not.
 
+
+### Keyless Session serial command roots
+
+A trusted Empty-login consumer may begin a WriteAfterReads Preflight without a
+credential only through begin_preflight_with_session and its actual live
+Session. Installed and absent login intents must not silently take this path.
+The serial root retains issuer and Session generation, has no caller receipt
+cap or root clock, and uses the declared per-call bound. Complete Plans and
+all provider-signing, selection-backed or nonce-bearing attachments are refused;
+a missing credential grants no signing authority. Existing signed adopters wrap
+the same SerialPolicy credential in Some with no selection or wire change.
+
+Each unsigned call binds that Session and uses only its declared egress. An auth
+resend keeps method, URL, body and static headers fixed, but reads the newer
+Session bundle at Bind. Changed requests and signed resends refuse as Invalid
+before preparation or new resource IDs. The engine retains a codec fingerprint,
+not signed bytes. A new logical call may change its request. Session retirement,
+foreign handles, and equality expiry produce typed unreleased refusals without
+auth-health or account-latch changes; late callbacks remain inert. The command
+terminal follows the existing Plan journal: an accepted prefix yields None,
+and a released attempt followed by an unreleased failed resend may yield Unknown
+rather than whole-command NotSent. No native GRVT constructor or queue adoption
+is enabled by this shared prerequisite.
+
+
+### Kraken managed socket admission
+
+Futures and Spot public/private sockets now use engine-issued feed epochs and
+shared lifecycle timers. Duplicate OPEN cannot replay auth/subscriptions, and
+connect, auth or receive ingress at deadline equality refuses before delayed
+timer delivery. Unopened or retired Spot balances cannot issue account HTTP.
+Only successfully decoded envelopes refresh receive; malformed Spot traffic
+therefore no longer keeps a silent connection alive. These safer differences
+are pinned by actual-ingress controls, not venue-owned clocks.
+
+Futures challenge and three distinct ACKs remain separate from the OPEN+180s
+validated initial-payload bound. Its post-Ready Timeout(Auth) means lifecycle
+timeout, never invalid credentials or a write resend. Spot tokens belong to
+the exact physical epoch; obsolete token responses/retries are inert, and the
+two native subscription frames use an epoch-bound one-shot queue with final
+release expiry checks. Native HTTP signing and nonce namespace stay unchanged.
+The newly linked managed-sockets feature has a family cost (#2189); CI records
+Kraken size. The venue-only policy waives a local combined measurement while
+combined headroom exceeds 200K.
+
+Public subscription Capacity retires the current epoch once and recovers through
+shared Closed/backoff, preserving native ticker/book/OHLC demand. Repeated
+capacity while already retired cannot erase or renew that retry. Permanent
+encoder errors and private admission errors remain explicit fail-closed stops;
+this recovery grants no HTTP, auth, signing or venue-owned supervisor authority.
+
+Replacement admission follows the same public Capacity recovery: an engine
+issued epoch and its native socket reference exist before fallible interest
+staging, so a refusal retires that exact epoch and takes shared exponential
+backoff instead of permanently failing the feed. Controls saturate resources at
+the captured real retry and prove subsequent demand replay and private liveness.
+
 ## Lighter Schnorr auth recipe and public key (P3 parts 2+3)
 
 Shared prerequisites for the Lighter venue cutover (owner codex-ih35js). Nothing
@@ -9341,3 +9398,34 @@ calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
   non-canonical, zero or wrong-width scalar is refused at trusted setup
   (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
   ref is declared at the cutover.
+
+## Backpack snapshot-issued trigger repair
+
+Accepted managed account Orders snapshots publish under live Background DATA,
+then mint the existing cancel-then-place authority before retiring that Read.
+Discovery may use the installed Secondary; repair always uses the genuine
+installed native-ready Primary. Streams never mint. A missing Primary produces
+one local typed NoPrimary Warn per accepted snapshot, with no mint call or write;
+public-only or native-unready account state cannot start repair.
+
+Each physical cancel/place leg has its own 20-second Never policy, with no
+aggregate clock, fake Command or borrowed Read mutation authority. The placement
+successor is issued only inside the accepted cancel DATA delivery. Explicit
+finite zero baseline and cumulative fill are required for the full frozen size;
+partial, missing, invalid, decreasing, contradictory or later fill evidence
+suppresses replacement and prompts manual reconciliation. No remainder math is
+introduced. Raw per-ID evidence is independent of candidate eligibility and
+survives retained rows and Store rollback. These are intentional safety
+improvements over native automatic full-size replacement.
+
+Unsafe current stream or accepted REST evidence retires the exact held successor
+Context before any early return. Held Prepare/Bind then settles Some(NotSent),
+while released work remains Unknown. A successor never issued is place=None;
+the accepted cancel remains factual. Cleanup settles once and independent
+account observations and real command owners keep their own custody. Unknown
+subjects cannot be retired merely by a terminal-looking Store row.
+
+An accepted placement with a malformed financial row retains the original Store
+identity and publishes no fabricated replacement. It still fences older Orders
+reads before reconciliation. Existing native financial formatting and private
+socket authentication remain unchanged.
