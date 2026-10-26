@@ -4,30 +4,44 @@ use super::*;
 use crate::nonce::{NonceDomain, NonceSelectionError};
 #[cfg(feature = "address-nonce")]
 use crate::signing::{Identity, KeyRef, SignError};
+#[cfg(feature = "address-nonce")]
 use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct SetupRetirement {
+    #[cfg(feature = "address-nonce")]
     issuer: Arc<Issuer>,
+    #[cfg(feature = "address-nonce")]
     generation: u64,
+    #[cfg(feature = "address-nonce")]
     task: RequestId,
+    #[cfg(not(feature = "address-nonce"))]
+    unavailable: std::convert::Infallible,
 }
+#[cfg(feature = "address-nonce")]
 #[derive(Debug)]
 struct Issuer {
     wire: u64,
 }
+#[cfg(feature = "address-nonce")]
 impl PartialEq for Issuer {
     fn eq(&self, other: &Self) -> bool {
         std::ptr::eq(self, other)
     }
 }
+#[cfg(feature = "address-nonce")]
 impl Eq for Issuer {}
 impl SetupRetirement {
     pub fn to_wire(&self) -> String {
-        format!(
-            "s1:{}:{}:{}",
-            self.issuer.wire, self.generation, self.task.0
-        )
+        #[cfg(feature = "address-nonce")]
+        {
+            format!(
+                "s1:{}:{}:{}",
+                self.issuer.wire, self.generation, self.task.0
+            )
+        }
+        #[cfg(not(feature = "address-nonce"))]
+        match self.unavailable {}
     }
 }
 

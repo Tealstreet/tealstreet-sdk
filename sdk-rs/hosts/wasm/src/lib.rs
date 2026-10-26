@@ -514,7 +514,7 @@ fn encode(actions: &[Action]) -> String {
                 token: token.to_wire(),
             },
             #[cfg(not(feature = "address-nonce"))]
-            Action::RetireAddressSetup { .. } => panic!("Address setup is unsupported"),
+            Action::RetireAddressSetup { .. } => std::process::abort(),
             Action::WsConnect {
                 binary,
                 socket,
