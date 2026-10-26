@@ -141,7 +141,12 @@ fn secondary_get_keeps_primary_mutations() {
                         recv_window.unwrap_or(20000.0)
                     )
                 );
-                assert_eq!(signature.len(), 64, "a 64-digit hex signature");
+                // Signed with the selected role's own material: the read
+                // identity's for a read, Primary's for a mutation.
+                assert_eq!(
+                    signature,
+                    crate::test_config::fixture_signature(request.method == Method::Get, payload)
+                );
                 assert!(
                     request
                         .headers

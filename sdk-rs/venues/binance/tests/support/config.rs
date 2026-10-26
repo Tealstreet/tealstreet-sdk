@@ -63,18 +63,32 @@ pub fn keyed(variant: Variant, key: &str, seed: &str) -> Options {
     }
 }
 
+const PRIMARY_SEED: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+const READ_SEED: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+
 /// The two-identity fixture the crate's selection tests share.
 pub fn with_read_identity() -> Options {
     Options {
         key: Some("primary-key".into()),
-        secret: Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".into()),
+        secret: Some(PRIMARY_SEED.into()),
         read_credentials: Some(ReadCredentials {
             key: "read-key".into(),
-            secret: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=".into(),
+            secret: READ_SEED.into(),
             passphrase: Some("read-pass".into()),
         }),
         ..Options::default()
     }
+}
+
+/// The signature `with_read_identity`'s Read (`read`) or Primary material
+/// gives `payload`: an independent check of which material signed.
+pub fn fixture_signature(read: bool, payload: &str) -> String {
+    let seed = if read { READ_SEED } else { PRIMARY_SEED };
+    safe_cex_crypto::hmac_sha256(
+        seed.as_bytes(),
+        payload.as_bytes(),
+        safe_cex_crypto::Encoding::Hex,
+    )
 }
 
 /// The read identity without signing material: an invalid Secondary.

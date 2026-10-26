@@ -25,11 +25,15 @@ fn vector() -> Vector {
 
 /// One provider-signed identity read (FetchAccount) from `options`.
 fn signed_read(options: Options) -> HttpRequest {
+    signed_read_at(options, NOW)
+}
+
+fn signed_read_at(options: Options, now: f64) -> HttpRequest {
     let mut engine = support::engine(options);
     engine.store_mut().set_orders(vec![]);
     engine.store_mut().set_positions(vec![]);
-    engine.handle(NOW, Event::Command(Command::FetchAccount { command: 7 }));
-    safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
+    engine.handle(now, Event::Command(Command::FetchAccount { command: 7 }));
+    safe_cex_engine::test_support::prepared_actions(&mut engine, now)
         .into_iter()
         .find_map(|action| match action {
             Action::Http(request) => Some(request),
@@ -88,4 +92,18 @@ fn configured_receive_windows_are_signed_without_changing_supported_values() {
             hmac_sha256(b"s", payload.as_bytes(), Encoding::Hex)
         );
     }
+}
+
+/// The wire stamp is the whole millisecond below a fractional clock, as the
+/// documented example's 1591702613943.7 signed timestamp=1591702613943.
+#[test]
+fn a_fractional_clock_signs_the_floored_millisecond() {
+    let request = signed_read_at(keyed("s", None), 1000.7);
+    let (_, query) = request.url.split_once('?').unwrap();
+    let (payload, signature) = query.rsplit_once("&signature=").unwrap();
+    assert_eq!(payload, "timestamp=1000&recvWindow=20000");
+    assert_eq!(
+        signature,
+        hmac_sha256(b"s", payload.as_bytes(), Encoding::Hex)
+    );
 }
