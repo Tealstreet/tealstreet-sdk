@@ -3132,6 +3132,7 @@ mod tests {
         native_effects: usize,
         housekeeping_checks: usize,
         reconciles: Vec<Option<Vec<String>>>,
+        reasks: Vec<bool>,
         // The command intent a test mutation is issued under (default Place).
         mutation_intent: Option<crate::classify::Intent>,
         // Whether a reconcile hook ever saw borrowed delivery/read authority.
@@ -3445,11 +3446,12 @@ mod tests {
                 panic!("unexpected transport failure");
             }
         }
-        fn reconcile_uncertain(&mut self, _cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
+        fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
             self.reconciles.push(symbols.map(<[String]>::to_vec));
+            self.reasks.push(cx.reconcile_reask());
             #[cfg(feature = "order-locks")]
             {
-                self.reconcile_custody |= _cx_has_custody(_cx);
+                self.reconcile_custody |= _cx_has_custody(cx);
             }
         }
         fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -5632,6 +5634,9 @@ mod tests {
         );
         assert_eq!(engine.venue.reconciles.len(), 9);
         assert!(engine.venue.reconciles.iter().all(|scope| *scope == btc));
+        // The seal's ask is not a re-ask; every backoff call is.
+        assert!(!engine.venue.reasks[0]);
+        assert!(engine.venue.reasks[1..].iter().all(|reask| *reask));
         // A fresh read releases the fence and the re-asks stop.
         let token = engine.io.core.order_locks.token();
         engine
