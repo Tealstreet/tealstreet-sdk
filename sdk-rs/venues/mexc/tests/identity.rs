@@ -1,13 +1,12 @@
 //! Private validation uses the selected read signer; persisted identity is Primary metadata.
 mod support;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Method, Notice, ReadCredentials, Response,
+    Action, Command, Event, HttpRequest, Method, Notice, ReadCredentials, Response,
 };
-use safe_cex_venue_mexc::MexcFutures;
 use support::Options;
 
 const NOW: f64 = 1_700_000_000_000.;
-fn engine(options: Options) -> Engine<MexcFutures> {
+fn engine(options: Options) -> support::TestEngine {
     let mut e = support::configured(options);
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 123.,
@@ -17,7 +16,7 @@ fn engine(options: Options) -> Engine<MexcFutures> {
     });
     e
 }
-fn ask(e: &mut Engine<MexcFutures>) -> Vec<Action> {
+fn ask(e: &mut support::TestEngine) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
     let actions = support::prepared(e, NOW);
     let mut timers = std::collections::HashSet::new();
@@ -47,7 +46,7 @@ fn take(actions: Vec<Action>) -> HttpRequest {
     assert_eq!(r.route, None);
     r
 }
-fn respond(e: &mut Engine<MexcFutures>, r: &HttpRequest, status: u16, body: &str) -> Vec<Action> {
+fn respond(e: &mut support::TestEngine, r: &HttpRequest, status: u16, body: &str) -> Vec<Action> {
     e.handle(
         NOW,
         Event::HttpResponse {
@@ -117,7 +116,7 @@ fn read() -> ReadCredentials {
         passphrase: None,
     }
 }
-fn request(e: &mut Engine<MexcFutures>) -> HttpRequest {
+fn request(e: &mut support::TestEngine) -> HttpRequest {
     let r = take(ask(e));
     assert_eq!(r.url, "https://api.mexc.com/api/v1/private/account/assets");
     r

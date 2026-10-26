@@ -39,6 +39,8 @@ struct Rule {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum SetupMapping {
+    #[serde(rename = "mexc")]
+    Mexc,
     Asterdex,
     #[serde(rename = "apexomni")]
     ApexOmni,

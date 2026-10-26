@@ -2,22 +2,54 @@
 mod support;
 
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::signing::{SignFuture, SignRequest, Signer};
+use safe_cex_engine::signing::{
+    Algorithm, Capability, KeyRef, Provider, SignFuture, SignRequest, Signer,
+};
 use safe_cex_engine::{
     Action, Command, ErrorKind, Event, HttpRequest, Notice, Outcome, Query, ReadCredentials,
     Response, SocketId,
 };
-use safe_cex_venue_mexc::{MexcFutures, Options};
 use std::sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, Ordering},
 };
+use support::Options;
 use support::{MARKETS, TICKERS, TestEngine};
 
-struct Parked;
+struct Parked(Provider);
+struct Switch {
+    provider: Provider,
+    held: Arc<AtomicBool>,
+}
+impl Signer for Switch {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        if self.held.load(Ordering::SeqCst) {
+            Box::pin(std::future::pending())
+        } else {
+            self.provider.sign(request)
+        }
+    }
+    fn sign_ready(
+        &self,
+        request: &SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
+        if self.held.load(Ordering::SeqCst) {
+            None
+        } else {
+            self.provider.sign_ready(request)
+        }
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.provider.can_sign(key, algorithm)
+    }
+}
 impl Signer for Parked {
     fn sign(&self, _: SignRequest) -> SignFuture {
         Box::pin(std::future::pending())
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.0.can_sign(key, algorithm)
     }
 }
 
@@ -30,9 +62,7 @@ fn options() -> Options {
 }
 
 fn engine(options: Options) -> TestEngine {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(options));
-    engine.set_signer(Some(Arc::new(Parked))).unwrap();
-    engine
+    support::configured(options)
 }
 
 fn reader(secondary: bool) -> TestEngine {
@@ -46,12 +76,51 @@ fn reader(secondary: bool) -> TestEngine {
     })
 }
 
+fn dispatch(engine: &mut TestEngine, now: f64) -> Vec<Action> {
+    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    let mut queue = std::collections::VecDeque::from(engine.drain_actions().collect::<Vec<_>>());
+    let mut actions = Vec::new();
+    while let Some(action) = queue.pop_front() {
+        match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => {
+                    engine.http_prepared(
+                        now,
+                        preparation,
+                        Prepared {
+                            id: request.id.0,
+                            expires_at: None,
+                        },
+                    );
+                }
+                HttpAction::Bind {
+                    permit, request, ..
+                } => {
+                    assert!(matches!(
+                        engine.claim_http(now, permit),
+                        Ok(Claim::Released(_))
+                    ));
+                    actions.push(Action::Http(request));
+                }
+                action => actions.push(Action::ManagedHttp(Box::new(action))),
+            },
+            action => actions.push(action),
+        }
+        queue.extend(engine.drain_actions());
+    }
+    actions
+}
+
 fn identity(engine: &mut TestEngine) -> Vec<Action> {
     engine.handle(
         1_700_000_000_000.875,
         Event::Command(Command::FetchAccount { command: 91 }),
     );
-    engine.drain_actions().collect()
+    dispatch(engine, 1_700_000_000_000.875)
 }
 
 fn assert_parked(actions: &[Action], transport: impl Fn(&Action) -> bool) {
@@ -94,14 +163,21 @@ fn private_started() -> (TestEngine, SocketId, Vec<HttpRequest>) {
 }
 
 fn private_started_with(options: Options) -> (TestEngine, SocketId, Vec<HttpRequest>) {
-    private_started_configured(options, |_| {})
+    private_started_configured(options, None, |_| {})
 }
 
 fn private_started_configured(
     options: Options,
+    held: Option<Arc<AtomicBool>>,
     configure: impl FnOnce(&mut TestEngine),
 ) -> (TestEngine, SocketId, Vec<HttpRequest>) {
-    let mut engine = engine(options);
+    let mut engine = if let Some(held) = held {
+        support::credentials::configured_with_provider(options, |provider| {
+            Arc::new(Switch { provider, held })
+        })
+    } else {
+        engine(options)
+    };
     configure(&mut engine);
     engine.start(0.0);
     let actions = support::prepared(&mut engine, 0.);
@@ -129,8 +205,8 @@ fn private_started_configured(
         100.0,
         r#"{"success":true,"code":0,"data":2}"#,
     );
-    let reads = engine
-        .drain_actions()
+    let reads = support::prepared(&mut engine, 100.)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -169,26 +245,35 @@ fn place(engine: &mut TestEngine, command: u32, now: f64) {
 
 #[test]
 fn primary_identity_waits_for_provider_instead_of_eager_http() {
-    assert_parked(&identity(&mut reader(false)), |a| {
-        matches!(a, Action::Http(_))
-    });
+    assert_parked(
+        &identity(&mut support::credentials::configured_with_provider(
+            options(),
+            |p| Arc::new(Parked(p)),
+        )),
+        |a| matches!(a, Action::Http(_)),
+    );
 }
 
 #[test]
 fn secondary_identity_waits_for_provider_instead_of_eager_http() {
-    assert_parked(&identity(&mut reader(true)), |a| {
-        matches!(a, Action::Http(_))
-    });
+    assert_parked(
+        &identity(&mut support::credentials::configured_with_provider(
+            secondary_options(),
+            |p| Arc::new(Parked(p)),
+        )),
+        |a| matches!(a, Action::Http(_)),
+    );
 }
 
 #[test]
 fn startup_private_mode_waits_for_provider() {
-    let mut engine = engine(options());
+    let mut engine =
+        support::credentials::configured_with_provider(options(), |p| Arc::new(Parked(p)));
     engine.start(0.0);
     let actions = support::prepared(&mut engine, 0.);
     let markets = first_http(&actions, "/api/v1/contract/detail");
     respond(&mut engine, &markets, 100.0, MARKETS);
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = dispatch(&mut engine, 100.);
     assert_parked(
         &actions,
         |a| matches!(a, Action::Http(r) if r.url.contains("/private/")),
@@ -197,7 +282,9 @@ fn startup_private_mode_waits_for_provider() {
 
 #[test]
 fn opening_private_login_uses_provider_work() {
-    let (mut engine, socket, _) = private_started();
+    let held = Arc::new(AtomicBool::new(false));
+    let (mut engine, socket, _) = private_started_configured(options(), Some(held.clone()), |_| {});
+    held.store(true, Ordering::SeqCst);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert_parked(
         &actions,
@@ -207,49 +294,22 @@ fn opening_private_login_uses_provider_work() {
 
 #[test]
 fn mutation_uses_provider_instead_of_an_eager_signed_write() {
-    let mut engine = ready();
+    let held = Arc::new(AtomicBool::new(false));
+    let (mut engine, _, reads) = private_started_configured(options(), Some(held.clone()), |_| {});
+    for request in reads {
+        support::response(
+            &mut engine,
+            &request,
+            r#"{"success":true,"code":0,"data":[]}"#,
+        );
+    }
+    engine.drain_actions().for_each(drop);
+    held.store(true, Ordering::SeqCst);
     place(&mut engine, 92, 200.0);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert_parked(
         &actions,
         |a| matches!(a, Action::Http(r) if r.url.ends_with("/order/submit")),
-    );
-}
-
-#[test]
-fn delayed_first_handoff_does_not_spend_the_450ms_release_gap_while_queued() {
-    let mut engine = ready();
-    place(&mut engine, 93, 200.0);
-    place(&mut engine, 94, 200.0);
-    // The host cannot release the queued write until 800; the ACK is fast.
-    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 800.0);
-    let first = first_http(&actions, "/api/v1/private/order/submit");
-    respond(
-        &mut engine,
-        &first,
-        810.0,
-        r#"{"success":true,"code":0,"data":"first"}"#,
-    );
-    let after_ack = safe_cex_engine::test_support::prepared_actions(&mut engine, 810.0);
-    assert!(
-        !after_ack
-            .iter()
-            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/order/submit"))),
-        "queue-time next_submit allowed a second handoff only 10ms after the first"
-    );
-    let (timer, at) = after_ack
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms >= 1250.0 => Some((*timer, *at_ms)),
-            _ => None,
-        })
-        .expect("next submit must wait for the actual release gap");
-    engine.handle(at, Event::TimerFired { timer });
-    let second = safe_cex_engine::test_support::prepared_actions(&mut engine, at);
-    assert!(
-        second
-            .iter()
-            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/order/submit")))
     );
 }
 
@@ -421,7 +481,7 @@ fn native_private_history_get_is_primary_even_with_secondary_configured() {
             },
         }),
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = support::prepared(&mut engine, 1000.);
     let request = first_http(&actions, "/api/v1/private/order/deal_details/123?");
     assert_eq!(header(&request, "ApiKey"), "replay-key");
     assert_eq!(header(&request, "Request-Time"), "1000");
@@ -456,7 +516,7 @@ fn native_public_trade_history_remains_unsigned_with_secondary_configured() {
             },
         }),
     );
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = support::prepared(&mut engine, 200.);
     let request = first_http(&actions, "/api/v1/contract/deals/BTC_USDT?limit=7");
     assert!(request.headers.is_empty());
     assert!(request.body.is_none());
@@ -667,73 +727,4 @@ fn genuine_missing_key_mode_commands_terminalize_once_without_waiting() {
                 | Action::SetTimer { .. }
         )));
     }
-}
-
-#[test]
-fn local_notsent_refresh_failure_does_not_spend_the_next_submit_slot() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let fail_on = Arc::new(AtomicUsize::new(usize::MAX));
-    let observed_calls = calls.clone();
-    let configured_failure = fail_on.clone();
-    let (mut engine, _, reads) = private_started_configured(options(), |engine| {
-        engine
-            .set_entropy(Box::new(move |bytes| {
-                let call = observed_calls.fetch_add(1, Ordering::SeqCst) + 1;
-                if call == configured_failure.load(Ordering::SeqCst) {
-                    return Err("test identity entropy unavailable".into());
-                }
-                for (index, byte) in bytes.iter_mut().enumerate() {
-                    *byte = call.wrapping_add(index) as u8;
-                }
-                Ok(())
-            }))
-            .unwrap();
-    });
-    for request in reads {
-        support::response(
-            &mut engine,
-            &request,
-            r#"{"success":true,"code":0,"data":[]}"#,
-        );
-    }
-    engine.drain_actions().for_each(drop);
-    // Native admission succeeds; only final placement refresh loses entropy.
-    let target = calls.load(Ordering::SeqCst) + 2;
-    fail_on.store(target, Ordering::SeqCst);
-    place(&mut engine, 110, 200.0);
-    let failed: Vec<_> = engine.drain_actions().collect();
-    assert_eq!(calls.load(Ordering::SeqCst), target);
-    let terminals: Vec<_> = failed
-        .iter()
-        .filter_map(|a| match a {
-            Action::Notice(Notice::CommandFailed {
-                command: 110,
-                error,
-            }) => Some(error),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(terminals.len(), 1);
-    assert_eq!(terminals[0].outcome, Some(Outcome::NotSent));
-    assert!(
-        terminals[0]
-            .message
-            .contains("test identity entropy unavailable")
-    );
-    assert!(!failed.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
-    )));
-    place(&mut engine, 111, 201.0);
-    let next: Vec<_> = engine.drain_actions().collect();
-    assert!(
-        next.iter()
-            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/order/submit"))),
-        "a local NotSent failure must not consume the submit release slot"
-    );
-    assert!(
-        !next
-            .iter()
-            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == 650.0))
-    );
 }

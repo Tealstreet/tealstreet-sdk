@@ -1,226 +1,137 @@
-# MEXC installed signing and private request custody
+# MEXC installed signing and private Read custody
 
-Status: local implementation in progress, unpublished; full PR review follows
-plan, originals and source together under the overseer speed instruction.
-Owner codex-mxb4mq, reassigned by the overseer from kuhwxi's later queue;
-reviewer codex-hcmq3f. Base eeb9d170f640 on origin/feat/rust-rewrite.
-One venue PR combines plan, originals, source and correctness qualification.
-WOO remains clean on feat/rust-woo-trading-signing at d402e9e4637, waiting for
-the two assigned pacing prerequisites. Resume it after their actual landings.
+Status: signing/private-read source complete; publishing one venue PR under
+speed mode, reviewer codex-hcmq3f. Trading custody/pacing is a SECOND PR by the
+overseer's direct split instruction. No shared engine or provider source edit.
 
-## Ownership and boundary
+## Scope and retained boundary
 
-No open MEXC implementation PR was found. The open cross-family HMAC plan
-#1718 is documentation. The old rust-mexc worktree is on a standby branch;
-kuhwxi's Aimux session is not running. Historical dispatch-signer branch
-62633039708 contains docs and eighteen original controls, no production source.
-Treat those controls as references; adapt only genuine managed-public setup.
-Do not import historical engine changes or claim old reviews cover this source.
+Consume Primary/Secondary material in trusted JS/native setup, install genuine
+provider references, and pass only refs/protocol options to MEXC. Cut over all
+REST signing and private WS login together. Account/settings observations,
+identity and private/public history gain exact selected managed Read ownership.
+Existing public Markets/Tickers/Depth/Book/Candles custody remains in place.
 
-Current inventories contain22 signing,12 credential and13 production request
-occurrences. Signing includes seven secondary test fingerprints, so22 is not
-twenty-two independent production senders. Freeze foreign map entries and order;
-remove only exact retired MEXC occurrences after the actual scanner proves it.
-Existing public Markets/Tickers/Depth and caller Book/Candles custody stays intact.
+The trading reducer, FIFO, job sizing,450/1500ms timing,510 response cooldown,
+amend/fallback rules and native physical sends stay unchanged. The old shared
+account.rs opaque request remains only for trading and now attaches the same
+immutable provider recipe. No synthetic Command, Background Mutation, borrowed
+Read write-authority, venue pacing substitute or fake release fact.
 
-Cut over all credential-bearing users atomically: the shared account/trading
-helper, direct private-history signer, account identity and private WS login.
-No raw fallback, recipe-only bridge activation or keyless signed Context.
-Scope includes MEXC source/tests, its registry arm and trusted setup mapping,
-one construction row, direct bridge/setup controls, docs and removal-only maps.
-No engine, crypto-provider, checker, host transport or socket-mode migration.
-Expected size is roughly3000 runtime lines plus controls/fixture adaptation;
-CI is the MEXC family record. No local combined while headroom exceeds200K;
-use the standing venue allowance only if the CI record requires it.
+The later trading PR waits for actual dazzy admissible-set and defer_pacing
+landings plus fe7 SerialCall.pacing. One submit domain has450ms base; original
+multi-order jobs use outer1500 on every submit, including final singleton/fallback.
+Only explicitly declared submit/batch members may join that domain (DomainMembers::Declared); cancels and other unpaced calls stay outside it.510 extends its own resolved floor to response
+now+1500 inside the exact released delivery. No API is assumed before landing.
 
-## Installed authority and persisted identity
+## Installed identity and wire
 
-Consume raw credentials only at trusted construction and pass installed refs
-to the venue. Primary credential trimming follows Rust White_Space semantics;
-the Primary secret and all Secondary bytes stay exact. Read selection is per
-native caller, never inferred solely from GET: account reads and amend-read
-polls may use Secondary, private history stays Primary, writes and WS login
-use Primary. Public trade history is unsigned. Invalid configured Secondary
-must not fall back to Primary. Public-only cannot start private work.
+MEXC's existing userId is mexc: plus the first12 SHA256 bytes of RAW Primary key.
+Trusted setup derives that namespace BEFORE normalization and supplies explicit
+Primary stableId; conflicting supplied mappings refuse. The ordinary provider
+only carries metadata and never derives hashes. Venue execution only reads the
+installed Primary mapping. JS declares the mapping through construction-rules,
+not a venue-name bridge branch. Native raw/JSON and JS literal Unicode vectors
+pin whitespace/NEL versus BOM without a silent account remap.
 
-Native identity has a distinct eligibility rule: a saved nonempty raw Primary
-key plus a complete Secondary may validate even without a Primary secret.
-Preserve that capability using a credential-only Primary and a Secondary Read;
-do not manufacture Primary signing authority. Other private history, leverage,
-startup and trading gates retain their own native usable-Primary requirement.
+Primary credential trimming follows Rust White_Space. Primary secret and all
+Secondary bytes stay exact. Credential-only Primary plus a complete Secondary
+retains identity validation; private startup/history/leverage/trading still
+require the native usable Primary. Invalid configured Secondary never falls
+back. Public-only cannot start private work. Injected providers supply explicit
+Primary mapping and installed identities.
 
-Persisted userId is mexc: plus the first12 SHA256 bytes of the RAW Primary key.
-REST signing trims that key, so hashing the provider-presented trimmed value
-would silently remap accounts. Proposed trusted MEXC compatibility setup computes
-the existing mapping before trimming and carries it as Primary stableId through
-the existing metadata channel. Venue execution reads only that stableId; no raw
-key hashing or provider key-hash escape. Both JS and native setup need the same
-literal vectors, including surrounding whitespace. An injected provider supplies
-its stableId explicitly. Missing metadata refuses identity visibly without
-altering the key or selecting the Secondary's identity. Exact setup/API review
-must close this mapping before production; do not remove persisted capability.
+REST attests immutable method/host/path/query/body/static headers before provider
+work and apply. Its preimage is selected credential + integer protocol stamp +
+exact payload. The provider owns interpolation/HMAC; require the exact receipt,
+two values,32-byte MAC, safe nonempty presented key and no extra provider headers.
+Header order remains ApiKey, Request-Time, Signature, Recv-Window, Content-Type;
+window defaults20000 and clamps1..20000, including the existing unit clamp table.
 
-## Exact REST and login recipes
+Private open keeps plain PING before exact native login JSON. Cx::send_signed
+uses installed Primary SessionAuth and the current captured socket. Legacy
+socket supervision and Required login acknowledgement remain; no socket feed
+registration or auth-interest replay. Existing wire/reconnect controls stay.
 
-REST preimage is selected credential bytes + integer protocol stamp + exact
-payload. Use provider-private PayloadPart::Credential followed by byte parts,
-with installed credential and signing refs. GET payload is the native sorted
-encoded query; POST payload is the original serialized body, never rebuilt.
-Attest exact method, host, path/query, body and static headers before provider
-work and again before applying the result. Require exact result shape/receipt,
-nonempty safe presented key,32-byte HMAC and no unsolicited provider headers.
-Keep header order ApiKey, Request-Time, Signature, Recv-Window, Content-Type.
-Window defaults20000, clamps1..20000; signature freshness uses the selected
-window and never extends the original physical deadline during preparation.
+## Read custody and failure policy
 
-Private open sends the plain ping before provider-backed login. Login JSON
-remains method=login and param apiKey, reqTime STRING, signature in that order.
-Its preimage is Primary credential + the same integer stamp + empty payload.
-Use Selected SessionAuth and Cx::send_signed with exact captured SocketId;
-retain the existing legacy socket generation/retirement and Required native
-login-ACK timeout. No managed feed registration or coexistence seam is added.
-Old-socket provider completion must not send on a replacement socket.
+Identity/leverage retain original caller roots, and history retains its cursor
+root/accepted-page authority. Private history is Primary-only; account/settings
+and identity choose the native Read slot once. Each account/page observation is
+20s/Never; immutable selected recipe and full admitted handle stay in Pending.
+Public history stays keyless. Native route None/Primary egress remains.
 
-## Physical ownership and reducers
+Exact DATA validation precedes rows/status/diagnostics/financial reducers.
+Accepted publication stays live. Retire the completing leg before deferred
+native followups or root completion. Expired owned failures still clean up once;
+foreign/duplicate/already-retired resources cannot advance work. No latest-kind
+replacement gate suppresses a still-live older native observation.
 
-Admit original caller Read roots for identity/leverage/history before I/O;
-retain one selected binding and exact Context in Pending. Every private account
-observation has its own Background20s/Never authority, including each page.
-DATA validation precedes streamed rows, status, diagnostics and reducers.
-Publish accepted state while live, retire exact custody before successors.
-Preserve full/partial account joins, revisions/tokens, stale fencing, settings,
-financial scaling, history windows/limits and accepted-page recovery. Expired
-owned failure cleanup uses exact retirement rather than a live-DATA check.
-Duplicate/foreign/revoked handles cannot advance or retire independent work.
+Precommit Capacity/TimedOut, or Invalid plus Network/Timeout/Internal, keep native
+delayed account recovery. Other owned finite precommit refusals retire once and
+warn without creating recovery. Released failures retain native handling.
+Nonfinite time performs exact cleanup and, for a caller Read, one owned failure terminal, with no new venue work/diagnostic.
+A real Mode request exercises eleven typed cases using identical message text;
+duplicates cannot rearm, and a real independent ticker completes. Released
+Mode expiry controls exercise real response/failure boundaries, denial of old
+payload and duplicate delivery, and an independently live later Book peer.
 
-Trading retains genuine original-entry Preflight/Plan custody and one FIFO;
-never reconstitute Command entry or issue under an unrelated timer callback.
-Amend cancellation, up to six native reconciliation reads, definitive remaining
-quantity and replacement stay on the same owner with captured Read vs Primary
-write binding. Never resend a mutation on ambiguous failure. Pure ACK decode,
-truthful write fact, effects validation, Store/diagnostics, then exact retirement.
-Mandatory bounded reconciliation captures the native IDs and financial intent.
-No accepted prefix may become NotSent; no replacement after unproven cancellation.
+## Fixtures and preservation
 
-Native lists are not capped at256 calls: batching chunks50, mixed order kinds,
-settings rails and definitive batch fallback require an API-fit audit against
-complete/streamed Plan bounds. No fake split Commands or dropped native sends.
-Only SUBMIT/BATCH joins physical pacing:450ms for singleton and1500ms for a
-multi-order release; the latter debt survives a following singleton. Cancels,
-leverage, conditional placement and amend GETs do not acquire that clock.
-Code510 retains its explicit response-derived cooldown. Local NotSent charges
-no physical slot, as approved in the historical disposition; test immediate
-following valid release and held-provider/final-Claim spacing separately.
+Unchanged eeb9 baseline:223PASS/0FAIL/0ignored across18 targets. Original7fba
+checkpoint:11nativeGREEN/7assertRED. That evidence is historical, not execution
+of managed suffixes. The later split retains16 originals in dispatch_signing;
+TWO future pacing witnesses remain byte-exact in the local trading handoff:
+delayed_first_handoff_does_not_spend_the_450ms_release_gap_while_queued and
+local_notsent_refresh_failure_does_not_spend_the_next_submit_slot. Their old REDs
+are not relabelled GREEN. This is an explicit scope split, not an ignored test.
 
-Current serial Plans reject nonzero pacing and inherit one root selector.
-Do not implement venue-clock release arbitration or assume WOO's pending APIs
-already exist. Reviewer must settle the exact MEXC plan/call mapping before
-trading source; if the same shared prerequisite is needed, consume its actual
-landing instead of editing core. Independent recipe/read design can proceed.
+Fixture Options consume historical inputs into a real LocalSigner before engine
+startup. A thin test engine records each actual handle/start observation so the
+normal collector releases genuine Prepare/Bind/Claim at that clock. No predicted
+IDs, raw fallback, financial response substitution or clock guessing. The two
+account timer/reporter collectors use their actual captured observation too.
+Shared public handoff controls retain actual preparation/claim APIs and clocks.
 
-Each physical call is20s/Never with original first-admission wait where the
-shared API requires it; no guessed aggregate serial clock or caller-wait renewal.
-Typed local/admission/precommit/released failure matrix stays explicit and
-separate from physical ownership. Nonfinite time creates no new work/timers;
-only exact issued cleanup is allowed, without damaging a peer/cadence timer.
-Once-only retirement notifications must release queued successors under genuine
-preflight readiness, never native pump with borrowed callback authority.
+History page responses/failures now use the original query observation rather
+than the unrelated startup helper's earlier100ms clock; startup stays100ms.
+Local-read success permits exactly its captured preparation Cancel once, then
+retains the no-newwork assertions. Paused pressure fills254 depth peers before
+a genuine429, then the two released credits with independent candle reads;
+all256 survival/reuse assertions remain. This respects native depth throttling.
 
-## Controls and delivery
+The secondary unit probe lives in tests/support, installs real refs/providers,
+and uses genuine engine-delivered test commands; GET uses Prepare/Bind/Claim.
+Its complete old native header/assertion tail and invalid-secondary negative
+remain. Raw primitive helpers are cfg(test) financial/wire oracles only; no
+production raw key/secret holder or signing primitive remains in the venue.
 
-Unchanged-runtime baseline runs the scoped MEXC crate before new controls.
-Adapt historical controls only where their public setup expects retired raw
-HTTP; preserve every existing financial/wire assertion and payload. Pin literal
-REST/WS HMAC, window/trim behavior, Primary-only history, Secondary amend reads,
-credential-only Primary identity, ping/login order, no-private public mode and
-the persisted raw-key fingerprint. Count real assertion RED separately from
-setup/compilation errors and do not label legacy handoff as final-Claim proof.
+## Inventories and accepted interim bans RED
 
-Source-stage controls need genuine installed providers versus different valid
-raw contrasts; actual Prepare/Bind/Claim and parked signer; held route/provider
-expiry/equality; exact cleanup ledgers, healthy peers and full Store/actions;
-once-only original terminals; mixed financial batch/fallback/partial effects;
-live publication before retirement; duplicate/nonfinite no work and all-credit
-reuse. Preserve old fixture assertions, financial payloads and clocks; review
-any necessary managed collector adaptation as an exact artifact before adoption.
+Only MEXC inventory rows are pruned; every foreign entry/order and all checkers
+remain unchanged. The existing account.rs request9baacdfca9e0 and all four
+trading.rs fingerprints stay exact. The conservative signing diagnostic word
+secret and the shared ReadCredentials::status reference remain inventoried.
 
-One hcmq3f CLEAR plus green correctness build/tests/strict Clippy/fmt/bans and
-MEXC replay permits a guarded owner merge under speed mode. CI supplies family
-size; no auditor/CPU/certification wait for an eligible venue-only slice. Shared
-source/checker/additive-inventory work is outside this scope and its own gate.
+ONE interim request attachment is new: account.rs queue_trade,
+6805c7c16738c3c1e45f770b81f0c7e59fea6ed7fc1f37ed3a963c49a4b1ec20,
+count0->1, cx.sign_http(request, Box::new(step)). The overseer explicitly accepted
+the resulting bans RED using the #2195 precedent. It is NOT added to a baseline,
+allowlist or checker exception, and remains visible to the immutable ratchet.
+No other growth/RED is accepted. Name it in READY;8x5tm1 must verify and GO.
+The trading PR MUST remove it back to0 when managed write custody lands.
 
-## Current unchanged-runtime checkpoint
+## Qualification and delivery
 
-On exact eeb9d170f640, scoped native qualification is223PASS/0FAIL/0ignored
-across18 targets. Historical eighteen controls have been refreshed locally:
-only five public startup collections now release genuine managed preparation
-at the original0/100ms clocks. Reversing those statements reconstructs the
-entire historical target; existing assertions and raw financial literals stay
-unchanged. Current outcome11nativeGREEN/7intended assertionRED/0ignored/filter.
-Five REDs expose eager signed private transport; one exposes queue-time450ms
-spacing after delayed handoff, and one exposes a NotSent refresh consuming the
-next native slot. No compile/setup failure is counted. These legacy witnesses
-do not yet prove installed-provider ownership or final managed Claims.
+Bound local full family:248PASS/0FAIL/0ignored before the additive released
+Background expiry control; that added target subsequently10PASS. Strict all-target
+MEXC Clippy passes. Trusted native setup3 and JS8 remain separately scoped logs.
+Final composed source must pass full family/strict/fmt and all bans except the
+exact ruled row. CI supplies family size and required MEXC replay. No local
+family size matrix or combined measurement under the current venue-only rule.
+Venue growth up to5% uses CI's number rounded up to KiB if needed.
 
-Hcmq3f cleared the plan and first originals at7fba53a89f0. The overseer then
-authorized local source without waiting for another preview: review is on the
-full venue PR. Trusted-ID direction is CLEAR; no source or runtime clearance
-is inferred from that plan verdict.
-
-## Local implementation and remaining shared prerequisites
-
-The independent local source now includes immutable provider-backed REST/login
-recipes; installed-only venue options and MEXC trusted JS/native stableId setup;
-selected account/identity Read ownership; and Primary-only private-history roots
-with exact live page admission/retirement. Account publication is live, with
-physical successors deferred until the completing observation retires. Public
-trade history stays unsigned under its caller root. Existing identity assertions
-and literal IDs/HMACs pass with genuine installed providers and managed release.
-
-Current scoped evidence:16 Rust identity/Read/history controls PASS, three native
-trusted-setup controls PASS, eight JS setup controls PASS, MEXC-only construction
-build PASS and strict library Clippy PASS. Baseline223 stays historical: the full
-current family, existing fixture migration, inventories/bans and replay have NOT
-yet qualified. The full-target original18 remains the unchanged-runtime RED
-checkpoint; do not relabel it as green after the source changes.
-
-Trading remains on its legacy FIFO/pacing, using installed provider recipes only
-as local wiring. Its temporary legacy sign_http attachment is NOT a final
-managed trade funnel and cannot be published. Fe7 confirmed THREE actual core
-landings are required before that scheduler source can qualify: dazzy3's
-release-domain admissible sets, fe7's SerialCall.pacing, and dazzy3's separate
-Cx::defer_pacing slice. No own engine work or venue-clock substitute.
-
-One submit domain declares450ms. SUBMIT/BATCH selects outer gap0 for an original
-single-order job and1500 for EVERY call from an original multi-order job,
-including a singleton final chunk and fallback. All other calls are unpaced.
-Code510 maps to defer_pacing(context,1500) in its exact released response
-custody: extend its resolved groups to max(floor,response-now+1500), no Claim
-or terminal. The next head waits on that shared floor. Actual landings plus
-consumer contract controls remain gates; a proposed API is not a landed one.
-
-## Independent Read checkpoint
-
-Private precommit recovery is typed: Capacity/TimedOut, or Invalid with
-Network/Timeout/Internal, retain native delayed account recovery. Other owned
-finite refusals retire once and warn without starting new recovery. Released
-failures retain native handling. Selection/configuration failure never borrows
-the transient row; nonfinite delivery only cleans up exact ownership. The new
-control drives an actual prepared Mode read for eleven typed combinations using
-one identical message, rejects duplicate rearming, and completes a real sibling.
-
-Local-read fixture adoption captures the actual preparation and permits exactly
-its one Cancel on successful completion. All remaining no-new-HTTP assertions
-stay. The paused-capacity control holds254 depth peers, completes its genuine
-429, then fills the two released credits with independent candle reads: depth
-admission is correctly paused by that429. It retains all256-peer survival and
-slot-reuse assertions. History collectors release genuine managed pages; their
-response/failure observation follows the original query observation rather than
-the shared startup helper's earlier100ms clock. Startup remains at100ms and all
-financial payload literals/result assertions are unchanged.
-
-Current scoped strict Clippy covers the MEXC library and installed_reads,
-identity, history and request_context_local_reads. Whole-family qualification,
-remaining private fixtures/unit probes, inventories and replay remain open;
-this local checkpoint is not publishable while trading uses temporary legacy
-attachment. No full-target18-originals GREEN claim is made.
+Publish this signing/private-read PR now; hcm reviews the complete packet.
+READY requires correctness/venue replay, hcm CLEAR and the exact accepted-red
+proof.8x5tm1 GO is retained solely for the interim inventory addition, followed
+by the guarded head-matched owner merge. No CPU/certification wait.

@@ -118,6 +118,10 @@ mod tests {
     }
     #[test]
     fn raw_and_json_setup_preserve_identical_raw_namespaces_before_trim() {
+        assert_eq!(
+            construction::signer_setup_mapping("mexc"),
+            Some(construction::SetupMapping::Mexc)
+        );
         for (key, stable) in [
             ("replay-key", "mexc:a7c5c5f5cbc33ea500a4850d"),
             (" replay-key ", "mexc:ae0c5396072d0d2a609af843"),

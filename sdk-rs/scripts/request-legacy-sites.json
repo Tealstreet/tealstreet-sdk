@@ -249,18 +249,7 @@
     "0bc3151ddc1e8889eb3a752d5431f3ab5643750a38409c18c5e239d38dcfc4b2": 1
   },
   "venues/mexc/src/account.rs": {
-    "b7dc68beffbce5993cd986ca76deaba009d76529c9a08dd7cba43c5f61aa74e8": 1,
-    "9baacdfca9e0cc474c05532c9e1e6137179f1860fb215900cb3875863da3c055": 1,
-    "9957739c32728439a0b5b0cbabfd9b7c77479ca2e08a5c8718213e4ddbcdfc7b": 1,
-    "3a512e8472fbb7eb5034b94f2172f6b72ec7152336d77e97e71f1ba0e041e668": 1,
-    "b44d970931e9cb5f96e525d6b46444a2710921aeb72bce9c635f43c9dd7c8359": 1
-  },
-  "venues/mexc/src/history.rs": {
-    "7d9792a0676bccdf20b899bb81c8f19bdf33402d56972457af968a5c4f3f433c": 1
-  },
-  "venues/mexc/src/identity.rs": {
-    "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
+    "9baacdfca9e0cc474c05532c9e1e6137179f1860fb215900cb3875863da3c055": 1
   },
   "venues/mexc/src/lib.rs": {
     "e7ec3b5f8c170e9a5887721f2eedda084ecf9f5a5eba8d1e899957c63019e0bb": 1

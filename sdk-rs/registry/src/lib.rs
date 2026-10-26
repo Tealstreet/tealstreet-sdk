@@ -671,7 +671,7 @@ pub fn prepare_local_signer_for(
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
     #[cfg(feature = "mexc")]
-    if venue == "mexc" {
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::raw(options);
     }
     #[cfg(feature = "asterdex")]
@@ -934,7 +934,7 @@ pub fn local_signer_from_json_for(
     VenueError,
 > {
     #[cfg(feature = "mexc")]
-    if venue == "mexc" {
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::json(input, false);
     }
 
@@ -987,7 +987,7 @@ pub fn local_signer_from_json_for_mode(
     VenueError,
 > {
     #[cfg(feature = "mexc")]
-    if venue == "mexc" {
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::json(input, construction::signer_setup_public_data_only(options));
     }
 

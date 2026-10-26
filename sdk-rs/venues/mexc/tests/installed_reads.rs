@@ -417,3 +417,142 @@ fn private_history_held_binding_expiry_cannot_publish_a_page() {
     assert!(done(&reply(&mut e, &request, NOW + 20_000.), 44).is_empty());
     assert_eq!(e.account_snapshot_frame(NOW), before);
 }
+
+#[test]
+fn background_released_expiry_retires_once_and_preserves_later_peer() {
+    for failed in [false, true] {
+        let mut e = engine(false, true);
+        let (mode, ticker) = mode_and_peer(&mut e);
+        let mode = release(&mut e, mode, NOW);
+        let ticker = release(&mut e, ticker, NOW);
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: ticker.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: support::TICKERS,
+                },
+            },
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW + 1000.,
+            Event::Command(Command::FetchOrderBook {
+                command: 99,
+                symbol: "BTCUSDT".into(),
+                limit: Some(1),
+            }),
+        );
+        let peer = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => Some((preparation, request)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        assert!(e.store().hedged());
+        if failed {
+            e.handle(
+                NOW + 20_000.,
+                Event::HttpFailed {
+                    request: mode.id,
+                    error: "expired observation",
+                },
+            );
+        } else {
+            e.handle(
+                NOW + 20_000.,
+                Event::HttpResponse {
+                    request: mode.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: r#"{"success":true,"code":0,"data":2}"#,
+                    },
+                },
+            );
+        }
+        let cleanup: Vec<_> = e.drain_actions().collect();
+        assert!(
+            e.store().hedged(),
+            "expired mode cannot publish its payload"
+        );
+        assert!(e.http_preparation_pending(peer.0));
+        assert!(!cleanup.iter().any(|action| matches!(action, Action::Http(_) | Action::Notice(Notice::AccountAuth { .. })) || matches!(action, Action::ManagedHttp(action) if !matches!(action.as_ref(),HttpAction::Cancel { .. }))));
+        assert_eq!(
+            cleanup
+                .iter()
+                .filter(|action| matches!(action, Action::SetTimer { .. }))
+                .count(),
+            1,
+            "one native poll recovery"
+        );
+        assert!(reply(&mut e, &mode, NOW + 20_000.).is_empty());
+        let peer = release(&mut e, peer, NOW + 20_001.);
+        e.handle(NOW + 20_002., Event::HttpResponse { request: peer.id, response: Response { status: 200, headers: "", body: r#"{"success":true,"code":0,"data":{"version":1,"bids":[[60000,10,1]],"asks":[[60001,20,1]]}}"# } });
+        assert!(e.drain_actions().any(|action| matches!(
+            action,
+            Action::Notice(Notice::CommandDone { command: 99, .. })
+        )));
+    }
+}
+
+#[test]
+fn nonfinite_owned_identity_delivery_settles_without_leaking_the_original_root() {
+    for failed in [false, true] {
+        let mut e = engine(false, true);
+        let packet = ask(&mut e, 42);
+        let request = release(&mut e, packet, NOW);
+        let before = e.account_snapshot_frame(NOW).to_vec();
+        if failed {
+            e.handle(
+                f64::NAN,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: "invalid observation clock",
+                },
+            );
+        } else {
+            e.handle(
+                f64::NAN,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: EMPTY,
+                    },
+                },
+            );
+        }
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 42, .. })))
+                .count(),
+            1
+        );
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Http(_)
+                | Action::Sign { .. }
+                | Action::SetTimer { .. }
+                | Action::WsConnect { .. }
+                | Action::WsSend { .. }
+                | Action::Notice(Notice::AccountAuth { .. })
+        )));
+        assert_eq!(e.account_snapshot_frame(NOW), before);
+        let next = ask_at(&mut e, 42, NOW + 1.);
+        assert!(e.http_preparation_pending(next.0));
+    }
+}

@@ -279,6 +279,9 @@ impl MexcFutures {
         }
         if !cx.now.is_finite() {
             self.discard_private(*pending);
+            if let Some(root) = owner.root() {
+                let _ = cx.fail_context(root, error);
+            }
             return;
         }
         self.private_delivery = owner.root().cloned();

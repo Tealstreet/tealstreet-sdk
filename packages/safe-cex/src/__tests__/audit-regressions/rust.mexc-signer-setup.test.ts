@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ExchangeOptions } from '../../types';
-import { deriveBridgeConstruction, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
+import { deriveBridgeConstruction, deriveSignerSetupPolicy, deriveSignerSetupMapping } from '../../exchanges/rust/construction';
 import { LocalSignerSetup, rustTrim, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
 import { mapMEXCSignerSetup } from '../../exchanges/rust/mexcSignerSetup';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
@@ -22,8 +22,8 @@ describe('MEXC trusted persisted identity', () => {
     const setup = new LocalSignerSetup(mapped, deriveSignerSetupPolicy('mexc'));
     let capsule = '';
     let engineOptions = '';
-    class Engine { constructor(_venue: string, json: string, credentials: string) { capsule = credentials; engineOptions = json; } }
-    setup.construct(Engine as unknown as new (...args: string[]) => WasmEngineLike, 'mexc', JSON.stringify(withoutSigningCredentials(mapped)));
+    class Engine { constructor(_venue: string, json: string, credentials?: string) { capsule = credentials ?? ''; engineOptions = json; } }
+    setup.construct(Engine as unknown as new (venue: string, options: string, credentials?: string) => WasmEngineLike, 'mexc', JSON.stringify(withoutSigningCredentials(mapped)));
     expect(JSON.parse(capsule).primary).toEqual({ key, secret: 'secret', stableId, trimCredential: true });
     expect(JSON.parse(capsule).secondary).toEqual({ key: ' read ', secret: ' read-secret ', trimCredential: false });
     expect(engineOptions).not.toContain('replay-key');
@@ -42,10 +42,11 @@ describe('MEXC trusted persisted identity', () => {
   });
   it('never takes the secondary mapping as the primary identity', () => {
     expect(mapMEXCSignerSetup({ ...options, localSigner: { secondary: { stableId: 'secondary' } } }).localSigner?.primary?.stableId).toBe(vectors[0][1]);
-    expect(mapMEXCSignerSetup({ ...options, key: undefined }).localSigner?.primary).toBeUndefined();
+    expect(mapMEXCSignerSetup({ ...options, key: undefined } as unknown as ExchangeOptions).localSigner?.primary).toBeUndefined();
   });
   it('pins the real bridge and optional Primary signing declaration', () => {
     expect(deriveBridgeConstruction('mexc', options).dispatchSigning).toBe(true);
+    expect(deriveSignerSetupMapping('mexc')).toBe('mexc');
     expect(deriveSignerSetupPolicy('mexc').primary?.signing).toBe('optional');
     expect(deriveSignerSetupPolicy('mexc').primary?.trimCredential).toBe(true);
     expect(deriveSignerSetupPolicy('mexc').secondary?.trimCredential).toBe(false);

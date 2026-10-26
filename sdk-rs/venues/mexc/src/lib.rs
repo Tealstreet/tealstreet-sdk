@@ -1409,4 +1409,5 @@ fn reread_partial<P>(
 }
 
 #[cfg(test)]
+#[path = "../tests/support/secondary.rs"]
 mod secondary_tests;

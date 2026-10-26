@@ -1633,6 +1633,53 @@ fn auth_rejection(body: &str, read_key: bool) -> Option<VenueError> {
     Some(error)
 }
 
+impl MexcFutures {
+    pub(crate) fn queue_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        payload: String,
+        pending: Pending,
+    ) {
+        use safe_cex_engine::credential_selection::{CredentialRole, Slots};
+        let slots = Slots::new(
+            self.credentials.clone(),
+            self.options.identities.secondary.clone(),
+            Default::default(),
+        );
+        let role = if method == Method::Get {
+            CredentialRole::Read { scope: None }
+        } else {
+            CredentialRole::Mutation
+        };
+        let Ok((_, identity)) = slots.select(role) else {
+            return;
+        };
+        let step = crate::sign::dispatch::Http::new(
+            identity.clone(),
+            method,
+            path.into(),
+            payload.clone(),
+            self.options.recv_window,
+        );
+        let url = step.url();
+        let headers = vec![("Content-Type", "application/json".into())];
+        let request = cx.request(
+            method,
+            url,
+            headers,
+            if method == Method::Get {
+                None
+            } else {
+                Some(payload)
+            },
+            pending,
+        );
+        cx.sign_http(request, Box::new(step));
+    }
+}
+
 #[cfg(test)]
 mod auth_envelopes {
     use super::*;
