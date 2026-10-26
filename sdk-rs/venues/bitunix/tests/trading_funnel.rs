@@ -1153,3 +1153,72 @@ fn a_joined_pre_mark_regular_census_never_counts_toward_a_later_release() {
         "mark 2's own census releases ETH"
     );
 }
+
+/// dazzy3's liveness note: the engine re-asks at 1, 2, 4 ... s while fenced.
+/// With no write settled since, a re-ask joins the owed census rather than
+/// raising its floor, so a census slower than several re-asks still releases.
+#[test]
+fn engine_re_asks_join_a_slow_owed_census_that_still_releases() {
+    let (mut e, _) = startup();
+    let place = |command: u32| {
+        Command::PlaceOrders {
+        command,
+        orders: vec![serde_json::from_str(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","price":90500.04,"amount":0.0021}"#).unwrap()],
+    }
+    };
+    let reads = |actions: &[Action]| -> Vec<HttpRequest> {
+        http(actions)
+            .into_iter()
+            .filter(|r| r.url.ends_with("get_pending_orders"))
+            .collect()
+    };
+    e.handle(1000.0, Event::Command(place(501)));
+    let write = post(&http(&prepared(&mut e, 1000.0)), "place_order").expect("the placement");
+    e.handle(
+        1010.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "lost placement ACK",
+        },
+    );
+    let mut log = prepared(&mut e, 1010.0);
+    let census = reads(&log);
+    assert_eq!(census.len(), 2, "the owed census");
+    // Fire every engine re-ask due within 8 s; none may issue a new census.
+    let mut fired = std::collections::HashSet::new();
+    loop {
+        let next = log
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms <= 9000.0 && !fired.contains(timer) => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .min_by(|x, y| x.1.total_cmp(&y.1));
+        let Some((timer, at)) = next else { break };
+        fired.insert(timer);
+        e.handle(at, Event::TimerFired { timer });
+        let out = prepared(&mut e, at);
+        assert!(
+            reads(&out).is_empty(),
+            "a re-ask at {at} joins the owed census"
+        );
+        log.extend(out);
+    }
+    assert!(fired.len() >= 3, "several re-asks fired: {}", fired.len());
+    for request in &census {
+        let body = if request.url.contains("/tpsl/") {
+            TPSL
+        } else {
+            ORDERS
+        };
+        answer(&mut e, 9500.0, request, body);
+    }
+    e.handle(9600.0, Event::Command(place(502)));
+    assert_eq!(
+        writes_of(&prepared(&mut e, 9600.0), "place_order"),
+        1,
+        "the slow owed census still releases"
+    );
+}

@@ -185,6 +185,8 @@ pub struct OrderReadProgress {
     dirty: bool,
     /// Issued as an owed uncertain-write census: a later request joins it.
     owed: bool,
+    /// `writes_settled` when issued: unchanged, a later request is a re-ask.
+    writes_settled: u64,
     newer: RowAdmission<String>,
     rejected: RowAdmission<String>,
 }
@@ -198,6 +200,11 @@ pub struct AccountState {
     /// issued after the request. Reads stay Primary-signed until a complete
     /// snapshot at or past it commits.
     pub owed: [Option<u64>; 2],
+    /// Trading writes settled (answered or lost). Every uncertain seal is one,
+    /// so an owed census issued since the last settled write is still fresh.
+    pub writes_settled: u64,
+    /// `writes_settled` at the last uncertain-write request.
+    pub request_writes: Option<u64>,
     /// Regular and TP/SL order snapshots committed since that reconcile.
     pub reconciled: [bool; 2],
     /// Symbols whose leverage/margin mode were read on first candle interest.
@@ -586,8 +593,14 @@ impl BitunixFutures {
             }
         }
         if let Some(slot) = axis.order_slot() {
-            if self.account.reconcile {
-                // A joined census predates this request; only a later one pays it.
+            // A re-ask keeps an owed census issued since the last settled write;
+            // after a newer write only a later census pays the debt.
+            let fresh = self.account.order_reads[slot]
+                .as_ref()
+                .is_some_and(|progress| {
+                    progress.owed && progress.writes_settled == self.account.writes_settled
+                });
+            if self.account.reconcile && !fresh {
                 self.account.owed[slot] = Some(self.account.serials[slot + 2] + 1);
             }
             if after.is_none()
@@ -654,6 +667,7 @@ impl BitunixFutures {
                 timer: cx.set_timer(ORDER_STALL_MS),
                 dirty: false,
                 owed: read.reconcile,
+                writes_settled: self.account.writes_settled,
                 newer: Default::default(),
                 rejected: Default::default(),
             });
