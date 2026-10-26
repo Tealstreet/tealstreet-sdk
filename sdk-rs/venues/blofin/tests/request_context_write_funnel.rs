@@ -841,10 +841,12 @@ fn an_engine_reask_restarts_reconciliation_after_native_retries_are_exhausted() 
         }
         assert_eq!(count(&h, "orders-pending?"), 1);
         let request = h.take("orders-pending?");
-        assert!(request
-            .headers
-            .iter()
-            .any(|(name, value)| name.eq_ignore_ascii_case("ACCESS-KEY") && value == "key"));
+        assert!(
+            request
+                .headers
+                .iter()
+                .any(|(name, value)| name.eq_ignore_ascii_case("ACCESS-KEY") && value == "key")
+        );
         answer(&mut h, &request, 200, r#"{"code":"0","data":{}}"#);
         assert_eq!(count(&h, "orders-pending?"), 0);
     }
@@ -854,9 +856,11 @@ fn an_engine_reask_restarts_reconciliation_after_native_retries_are_exhausted() 
     assert_eq!(count(&h, "batch-orders"), 0);
     let before_reask = h.actions.len();
     fire_until(&mut h, sealed_at + 7_000.);
-    assert!(h.actions[before_reask..]
-        .iter()
-        .all(|a| !matches!(a, Action::Http(r) if r.url.contains("account/positions"))));
+    assert!(
+        h.actions[before_reask..]
+            .iter()
+            .all(|a| !matches!(a, Action::Http(r) if r.url.contains("account/positions")))
+    );
     assert_eq!(
         count(&h, "orders-pending?"),
         1,
