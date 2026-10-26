@@ -9913,6 +9913,30 @@ bootstrap features; AsterDEX additionally requires address setup and signing
 metadata. Combined default features cannot satisfy an isolated family's check.
 Negative controls pin missing features and reject unknown setup mappings.
 
+## Rust-only beta SDK admission
+
+SDK web/native registries, saved-account/public factories and worker startup
+select `RustEngineExchange` without an engine opt-in. The single SDK beta roster
+is `packages/safe-cex/src/exchanges/rust/betaVenues.ts`; names outside it refuse
+with typed `Unsupported` / `NotSent` before clock, runtime or transport work.
+Previously saved OUT accounts cannot start in this build. The `engine: 'rust'`
+input remains compatible but no longer selects between implementations.
+
+There is no TypeScript venue or hosted-signing venue fallback. An IN account
+using `remoteSigner` / `payloadSigner` without enabled Rust remote policy
+refuses with `Unsupported` / `NotSent`; Paradex beta supports local keys only.
+Enabled Rust provider paths retain their existing custody and wire contracts.
+Bitunix is hosted-enabled after #2262's declared remote policy landed. The SDK
+continues to derive eligibility from that policy, without a separate beta
+override.
+
+Metadata and standalone `*.signing.ts` codecs used by `rust/legacySigning.ts`
+remain runtime dependencies. Independent TS/native financial, transport and
+signing reference oracles remain test-only. Historical Rust adapter fixtures
+mock the beta admission layer explicitly; real SDK/worker refusal controls do
+not use that fixture. Retained oracle execution is not beta activation. R2 owns
+adapter relocation/deletion and retargets those test-only imports.
+
 ### Uncertain-placement fence (Phase A)
 
 A placing scope that sealed Unknown marks its symbols uncertain until a fresh
@@ -9927,8 +9951,10 @@ admitted). A venue opts in only when `reconcile_uncertain` starts a fresh read
 hang, which is why the default is off. While a symbol stays uncertain the engine
 re-asks the hook with backoff (1 s doubling to 30 s, restarted by a new seal)
 until a post-mark `orders_reconciled` clears it, so a failed reconcile read
-cannot leave the fence standing; hooks stay single-shot and must absorb re-asks
-without restarting a running fresh read. A venue may hold the fence to its
+cannot leave the fence standing; hooks stay single-shot. `Cx::reconcile_reask()`
+is true on a backoff re-ask with no new uncertain write since the last ask: the
+hook must then join any read already running or owed, never start or owe
+another (a slow read would otherwise never complete and release). A venue may hold the fence to its
 native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
 opts in. Not covered yet (Phase B): an Unknown marker for venues with no
 placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
