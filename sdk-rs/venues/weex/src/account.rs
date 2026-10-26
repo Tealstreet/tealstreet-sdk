@@ -4,6 +4,7 @@ use crate::account_wire::*;
 use crate::{Pending, Task, WeexFutures};
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
@@ -303,7 +304,7 @@ impl WeexFutures {
             cx.deactivate();
             return;
         }
-        if self.credentials.primary.is_none() {
+        if !self.slots.has_primary() {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);
             cx.store.set_orders(vec![]);
@@ -321,7 +322,7 @@ impl WeexFutures {
             self.start_account(cx);
             return;
         }
-        if self.credentials.primary.is_none() || self.account.pending > 0 {
+        if !self.slots.has_primary() || self.account.pending > 0 {
             return;
         }
         if let Some(timer) = self.account.refresh.take() {
@@ -330,7 +331,10 @@ impl WeexFutures {
         self.account_cycle(cx);
     }
     pub(crate) fn connect_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let (Some(primary), Some(feed)) = (&self.credentials.primary, self.sockets.private) {
+        if let (Ok((_, primary)), Some(feed)) = (
+            self.slots.select(CredentialRole::SessionAuth),
+            self.sockets.private,
+        ) {
             let step = crate::dispatch_signing::Upgrade::new(primary.clone());
             if let Ok(epoch) = cx.connect_socket_signed(feed, step.unsigned(), Box::new(step)) {
                 self.account.socket = Some(epoch.socket());
