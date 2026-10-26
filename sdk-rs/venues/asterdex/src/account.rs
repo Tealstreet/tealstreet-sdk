@@ -929,6 +929,8 @@ impl AsterDex {
                             self.account.orders_timer = Some(cx.set_timer(1_000.0));
                         }
                     } else {
+                        // Only a clean snapshot can prove an uncertain placement absent.
+                        let clean = rows.rejected() == 0;
                         let mut rows =
                             rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                         self.account
@@ -968,7 +970,9 @@ impl AsterDex {
                             self.account.orders_seeded = true;
                         }
                         cx.store.set_orders(rows);
-                        cx.orders_reconciled(None);
+                        if clean {
+                            cx.orders_reconciled(None);
+                        }
                     }
                 }
                 if std::mem::take(&mut self.account.orders_requery) {

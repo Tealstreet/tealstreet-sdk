@@ -577,3 +577,27 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     let admitted = retry(&mut e);
     write(&admitted, Method::Post, "/order");
 }
+
+/// A fresh read with a rejected row is not a clean snapshot, so it cannot
+/// prove the uncertain order absent; the symbol stays fenced.
+#[test]
+fn a_fresh_order_read_with_a_rejected_row_keeps_the_fence() {
+    let mut e = engine();
+    let sent = command(&mut e, place());
+    let lost = write(&sent, Method::Post, "/order").clone();
+    let failed = answer(&mut e, &lost, 503, "upstream timeout");
+    let fresh = failed
+        .requests
+        .iter()
+        .find(|r| r.url.contains("/openOrders"))
+        .expect("the reconcile read starts at once")
+        .clone();
+    answer(&mut e, &fresh, 200, r#"[{"orderId":"not-a-row"}]"#);
+    let retry = command(&mut e, place());
+    assert!(
+        retry.requests.iter().all(|r| !r.url.contains("/order?")),
+        "no placement"
+    );
+    let error = terminal(&retry).expect("one terminal").unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
+}
