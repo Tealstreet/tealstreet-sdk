@@ -87,7 +87,7 @@ fn level_edits(h: &Harness) -> usize {
         .count()
 }
 
-/// 7. A parked command whose caller wait expires never writes: at its wake
+/// Control 7: A parked command whose caller wait expires never writes: at its wake
 /// the expiry is its one NotSent terminal.
 #[test]
 fn an_expired_parked_command_never_writes() {
@@ -106,7 +106,7 @@ fn an_expired_parked_command_never_writes() {
     assert_eq!(terminals(&h, 8), 1);
 }
 
-/// 7. A dequeued command re-plans against the current Store: a refusal there
+/// Control 7: A dequeued command re-plans against the current Store: a refusal there
 /// is NotSent with no request.
 #[test]
 fn a_dequeue_re_plan_refusal_is_not_sent() {
@@ -132,7 +132,7 @@ fn a_dequeue_re_plan_refusal_is_not_sent() {
     assert_eq!(h.writes(), 0);
 }
 
-/// 8 (D3). Inspect and Verify are in-job reads: they sign with the Plan's
+/// Control 8 (D3): Inspect and Verify are in-job reads: they sign with the Plan's
 /// Primary credential even with a read key configured.
 #[test]
 fn amend_reads_sign_with_the_primary_inside_the_write_job() {
@@ -152,7 +152,7 @@ fn amend_reads_sign_with_the_primary_inside_the_write_job() {
     assert_eq!(api_key(&verify), "replay-key");
 }
 
-/// 8 (D3). Native's three Read retries chain per call, and a fourth is never
+/// Control 8 (D3): Native's three Read retries chain per call, and a fourth is never
 /// sent; the job then fails NotSent with no write.
 #[test]
 fn an_inspect_chains_three_retries_and_never_a_fourth() {
@@ -162,7 +162,7 @@ fn an_inspect_chains_three_retries_and_never_a_fourth() {
     for _ in 0..4 {
         let inspect = h.take(Method::Get, "/fapi/v2/order?");
         fail(&mut h, inspect);
-        let due: Vec<_> = h.timers.drain(..).collect();
+        let due = std::mem::take(&mut h.timers);
         for (timer, at) in due {
             h.handle(at, Event::TimerFired { timer });
         }
@@ -179,7 +179,7 @@ fn an_inspect_chains_three_retries_and_never_a_fourth() {
     assert_eq!(h.writes(), 0);
 }
 
-/// 8. A Verify that does not prove the cancel prepares no replacement; the
+/// Control 8: A Verify that does not prove the cancel prepares no replacement; the
 /// terminal keeps the accepted cancel as known-partial evidence.
 #[test]
 fn an_unproven_verify_prepares_no_replacement() {
@@ -211,7 +211,7 @@ fn an_unproven_verify_prepares_no_replacement() {
     assert_eq!(terminals(&h, 7), 1);
 }
 
-/// 10. A -1022 on a write resends once with the same client order ID.
+/// Control 10: A -1022 on a write resends once with the same client order ID.
 #[test]
 fn a_signature_refusal_resends_a_write_once_with_its_client_id() {
     let mut h = Harness::new();
@@ -251,7 +251,7 @@ fn a_signature_refusal_resends_a_write_once_with_its_client_id() {
     assert_eq!(terminals(&h, 7), 1);
 }
 
-/// 10. A malformed 2xx write is Unknown, never unclassified.
+/// Control 10: A malformed 2xx write is Unknown, never unclassified.
 #[test]
 fn a_malformed_write_answer_is_unknown() {
     let mut h = Harness::new();
@@ -264,7 +264,7 @@ fn a_malformed_write_answer_is_unknown() {
     );
 }
 
-/// 11 (Q1). A cancel batch continues past an Unknown leg and skips a child the
+/// Control 11 (Q1): A cancel batch continues past an Unknown leg and skips a child the
 /// parent's ACK closed. The text stays native's; the outcome is Unknown with
 /// the confirmed IDs as partial evidence.
 #[test]
@@ -312,7 +312,7 @@ fn a_cancel_batch_continues_past_an_unknown_leg_and_skips_a_closed_child() {
     assert_eq!(terminals(&h, 7), 1);
 }
 
-/// 12. A failure after an accepted placement keeps the accepted ID.
+/// Control 12: A failure after an accepted placement keeps the accepted ID.
 #[test]
 fn a_failure_after_an_accepted_placement_keeps_its_id() {
     let mut h = Harness::new();
@@ -329,7 +329,7 @@ fn a_failure_after_an_accepted_placement_keeps_its_id() {
     );
 }
 
-/// 13 (D4). The protective census is the job's own final Read: Primary-signed,
+/// Control 13 (D4): The protective census is the job's own final Read: Primary-signed,
 /// a clean one completes, a failed one is Unknown with the accepted IDs.
 #[test]
 fn the_protective_census_is_the_jobs_final_primary_read() {
@@ -357,7 +357,7 @@ fn the_protective_census_is_the_jobs_final_primary_read() {
     }
 }
 
-/// 14. A lost protective create fences cancel-all until a Primary-signed
+/// Control 14: A lost protective create fences cancel-all until a Primary-signed
 /// reconcile snapshot clears it.
 #[test]
 fn a_lost_protective_create_fences_cancel_all_until_a_primary_reconcile() {
@@ -416,7 +416,7 @@ fn a_lost_protective_create_fences_cancel_all_until_a_primary_reconcile() {
     );
 }
 
-/// 15. A 503 on a write restores its rows, gives one terminal, and the next
+/// Control 15: A 503 on a write restores its rows, gives one terminal, and the next
 /// queued command proceeds.
 #[test]
 fn a_503_restores_rows_and_the_next_queued_command_proceeds() {

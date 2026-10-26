@@ -387,7 +387,8 @@ fn assert_unknown_setting_failure(h: &Harness, result: &[Action], provider_posts
                 assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
                 assert_eq!(
                     error.message,
-                    r#"Bitrue HTTP 500: {"code":"-1022","msg":"Invalid signature"}"#
+                    // A 5xx write is the engine's unproven seal; no body is decoded.
+                    "HTTP response does not prove the write outcome"
                 );
                 Some("failure")
             }

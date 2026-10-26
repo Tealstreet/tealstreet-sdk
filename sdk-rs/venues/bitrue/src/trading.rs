@@ -26,6 +26,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Each call's own bound; the streamed Plan has no whole-job deadline.
 const CALL_MS: u32 = 20_000;
+const CENSUS_UNCERTAIN: &str =
+    "Bitrue protective placement outcome is uncertain; complete fresh order census is required";
 /// Native's Network/Timeout retries on a read, chained per call (D3).
 const READ_RETRIES: u8 = 3;
 
@@ -78,8 +80,10 @@ pub struct Request {
     step: Step,
     protection: Option<ProtectionFence>,
     resent: bool,
+    /// The released attempt's stamp: a re-sign stamps strictly after it.
+    pub(crate) floor: Option<safe_cex_engine::StampFloor>,
     /// A census call's streamed open-order snapshot.
-    census: Option<crate::account::Request>,
+    census: Option<Box<crate::account::Request>>,
 }
 struct ProtectionFence {
     symbol: String,
@@ -938,6 +942,17 @@ impl Bitrue {
     /// Root first: the Preflight exists before validation, so every refusal is
     /// its own NotSent terminal. A command behind a live job parks in FIFO order.
     fn enter_trade(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        // Keyless: no write root exists, so the local refusal authority answers.
+        if self.options.public_data_only || self.trade_identity().is_none() {
+            let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                not_sent("Bitrue trading requires API credentials"),
+            );
+            return;
+        }
         let credential = self.trade_identity().map(|(credential, _)| credential);
         let policy = PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
@@ -1102,7 +1117,7 @@ impl Bitrue {
                     }
                 }
             }
-            return self.issue_call(cx, active, slot, step, false);
+            return self.issue_call(cx, active, slot, step, false, None);
         }
         if active.work.cancel_errors.is_empty() {
             return self.finish(cx, active, None);
@@ -1174,7 +1189,7 @@ impl Bitrue {
                 }
             }
         };
-        self.issue_call(cx, active, slot, step, false);
+        self.issue_call(cx, active, slot, step, false, None);
     }
     /// Queues one Plan call. An amend's replacement is fenced before release,
     /// since a lost create ACK may still leave native protection live.
@@ -1185,6 +1200,7 @@ impl Bitrue {
         slot: Slot,
         step: Step,
         resent: bool,
+        floor: Option<safe_cex_engine::StampFloor>,
     ) {
         let plan = active.plan.clone().expect("admitted Plan");
         let narrowed = active.work.amend && matches!(step.effect, Effect::Place { .. });
@@ -1232,7 +1248,7 @@ impl Bitrue {
             _ => None,
         };
         let census = match &step.effect {
-            Effect::Census(symbol) => Some(crate::account::Request::Orders {
+            Effect::Census(symbol) => Some(Box::new(crate::account::Request::Orders {
                 symbol: symbol.clone(),
                 revision: self.account.orders_revision,
                 lookup: None,
@@ -1240,7 +1256,7 @@ impl Bitrue {
                 quotes: HashMap::new(),
                 invalid: false,
                 primary: true,
-            }),
+            })),
             _ => None,
         };
         let url = format!("{}{}", crate::REST, step.path);
@@ -1250,7 +1266,7 @@ impl Bitrue {
             url.clone(),
             step.body.clone(),
             self.options.recv_window,
-            None,
+            floor,
         );
         let (method, body) = (step.method, step.body.clone());
         let stream = census.is_some();
@@ -1265,6 +1281,7 @@ impl Bitrue {
                 step,
                 protection,
                 resent,
+                floor: None,
                 census,
             },
         );
@@ -1470,7 +1487,7 @@ impl Bitrue {
             self.trading.active = Some(active);
             return;
         };
-        if matches!(request.step.effect, Effect::Place { .. }) {
+        if request.step.is_place() {
             self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
         }
         if request.step.read() {
@@ -1486,7 +1503,16 @@ impl Bitrue {
             {
                 active.work.read_retries += 1;
                 request.census = None;
-                return self.issue_call(cx, active, slot, request.step, true);
+                return self.issue_call(cx, active, slot, request.step, true, request.floor);
+            }
+            // Transport text stays behind native's private diagnostic boundary.
+            if let Effect::Census(symbol) = &request.step.effect {
+                cx.command_error(
+                    active.work.command,
+                    format!("Bitrue order read for {symbol} failed"),
+                );
+                error = VenueError::new(CENSUS_UNCERTAIN);
+                active.work.note = Some(CENSUS_UNCERTAIN.into());
             }
             return self.end(cx, active, None, error);
         }
@@ -1546,11 +1572,11 @@ impl Bitrue {
                 )
             {
                 request.census = None;
-                return self.issue_call(cx, active, slot, request.step, true);
+                return self.issue_call(cx, active, slot, request.step, true, request.floor);
             }
             active.work.read_retries = 0;
             let result = match request.census.take() {
-                Some(census) => self.census_answer(cx, census, &response),
+                Some(census) => self.census_answer(cx, *census, &response),
                 None => check(&response).and_then(|()| {
                     self.trade_detail(cx, &mut active.work, &request.step, response.body)
                 }),
@@ -1558,6 +1584,11 @@ impl Bitrue {
             return match result {
                 Ok(()) => self.drive(cx, active, At::Data(&request.slot, &request.context)),
                 Err(error) => {
+                    // A stream failure's owned read text may lead; the census
+                    // uncertainty always follows it.
+                    if request.step.is_census() {
+                        active.work.note = Some(CENSUS_UNCERTAIN.into());
+                    }
                     self.end(cx, active, current, VenueError::new(error))
                 }
             };
@@ -1629,7 +1660,7 @@ impl Bitrue {
             url.clone(),
             step.body.clone(),
             self.options.recv_window,
-            None,
+            request.floor,
         );
         let (method, body, context) = (step.method, step.body.clone(), request.context.clone());
         let pending = Pending::trade(
@@ -1643,6 +1674,7 @@ impl Bitrue {
                 step,
                 protection: request.protection,
                 resent: true,
+                floor: None,
                 census: None,
             },
         );
@@ -1661,7 +1693,6 @@ impl Bitrue {
         census: crate::account::Request,
         response: &Response<'_>,
     ) -> Result<(), String> {
-        const UNCERTAIN: &str = "Bitrue protective placement outcome is uncertain; complete fresh order census is required";
         let crate::account::Request::Orders {
             symbol,
             revision,
@@ -1671,7 +1702,7 @@ impl Bitrue {
             ..
         } = census
         else {
-            return Err(UNCERTAIN.into());
+            return Err(CENSUS_UNCERTAIN.into());
         };
         #[derive(Deserialize)]
         struct OrdersEnvelope {
@@ -1682,7 +1713,11 @@ impl Bitrue {
             && serde_json::from_str::<OrdersEnvelope>(response.body)
                 .is_ok_and(|v| v.data.is_empty());
         let (_, clean) = self.apply_orders(cx, &symbol, revision, rows, quotes, schema && !invalid);
-        if clean { Ok(()) } else { Err(UNCERTAIN.into()) }
+        if clean {
+            Ok(())
+        } else {
+            Err(CENSUS_UNCERTAIN.into())
+        }
     }
     /// Decodes one write answer, records its journal fact exactly once and
     /// applies native Store effects.
@@ -2095,6 +2130,12 @@ fn census(symbol: &str) -> Step {
     }
 }
 impl Step {
+    fn is_place(&self) -> bool {
+        matches!(self.effect, Effect::Place { .. })
+    }
+    fn is_census(&self) -> bool {
+        matches!(self.effect, Effect::Census(_))
+    }
     fn read(&self) -> bool {
         matches!(
             self.effect,

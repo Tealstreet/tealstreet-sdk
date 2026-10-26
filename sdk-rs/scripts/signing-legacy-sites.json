@@ -65,11 +65,6 @@
   "venues/bitrue/src/lib.rs": {
     "3fc0ac9384674c1ef318dd176d8dec4d6f40c5d566422371de05519fa9e139e7": 1
   },
-  "venues/bitrue/src/secondary_tests.rs": {
-    "757883915aac4af8a839c2d1ac2b7b308d262b53c80430bdf8cb1a0197af7963": 1,
-    "7fac2a5d0df5ccdccea563cad8993b0961d92cfa2f0a141f1e18d3027647cf59": 1,
-    "93bc661660e4c83455f120e67a4e6d3623b04659817896ae90fe63ac5ac022a3": 1
-  },
   "venues/bitrue/src/sign/dispatch.rs": {
     "079483f82abed938e7f2aa2d4acda709b4ab506e28075820686ac9d942094dc6": 1,
     "b94b333b3d8ea0a332ec9faa1a6b397cd0f87ce7c05cfd7a7f66f2d4bfa020c8": 1

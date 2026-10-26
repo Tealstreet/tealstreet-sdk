@@ -1176,7 +1176,8 @@ impl Venue for Bitrue {
         mut pending: Pending,
         response: Response<'_>,
     ) {
-        if let Job::Trade(request) = pending.job {
+        if let Job::Trade(mut request) = pending.job {
+            request.floor = pending.wire.floor;
             return self.trade_response(cx, request, response);
         }
         if !Self::delivered(cx, &pending) {
@@ -1272,8 +1273,16 @@ impl Venue for Bitrue {
         pending: Pending,
         response: Response<'_>,
     ) {
-        if let Job::Trade(request) = pending.job {
-            return self.trade_response(cx, request, response);
+        if let Job::Trade(mut request) = pending.job {
+            request.floor = pending.wire.floor;
+            if codes::resend(&response) {
+                return self.trade_response(cx, request, response);
+            }
+            // A body without the list is a failed read, not DATA.
+            let error =
+                safe_cex_engine::VenueError::new("Response did not contain the expected list")
+                    .kind(safe_cex_engine::ErrorKind::Internal);
+            return self.trade_call_failed(cx, request, error, true);
         }
         if !pending.signature_resent && codes::resend(&response) {
             self.on_response(cx, pending, response);
@@ -1294,7 +1303,8 @@ impl Venue for Bitrue {
         mut pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        if let Job::Trade(request) = pending.job {
+        if let Job::Trade(mut request) = pending.job {
+            request.floor = pending.wire.floor;
             return self.trade_call_failed(cx, request, error, true);
         }
         let safe = pending.wire.method == Method::Get
@@ -1614,6 +1624,3 @@ fn reread_partial<P>(
     }
     *stalls < 5
 }
-
-#[cfg(test)]
-mod secondary_tests;

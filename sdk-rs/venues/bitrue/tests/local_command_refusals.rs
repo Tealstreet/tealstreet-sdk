@@ -1,4 +1,4 @@
-//! Genuine command admission for initial Bitrue refusals; queued private work stays legacy.
+//! Genuine command admission for initial Bitrue refusals; trading writes run on Preflight roots.
 mod support;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Context, Error, Operation, Policy, RetryPolicy, Scope};
@@ -33,6 +33,28 @@ impl<V: Venue> Venue for Probe<V> {
     }
     fn guard_order_mutations(&self) -> bool {
         self.inner.guard_order_mutations()
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &V::Pending,
+    ) -> Result<safe_cex_engine::request_context::ReconciliationData, Error> {
+        self.inner.capture_http_reconciliation(pending)
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, V::Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.inner.on_http_preflight_ready(cx, preflight);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.inner.on_http_owner_retired_preflight(owner)
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, V::Pending>, symbols: Option<&[String]>) {
+        self.inner.reconcile_uncertain(cx, symbols);
     }
     fn cancel_needs_stored_order(&self) -> bool {
         self.inner.cancel_needs_stored_order()
@@ -255,6 +277,10 @@ fn snapshot(e: &Engine<Probe<Bitrue>>) -> serde_json::Value {
 }
 fn capacity(case: Case) {
     for (keyed, public_only) in [(false, false), (true, false), (true, true)] {
+        // B2: keyed trading plans under its own Preflight (trading_funnel.rs).
+        if matches!(case, Case::Planning) && keyed && !public_only {
+            continue;
+        }
         let mut e = seeded(keyed, public_only);
         e.store_mut().set_hedged(true);
         let before = snapshot(&e);
@@ -324,9 +350,8 @@ fn native_one_way_setting_stays_a_keyless_success() {
     }
 }
 #[test]
-fn valid_private_wire_does_not_admit_a_local_refusal_owner() {
+fn valid_private_wire_takes_its_preflight_not_a_local_refusal_owner() {
     let mut e = seeded(true, false);
-    assert!(control(&mut e, Some("saturate")).is_empty());
     let actions = run(&mut e, leverage(2.));
     let requests: Vec<_> = actions
         .iter()
@@ -361,7 +386,7 @@ fn valid_private_wire_does_not_admit_a_local_refusal_owner() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
     );
-    assert_eq!(e.venue().held.len(), 256);
+    assert!(e.venue().held.is_empty());
 }
 
 #[test]
