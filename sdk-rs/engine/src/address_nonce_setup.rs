@@ -698,3 +698,28 @@ pub(super) use enabled::AddressNonceSetup;
 pub(crate) use enabled::{AddressCapability, VerifiedAddress};
 #[cfg(feature = "address-nonce")]
 pub use enabled::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
+
+#[cfg(all(test, feature = "address-nonce"))]
+mod capability_layout_tests {
+    use super::AddressCapability;
+
+    #[test]
+    fn private_address_capability_fits_one_pointer() {
+        assert!(
+            size_of::<AddressCapability>() <= size_of::<usize>(),
+            "address capability is {} bytes; one pointer is {} bytes",
+            size_of::<AddressCapability>(),
+            size_of::<usize>(),
+        );
+    }
+
+    #[test]
+    fn unified_address_feature_keeps_read_custody_within_clippy_variant_limit() {
+        let admitted = size_of::<crate::selected_read::AdmittedRead>();
+        let context = size_of::<crate::request_context::Context>();
+        assert!(
+            admitted.saturating_sub(context) <= 200,
+            "signed read is {admitted} bytes versus unsigned context {context} bytes",
+        );
+    }
+}
