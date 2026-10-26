@@ -130,6 +130,19 @@ struct SetupRunOwner<V: Venue, T: Transport> {
     cleanup: Option<std::pin::Pin<Box<safe_cex_engine::AddressSetupCleanup>>>,
 }
 #[cfg(feature = "address-nonce")]
+impl<V: Venue, T: Transport> std::ops::Deref for SetupRunOwner<V, T> {
+    type Target = Host<V, T>;
+    fn deref(&self) -> &Self::Target {
+        self.host.as_ref().expect("setup host owner is live")
+    }
+}
+#[cfg(feature = "address-nonce")]
+impl<V: Venue, T: Transport> std::ops::DerefMut for SetupRunOwner<V, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.host.as_mut().expect("setup host owner is live")
+    }
+}
+#[cfg(feature = "address-nonce")]
 impl<V: Venue, T: Transport> Drop for SetupRunOwner<V, T> {
     fn drop(&mut self) {
         let cleanup = self.cleanup.take().or_else(|| {
@@ -296,7 +309,17 @@ impl<V: Venue, T: Transport> Host<V, T> {
         on_frame: &mut impl FnMut(&[u8]),
         on_notice: &mut impl FnMut(Notice),
     ) {
-        self.turn(|host| host.engine.start((host.clock)()));
+        self.turn(|host| {
+            let now = (host.clock)();
+            #[cfg(feature = "address-nonce")]
+            if !host.engine.has_started()
+                && let Err(error) = host.engine.initialize_address_nonce(now)
+            {
+                host.terminal = Some(error);
+                return;
+            }
+            host.engine.start(now);
+        });
         self.execute(on_notice);
         let mut flush = tokio::time::interval(flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

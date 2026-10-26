@@ -26,13 +26,9 @@ impl ContextRegistry {
         }
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         if let Some(session) = session {
-            let generation = self.validate_session(session)?;
-            if self.sessions.egress(generation).is_none() {
-                return Err(Error::Invalid);
-            }
+            self.validate_session(session)?;
             if policy.purpose != PreflightPurpose::WriteAfterReads
                 || policy.read_credential.is_some()
-                || policy.write_credential.is_some()
             {
                 return Err(Error::Invalid);
             }
@@ -224,8 +220,8 @@ impl<P> Cx<'_, P> {
         self.with_command_entry(operation, |cx, command| cx.issue_preflight(command, policy))
     }
 
-    /// Retain one live Session for unsigned serial calls without a credential.
-    /// Trusted Empty-login consumers only; this grants no signing authority.
+    /// Retain a verified login Session for explicitly declared Session calls.
+    /// A write credential remains separate authority for Preflight calls.
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     pub fn begin_preflight_with_session(
         &mut self,
@@ -310,6 +306,14 @@ impl<P> Cx<'_, P> {
             || !self.io.core.order_locks.can_manage_unsent(command)
         {
             return Err(Error::State);
+        }
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        if let Some(session) = session {
+            self.io.core.request_contexts.validate_session_root(
+                session,
+                policy.write_credential.as_ref(),
+                &self.io.core.identities,
+            )?;
         }
         self.io.core.request_contexts.prepare_preflight(
             command,
