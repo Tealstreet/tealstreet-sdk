@@ -13,10 +13,21 @@ pub fn options() -> Options {
         ..Options::default()
     }
 }
-pub fn reply(e: &mut Engine<Lighter>, r: &HttpRequest, status: u16, body: &str) {
+pub fn reply<V: safe_cex_engine::Venue>(
+    e: &mut Engine<V>,
+    r: &HttpRequest,
+    status: u16,
+    body: &str,
+) {
     reply_at(e, NOW, r, status, body)
 }
-pub fn reply_at(e: &mut Engine<Lighter>, now: f64, r: &HttpRequest, status: u16, body: &str) {
+pub fn reply_at<V: safe_cex_engine::Venue>(
+    e: &mut Engine<V>,
+    now: f64,
+    r: &HttpRequest,
+    status: u16,
+    body: &str,
+) {
     e.handle(
         now,
         Event::HttpResponse {
@@ -93,10 +104,10 @@ pub fn ready_tracked(options: Options) -> (Engine<Lighter>, SocketId, Timers) {
 pub fn ready_tracked_meta(options: Options, meta: &str) -> (Engine<Lighter>, SocketId, Timers) {
     ready_engine_meta(engine(options), meta)
 }
-pub fn ready_engine_meta(
-    mut e: Engine<Lighter>,
+pub fn ready_engine_meta<V: safe_cex_engine::Venue>(
+    mut e: Engine<V>,
     meta: &str,
-) -> (Engine<Lighter>, SocketId, Timers) {
+) -> (Engine<V>, SocketId, Timers) {
     let mut timers = Timers::new();
     e.start(NOW);
     let mut private = None;
@@ -156,8 +167,14 @@ pub fn engine(options: Options) -> Engine<Lighter> {
     try_engine(options).expect("valid trusted fixture setup")
 }
 pub fn try_engine(
-    mut options: Options,
+    options: Options,
 ) -> Result<Engine<Lighter>, safe_cex_engine::signing::SignError> {
+    try_engine_with(options, |venue| venue)
+}
+pub fn try_engine_with<V: safe_cex_engine::Venue>(
+    mut options: Options,
+    wrap: impl FnOnce(Lighter) -> V,
+) -> Result<Engine<V>, safe_cex_engine::signing::SignError> {
     use safe_cex_crypto::signer::{
         LighterPrincipal, LocalIdentity, LocalSetup, LocalSigner, Secret,
     };
@@ -226,7 +243,8 @@ pub fn try_engine(
         LighterPrincipal::new(index)?,
     )?;
     options.identity = identities.primary.clone();
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options.into()));
+    let mut engine =
+        safe_cex_engine::test_support::seeded_engine(wrap(Lighter::new(options.into())));
     engine
         .set_signer(Some(std::sync::Arc::new(signer)))
         .unwrap();
