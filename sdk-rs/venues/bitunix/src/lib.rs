@@ -583,7 +583,27 @@ impl Venue for BitunixFutures {
     }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        safe_cex_engine::Capabilities::BASE
+        safe_cex_engine::Capabilities {
+            closed_positions: true,
+            position_history: safe_cex_engine::PositionHistory::Bitunix,
+            closed_position_format: safe_cex_engine::ClosedPositionFormat::Bitunix,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::FetchClosedPositions {
+                symbol,
+                from_ms,
+                to_ms,
+            } => self.closed_positions(cx, command, symbol, from_ms, to_ms),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -948,6 +968,10 @@ impl Venue for BitunixFutures {
     ) {
         pending.release(cx);
         let pending = match pending {
+            Pending::History(read) => {
+                self.history_stream_error(cx, read, &response);
+                return;
+            }
             Pending::Private(read) => {
                 self.account_failed(cx, read, Some(&response));
                 return;

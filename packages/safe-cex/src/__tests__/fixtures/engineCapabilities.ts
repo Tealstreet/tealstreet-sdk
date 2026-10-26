@@ -58,15 +58,15 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
             ? 'inverseContractSized'
             : 'base',
     accountTier: is('lighter', 'lighter-robinhood'),
-    closedPositions: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'blofin', ...OKX),
+    closedPositions: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'blofin', 'bitunix', ...OKX),
     balanceInfo: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot'),
     marketRefresh: is('bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'),
     positionHistory: is('kraken', 'bitget', 'bitgetusdc', 'bitgetinverse') ? 'fillsAccount'
       : is('binance', 'hyperliquid', 'paradex') ? 'fillsSymbol'
       : is('bybit', 'bybitdemo', 'hyrotrader') ? 'bybit'
-      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : is('woo') ? 'wooOrders' : 'unsupported',
+      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : is('woo') ? 'wooOrders' : is('bitunix') ? 'bitunix' : 'unsupported',
     closedPositionFormat: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse') ? 'bybit'
-      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : 'unsupported',
+      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : is('bitunix') ? 'bitunix' : 'unsupported',
     fillHistoryTime: is('woo') ? 'nonnegativeSecondsOrMilliseconds'
       : is('apexomni', 'blofin', 'bitrue', 'grvt', 'hyperliquid', 'paradex', 'lighter', 'lighter-robinhood', 'kraken', 'coinbase', 'coinbasespot')
         ? 'secondsOrMilliseconds' : 'asProvided',
