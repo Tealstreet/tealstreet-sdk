@@ -9588,3 +9588,11 @@ cleanup owner as native Host. Normal shutdown waits for actual setup cleanup;
 cleanup/task failures return a sanitized server error. Aborted actors retain the
 original cleanup in the live runtime and grant no retirement or replacement
 acknowledgement. Runtime teardown remains no join.
+
+### Primary key-permission verification reads
+
+`PrimaryReason::KeyPermissions` (`keyPermissions` in signMeta) names a primary
+read that verifies the trading key's own capabilities before private startup,
+such as Coinbase `GET /api/v3/brokerage/key_permissions`. It is primary-only,
+like every `PrimaryRead`. A secondary read-key verification stays an ordinary
+`Read`. No existing reason was reused, because none describes it truthfully.
