@@ -133,7 +133,14 @@ impl Okx {
                 } else {
                     Invalidation::None
                 },
-                subscription_interval_ms: 0.,
+                // OKX EEA (772 markets, about 40 subscribe frames) resets a
+                // public socket that writes them all in the open tick; 50 ms
+                // between frames streams at line rate. Global takes the burst.
+                subscription_interval_ms: if channel == PUBLIC && self.options.eea {
+                    50.
+                } else {
+                    0.
+                },
             };
             let feed = cx.register_socket_feed(policy)?;
             self.connections[channel].feed = Some(feed);
@@ -282,12 +289,15 @@ impl Okx {
             let name = v.channel;
             let kind = usize::from(v.inst_type == Some("FUTURES"));
             let order = if channel == PUBLIC {
+                // Books lead: the feed is paced, so a watched book must not
+                // wait behind OKX EEA's 40-frame ticker sweep.
                 match name {
-                    "tickers" => 0,
-                    "mark-price" => 1,
-                    "index-tickers" => 2,
-                    "open-interest" => 3,
-                    "funding-rate" => 4,
+                    "books" => 0,
+                    "tickers" => 1,
+                    "mark-price" => 2,
+                    "index-tickers" => 3,
+                    "open-interest" => 4,
+                    "funding-rate" => 5,
                     _ => 100,
                 }
             } else {
@@ -442,7 +452,8 @@ mod encoding_tests {
                     .map(|arg| (arg.channel.to_owned(), arg.inst_id.unwrap().to_owned())),
             );
         }
-        let mut expected = Vec::new();
+        // A watched book leads the paced stream.
+        let mut expected = vec![("books".to_owned(), "M0".to_owned())];
         for topic in [
             "tickers",
             "mark-price",
@@ -461,14 +472,13 @@ mod encoding_tests {
                 ));
             }
         }
-        expected.push(("books".into(), "M0".into()));
         assert_eq!(actual, expected);
         assert_eq!(
             batches
                 .iter()
                 .map(|batch| batch.covered_keys.len())
                 .collect::<Vec<_>>(),
-            [100, 100, 100, 100, 100, 76, 1]
+            [100, 100, 100, 100, 100, 77]
         );
     }
 }
