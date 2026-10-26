@@ -9319,6 +9319,30 @@ The separately owned core CancelOnly overlap rule landed in #2181. Per the overs
 Phemex late-repair source corrections retain native envelope/row refusal codes and typed classification. A refused repair admission refreshes the account; non-capacity mint refusals give an explicit manual-cancel diagnostic. Retry reads can temporarily overlap the retiring Read by one Context to retain snapshot DATA custody. Phemex does not advance the selective snapshot fence; retirement relies on the receipt's begin-after-mint check and actual absence. The dispatch-signing fixture's Pending variant matcher changes; signing vectors do not.
 
 
+### Keyless Session serial command roots
+
+A trusted Empty-login consumer may begin a WriteAfterReads Preflight without a
+credential only through begin_preflight_with_session and its actual live
+Session. Installed and absent login intents must not silently take this path.
+The serial root retains issuer and Session generation, has no caller receipt
+cap or root clock, and uses the declared per-call bound. Complete Plans and
+all provider-signing, selection-backed or nonce-bearing attachments are refused;
+a missing credential grants no signing authority. Existing signed adopters wrap
+the same SerialPolicy credential in Some with no selection or wire change.
+
+Each unsigned call binds that Session and uses only its declared egress. An auth
+resend keeps method, URL, body and static headers fixed, but reads the newer
+Session bundle at Bind. Changed requests and signed resends refuse as Invalid
+before preparation or new resource IDs. The engine retains a codec fingerprint,
+not signed bytes. A new logical call may change its request. Session retirement,
+foreign handles, and equality expiry produce typed unreleased refusals without
+auth-health or account-latch changes; late callbacks remain inert. The command
+terminal follows the existing Plan journal: an accepted prefix yields None,
+and a released attempt followed by an unreleased failed resend may yield Unknown
+rather than whole-command NotSent. No native GRVT constructor or queue adoption
+is enabled by this shared prerequisite.
+
+
 ## Backpack snapshot-issued trigger repair
 
 Accepted managed account Orders snapshots publish under live Background DATA,

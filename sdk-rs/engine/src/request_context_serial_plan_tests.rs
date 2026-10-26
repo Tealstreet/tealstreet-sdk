@@ -187,7 +187,7 @@ mod serial_plans {
                 credential()
             };
             SerialPolicy {
-                credential,
+                credential: Some(credential),
                 pacing: self.pacing,
                 refusals_complete: self.refusals_complete,
             }
