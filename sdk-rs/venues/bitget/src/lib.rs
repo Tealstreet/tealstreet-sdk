@@ -378,9 +378,10 @@ impl BitgetFutures {
 
     fn disconnected(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
         let connection = &mut self.sockets[index];
-        connection.open = false;
+        let opened = std::mem::replace(&mut connection.open, false);
         connection.socket = None;
         if index == 3 {
+            self.private_closed(cx, opened);
             self.account.authenticated = false;
             self.account.supervisor.retry(cx);
             return;
@@ -700,6 +701,7 @@ impl Venue for BitgetFutures {
         connection.open = true;
         connection.ping_at = cx.now;
         if index == 3 {
+            self.account.login_answered = false;
             self.account.supervisor.opened(cx);
             self.private_open(cx, socket);
             cx.send(socket, "ping");

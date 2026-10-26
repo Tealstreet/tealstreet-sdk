@@ -98,6 +98,7 @@ mod keyless_serial {
             operation,
             timeout_ms: 20_000,
             attempts: 2,
+            pacing: None,
         }
     }
     impl Probe {

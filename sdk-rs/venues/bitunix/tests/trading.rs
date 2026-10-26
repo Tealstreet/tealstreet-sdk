@@ -10,7 +10,9 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         let (mut e, _) = startup();
         assert!(e.store().loaded().orders);
         assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
-        e.drain_actions().for_each(drop);
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .for_each(drop);
         e.handle(
             2000.0,
             Event::Command(Command::CancelOrders {
@@ -22,7 +24,9 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
                 },
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         assert!(
             !actions
                 .iter()
@@ -44,7 +48,9 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
 #[test]
 fn an_empty_cancellation_list_remains_a_successful_noop() {
     let (mut e, _) = startup();
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         2000.0,
         Event::Command(Command::CancelOrders {
@@ -52,7 +58,9 @@ fn an_empty_cancellation_list_remains_a_successful_noop() {
             ids: vec![],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
@@ -133,7 +141,9 @@ fn invalid_later_split_prevents_every_earlier_plain_or_protection_write() {
                 orders: vec![first, last],
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         assert!(
             !actions
                 .iter()
@@ -155,7 +165,8 @@ fn order(extra: &str) -> PlaceOrderOpts {
     serde_json::from_str(&format!(r#"{{"symbol":"BTCUSDT","type":"limit","side":"buy","price":90500.04,"amount":0.0021{extra}}}"#)).unwrap()
 }
 fn done(e: &mut TestEngine, command: u32) -> Result<String, String> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandDone { command: c, result }) if c == command => {
                 Some(Ok(result))
@@ -178,7 +189,9 @@ fn unsupported_stp_on_final_batch_member_prevents_all_io() {
                 orders: vec![order(""), order(&format!(r#", "stpMode":"{mode}""#))],
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(actions.iter().any(|a| matches!(
             a,
@@ -208,7 +221,9 @@ fn unsupported_bybit_controls_on_final_batch_member_prevent_all_io() {
                 orders: vec![order(""), order(control)],
             }),
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions
@@ -264,7 +279,9 @@ fn native_client_id_is_verbatim_and_whole_batch_rejects_before_writes() {
             ],
         }),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         actions
@@ -290,7 +307,9 @@ fn chunks_at_five_with_one_second_cooldown_and_never_retries_unknown_writes() {
         r.id,
         r#"{"code":0,"data":{"successList":[{"orderId":"1"},{"orderId":"2"},{"orderId":"3"},{"orderId":"4"},{"orderId":"5"}],"failureList":[]}}"#,
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     let timer = actions
         .iter()
@@ -313,8 +332,15 @@ fn chunks_at_five_with_one_second_cooldown_and_never_retries_unknown_writes() {
             error: "response lost",
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
+    // Only the uncertain seal's order census follows; no further write.
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+    );
     assert!(
         actions
             .iter()
@@ -435,8 +461,15 @@ fn cancel_item_failure_aborts_replacement_and_keeps_parent_open() {
         r.id,
         r#"{"code":0,"data":{"successList":[],"failureList":[{"orderId":"one","errorMsg":"cancel rejected"}]}}"#,
     );
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
+    // Only the uncertain seal's order census follows; no further write.
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+    );
     assert!(
         actions
             .iter()
@@ -452,7 +485,9 @@ fn native_amend_accepts_limit_protection_and_targeted_standalone_leg() {
         s,
         r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","tpOrderType":"LIMIT","tpOrderPrice":"79"}}"#,
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         1.0,
         Event::Command(Command::AmendOrder {
@@ -474,7 +509,9 @@ fn native_amend_accepts_limit_protection_and_targeted_standalone_leg() {
         s,
         r#"{"ch":"tpsl","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"second","positionId":"position-1","side":"Buy","type":"TPSL","tpPrice":"85000","tpQty":"0.01"}}"#,
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         1.0,
         Event::Command(Command::AmendOrder {
@@ -528,7 +565,9 @@ fn split_order_rejection_cannot_resend_already_accepted_chunks() {
         r.id,
         r#"{"code":20003,"msg":"Position does not exist"}"#,
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         actions
@@ -585,7 +624,9 @@ fn replacement_waits_for_final_canceled_quantity_before_placing() {
         s,
         r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","side":"Sell","qty":"3","dealAmount":"2","averagePrice":"100"}}"#,
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     reply(
         &mut e,
         cancel.id,
@@ -623,8 +664,15 @@ fn incomplete_cancel_ack_never_places_replacement() {
         r.id,
         r#"{"code":0,"data":{"successList":[],"failureList":[]}}"#,
     );
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
+    // Only the uncertain seal's order census follows; no further write.
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+    );
     assert!(
         actions
             .iter()
@@ -640,7 +688,9 @@ fn cancelling_both_attached_limit_legs_needs_no_recreation() {
         s,
         r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","tpOrderType":"LIMIT","tpOrderPrice":"79"}}"#,
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         1.0,
         Event::Command(Command::CancelOrders {
@@ -682,7 +732,11 @@ fn malformed_or_stale_final_fill_totals_never_create_replacements() {
         );
         let r = requests(&mut e).remove(0);
         reply(&mut e, r.id, &format!(r#"{{"code":0,"data":{detail}}}"#));
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .any(|a| matches!(a, Action::Http(_)))
+        );
     }
 }
 fn orders_refresh(
@@ -698,7 +752,9 @@ fn orders_refresh(
             text: r#"{"ch":"order","data":{"event":"UPDATE","symbol":"BTCUSDT","orderId":"one","dealAmount":"1"}}"#,
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     let (timer, at) = actions
         .into_iter()
         .filter_map(|a| {
@@ -728,7 +784,9 @@ fn orders_refresh(
             },
         );
     }
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .for_each(drop);
 }
 #[test]
 fn reconciliations_preserve_inflight_creating_and_canceling_rows() {
@@ -755,10 +813,12 @@ fn reconciliations_preserve_inflight_creating_and_canceling_rows() {
             error: "response lost",
         },
     );
-    let pending = e.drain_actions().find_map(|a| match a {
-        Action::SetTimer { timer, at_ms } if at_ms == 2101.0 => Some((timer, at_ms)),
-        _ => None,
-    });
+    let pending = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == 2101.0 => Some((timer, at_ms)),
+            _ => None,
+        });
     assert!(pending.is_some(), "failed write schedules an order repair");
     assert!(
         !e.store()

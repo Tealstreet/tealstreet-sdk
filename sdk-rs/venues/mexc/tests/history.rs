@@ -1,10 +1,27 @@
 mod support;
 use safe_cex_engine::{Action, Command, Event, Notice, Query};
 use support::*;
+const OBSERVATION: f64 = 1_700_000_000_000.;
+fn requests(e: &mut TestEngine) -> Vec<safe_cex_engine::HttpRequest> {
+    public_requests(e, OBSERVATION)
+}
+fn response(e: &mut TestEngine, request: &safe_cex_engine::HttpRequest, body: &str) {
+    e.handle(
+        OBSERVATION,
+        Event::HttpResponse {
+            request: request.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
 fn ready() -> TestEngine {
     let (mut e, _, reads, _) = private_started();
     for r in reads {
-        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+        support::response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
     }
     e.drain_actions().for_each(drop);
     e
@@ -379,7 +396,7 @@ fn fail_read(e: &mut TestEngine, r: &safe_cex_engine::HttpRequest, failure: u8) 
             r#"{"success":false,"code":510,"message":"busy","data":[]}"#,
         ),
         1 => e.handle(
-            100.0,
+            OBSERVATION,
             Event::HttpFailed {
                 request: r.id,
                 error: "offline",

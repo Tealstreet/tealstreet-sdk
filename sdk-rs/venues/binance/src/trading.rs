@@ -1067,8 +1067,9 @@ impl BinanceFutures {
         // Binance allows one closePosition order per direction per symbol.
         let mut replaced: Vec<Order> = Vec::new();
         let pm = self.options.portfolio_margin;
+        let replaces_close_orders = !pm && !self.is_spot();
         for opts in orders {
-            if !pm {
+            if replaces_close_orders {
                 for existing in self.conflicting_close_orders(cx, opts) {
                     if !replaced.iter().any(|o| o.id == existing.id) {
                         replaced.push(existing);
@@ -1301,9 +1302,8 @@ impl BinanceFutures {
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
     ) -> Result<Vec<Params>, String> {
-        if opts.reduce_only == Some(true) || opts.close == Some(true) {
-            return Err("Binance Spot does not support reduceOnly or closePosition".into());
-        }
+        // Spot has no position to reduce, so the flags are dropped as in TS; a sell
+        // beyond the balance fails at Binance.
         if matches!(
             opts.kind,
             OrderType::TrailingStopLoss | OrderType::Conditional
@@ -2645,13 +2645,8 @@ mod audit_tests {
     fn engine(variant: Variant, fail_at: usize) -> Engine<BinanceFutures> {
         FAIL_AT.set(fail_at);
         IDS.set(0);
-        let (mut venue, signer) = crate::test_config::Options {
-            variant,
-            key: Some("api-key".into()),
-            secret: Some("secret".into()),
-            ..crate::test_config::Options::default()
-        }
-        .build();
+        let (mut venue, signer) =
+            crate::test_config::keyed(variant, "api-key", "fixture-seed").build();
         venue.trading.id_generator = Some(injected_uuid);
         let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
         engine.set_signer(Some(signer)).unwrap();

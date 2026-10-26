@@ -1331,8 +1331,30 @@ impl Venue for BinanceFutures {
             Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
             Variant::CoinM => safe_cex_engine::Capabilities {
                 quantity_units: safe_cex_engine::QuantityUnits::InverseContractSized,
+                balance_info: true,
                 ..safe_cex_engine::Capabilities::NO_HISTORY
             },
+        }
+    }
+
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            // TS marks a COIN-M balance coin-margined, so an inverse market whose
+            // margin coin has no row reads zero instead of the USD total.
+            safe_cex_engine::VenueAction::FetchBalanceInfo
+                if self.options.variant == Variant::CoinM =>
+            {
+                let Ok(context) = Self::read_context(cx, None) else {
+                    return;
+                };
+                let _ = cx.done_context(&context, r#"{"coinMargined":true}"#.into());
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
 

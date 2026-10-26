@@ -2263,3 +2263,29 @@ fn read_policy(credential: Option<Credential>) -> Policy {
         retry: RetryPolicy::Never,
     }
 }
+
+#[cfg(test)]
+mod key_refusal_tests {
+    use super::*;
+    use safe_cex_engine::classify::{Intent, Native, NativeCode, Verdict};
+
+    /// A write and a read refused with the same key code carry the same kind.
+    #[test]
+    fn write_and_read_key_refusals_agree() {
+        for code in 50000..50200 {
+            let text = code.to_string();
+            let Some(kind) = rest_key_rejection(&text) else {
+                continue;
+            };
+            let native = Native {
+                code: NativeCode::Int(code),
+                message: "native",
+            };
+            assert_eq!(
+                crate::trading::CODES.verdict(&native, Intent::Place),
+                Verdict::Refused(kind),
+                "{code}"
+            );
+        }
+    }
+}
