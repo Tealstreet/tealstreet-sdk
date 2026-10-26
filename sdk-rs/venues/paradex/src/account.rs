@@ -170,6 +170,8 @@ pub struct Account {
     balance_revision: u64,
     margins_revision: u64,
     orders_busy: bool,
+    /// An uncertain placement asked for a read dispatched after its write.
+    orders_owed: bool,
     positions_busy: bool,
     balance_busy: bool,
     margins_busy: bool,
@@ -220,6 +222,7 @@ impl Account {
             balance_revision: 0,
             margins_revision: 0,
             orders_busy: false,
+            orders_owed: false,
             positions_busy: false,
             balance_busy: false,
             margins_busy: false,
@@ -1085,6 +1088,20 @@ impl Account {
             }),
         );
     }
+    /// Start or join an order read dispatched after an uncertain placement;
+    /// a clean snapshot releases the engine's fence through `orders_reconciled`.
+    pub fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.orders_busy {
+            self.orders_owed = true;
+        } else {
+            self.orders(cx, false);
+        }
+    }
+    fn owed_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if std::mem::take(&mut self.orders_owed) {
+            self.orders(cx, false);
+        }
+    }
     fn orders(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
         if self.orders_busy {
             return;
@@ -1406,6 +1423,7 @@ impl Account {
             } => {
                 self.orders_busy = false;
                 if !invalid {
+                    let clean = coverage.rejected() == 0;
                     // Decode all fallible mapping before entering native publication.
                     let prepared = rows
                         .into_iter()
@@ -1415,9 +1433,12 @@ impl Account {
                             Some((row, order, version))
                         })
                         .collect();
-                    cx.store.commit_orders_snapshot([token], |current| {
+                    let committed = cx.store.commit_orders_snapshot([token], |current| {
                         self.publish_orders_snapshot(prepared, coverage, current)
                     });
+                    if committed && clean {
+                        cx.orders_reconciled(None);
+                    }
                 } else {
                     cx.notice(
                         Level::Warn,
@@ -1425,6 +1446,7 @@ impl Account {
                         "Invalid Paradex orders snapshot",
                     );
                 }
+                self.owed_orders(cx);
                 if cycle {
                     self.margins(cx, false);
                 }
@@ -1517,6 +1539,7 @@ impl Account {
             }
             Request::Orders { cycle, .. } => {
                 self.orders_busy = false;
+                self.owed_orders(cx);
                 if cycle {
                     self.margins(cx, false);
                 }

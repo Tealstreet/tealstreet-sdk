@@ -9974,6 +9974,11 @@ their reconcile; any other end drops the mark. Amend roots are marked too, so an
 Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
 same-ID amend fence stays as is.
 
+Paradex opts in: after an Unknown placement or amend it reads `/orders` and
+releases on a clean snapshot. Cancel-all keeps the engine default (refused
+until reconciled). If `/auth` has been refused (401/403), no order read can run,
+so the fence holds until the account is reconnected or re-keyed.
+
 ## Lighter public beta data
 
 Market snapshots seed last price and start ticker hydration before socket Open.
