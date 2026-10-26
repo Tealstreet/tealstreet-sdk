@@ -932,11 +932,11 @@ fn implemented(algorithm: Algorithm) -> bool {
         Algorithm::HmacSha256 | Algorithm::Sha256SecretSuffix => true,
         Algorithm::HmacSha512 => cfg!(feature = "hmac-sha512"),
         Algorithm::ZkLinkContract => cfg!(feature = "zklink"),
+        Algorithm::SchnorrDigest => cfg!(feature = "schnorr"),
         Algorithm::Ed25519
         | Algorithm::Es256
         | Algorithm::Secp256k1Digest
-        | Algorithm::StarkDigest
-        | Algorithm::SchnorrDigest => false,
+        | Algorithm::StarkDigest => false,
     }
 }
 
