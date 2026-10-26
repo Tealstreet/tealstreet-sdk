@@ -15,9 +15,9 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 test('only Bitget, Bybit and AsterDEX carry venue overrides, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit']);
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_326_024 + 4_096);
-  assert.equal(wasmBudgetError(1_330_120, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_330_121, 'venue', 'asterdex'), /exceeds 1330120/);
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_353 * 1_024);
+  assert.equal(wasmBudgetError(1_385_472, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(1_385_473, 'venue', 'asterdex'), /exceeds 1385472/);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], 1446 * 1024);
     assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1448 * 1024);
@@ -43,18 +43,21 @@ test('the approved combined ceiling accepts 14 MiB exactly and rejects the next 
 
 test('CI budgets each standalone venue build under its own venue name', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  const step = workflow.indexOf('name: Check the wasm size budget');
+  const step = workflow.indexOf('name: Check family isolation, every alias and the shipped size');
   assert.ok(step >= 0);
-  assert.match(workflow.slice(step, step + 200), /rust:wasm-budget --venue '\$\{\{ matrix\.venue \}\}'/);
+  assert.match(workflow.slice(step, step + 220), /RUST_TEST_FAMILY: \$\{\{ matrix\.family \}\}/);
+  assert.match(workflow.slice(step, step + 220), /rust:test-families/);
+  const familyCheck = readFileSync(new URL('./families.integration.mjs', import.meta.url), 'utf8');
+  assert.match(familyCheck, /wasmBudgetError\(size, 'venue', family\)/);
 });
 
 test('CI budgets the combined artifact immediately after its build before standalone overwrite', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   const combined = workflow.indexOf('name: Build the combined wasm engine');
   const budget = workflow.indexOf('name: Check the shipped combined wasm size budget');
-  const standalone = workflow.indexOf('name: Build the venue wasm engine');
-  assert.ok(combined >= 0 && budget > combined && standalone > budget);
-  assert.match(workflow.slice(budget, standalone), /rust:wasm-budget --combined/);
+  const archive = workflow.indexOf('name: Retain built combined module for reuse');
+  assert.ok(combined >= 0 && budget > combined && archive > budget);
+  assert.match(workflow.slice(budget, archive), /rust:wasm-budget --combined/);
 });
 
 test('the Bybit capability comparison budgets ordinary Bybit under its own venue name', () => {
