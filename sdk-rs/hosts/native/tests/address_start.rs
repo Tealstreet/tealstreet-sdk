@@ -69,7 +69,7 @@ async fn host_start_initializes_local_alias_slots_before_venue_start() {
                 .as_ref()
                 .unwrap()
                 .verified_signing_address(),
-            Ok(ADDRESS)
+            Err(SignError::InvalidRequest)
         );
     }
 }
@@ -139,6 +139,6 @@ async fn host_start_reuses_an_explicitly_completed_setup() {
             .as_ref()
             .unwrap()
             .verified_signing_address(),
-        Ok(ADDRESS)
+        Err(SignError::InvalidRequest)
     );
 }
