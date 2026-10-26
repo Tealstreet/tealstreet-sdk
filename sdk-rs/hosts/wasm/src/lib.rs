@@ -2194,6 +2194,7 @@ mod tests {
                         "hyrotrader",
                         "bybitinverse",
                         "bybitspot",
+                        "binanceinverse",
                     ],
                     venue,
                 ),

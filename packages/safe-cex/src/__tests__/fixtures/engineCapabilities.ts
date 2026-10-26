@@ -59,7 +59,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
             : 'base',
     accountTier: is('lighter', 'lighter-robinhood'),
     closedPositions: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'blofin', 'bitunix', ...OKX),
-    balanceInfo: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot'),
+    balanceInfo: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot', 'binanceinverse'),
     marketRefresh: is('bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'),
     positionHistory: is('kraken', 'bitget', 'bitgetusdc', 'bitgetinverse') ? 'fillsAccount'
       : is('binance', 'hyperliquid', 'paradex') ? 'fillsSymbol'
