@@ -12,7 +12,7 @@ const identity={credential:'origin.credential',signing:'origin.signing'};
 function rig(spot,{hold=false,holdFirst=false}={}) {
  let now=9_007_199_254_741,seq=0,sends=0,prepares=0,binds=0,cancels=0,peerCalls=0,release;
  const subject=`hosted-wasm-${spot}-${++rig.serial}`;
- const executor=new wasm.HostedOperationExecutor(JSON.stringify({primary:{key:'fixture-primary',secret:'a3Jha2VuLXRlc3Qtc2VjcmV0',stableId:subject}}),spot,false);
+ const executor=new wasm.HostedOperationExecutor(JSON.stringify({primary:{key:'fixture-primary',secret:Buffer.from('kraken-test-secret').toString('base64'),stableId:subject}}),spot,false);
  const installed=JSON.parse(executor.binding('primary'));
  const binding={account:subject,network:'mainnet',...installed,generation:subject,metadata:null};
  const peerCodec=createKrakenOperationCodec({wasm,executor,spot});

@@ -229,7 +229,12 @@ fn nonce_alias_fields_and_altered_operation_graphs_refuse() {
 #[test]
 fn installed_executor_owns_refs_and_exposes_only_public_binding() {
     use safe_cex_engine::{CredentialSlot, credential_selection::CredentialRole};
-    let executor=Executor::from_json(r#"{"primary":{"key":"fixture-primary","secret":"a3Jha2VuLXRlc3Qtc2VjcmV0","stableId":"executor-subject"}}"#.into(),true,false).unwrap();
+    let setup = serde_json::json!({"primary": {
+        "key": "fixture-primary",
+        "secret": STANDARD.encode(b"kraken-test-secret"),
+        "stableId": "executor-subject"
+    }});
+    let executor = Executor::from_json(setup.to_string(), true, false).unwrap();
     assert_eq!(
         executor.binding(CredentialSlot::Primary).unwrap(),
         ("executor-subject".into(), "fixture-primary".into())
