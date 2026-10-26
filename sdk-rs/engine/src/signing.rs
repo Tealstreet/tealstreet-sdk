@@ -499,6 +499,18 @@ impl Identity {
         self.checked(false)
     }
 
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(crate) fn accepts_session_root(
+        &self,
+        credential: &crate::request_context::Credential,
+        write: Option<&crate::request_context::Credential>,
+    ) -> bool {
+        credential.slot == crate::CredentialSlot::Primary
+            && credential.reference == self.credential
+            && self.validate_credential().is_ok()
+            && write.is_none_or(|write| write == credential && self.signing_ref().is_ok())
+    }
+
     fn checked(&self, signing_required: bool) -> Result<(), &'static str> {
         let credential = if self.credential_absent {
             self.credential.0.is_empty() && self.signing.is_some()
