@@ -63,23 +63,42 @@ investigation.
 
 ## Decisions for review
 
-- **D1, login signing failure (dazzy3: (a), pending 4yjlw0).** A legacy socket's
-  `send_signed` failure takes `Engine::sign_failed`'s WsSend arm. A provider
-  refusal latches the socket's signing role (`signing_latch.socket_failed`). The
-  engine then calls `cx.close(socket)` and `venue.on_close(socket, 1006)`, and
-  BloFin's `private_close` reconnects. So "socket closed, reconnect scheduled, no
-  login frame" holds with no venue change.
-  - What changes: native's `STREAM_UNAVAILABLE` notice is no longer emitted for
-    a login signing failure. `on_close(1006)` can't tell a signing failure from
-    an ordinary abnormal close, and the venue adds no heuristic (such as "a close
-    before the login ACK means signing failed"). CALLERS records the dropped
-    notice as a disclosed change. If 4yjlw0 rules the notice caller-visible, the
-    alternative (b) is a typed socket-signing-failure callback from the
-    signing/engine owner, raised before source.
-  - The latch is pinned. A provider refusal (for example a missing key) latches
-    the role, so the private login doesn't retry in a tight loop after the
-    reconnect. An entropy failure is not a provider refusal: the socket
-    reconnects and the login retries.
+- **D1, login signing failure: RULED (b), fe7lgm (engine shape).**
+  - Engine fact: a legacy socket's `send_signed` failure takes
+    `Engine::sign_failed`'s WsSend arm. The signing latch records a provider
+    refusal, then the engine calls `cx.close(socket)` and
+    `venue.on_close(socket, 1006)`, a synthetic close the venue can't tell from
+    a real abnormal one. Inferring a signing failure from that close (or from a
+    pending-signing flag) would misreport a transport close that lands inside
+    the signing window. So no heuristic.
+  - Seam: a new default-no-op `Venue::on_socket_sign_failed(&mut self, cx,
+    socket, &VenueError)`. It's called in `sign_failed` for WsSend/WsConnect on
+    the LEGACY path only, before the close and `on_close`. It's never called on
+    the managed path, which keeps its feed-stop reasons. The latch, the close
+    and `on_close(1006)` are otherwise unchanged.
+  - The seam is a separate engine-only first commit of this PR (a default method
+    plus one call site), reviewed by fe7lgm, with paired Bybit, Bitget and
+    combined sizes at about +0.
+  - Engine control: a legacy socket whose login signing is refused calls the hook
+    once, then the close and `on_close(1006)`; a managed feed gets no hook.
+  - BloFin implements the hook as native's handling: exactly one
+    `STREAM_UNAVAILABLE`. The following `on_close(1006)` → `private_close` does
+    the reconnect bookkeeping and adds no second notice.
+  - This supersedes dazzy3's (a), which dazzy3 offered unless ruled otherwise.
+- **The signing latch (shared engine rule; raised for 4yjlw0).**
+  - A PROVIDER refusal (for example MissingKey) latches the private socket
+    role. `SigningLatch.roles` is documented as "Socket roles whose signing was
+    refused; they are never reconnected", so there is no reconnect and no
+    retry, and no tight loop. The latch notice is "Signing cannot succeed with
+    the installed credentials: …".
+  - `credential_refused` attributes a refused socket login to the Primary
+    (signing_dispatch.rs). The resulting credential notice text and count are
+    pinned so the refusal is visible, not silent (fe7lgm).
+  - An ENTROPY failure is not a provider refusal: the socket reconnects and the
+    login signs again, as native retried.
+  - 4yjlw0's pin "the next reconnect signs again after a provider refusal"
+    conflicts with this shared rule. It is not worked around: the RED pins the
+    latch as specified, and the rule stays the engine's.
 - **D2, the sign-module ban (dazzy3: join).** BloFin joins `check-signing.py`'s
   migrated set: its `sign` directory is scanned, and `sign/dispatch.rs`'s HMAC
   work references are frozen as the migrated families' are. Leaving it exempt
@@ -92,10 +111,15 @@ investigation.
   number timestamp.
 - With a Secondary configured, the login signs with the PRIMARY identity, as
   native does.
-- A login signing failure closes the socket with no login frame, and
-  `private_close` schedules the reconnect (D1 (a)). A provider refusal latches
-  the role, so there is no further login attempt and no tight loop. An entropy
-  failure reconnects and the login retries.
+- A login signing failure gives exactly one `STREAM_UNAVAILABLE` through the
+  hook, closes the socket with no login frame, and adds no second notice on the
+  `on_close(1006)` that follows (D1 (b)).
+- A provider refusal latches the private role: no reconnect and no further
+  login. The latch and credential notices are pinned by text and count, and the
+  refusal is attributed to the Primary.
+- An entropy failure reconnects and the next login signs again.
+- Public-data-only with keys configured never calls `send_signed`: no Sign
+  action and no login frame (4yjlw0).
 - An explicit empty Secondary passphrase still refuses startup before discovery
   or entropy, with the same text, kind, notice and `StartupFailed`.
 - `signed()` presence, the passphrase refusal and the "read-only API key" text
