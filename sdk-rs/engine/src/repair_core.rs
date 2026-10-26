@@ -750,6 +750,8 @@ impl<P> Io<P> {
 
     /// A venue finished a repair leg outside any delivery (such as a refused
     /// send): end the root once it holds no live leg, so `Settled` still comes.
+    /// Terminal by contract: a later leg exists only as `repair_successor`
+    /// inside its predecessor's delivery, never from a timer or ready callback.
     pub(super) fn repair_leg_finished(&mut self, context: &Context, now: f64) {
         let Owner::Repair { generation } = context.owner() else {
             return;

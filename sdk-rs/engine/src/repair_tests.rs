@@ -916,6 +916,13 @@ mod repair {
         assert_eq!(e.venue.notices.len(), 1, "{:?}", e.venue.notices);
         assert!(e.venue.notices[0].contains("cancel: NotSent"), "{:?}", e.venue.notices);
         assert_eq!(e.venue.notice_outside_entry, vec![true]);
+        let root = e.venue.roots[0].0.clone();
+        let mut cx = Cx { now: 2.5, store: &mut e.store, io: &mut e.io };
+        assert_eq!(
+            cx.repair_successor(&root).err(),
+            Some(RepairRefusal::Invalid),
+            "finishing the last leg outside a delivery is terminal"
+        );
         e.handle_command(
             3.,
             Command::CancelOrders {
