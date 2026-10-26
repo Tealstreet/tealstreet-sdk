@@ -176,8 +176,9 @@ jobs:
             command: |
               cargo build --locked -p safe-cex-candle-cache --bin candle-cache-owner
               cargo clippy --locked -p safe-cex-candle-cache -p safe-cex-num -p safe-cex-types --lib --bins -- -D warnings
-              # Two source oracles load the TypeScript compiler over TS venue sources.
-              cargo test --locked -p safe-cex-candle-cache -- --skip tests::cleaning_2000_nan_permutations_match_actual_source_order --skip tests::cleaning_source_nan_permutations_keep_first_duplicates
+              # Four source oracles load the TypeScript compiler over TS venue sources
+              # (fix_audit_source.cjs), which the Rust-only bundle deletes.
+              cargo test --locked -p safe-cex-candle-cache -- --skip tests::cleaning_2000_nan_permutations_match_actual_source_order --skip tests::cleaning_source_nan_permutations_keep_first_duplicates --skip all_calendar_adapters_and_both_real_kv_cache_paths_match_source --skip clean_candles_and_real_fetch_keep_source_nan_permutations_and_first_rows
               cargo test --locked -p safe-cex-num --lib
               # This audit reads source of a crate the port deleted.
               cargo test --locked -p safe-cex-types --lib -- --skip position_record::tests::serde_accepted_spelling_inventory_matches_source

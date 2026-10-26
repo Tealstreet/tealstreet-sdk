@@ -9681,6 +9681,6 @@ excludes them so those features never unify into the port. The native
 `candle-cache` check builds, lints and tests them alone, and
 `scripts/check-serde-json-features.py` fails if any port package resolves those
 features. Not run: master's TypeScript-oracle tests (they need an isolated TS
-install), two candle-cache source oracles that load the TypeScript compiler
+install), four candle-cache source oracles that load the TypeScript compiler
 over TS venue sources, and one `safe-cex-types` audit of a crate the port deleted. No port
 crate may depend on these three.
