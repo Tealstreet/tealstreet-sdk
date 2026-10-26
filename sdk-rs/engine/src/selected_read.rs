@@ -232,7 +232,7 @@ impl SelectedRead {
     }
 
     fn credential(&self) -> Credential {
-        self.selection.credential(self.identity.credential.clone())
+        self.selection.authority(&self.identity)
     }
 }
 
