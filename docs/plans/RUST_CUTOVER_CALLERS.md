@@ -9922,7 +9922,9 @@ when `reconcile_uncertain` starts the fresh read at once, so the fence is
 short-lived; without that hook the fence could hang, which is why the default is
 off. OKX opts in. AsterDEX opts in: its hook starts an open-orders read at once,
 or, when a read is already in flight (which predates the seal and cannot clear
-the fence), starts the fresh one as that read completes. Not covered yet: venues with no placement scope
+the fence), starts the fresh one as that read completes. It releases only on a
+clean read, so a persistently malformed order row keeps that venue's placements
+refused (cancels stay admitted) until the row parses. Not covered yet: venues with no placement scope
 (`guard_pending_placements` or `guard_order_mutations` false: Bybit, Crypto.com,
 BingX, ApeX, Lighter), and amend roots whose replacement places
 (the zs5e83 audit, /tmp/codex-beta-plan-fence-audit/report.md).
