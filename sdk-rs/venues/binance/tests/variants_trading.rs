@@ -732,6 +732,19 @@ fn a_signature_rejected_write_is_re_signed_and_resent_once() {
     assert_ne!(second.id, first.id);
     assert!(h.done.is_empty(), "the resend decides the outcome");
     assert!(second.url.contains("newClientOrderId=caller_1"));
+    // The same order: every parameter but the timestamp and signature is identical.
+    let order_params = |url: &str| {
+        let mut params: Vec<_> = url
+            .split_once('?')
+            .map_or("", |(_, query)| query)
+            .split('&')
+            .filter(|param| !param.starts_with("timestamp=") && !param.starts_with("signature="))
+            .map(str::to_owned)
+            .collect();
+        params.sort();
+        params
+    };
+    assert_eq!(order_params(&second.url), order_params(&first.url));
     assert_ne!(
         second.url, first.url,
         "the resend is re-signed at its own timestamp"
@@ -765,4 +778,16 @@ fn other_write_refusals_are_never_resent() {
     h.reply(first.id, 400, "", r#"{"code":-2010,"msg":"rejected"}"#);
     assert!(h.requests.is_empty());
     assert!(h.done.last().unwrap().1.is_err());
+}
+
+#[test]
+fn a_signature_code_on_an_unproven_status_is_never_resent() {
+    // A 5xx proves nothing about the write, so -1022 in its body is no refusal.
+    let mut h = ready(Variant::Spot);
+    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    let first = h.take("/api/v3/order");
+    h.reply(first.id, 503, "", SIGNATURE_REJECTED);
+    assert!(h.requests.is_empty(), "no resend of an unproven write");
+    let (_, error) = h.failures.last().expect("the write fails");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
 }

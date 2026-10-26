@@ -914,3 +914,27 @@ fn other_key_refusals_are_never_resent() {
     assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(failures(&output).len(), 1);
 }
+
+#[test]
+fn a_signature_code_on_an_unproven_status_is_never_resent() {
+    // A 5xx proves nothing about the write, so 50113 in its body is no refusal.
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 503, SIGNATURE_REJECTED, 6.);
+    let output = prepared(&mut engine, 6.);
+    // Reconciliation reads may follow; the write itself is never sent again.
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "no resend of an unproven write"
+    );
+    let failed = failures(&output);
+    assert!(
+        failed
+            .iter()
+            .all(|error| error.outcome == Some(safe_cex_engine::Outcome::Unknown)),
+        "an unproven write stays Unknown: {failed:?}"
+    );
+}

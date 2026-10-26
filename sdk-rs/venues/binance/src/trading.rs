@@ -1035,14 +1035,17 @@ impl BinanceFutures {
                 Err(_) => return,
                 // One re-signed resend of a definitive signature refusal; the
                 // journal refuses a second, which then fails as recorded.
-                Ok(Some(grant)) => {
+                // A job already stopping, or ended, never sends again.
+                Ok(Some(grant))
+                    if may_resend(stopped, self.trading.jobs.contains_key(&command)) =>
+                {
                     if let Some(job) = self.trading.jobs.get_mut(&command) {
                         job.stop = stopped;
                     }
                     self.resend_trade(cx, command, &context, grant, resend_call, resend);
                     return;
                 }
-                Ok(None) => {}
+                Ok(_) => {}
             }
         }
         let Some(job) = self.trading.jobs.get_mut(&command) else {
@@ -3176,6 +3179,28 @@ mod audit_tests {
         assert_eq!(
             result,
             Err("Binance client order ID generation failed: entropy unavailable".into())
+        );
+    }
+}
+
+/// A granted signature resend goes out only for a live job that was not
+/// already stopping before this refusal.
+fn may_resend(stopped_before: bool, job_live: bool) -> bool {
+    job_live && !stopped_before
+}
+
+#[cfg(test)]
+mod resend_guard_tests {
+    #[test]
+    fn a_stopping_or_ended_job_never_resends() {
+        assert!(super::may_resend(false, true));
+        assert!(
+            !super::may_resend(true, true),
+            "stopping before the refusal"
+        );
+        assert!(
+            !super::may_resend(false, false),
+            "the command already ended"
         );
     }
 }
