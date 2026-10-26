@@ -1468,3 +1468,6 @@ fn schedule_control_shares_ordinary_write_queue_and_nonce_without_settings_mutat
         positions
     );
 }
+
+#[path = "support/beta_batch_outcomes.rs"]
+mod beta_batch_outcomes;
