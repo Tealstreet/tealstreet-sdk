@@ -12,7 +12,7 @@ name = "dispatch_signer_adoption"
 required-features = ["private-adoption-originals"]
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["order-locks", "dispatch-nonce"] }
+safe-cex-engine = { workspace = true, features = ["order-locks", "dispatch-nonce", "socket-native-timing"] }
 safe-cex-crypto = { workspace = true, features = ["hmac-sha512"] }
 serde.workspace = true
 serde_json.workspace = true
