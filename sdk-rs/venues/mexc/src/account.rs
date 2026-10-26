@@ -121,67 +121,6 @@ fn mapped_ids<T>(builder: &SnapshotBuilder<String, T>, key: impl Fn(&T) -> &Stri
 }
 
 impl MexcFutures {
-    pub fn signed(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        payload: String,
-        streamed: bool,
-        pending: Pending,
-    ) {
-        let read_credentials = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get)
-            .map(|read| sign::Credentials {
-                key: read.key.clone(),
-                secret: read.secret.clone(),
-            });
-        let Some(c) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
-            return;
-        };
-        let headers = c.headers_window(cx.now, &payload, self.options.recv_window);
-        let url = if method == Method::Get && !payload.is_empty() {
-            format!("{}{path}?{payload}", crate::REST)
-        } else {
-            format!("{}{path}", crate::REST)
-        };
-        let scope = auth_scope(&pending);
-        let id = if streamed {
-            cx.request_streamed(
-                method,
-                url,
-                headers,
-                ArrayAt::EnvelopeField("data"),
-                pending,
-            )
-        } else {
-            cx.request(
-                method,
-                url,
-                headers,
-                if method == Method::Get {
-                    None
-                } else {
-                    Some(payload)
-                },
-                pending,
-            )
-        };
-        if let Some(scope) = scope {
-            cx.tag_account_read(
-                id,
-                if read_credentials.is_some() {
-                    safe_cex_engine::CredentialSlot::Secondary
-                } else {
-                    safe_cex_engine::CredentialSlot::Primary
-                },
-                scope,
-            );
-        }
-    }
     pub fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, command: u32, symbol: String) {
         if cx.now < self.account.paused_until {
             Self::fail_local_read(cx, "MEXC account reads are rate limited");
@@ -269,7 +208,7 @@ impl MexcFutures {
         });
         self.snapshot_page(cx, snapshot);
     }
-    fn snapshot_page(&self, cx: &mut Cx<'_, Pending>, snapshot: Box<Snapshot>) {
+    fn snapshot_page(&mut self, cx: &mut Cx<'_, Pending>, snapshot: Box<Snapshot>) {
         let mut path = match snapshot.scope {
             Scope::Assets => "/api/v1/private/account/assets",
             Scope::Positions => "/api/v1/private/position/open_positions",
@@ -325,38 +264,29 @@ impl MexcFutures {
         ));
     }
     pub fn account_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        let c = self.credentials.as_ref().unwrap();
+        let Some(identity) = self.credentials.clone() else {
+            return;
+        };
+        let slots = safe_cex_engine::credential_selection::Slots::new(
+            Some(identity),
+            None,
+            Default::default(),
+        );
+        let Ok((_, identity)) =
+            slots.select(safe_cex_engine::credential_selection::CredentialRole::SessionAuth)
+        else {
+            return;
+        };
         self.account.private.open = true;
         self.account.supervisor.opened(cx);
         cx.send(socket, r#"{"method":"ping"}"#);
-        #[derive(serde::Serialize)]
-        struct Param<'a> {
-            #[serde(rename = "apiKey")]
-            key: &'a str,
-            #[serde(rename = "reqTime")]
-            time: String,
-            signature: String,
-        }
-        #[derive(serde::Serialize)]
-        struct Login<'a> {
-            method: &'static str,
-            param: Param<'a>,
-        }
-        cx.send(
+        cx.send_signed(
             socket,
-            serde_json::to_string(&Login {
-                method: "login",
-                param: Param {
-                    key: &c.key,
-                    time: safe_cex_engine::num::format(safe_cex_engine::time::wire_stamp_ms(
-                        cx.now,
-                    )),
-                    signature: c.signature(safe_cex_engine::time::wire_stamp_ms(cx.now), ""),
-                },
-            })
-            .unwrap(),
+            String::new(),
+            Box::new(sign::dispatch::Login::new(identity.clone(), socket)),
         );
     }
+
     pub fn account_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         self.account.supervisor.received(cx.now);
         let Ok(m) = serde_json::from_str::<Message<'_>>(text) else {
@@ -1076,7 +1006,7 @@ impl MexcFutures {
             return true;
         }
         // Initial mode and plan-list credential refusals cannot recover by polling.
-        let read_key = self.options.read_credentials.is_some();
+        let read_key = self.options.identities.secondary.is_some();
         let initial_plan = if let Request::Snapshot(snapshot) = request {
             snapshot.scope == Scope::Plan && !cx.store.loaded().orders
         } else {
@@ -1130,14 +1060,14 @@ impl MexcFutures {
         };
         match request {
             Request::Leverage {
-                command,
+                command: _,
                 symbol,
                 revision,
                 rows,
                 bad,
             } => {
                 if bad || rows.is_empty() {
-                    cx.fail(command, "Invalid MEXC leverage response");
+                    self.private_fail(cx, "Invalid MEXC leverage response", false);
                     return;
                 }
                 let mut rails = self
@@ -1207,8 +1137,8 @@ impl MexcFutures {
                     margin_type: MarginType,
                     position_mode: PositionMode,
                 }
-                cx.done(
-                    command,
+                self.private_done(
+                    cx,
                     serde_json::to_string(&ResultRails {
                         buy_leverage: rails.long,
                         sell_leverage: rails.short,
@@ -1524,9 +1454,8 @@ impl MexcFutures {
         {
             return;
         }
-        if let Request::Leverage { command, .. } = &request {
-            cx.command_error(*command, error);
-            cx.fail(*command, error);
+        if let Request::Leverage { .. } = &request {
+            self.private_fail(cx, error, true);
         } else {
             cx.retried_failure("mexc.account:1339", error);
         }
@@ -1615,7 +1544,7 @@ pub fn side(n: f64) -> OrderSide {
     }
 }
 
-fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
+pub(crate) fn auth_scope(pending: &Pending) -> Option<safe_cex_engine::AccountReadScope> {
     use safe_cex_engine::AccountReadScope::*;
     Some(match pending {
         Pending::Account(Request::Mode) => Settings,

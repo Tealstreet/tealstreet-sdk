@@ -1568,3 +1568,44 @@ fn write_failure(status: u16, body: &str, message: String, refused: bool) -> Ven
         _ => error,
     }
 }
+
+impl MexcFutures {
+    pub(crate) fn queue_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        payload: String,
+        pending: Pending,
+    ) {
+        use safe_cex_engine::credential_selection::{CredentialRole, Slots};
+        let slots = Slots::new(
+            self.credentials.clone(),
+            self.options.identities.secondary.clone(),
+            Default::default(),
+        );
+        let role = if method == Method::Get {
+            CredentialRole::Read { scope: None }
+        } else {
+            CredentialRole::Mutation
+        };
+        let Ok((_, identity)) = slots.select(role) else {
+            return;
+        };
+        let step = crate::sign::dispatch::Http::new(
+            identity.clone(),
+            method,
+            path.into(),
+            payload,
+            self.options.recv_window,
+        );
+        let request = cx.request(
+            method,
+            step.url(),
+            vec![("Content-Type", "application/json".into())],
+            step.body(),
+            pending,
+        );
+        cx.sign_http(request, Box::new(step));
+    }
+}

@@ -1,6 +1,8 @@
 //! Every Rust venue, constructed by name from one options shape. Hosts (wasm,
 //! native) parse the account options once and receive the venue's engine
 //! through a [`Visit`]or; each venue's construction rules live here.
+#[cfg(feature = "mexc")]
+mod mexc_setup;
 #[cfg(not(any(
     feature = "grvt",
     feature = "paradex",
@@ -668,6 +670,10 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "mexc")]
+    if venue == "mexc" {
+        return mexc_setup::raw(options);
+    }
     #[cfg(feature = "asterdex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Asterdex) {
         // Setup resolves the version first; the policy then reads it.
@@ -927,6 +933,11 @@ pub fn local_signer_from_json_for(
     ),
     VenueError,
 > {
+    #[cfg(feature = "mexc")]
+    if venue == "mexc" {
+        return mexc_setup::json(input, false);
+    }
+
     // No options means no resolved setup facts, so nothing is refined.
     let (provider, identities) =
         local_signer_from_json_with_policy(input, construction::signer_setup_policy(venue), false)?;
@@ -975,6 +986,11 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    #[cfg(feature = "mexc")]
+    if venue == "mexc" {
+        return mexc_setup::json(input, construction::signer_setup_public_data_only(options));
+    }
+
     let (provider, identities) = local_signer_from_json_with_policy(
         input,
         signer_setup_policy_for(venue, options),
@@ -1673,21 +1689,31 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "mexc")]
-        "mexc" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "mexc" => {
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid("MEXC credentials belong in signer setup"));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 MexcFutures::new(MexcOptions {
                     recv_window: tighter_recv_window(options.recv_window),
-                    read_credentials: options.read_credentials.take(),
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
+                    read_credentials_valid: identities.secondary.as_ref().map(|_| true),
+                    identities: identities.clone(),
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "phemex")]
         "phemex" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())

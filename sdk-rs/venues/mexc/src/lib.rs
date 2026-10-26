@@ -3,6 +3,7 @@ mod account;
 mod depth_query;
 mod history;
 mod identity;
+mod private_read;
 mod sign;
 mod trading;
 mod wire;
@@ -26,27 +27,19 @@ const WS: &str = "wss://contract.mexc.com/edge";
 const PING: &str = r#"{"method":"ping"}"#;
 const MAX_BUFFERED: usize = 2_000;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Options {
-    /// Optional tighter signing receive window in milliseconds.
     pub recv_window: Option<u32>,
-    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub public_data_only: bool,
-    pub key: Option<String>,
-    pub secret: Option<String>,
-}
-safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.secret);
-        if let Some(read) = self.read_credentials.as_mut() {
-            read.erase_secrets();
-        }
-    }
+    pub identities: safe_cex_engine::signing::Identities,
+    pub read_credentials_valid: Option<bool>,
 }
 
 pub enum Pending {
+    Private {
+        owner: private_read::Owner,
+        pending: Box<Pending>,
+    },
     History(history::Request),
     Identity(CommandId),
     Trade(trading::Request),
@@ -105,12 +98,16 @@ struct BookState {
 }
 
 pub struct MexcFutures {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
-    credentials: Option<sign::Credentials>,
+    options: Options,
+    credentials: Option<safe_cex_engine::signing::Identity>,
     account: account::Account,
     /// Regular, plan and stop order reads share the orders scope.
     orders_auth: safe_cex_engine::MergedScopeAuth,
     trading: trading::Trading,
+    defer_private: bool,
+    deferred_private: Vec<private_read::Deferred>,
+    private_delivery: Option<Context>,
+    private_result: Option<Result<String, VenueError>>,
     public: Connection,
     public_supervisor: Supervisor,
     books: HashMap<String, BookState>,
@@ -132,22 +129,21 @@ impl MexcFutures {
     }
 
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
-        let credentials = match (&options.key, &options.secret) {
-            (Some(key), Some(secret)) if !options.public_data_only && !key.trim().is_empty() => {
-                Some(sign::Credentials {
-                    key: key.trim().to_owned(),
-                    secret: secret.clone(),
-                })
-            }
-            _ => None,
-        };
+        let credentials = options.identities.primary.clone().filter(|identity| {
+            !options.public_data_only
+                && identity.validate().is_ok()
+                && identity.signing_ref().is_ok()
+        });
         Self {
             options,
             credentials,
             account: account::Account::new(),
             orders_auth: Default::default(),
             trading: trading::Trading::default(),
+            defer_private: false,
+            deferred_private: Vec::new(),
+            private_delivery: None,
+            private_result: None,
             public: Connection::default(),
             public_supervisor: Supervisor::new(Config {
                 idle_timeout_ms: 20_000.0,
@@ -592,7 +588,7 @@ impl MexcFutures {
     // The account already started when markets loaded, independent of tickers.
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
         self.connect_public(cx);
-        if self.options.public_data_only || self.options.key.as_ref().is_none_or(|s| s.is_empty()) {
+        if self.options.public_data_only || self.options.identities.primary.is_none() {
             cx.store.set_orders(vec![]);
             cx.store.set_positions(vec![]);
             cx.store.set_balance(Default::default());
@@ -616,6 +612,9 @@ impl MexcFutures {
             let _ = cx.finish_http_context(context);
         }
         match pending {
+            Pending::Private { .. } => {
+                unreachable!("private ownership is handled before native dispatch")
+            }
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Depth {
                 symbol, generation, ..
@@ -668,7 +667,11 @@ impl Venue for MexcFutures {
         _now: f64,
         _store: &safe_cex_engine::Store,
     ) -> Option<safe_cex_engine::AuthOutcome> {
-        self.account_auth(pending, response)
+        if let Pending::Private { pending, .. } = pending {
+            self.account_auth(pending, response)
+        } else {
+            self.account_auth(pending, response)
+        }
     }
 
     fn cancel_needs_stored_order(&self) -> bool {
@@ -690,8 +693,8 @@ impl Venue for MexcFutures {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(read) = &self.options.read_credentials
-            && let Err(error) = read.validate()
+        if let Some(valid) = self.options.read_credentials_valid
+            && let Err(error) = safe_cex_engine::ReadCredentials::status(valid)
         {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
@@ -808,6 +811,12 @@ impl Venue for MexcFutures {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Pending::Private { owner, pending } = pending {
+            if owner.current(cx) {
+                self.on_item(cx, pending, item);
+            }
+            return;
+        }
         if let Some(context) = pending.public_context()
             && cx.validate_background_read_http_delivery(context).is_err()
         {
@@ -863,6 +872,21 @@ impl Venue for MexcFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Private { owner, pending } = pending {
+            if !owner.current(cx) {
+                self.private_failed(
+                    cx,
+                    Pending::Private { owner, pending },
+                    VenueError::new("MEXC read expired"),
+                );
+                return;
+            }
+            self.private_delivery = owner.root().cloned();
+            self.defer_private = true;
+            self.on_response(cx, *pending, response);
+            self.finish_private(cx, owner);
+            return;
+        }
         if let Pending::Trade(request) = pending {
             self.trade_response(cx, request, response);
             return;
@@ -906,6 +930,9 @@ impl Venue for MexcFutures {
         let background = pending.public_context().cloned();
         let mut start_account_and_tickers = false;
         (|| match pending {
+            Pending::Private { .. } => {
+                unreachable!("private ownership is handled before native dispatch")
+            }
             Pending::Identity(command) => self.identity_response(cx, command, response),
             Pending::Account(request) => {
                 let ok = response.status == 200;
@@ -1068,6 +1095,21 @@ impl Venue for MexcFutures {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if let Pending::Private { owner, pending } = pending {
+            if !owner.current(cx) {
+                self.private_failed(
+                    cx,
+                    Pending::Private { owner, pending },
+                    VenueError::new("MEXC read expired"),
+                );
+                return;
+            }
+            self.private_delivery = owner.root().cloned();
+            self.defer_private = true;
+            self.on_stream_error(cx, *pending, response);
+            self.finish_private(cx, owner);
+            return;
+        }
         if let Pending::Account(request) = &pending
             && self.account_startup_refusal(cx, request, &response)
         {
@@ -1083,6 +1125,15 @@ impl Venue for MexcFutures {
         );
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if matches!(pending, Pending::Private { .. }) {
+            self.private_precommit_failed(
+                cx,
+                pending,
+                safe_cex_engine::request_context::Error::Invalid,
+                error,
+            );
+            return;
+        }
         match pending {
             Pending::Candles { context, .. } => {
                 let _ = cx.fail_context(&context, error);
@@ -1093,7 +1144,24 @@ impl Venue for MexcFutures {
             pending => self.on_request_failed(cx, pending, &error.message),
         }
     }
+    fn on_http_preparation_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        reason: safe_cex_engine::request_context::Error,
+        error: VenueError,
+    ) {
+        if matches!(pending, Pending::Private { .. }) {
+            self.private_precommit_failed(cx, pending, reason, error);
+        } else {
+            self.on_sign_error(cx, pending, error);
+        }
+    }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if matches!(pending, Pending::Private { .. }) {
+            self.private_failed(cx, pending, error);
+            return;
+        }
         match pending {
             Pending::Candles { context, .. } | Pending::BookQuery { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
@@ -1102,6 +1170,10 @@ impl Venue for MexcFutures {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if matches!(pending, Pending::Private { .. }) {
+            self.private_failed(cx, pending, VenueError::new(error));
+            return;
+        }
         self.failure(cx, pending, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

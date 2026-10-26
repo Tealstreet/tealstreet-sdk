@@ -1,6 +1,7 @@
 # MEXC installed signing and private request custody
 
-Status: current-tip plan and unchanged-runtime audit, before production edits.
+Status: local implementation in progress, unpublished; full PR review follows
+plan, originals and source together under the overseer speed instruction.
 Owner codex-mxb4mq, reassigned by the overseer from kuhwxi's later queue;
 reviewer codex-hcmq3f. Base eeb9d170f640 on origin/feat/rust-rewrite.
 One venue PR combines plan, originals, source and correctness qualification.
@@ -161,5 +162,65 @@ spacing after delayed handoff, and one exposes a NotSent refresh consuming the
 next native slot. No compile/setup failure is counted. These legacy witnesses
 do not yet prove installed-provider ownership or final managed Claims.
 
-Exact current source/API plan review remains before implementation, especially
-the trusted persisted-ID mapping and the trading per-call pacing/Plan fit.
+Hcmq3f cleared the plan and first originals at7fba53a89f0. The overseer then
+authorized local source without waiting for another preview: review is on the
+full venue PR. Trusted-ID direction is CLEAR; no source or runtime clearance
+is inferred from that plan verdict.
+
+## Local implementation and remaining shared prerequisites
+
+The independent local source now includes immutable provider-backed REST/login
+recipes; installed-only venue options and MEXC trusted JS/native stableId setup;
+selected account/identity Read ownership; and Primary-only private-history roots
+with exact live page admission/retirement. Account publication is live, with
+physical successors deferred until the completing observation retires. Public
+trade history stays unsigned under its caller root. Existing identity assertions
+and literal IDs/HMACs pass with genuine installed providers and managed release.
+
+Current scoped evidence:16 Rust identity/Read/history controls PASS, three native
+trusted-setup controls PASS, eight JS setup controls PASS, MEXC-only construction
+build PASS and strict library Clippy PASS. Baseline223 stays historical: the full
+current family, existing fixture migration, inventories/bans and replay have NOT
+yet qualified. The full-target original18 remains the unchanged-runtime RED
+checkpoint; do not relabel it as green after the source changes.
+
+Trading remains on its legacy FIFO/pacing, using installed provider recipes only
+as local wiring. Its temporary legacy sign_http attachment is NOT a final
+managed trade funnel and cannot be published. Fe7 confirmed THREE actual core
+landings are required before that scheduler source can qualify: dazzy3's
+release-domain admissible sets, fe7's SerialCall.pacing, and dazzy3's separate
+Cx::defer_pacing slice. No own engine work or venue-clock substitute.
+
+One submit domain declares450ms. SUBMIT/BATCH selects outer gap0 for an original
+single-order job and1500 for EVERY call from an original multi-order job,
+including a singleton final chunk and fallback. All other calls are unpaced.
+Code510 maps to defer_pacing(context,1500) in its exact released response
+custody: extend its resolved groups to max(floor,response-now+1500), no Claim
+or terminal. The next head waits on that shared floor. Actual landings plus
+consumer contract controls remain gates; a proposed API is not a landed one.
+
+## Independent Read checkpoint
+
+Private precommit recovery is typed: Capacity/TimedOut, or Invalid with
+Network/Timeout/Internal, retain native delayed account recovery. Other owned
+finite refusals retire once and warn without starting new recovery. Released
+failures retain native handling. Selection/configuration failure never borrows
+the transient row; nonfinite delivery only cleans up exact ownership. The new
+control drives an actual prepared Mode read for eleven typed combinations using
+one identical message, rejects duplicate rearming, and completes a real sibling.
+
+Local-read fixture adoption captures the actual preparation and permits exactly
+its one Cancel on successful completion. All remaining no-new-HTTP assertions
+stay. The paused-capacity control holds254 depth peers, completes its genuine
+429, then fills the two released credits with independent candle reads: depth
+admission is correctly paused by that429. It retains all256-peer survival and
+slot-reuse assertions. History collectors release genuine managed pages; their
+response/failure observation follows the original query observation rather than
+the shared startup helper's earlier100ms clock. Startup remains at100ms and all
+financial payload literals/result assertions are unchanged.
+
+Current scoped strict Clippy covers the MEXC library and installed_reads,
+identity, history and request_context_local_reads. Whole-family qualification,
+remaining private fixtures/unit probes, inventories and replay remain open;
+this local checkpoint is not publishable while trading uses temporary legacy
+attachment. No full-target18-originals GREEN claim is made.

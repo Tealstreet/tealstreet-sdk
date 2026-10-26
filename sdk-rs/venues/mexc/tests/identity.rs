@@ -1,12 +1,14 @@
-//! Private validation uses the selected read signer; the stable identity uses the raw primary key.
+//! Private validation uses the selected read signer; persisted identity is Primary metadata.
+mod support;
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Method, Notice, ReadCredentials, Response,
 };
-use safe_cex_venue_mexc::{MexcFutures, Options};
+use safe_cex_venue_mexc::MexcFutures;
+use support::Options;
 
 const NOW: f64 = 1_700_000_000_000.;
 fn engine(options: Options) -> Engine<MexcFutures> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(options));
+    let mut e = support::configured(options);
     e.store_mut().set_balance(safe_cex_engine::model::Balance {
         total: 123.,
         free: 100.,
@@ -17,7 +19,22 @@ fn engine(options: Options) -> Engine<MexcFutures> {
 }
 fn ask(e: &mut Engine<MexcFutures>) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::FetchAccount { command: 42 }));
-    e.drain_actions().collect()
+    let actions = support::prepared(e, NOW);
+    let mut timers = std::collections::HashSet::new();
+    let mut retained = Vec::new();
+    for action in actions {
+        match action {
+            Action::SetTimer { timer, at_ms } => {
+                assert!([NOW + 20_000., NOW + 120_000.].contains(&at_ms));
+                assert!(timers.insert(timer));
+            }
+            Action::ClearTimer { timer } => {
+                assert!(timers.remove(&timer));
+            }
+            action => retained.push(action),
+        }
+    }
+    retained
 }
 fn take(actions: Vec<Action>) -> HttpRequest {
     let mut iter = actions.into_iter();
