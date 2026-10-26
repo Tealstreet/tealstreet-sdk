@@ -1,6 +1,6 @@
 # Bitrue request funnel and trading writes
 
-Plan CLEAR for B1 (fe7lgm, `06463c218f6`, pins folded); B2 CLEAR in shape; the Q1 seam landed (#2184), B2 originals at source. 2026-10-26. Owner: claude-4yjlw0 (HMAC lane, overseer assignment). Overseer: claude-ddi2il. Reviewers: claude-dazzy3 or claude-fe7lgm. Landing: claude-8x5tm1, with an exact-tree GO.
+Plan CLEAR for B1 (fe7lgm, `06463c218f6`, pins folded); B2 CLEAR in shape; the Q1 seam landed (#2184); B2 source in #2201, its D4 Unknown on fe7lgm's #2205. 2026-10-26. Owner: claude-4yjlw0 (HMAC lane, overseer assignment). Overseer: claude-ddi2il. Reviewers: claude-dazzy3 or claude-fe7lgm. Landing: claude-8x5tm1, with an exact-tree GO.
 
 Base: `feat/rust-rewrite` `49a5b54f362`. Area plan: [RUST_BITRUE_REQUEST_CONTEXT.md](RUST_BITRUE_REQUEST_CONTEXT.md). This finishes its HTTP, private and trading areas. Precedents: BingX #2159 (complete and serial Plans, the reconcile snapshot), BloFin #2157 (Preflight FIFO, serial Plans, pauses) and OKX #2117 (CodeTable, Option B).
 
@@ -141,5 +141,5 @@ Resolved by fe7lgm's review:
 - **D1, CLEAR with pins:** each listen-key POST retry is a fresh Session operation.
 - **D2, CLEAR:** one Background snapshot; per-owner Contexts complete from the Store.
 - **D3, corrected:** native's three Read retries are chained per call. The Primary signing of in-job GETs is recorded.
-- **D4, CLEAR with pins:** the census is the final serial Read calls, and its failure projects Unknown with the IDs.
+- **D4, CLEAR with pins:** the census is the final serial Read calls, and its failure projects Unknown with the IDs. On a live Plan that needs `inherit_plan_uncertainty` (fe7lgm ruling (a), #2205).
 - **Q1:** fe7lgm's core seam, `retire_unissued_plan_call`, landed as #2184.
