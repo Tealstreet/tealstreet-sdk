@@ -518,3 +518,6 @@ fn suppressed_spot_public_feed_is_not_supervised() {
     assert_eq!(h.fired, 120, "only the five-second poll fires");
     assert_eq!(h.timers.len(), 1);
 }
+
+#[path = "support/managed_socket_context.rs"]
+mod managed_socket_context;

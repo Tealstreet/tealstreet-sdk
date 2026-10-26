@@ -9343,6 +9343,39 @@ rather than whole-command NotSent. No native GRVT constructor or queue adoption
 is enabled by this shared prerequisite.
 
 
+### Kraken managed socket admission
+
+Futures and Spot public/private sockets now use engine-issued feed epochs and
+shared lifecycle timers. Duplicate OPEN cannot replay auth/subscriptions, and
+connect, auth or receive ingress at deadline equality refuses before delayed
+timer delivery. Unopened or retired Spot balances cannot issue account HTTP.
+Only successfully decoded envelopes refresh receive; malformed Spot traffic
+therefore no longer keeps a silent connection alive. These safer differences
+are pinned by actual-ingress controls, not venue-owned clocks.
+
+Futures challenge and three distinct ACKs remain separate from the OPEN+180s
+validated initial-payload bound. Its post-Ready Timeout(Auth) means lifecycle
+timeout, never invalid credentials or a write resend. Spot tokens belong to
+the exact physical epoch; obsolete token responses/retries are inert, and the
+two native subscription frames use an epoch-bound one-shot queue with final
+release expiry checks. Native HTTP signing and nonce namespace stay unchanged.
+The newly linked managed-sockets feature has a family cost (#2189); CI records
+Kraken size. The venue-only policy waives a local combined measurement while
+combined headroom exceeds 200K.
+
+Public subscription Capacity retires the current epoch once and recovers through
+shared Closed/backoff, preserving native ticker/book/OHLC demand. Repeated
+capacity while already retired cannot erase or renew that retry. Permanent
+encoder errors and private admission errors remain explicit fail-closed stops;
+this recovery grants no HTTP, auth, signing or venue-owned supervisor authority.
+
+Replacement admission follows the same public Capacity recovery: an engine
+issued epoch and its native socket reference exist before fallible interest
+staging, so a refusal retires that exact epoch and takes shared exponential
+backoff instead of permanently failing the feed. Controls saturate resources at
+the captured real retry and prove subsequent demand replay and private liveness.
+
+
 ## Backpack snapshot-issued trigger repair
 
 Accepted managed account Orders snapshots publish under live Background DATA,
