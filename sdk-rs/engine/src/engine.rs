@@ -1660,6 +1660,9 @@ struct IoCore {
     /// clears it: the next re-ask and how many have run (bounded backoff).
     #[cfg(feature = "order-locks")]
     fence_reread: Option<(f64, u32)>,
+    /// The `reconcile_uncertain` call in progress is a backoff re-ask.
+    #[cfg(feature = "order-locks")]
+    reconcile_reask: bool,
     command_entry: Option<command_entry::Entry>,
     /// Caller waits stamped at each external command receipt.
     command_waits: command_entry::Waits,
@@ -1818,6 +1821,8 @@ impl Default for IoCore {
             reconcile_due: Vec::new(),
             #[cfg(feature = "order-locks")]
             fence_reread: None,
+            #[cfg(feature = "order-locks")]
+            reconcile_reask: false,
             command_entry: None,
             command_waits: Default::default(),
             #[cfg(feature = "http-plans")]
@@ -2776,6 +2781,16 @@ impl<P> Cx<'_, P> {
         let _ = command;
     }
 
+    /// True inside `reconcile_uncertain` when the engine re-asks with backoff and
+    /// no write has turned uncertain since its last ask: join any read already
+    /// running or owed rather than starting (or owing) another.
+    pub fn reconcile_reask(&self) -> bool {
+        #[cfg(feature = "order-locks")]
+        return self.io.core.reconcile_reask;
+        #[cfg(not(feature = "order-locks"))]
+        false
+    }
+
     /// Call only after accepting a complete, fresh authoritative order read.
     /// A read started before an uncertain placement cannot clear its fence.
     pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
@@ -3330,7 +3345,8 @@ pub trait Venue {
 
     /// Reconcile writes whose outcome is unknown: issue a fresh order read for
     /// these symbols (`None`: all) and report it through `orders_reconciled`.
-    /// The engine asks once per uncertain seal, after any rate-limit wait.
+    /// The engine asks once per uncertain seal, after any rate-limit wait, and
+    /// re-asks with backoff while a fence stands (`Cx::reconcile_reask`).
     fn reconcile_uncertain(
         &mut self,
         _cx: &mut Cx<'_, Self::Pending>,
@@ -5009,7 +5025,9 @@ impl<V: Venue> Engine<V> {
                             store: &mut self.store,
                             io: &mut self.io,
                         };
+                        cx.io.core.reconcile_reask = true;
                         self.venue.reconcile_uncertain(&mut cx, scope.as_deref());
+                        self.io.core.reconcile_reask = false;
                         self.io.core.http_delivery = delivery;
                         self.io.core.order_response_token = token;
                     }
