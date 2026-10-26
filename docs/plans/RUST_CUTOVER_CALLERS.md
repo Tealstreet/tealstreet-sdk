@@ -9940,3 +9940,10 @@ scheduled reconciliation. Repeated hook calls preserve that scheduled timer.
 Its native signing-expiry plus five-second lower bound remains authoritative:
 an early empty snapshot cannot prove that a late placement will not arrive.
 The engine owns re-asking; the hooks add no retry loop or write resend.
+
+Four Phemex trading controls now pin the earlier symbol-level NotSent refusal
+instead of dispatching another placement while the first is Unknown. A refused
+retry cannot clear uncertainty or add a late-cancel subject; panic cancel-all
+still runs, and a foreign order is not canceled merely because that retry's
+client ID appeared in a later snapshot. The old two-unknown-origin entry
+sequence is prevented by the fence; no production repair grouping is changed.
