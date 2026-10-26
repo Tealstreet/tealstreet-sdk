@@ -149,39 +149,6 @@ pub(crate) fn response_data<'a>(
         .ok_or_else(|| malformed("Bitunix response has no data", write))
 }
 
-/// Preserve all messages; aggregate outcomes must never turn an uncertain leg into a refusal.
-pub(crate) fn append(previous: &mut Option<VenueError>, error: VenueError) {
-    let Some(first) = previous.as_mut() else {
-        *previous = Some(error);
-        return;
-    };
-    first.message.push_str("; ");
-    first.message.push_str(&error.message);
-    if first.kind != error.kind {
-        first.kind = None;
-    }
-    if first.venue_code != error.venue_code {
-        first.venue_code = None;
-    }
-    if first.venue_message != error.venue_message {
-        first.venue_message = None;
-    }
-    first.outcome =
-        if first.outcome == Some(Outcome::Unknown) || error.outcome == Some(Outcome::Unknown) {
-            Some(Outcome::Unknown)
-        } else if first.outcome == error.outcome {
-            first.outcome
-        } else {
-            None
-        };
-}
-pub(crate) fn aggregate(mut error: VenueError, effective: bool, ids: &[String]) -> VenueError {
-    if effective && matches!(error.outcome, Some(Outcome::NotSent | Outcome::Rejected)) {
-        error.outcome = None;
-    }
-    error.partial_ids(ids)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,29 +227,5 @@ mod tests {
                 }
             }
         }
-    }
-    #[test]
-    fn aggregate_unknown_is_sticky_and_effective_nonplacement_legs_clear_refusals() {
-        let mut failures = None;
-        append(
-            &mut failures,
-            native(Some(Code(10001)), "uncertain".into(), true),
-        );
-        append(
-            &mut failures,
-            native(Some(Code(20003)), "refused".into(), true),
-        );
-        assert_eq!(
-            aggregate(failures.unwrap(), true, &[]).outcome,
-            Some(Outcome::Unknown)
-        );
-        assert_eq!(
-            aggregate(not_sent("local", ErrorKind::InvalidInput), true, &[]).outcome,
-            None
-        );
-        assert_eq!(
-            aggregate(native(Some(Code(20003)), "refused".into(), true), true, &[]).outcome,
-            None
-        );
     }
 }

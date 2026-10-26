@@ -4,11 +4,15 @@ use crate::sign::Params;
 use crate::wire::{Num, Str, data, time_ms};
 use crate::{BitunixFutures, Pending};
 use safe_cex_engine::Level;
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{CommandEntryError, Operation, Policy, RetryPolicy};
+use safe_cex_engine::selected_read::{
+    CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot,
+    SelectedRead,
+};
 use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
 const TRADES: &str = "/api/v1/futures/trade/get_history_trades";
@@ -29,7 +33,10 @@ enum Kind {
     Income,
 }
 pub struct Request {
-    owner: CursorHistory<MappedRow>,
+    owner: ReadCursorHistory<MappedRow>,
+    /// The command's own caller Read root; each page is one leg of it.
+    root: ReadRoot,
+    leg: Option<ReadLeg>,
     kind: Kind,
     symbol: Option<String>,
     order_id: Option<String>,
@@ -71,6 +78,18 @@ fn stall_message(reason: Stall) -> String {
     }
 }
 impl Request {
+    /// The exact live page of this command's root.
+    pub(crate) fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg.as_ref().is_some_and(|leg| {
+            self.root.validate_delivery(cx, leg).is_ok()
+                && self.owner.validate_delivery(cx, leg.context()).is_ok()
+        })
+    }
+    pub(crate) fn release(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(leg) = self.leg.take() {
+            let _ = cx.finish_http_context(leg.context());
+        }
+    }
     fn order_cursor(&self) -> Option<f64> {
         self.owner
             .cursor()
@@ -314,8 +333,33 @@ impl BitunixFutures {
             Kind::Fills => CursorWalk::new(1),
         }
         .stall_on_no_new_rows();
+        let selected = SelectedRead::select(&self.slots, ReadRole::Read { scope: None });
+        let root = match SelectedRead::command_root(
+            cx,
+            selected,
+            LocalRefusal {
+                diagnostic: None,
+                error: VenueError::new("Bitunix credentials required").kind(ErrorKind::AuthInvalid),
+            },
+        ) {
+            Ok(root) => root,
+            Err(CommandReadError::Entry(CommandEntryError::Revoked)) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+            Err(_) => return,
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root.context().clone()) {
+            Ok(completion) => completion,
+            Err(reason) => {
+                let _ = cx.fail_context(root.context(), reason.read_venue_error());
+                return;
+            }
+        };
         let read = Request {
-            owner: CursorHistory::new(Completion::new(command), walk, stall_message, encode),
+            owner: ReadCursorHistory::new(completion, walk, stall_message, encode),
+            root,
+            leg: None,
             kind,
             symbol,
             order_id,
@@ -359,20 +403,69 @@ impl BitunixFutures {
         read.oldest = f64::INFINITY;
         read.reached_start = false;
         read.invalid = false;
-        self.signed_request(
+        let leg = match read.root.leg(
             cx,
-            Method::Get,
-            if read.kind == Kind::Orders {
-                ORDERS
-            } else {
-                TRADES
+            ReadLegPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
             },
-            params,
-            None,
-            Pending::History(read),
-        );
+        ) {
+            Ok(leg) => leg,
+            // An expired or retired root already has the engine's terminal.
+            Err(safe_cex_engine::request_context::Error::Revoked) => return,
+            Err(reason) => {
+                let _ = read.owner.reject(cx, reason.read_venue_error());
+                return;
+            }
+        };
+        let path = if read.kind == Kind::Orders {
+            ORDERS
+        } else {
+            TRADES
+        };
+        let query = params.query();
+        let url = format!("{}{path}?{query}", crate::REST);
+        let signing = params.signing();
+        let testnet = self.options.testnet;
+        let request_url = url.clone();
+        if let Err((Pending::History(mut read), reason)) = leg.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url,
+                body: None,
+                stream: Some(crate::recovery::LIST),
+            },
+            |identity| {
+                Box::new(crate::sign::dispatch::Http::new(
+                    identity.clone(),
+                    Method::Get,
+                    request_url,
+                    signing,
+                    None,
+                    testnet,
+                ))
+            },
+            |leg| {
+                read.leg = Some(leg);
+                Pending::History(read)
+            },
+        ) {
+            read.release(cx);
+            let _ = read.owner.reject(cx, reason.read_venue_error());
+        }
     }
     pub(crate) fn history_item(&self, cx: &Cx<'_, Pending>, read: &mut Request, item: &str) {
+        // Rows admit only under this command's exact live page.
+        let Some(leg) = read.leg.as_ref() else {
+            return;
+        };
+        if read.root.validate_delivery(cx, leg).is_err() {
+            return;
+        }
+        let Ok(mut page) = read.owner.admit(cx, leg.context()) else {
+            return;
+        };
         read.count += 1;
         let row: Row<'_> = match serde_json::from_str(item) {
             Ok(r) => r,
@@ -408,7 +501,7 @@ impl BitunixFutures {
             row.trade_id.as_ref()
         };
         // Raw ids, including rows later rejected by a mapper, drive paging progress.
-        if read.kind != Kind::Fills && !id.is_empty() && !read.owner.fresh(id.to_owned()) {
+        if read.kind != Kind::Fills && !id.is_empty() && !page.fresh(id.to_owned()) {
             return;
         }
         if read.kind == Kind::Orders && !id.is_empty() {
@@ -477,7 +570,7 @@ impl BitunixFutures {
                 } else {
                     row.trade_id.to_string()
                 };
-                if !read.owner.fresh(key) {
+                if !page.fresh(key) {
                     return;
                 }
                 let asset = if !row.fee_currency.is_empty() {
@@ -489,7 +582,7 @@ impl BitunixFutures {
                 } else {
                     cx.store.market(symbol).map_or("USDT", |m| m.quote.as_str())
                 };
-                read.owner.stage(MappedRow::Fill(Execution {
+                page.stage(MappedRow::Fill(Execution {
                     id: if row.trade_id.is_empty() {
                         None
                     } else {
@@ -522,7 +615,7 @@ impl BitunixFutures {
                     "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED" => OrderStatus::Canceled,
                     _ => OrderStatus::Closed,
                 };
-                read.owner.stage(MappedRow::Order(HistoricalOrder {
+                page.stage(MappedRow::Order(HistoricalOrder {
                     id: row.order_id.to_string(),
                     symbol: row.symbol.to_string(),
                     side: order_side(&row.side),
@@ -577,7 +670,7 @@ impl BitunixFutures {
                     ),
                 ] {
                     if income != 0.0 {
-                        read.owner.stage(MappedRow::Income(Income {
+                        page.stage(MappedRow::Income(Income {
                             symbol: row.symbol.to_string(),
                             income_type: kind,
                             income,
@@ -598,6 +691,11 @@ impl BitunixFutures {
         mut read: Request,
         response: Response<'_>,
     ) {
+        if !read.delivered(cx) {
+            // A stale or mismatched delivery still closes its own leg.
+            read.release(cx);
+            return;
+        }
         if !(200..300).contains(&response.status) || data(response.body).is_err() || read.invalid {
             self.history_failed(cx, read, "Bitunix history read failed");
             return;
@@ -621,12 +719,21 @@ impl BitunixFutures {
             Kind::Income => (read.income_page() + 1).to_string(),
             Kind::Fills => unreachable!("single-page fills never continue"),
         });
-        match read.owner.advance(CursorPage {
-            next,
-            rows: read.count,
-            fresh: read.added,
-            want_more: more,
-        }) {
+        let step = {
+            let leg = read.leg.as_ref().expect("delivered page");
+            let Ok(mut page) = read.owner.admit(cx, leg.context()) else {
+                read.release(cx);
+                return;
+            };
+            page.advance(CursorPage {
+                next,
+                rows: read.count,
+                fresh: read.added,
+                want_more: more,
+            })
+        };
+        read.release(cx);
+        match step {
             CursorStep::More(_) => self.history_page(cx, read),
             CursorStep::Done | CursorStep::Stalled(_) => self.history_done(cx, read, Ok(())),
         }
@@ -637,14 +744,20 @@ impl BitunixFutures {
         // retain Internal fallback rather than misclassifying all as Network.
         self.history_done(cx, read, Err(VenueError::new(error)));
     }
-    pub(crate) fn history_sign_failed(&self, cx: &mut Cx<'_, Pending>, read: Request, error: &str) {
+    pub(crate) fn history_sign_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        mut read: Request,
+        error: &str,
+    ) {
+        read.release(cx);
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
         let kind = if !self.slots.has_primary() {
             ErrorKind::AuthInvalid
         } else {
             ErrorKind::Internal
         };
-        read.owner.reject(
+        let _ = read.owner.reject(
             cx,
             VenueError::new(error).kind(kind).outcome(Outcome::NotSent),
         );
@@ -652,13 +765,14 @@ impl BitunixFutures {
     fn history_done(
         &self,
         cx: &mut Cx<'_, Pending>,
-        read: Request,
+        mut read: Request,
         result: Result<(), VenueError>,
     ) {
+        read.release(cx);
         let Request {
             owner, kind, limit, ..
         } = read;
-        owner.finish_with(cx, result, move |mut rows| {
+        let _ = owner.finish_with(cx, result, move |mut rows| {
             rows.sort_by(|a, b| b.timestamp().total_cmp(&a.timestamp()));
             if kind != Kind::Income {
                 rows.truncate(limit);
