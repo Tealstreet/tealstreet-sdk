@@ -243,6 +243,22 @@ impl Schedule {
         Ok(())
     }
 
+    /// Complete an Available call that was never started: its attempts and
+    /// unselected fallback credits are released, and the sequence advances.
+    pub fn retire_unissued(&mut self, slot: &Slot) -> Result<(), Error> {
+        let index = self.index(slot)?;
+        if self.calls[index].state != State::Available {
+            return Err(Error::Revoked);
+        }
+        self.reserved -= usize::from(self.calls[index].terms.attempts);
+        if let Some(fallback) = self.calls[index].fallback {
+            self.release_unselected(fallback);
+        }
+        self.calls[index].state = State::Complete;
+        self.advance(self.calls[index].sequence);
+        Ok(())
+    }
+
     /// Select the declared branch after the existing journal proves a parent
     /// refusal. The branch follows the parent once, never once per retry.
     pub fn replace(&mut self, slot: &Slot) -> Result<(), Error> {

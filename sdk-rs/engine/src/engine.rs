@@ -1603,6 +1603,10 @@ struct IoCore {
     /// Preallocated to owner capacity so tracking never allocates.
     read_roots: Vec<(f64, CommandId, u64, TimerId)>,
     read_roots_expiring: bool,
+    /// Parked WriteAfterReads Preflights bounded by their caller's receipt:
+    /// (cap, owner, its timer).
+    #[cfg(feature = "write-preflight-wait")]
+    write_preflight_waits: Vec<(f64, crate::request_context::Preflight, TimerId)>,
     /// Action capacity right after the sweep's reservation, for tests.
     #[cfg(test)]
     read_root_sweep_capacity: Option<usize>,
@@ -1733,6 +1737,8 @@ impl Default for IoCore {
             placement_acks: Default::default(),
             execution_timer: None,
             read_roots: Vec::with_capacity(256),
+            #[cfg(feature = "write-preflight-wait")]
+            write_preflight_waits: Vec::new(),
             read_roots_expiring: false,
             #[cfg(test)]
             read_root_sweep_capacity: None,
@@ -3985,6 +3991,12 @@ impl<V: Venue> Engine<V> {
         {
             return;
         }
+        #[cfg(feature = "write-preflight-wait")]
+        if let Event::TimerFired { timer } = &event
+            && self.io.write_preflight_timer(*timer, now)
+        {
+            return;
+        }
         self.process_socket_work(now);
         self.io.core.http_responses.prune(now);
         // Expired observers detach before any delivery can project to them.
@@ -5159,11 +5171,15 @@ impl<V: Venue> Engine<V> {
     /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        self.flush_keyless_session_roots(now);
         if self.io.core.request_contexts.has_plans() {
             self.flush_live_http_plans(now);
         }
         // Bearer fences first, then parked Slots (which drain fences per pass).
         self.flush_bearer_fences(now);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        self.flush_keyless_session_roots(now);
         // Last, at every outer Plan flush, including after the final Plan
         // sealed: parked Slots whose Session ended or whose Plan sealed.
         self.flush_plan_session_waits(now);

@@ -3,9 +3,12 @@ use safe_cex_engine::{Action, Command, Event, Notice, SocketChannel, Venue};
 use safe_cex_venue_woo::{Options, Woo};
 use support::*;
 fn subscribe(e: &mut TestEngine) {
+    subscribe_at(e, 40.);
+}
+fn subscribe_at(e: &mut TestEngine, now: f64) {
     e.drain_actions().for_each(drop);
     e.handle(
-        40.0,
+        now,
         Event::Command(Command::SubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         }),
@@ -37,9 +40,9 @@ fn initial_sockets_have_explicit_roles_and_unmodified_venue_urls_on_both_environ
             ..Default::default()
         }));
         e.start(0.0);
-        let r = requests(&mut e).remove(0);
+        let r = prepared_seed_requests(&mut e, 0.).remove(0);
         response(&mut e, &r, 10.0, MARKETS);
-        let mut early = e.drain_actions().collect::<Vec<_>>();
+        let mut early = prepared_seed_actions(&mut e, 10.);
         let ticker = early
             .iter()
             .find_map(|a| match a {
@@ -156,9 +159,9 @@ fn nullable_index_keeps_missing_value_without_rejecting_the_seed() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(
         &mut e,
         &r,
@@ -329,7 +332,7 @@ fn pre_seed_book_subscription_survives_until_socket_open() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     e.handle(
         1.0,
         Event::Command(Command::SubscribeOrderBook {
@@ -337,7 +340,7 @@ fn pre_seed_book_subscription_survives_until_socket_open() {
         }),
     );
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(&mut e, &r, 20.0, TICKERS);
     let s = e
         .drain_actions()
@@ -350,14 +353,14 @@ fn pre_seed_book_subscription_survives_until_socket_open() {
         })
         .unwrap();
     e.handle(30.0, Event::WsOpened { socket: s });
-    let r = requests(&mut e).remove(0);
+    let r = released_requests(&mut e, 30.).remove(0);
     assert!(r.url.ends_with("/orderbook/PERP_BTC_USDT"));
 }
 #[test]
 fn buffers_before_snapshot_discards_old_and_preserves_full_depth() {
     let (mut e, s) = started();
     subscribe(&mut e);
-    let r = requests(&mut e).remove(0);
+    let r = released_requests(&mut e, 40.).remove(0);
     ws(&mut e, s, 50.0, &UPDATE.replace("102", "99"));
     ws(&mut e, s, 60.0, UPDATE);
     snapshot(&mut e, &r, 70.0, 100);
@@ -377,7 +380,7 @@ fn buffers_before_snapshot_discards_old_and_preserves_full_depth() {
 fn overflowing_snapshot_buffer_invalidates_the_old_response() {
     let (mut e, s) = started();
     subscribe(&mut e);
-    let old = requests(&mut e).remove(0);
+    let old = released_requests(&mut e, 40.).remove(0);
     for n in 0..2001 {
         ws(&mut e, s, 50.0 + n as f64, UPDATE);
     }
@@ -431,7 +434,7 @@ fn streamed_candles_keep_open_and_monotonic_time() {
 fn snapshot_keeps_more_than_one_thousand_levels() {
     let (mut e, _) = started();
     subscribe(&mut e);
-    let r = requests(&mut e).remove(0);
+    let r = released_requests(&mut e, 40.).remove(0);
     let bids = (1..=1501)
         .rev()
         .map(|p| format!(r#"{{"price":{p},"quantity":1}}"#))
@@ -449,7 +452,7 @@ fn snapshot_keeps_more_than_one_thousand_levels() {
 fn malformed_buffer_invalidates_in_flight_snapshot_and_resyncs() {
     let (mut e, s) = started();
     subscribe(&mut e);
-    let old = requests(&mut e).remove(0);
+    let old = released_requests(&mut e, 40.).remove(0);
     ws(
         &mut e,
         s,
@@ -469,7 +472,7 @@ fn malformed_buffer_invalidates_in_flight_snapshot_and_resyncs() {
     snapshot(&mut e, &old, 60.0, 100);
     assert!(e.venue().book("BTCUSDT").is_none());
     e.handle(1050.0, Event::TimerFired { timer });
-    let new = requests(&mut e).remove(0);
+    let new = released_requests(&mut e, 1050.).remove(0);
     snapshot(&mut e, &new, 1060.0, 110);
     assert_eq!(e.venue().book("BTCUSDT").unwrap().bids(), &[(59000.0, 2.0)]);
 }
@@ -477,7 +480,7 @@ fn malformed_buffer_invalidates_in_flight_snapshot_and_resyncs() {
 fn live_malformed_frame_never_commits_its_valid_prefix() {
     let (mut e, s) = started();
     subscribe(&mut e);
-    let r = requests(&mut e).remove(0);
+    let r = released_requests(&mut e, 40.).remove(0);
     snapshot(&mut e, &r, 50.0, 100);
     ws(
         &mut e,
@@ -491,7 +494,7 @@ fn live_malformed_frame_never_commits_its_valid_prefix() {
 fn reference_counts_and_generations_reject_unsubscribed_snapshot() {
     let (mut e, _) = started();
     subscribe(&mut e);
-    let old = requests(&mut e).remove(0);
+    let old = released_requests(&mut e, 40.).remove(0);
     subscribe(&mut e);
     assert!(requests(&mut e).is_empty());
     for n in 0..2 {
@@ -502,8 +505,8 @@ fn reference_counts_and_generations_reject_unsubscribed_snapshot() {
             }),
         );
     }
-    subscribe(&mut e);
-    let new = requests(&mut e).remove(0);
+    subscribe_at(&mut e, 52.);
+    let new = released_requests(&mut e, 52.).remove(0);
     snapshot(&mut e, &old, 60.0, 200);
     assert!(e.venue().book("BTCUSDT").is_none());
     snapshot(&mut e, &new, 70.0, 100);
@@ -516,9 +519,9 @@ fn funding_waits_sixty_seconds_and_failed_reads_preserve_seed() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(&mut e, &r, 20.0, TICKERS);
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
@@ -533,7 +536,7 @@ fn funding_waits_sixty_seconds_and_failed_reads_preserve_seed() {
         })
         .unwrap();
     e.handle(60020.0, Event::TimerFired { timer });
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 60020.).remove(0);
     response(
         &mut e,
         &r,
@@ -546,7 +549,7 @@ fn funding_waits_sixty_seconds_and_failed_reads_preserve_seed() {
 fn failed_market_page_cannot_poison_price_caps_after_retry() {
     let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options::default()));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(
         &mut e,
         &r,
@@ -567,7 +570,7 @@ fn failed_market_page_cannot_poison_price_caps_after_retry() {
         })
         .unwrap();
     e.handle(1010.0, Event::TimerFired { timer });
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 1010.).remove(0);
     response(
         &mut e,
         &r,
@@ -633,7 +636,7 @@ fn silence_closes_socket_then_reconnects_with_fresh_book_generation() {
         })
         .unwrap();
     subscribe(&mut e);
-    let old = requests(&mut e).remove(0);
+    let old = released_requests(&mut e, 40.).remove(0);
     e.handle(25000.0, Event::TimerFired { timer: watchdog });
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(
@@ -673,7 +676,7 @@ fn silence_closes_socket_then_reconnects_with_fresh_book_generation() {
         })
         .unwrap();
     e.handle(26010.0, Event::WsOpened { socket: new });
-    let r = requests(&mut e).remove(0);
+    let r = released_requests(&mut e, 26010.).remove(0);
     snapshot(&mut e, &old, 26020.0, 300);
     assert!(e.venue().book("BTCUSDT").is_none());
     snapshot(&mut e, &r, 26030.0, 200);
@@ -686,7 +689,7 @@ fn malformed_market_and_ticker_rows_are_skipped_at_startup() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(
         &mut e,
         &r,
@@ -698,7 +701,7 @@ fn malformed_market_and_ticker_rows_are_skipped_at_startup() {
     );
     assert_eq!(e.store().markets().len(), 2);
     assert!(e.store().market("ETHUSDT").is_none());
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(
         &mut e,
         &r,
@@ -736,9 +739,9 @@ fn ticker_without_open_keeps_last_price_with_zero_percentage() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(
         &mut e,
         &r,
@@ -759,7 +762,7 @@ fn empty_book_frame(frame: &[u8]) -> bool {
 fn prev_ts_gap_hides_book_and_publishes_clear_until_new_snapshot() {
     let (mut e, s) = started();
     subscribe(&mut e);
-    let r = requests(&mut e).remove(0);
+    let r = released_requests(&mut e, 40.).remove(0);
     snapshot(&mut e, &r, 70.0, 100);
     ws(
         &mut e,
@@ -798,7 +801,7 @@ fn prev_ts_gap_hides_book_and_publishes_clear_until_new_snapshot() {
         })
         .unwrap();
     e.handle(1090.0, Event::TimerFired { timer });
-    let r = requests(&mut e).remove(0);
+    let r = released_requests(&mut e, 1090.).remove(0);
     snapshot(&mut e, &r, 1100.0, 105);
     assert!(e.book("BTCUSDT").is_some());
 }
@@ -808,7 +811,7 @@ fn buffered_prev_ts_gap_rejects_snapshot_but_overlap_can_bridge() {
     for (previous, visible) in [(99, true), (101, false)] {
         let (mut e, s) = started();
         subscribe(&mut e);
-        let r = requests(&mut e).remove(0);
+        let r = released_requests(&mut e, 40.).remove(0);
         ws(
             &mut e,
             s,
@@ -824,7 +827,7 @@ fn buffered_prev_ts_gap_rejects_snapshot_but_overlap_can_bridge() {
 fn disconnect_publishes_clear_before_reconnect_snapshot() {
     let (mut e, s) = started();
     subscribe(&mut e);
-    let r = requests(&mut e).remove(0);
+    let r = released_requests(&mut e, 40.).remove(0);
     snapshot(&mut e, &r, 70.0, 100);
     e.take_frame(71.0);
     e.handle(

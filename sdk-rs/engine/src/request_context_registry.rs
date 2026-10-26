@@ -18,12 +18,20 @@ const CAPACITY: usize = 256;
 #[path = "local_setting.rs"]
 mod local_setting;
 
+#[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+#[path = "request_context_keyless_session.rs"]
+mod keyless_session;
+
 #[path = "session_context.rs"]
 pub(super) mod session;
 
 #[cfg(all(test, feature = "http-plans"))]
 #[path = "plan_receipt_cap_tests.rs"]
 mod receipt_cap_tests;
+
+#[cfg(all(test, feature = "write-preflight-wait"))]
+#[path = "write_preflight_wait_tests.rs"]
+mod write_preflight_wait_tests;
 
 #[cfg(all(test, feature = "http-plans"))]
 #[path = "request_context_preflight_tests.rs"]
@@ -203,6 +211,14 @@ pub(super) enum Seal {
 #[derive(Default)]
 pub(super) struct ContextRegistry {
     issuer: std::sync::Arc<()>,
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    keyless_roots: usize,
+    #[cfg(all(
+        feature = "serial-plans",
+        feature = "session-bearer",
+        any(test, feature = "test-support")
+    ))]
+    keyless_scan_visits: std::cell::Cell<usize>,
     contexts: crate::IdMap<u64, Context>,
     commands: std::collections::HashMap<CommandId, CommandOwner>,
     sessions: session::Sessions,
@@ -1524,6 +1540,14 @@ impl ContextRegistry {
                     }
                     let preflight = Preflight::new(&self.issuer, command, owner.generation);
                     let token = HttpOwnerRetirement::new(preflight);
+                    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+                    if match &owner.phase {
+                        CommandPhase::Preflight(state) => state.session_root().is_some(),
+                        CommandPhase::Planned(state) => state.session_root().is_some(),
+                        _ => false,
+                    } {
+                        self.keyless_roots -= 1;
+                    }
                     owner.phase = CommandPhase::Retiring(token.clone());
                     self.contexts
                         .retain(|_, context| context.owner() != token.preflight().owner());
@@ -2201,6 +2225,8 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .contexts
             .remove(&context.leg());
+        #[cfg(feature = "repair-mutations")]
+        self.io.repair_leg_finished(context, self.now);
         Ok(())
     }
 }

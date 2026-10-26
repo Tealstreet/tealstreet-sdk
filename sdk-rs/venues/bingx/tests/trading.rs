@@ -19,30 +19,10 @@ use trading::Trading;
 pub enum Pending {
     Trade(trading::Request),
 }
-fn issue(
-    cx: &mut Cx<'_, Pending>,
-    credentials: Option<&Credentials>,
-    method: safe_cex_engine::Method,
-    path: &'static str,
-    params: sign::Params,
-    _at: Option<safe_cex_engine::json::ArrayAt>,
-    pending: Pending,
-) {
-    // Mirrors the crate's legacy staging transport for the source-included modules.
-    let recipe = credentials.map(|c| {
-        sign::dispatch::Http::new(c.identity(method).clone(), method, path, params.clone())
-    });
-    let (url, headers, body) = params.render(
-        method,
-        path,
-        vec![(
-            sign::unsigned_headers(method)[0].0,
-            sign::unsigned_headers(method)[0].1.into(),
-        )],
-    );
-    let id = cx.request(method, url, headers, body, pending);
-    if let Some(recipe) = recipe {
-        cx.sign_http(id, Box::new(recipe));
+impl Pending {
+    fn into_trade(self) -> Option<trading::Request> {
+        let Self::Trade(request) = self;
+        Some(request)
     }
 }
 struct TestVenue {
@@ -50,6 +30,7 @@ struct TestVenue {
     initial: Option<(Order, String, String)>,
     credentials: Credentials,
     acknowledgements: Vec<(bool, bool)>,
+    admitted_entries: usize,
 }
 impl Venue for TestVenue {
     type Pending = Pending;
@@ -79,7 +60,41 @@ impl Venue for TestVenue {
             request.reconciles_orders(),
         ));
         self.trading
-            .on_response(cx, Some(&self.credentials), request, response);
+            .on_response(cx, Some(&self.credentials), request, response, |_, _| {});
+    }
+    fn unproven_http_evidence(
+        &self,
+        _: &Pending,
+        response: Response<'_>,
+        evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+    ) {
+        trading::evidence(response.body, evidence);
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        let Pending::Trade(request) = pending;
+        request.reconciliation()
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.trading.retired(owner);
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let Pending::Trade(request) = pending;
+        self.trading
+            .on_sign_failed(cx, Some(&self.credentials), request, error);
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let Pending::Trade(request) = pending;
@@ -98,7 +113,26 @@ impl Venue for TestVenue {
     }
     fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        self.trading.command(cx, Some(&self.credentials), command);
+        if matches!(command, Command::FetchLeverage { .. }) {
+            use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
+            for _ in 0..256 {
+                cx.http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            }
+            return;
+        }
+        let entries = &mut self.admitted_entries;
+        self.trading
+            .command(cx, Some(&self.credentials), command, || *entries += 1);
     }
     fn book(&self, _: &str) -> Option<&Book> {
         None
@@ -112,6 +146,8 @@ struct Harness {
     requests: Vec<HttpRequest>,
     done: Vec<Result<String, String>>,
     failures: Vec<safe_cex_engine::VenueError>,
+    receipted: std::collections::HashSet<String>,
+    now: f64,
 }
 impl Harness {
     fn new(initial: Option<(Order, &str)>) -> Self {
@@ -132,6 +168,7 @@ impl Harness {
             trading: Trading::default(),
             initial: initial.map(|(o, k)| (o, k.into(), status.into())),
             acknowledgements: Vec::new(),
+            admitted_entries: 0,
             credentials: Credentials {
                 read: None,
                 primary: identities.primary.unwrap(),
@@ -144,13 +181,15 @@ impl Harness {
             requests: Vec::new(),
             done: Vec::new(),
             failures: Vec::new(),
+            receipted: Default::default(),
+            now: 1_000.,
         };
         h.collect();
         h
     }
     fn collect(&mut self) {
         let mut receipts = Vec::new();
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
                 Action::Notice(Notice::CommandProgress {
                     receipts: actual, ..
@@ -170,12 +209,19 @@ impl Harness {
                         })
                         .into_iter()
                         .collect();
-                    assert_eq!(
-                        std::mem::take(&mut receipts),
-                        expected,
+                    // A signature resend repeats an identity already receipted.
+                    let resent = receipts.is_empty()
+                        && expected
+                            .iter()
+                            .all(|r| self.receipted.contains(&r.identity));
+                    self.receipted
+                        .extend(expected.iter().map(|r| r.identity.clone()));
+                    assert!(
+                        resent || receipts == expected,
                         "receipt must precede the exact outgoing native identity: {}",
                         r.url
                     );
+                    receipts.clear();
                     self.requests.push(r);
                 }
                 Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(Ok(result)),
@@ -188,13 +234,14 @@ impl Harness {
         }
     }
     fn command(&mut self, command: Command) {
-        self.engine.handle(1_000.0, Event::Command(command));
+        self.engine.handle(self.now, Event::Command(command));
         self.collect();
     }
     fn reply(&mut self, body: &str) {
         let id = self.requests.remove(0).id;
+        self.now += 1.;
         self.engine.handle(
-            1_001.0,
+            self.now,
             Event::HttpResponse {
                 request: id,
                 response: Response {
@@ -208,8 +255,9 @@ impl Harness {
     }
     fn failed(&mut self) {
         let id = self.requests.remove(0).id;
+        self.now += 1.;
         self.engine.handle(
-            1_001.0,
+            self.now,
             Event::HttpFailed {
                 request: id,
                 error: "connection lost",
@@ -523,7 +571,7 @@ fn cancel_continues_after_failure_and_marks_only_successes() {
     h.reply(r#"{"code":80016,"msg":"order absent"}"#);
     assert_eq!(
         h.engine.store().order("2").unwrap().status,
-        OrderStatus::Canceled
+        OrderStatus::Open
     );
     assert!(h.done[0].is_err());
 }
@@ -1349,11 +1397,19 @@ fn write_failures_are_classified_without_changing_their_text() {
         ),
         (
             r#"{"code":0,"msg":"","data":{"order":{}}}"#,
+            Some(ErrorKind::Internal),
+            Some(Outcome::Unknown),
+        ),
+        (
+            "not json",
+            Some(ErrorKind::Internal),
+            Some(Outcome::Unknown),
+        ),
+        (
+            r#"{"code":109500,"msg":"system busy"}"#,
             None,
             Some(Outcome::Unknown),
         ),
-        ("not json", None, Some(Outcome::Unknown)),
-        (r#"{"code":109500,"msg":"system busy"}"#, None, None),
     ] {
         let mut h = Harness::new(None);
         h.place(vec![opts()]);
@@ -1477,4 +1533,178 @@ fn app_protective_payload_with_matching_trigger_price_places_like_price_only() {
     h.place(vec![app("stop_market", 90.0, Some(89.0))]);
     assert!(h.requests.is_empty());
     assert!(h.done[0].is_err());
+}
+
+#[test]
+fn replacement_ids_prevent_a_signature_resend_even_without_cancellation_proof() {
+    for data in [
+        r#"{"newOrderId":"replacement"}"#,
+        r#"{"newOrderResponse":{"orderId":"replacement"}}"#,
+    ] {
+        let mut h = Harness::new(Some((order(), "LIMIT")));
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price: Some(96.),
+            amount: None,
+        });
+        h.reply(&format!(
+            r#"{{"code":100001,"msg":"Signature verification failed","data":{data}}}"#
+        ));
+        assert!(
+            h.requests.is_empty(),
+            "replacement evidence must prevent a resend"
+        );
+        assert_eq!(
+            h.failures[0].outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+        assert_eq!(
+            h.failures[0].partial.as_ref().unwrap().order_ids,
+            ["replacement"]
+        );
+        assert_eq!(
+            h.engine.store().order(&order().id).unwrap().status,
+            OrderStatus::Open
+        );
+    }
+}
+
+#[test]
+fn duplicate_entry_cannot_run_native_freshness_effects_or_replace_the_live_job() {
+    let mut h = Harness::new(None);
+    h.place(vec![opts()]);
+    assert_eq!(h.engine.venue().admitted_entries, 1);
+    let request = h.requests[0].id;
+    h.place(vec![opts()]);
+    assert_eq!(h.engine.venue().admitted_entries, 1);
+    assert_eq!(h.requests.len(), 1);
+    assert_eq!(h.requests[0].id, request);
+    h.reply(r#"{"code":0,"data":{"orderId":"original"}}"#);
+    assert_eq!(h.done.iter().filter(|r| r.is_ok()).count(), 1);
+}
+
+#[test]
+fn rejected_entry_cannot_run_native_freshness_effects_or_start_a_write() {
+    let mut h = Harness::new(None);
+    h.command(Command::FetchLeverage {
+        command: 99,
+        symbol: "BTCUSDT".into(),
+    });
+    h.place(vec![opts()]);
+    assert_eq!(h.engine.venue().admitted_entries, 0);
+    assert!(h.requests.is_empty());
+    assert_eq!(h.failures.len(), 1);
+    assert!(h.failures[0].message.contains("capacity"));
+}
+
+fn split_order(amount: f64) -> PlaceOrderOpts {
+    serde_json::from_value(serde_json::json!({
+        "symbol": "BTCUSDT", "type": "market", "side": "buy", "amount": amount
+    }))
+    .unwrap()
+}
+
+#[test]
+fn native_maximum_split_streams_every_lot_and_returns_every_accepted_id() {
+    // 10,000 lots of the market's 10.0 maximum: native `split()`'s exact bound.
+    let mut h = Harness::new(None);
+    h.place(vec![split_order(100_000.)]);
+    for lot in 0..10_000 {
+        assert_eq!(
+            h.requests.len(),
+            1,
+            "lot {lot}: one native write at a time: {:?}",
+            h.failures
+        );
+        let body: serde_json::Value = serde_json::from_str(h.body()).unwrap();
+        assert_eq!(body["quantity"], 10.0, "lot {lot}");
+        assert!(
+            h.done.is_empty(),
+            "lot {lot}: the command is still streaming"
+        );
+        h.reply(&format!(r#"{{"code":0,"data":{{"orderId":"{lot}"}}}}"#));
+    }
+    assert!(h.requests.is_empty());
+    let ids: Vec<String> = serde_json::from_str(h.done[0].as_ref().unwrap()).unwrap();
+    assert_eq!(
+        ids,
+        (0..10_000).map(|id| id.to_string()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn mid_split_signature_resend_and_refusal_keep_every_accepted_id() {
+    use safe_cex_engine::ErrorKind;
+    let mut h = Harness::new(None);
+    h.place(vec![split_order(30.)]);
+    h.reply(r#"{"code":0,"data":{"orderId":"lot-0"}}"#);
+    let first = h.body().to_owned();
+    h.reply(r#"{"code":100001,"msg":"Signature verification failed"}"#);
+    let resent: serde_json::Value = serde_json::from_str(h.body()).unwrap();
+    let first: serde_json::Value = serde_json::from_str(&first).unwrap();
+    assert_eq!(resent["clientOrderId"], first["clientOrderId"]);
+    h.reply(r#"{"code":0,"data":{"orderId":"lot-1"}}"#);
+    h.reply(r#"{"code":101204,"msg":"Insufficient margin"}"#);
+    assert!(h.requests.is_empty());
+    let [error] = h.failures.as_slice() else {
+        panic!("{:?}", h.failures);
+    };
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::Rejected), None)
+    );
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["lot-0", "lot-1"]
+    );
+}
+
+/// cancelReplace runs STOP_ON_FAILURE, so a refusal may follow the cancel: native
+/// leaves its outcome unset, and no refusal on this path grants a resend.
+fn assert_refused_replace_has_no_outcome(body: &str, kind: Option<safe_cex_engine::ErrorKind>) {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.),
+        amount: None,
+    });
+    h.reply(body);
+    assert!(
+        h.requests.is_empty(),
+        "{body}: no resend and no further call"
+    );
+    let [error] = h.failures.as_slice() else {
+        panic!("{body}: {:?}", h.failures);
+    };
+    assert_eq!((error.kind, error.outcome), (kind, None), "{body}");
+    assert!(
+        error
+            .partial
+            .as_ref()
+            .is_none_or(|p| p.order_ids.is_empty()),
+        "{body}: no accepted ID may be invented"
+    );
+    assert_eq!(
+        h.engine.store().order(&order().id).unwrap().status,
+        OrderStatus::Open,
+        "{body}: the original stays until a read proves otherwise"
+    );
+}
+
+#[test]
+fn refused_cancel_replace_has_no_outcome() {
+    assert_refused_replace_has_no_outcome(
+        r#"{"code":100400,"msg":"invalid parameter"}"#,
+        Some(safe_cex_engine::ErrorKind::InvalidInput),
+    );
+}
+
+#[test]
+fn signature_refused_cancel_replace_has_no_outcome_and_no_resend() {
+    assert_refused_replace_has_no_outcome(
+        r#"{"code":100001,"msg":"Signature verification failed"}"#,
+        Some(safe_cex_engine::ErrorKind::AuthInvalid),
+    );
 }

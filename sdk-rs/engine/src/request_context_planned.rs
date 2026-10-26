@@ -79,6 +79,10 @@ fn take(ids: &mut Range<u64>, count: u64) -> Range<u64> {
 }
 
 impl State {
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(super) fn session_root(&self) -> Option<&crate::request_context::Session> {
+        self.body.first()?.serial.as_ref()?.session_root.as_ref()
+    }
     /// A Mutation Plan's admitted credential, for repair mint custody.
     #[cfg(feature = "repair-mutations")]
     pub(in crate::engine) fn repair_write_credential(
@@ -476,6 +480,19 @@ impl<P> Cx<'_, P> {
             return Err(Error::Invalid);
         }
         let (intent, old_read) = self.preflight_plan_origin(preflight)?;
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        if self
+            .io
+            .core
+            .request_contexts
+            .keyless_session(preflight.owner())
+            .is_some()
+            && serial
+                .as_ref()
+                .is_none_or(|serial| serial.session_root.is_none())
+        {
+            return Err(Error::Invalid);
+        }
         let (operation, credential) = match intent.purpose {
             PreflightPurpose::ReadOnly => (Operation::Read, intent.read_credential),
             PreflightPurpose::WriteAfterReads => (Operation::Mutation, intent.write_credential),
@@ -491,12 +508,16 @@ impl<P> Cx<'_, P> {
             .core
             .request_contexts
             .preflight_receipt_cap(preflight)?;
+        #[cfg(not(feature = "write-preflight-wait"))]
         if receipt_cap.is_some() && operation != Operation::Read {
             return Err(Error::Invalid);
         }
         if receipt_cap.is_some_and(|(_, cap)| !self.now.is_finite() || cap - self.now < 1.) {
             return Err(Error::TimedOut);
         }
+        // A write Plan never inherits the caller cap: it bounded the Preflight only.
+        #[cfg(feature = "write-preflight-wait")]
+        let receipt_cap = receipt_cap.filter(|_| operation == Operation::Read);
         #[cfg(feature = "serial-plans")]
         let schedule = schedule?;
         #[cfg(not(feature = "serial-plans"))]
@@ -1102,6 +1123,12 @@ impl<P> Cx<'_, P> {
         protection_cancel: bool,
         resumed: bool,
     ) -> Result<Context, Error> {
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let session_egress = self
+            .io
+            .core
+            .request_contexts
+            .keyless_session_egress(plan.owner())?;
         let body = self
             .io
             .core
@@ -1154,6 +1181,10 @@ impl<P> Cx<'_, P> {
             body.policy.pacing,
         )?
         .with_retry(body.policy.retry)?;
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        {
+            context = context.with_egress(session_egress)?;
+        }
         context.bind_issuer(&self.io.core.request_contexts.issuer);
         let call = Call::open(
             context.clone(),
@@ -2097,6 +2128,55 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Retire the current unissued call of an independent complete Plan that
+    /// the venue decides not to send. No journal fact; its reservations return.
+    /// Admitted only where the call could have been issued; every check
+    /// precedes the first change. Retiring every call leaves the Plan unable to
+    /// succeed: a venue whose targets are all closed uses `done_empty_plan`
+    /// before admission. See docs/plans/RUST_PLAN_RETIRE_UNISSUED.md.
+    pub fn retire_unissued_plan_call(&mut self, plan: &Plan, slot: &Slot) -> Result<(), Error> {
+        self.io.core.request_contexts.validate_unbound_plan(plan)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        #[cfg(feature = "serial-plans")]
+        if body.serial.is_some() {
+            return Err(Error::State);
+        }
+        if !body.policy.independent_calls {
+            return Err(Error::Invalid);
+        }
+        let index = body.schedule.ordinal(slot)?;
+        #[cfg(feature = "http-mutation-barriers")]
+        if body.barriers.iter().any(|group| group.contains(&index)) {
+            return Err(Error::Invalid);
+        }
+        let entry = &body.entries[index];
+        if entry.credit != Credit::Unissued
+            || entry.call.is_some()
+            || entry.parked
+            || !body
+                .schedule
+                .available()
+                .any(|candidate| body.schedule.ordinal(&candidate) == Ok(index))
+            || !entry.eligible_at.is_some_and(|at| at <= self.now)
+            || !self.plan_issue_custody(plan, body)
+        {
+            return Err(Error::Revoked);
+        }
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
+        body.schedule
+            .retire_unissued(slot)
+            .expect("checked available slot");
+        body.entries[index].credit = Credit::Released;
+        body.refresh_availability(self.now);
+        self.io.core.request_contexts.reserved_contexts -= 1;
+        self.rearm_plan(plan);
+        Ok(())
+    }
+
     /// Explicit empty native plan. No root, Context, physical attempt or accepted
     /// write fact is manufactured for a successful no-op.
     pub fn done_empty_plan(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
@@ -2242,3 +2322,47 @@ mod disabled_barrier_tests;
 #[cfg(all(test, feature = "serial-plans"))]
 #[path = "request_context_schedule_admission_tests.rs"]
 mod schedule_admission_tests;
+
+#[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+impl ContextRegistry {
+    pub(in crate::engine) fn prepare_keyless_wire(
+        &self,
+        context: &Context,
+        method: crate::Method,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: Option<&str>,
+    ) -> Result<Option<[u8; 32]>, Error> {
+        if self.keyless_session(context.owner()).is_none() {
+            return Ok(None);
+        }
+        let Some(plan) = self.plan_from_context(context) else {
+            return Ok(None);
+        };
+        let current = self.plan_body(&plan)?;
+        let Some(serial) = current.serial.as_ref().filter(|s| s.session_root.is_some()) else {
+            return Ok(None);
+        };
+        let fingerprint = super::keyless_session::wire_fingerprint(method, url, headers, body);
+        if serial
+            .wire_fingerprint
+            .is_some_and(|expected| expected != fingerprint)
+        {
+            return Err(Error::Invalid);
+        }
+        Ok(Some(fingerprint))
+    }
+
+    pub(in crate::engine) fn commit_keyless_wire(&mut self, owner: Owner, fingerprint: [u8; 32]) {
+        let CommandPhase::Planned(state) =
+            &mut self.owner_entry_mut(owner).expect("queued owner").phase
+        else {
+            unreachable!("queued serial Plan");
+        };
+        state.body[0]
+            .serial
+            .as_mut()
+            .expect("queued keyless serial")
+            .wire_fingerprint = Some(fingerprint);
+    }
+}

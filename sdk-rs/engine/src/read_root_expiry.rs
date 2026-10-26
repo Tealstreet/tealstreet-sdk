@@ -32,6 +32,27 @@ impl<P> Io<P> {
     }
 }
 
+#[cfg(feature = "write-preflight-wait")]
+impl<P> Io<P> {
+    /// A parked write Preflight's cap timer; an early or non-finite fire
+    /// re-arms for the exact cap (true: consumed here), so a host's one wake
+    /// is never spent without the cap staying armed.
+    pub(super) fn write_preflight_timer(&mut self, timer: TimerId, now: f64) -> bool {
+        let Some(&(at_ms, ..)) = self
+            .core
+            .write_preflight_waits
+            .iter()
+            .find(|(.., own)| *own == timer)
+        else {
+            return false;
+        };
+        if !now.is_finite() || now < at_ms {
+            self.core.actions.push(Action::SetTimer { timer, at_ms });
+        }
+        true
+    }
+}
+
 impl crate::engine::CoreIo<'_> {
     /// Every terminal of a tracked owner leaves the index and clears its own
     /// timer; nothing here needs a fresh identity.
@@ -49,10 +70,48 @@ impl crate::engine::CoreIo<'_> {
 }
 
 impl<V: Venue> Engine<V> {
+    /// A parked write Preflight past its caller's cap fails exactly as an
+    /// expired entry does, through the owner-aware Preflight seal; one that left
+    /// its park is no longer bounded. Runs outside every command loan.
+    #[cfg(feature = "write-preflight-wait")]
+    fn expire_write_preflights(&mut self, now: f64) {
+        if self.io.core.write_preflight_waits.is_empty() || !now.is_finite() {
+            return;
+        }
+        let mut index = 0;
+        while index < self.io.core.write_preflight_waits.len() {
+            let (at_ms, preflight, timer) = self.io.core.write_preflight_waits[index].clone();
+            let waiting = self.io.core.request_contexts.preflight_waiting(&preflight);
+            if waiting && now < at_ms {
+                index += 1;
+                continue;
+            }
+            // Seal first: the cap leaves the index only once the owner has its
+            // terminal, so a refused seal can never strand a parked caller.
+            if waiting {
+                let sealed = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                }
+                .fail_preflight(&preflight, Error::TimedOut.venue_error());
+                if sealed.is_err() {
+                    debug_assert!(false, "a due write Preflight cap must seal: {sealed:?}");
+                    index += 1;
+                    continue;
+                }
+            }
+            self.io.core.write_preflight_waits.swap_remove(index);
+            self.io.core.actions.push(Action::ClearTimer { timer });
+        }
+    }
+
     /// Retire every tracked root due at `now` before anything can stamp, run a
     /// codec or lend authority: prepare all, mark all, then per owner discard,
     /// hand back its continuations without a Cx, and seal once.
     pub(super) fn expire_read_roots(&mut self, now: f64) {
+        #[cfg(feature = "write-preflight-wait")]
+        self.expire_write_preflights(now);
         if self.io.core.read_roots.is_empty()
             || !now.is_finite()
             || !self.io.core.read_roots.iter().any(|(at, ..)| now >= *at)

@@ -603,7 +603,37 @@ impl<P> Cx<'_, P> {
         };
         // After admission, so a refused binding fails an owning Plan like any
         // other issue refusal.
-        let resolved = self.resolve_bearer(&context, bearer);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let forbids_recipe = self
+            .io
+            .core
+            .request_contexts
+            .keyless_session(context.owner())
+            .is_some()
+            && !matches!(&recipe, ManagedRecipe::Unsigned(_));
+        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+        let forbids_recipe = false;
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let keyless_owner = context.owner();
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let wire = if let ManagedRecipe::Unsigned(headers) = &recipe {
+            self.io.core.request_contexts.prepare_keyless_wire(
+                &context,
+                method,
+                &url,
+                headers,
+                body.as_deref(),
+            )
+        } else {
+            Ok(None)
+        };
+        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+        let wire: Result<Option<[u8; 32]>, Error> = Ok(None);
+        let resolved = match &wire {
+            Err(error) => Err(*error),
+            Ok(_) if forbids_recipe => Err(Error::Invalid),
+            Ok(_) => self.resolve_bearer(&context, bearer),
+        };
         let generation = resolved.as_ref().ok().copied().flatten();
         // A group claims its members together, and that claim checks no
         // member's Bearer (R11, deferred to its first consumer), so a
@@ -622,6 +652,25 @@ impl<P> Cx<'_, P> {
         let refusal: Option<&'static str> = None;
         #[cfg(not(feature = "session-bearer"))]
         let refusal = bearer.is_some().then_some(SESSION_BEARER_DISABLED);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let refusal = refusal.or_else(|| {
+            if forbids_recipe {
+                Some("Keyless Session serial calls cannot sign")
+            } else if wire.is_err() {
+                Some("Keyless serial resend changed its request")
+            } else if self
+                .io
+                .core
+                .request_contexts
+                .keyless_session(context.owner())
+                .is_some()
+                && resolved.is_err()
+            {
+                Some("Keyless serial call requires its admitted Session")
+            } else {
+                None
+            }
+        });
         let result = match resolved {
             Ok(_) if refusal.is_some() => Err((pending, Error::Invalid)),
             Ok(bearer) => self.queue_managed_admitted(
@@ -637,6 +686,15 @@ impl<P> Cx<'_, P> {
             ),
             Err(error) => Err((pending, error)),
         };
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        if result.is_ok()
+            && let Ok(Some(fingerprint)) = wire
+        {
+            self.io
+                .core
+                .request_contexts
+                .commit_keyless_wire(keyless_owner, fingerprint);
+        }
         #[cfg(feature = "http-plans")]
         if let (Some(admission), Err((_, error))) = (admission.as_ref(), &result) {
             self.fail_owned_admission(admission, *error, refusal);
@@ -666,6 +724,13 @@ impl<P> Cx<'_, P> {
         bearer: Option<&Session>,
     ) -> Result<Option<u64>, Error> {
         let registry = &self.io.core.request_contexts;
+        #[cfg(feature = "serial-plans")]
+        if let Some(root) = registry.validate_keyless_session(context.owner())? {
+            let actual = bearer.ok_or(Error::Revoked)?;
+            if registry.validate_session(actual)? != root {
+                return Err(Error::Revoked);
+            }
+        }
         let generation = match bearer {
             Some(session) => Some(registry.validate_session(session)?),
             None => match registry.leg_bearer(context) {
@@ -1574,7 +1639,7 @@ impl<V: Venue> Engine<V> {
     /// role was captured at admission. Descriptive only: it grants nothing.
     #[cfg(feature = "sign-meta")]
     pub fn sign_meta(&self, task: RequestId) -> Option<crate::sign_meta::SignMeta> {
-        use crate::sign_meta::{SignMeta, SignOwner};
+        use crate::sign_meta::{SignKind, SignMeta};
         let (request, deadline_ms) = self.io.core.signing.prepared_task(task)?;
         let managed = self.io.core.managed_http.get(&request)?;
         if managed.signing_attempt != Some(task) {
@@ -1583,22 +1648,26 @@ impl<V: Venue> Engine<V> {
         let role = managed.role?;
         let context = managed.lifecycle.context();
         let slot = context.credential()?.slot;
-        let owner = match context.owner() {
-            Owner::Session { generation } => SignOwner::Session { generation },
+        let kind = match context.owner() {
+            Owner::Session { generation } => SignKind::Session {
+                generation,
+                slot,
+                role,
+            },
             _ => {
                 let attempt = managed.lifecycle.attempt();
-                SignOwner::Managed {
+                SignKind::Managed {
                     request: attempt.request,
                     generation: attempt.generation,
+                    slot,
+                    role,
                 }
             }
         };
         Some(SignMeta {
             task,
-            owner,
             deadline_ms,
-            slot,
-            role,
+            kind,
         })
     }
 
@@ -2824,10 +2893,14 @@ mod tests {
     include!("request_context_plan_expiry_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_independence_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_plan_retire_tests.rs");
     #[cfg(feature = "serial-plans")]
     include!("request_context_serial_plan_tests.rs");
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     include!("request_context_serial_session_tests.rs");
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    include!("request_context_keyless_serial_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
     #[cfg(feature = "sign-meta")]
