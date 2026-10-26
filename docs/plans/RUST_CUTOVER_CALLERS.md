@@ -9463,3 +9463,12 @@ retain unsigned account discovery, snapshots and public trades; no hosted signin
 capability is activated. Expired Background reads clear only their native
 inflight state via the engine failure callback, permitting a fresh poll without
 publishing expired DATA or issuing any command terminal.
+
+Lighter's tests/support/reference_signer.rs is a frozen compatibility codec,
+sharing transaction DTOs and cryptographic primitives with production. It is
+not an independent oracle: tests/signing.rs pins it to the TS and Go-WASM corpus.
+
+Retired writes apply nonce invalidation and setting uncertainty before any
+queued Preflight or Plan resumes. A consumed Submit nonce is discarded on
+NotSent as well as released failures, forcing the next job to read nextNonce.
+An explicit HTTP 2xx tier refusal is Rejected, never an unproven Unknown.

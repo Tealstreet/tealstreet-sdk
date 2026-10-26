@@ -334,7 +334,9 @@ and cursor-integrity proof failure stay strict. Provisional failed pages never
 enter accepted history.
 
 The frozen eager signing codec remains only in tests/support/reference_signer.rs
-as an independent financial vector oracle. Production Options contains public
+as a compatibility codec sharing production DTOs and cryptography. Its authority
+comes from tests/signing.rs, which pins it to the independent TS and Go-WASM
+corpus. Production Options contains public
 account selectors and opaque issued Identity refs; no key or scalar holder.
 Native and JSON setup controls pin all original key presences, nonblank Present
 precedence, principal nonpresentation, invalid scalar/index/secondary/provider

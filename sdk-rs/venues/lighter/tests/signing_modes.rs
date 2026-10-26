@@ -145,7 +145,7 @@ fn remote_presence_does_not_override_valid_local_signer_or_supported_provider() 
 }
 
 #[test]
-fn payload_only_and_explicit_public_or_missing_api_index_skip_account_startup() {
+fn payload_only_and_explicit_public_skip_account_startup() {
     for opts in [
         Options {
             secret: None,
@@ -154,11 +154,6 @@ fn payload_only_and_explicit_public_or_missing_api_index_skip_account_startup() 
         Options {
             remote_signer: true,
             public_data_only: true,
-            ..options()
-        },
-        Options {
-            remote_signer: true,
-            api_key_index: None,
             ..options()
         },
     ] {
@@ -239,5 +234,18 @@ fn remote_only_history_never_sends_private_requests_and_keeps_public_trades_avai
         assert!(reads[0].url.contains("/trades?"));
         assert!(!reads[0].url.contains("account_index"));
         assert!(reads[0].headers.is_empty());
+    }
+}
+
+#[test]
+fn trusted_fixture_refuses_missing_malformed_and_out_of_range_private_indices() {
+    for index in [None, Some(" "), Some("bad"), Some("255")] {
+        assert!(
+            support::try_engine(Options {
+                api_key_index: index.map(str::to_owned),
+                ..options()
+            })
+            .is_err()
+        );
     }
 }

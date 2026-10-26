@@ -602,6 +602,7 @@ impl Lighter {
         let mut reserved = Vec::with_capacity(count);
         for tx in txs {
             let Some(nonce) = self.trading.next_nonce.take() else {
+                self.trading.next_nonce.invalidate();
                 self.trade_finish(cx, not_sent("Lighter transaction nonce exhausted"));
                 return;
             };
@@ -629,6 +630,7 @@ impl Lighter {
         let recipe = match recipe {
             Ok(recipe) => recipe,
             Err(error) => {
+                self.trading.next_nonce.invalidate();
                 self.trade_finish(cx, not_sent(error));
                 return;
             }
@@ -971,12 +973,18 @@ impl Lighter {
                     self.trade_finish(cx, error);
                     return;
                 }
-                let ids = match self.trading.active.as_ref().unwrap().steps.front() {
+                let ids: Vec<String> = match self.trading.active.as_ref().unwrap().steps.front() {
                     Some(Step::Place(orders)) => {
                         orders.iter().map(|p| p.order.id.clone()).collect()
                     }
                     _ => Vec::new(),
                 };
+                self.trading
+                    .active
+                    .as_mut()
+                    .unwrap()
+                    .ids
+                    .extend(ids.iter().cloned());
                 if cx
                     .http_write_fact(&context, WriteFact::Accepted { order_ids: ids }, None)
                     .is_err()
@@ -999,12 +1007,6 @@ impl Lighter {
                         for mut p in orders {
                             p.order.last_update = cx.now;
                             self.record_placement(p.order.clone());
-                            self.trading
-                                .active
-                                .as_mut()
-                                .unwrap()
-                                .ids
-                                .push(p.order.id.clone());
                             // A live terminal event can overtake the HTTP acknowledgement.
                             if !self.account_order_terminal(&p.order.id)
                                 && !cx.store.order(&p.order.id).is_some_and(|o| {
@@ -1160,6 +1162,9 @@ impl Lighter {
         }
         self.trading.waiting_limits = false;
         if let Some(job) = self.trading.active.take() {
+            if job.effect.is_some() {
+                self.trading.next_nonce.invalidate();
+            }
             let mut error = error.into();
             if !job.ids.is_empty() {
                 let indexes = job.ids.join(",");
@@ -1691,6 +1696,21 @@ impl Lighter {
         code: u64,
         message: &str,
     ) -> bool {
+        match Self::record_refusal(cx, context, code, message) {
+            Ok(()) => true,
+            Err(error) => {
+                self.trade_finish(cx, error.venue_error());
+                false
+            }
+        }
+    }
+
+    pub(crate) fn record_refusal(
+        cx: &mut Cx<'_, Pending>,
+        context: &Context,
+        code: u64,
+        message: &str,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
         let table = CodeTable {
             rows: &[Row {
                 key: Key::Range(0, i64::MAX),
@@ -1705,8 +1725,7 @@ impl Lighter {
             code: NativeCode::Int(code as i64),
             message,
         };
-        let result = cx
-            .classify_write(context, &table, Some(&native), message)
+        cx.classify_write(context, &table, Some(&native), message)
             .and_then(|fact| {
                 cx.http_write_fact(
                     context,
@@ -1716,14 +1735,8 @@ impl Lighter {
                     },
                     None,
                 )
-            });
-        match result {
-            Ok(_) => true,
-            Err(error) => {
-                self.trade_finish(cx, error.venue_error());
-                false
-            }
-        }
+            })
+            .map(|_| ())
     }
 
     fn trade_wake_next(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1736,6 +1749,7 @@ impl Lighter {
         cx: &mut Cx<'_, Pending>,
         preflight: &Preflight,
     ) {
+        self.settle_retired_trades(cx);
         if self.trading.active.is_none() {
             if !self
                 .trading
@@ -1773,6 +1787,7 @@ impl Lighter {
         self.trade_kick(cx);
     }
     pub(crate) fn trade_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
+        self.settle_retired_trades(cx);
         let Some(job) = self.trading.active.as_mut().filter(|job| {
             job.plan
                 .as_ref()

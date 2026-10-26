@@ -309,18 +309,24 @@ impl Lighter {
             let _ = cx.done_plan(&plan, "null".into());
         } else {
             let message = envelope
-                .and_then(|e| e.message)
+                .as_ref()
+                .and_then(|e| e.message.as_deref())
                 .filter(|m| !m.is_empty())
+                .map(str::to_owned)
                 .unwrap_or_else(|| format!("HTTP {}", response.status));
-            let _ = cx.http_write_unproven(
-                &context,
-                format!("Lighter account tier change failed: {message}"),
-            );
+            let message = format!("Lighter account tier change failed: {message}");
+            if (200..300).contains(&response.status)
+                && let Some(code) = envelope.and_then(|e| e.code)
+            {
+                if let Err(error) = Self::record_refusal(cx, &context, u64::from(code), &message) {
+                    let _ = cx.fail_plan(&plan, error.venue_error());
+                    return;
+                }
+            } else {
+                let _ = cx.http_write_unproven(&context, &message);
+            }
             let _ = cx.finish_plan_call(&plan, &slot, &context);
-            let _ = cx.fail_plan(
-                &plan,
-                format!("Lighter account tier change failed: {message}"),
-            );
+            let _ = cx.fail_plan(&plan, message);
         }
     }
     pub(crate) fn limits_standard(&self) -> bool {

@@ -173,19 +173,33 @@ pub fn try_engine(
         return Err(safe_cex_engine::signing::SignError::Unsupported);
     }
     let key = options.key.take();
-    options.l1_address = key.clone();
+    if options.l1_address.is_none() {
+        options.l1_address = key.as_deref().and_then(|key| {
+            let start = key.find("0x")?;
+            let address = key.get(start..start + 42)?;
+            (address[2..].bytes().all(|b| b.is_ascii_hexdigit())
+                && key
+                    .as_bytes()
+                    .get(start + 42)
+                    .is_none_or(|b| !b.is_ascii_hexdigit()))
+            .then(|| address.to_owned())
+        });
+    }
     let secret = options.secret.take();
+    let primary = if key.is_some() || secret.is_some() {
+        let mut primary = LocalIdentity::default();
+        if let Some(key) = key {
+            primary.key = Secret::new(key);
+        }
+        if let Some(secret) = secret {
+            primary.secret = Secret::new(secret);
+        }
+        Some(primary)
+    } else {
+        None
+    };
     let setup = LocalSetup {
-        primary: secret.map(|secret| {
-            let mut primary = LocalIdentity {
-                secret: Secret::new(secret),
-                ..Default::default()
-            };
-            if let Some(key) = key {
-                primary.key = Secret::new(key);
-            }
-            primary
-        }),
+        primary,
         secondary: None,
     };
     let policy = CredentialSetupPolicy {
@@ -203,7 +217,7 @@ pub fn try_engine(
             .api_key_index
             .as_deref()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(0)
+            .ok_or(safe_cex_engine::signing::SignError::InvalidRequest)?
     };
     let (signer, identities, _) = LocalSigner::from_setup_with_lighter_principal(
         setup,

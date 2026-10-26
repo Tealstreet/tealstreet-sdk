@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! Frozen eager-signing oracle retained only for independent vector tests.
+//! Frozen compatibility codec pinned by signing.rs to the TS and Go-WASM corpus.
 use safe_cex_crypto::lighter::{SchnorrNonce, poseidon2_hash_fp5, schnorr_sign};
 use serde::Serialize;
 use zeroize::{Zeroize, Zeroizing};

@@ -521,3 +521,112 @@ fn typed_provider_refusal_preserves_its_kind_without_a_write_retry() {
     );
     assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("sendTx")))));
 }
+
+#[test]
+fn retired_setting_is_fenced_before_its_queued_successor_wakes() {
+    let mut engine = ready(true);
+    let actions = issue(
+        &mut engine,
+        Command::SetLeverage {
+            command: COMMAND,
+            symbol: "ETH".into(),
+            leverage: 5.0,
+            side: None,
+        },
+        30_000,
+    );
+    let nonce = release(&mut engine, &actions, "nextNonce");
+    let actions = after_reply(&mut engine, &nonce, r#"{"code":200,"nonce":10}"#);
+    let write = release(&mut engine, &actions, "sendTx");
+    let queued = issue(
+        &mut engine,
+        Command::SetMarginType {
+            command: COMMAND + 1,
+            symbol: "ETH".into(),
+            isolated: true,
+        },
+        60_000,
+    );
+    assert!(!queued.iter().any(|action| matches!(action, Action::ManagedHttp(action)
+        if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("sendTx")))));
+    // The engine seals an unproven released write before any venue DATA callback.
+    reply_at(&mut engine, NOW, &write, 503, "unavailable");
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(
+        matches!(terminal(&actions).as_slice(), [Notice::CommandFailed { error, .. }]
+        if error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+    );
+    prepared(&actions, "nextNonce");
+    let nonce = release_at(&mut engine, &actions, "nextNonce", NOW);
+    reply_at(&mut engine, NOW, &nonce, 200, r#"{"code":200,"nonce":20}"#);
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action)
+        if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("sendTx")))));
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { command, error })
+        if *command == COMMAND + 1 && error.message.contains("awaiting reconciliation"))));
+}
+
+#[test]
+fn a_not_sent_submission_forces_the_next_job_to_refetch_nonce() {
+    let mut engine = ready(true);
+    let actions = nonce_then_submit(&mut engine);
+    let preparation = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.url.contains("sendTx") => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap();
+    engine.http_preparation_failed(
+        NOW,
+        preparation,
+        safe_cex_engine::request_context::Error::Invalid,
+        safe_cex_engine::VenueError::new("provider refused")
+            .kind(safe_cex_engine::ErrorKind::Internal)
+            .outcome(safe_cex_engine::Outcome::NotSent),
+    );
+    let actions = engine.drain_actions().collect::<Vec<_>>();
+    assert!(
+        matches!(terminal(&actions).as_slice(), [Notice::CommandFailed { error, .. }]
+        if error.outcome == Some(safe_cex_engine::Outcome::NotSent))
+    );
+    let actions = place(&mut engine);
+    prepared(&actions, "nextNonce");
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action)
+        if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("sendTx")))));
+}
+
+#[test]
+fn explicit_tier_refusal_is_rejected_without_resending() {
+    let mut engine = ready(true);
+    let actions = issue(
+        &mut engine,
+        Command::Venue {
+            command: COMMAND,
+            action: VenueAction::SetAccountTier {
+                tier: "premium".into(),
+            },
+        },
+        30_000,
+    );
+    let packet = release(&mut engine, &actions, "changeAccountTier");
+    let actions = after_reply(
+        &mut engine,
+        &packet,
+        r#"{"code":21100,"message":"tier change cooldown"}"#,
+    );
+    assert!(
+        matches!(terminal(&actions).as_slice(), [Notice::CommandFailed { error, .. }]
+        if error.outcome == Some(safe_cex_engine::Outcome::Rejected))
+    );
+    assert!(!actions.iter().any(|action| matches!(action, Action::ManagedHttp(action)
+        if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if request.url.contains("changeAccountTier")))));
+}
