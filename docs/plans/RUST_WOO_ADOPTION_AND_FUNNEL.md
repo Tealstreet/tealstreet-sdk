@@ -248,3 +248,17 @@ final composed scoped qualification at `0c2b49bf051` is 232 native tests across
 Formatting and inventory checks are recorded separately at their exact pins.
 No old Bitget gate exception is used. Immutable freeze carry, current combined
 proof, full green CI/family record and auditor exact-tree GO remain required.
+
+## Actual managed-socket capability composition
+
+The actual #2161 landing da842915762 adds the engine handoff capability gate.
+WOO intentionally retains the default `Venue::socket_capabilities()` value
+`SocketCapabilities::FULL` (`handoff: true`); it does not declare `handoff: false`.
+Its public book seeding uses genuine `set_socket_interests_then` continuations,
+so disabling handoff would refuse required work. No WOO runtime override or
+engine edit is needed. Preserve the real handoff wake, surviving-interest and
+512-credit pressure controls unchanged on this composition.
+
+The earlier green run 40245207561 and combined measurements retain their exact
+historical pins. This engine overlap requires a fresh PR-triggered run, its CI
+WOO family record, and a fresh local composed combined measurement before READY.
