@@ -78,7 +78,7 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_448_960, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(1_452_004, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(1_452_032, 'venue', 'bybit'), undefined);
-  assert.equal(wasmBudgetError(1_452_056, 'venue', 'bybit'), undefined);
+  assert.equal(wasmBudgetError(1_452_035, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(1_453_056, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(1_453_057, 'venue', 'bybit'), /exceeds 1453056/);
   assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bybit'), /exceeds 14680064/);

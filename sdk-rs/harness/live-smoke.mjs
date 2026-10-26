@@ -161,8 +161,16 @@ export async function runLiveSmoke({ venue, profile, transport, write, symbol, t
     let failed = false;
     for (const symbol of symbols) {
       if (!symbol) { failed = true; continue; }
-      try { await command({ op: 'cancelSymbolOrders', symbol }); }
-      catch { failed = true; }
+      // An Unknown write fences cancel-all (NotSent) until a fresh order read reconciles it.
+      const end = performance.now() + timeoutMs;
+      for (;;) {
+        try { await command({ op: 'cancelSymbolOrders', symbol }); break; }
+        catch (error) {
+          if (error?.outcome !== 'notSent' || !String(error?.message).includes('reconcile before cancel-all') ||
+              performance.now() >= end) { failed = true; break; }
+          await sleep(25);
+        }
+      }
     }
     if (failed) fail('cancel-all-incomplete');
   };
