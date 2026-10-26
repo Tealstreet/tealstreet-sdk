@@ -62,7 +62,7 @@ pub(crate) fn headers(
                             attempts: 1,
                         },
                         SerialPolicy {
-                            credential,
+                            credential: Some(credential),
                             pacing: None,
                             refusals_complete: false,
                         },
