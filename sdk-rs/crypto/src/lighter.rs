@@ -40,14 +40,16 @@ pub fn poseidon2_hash_fp5(input: &[u8]) -> Result<[u8; 40], String> {
 /// Derive the compressed public key, including Go's scalar reduction semantics.
 pub fn public_key(key: &[u8]) -> Result<[u8; 40], String> {
     let key = ScalarField::from_bytes_le(&scalar(key)?)?;
-    let mut encoded = Point::generator().mul(&key).encode().to_bytes_le();
-    // The field may hold a limb as an unreduced p; Go always reduces, so
-    // emit each little-endian limb in [0, p).
+    Ok(reduced(Point::generator().mul(&key).encode().to_bytes_le()))
+}
+/// The field may hold a limb as an unreduced p; Go always reduces, so every
+/// encoding this module emits or compares has each little-endian limb in [0, p).
+fn reduced(mut encoded: [u8; 40]) -> [u8; 40] {
     for limb in encoded.as_chunks_mut::<8>().0 {
         let value = u64::from_le_bytes(*limb);
         *limb = (value % Goldilocks::MODULUS).to_le_bytes();
     }
-    Ok(encoded)
+    encoded
 }
 /// A canonical encoding of a non-neutral ECgFp5 point: the only public keys
 /// a provider may report. Decoding then re-encoding must reproduce the bytes.
@@ -66,8 +68,9 @@ pub fn is_public_key(value: &[u8]) -> bool {
     let Ok(encoded) = poseidon_hash::Fp5Element::from_bytes_le(value) else {
         return false;
     };
-    Point::decode(&encoded)
-        .is_some_and(|point| !point.is_neutral() && point.encode().to_bytes_le()[..] == *value)
+    Point::decode(&encoded).is_some_and(|point| {
+        !point.is_neutral() && reduced(point.encode().to_bytes_le())[..] == *value
+    })
 }
 /// A canonical, nonzero secret nonce, consumed by signing and never Clone/Copy.
 /// Hosts must supply fresh CSPRNG output; construction rejects broken all-zero entropy.
