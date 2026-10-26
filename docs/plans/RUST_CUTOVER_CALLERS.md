@@ -9109,3 +9109,16 @@ Follow-up (engine owner, fe7lgm): a granted plan resend can only be
 released from plan custody. A venue whose resend must wait on a venue
 condition therefore needs a serial-plan condition wait, as AsterDEX does here.
 A custody-preserving parked resend would remove that need.
+
+## AsterDEX V3 configured signer mismatch (approved, adoption pending)
+
+The address-nonce consumer must refuse at trusted setup when the configured
+signer address differs from the selected signing key's verified public address,
+using a clear typed error that identifies the mismatch. Native currently sends
+the mismatched configured signer and fails at the venue; the approved change
+moves that refusal earlier and makes its reason precise. It must not silently
+substitute the derived address. Matching accounts and legitimately installed
+primary/read aliases retain their behavior. A native-versus-new original must
+pin both refusals before consumer source closes this gate. This is a recorded
+ruling, not an implemented or activated path. The generic nonce mint accepts
+no configured address and has no mismatch exception.

@@ -58,6 +58,15 @@ Without that wallet, independently configured read agents use their own exact
 address/ref pairs. Each slot still passes the same engine-owned address binding
 operation; configuration text alone cannot install a verified subject.
 
+The overseer ruled that a configured Aster V3 signer address differing from
+the selected signing key's verified address must refuse at trusted setup with
+a clear typed error naming the mismatch. Never silently substitute the derived
+address for mismatched configuration. Matching configurations and legitimately
+installed alias slots retain their behavior. The consumer must pin native
+venue refusal versus the new earlier setup refusal with an original and record
+the timing/diagnostic change in CALLERS. The generic mint still accepts no
+configured address and gains no exception for mismatched input.
+
 Canonicalize a validated address to exactly20 bytes. Spellings allowed at the
 consumer's existing input boundary must identify the same bytes; there is no
 new permissive native-config parser. The resulting NonceKey must be exactly
