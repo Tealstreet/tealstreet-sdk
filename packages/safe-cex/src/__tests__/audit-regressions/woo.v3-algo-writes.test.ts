@@ -14,10 +14,10 @@ import {
   decodeWooV3AlgoPlaceResponse,
   WOO_V3_ALGO_WRITE_PARITY,
   WooV3AlgoWriteResponseError,
-} from '../../exchanges/woo/woo.v3.algo-writes';
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
-import type { WooV3AlgoOrder } from '../../exchanges/woo/woo.v3.private';
-import { prepareWooV3Request } from '../../exchanges/woo/woo.v3.request';
+} from '../reference/woo/woo.v3.algo-writes';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
+import type { WooV3AlgoOrder } from '../reference/woo/woo.v3.private';
+import { prepareWooV3Request } from '../reference/woo/woo.v3.request';
 
 const auth = {
   apiKey: 'AbmyVJGUpN064ks5ELjLfA==',
@@ -397,7 +397,7 @@ describe('WooX V3 inert algo-order writes', () => {
         symbolPendingCancel: 'blocked-published-query-schema-conflicts-with-prose',
       }),
     );
-    const wooDirectory = join(__dirname, '../../exchanges/woo');
+    const wooDirectory = join(__dirname, '../reference/woo');
     for (const runtimeFile of ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-private.ts', 'woo.ws-public.ts']) {
       expect(readFileSync(join(wooDirectory, runtimeFile), 'utf8')).not.toContain('woo.v3.algo-writes');
     }

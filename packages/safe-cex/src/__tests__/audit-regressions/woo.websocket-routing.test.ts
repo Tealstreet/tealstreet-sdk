@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
+import { WOOXExchange } from '../reference/woo/woo.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const makeExchange = () =>

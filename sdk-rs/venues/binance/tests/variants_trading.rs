@@ -655,11 +655,16 @@ fn spot_market_take_profit_still_amends_while_spot_take_profit_limit_refuses() {
             price: Some(125.0),
             amount: None,
         }));
-        let failed = h
-            .failures
-            .iter()
-            .any(|(c, e)| *c == 88 && e.kind == Some(safe_cex_engine::ErrorKind::Unsupported));
-        assert_eq!(failed, refused, "{native}");
+        let failures: Vec<_> = h.failures.iter().filter(|(c, _)| *c == 88).collect();
+        assert_eq!(failures.len(), usize::from(refused), "{native}");
+        if let Some((_, error)) = failures.first() {
+            assert_eq!(
+                error.message,
+                "Binance stop-limit orders cannot be amended; cancel and place a new one"
+            );
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        }
         assert_eq!(h.requests.is_empty(), refused, "{native}");
     }
 }
@@ -721,4 +726,82 @@ fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
     for (variant, body, ids, expected) in observations {
         assert_eq!(ids, expected, "variant={variant:?} body={body}");
     }
+}
+
+const SIGNATURE_REJECTED: &str =
+    r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#;
+
+#[test]
+fn a_signature_rejected_write_is_re_signed_and_resent_once() {
+    let mut h = ready(Variant::Spot);
+    place(
+        &mut h,
+        vec![order(Variant::Spot, r#""clientOrderId":"caller_1""#)],
+    );
+    let first = h.take("/api/v3/order");
+    h.now += 5.0;
+    h.reply(first.id, 400, "", SIGNATURE_REJECTED);
+    let second = h.take("/api/v3/order");
+    assert!(h.requests.is_empty(), "exactly one resend");
+    assert_ne!(second.id, first.id);
+    assert!(h.done.is_empty(), "the resend decides the outcome");
+    assert!(second.url.contains("newClientOrderId=caller_1"));
+    // The same order: every parameter but the timestamp and signature is identical.
+    let order_params = |url: &str| {
+        let mut params: Vec<_> = url
+            .split_once('?')
+            .map_or("", |(_, query)| query)
+            .split('&')
+            .filter(|param| !param.starts_with("timestamp=") && !param.starts_with("signature="))
+            .map(str::to_owned)
+            .collect();
+        params.sort();
+        params
+    };
+    assert_eq!(order_params(&second.url), order_params(&first.url));
+    assert_ne!(
+        second.url, first.url,
+        "the resend is re-signed at its own timestamp"
+    );
+    h.reply(second.id, 200, "", r#"{"orderId":123}"#);
+    assert_eq!(
+        h.done.last().unwrap().1.as_ref().unwrap(),
+        r#"["caller_1"]"#
+    );
+}
+
+#[test]
+fn a_second_signature_rejection_fails_without_a_third_send() {
+    let mut h = ready(Variant::Spot);
+    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    let first = h.take("/api/v3/order");
+    h.reply(first.id, 400, "", SIGNATURE_REJECTED);
+    let second = h.take("/api/v3/order");
+    h.reply(second.id, 400, "", SIGNATURE_REJECTED);
+    assert!(h.requests.is_empty(), "no third send");
+    let (_, error) = h.failures.last().expect("the write fails");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+}
+
+#[test]
+fn other_write_refusals_are_never_resent() {
+    let mut h = ready(Variant::Spot);
+    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    let first = h.take("/api/v3/order");
+    h.reply(first.id, 400, "", r#"{"code":-2010,"msg":"rejected"}"#);
+    assert!(h.requests.is_empty());
+    assert!(h.done.last().unwrap().1.is_err());
+}
+
+#[test]
+fn a_signature_code_on_an_unproven_status_is_never_resent() {
+    // A 5xx proves nothing about the write, so -1022 in its body is no refusal.
+    let mut h = ready(Variant::Spot);
+    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    let first = h.take("/api/v3/order");
+    h.reply(first.id, 503, "", SIGNATURE_REJECTED);
+    assert!(h.requests.is_empty(), "no resend of an unproven write");
+    let (_, error) = h.failures.last().expect("the write fails");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
 }

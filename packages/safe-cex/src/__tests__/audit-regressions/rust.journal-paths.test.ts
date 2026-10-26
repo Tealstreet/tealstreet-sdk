@@ -1,8 +1,15 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ExchangeName, Market } from '../../types';
 
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
+import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
@@ -41,6 +48,18 @@ const market = (overrides: Partial<Market>): Market =>
     contractSize: 0.01,
     ...overrides,
   }) as Market;
+
+const BITUNIX_ROWS = [
+  { positionId: 'p1', symbol: 'BTCUSDT', side: 'BUY', qty: '0.5', maxQty: '0.5', entryPrice: '60000', closePrice: '61000', fee: '1.2', funding: '0', realizedPNL: '498.8', leverage: '10', marginMode: 'CROSS', positionMode: 'ONE_WAY', ctime: '1700000000000', mtime: '1700000500000' },
+  { positionId: 'p2', symbol: 'ETHUSDT', side: 'SELL', qty: '2', maxQty: '3', entryPrice: '2000', closePrice: '1990', fee: '0.4', funding: '-0.1', realizedPNL: '19.6', leverage: '5', marginMode: 'ISOLATION', positionMode: 'HEDGE', ctime: '1700001000000', mtime: '1700002000000' },
+];
+
+/** The TS venue over the same raw rows: its pager is the only thing replaced. */
+const tsBitunix = (rows: Array<Record<string, unknown>>) => {
+  const exchange = new BitunixExchange('bitunix', { key: 'k', secret: 's', tuning: { consoleLogging: false } }, new DefaultStore());
+  vi.spyOn(exchange as unknown as { fetchBitunixHistoryPages: () => Promise<unknown> }, 'fetchBitunixHistoryPages').mockResolvedValue(rows);
+  return exchange;
+};
 
 type Fold = { foldClosedPositionRecords: (...args: unknown[]) => Promise<unknown[]> };
 
@@ -105,6 +124,23 @@ describe('Rust journal paths follow the TS venue declarations', () => {
     expect(records).toHaveLength(1);
   });
 
+  it('bitunix maps the reported closed axis through its position adapter, as the TS venue', async () => {
+    const { exchange, command } = make('bitunix', { fetchClosedPositions: BITUNIX_ROWS });
+    exchange.store.update({ markets: [market({ id: 'BTC/USDT' }), market({ id: 'ETH/USDT', symbol: 'ETHUSDT', quote: 'USDC' })] });
+    const records = await exchange.fetchHistoricalPositions({ account: 'acct', from: 1, to: 2 });
+    expect(command).toHaveBeenCalledWith({ op: 'fetchClosedPositions', symbol: undefined, from: 1, to: 2 }, { report: false });
+    expect(records).toEqual(
+      BITUNIX_ROWS.map((row) =>
+        mapBitunixPositionHistory(row, { account: 'acct', resolveSettleCurrency: (s) => (s === 'ETHUSDT' ? 'USDC' : 'USDT') }),
+      ),
+    );
+    expect(records).toHaveLength(2);
+    const ts = tsBitunix(BITUNIX_ROWS);
+    ts.store.update({ markets: [market({ id: 'BTC/USDT' }), market({ id: 'ETH/USDT', symbol: 'ETHUSDT', quote: 'USDC' })] });
+    expect(records).toEqual(await ts.fetchHistoricalPositions({ account: 'acct', from: 1, to: 2 }));
+    ts.dispose();
+  });
+
   it.each([
     ['bitget', false],
     ['bitgetusdc', false],
@@ -130,6 +166,7 @@ it.each([
   ['bybit', 'fetchOrderHistory'],
   ['okx', 'fetchClosedPositions'],
   ['blofin', 'fetchClosedPositions'],
+  ['bitunix', 'fetchClosedPositions'],
   ['woo', 'fetchOrderHistory'],
 ] as const)('%s preserves incomplete %s through an empty derived history', async (name, axis) => {
   const responses = { fetchClosedPositions: [], fetchOrderHistory: [] };

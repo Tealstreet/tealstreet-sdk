@@ -815,3 +815,470 @@ fn a_lost_create_fences_cancel_all_until_the_reconcile_snapshot() {
         "the fresh snapshot clears the fence"
     );
 }
+
+#[test]
+fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
+    let refuse = |engine: &mut Engine<Okx>, action: &Action, status, body, now| {
+        let Action::Http(r) = action else {
+            panic!("expected request")
+        };
+        engine.handle(
+            now,
+            Event::HttpResponse {
+                request: r.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    };
+    let failures = |output: &[Action]| -> Vec<safe_cex_engine::VenueError> {
+        output
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    // A lost 503 answer: the order may exist, so the placement seals Unknown.
+    refuse(
+        &mut engine,
+        post(&first),
+        503,
+        r#"{"code":"1","msg":"busy"}"#,
+        6.,
+    );
+    let sealed = prepared(&mut engine, 6.);
+    assert!(
+        failures(&sealed)
+            .iter()
+            .any(|error| error.outcome == Some(safe_cex_engine::Outcome::Unknown)),
+        "the placement seals Unknown"
+    );
+    // A user retry on the same symbol must not send a second placement.
+    engine.handle(
+        7.,
+        Event::Command(Command::PlaceOrders {
+            command: OWNER + 1,
+            orders: vec![order(1)],
+        }),
+    );
+    let retry = prepared(&mut engine, 7.);
+    assert!(
+        !retry
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "no second placement while the first is Unknown"
+    );
+    assert!(
+        failures(&retry).iter().any(|error| {
+            error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.legacy_text().contains("uncertain")
+        }),
+        "the retry is refused NotSent with the reason"
+    );
+    // The reconcile read itself fails: the fence holds and the retry is refused again.
+    let read = |output: &[Action]| {
+        output
+            .iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))
+            .cloned()
+            .expect("a fresh open-orders read")
+    };
+    let first_read = read(&sealed);
+    refuse(
+        &mut engine,
+        &first_read,
+        503,
+        r#"{"code":"1","msg":"busy"}"#,
+        8.,
+    );
+    let after = prepared(&mut engine, 8.);
+    engine.handle(
+        9.,
+        Event::Command(Command::PlaceOrders {
+            command: OWNER + 2,
+            orders: vec![order(1)],
+        }),
+    );
+    let refused = prepared(&mut engine, 9.);
+    assert!(
+        !refused
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "a failed reconcile read does not release the fence"
+    );
+    assert!(
+        failures(&refused)
+            .iter()
+            .any(|error| error.outcome == Some(safe_cex_engine::Outcome::NotSent))
+    );
+    // The engine re-asks the venue 1 s after the seal; that fresh read releases the fence.
+    let timer = sealed
+        .iter()
+        .chain(&retry)
+        .chain(&after)
+        .chain(&refused)
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 1_006. => Some(*timer),
+            _ => None,
+        })
+        .next_back()
+        .expect("the engine re-ask is armed 1 s after the seal");
+    engine.handle(1_006., Event::TimerFired { timer });
+    // Every order kind's page answers empty; the complete clean read releases.
+    let mut output = prepared(&mut engine, 1_006.);
+    while let Some(page) = output
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")))
+        .cloned()
+    {
+        reply(&mut engine, &page, &support::envelope(""), 1_007.);
+        output = prepared(&mut engine, 1_007.);
+    }
+    engine.handle(
+        1_008.,
+        Event::Command(Command::PlaceOrders {
+            command: OWNER + 3,
+            orders: vec![order(1)],
+        }),
+    );
+    let admitted = prepared(&mut engine, 1_008.);
+    post(&admitted);
+    assert!(failures(&admitted).is_empty(), "the placement is admitted");
+}
+
+#[test]
+fn engine_re_asks_join_the_running_fresh_read_until_it_releases() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    let Action::Http(write) = post(&first) else {
+        unreachable!()
+    };
+    engine.handle(
+        6.,
+        Event::HttpResponse {
+            request: write.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: r#"{"code":"1","msg":"busy"}"#,
+            },
+        },
+    );
+    let mut seen: Vec<Action> = prepared(&mut engine, 6.);
+    let reads = |output: &[Action]| {
+        output
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")))
+            .count()
+    };
+    assert_eq!(reads(&seen), 1, "the seal starts one fresh order read");
+    let held = seen
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")))
+        .cloned()
+        .unwrap();
+    // The read is slow: the engine's 1 s and 2 s re-asks join it instead of replacing it.
+    for at in [1_006., 3_006.] {
+        let timer = seen
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+                _ => None,
+            })
+            .next_back()
+            .expect("an engine re-ask is armed");
+        engine.handle(at, Event::TimerFired { timer });
+        let output = prepared(&mut engine, at);
+        assert_eq!(
+            reads(&output),
+            0,
+            "a re-ask does not restart the running read"
+        );
+        seen.extend(output);
+    }
+    // The held read completes clean, page by page, and releases the fence.
+    let mut page = Some(held);
+    while let Some(request) = page {
+        reply(&mut engine, &request, &support::envelope(""), 3_100.);
+        page = prepared(&mut engine, 3_100.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")));
+    }
+    engine.handle(
+        3_200.,
+        Event::Command(Command::PlaceOrders {
+            command: OWNER + 1,
+            orders: vec![order(1)],
+        }),
+    );
+    post(&prepared(&mut engine, 3_200.));
+}
+
+const SIGNATURE_REJECTED: &str = r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#;
+
+fn refuse(engine: &mut Engine<Okx>, action: &Action, status: u16, body: &str, now: f64) {
+    let Action::Http(r) = action else {
+        panic!("expected request")
+    };
+    engine.handle(
+        now,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
+
+fn failures(output: &[Action]) -> Vec<&safe_cex_engine::VenueError> {
+    output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed {
+                command: OWNER,
+                error,
+            }) => Some(error),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_signature_rejected_write_is_re_signed_and_resent_once() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 401, SIGNATURE_REJECTED, 6.);
+    let second = prepared(&mut engine, 6.);
+    assert!(
+        failures(&second).is_empty(),
+        "the resend decides the outcome"
+    );
+    let (Action::Http(a), Action::Http(b)) = (post(&first), post(&second)) else {
+        unreachable!()
+    };
+    assert_ne!(a.id, b.id, "a fresh physical attempt");
+    assert_eq!(a.body, b.body, "the same native write");
+    reply(
+        &mut engine,
+        post(&second),
+        r#"{"code":"0","msg":"","data":[{"ordId":"777","clOrdId":"","sCode":"0","sMsg":""}]}"#,
+        7.,
+    );
+    let output = prepared(&mut engine, 7.);
+    assert!(output.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { command: OWNER, result }) if result.contains("777")
+    )));
+}
+
+#[test]
+fn a_second_signature_rejection_fails_without_a_third_send() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 401, SIGNATURE_REJECTED, 6.);
+    let second = prepared(&mut engine, 6.);
+    refuse(&mut engine, post(&second), 401, SIGNATURE_REJECTED, 7.);
+    let output = prepared(&mut engine, 7.);
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "no third send"
+    );
+    let errors = failures(&output);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Rejected));
+}
+
+#[test]
+fn other_key_refusals_are_never_resent() {
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(
+        &mut engine,
+        post(&first),
+        401,
+        r#"{"code":"50111","msg":"Invalid OK-ACCESS-KEY","data":[]}"#,
+        6.,
+    );
+    let output = prepared(&mut engine, 6.);
+    assert!(!output.iter().any(|a| matches!(a, Action::Http(_))));
+    assert_eq!(failures(&output).len(), 1);
+}
+
+#[test]
+fn a_signature_code_on_an_unproven_status_is_never_resent() {
+    // A 5xx proves nothing about the write, so 50113 in its body is no refusal.
+    let mut engine = trading_engine();
+    place(&mut engine, vec![order(1)]);
+    let first = prepared(&mut engine, 5.);
+    refuse(&mut engine, post(&first), 503, SIGNATURE_REJECTED, 6.);
+    let output = prepared(&mut engine, 6.);
+    // Reconciliation reads may follow; the write itself is never sent again.
+    assert!(
+        !output
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post)),
+        "no resend of an unproven write"
+    );
+    let failed = failures(&output);
+    assert!(
+        failed
+            .iter()
+            .all(|error| error.outcome == Some(safe_cex_engine::Outcome::Unknown)),
+        "an unproven write stays Unknown: {failed:?}"
+    );
+}
+
+/// OKX's census runs each page under its own context. A mark made mid-census
+/// restarts it at once, so pages sent before the mark never report a release;
+/// the census also releases only marks its first page saw (`order_read_epoch`).
+#[test]
+fn a_census_begun_before_a_mark_cannot_release_it_from_a_later_page() {
+    use support::{FixtureOptions, MARKET, TICKER, envelope, is_get, take_http};
+    let eth = |row: &str| row.replace("BTC", "ETH");
+    let mut e = support::engine(FixtureOptions {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..FixtureOptions::default()
+    });
+    e.start(0.0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
+    reply(
+        &mut e,
+        &a,
+        &envelope(&format!("{MARKET},{}", eth(MARKET))),
+        1.0,
+    );
+    let mut out = prepared(&mut e, 1.0);
+    let a = take_http(&mut out);
+    reply(
+        &mut e,
+        &a,
+        &envelope(&format!("{TICKER},{}", eth(TICKER))),
+        2.0,
+    );
+    out.extend(prepared(&mut e, 2.0));
+    let a = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap()
+        .clone();
+    reply(
+        &mut e,
+        &a,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.0,
+    );
+    // Answer every account read; with `hold`, keep the first open-orders page in flight.
+    let drain = |e: &mut Engine<Okx>, first: Vec<Action>, at, hold: bool| {
+        let (mut held, mut pending) = (None, first);
+        while let Some(a) = pending.pop() {
+            let Action::Http(r) = &a else { continue };
+            if hold && held.is_none() && r.url.contains("/trade/orders-pending") {
+                held = Some(a);
+                continue;
+            }
+            let body = if r.url.contains("account-position-risk") {
+                envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+            } else {
+                envelope("")
+            };
+            reply(e, &a, &body, at);
+            pending.extend(prepared(e, at));
+        }
+        held
+    };
+    let first = prepared(&mut e, 3.0);
+    drain(&mut e, first, 4.0, false);
+    let place = |e: &mut Engine<Okx>, command, symbol: &str, at| {
+        e.handle(
+            at,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![
+                    serde_json::from_str(&format!(
+                        r#"{{"symbol":"{symbol}","type":"market","side":"buy","amount":1}}"#
+                    ))
+                    .unwrap(),
+                ],
+            }),
+        );
+        prepared(e, at)
+    };
+    let answer = |e: &mut Engine<Okx>, sent: &[Action], status, body: &str, at| {
+        let Action::Http(write) = post(sent) else {
+            unreachable!()
+        };
+        e.handle(
+            at,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    };
+    // A lost BTC placement seals Unknown; its reconcile starts a census at once.
+    let sent = place(&mut e, OWNER, "BTCUSDT", 5.);
+    answer(&mut e, &sent, 503, r#"{"code":"1","msg":"busy"}"#, 6.);
+    let census = prepared(&mut e, 6.);
+    let held = drain(&mut e, census, 6.5, true).expect("the census's first page is in flight");
+    // A lost ETH placement mid-census seals Unknown too; its reconcile restarts
+    // the census at once, so the running one (its first page sent before the
+    // ETH write) can no longer report.
+    let sent = place(&mut e, OWNER + 1, "ETHUSDT", 7.);
+    answer(&mut e, &sent, 503, r#"{"code":"1","msg":"busy"}"#, 8.);
+    let restarted = prepared(&mut e, 8.);
+    let fresh = restarted
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders-pending")))
+        .cloned()
+        .expect("the census restarts");
+    // The stale census's pages answer clean and release nothing.
+    let mut page = Some(held);
+    while let Some(request) = page {
+        reply(&mut e, &request, &envelope(""), 9.);
+        page = prepared(&mut e, 9.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")));
+    }
+    let retry = |e: &mut Engine<Okx>, command, symbol, at| {
+        place(e, command, symbol, at)
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
+    };
+    assert!(
+        !retry(&mut e, OWNER + 2, "ETHUSDT", 10.),
+        "a census begun before the ETH write released it"
+    );
+    // The restarted census, every page sent after both writes, releases both.
+    let mut page = Some(fresh);
+    while let Some(request) = page {
+        reply(&mut e, &request, &envelope(""), 11.);
+        page = prepared(&mut e, 11.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")));
+    }
+    assert!(retry(&mut e, OWNER + 3, "ETHUSDT", 12.));
+}

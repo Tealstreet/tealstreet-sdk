@@ -9854,6 +9854,10 @@ a CloudFront host stays an auth kind. Native codes and a venue's own declared
 Bitget, Bitunix) keeps a CDN page as auth. Move the check ahead of the status
 rows if such a venue is ever fronted by CloudFront.
 
+### Bitunix closed positions and journal on Rust
+
+Bitunix on the Rust engine now serves the journal (historical positions) and closed PnL from the venue's reported position history, mapped by TypeScript's own Bitunix mappers, as TypeScript does ([RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md)). The journal previously threw "no journal records path declared", and closed PnL was always empty. Capability records gain `positionHistory: "bitunix"` and `closedPositionFormat: "bitunix"`. A failed journal read throws, as on every other reported-closed venue; a failed closed-PnL read yields `[]`.
+
 ### Bitunix account read classification (P1 #33)
 
 A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
@@ -9909,6 +9913,165 @@ bootstrap features; AsterDEX additionally requires address setup and signing
 metadata. Combined default features cannot satisfy an isolated family's check.
 Negative controls pin missing features and reject unknown setup mappings.
 
+## Rust-only beta SDK admission
+
+SDK web/native registries, saved-account/public factories and worker startup
+select `RustEngineExchange` without an engine opt-in. The single SDK beta roster
+is `packages/safe-cex/src/exchanges/rust/betaVenues.ts`; names outside it refuse
+with typed `Unsupported` / `NotSent` before clock, runtime or transport work.
+Previously saved OUT accounts cannot start in this build. The `engine: 'rust'`
+input remains compatible but no longer selects between implementations.
+
+There is no TypeScript venue or hosted-signing venue fallback. An IN account
+using `remoteSigner` / `payloadSigner` without enabled Rust remote policy
+refuses with `Unsupported` / `NotSent`; Paradex beta supports local keys only.
+Enabled Rust provider paths retain their existing custody and wire contracts.
+Bitunix is hosted-enabled after #2262's declared remote policy landed. The SDK
+continues to derive eligibility from that policy, without a separate beta
+override.
+
+Metadata and standalone `*.signing.ts` codecs used by `rust/legacySigning.ts`
+remain runtime dependencies. Independent TS/native financial, transport and
+signing reference oracles remain test-only. Historical Rust adapter fixtures
+mock the beta admission layer explicitly; real SDK/worker refusal controls do
+not use that fixture. Retained oracle execution is not beta activation. R2 owns
+adapter relocation/deletion and retargets those test-only imports.
+
+### Uncertain-placement fence (Phase A)
+
+A placing scope that sealed Unknown marks its symbols uncertain until a fresh
+order read reconciles them. A venue that opts into
+`fence_uncertain_placements` now refuses a later `PlaceOrders` or amend on an
+uncertain symbol NotSent ("Placement outcome is uncertain; reconcile before
+placing or amending"), so a user retry cannot duplicate a possibly placed order.
+Cancel by ID stays admitted; cancel-all keeps each venue's existing
+`fence_uncertain_cancel_all` disposition (default refused until reconcile, Phemex
+admitted). A venue opts in only when `reconcile_uncertain` starts a fresh read
+(or joins one dispatched after the write); without that hook the fence could
+hang, which is why the default is off. While a symbol stays uncertain the engine
+re-asks the hook with backoff (1 s doubling to 30 s, restarted by a new seal)
+until a post-mark `orders_reconciled` clears it, so a failed reconcile read
+cannot leave the fence standing; hooks stay single-shot. `Cx::reconcile_reask()`
+is true on a backoff re-ask with no new uncertain write since the last ask: the
+hook must then join any read already running or owed, never start or owe
+another (a slow read would otherwise never complete and release). A venue may hold the fence to its
+native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
+opts in. AsterDEX opts in: its hook starts an open-orders read at once, or, when a
+read is already in flight (which predates the seal and cannot clear the fence),
+starts the fresh one as that read completes. It releases only on a clean read,
+so a persistently malformed order row keeps that venue's placements refused
+(cancels by ID stay admitted) until the row parses. Not covered yet (Phase B): an Unknown marker for venues with no
+placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
+until its opt-in) from managed, single-Context and legacy `cx.request` writes,
+and amend roots whose replacement places (zs5e83's audits,
+/tmp/codex-beta-plan-fence-audit/report.md and followup.md). Paradex's
+venue-local same-ID amend fence stays as is.
+
+Phase B (#2288) covers it: the fence no longer needs a lock scope. On an opted-in venue whose
+placements or amends hold no scope (guard flags off: Binance x4, Bybit,
+Crypto.com, BingX, ApeX, Hyperliquid, Paradex), entry still refuses a fenced
+symbol (cancel-all as its `fence_uncertain_cancel_all` declares), and every
+admitted placement or amend is marked with its symbols (all
+symbols for an amend whose symbol is unknown). An Unknown outcome on that
+command (managed, single-Context or legacy `cx.request`) fences them and queues
+their reconcile; any other end drops the mark. Amend roots are marked too, so an
+Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
+same-ID amend fence stays as is.
+
+A census that pages under several contexts records `Cx::order_read_epoch()`
+before its first page and reports through `orders_reconciled_since`, so its
+last page cannot release a mark its first page never saw. OKX adopts it (its
+census already restarts on every mark's immediate reconcile); a venue whose
+census spans contexts should do the same.
+
+Paradex opts in: after an Unknown placement or amend it reads `/orders` and
+releases on a clean snapshot. Cancel-all keeps the engine default (refused
+until reconciled). If `/auth` has been refused (401/403), no order read can run,
+so the fence holds until the account is reconnected or re-keyed.
+
+## Lighter public beta data
+
+Market snapshots seed last price and start ticker hydration before socket Open.
+The existing single-flight guard prevents duplicate pending reads. Stats decode base and
+USD open interest independently, preferring the base field when both exist.
+REST depth sums are rounded to the market's declared amount precision to remove
+binary addition residue. Public close requests a recovery snapshot immediately
+when existing pacing permits; one inflight request per book remains the limit.
+A newer socket snapshot invalidates an older recovery reply. Grouped limit
+TP/SL remains a separately tested beta blocker, not part of this public slice.
+
+Before socket Open, the first ticker seed also publishes real exchangeStats
+daily volume, quote volume and percentage. TypeScript's REST fallback drops
+those fields. The overseer accepts this more complete bootstrap in readiness
+comparison; the raw replay still reports these differences without relaxed
+tolerances. Prices, books and later checkpoints must agree.
+The CI verifier declares only exact recorded bootstrap paths with TS zero and
+finite Rust values. Later checkpoints and other fields remain strict; existing
+private fill/order baseline declarations remain separate and unchanged.
+
+### Restored candle-cache crates for the monorepo candle-server
+
+`sdk-rs/safe-cex-candle-cache`, `safe-cex-num` and `safe-cex-types` are restored
+verbatim from master (overseer ruling), because the monorepo
+`Dockerfile.candle-server` builds `-p safe-cex-candle-cache --bin
+candle-cache-owner` from this workspace. They keep master's serde_json features
+(`arbitrary_precision`, `preserve_order`). Every `--workspace` CI command
+excludes them so those features never unify into the port. The native
+`candle-cache` check builds, lints and tests them alone, and
+`scripts/check-serde-json-features.py` fails if any port package resolves those
+features. Not run: master's TypeScript-oracle tests (they need an isolated TS
+install), the candle-cache `fix_audit` and `monthly_behavior` targets and two
+lib tests, which load the TypeScript compiler over TS venue sources, and one `safe-cex-types` audit of a crate the port deleted. No port
+crate may depend on these three.
+
+### One re-signed resend of a write signature rejection
+
+A write refused for its signature executed nothing, so it is re-signed and sent
+once more, writes included (TS 9db593a2338 parity). Binance `-1022` and OKX
+`50113` are `RefusedResend(AuthInvalid)` rows. Binance write legs use
+`RetryPolicy::DefinitiveRefusal` and resend through `http_resend_context`; OKX
+serial writes declare `attempts: 2` and resend through `plan_resend_context`.
+The journal refuses a second resend, so a second rejection fails as
+`AuthInvalid`/`Rejected` with no third send. Every other refusal is still never
+resent. Kraken spot already re-signs a trade once on `EAPI:Invalid signature`
+(`spot/account.rs` `private_response`), and Bitunix `10007` landed in #2207.
+
+### Kraken and KrakenSpot uncertain-placement opt-in
+
+Both products opt into the shared Phase B placement/amend fence. An Unknown
+terminal keeps accepted IDs and refuses a later overlapping placement or amend
+NotSent until a complete, clean open-orders read publishes and calls
+`orders_reconciled`. Cancel by ID remains admitted; store-composed cancel-all
+keeps the shared uncertainty guard. A pre-mark read cannot release a newer mark.
+
+The account hook uses `cx.reconcile_reask` to join a running or already-owed
+read. A new seal owes a follow-up behind an older read; engine backoff re-asks
+do not restart a fresh read or perpetually owe another one. Failed or
+malformed reads leave the fence in place until a clean retry. This is local-key
+beta safety; it does not enable hosted signing. Native engine controls prove
+retry/amend refusal, stale/fresh release, held reads across three engine re-asks,
+503 recovery and rejected-row refusal. Browser readiness remains a separate
+JS/WASM host gate.
+
+## Hyperliquid uncertain-placement reconciliation
+
+Hyperliquid and HyperliquidSpot reconcile uncertain placements through their
+existing complete `frontendOpenOrders` read. Repeated engine requests join the
+in-flight DEX scope and owe at most one successor read. After Store publication,
+only a clean snapshot with zero rejected rows reports that scope reconciled;
+duplicate or malformed rows cannot release it. The engine's dispatch token
+keeps a pre-write read from releasing a newer uncertainty fence.
+
+Both products opt into `fence_uncertain_placements` on the engine's generic
+legacy-write Phase B. An Unknown placement or amend refuses overlapping new
+placements and amends as NotSent until a fresh clean read reconciles them.
+Cancel by ID remains available. The perps and Spot four-step controls were RED
+at the retry assertion before Phase B and now execute through stale-read
+refusal, fresh Store publication and a successful retry. Duplicate rows keep
+the fence standing. This slice adds no venue retry loop or write resend.
+Multi-DEX reads release symbol-scoped marks only; an unknown-ID amend is refused
+NotSent before dispatch and cannot create an all-symbol mark on this venue.
+
 ### Engine: settle-only condition wait for stream-proven writes
 
 Venue authors gain `serial_plan_settle_wait(plan, slot, context, bound_ms)`
@@ -9938,9 +10101,20 @@ rest without a position. What callers see:
 
 ### Lighter: an Unknown placement fences its symbol
 
-Lighter now opts into `guard_pending_placements`. After a placement whose
-outcome is Unknown (a lost or 5xx `sendTx`), `CancelSymbolOrders` on that
-symbol fails with "Placement outcome is uncertain; reconcile before
-cancel-all" and sends nothing, until the next complete orders snapshot
-reconciles. A further placement on the symbol is still admitted until the
-engine's order-lock acquire also consults the uncertain scope for placements.
+Lighter opts into `guard_pending_placements` and `fence_uncertain_placements`.
+After a placement whose outcome is Unknown (a lost or 5xx `sendTx`), on that
+symbol:
+- `placeOrders` and `amendOrder` fail NotSent with "Placement outcome is
+  uncertain; reconcile before placing or amending" and send nothing;
+- `cancelSymbolOrders` fails with "Placement outcome is uncertain; reconcile
+  before cancel-all" and sends nothing: Lighter composes cancel-all from known
+  ids, so it would miss the uncertain order. Cancelling a known order by id is
+  still admitted.
+The Unknown starts an active-orders read at once. The fence clears on the first
+complete orders snapshot requested after the write: a read already in flight
+when the write went out, a failed read, or a snapshot with an unmappable row
+does not clear it. If a read was in flight, another follows as soon as it
+settles, and a failed read is followed at once by a fresh one, so the fence
+normally lasts about one orders round trip. The engine's reconcile re-asks
+(1 s doubling to 30 s) join an outstanding read rather than restarting it.
+

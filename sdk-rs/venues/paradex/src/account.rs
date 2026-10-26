@@ -15,7 +15,8 @@ use safe_cex_engine::model::{
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Cx, Fill, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId, json::ArrayAt,
+    Cx, Fill, Method, Response, SignatureTarget, SocketChannel, SocketId, TimerId, VenueError,
+    json::ArrayAt,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -147,8 +148,10 @@ pub struct Account {
     token: Option<String>,
     refresh_at: f64,
     auth_in_flight: bool,
+    /// A definitive credential refusal; terminal until the account is rebuilt.
+    auth_rejected: bool,
     queue: VecDeque<Queued>,
-    failed: Vec<(Pending, String)>,
+    failed: Vec<(Pending, VenueError)>,
     socket: Option<SocketId>,
     open: bool,
     authenticated: bool,
@@ -167,6 +170,8 @@ pub struct Account {
     balance_revision: u64,
     margins_revision: u64,
     orders_busy: bool,
+    /// An uncertain placement asked for a read dispatched after its write.
+    orders_owed: bool,
     positions_busy: bool,
     balance_busy: bool,
     margins_busy: bool,
@@ -192,6 +197,7 @@ impl Account {
             token: None,
             refresh_at: 0.,
             auth_in_flight: false,
+            auth_rejected: false,
             queue: VecDeque::new(),
             failed: vec![],
             socket: None,
@@ -216,6 +222,7 @@ impl Account {
             balance_revision: 0,
             margins_revision: 0,
             orders_busy: false,
+            orders_owed: false,
             positions_busy: false,
             balance_busy: false,
             margins_busy: false,
@@ -320,7 +327,7 @@ impl Account {
     pub fn bump_positions(&mut self) {
         self.positions_revision = self.positions_revision.wrapping_add(1);
     }
-    pub fn drain_failed(&mut self) -> Vec<(Pending, String)> {
+    pub fn drain_failed(&mut self) -> Vec<(Pending, VenueError)> {
         std::mem::take(&mut self.failed)
     }
     pub fn handles_socket(&self, socket: SocketId) -> bool {
@@ -415,8 +422,12 @@ impl Account {
         if self.credentials.is_none() {
             self.failed.push((
                 pending,
-                "Paradex private authentication is not ready".into(),
+                VenueError::new("Paradex private authentication is not ready"),
             ));
+            return;
+        }
+        if self.auth_rejected {
+            self.failed.push((pending, auth_rejected_error()));
             return;
         }
         let request = Queued {
@@ -433,7 +444,7 @@ impl Account {
         if self.queue.len() >= MAX_QUEUED {
             self.failed.push((
                 request.pending,
-                "Paradex authentication queue is full".into(),
+                VenueError::new("Paradex authentication queue is full"),
             ));
             return;
         }
@@ -500,11 +511,11 @@ impl Account {
                 fence.sent = false;
             }
             self.failed
-                .push((pending, "Paradex signing queue is full".into()));
+                .push((pending, VenueError::new("Paradex signing queue is full")));
         }
     }
     fn refresh(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.auth_in_flight {
+        if self.auth_in_flight || self.auth_rejected {
             return;
         }
         let Some(credentials) = &self.credentials else {
@@ -535,7 +546,7 @@ impl Account {
             )
         {
             self.failed
-                .push((pending, "Paradex signing queue is full".into()));
+                .push((pending, VenueError::new("Paradex signing queue is full")));
         }
     }
     fn auth_failed(&mut self, cx: &mut Cx<'_, Pending>, error: &str) {
@@ -543,12 +554,28 @@ impl Account {
         self.token = None;
         self.refresh_at = 0.;
         for queued in self.queue.drain(..) {
-            self.failed.push((queued.pending, error.to_owned()));
+            self.failed.push((queued.pending, VenueError::new(error)));
         }
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
         if self.retry.is_none() {
             self.retry = Some(cx.set_timer(2_000.));
         }
+    }
+    /// A definitive 401/403 from `/auth`: the credentials are wrong, so retrying
+    /// cannot help. Every queued and later private request refuses typed.
+    fn auth_rejected(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.auth_in_flight = false;
+        self.auth_rejected = true;
+        self.token = None;
+        self.refresh_at = 0.;
+        for queued in self.queue.drain(..) {
+            self.failed.push((queued.pending, auth_rejected_error()));
+        }
+        cx.notice(
+            Level::Error,
+            code::AUTH_REJECTED,
+            "Paradex rejected the account credentials",
+        );
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.socket.is_none() && !self.supervisor.is_waiting() {
@@ -1061,6 +1088,20 @@ impl Account {
             }),
         );
     }
+    /// Start or join an order read dispatched after an uncertain placement;
+    /// a clean snapshot releases the engine's fence through `orders_reconciled`.
+    pub fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.orders_busy {
+            self.orders_owed = true;
+        } else {
+            self.orders(cx, false);
+        }
+    }
+    fn owed_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if std::mem::take(&mut self.orders_owed) {
+            self.orders(cx, false);
+        }
+    }
     fn orders(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
         if self.orders_busy {
             return;
@@ -1222,6 +1263,10 @@ impl Account {
             let _ = cx.finish_http_context(context);
             return;
         }
+        if matches!(request, Request::Auth { .. }) && matches!(response.status, 401 | 403) {
+            self.auth_rejected(cx);
+            return;
+        }
         if let Err(error) = crate::success(response) {
             self.on_failed(cx, request, &error);
             return;
@@ -1266,19 +1311,7 @@ impl Account {
                 }
             }
             Request::Auth { started } => {
-                #[derive(Deserialize)]
-                struct Token {
-                    jwt_token: Option<String>,
-                    token: Option<String>,
-                }
-                let token = serde_json::from_str::<Token>(response.body)
-                    .ok()
-                    .and_then(|t| {
-                        t.jwt_token
-                            .filter(|s| !s.trim().is_empty())
-                            .or(t.token.filter(|s| !s.trim().is_empty()))
-                    });
-                let Some(token) = token else {
+                let Some(token) = auth_token(response.body) else {
                     self.auth_failed(cx, "Paradex authentication returned no JWT");
                     return;
                 };
@@ -1390,6 +1423,7 @@ impl Account {
             } => {
                 self.orders_busy = false;
                 if !invalid {
+                    let clean = coverage.rejected() == 0;
                     // Decode all fallible mapping before entering native publication.
                     let prepared = rows
                         .into_iter()
@@ -1399,9 +1433,12 @@ impl Account {
                             Some((row, order, version))
                         })
                         .collect();
-                    cx.store.commit_orders_snapshot([token], |current| {
+                    let committed = cx.store.commit_orders_snapshot([token], |current| {
                         self.publish_orders_snapshot(prepared, coverage, current)
                     });
+                    if committed && clean {
+                        cx.orders_reconciled(None);
+                    }
                 } else {
                     cx.notice(
                         Level::Warn,
@@ -1409,6 +1446,7 @@ impl Account {
                         "Invalid Paradex orders snapshot",
                     );
                 }
+                self.owed_orders(cx);
                 if cycle {
                     self.margins(cx, false);
                 }
@@ -1501,6 +1539,7 @@ impl Account {
             }
             Request::Orders { cycle, .. } => {
                 self.orders_busy = false;
+                self.owed_orders(cx);
                 if cycle {
                     self.margins(cx, false);
                 }
@@ -2199,4 +2238,24 @@ fn raw_rows(text: &str) -> Result<Vec<&serde_json::value::RawValue>, serde_json:
     } else {
         serde_json::from_str(text).map(|row| vec![row])
     }
+}
+
+fn auth_rejected_error() -> VenueError {
+    VenueError::new("Paradex rejected the account credentials")
+        .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+        .outcome(safe_cex_engine::Outcome::NotSent)
+}
+
+/// The JWT a successful `/auth` returns, if it carries one.
+pub(crate) fn auth_token(body: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Token {
+        jwt_token: Option<String>,
+        token: Option<String>,
+    }
+    serde_json::from_str::<Token>(body).ok().and_then(|t| {
+        t.jwt_token
+            .filter(|s| !s.trim().is_empty())
+            .or(t.token.filter(|s| !s.trim().is_empty()))
+    })
 }

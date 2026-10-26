@@ -1,3 +1,10 @@
+import { vi } from 'vitest';
+
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, OrderBook } from '../../types';
 
@@ -95,7 +102,7 @@ const start = async (options: ExchangeOptions, handle?: RequestHandler) => {
 };
 
 it('loads outcomes as exact token markets and lazily streams complete CLOB books into worker and main frames', async () => {
-  expect(isRustVenue('polymarket')).toBe(true);
+  expect(isRustVenue('polymarket')).toBe(false);
   const { exchange, requests, sockets, store } = await start({ key: '', secret: '', publicDataOnly: true });
   expect(store.markets.map((market) => [market.id, market.symbol, market.quote])).toEqual([[TOKEN, SYMBOL, 'pUSD'], [NO_TOKEN, 'cafe-open-No', 'pUSD']]);
   expect(store.markets[0].info).toEqual({ tokenId: TOKEN, conditionId: '0xcondition', outcome: 'Yes', tickSize: 0.001, negRisk: true, question: 'Will café open?', description: 'Exact description', endDate: '2027-12-31T00:00:00Z', slug: 'cafe-open' });

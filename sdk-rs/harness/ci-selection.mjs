@@ -41,12 +41,20 @@ export function rustDocumentInputs(sources) {
   return { paths, unresolved };
 }
 
+// TS venue code: the runtime helpers kept under exchanges/<venue>/ and the frozen
+// replay oracle under __tests__/reference/<venue>/ both select that venue.
+const TS_VENUE = /^packages\/safe-cex\/src\/(exchanges|__tests__\/reference)\/([^/]+)\//;
+const tsVenue = (path) => {
+  const match = TS_VENUE.exec(path);
+  return match && { root: `packages/safe-cex/src/${match[1]}/${match[2]}/`, venue: match[2], oracle: match[1] !== 'exchanges' };
+};
+
 export function externallyImportedVenues(sources) {
   const imported = new Set();
   for (const [source, text] of sources) for (const match of text.matchAll(/['"](\.[^'"\n]+)['"]/g)) {
     const target = posix.normalize(posix.join(posix.dirname(source), match[1]));
-    const venue = /^packages\/safe-cex\/src\/exchanges\/([^/]+)(?:\/|$)/.exec(target)?.[1];
-    if (venue && !source.startsWith(`packages/safe-cex/src/exchanges/${venue}/`)) imported.add(venue);
+    const venue = tsVenue(target.endsWith('/') ? target : `${target}/`);
+    if (venue && !source.startsWith(venue.root)) imported.add(venue.venue);
   }
   return imported;
 }
@@ -70,12 +78,12 @@ export function selectCi({ paths, manifests, full = false, documents = { paths: 
       if (venue[2] === 'Cargo.toml') nativeFull = true;
       crates.add(venue[1]); continue;
     }
-    const ts = /^packages\/safe-cex\/src\/exchanges\/([^/]+)\//.exec(path);
+    const ts = tsVenue(path);
     if (ts) {
-      try { family(ts[1]); } catch { full = true; reasons.push(path); continue; }
-      if (!/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path) && !path.includes('/__tests__/')) {
-        crates.add(venueCrate(ts[1]));
-        if (externalImports.has(ts[1])) { full = true; reasons.push(`Cross-venue TS import: ${ts[1]}`); }
+      try { family(ts.venue); } catch { full = true; reasons.push(path); continue; }
+      if (!/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path) && (ts.oracle || !path.includes('/__tests__/'))) {
+        crates.add(venueCrate(ts.venue));
+        if (externalImports.has(ts.venue)) { full = true; reasons.push(`Cross-venue TS import: ${ts.venue}`); }
       }
       continue;
     }
@@ -144,7 +152,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     ? rustDocumentInputs(execFileSync('git', ['ls-files', '-z', '--', '*.rs'], { encoding: 'utf8' })
       .split('\0').filter(Boolean).map(path => [path, readFileSync(path, 'utf8')]))
     : undefined;
-  const externalImports = paths.some(path => path.startsWith('packages/safe-cex/src/exchanges/'))
+  const externalImports = paths.some(path => tsVenue(path))
     ? externallyImportedVenues(execFileSync('git', ['ls-files', '-z', '--', '*.ts', '*.tsx', '*.mts', '*.js', '*.mjs'], { encoding: 'utf8' })
       .split('\0').filter(Boolean).map(path => [path, readFileSync(path, 'utf8')]))
     : undefined;

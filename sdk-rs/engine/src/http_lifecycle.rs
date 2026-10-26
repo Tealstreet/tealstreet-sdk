@@ -3132,6 +3132,7 @@ mod tests {
         native_effects: usize,
         housekeeping_checks: usize,
         reconciles: Vec<Option<Vec<String>>>,
+        reasks: Vec<bool>,
         // The command intent a test mutation is issued under (default Place).
         mutation_intent: Option<crate::classify::Intent>,
         // Whether a reconcile hook ever saw borrowed delivery/read authority.
@@ -3445,11 +3446,12 @@ mod tests {
                 panic!("unexpected transport failure");
             }
         }
-        fn reconcile_uncertain(&mut self, _cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
+        fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
             self.reconciles.push(symbols.map(<[String]>::to_vec));
+            self.reasks.push(cx.reconcile_reask());
             #[cfg(feature = "order-locks")]
             {
-                self.reconcile_custody |= _cx_has_custody(_cx);
+                self.reconcile_custody |= _cx_has_custody(cx);
             }
         }
         fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -5133,7 +5135,8 @@ mod tests {
                 .iter()
                 .filter(|action| matches!(action,
             Action::Notice(Notice::CommandFailed { command: 8, error })
-            if error.message == "Placement outcome is uncertain; reconcile before cancel-all"))
+            if error.message == "Placement outcome is uncertain; reconcile before cancel-all"
+                && error.outcome == Some(crate::Outcome::NotSent)))
                 .count(),
             1
         );
@@ -5530,6 +5533,127 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn a_managed_unknown_placement_fences_its_symbol_until_reconciled() {
+        let place = |command, symbol: &str| Command::PlaceOrders {
+            command,
+            orders: vec![
+                serde_json::from_str(&format!(
+                    r#"{{"symbol":"{symbol}","type":"limit","side":"buy","amount":1,"price":1}}"#
+                ))
+                .unwrap(),
+            ],
+        };
+        let (mut engine, _) = start(Probe::default());
+        engine.io.core.order_locks = crate::order_locks::OrderLocks::fencing_placements(true);
+        // A read dispatched before the write: its answer cannot vouch for the placement.
+        let stale = engine.io.core.order_locks.token();
+        // A released managed placement that seals Unknown (a lost 503 answer).
+        seal_uncertain(
+            &mut engine,
+            &place(7, "BTCUSDT"),
+            6.,
+            VenueError::new("lost"),
+        );
+        assert!(engine.io.core.order_locks.uncertain("BTCUSDT"));
+        assert_eq!(
+            engine.venue.reconciles,
+            vec![Some(vec!["BTCUSDT".to_owned()])],
+            "the Unknown seal asks for its reconcile at once"
+        );
+        let locks = &mut engine.io.core.order_locks;
+        assert_eq!(
+            locks.acquire(&place(8, "BTCUSDT"), &engine.store, false),
+            Err(crate::order_locks::Refusal::Uncertain(8)),
+            "a retry cannot duplicate the possibly placed order"
+        );
+        assert!(
+            locks
+                .acquire(&place(9, "ETHUSDT"), &engine.store, false)
+                .is_ok()
+        );
+        assert!(
+            locks
+                .acquire(
+                    &Command::CancelOrders {
+                        command: 10,
+                        ids: vec!["resting".into()],
+                    },
+                    &engine.store,
+                    false,
+                )
+                .is_ok(),
+            "a cancel is still admitted"
+        );
+        locks.reconciled(Some("BTCUSDT"), stale);
+        assert_eq!(
+            locks.acquire(&place(11, "BTCUSDT"), &engine.store, false),
+            Err(crate::order_locks::Refusal::Uncertain(11)),
+            "a stale read does not release the fence"
+        );
+        // A fresh read for the symbol, after the write, releases the fence.
+        let token = locks.token();
+        locks.reconciled(Some("BTCUSDT"), token);
+        assert!(!locks.uncertain("BTCUSDT"));
+        assert!(
+            locks
+                .acquire(&place(12, "BTCUSDT"), &engine.store, false)
+                .is_ok()
+        );
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_fenced_symbol_re_asks_its_reconcile_with_bounded_backoff_until_released() {
+        let place = Command::PlaceOrders {
+            command: 7,
+            orders: vec![
+                serde_json::from_str(
+                    r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":1}"#,
+                )
+                .unwrap(),
+            ],
+        };
+        let (mut engine, _) = start(Probe::default());
+        engine.io.core.order_locks = crate::order_locks::OrderLocks::fencing_placements(true);
+        seal_uncertain(&mut engine, &place, 6., VenueError::new("lost"));
+        let btc = Some(vec!["BTCUSDT".to_owned()]);
+        assert_eq!(engine.venue.reconciles, vec![btc.clone()], "asked at once");
+        // Each reconcile read fails; the engine re-asks 1 s, 2 s, 4 s ... capped at 30 s.
+        let mut at = 6.;
+        let mut gaps = Vec::new();
+        for _ in 0..8 {
+            let (timer, due) = engine.reconcile_timer.expect("a re-ask is armed");
+            gaps.push(due - at);
+            at = due;
+            engine.handle(at, Event::TimerFired { timer });
+        }
+        assert_eq!(
+            gaps,
+            [
+                1_000., 2_000., 4_000., 8_000., 16_000., 30_000., 30_000., 30_000.
+            ]
+        );
+        assert_eq!(engine.venue.reconciles.len(), 9);
+        assert!(engine.venue.reconciles.iter().all(|scope| *scope == btc));
+        // The seal's ask is not a re-ask; every backoff call is.
+        assert!(!engine.venue.reasks[0]);
+        assert!(engine.venue.reasks[1..].iter().all(|reask| *reask));
+        // A fresh read releases the fence and the re-asks stop.
+        let token = engine.io.core.order_locks.token();
+        engine
+            .io
+            .core
+            .order_locks
+            .reconciled(Some("BTCUSDT"), token);
+        let (timer, due) = engine.reconcile_timer.expect("the last re-ask is armed");
+        engine.handle(due, Event::TimerFired { timer });
+        assert_eq!(engine.venue.reconciles.len(), 9, "no re-ask after release");
+        assert!(engine.reconcile_timer.is_none());
+        assert!(engine.io.core.fence_reread.is_none());
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn unlocked_uncertain_writes_full_read_and_waits_are_bounded() {
         // A managed write the order lock never held still reconciles in full.
         let (mut engine, _) = start(Probe::default());
@@ -5746,6 +5870,49 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn a_paged_census_releases_only_marks_its_first_page_saw() {
+        let (mut engine, _) = start(Probe::default());
+        let release = |engine: &mut Engine<Probe>, token: u64, epoch: Option<u64>| {
+            engine.io.core.order_response_token = Some(token);
+            let mut cx = Cx {
+                now: 1.,
+                store: &mut engine.store,
+                io: &mut engine.io,
+            };
+            match epoch {
+                Some(epoch) => cx.orders_reconciled_since(None, epoch),
+                None => cx.orders_reconciled(None),
+            }
+            engine.io.core.order_response_token = None;
+        };
+        let eth = || Some(vec!["ETHUSDT".to_owned()]);
+        // The census's first page leaves; then ETH turns uncertain; a later page
+        // (its own context) leaves after the mark and completes the census.
+        let first_page = Cx {
+            now: 0.,
+            store: &mut engine.store,
+            io: &mut engine.io,
+        }
+        .order_read_epoch();
+        engine.io.core.order_locks.fence(eth().as_deref());
+        let last_page = engine.io.core.order_locks.token();
+        release(&mut engine, last_page, Some(first_page));
+        assert!(
+            engine.io.core.order_locks.uncertain("ETHUSDT"),
+            "the first page predates the mark"
+        );
+        // RED for the per-page token: the last page alone would release it.
+        release(&mut engine, last_page, None);
+        assert!(!engine.io.core.order_locks.uncertain("ETHUSDT"));
+        // A census begun after the mark releases it.
+        engine.io.core.order_locks.fence(eth().as_deref());
+        let begun = engine.io.core.order_locks.token();
+        release(&mut engine, begun, Some(begun));
+        assert!(!engine.io.core.order_locks.uncertain("ETHUSDT"));
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn an_overflowing_reconcile_queue_never_cuts_a_wait_short() {
         let btc = || Some(vec!["BTCUSDT".to_owned()]);
         // 64 deferred entries with unequal waits, then one immediate entry.
@@ -5800,9 +5967,17 @@ mod tests {
             6.,
             VenueError::new("lost"),
         );
+        // A second placement on the uncertain symbol is now refused at entry; a
+        // routed cancel there is still admitted and its uncertain seal asks again.
         seal_uncertain(
             &mut engine,
-            &place(8, "BTCUSDT"),
+            &Command::CancelOrdersWithSymbols {
+                command: 8,
+                orders: vec![crate::model::CancelOrderRef {
+                    id: "x".into(),
+                    symbol: "BTCUSDT".into(),
+                }],
+            },
             7.,
             VenueError::new("lost"),
         );

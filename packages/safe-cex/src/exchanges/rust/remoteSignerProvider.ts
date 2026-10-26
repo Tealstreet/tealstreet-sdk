@@ -1,13 +1,21 @@
-import type { SignAlgorithm, Signer, SignReceipt, SignResult } from '@tealstreet/safe-cex-wasm/host';
+import type { SignAlgorithm, Signer, SignReceipt, SignRequest, SignResult } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions, PayloadSigner, RemoteSigner } from '../../types';
 import type { RemoteSigningPolicy } from './construction';
 
+import { sha256 } from '@noble/hashes/sha2.js';
 import { nanoid } from 'nanoid';
 
 import { deriveRemoteSigningPolicy } from './construction';
 
-/** Everything this provider signs; the engine's capability admission reads it. */
-export const REMOTE_SIGNER_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
+const HMAC_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['hmacSha256']);
+const DOUBLE_SHA256_ALGORITHMS: readonly SignAlgorithm[] = Object.freeze(['sha256SecretSuffix']);
+/** Families whose remote wire signs `hex(sha256(hex(sha256(toSign)) ‖ material))`. */
+const doubleSha256 = (name: ExchangeName) => name === 'bitunix';
+
+/** Everything this provider signs for a venue; the engine's capability admission
+ * reads it. A double-SHA256 family is never advertised an HMAC, nor the reverse. */
+export const remoteSignerAlgorithms = (name: ExchangeName): readonly SignAlgorithm[] =>
+  doubleSha256(name) ? DOUBLE_SHA256_ALGORITHMS : HMAC_ALGORITHMS;
 
 export interface RemoteSignerIdentity {
   credential: string;
@@ -215,6 +223,7 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
   const presentation = deriveRemoteSigningPolicy(exchangeName);
   const encoding = presentation?.signatureEncoding ?? 'hex';
   const passphraseHeader = presentation?.passphraseHeader;
+  const algorithms = remoteSignerAlgorithms(exchangeName);
   let accountName: string | undefined;
   const owned = new Map<string, { identity: RemoteSignerIdentity; primary: boolean; receiver: Readonly<Record<string, unknown>> }>();
   const credentials = new Map<string, { bytes: number[]; identity: RemoteSignerIdentity }>();
@@ -255,6 +264,61 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     if (!remoteSigner && !payloadSigner) throw refused();
   } catch { throw refused(); }
 
+  /** The one admitted fused shape, in the engine's order: `sha256` over bytes and
+   * the signing identity's own credential, `sign sha256SecretSuffix` over exactly
+   * `result{0, hex}`, then `present` of that credential. Anything else refuses.
+   * The browser computes both hashes from the inner preimage; the inner digest
+   * is recomputed here, and the key comes from local custody, never the browser.
+   */
+  const signDoubleSha256 = async (operations: SignRequest['operations'], receipt: SignReceipt, signal: AbortSignal): Promise<RemoteSignerResult> => {
+    if (!doubleSha256(exchangeName) || !remoteSigner || operations.length !== 3) throw refused();
+    const [digest, sign, present] = operations;
+    if (digest?.kind !== 'sha256' || sign?.kind !== 'sign' || present?.kind !== 'present'
+      || sign.algorithm !== 'sha256SecretSuffix') throw refused();
+    const entry = owned.get(sign.key);
+    if (!entry || !entry.primary || entry.identity.signing !== sign.key
+      || present.key !== entry.identity.credential) throw refused();
+    const reference = Array.isArray(sign.payload) && sign.payload.length === 1 ? Array.from(sign.payload)[0] : undefined;
+    if (!record(reference) || reference.kind !== 'result' || reference.index !== 0 || reference.encoding !== 'hex') throw refused();
+    if (!Array.isArray(digest.payload) || digest.payload.length < 1 || digest.payload.length > MAX_PARTS) throw refused();
+    const material = credentials.get(entry.identity.credential);
+    if (!material) throw refused();
+    const key = material.bytes;
+    let total = key.length;
+    const parts = Array.from(digest.payload, (part) => {
+      let bytes: number[];
+      if (part?.kind === 'credential' && part.key === entry.identity.credential) bytes = key;
+      else if (part?.kind === 'bytes' && Array.isArray(part.bytes) && part.bytes.length <= MAX_PAYLOAD) {
+        for (const byte of part.bytes) {
+          if (!Number.isInteger(byte) || byte < 0 || byte > 255) throw refused();
+        }
+        bytes = part.bytes;
+      } else throw refused();
+      total += bytes.length;
+      if (total > MAX_PAYLOAD) throw refused();
+      return bytes;
+    });
+    const preimage = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
+    let offset = 0;
+    for (const part of parts) { preimage.set(part, offset); offset += part.length; }
+    const toSign = decodeUtf8(preimage);
+    if (signal.aborted) throw canceled();
+    const id = nanoid();
+    const response = await guarded(signal, remoteSigner, () => remoteSigner.sign({
+      id,
+      type: 'ws-auth',
+      exchangeName,
+      ...(accountName === undefined ? {} : { accountName }),
+      wsAuth: { toSign, outputFormat: 'bitunix-double-sha256' },
+    }));
+    if (!record(response) || response.id !== id
+      || (response.error !== undefined && (typeof response.error !== 'string' || response.error !== ''))) throw refused();
+    // Exactly 64 hex characters: browser text never reaches a header unparsed.
+    const outer = mac(response.wsAuthSignature, 'hex');
+    if (signal.aborted) throw canceled();
+    return { values: [Array.from(sha256(preimage)), outer, key.slice()], receipt };
+  };
+
   return async (request, { signal }): Promise<RemoteSignerResult> => {
     try {
       if (signal.aborted) throw canceled();
@@ -263,6 +327,11 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
         !['stampMs', 'expiryMs'].includes(key) || (value !== undefined && (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)))) throw refused();
       if (receipt.stampMs !== undefined && receipt.expiryMs !== undefined && receipt.expiryMs <= receipt.stampMs) throw refused();
       if (!Array.isArray(request.operations) || request.operations.length < 1 || request.operations.length > MAX_OPERATIONS) throw refused();
+      const operations = Array.from(request.operations);
+      if (operations.some((operation) => operation?.kind === 'sha256'
+        || (operation?.kind === 'sign' && operation.algorithm === 'sha256SecretSuffix'))) {
+        return await signDoubleSha256(operations, receipt, signal);
+      }
       let total = 0;
       // Validate the complete batch before invoking any callback.
       const work = Array.from(request.operations, (operation) => {
@@ -274,7 +343,8 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
           if (total > MAX_PAYLOAD) throw refused();
           return { kind: 'present' as const, key: operation.key, passphrase: item === undefined, bytes: material.slice() };
         }
-        if (operation.kind !== 'sign' || !REMOTE_SIGNER_ALGORITHMS.includes(operation.algorithm)) throw refused();
+        if (operation.kind !== 'sign' || !HMAC_ALGORITHMS.includes(operation.algorithm)
+          || !algorithms.includes(operation.algorithm)) throw refused();
         const entry = owned.get(operation.key);
         if (!entry || entry.identity.signing !== operation.key || (remoteSigner && !entry.primary)
           || !Array.isArray(operation.payload) || operation.payload.length > MAX_PARTS) throw refused();

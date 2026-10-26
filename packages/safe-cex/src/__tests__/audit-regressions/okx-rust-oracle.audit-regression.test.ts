@@ -2,7 +2,7 @@ import type { Market } from '../../types';
 
 import { expect, it, vi } from 'vitest';
 
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const setup = (publicDataOnly = true) => {
@@ -61,7 +61,7 @@ it('uses UTC month bounds even when local dates cross into the next day', async 
 });
 
 it('subscribes keyless business candles without login or private topics', async () => {
-  const { OKXBusinessWebsocket } = await import('../../exchanges/okx/okx.ws-business');
+  const { OKXBusinessWebsocket } = await import('../reference/okx/okx.ws-business');
   const exchange = setup();
   const socket = new OKXBusinessWebsocket(exchange);
   socket.topics.candle = [{ channel: 'candle1m', instId: 'BTC-USDT-SWAP' }];

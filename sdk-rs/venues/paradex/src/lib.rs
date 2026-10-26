@@ -91,6 +91,26 @@ impl Paradex {
 
 impl Venue for Paradex {
     type Pending = Pending;
+    /// Only `/auth` is credential evidence: a 401/403 is a definitive refusal,
+    /// and a 2xx carrying a JWT is acceptance.
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        _now: f64,
+        _store: &safe_cex_engine::Store,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        if !matches!(pending, Pending::Account(account::Request::Auth { .. })) {
+            return None;
+        }
+        match response.status {
+            401 | 403 => Some(safe_cex_engine::AuthOutcome::Rejected),
+            200..=299 => {
+                account::auth_token(response.body).map(|_| safe_cex_engine::AuthOutcome::Accepted)
+            }
+            _ => None,
+        }
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::FillsSymbol,
@@ -104,6 +124,14 @@ impl Venue for Paradex {
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);
+    }
+    // reconcile_uncertain starts an order read dispatched after the write.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.account.reconcile_orders(cx);
+        self.failures(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.handles_socket(socket) {
@@ -357,10 +385,12 @@ impl Paradex {
                 match pending {
                     Pending::Trade(request) => {
                         self.trading
-                            .on_unsent(cx, &mut self.account, request, &error)
+                            .on_refused(cx, &mut self.account, request, error)
                     }
-                    Pending::History(request) => self.history.on_rejected(cx, request, &error),
-                    other => self.dispatch_failed(cx, other, &error),
+                    Pending::History(request) => {
+                        self.history.on_rejected(cx, request, &error.message)
+                    }
+                    other => self.dispatch_failed(cx, other, &error.message),
                 }
             }
         }

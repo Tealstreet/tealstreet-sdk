@@ -174,8 +174,11 @@ fn a_lost_write_response_is_never_retried() {
         },
     );
     h.collect();
-    assert!(h.pending.is_empty());
     assert!(h.result(8).is_err());
+    // Nothing is resent; the only request is the fence's reconcile read.
+    let reconcile = h.pending.iter().map(|r| r.method).collect::<Vec<_>>();
+    assert_eq!(reconcile, vec![Method::Get]);
+    h.take("/orders");
 }
 #[test]
 fn brackets_have_individual_signatures_and_accept_child_responses_without_a_client_identity() {
@@ -403,9 +406,65 @@ fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
         assert_eq!(payload.kind, "MARKET");
         assert_eq!(payload.client_id.as_deref(), Some("next"));
         h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
-        assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
+        if ambiguous {
+            // Nothing is resent; the Unknown outcome only queues the fence's read.
+            reconcile_read_only(&mut h);
+        }
         assert!(h.pending.is_empty());
+        if ambiguous {
+            // A lost entry may have been accepted: never success, and the
+            // accepted next order stays visible.
+            let error = failed(&h, 71);
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            assert_eq!(error.partial.unwrap().order_ids, ["accepted-next"]);
+        } else {
+            assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
+        }
     }
+}
+
+#[test]
+fn a_child_leg_lost_in_transport_makes_the_command_unknown_with_accepted_ids() {
+    let mut h = private();
+    bracket_entry(&mut h, 12, None);
+    let tp = h.take("/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: tp.id,
+            error: "response lost after possible acceptance",
+        },
+    );
+    h.collect();
+    // The sibling stop-loss is still placed.
+    let sl = h.take("/orders");
+    h.respond(sl, 200, r#"{"id":"sl"}"#);
+    reconcile_read_only(&mut h);
+    let error = failed(&h, 12);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.partial.unwrap().order_ids, ["entry", "sl"]);
+}
+
+/// After an Unknown write the only pending request is the fence's order read.
+fn reconcile_read_only(h: &mut Harness) {
+    let read = h.take("/orders");
+    assert_eq!(read.method, Method::Get);
+    assert!(h.pending.is_empty(), "{:?}", h.pending);
+}
+
+fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
+    h.actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error })
+                if *command == id =>
+            {
+                Some(error.clone())
+            }
+            _ => None,
+        })
+        .expect("command failed")
 }
 
 #[test]
@@ -908,6 +967,16 @@ fn definitive_amend_rejection_allows_unchanged_reconciliation_but_transport_fail
         amend(&mut h, 141, None, Some(3.));
         if ambiguous {
             assert!(h.result(141).is_err());
+            assert!(h.pending.iter().all(|r| r.method == Method::Get));
+            // A complete read of the unchanged row releases the engine's
+            // placement fence; the venue's amend fence still needs evidence.
+            if let Some(i) = h.pending.iter().position(|r| r.url.contains("/orders")) {
+                let read = h.pending.remove(i);
+                h.respond(read, 200, &format!(r#"{{"results":[{AMEND_ROW}]}}"#));
+            }
+            assert!(h.pending.is_empty());
+            amend(&mut h, 143, None, Some(3.));
+            assert!(h.result(143).is_err());
             assert!(h.pending.is_empty());
             let matching = AMEND_ROW.replace("\"price\":\"99\"", "\"price\":\"101\"");
             amendment_update(&mut h, socket, &matching);
@@ -1294,4 +1363,199 @@ fn public_rest_book_refusal_does_not_invalidate_or_refresh_existing_jwt() {
         serde_json::from_str::<serde_json::Value>(h.result(71).unwrap()).unwrap()["userId"],
         "9007199254740993"
     );
+}
+fn take_method(h: &mut Harness, method: Method, path: &str) -> safe_cex_engine::HttpRequest {
+    let i = h
+        .pending
+        .iter()
+        .position(|r| r.method == method && r.url.contains(path))
+        .unwrap_or_else(|| panic!("missing {method:?} {path}: {:?}", h.pending));
+    h.pending.remove(i)
+}
+#[test]
+fn an_unknown_placement_refuses_a_retry_until_a_fresh_order_read_reconciles_it() {
+    let mut h = private();
+    // An order read dispatched before the write cannot clear its fence.
+    h.timer(h.now + 10_000.);
+    h.reply("/positions", r#"{"results":[]}"#);
+    h.reply(
+        "/account",
+        r#"{"total_collateral":"1000","free_collateral":"1000"}"#,
+    );
+    let stale = take_method(&mut h, Method::Get, "/orders");
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let write = take_method(&mut h, Method::Post, "/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: write.id,
+            error: "response lost after acceptance",
+        },
+    );
+    h.collect();
+    assert!(h.result(8).is_err());
+
+    // 1. The retry is refused NotSent and never written.
+    place(&mut h, 9, vec![opts(OrderType::Limit)]);
+    assert!(
+        !h.pending.iter().any(|r| r.method == Method::Post),
+        "the retry was written while the first placement is uncertain"
+    );
+    assert!(h.result(9).unwrap_err().contains("uncertain"));
+    assert_eq!(
+        h.failures.last().and_then(|e| e.outcome),
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+
+    // 2. The read in flight before the write completes; the fence holds.
+    h.respond(stale, 200, r#"{"results":[]}"#);
+    place(&mut h, 10, vec![opts(OrderType::Limit)]);
+    assert!(h.result(10).unwrap_err().contains("uncertain"));
+    assert!(!h.pending.iter().any(|r| r.method == Method::Post));
+
+    // 3. The hook's owed read, dispatched after the write, releases it.
+    let fresh = take_method(&mut h, Method::Get, "/orders");
+    h.respond(fresh, 200, r#"{"results":[]}"#);
+
+    // 4. The retry now places.
+    place(&mut h, 11, vec![opts(OrderType::Limit)]);
+    take_method(&mut h, Method::Post, "/orders");
+}
+#[test]
+fn engine_reasks_join_a_slow_post_write_read_that_then_releases_the_fence() {
+    let mut h = private();
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let write = take_method(&mut h, Method::Post, "/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: write.id,
+            error: "response lost after acceptance",
+        },
+    );
+    h.collect();
+    // The hook's read, dispatched after the write, stays unanswered.
+    let slow = take_method(&mut h, Method::Get, "/orders");
+    let start = h.now;
+    let mut reasks = vec![];
+    for _ in 0..3 {
+        let (timer, at) = h
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .expect("engine re-ask");
+        reasks.push(at - start);
+        h.now = at;
+        h.e.handle(h.now, Event::TimerFired { timer });
+        h.collect();
+        // Each re-ask joins the slow read: no restart, no second read.
+        assert!(h.pending.is_empty(), "{:?}", h.pending);
+        place(&mut h, 9, vec![opts(OrderType::Limit)]);
+        assert!(h.result(9).unwrap_err().contains("uncertain"));
+    }
+    assert_eq!(reasks, vec![1_000., 3_000., 7_000.]);
+    h.respond(slow, 200, r#"{"results":[]}"#);
+    // The slow read releases on completion; at most the one owed read follows.
+    let reads = h.pending.iter().filter(|r| r.method == Method::Get).count();
+    assert!(reads <= 1, "{:?}", h.pending);
+    place(&mut h, 10, vec![opts(OrderType::Limit)]);
+    take_method(&mut h, Method::Post, "/orders");
+}
+#[test]
+fn cancel_all_waits_for_reconciliation_after_an_unknown_placement_but_cancel_by_id_does_not() {
+    let mut h = private();
+    place(&mut h, 8, vec![opts(OrderType::Limit)]);
+    let write = take_method(&mut h, Method::Post, "/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: write.id,
+            error: "response lost after acceptance",
+        },
+    );
+    h.collect();
+    let fresh = take_method(&mut h, Method::Get, "/orders");
+    // A late-landing order could survive a venue-side cancel-all, so the
+    // engine default refuses it NotSent before any DELETE.
+    h.command(Command::CancelSymbolOrders {
+        command: 9,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    assert!(
+        !h.pending.iter().any(|r| r.method == Method::Delete),
+        "cancel-all was sent while the placement is uncertain"
+    );
+    assert!(h.result(9).unwrap_err().contains("uncertain"));
+    assert_eq!(
+        h.failures.last().and_then(|e| e.outcome),
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    // Cancel by ID cannot place, so it stays admitted.
+    h.command(Command::CancelOrders {
+        command: 10,
+        ids: vec!["resting".into()],
+    });
+    let cancel = take_method(&mut h, Method::Delete, "/orders/resting");
+    h.respond(cancel, 200, "{}");
+    assert!(!h.result(10).is_err_and(|e| e.contains("uncertain")));
+    // The cancel changed the order store after that read began, so its
+    // snapshot cannot commit and cannot release the fence.
+    h.respond(fresh, 200, r#"{"results":[]}"#);
+    h.command(Command::CancelSymbolOrders {
+        command: 11,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    assert!(h.result(11).unwrap_err().contains("uncertain"));
+    // The engine's re-ask starts a new read, whose clean snapshot releases it.
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("engine re-ask");
+    h.now = at;
+    h.e.handle(h.now, Event::TimerFired { timer });
+    h.collect();
+    let reread = take_method(&mut h, Method::Get, "/orders");
+    h.respond(reread, 200, r#"{"results":[]}"#);
+    h.command(Command::CancelSymbolOrders {
+        command: 12,
+        symbol: "BTC-USD-PERP".into(),
+    });
+    take_method(&mut h, Method::Delete, "/orders?market=");
+}
+
+#[test]
+fn a_refused_auth_is_a_typed_terminal_failure_without_retries() {
+    let mut h = private();
+    // Past the JWT refresh point, the next private request re-authenticates.
+    h.now += 180_000.;
+    place(&mut h, 80, vec![opts(OrderType::Limit)]);
+    let auth = h.take("/auth/");
+    h.respond(
+        auth,
+        401,
+        r#"{"error":"INVALID_SIGNATURE","message":"unknown subkey"}"#,
+    );
+    let error = failed(&h, 80);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    // No 2 s retry is armed, and nothing re-authenticates later.
+    let at = h.now + 2_000.;
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if (*at_ms - at).abs() < 1.))
+    );
+    place(&mut h, 81, vec![opts(OrderType::Limit)]);
+    assert!(!h.pending.iter().any(|r| r.url.contains("/auth/")));
+    let error = failed(&h, 81);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
 }

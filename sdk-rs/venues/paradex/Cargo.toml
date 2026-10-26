@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["command-order-book"] }
+safe-cex-engine = { workspace = true, features = ["command-order-book", "order-locks"] }
 safe-cex-crypto.workspace = true
 starknet-crypto.workspace = true
 zeroize.workspace = true
