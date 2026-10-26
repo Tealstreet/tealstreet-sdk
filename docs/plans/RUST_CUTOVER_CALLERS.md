@@ -10152,3 +10152,15 @@ BingX's provider-refusal retry control distinguishes the engine's required
 reconciliation re-ask from another mutation attempt: its captured timer issues
 only a managed Orders GET, retains one caller terminal and no new identity,
 and preserves the engine's bounded backoff when that read signer also refuses.
+
+Phemex's late-repair fixtures release all concurrent placements before any
+Unknown outcome, then issue genuine cancel-all commands. A later same-symbol
+Place is NotSent and adds no owed subject. The renamed concurrent/repeated
+cancel-all control no longer claims separate grants: a clean reconciliation
+needed to admit a sequential placement also settles the older unspent subject.
+The existing core `two_cancel_all_origins_share_one_native_request` control
+continues to pin cross-entitlement authority. Venue controls retain exact bulk
+paths, IDs, position sides, ten-plus-singleton chunking, mixed-ack Store effects
+and independent-side FIFO/no-resend assertions. Concurrent setup necessarily
+changes observation timing; single-placement helpers retain their clocks.
+Incomplete reads now pin the fence's typed NotSent/uncertain refusal.
