@@ -13,9 +13,9 @@ fn ready() -> TestEngine {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(&mut e, &r, 20.0, TICKERS);
     e.drain_actions().for_each(drop);
     e
