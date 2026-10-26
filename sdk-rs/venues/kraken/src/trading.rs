@@ -1,5 +1,8 @@
 //! Commands are validated in full before the first write and submitted once.
 use crate::{Kraken, Pending, sign};
+use safe_cex_engine::classify::{
+    self, CodeTable, Intent, Key, Native, NativeCode, Released, Row, Verdict,
+};
 use safe_cex_engine::model::*;
 use safe_cex_engine::num;
 use safe_cex_engine::request_context::Operation;
@@ -17,6 +20,7 @@ struct Job {
     command: CommandId,
     steps: VecDeque<Step>,
     ids: Vec<String>,
+    canceled_ids: Vec<String>,
     amend: Option<Order>,
     amend_filled: bool,
     amend_canceled: bool,
@@ -218,6 +222,7 @@ impl Kraken {
                         command: id,
                         steps,
                         ids: Vec::new(),
+                        canceled_ids: Vec::new(),
                         amend,
                         amend_filled: false,
                         amend_canceled: false,
@@ -727,40 +732,44 @@ impl Kraken {
     ) {
         let ok = (200..300).contains(&response.status);
         let leverage_read = matches!(request.step, Step::Leverage { .. });
+        let intent = match &request.step {
+            Step::Place(_) => Intent::Place,
+            Step::Cancel(_) => Intent::Cancel,
+            Step::Edit { .. } => Intent::Amend,
+            Step::Setting { .. } => Intent::Setting,
+            Step::Leverage { .. } => Intent::Read,
+        };
         let reply = serde_json::from_str::<Reply>(response.body).map_err(|_| {
             let message = "Invalid Kraken trading response";
             if ok {
                 unproven(message)
             } else {
-                http_failure(response.status, message)
+                classified_failure(&response, intent, None, message)
             }
         });
         let result = reply.and_then(|r| {
-            if !ok {
-                // Keep the venue's own error code, as TS does with `responseData.error`.
-                let detail = r
-                    .error
-                    .as_deref()
-                    .filter(|code| !code.is_empty())
-                    .or_else(|| r.errors.first().map(|e| e.message.as_str()))
-                    .map(|detail| format!(": {detail}"))
-                    .unwrap_or_default();
-                return Err(http_failure(
-                    response.status,
-                    format!("Kraken HTTP {}{detail}", response.status),
-                ));
-            }
-            if r.result != "success"
+            if !ok
+                || r.result != "success"
                 || matches!(r.status.as_deref(), Some("BAD_REQUEST" | "unauthorized"))
                 || r.error.as_ref().is_some_and(|e| !e.is_empty())
                 || !r.errors.is_empty()
             {
-                let code = r.error.clone().filter(|code| !code.is_empty());
-                let message = r
+                let code = r
                     .error
-                    .or_else(|| r.errors.first().map(|e| e.message.clone()))
-                    .unwrap_or_else(|| "Kraken rejected trading request".into());
-                return Err(refusal(message, r.status.as_deref(), code));
+                    .as_deref()
+                    .filter(|code| !code.is_empty())
+                    .or_else(|| r.errors.first().map(|e| e.message.as_str()));
+                let message = if !ok {
+                    let detail = code.map(|code| format!(": {code}")).unwrap_or_default();
+                    format!("Kraken HTTP {}{detail}", response.status)
+                } else {
+                    code.unwrap_or("Kraken rejected trading request").to_owned()
+                };
+                let code = code.or(r
+                    .status
+                    .as_deref()
+                    .filter(|status| matches!(*status, "BAD_REQUEST" | "unauthorized")));
+                return Err(classified_failure(&response, intent, code, message));
             }
             self.trading_apply(cx, request.step, request.settings_revision, r)
         });
@@ -856,6 +865,9 @@ impl Kraken {
                         && seen.insert(status.order_id.clone())
                     {
                         cancelled = true;
+                        if let Some(job) = self.trading.active.as_mut() {
+                            job.canceled_ids.push(status.order_id.clone());
+                        }
                         self.account_order_removed(cx, &status.order_id);
                     } else {
                         let message = format!(
@@ -882,7 +894,7 @@ impl Kraken {
                 if let Some(mut error) = error {
                     // Other orders in the batch were cancelled.
                     if cancelled && error.outcome == Some(Outcome::Rejected) {
-                        error.outcome = None;
+                        error.outcome = Some(Outcome::Unknown);
                     }
                     return Err(error);
                 }
@@ -984,17 +996,15 @@ impl Kraken {
                             "Kraken canceled the original protective order; replacement failed: {}",
                             error.message
                         );
-                    } else if !job.ids.is_empty() {
-                        error.message = format!(
-                            "{}; already accepted order IDs: {}",
-                            error.message,
-                            job.ids.join(",")
-                        );
                     }
-                    if (job.effective || job.amend_canceled || !job.ids.is_empty())
-                        && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-                    {
-                        error.outcome = None;
+                    let ids: Vec<_> = job
+                        .canceled_ids
+                        .into_iter()
+                        .chain(job.ids.iter().cloned())
+                        .collect();
+                    error = error.partial_ids(&ids);
+                    if job.effective || job.amend_canceled || !job.ids.is_empty() {
+                        error.outcome = Some(Outcome::Unknown);
                     }
                     cx.fail(job.command, error);
                 }
@@ -1030,55 +1040,124 @@ fn unproven(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
-/// A non-2xx answer: 408 and 5xx do not prove the venue refused it.
-fn http_failure(status: u16, message: impl Into<String>) -> VenueError {
-    let error = VenueError::new(message);
-    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
-    match status {
-        401 => rejected(error, ErrorKind::AuthInvalid),
-        403 => rejected(error, ErrorKind::AuthPermission),
-        429 => rejected(error, ErrorKind::RateLimited),
-        408 => error.outcome(Outcome::Unknown),
-        400..=499 => rejected(error, ErrorKind::Rejected),
-        _ => error.outcome(Outcome::Unknown),
-    }
-}
-
-/// A 2xx `result: error` envelope, classified by Kraken's documented error codes.
-fn refusal(message: String, status: Option<&str>, code: Option<String>) -> VenueError {
-    let error = VenueError::new(message);
-    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
-    let error = match (status, code.as_deref()) {
-        (_, Some("Server Error" | "Unavailable" | "unknownError")) => {
-            error.outcome(Outcome::Unknown)
-        }
-        (Some("unauthorized"), _) | (_, Some("authenticationError")) => {
-            rejected(error, ErrorKind::AuthInvalid)
-        }
-        (_, Some("apiLimitExceeded")) => rejected(error, ErrorKind::RateLimited),
-        (
-            _,
-            Some(
-                "accountInactive"
-                | "insufficientFunds"
-                | "invalidAccount"
-                | "invalidAmount"
-                | "invalidArgument"
-                | "invalidUnit"
-                | "marketUnavailable"
-                | "nonceBelowThreshold"
-                | "nonceDuplicate"
-                | "notFound"
-                | "requiredArgumentMissing",
-            ),
-        )
-        | (Some("BAD_REQUEST"), _) => rejected(error, ErrorKind::Rejected),
-        _ => error,
-    };
-    match code {
-        Some(code) => error.venue_code(code),
-        None => error,
-    }
+// Native error codes retain authority on non-2xx replies; the shared classifier
+// keeps transport, 408 and 5xx ahead of every native refusal.
+const ERROR_CODES: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Text("authenticationError"),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Text("unauthorized"),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Text("apiLimitExceeded"),
+            verdict: Verdict::Refused(ErrorKind::RateLimited),
+            only: None,
+        },
+        Row {
+            key: Key::Text("accountInactive"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("insufficientFunds"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("invalidAccount"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("invalidAmount"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("invalidArgument"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("invalidUnit"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("marketUnavailable"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("nonceBelowThreshold"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("nonceDuplicate"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("notFound"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("requiredArgumentMissing"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("BAD_REQUEST"),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Text("Server Error"),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Text("Unavailable"),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Text("unknownError"),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+    ],
+    success: &[Key::Text("success")],
+    unlisted: Verdict::Unknown(None),
+    status: &[
+        (400, Verdict::Refused(ErrorKind::Rejected)),
+        (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+        (403, Verdict::Refused(ErrorKind::AuthPermission)),
+        (404, Verdict::Refused(ErrorKind::Rejected)),
+        (429, Verdict::Refused(ErrorKind::RateLimited)),
+    ],
+};
+fn classified_failure(
+    response: &Response<'_>,
+    intent: Intent,
+    code: Option<&str>,
+    message: impl Into<String>,
+) -> VenueError {
+    let native = code.map(|code| Native {
+        code: NativeCode::Text(code),
+        message: code,
+    });
+    let released = Released::Response(response);
+    let verdict = classify::verdict(&ERROR_CODES, intent, released, native.as_ref());
+    classify::error(verdict, intent, released, native.as_ref(), message)
 }
 
 /// A send/edit/cancel status that is not success. Only Kraken's documented
@@ -1091,7 +1170,7 @@ fn status_failure(message: String, status: &str, edit: bool) -> VenueError {
     }
     // On an edit these cancel the resting order, possibly after fills.
     if edit && matches!(status, "postWouldExecute" | "iocWouldNotExecute") {
-        return error.venue_code(status);
+        return error.outcome(Outcome::Unknown).venue_code(status);
     }
     let refused = matches!(
         status,
@@ -1127,7 +1206,7 @@ fn status_failure(message: String, status: &str, edit: bool) -> VenueError {
             .outcome(Outcome::Rejected)
             .venue_code(status)
     } else {
-        error.venue_code(status)
+        error.outcome(Outcome::Unknown).venue_code(status)
     }
 }
 

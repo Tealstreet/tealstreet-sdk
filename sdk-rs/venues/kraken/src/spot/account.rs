@@ -46,6 +46,7 @@ pub struct Account {
     balance_flight: HashSet<u64>,
     balance_guard: StaleGuard,
     orders_flight: bool,
+    orders_reconcile: bool,
     pub provenance: HashMap<String, String>,
     pub terminal: HashSet<String>,
     terminal_fifo: VecDeque<String>,
@@ -361,11 +362,16 @@ impl KrakenSpot {
             },
         );
     }
+    pub(super) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.orders_reconcile = true;
+        self.orders_read(cx);
+    }
     fn orders_read(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.orders_flight {
             return;
         }
         self.account.orders_flight = true;
+        self.account.orders_reconcile = false;
         self.request_private(
             cx,
             "/0/private/OpenOrders",
@@ -643,6 +649,7 @@ impl KrakenSpot {
             }
         }
         if revision == self.account.revision {
+            let clean = rows.rejected() == 0;
             self.account.rearm_skips(
                 "order:",
                 rows.rejected() == 0,
@@ -659,6 +666,9 @@ impl KrakenSpot {
             self.account.provenance = provenance;
             rows.retain(|o| !self.account.terminal.contains(&o.id));
             cx.store.set_orders(rows);
+            if clean {
+                cx.orders_reconciled(None);
+            }
         }
         Ok(())
     }
@@ -674,21 +684,18 @@ impl KrakenSpot {
         let text = match result(response) {
             Ok(t) => t,
             Err(e) => {
-                if e.contains("EAPI:Invalid signature") && request.signature_retries < 1 {
+                let signature_refused = response.status != 408
+                    && response.status < 500
+                    && e.contains("EAPI:Invalid signature");
+                if signature_refused && request.signature_retries < 1 {
                     let mut r = request;
                     r.signature_retries += 1;
                     self.send_private(cx, r);
                     return;
                 }
-                // A key without trade permission still reads; only fail that write.
-                let permission_on_write = e.contains("EGeneral:Permission denied")
-                    && matches!(request.kind, Kind::Trade(_));
-                if !permission_on_write
-                    && (e.contains("EAPI:Invalid key")
-                        || e.contains("EAPI:Invalid signature")
-                        || e.contains("EGeneral:Permission denied")
-                        || matches!(response.status, 401 | 403))
-                {
+                // A status alone is not permanent account evidence. Only the exhausted
+                // definitive signature refusal retains the existing terminal policy.
+                if signature_refused && request.signature_retries == 1 {
                     self.reject_auth(cx, &e);
                 }
                 let error = super::trading::write_failure(response.status, response.body, e);
@@ -709,7 +716,11 @@ impl KrakenSpot {
             }
             Kind::Orders { revision } => {
                 self.account.orders_flight = false;
-                self.orders_response(cx, text, *revision)
+                let result = self.orders_response(cx, text, *revision);
+                if self.account.orders_reconcile {
+                    self.orders_read(cx);
+                }
+                result
             }
             Kind::Token { epoch } => {
                 if cx.socket_epoch(epoch.feed()) != Some(*epoch)
@@ -790,7 +801,12 @@ impl KrakenSpot {
                 Kind::Balance { revision } => {
                     self.account.balance_flight.remove(&revision);
                 }
-                Kind::Orders { .. } => self.account.orders_flight = false,
+                Kind::Orders { .. } => {
+                    self.account.orders_flight = false;
+                    if self.account.orders_reconcile {
+                        self.orders_read(cx);
+                    }
+                }
                 Kind::Token { epoch } => {
                     cx.retire_socket(
                         epoch.feed(),
