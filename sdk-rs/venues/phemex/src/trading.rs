@@ -86,6 +86,7 @@ fn serial_call() -> SerialCall {
         operation: Operation::Mutation,
         timeout_ms: 20_000,
         attempts: 1,
+        pacing: None,
     }
 }
 const REFUSALS: CodeTable = CodeTable {
@@ -186,6 +187,20 @@ struct Envelope {
     msg: String,
     #[serde(default)]
     data: Option<Box<RawValue>>,
+}
+
+pub(crate) fn unproven_diagnostics(
+    response: Response<'_>,
+    evidence: &mut safe_cex_engine::request_context::UnprovenEvidence,
+) {
+    if let Ok(envelope) = serde_json::from_str::<crate::wire::Envelope<'_>>(response.body) {
+        if let Some(code) = envelope.code {
+            evidence.venue_code(&code.to_string());
+        }
+        if !envelope.msg.is_empty() {
+            evidence.venue_message(&envelope.msg);
+        }
+    }
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1596,6 +1611,10 @@ impl PhemexPerpetuals {
         let mut resolved = false;
         let mut refusal_code = None;
         let mut known_effects = false;
+        let http_failure = (!(200..300).contains(&response.status))
+            .then(|| serde_json::from_str::<crate::wire::Envelope<'_>>(response.body).ok())
+            .flatten();
+        let mut classified_http_error = None;
         let result = (|| {
             if !(200..300).contains(&response.status) {
                 return Err(format!("HTTP {}: {}", response.status, response.body));
@@ -1803,7 +1822,13 @@ impl PhemexPerpetuals {
                         .map_or_else(Vec::new, |job| job.ids[before_ids..].to_vec()),
                 },
                 Err(message) => {
-                    let native = refusal_code.map(|code| Native { code, message: "" });
+                    let native = http_failure
+                        .as_ref()
+                        .map(|envelope| Native {
+                            code: envelope.code.map_or(NativeCode::None, NativeCode::Int),
+                            message: &envelope.msg,
+                        })
+                        .or_else(|| refusal_code.map(|code| Native { code, message: "" }));
                     let fact = match cx.classify_write(
                         context,
                         &REFUSALS,
@@ -1822,6 +1847,9 @@ impl PhemexPerpetuals {
                             return;
                         }
                     };
+                    if !(200..300).contains(&response.status) {
+                        classified_http_error = Some(fact.error().clone());
+                    }
                     WriteFact::Failed {
                         fact,
                         known_effects,
@@ -1876,6 +1904,10 @@ impl PhemexPerpetuals {
                 }
             }
             Err(error) => {
+                if let Some(error) = classified_http_error {
+                    self.finish_failed_trade(cx, request, error, true);
+                    return;
+                }
                 let outcome = if resolved {
                     Outcome::Rejected
                 } else {

@@ -2132,6 +2132,7 @@ fn serial(step: &Step) -> SerialCall {
         timeout_ms: CALL_MS,
         // A write's one -1022 RefusedResend.
         attempts: if read { 1 } else { 2 },
+        pacing: None,
     }
 }
 fn census(symbol: &str) -> Step {
