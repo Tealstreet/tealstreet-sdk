@@ -9725,3 +9725,14 @@ zero-gap group. Legs are stamped from the call, not the root. Existing adopters
 pass `None` and are unchanged. Serial is deliberately stricter than Background:
 a non-member serial Read naming a positive-gap domain pacing is Invalid, while a
 Background Read naming it is admitted and kept out of the FIFO.
+
+### Phemex credentialed smoke sizing
+
+The manual JS/WASM smoke runner reads the explicit monetary minimum
+`minOrderValueRv`, base-quantity step `qtyStepSize` and maximum `maxOrderQtyRq`
+from the matching listed PerpetualV2 row in `/public/products`. Quote and
+settlement must match the selected market; missing, malformed, duplicate,
+nonlinear or superseded limits refuse. It does not infer zero from quantity
+steps. The existing $100 notional cap, post-only placement, empty-account
+preconditions and independent cleanup readback remain unchanged. This enables
+only the credentialed test harness; production order sizing is unchanged.

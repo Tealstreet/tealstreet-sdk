@@ -17,6 +17,8 @@ const filters = [
 const fixtures = [
   ['binance', 'binance', market,
     http('https://demo-fapi.binance.com/fapi/v1/exchangeInfo', { symbols: [{ symbol: 'BTCUSDT', filters }] }), 5, 0.001, 0.001, 1],
+  ['phemex', 'phemex', market,
+    http('https://api.phemex.com/public/products', { code: 0, data: { perpProductsV2: [{ symbol: 'BTCUSDT', type: 'PerpetualV2', status: 'Listed', quoteCurrency: 'USDT', settleCurrency: 'USDT', minOrderValueRv: '1', qtyStepSize: '0.001', maxOrderQtyRq: '1000' }] } }), 1, 0.001, 0.001, 1],
   ['binancespot', 'binancespot', market,
     http('https://testnet.binance.vision/api/v3/exchangeInfo', { symbols: [{ symbol: 'BTCUSDT', filters: [
       { filterType: 'LOT_SIZE', minQty: '0.001', maxQty: '100', stepSize: '0.001' },
@@ -85,7 +87,7 @@ for (const [family, venue, selected, record, notional, minimum, step, scale] of 
 }
 
 test('coverage census includes every enabled rule family, unsupported names fail closed', () => {
-  assert.equal(fixtures.length, 22);
+  assert.equal(fixtures.length, 23);
   assert.deepEqual([...new Set(fixtures.map(([family]) => family))].sort(), Object.keys(LIVE_SMOKE_RULE_SOURCES).sort());
   for (const venue of [...Object.keys(LIVE_SMOKE_UNKNOWN_RULES), 'future-unknown-venue'])
     assert.deepEqual(venueMarketRules(venue, fixtures.map((fixture) => fixture[3]), market), { notionalKnown: false, minNotional: 0 });
@@ -93,11 +95,11 @@ test('coverage census includes every enabled rule family, unsupported names fail
 
 test('absent monetary fields do not infer zero from a plausible minimum quantity', () => {
   for (const [family, venue, selected, record] of fixtures.filter(([family]) =>
-    ['binance', 'binancespot', 'asterdex', 'bybit', 'bitget', 'bitrue', 'bingx', 'orderly', 'woo', 'lighter', 'paradex', 'coinbase'].includes(family))) {
+    ['binance', 'binancespot', 'phemex', 'asterdex', 'bybit', 'bitget', 'bitrue', 'bingx', 'orderly', 'woo', 'lighter', 'paradex', 'coinbase'].includes(family))) {
     const remove = (value) => {
       if (!value || typeof value !== 'object') return;
       for (const key of Object.keys(value)) {
-        if (['minNotionalValue', 'minOrderAmt', 'minTradeUSDT', 'minOrderMoney', 'tradeMinUSDT', 'min_notional', 'min_quote_amount', 'quote_min_size', 'notional', 'minNotional'].includes(key)) delete value[key];
+        if (['minOrderValueRv', 'minNotionalValue', 'minOrderAmt', 'minTradeUSDT', 'minOrderMoney', 'tradeMinUSDT', 'min_notional', 'min_quote_amount', 'quote_min_size', 'notional', 'minNotional'].includes(key)) delete value[key];
         else remove(value[key]);
       }
     };
