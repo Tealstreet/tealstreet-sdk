@@ -59,6 +59,14 @@ pub const HYPERLIQUID_AGENT: NonceDomain = NonceDomain {
     limit: (1 << 53) - 1,
 };
 
+/// Aster V3 uses calibrated whole milliseconds scaled to microseconds.
+#[cfg(feature = "address-nonce")]
+pub const ASTERDEX_V3: NonceDomain = NonceDomain {
+    name: "asterdex-v3",
+    floor: NonceFloor::ProtocolMs { scale: 1000 },
+    limit: u64::MAX,
+};
+
 /// Kraken Spot and Futures share a counter for the same trusted stable subject.
 pub const KRAKEN: NonceDomain = NonceDomain {
     name: "kraken",

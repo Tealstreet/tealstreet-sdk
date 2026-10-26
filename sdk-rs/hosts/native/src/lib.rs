@@ -174,6 +174,17 @@ impl<V: Venue, T: Transport> Host<V, T> {
         self.engine.sign_meta(task)
     }
 
+    #[cfg(feature = "address-nonce")]
+    pub fn initialize_address_setup(
+        &mut self,
+    ) -> Result<safe_cex_engine::AddressSetupProgress, VenueError> {
+        self.engine.initialize_address_nonce((self.clock)())
+    }
+    #[cfg(feature = "address-nonce")]
+    pub fn poll_address_setup(&mut self, cx: &mut std::task::Context<'_>) -> bool {
+        self.engine.poll_address_setup((self.clock)(), cx);
+        self.engine.address_nonce_setup_ready()
+    }
     pub fn event_sender(&self) -> Events {
         self.events.clone()
     }
@@ -210,6 +221,13 @@ impl<V: Venue, T: Transport> Host<V, T> {
         }
         self.stop();
         self.report_terminal(&mut on_notice);
+        #[cfg(feature = "address-nonce")]
+        if self.engine.take_address_setup_cleanup().await.is_err() {
+            on_notice(Notice::StartupFailed {
+                error: VenueError::new("Address setup cleanup failed")
+                    .kind(safe_cex_engine::ErrorKind::Internal),
+            });
+        }
         self.engine
     }
 
@@ -410,6 +428,14 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 }
                 Action::SignedOutbound { .. } => {
                     unreachable!("engine drain unwraps signed outbound")
+                }
+                Action::RetireAddressSetup { .. } => {
+                    self.terminal = Some(
+                        VenueError::new("Unsupported external address setup retirement")
+                            .kind(safe_cex_engine::ErrorKind::Internal),
+                    );
+                    self.stop();
+                    return false;
                 }
                 Action::Sign {
                     attempt,

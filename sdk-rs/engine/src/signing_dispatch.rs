@@ -159,6 +159,17 @@ pub(crate) struct Pending {
     pub(crate) nonce_repairs: u8,
 }
 impl Pending {
+    #[cfg(feature = "address-nonce")]
+    pub(crate) fn nonce_identity_current(&self, identities: &crate::signing::Identities) -> bool {
+        self.nonce_claim.as_ref().is_none_or(|claim| {
+            let identity = match claim.selection.slot() {
+                crate::CredentialSlot::Primary => identities.primary.as_ref(),
+                crate::CredentialSlot::Secondary => identities.secondary.as_ref(),
+            };
+            identity.is_some_and(|identity| claim.matches_identity(identity))
+        })
+    }
+
     #[cfg(all(test, feature = "dispatch-nonce"))]
     pub(crate) fn install_test_nonce_claim(&mut self, authority: Arc<ClaimAuthority>) {
         self.nonce_claim = Some(authority);
@@ -539,6 +550,10 @@ impl Dispatch {
         identities: &crate::signing::Identities,
     ) -> Result<SignRequest, SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
+        #[cfg(feature = "address-nonce")]
+        if !p.nonce_identity_current(identities) {
+            return Err(SignError::InvalidRequest);
+        }
         if !now.is_finite() || now >= p.deadline {
             return Err(SignError::TimedOut);
         }

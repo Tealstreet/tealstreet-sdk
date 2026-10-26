@@ -14,6 +14,33 @@ changed only this document and its index row; the subsequent original target
 adds no runtime, Cargo, provider, host, consumer or inventory change. Source
 activation, push, CI and shipping size results remain separate gates.
 
+## Source implementation checkpoint
+
+The overseer authorized immediate source implementation and PR review instead
+of further API-plan round trips. Freeze the owned-execution contract: separate
+valid result and actual cleanup join, dormant factory, original promises observed
+before start, 20s task bound, explicit joined reinitialization, unconditional
+provider defaults and Arc-wrapped one-shot retirement. This supersedes the earlier
+plan text requiring another direction round before source. Source, tests and
+shipping evidence are reviewed on the PR; hosted activation still requires the
+actual shared peer/resource proof.
+
+The source adds the engine-owned setup table, private slot/ref/domain/issuer
+bindings and readonly identities, address claim minting on the existing counter,
+typed selection errors, LocalSigner owned PublicAddress execution, the typed
+Managed/Session/Setup metadata union and business-byte-preserving serialization,
+and negotiated host initialization/retirement entry points. It enables no venue.
+The hosted-envelope owner implements the ONE peer extension: publicAddressOwned,
+a distinct setup-joined acknowledgement correlated to original id/task/setup
+generation/authenticated slot and binding incarnation, maximum2 retained owners
+per account. Responses, errors, disconnects and reconnects never prove join.
+
+The new host's unsupported retirement action disposes explicitly. Other unknown
+actions keep their tested batch-tail behavior. New host export presence never
+negotiates support. Existing business host metadata stays closed until its owner
+composes the separately reviewed setup factory/transport; no old host receives
+setup work without explicit trusted support negotiation.
+
 ## Existing authority and the precise extension
 
 The #2093 dispatcher already reserves once during an eligible recipe prepare,

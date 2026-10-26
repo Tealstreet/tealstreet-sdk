@@ -425,6 +425,11 @@ export interface WasmEngineLike {
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
   signingPending?(attempt: number): boolean;
+  /** Trusted pre-start negotiation; absent on builds without address-nonce. */
+  setAddressSetupSupport?(protocol: 'publicAddressOwned'): void;
+  initializeAddressSetup?(now: number, reinitialize: boolean): string;
+  addressSetupReady?(): boolean;
+  addressSetupRetired?(token: string, now: number): string;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;

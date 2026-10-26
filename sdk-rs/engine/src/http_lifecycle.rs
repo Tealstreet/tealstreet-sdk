@@ -1574,7 +1574,12 @@ impl<V: Venue> Engine<V> {
     /// role was captured at admission. Descriptive only: it grants nothing.
     #[cfg(feature = "sign-meta")]
     pub fn sign_meta(&self, task: RequestId) -> Option<crate::sign_meta::SignMeta> {
-        use crate::sign_meta::{SignMeta, SignOwner};
+        #[cfg(feature = "address-nonce")]
+        if let Some(meta) = self.io.core.address_setup.current_meta(task) {
+            debug_assert!(self.io.core.signing.prepared_task(task).is_none());
+            return Some(meta);
+        }
+        use crate::sign_meta::{SignKind, SignMeta};
         let (request, deadline_ms) = self.io.core.signing.prepared_task(task)?;
         let managed = self.io.core.managed_http.get(&request)?;
         if managed.signing_attempt != Some(task) {
@@ -1583,22 +1588,26 @@ impl<V: Venue> Engine<V> {
         let role = managed.role?;
         let context = managed.lifecycle.context();
         let slot = context.credential()?.slot;
-        let owner = match context.owner() {
-            Owner::Session { generation } => SignOwner::Session { generation },
+        let kind = match context.owner() {
+            Owner::Session { generation } => SignKind::Session {
+                generation,
+                slot,
+                role,
+            },
             _ => {
                 let attempt = managed.lifecycle.attempt();
-                SignOwner::Managed {
+                SignKind::Managed {
                     request: attempt.request,
                     generation: attempt.generation,
+                    slot,
+                    role,
                 }
             }
         };
         Some(SignMeta {
             task,
-            owner,
             deadline_ms,
-            slot,
-            role,
+            kind,
         })
     }
 
@@ -1985,6 +1994,20 @@ impl<V: Venue> Engine<V> {
             return Err(Error::Revoked);
         }
         let preparation = managed.lifecycle.preparation();
+        #[cfg(feature = "address-nonce")]
+        if managed
+            .recipe
+            .as_ref()
+            .is_some_and(|recipe| !recipe.nonce_identity_current(&self.io.core.identities))
+        {
+            self.http_preparation_failed(
+                now,
+                preparation,
+                Error::Revoked,
+                crate::signing::SignError::InvalidRequest.venue_error(),
+            );
+            return Err(Error::Revoked);
+        }
         if let Err(error) = managed.validate_send(&self.io.core.request_contexts, now) {
             self.http_preparation_failed(
                 now,

@@ -316,6 +316,9 @@ pub struct Identity {
     /// setup policy, never transported: a serialized copy loses it.
     #[serde(skip)]
     signing_not_configured: bool,
+    #[cfg(feature = "address-nonce")]
+    #[serde(skip)]
+    pub(crate) address: crate::engine::address_nonce_setup::AddressCapability,
 }
 impl Identity {
     #[inline]
@@ -327,6 +330,8 @@ impl Identity {
             stable_id: None,
             extra: Default::default(),
             signing_not_configured: false,
+            #[cfg(feature = "address-nonce")]
+            address: Default::default(),
         }
     }
 
@@ -369,6 +374,10 @@ impl Identity {
     #[inline]
     pub fn set_signing_ref(&mut self, signing: Option<KeyRef>) {
         self.signing = signing;
+        #[cfg(feature = "address-nonce")]
+        {
+            self.address = Default::default();
+        }
     }
 
     pub fn require_stable_id(&self) -> Result<&str, SignError> {
@@ -887,7 +896,39 @@ pub trait ProviderBounds {}
 impl<T> ProviderBounds for T {}
 /// Host-injected signing. Providers own secrets and may complete asynchronously.
 /// Hosts enforce cancellation/timeout independently of this future settling.
+/// An execution whose join includes all owned work and cleanup, not a timeout wrapper.
+pub trait OwnedSetupExecution: SetupExecutionBounds {
+    fn start(&mut self) -> Result<(), SignError>;
+    fn cancel(&mut self) -> Result<(), SignError>;
+    fn poll_result(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<SignResult, SignError>>;
+    fn poll_joined(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), SignError>>;
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub trait SetupExecutionBounds: Send {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + ?Sized> SetupExecutionBounds for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait SetupExecutionBounds {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> SetupExecutionBounds for T {}
+
 pub trait Signer: ProviderBounds {
+    fn owned_public_address_capability(&self) -> Capability {
+        Capability::Unsupported
+    }
+    fn create_public_address_setup(
+        &self,
+        _request: SignRequest,
+    ) -> Option<Box<dyn OwnedSetupExecution>> {
+        None
+    }
+
     fn sign(&self, request: SignRequest) -> SignFuture;
     /// True only when sign_ready always completes inline (normal local provider).
     fn immediate(&self) -> bool {
@@ -965,6 +1006,8 @@ mod setup_field_policy_tests {
             stable_id: None,
             extra: Default::default(),
             signing_not_configured: false,
+            #[cfg(feature = "address-nonce")]
+            address: Default::default(),
         }
     }
 
@@ -1017,6 +1060,8 @@ mod setup_field_policy_tests {
                 stable_id: None,
                 extra: Default::default(),
                 signing_not_configured: false,
+                #[cfg(feature = "address-nonce")]
+                address: Default::default(),
             }),
             secondary: Some(identity("secondary", None)),
         };
@@ -1035,6 +1080,8 @@ mod setup_field_policy_tests {
                 stable_id: None,
                 extra: Default::default(),
                 signing_not_configured: false,
+                #[cfg(feature = "address-nonce")]
+                address: Default::default(),
             }),
         };
         let original = ids.clone();

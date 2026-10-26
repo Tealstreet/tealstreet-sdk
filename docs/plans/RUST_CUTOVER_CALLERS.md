@@ -9206,3 +9206,23 @@ primary/read aliases retain their behavior. A native-versus-new original must
 pin both refusals before consumer source closes this gate. This is a recorded
 ruling, not an implemented or activated path. The generic nonce mint accepts
 no configured address and has no mismatch exception.
+
+
+### Address setup source: owned completion and claim-free access
+
+The address-nonce feature is opt-in and enables no venue in this PR. Setup accepts
+an exact PublicAddress result only after the original provider work and cleanup
+join within its frozen20s bound. Timeout/abort wrappers and remote responses alone
+cannot install a signer or unblock replacement. Missing owned-provider/host support
+refuses the address-dependent path before allocating a task, without an auth latch;
+public and claim-free work continue. An explicit pre-start reinitialization waits
+for true old-owner retirement, with no automatic retry. Both results and cleanup
+are retained across timeout and provider replacement.
+
+The shared address carrier also supports a claim-free consumer: GRVT can request
+the actual installed signer's address without declaring a nonce domain. This
+source adopts no GRVT request and changes no configured signer policy. Consumer
+adoption pins its warning-only option and exact actual signer before CreateOrder.
+Aster separately pins typed per-slot mismatch refusal and cold-instance replacement;
+HL separately accounts for its legacy prepared/released work. No nonce counter is
+reset and no possibly-sent mutation is replayed by setup or retirement.

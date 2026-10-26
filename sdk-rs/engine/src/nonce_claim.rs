@@ -23,16 +23,26 @@ pub(crate) struct ClaimAuthority {
     pub(crate) credential: Credential,
     pub(crate) signing: KeyRef,
     bound: AtomicBool,
+    #[cfg(feature = "address-nonce")]
+    address: Option<crate::engine::address_nonce_setup::VerifiedAddress>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NonceSelectionError {
     MissingCredential,
     InvalidSubject,
+    MissingSigningKey,
+    SigningNotConfigured,
+    SetupCapability(SignError),
 }
 impl NonceSelectionError {
     pub fn sign_error(self) -> SignError {
-        SignError::InvalidRequest
+        match self {
+            Self::MissingSigningKey => SignError::MissingKey,
+            Self::SigningNotConfigured => SignError::SigningNotConfigured,
+            Self::SetupCapability(error) => error,
+            Self::MissingCredential | Self::InvalidSubject => SignError::InvalidRequest,
+        }
     }
 }
 
@@ -47,16 +57,48 @@ impl NonceClaim {
         selection: Selection,
         identity: &Identity,
     ) -> Result<Self, NonceSelectionError> {
+        let address_domain = *domain != super::KRAKEN;
+        if address_domain {
+            identity.signing_ref().map_err(|error| match error {
+                SignError::SigningNotConfigured => NonceSelectionError::SigningNotConfigured,
+                _ => NonceSelectionError::MissingSigningKey,
+            })?;
+        }
         identity
             .validate()
             .map_err(|_| NonceSelectionError::InvalidSubject)?;
-        let stable = identity
-            .require_stable_id()
-            .map_err(|_| NonceSelectionError::InvalidSubject)?;
+        #[cfg(feature = "address-nonce")]
+        let address = if address_domain {
+            Some(
+                identity
+                    .address
+                    .verified(identity, selection.slot(), Some(domain))?,
+            )
+        } else {
+            None
+        };
+        let subject = if address_domain {
+            #[cfg(feature = "address-nonce")]
+            {
+                super::NonceKey::ethereum_address(&address.as_ref().unwrap().hex())
+            }
+            #[cfg(not(feature = "address-nonce"))]
+            {
+                return Err(NonceSelectionError::InvalidSubject);
+            }
+        } else {
+            NonceKey::stable_id(
+                identity
+                    .require_stable_id()
+                    .map_err(|_| NonceSelectionError::InvalidSubject)?,
+            )
+        };
         Ok(Self {
             authority: Arc::new(ClaimAuthority {
                 domain,
-                subject: NonceSubject(NonceKey::stable_id(stable)),
+                subject: NonceSubject(subject),
+                #[cfg(feature = "address-nonce")]
+                address,
                 selection,
                 credential: selection.credential(identity.credential.clone()),
                 signing: identity
@@ -78,12 +120,22 @@ pub(crate) struct NonceReservation {
 }
 impl ClaimAuthority {
     pub(crate) fn matches_identity(&self, identity: &Identity) -> bool {
-        identity.validate().is_ok()
-            && self.credential.reference == identity.credential
-            && identity.signing_ref().is_ok_and(|key| *key == self.signing)
-            && identity
-                .require_stable_id()
-                .is_ok_and(|id| self.subject.0 == NonceKey::stable_id(id))
+        if identity.validate().is_err()
+            || self.credential.reference != identity.credential
+            || !identity.signing_ref().is_ok_and(|key| *key == self.signing)
+        {
+            return false;
+        }
+        #[cfg(feature = "address-nonce")]
+        if let Some(address) = &self.address {
+            return identity
+                .address
+                .verified(identity, self.selection.slot(), Some(self.domain))
+                .is_ok_and(|current| current == *address);
+        }
+        identity
+            .require_stable_id()
+            .is_ok_and(|id| self.subject.0 == NonceKey::stable_id(id))
     }
 
     pub(crate) fn bind_once(&self) -> Result<(), SignError> {
