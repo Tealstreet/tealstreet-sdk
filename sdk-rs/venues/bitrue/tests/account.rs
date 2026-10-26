@@ -541,6 +541,7 @@ fn conditional_type_and_atomic_attached_children_preserve_native_identity() {
 fn fetch_leverage_reads_account_metadata_without_any_order_or_leverage_probe() {
     let mut h = Harness::new();
     h.seed();
+    h.now = 1.0;
     h.e.handle(
         1.0,
         Event::Command(Command::FetchLeverage {
@@ -550,6 +551,7 @@ fn fetch_leverage_reads_account_metadata_without_any_order_or_leverage_probe() {
     );
     h.collect();
     h.reply("/account", POSITION);
+    h.fire_at(h.now);
     assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command,result})if *command==88&&result.contains("\"buyLeverage\":25.0"))));
     assert!(h.pending.iter().all(|r| r.method == Method::Get));
 }
@@ -1274,6 +1276,7 @@ fn shared_leverage_snapshot_failures_report_each_owner_before_done_without_broad
         } else {
             exhaust_snapshot_transport(&mut h, snapshot);
         }
+        h.fire_at(h.now);
         let expected = if malformed {
             "Malformed Bitrue account snapshot; retaining previous state"
         } else {
@@ -1352,6 +1355,13 @@ fn exhaust_snapshot_transport(h: &mut Harness, mut snapshot: HttpRequest) {
     }
 }
 
+fn drain<V: safe_cex_engine::Venue>(
+    engine: &mut Engine<V>,
+    now: f64,
+) -> std::vec::IntoIter<Action> {
+    safe_cex_engine::test_support::prepared_actions(engine, now).into_iter()
+}
+
 // Drive the actual account loop through slow/fast updates, a parked stale callback,
 // and a resumed read. Other timers are deliberately not fired.
 fn policy_poll_read<V: safe_cex_engine::Venue>(
@@ -1360,15 +1370,14 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     endpoint: &str,
 ) -> (f64, Vec<safe_cex_engine::HttpRequest>) {
     use safe_cex_engine::{Action, Event};
-    engine.drain_actions().for_each(drop);
+    drain(engine, now).for_each(drop);
     engine.handle(
         now,
         Event::PollScaleChanged {
             scale: 60_000.0 / POLL_MS,
         },
     );
-    let slow: Vec<_> = engine
-        .drain_actions()
+    let slow: Vec<_> = drain(engine, now)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             Action::Http(_) => panic!("policy updates must not issue account reads"),
@@ -1383,8 +1392,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             scale: 1_500.0 / POLL_MS,
         },
     );
-    let fast: Vec<_> = engine
-        .drain_actions()
+    let fast: Vec<_> = drain(engine, now + 1.0)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -1398,7 +1406,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             scale: f64::INFINITY,
         },
     );
-    let paused: Vec<_> = engine.drain_actions().collect();
+    let paused: Vec<_> = drain(engine, now + 2.0).collect();
     assert!(
         paused
             .iter()
@@ -1406,15 +1414,14 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
     );
     assert!(!paused.iter().any(|a| matches!(a, Action::SetTimer { .. })));
     engine.handle(now + 1_501.0, Event::TimerFired { timer: fast[0].0 });
-    assert!(!engine.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert!(!drain(engine, now + 1_501.0).any(|a| matches!(a, Action::Http(_))));
     engine.handle(
         now + 90_000.0,
         Event::PollScaleChanged {
             scale: 1_500.0 / POLL_MS,
         },
     );
-    let resumed: Vec<_> = engine
-        .drain_actions()
+    let resumed: Vec<_> = drain(engine, now + 90_000.0)
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -1428,8 +1435,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = drain(engine, now + 91_500.0)
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -1446,11 +1452,7 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             scale: f64::INFINITY,
         },
     );
-    assert!(
-        !engine
-            .drain_actions()
-            .any(|a| matches!(a, Action::SetTimer { .. }))
-    );
+    assert!(!drain(engine, completed_at).any(|a| matches!(a, Action::SetTimer { .. })));
     (completed_at, reads)
 }
 
@@ -1461,15 +1463,14 @@ fn policy_poll_after_completion<V: safe_cex_engine::Venue>(
     use safe_cex_engine::{Action, Event};
     // A response may schedule an ordinary repair/deadline, but the parked poll
     // itself must still be registered and adopt this newest policy.
-    engine.drain_actions().for_each(drop);
+    drain(engine, now).for_each(drop);
     engine.handle(
         now,
         Event::PollScaleChanged {
             scale: 30_000.0 / POLL_MS,
         },
     );
-    let times: Vec<_> = engine
-        .drain_actions()
+    let times: Vec<_> = drain(engine, now)
         .filter_map(|a| match a {
             Action::SetTimer { at_ms, .. } => Some(at_ms),
             _ => None,
@@ -1502,8 +1503,7 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
                 },
             );
         }
-        reads = engine
-            .drain_actions()
+        reads = drain(engine, now)
             .filter_map(|a| match a {
                 safe_cex_engine::Action::Http(r) => Some(r),
                 _ => None,

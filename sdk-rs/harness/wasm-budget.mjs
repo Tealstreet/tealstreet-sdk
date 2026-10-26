@@ -9,12 +9,11 @@ import { parseArgs } from 'node:util';
 // total package size; overseer 2026-10-21 raised it to 13.5 MiB for the Bitunix family.
 export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_155_776 });
 // Bitget history Read custody: CI family size rounded up to KiB (overseer ceiling 1448 KiB).
-// AsterDEX: overseer ruling 2026-10-26, 1424 KiB for managed trade plans (funnel slice 3), about half
-// of it engine plan machinery. Follow-up (claude-19pt8s): the venue opt-s lever, CPU gate passing; if it
-// wins, lower this to the new measured value plus 4 KiB. It can only go down.
+// AsterDEX: the venue crate at opt-level "s" (#2178) measured 1,326,024 in CI. Per the overseer's
+// ruling the cap is that plus 4 KiB, below the shared venue budget. It can only go down.
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
 // Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_479_680, bitgetusdc: 1_479_680, bybit: 1_445_888, asterdex: 1_458_176 });
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_479_680, bitgetusdc: 1_479_680, bybit: 1_445_888, asterdex: 1_330_120 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {

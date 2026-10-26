@@ -75,7 +75,7 @@ fn unsigned(input: &str) -> Result<U256, String> {
     U256::from_str_radix(digits, radix).map_err(|_| "Invalid Paradex field value".into())
 }
 
-fn felt(input: &str) -> Result<Felt, String> {
+pub(crate) fn felt(input: &str) -> Result<Felt, String> {
     let number = unsigned(input)?;
     if number >= U256::from_str_radix(FIELD_PRIME, 16).expect("field prime") {
         return Err("Paradex field value is out of range".into());
@@ -92,7 +92,7 @@ fn secret(input: &str) -> Result<Felt, String> {
     Ok(Felt::from_bytes_be(&value.to_be_bytes()))
 }
 
-fn chain_id(input: &str) -> Result<Felt, String> {
+pub(crate) fn chain_id(input: &str) -> Result<Felt, String> {
     let value = if input.starts_with("0x")
         || input.starts_with("0X")
         || input.bytes().all(|b| b.is_ascii_digit())
@@ -178,20 +178,7 @@ impl Credentials {
     }
 
     fn signature(&self, definition: &str, values: &[Felt]) -> Result<String, String> {
-        let mut fields = vec![selector(definition).map_err(|_| "Invalid Paradex signing type")?];
-        fields.extend_from_slice(values);
-        let domain = hash_elements(&[
-            selector("StarkNetDomain(name:felt,chainId:felt,version:felt)").expect("ASCII type"),
-            short_string("Paradex").expect("short string"),
-            self.chain_id,
-            Felt::ONE,
-        ]);
-        let hash = hash_elements(&[
-            short_string("StarkNet Message").expect("short string"),
-            domain,
-            self.address_felt,
-            hash_elements(&fields),
-        ]);
+        let hash = typed_hash(self.chain_id, self.address_felt, definition, values)?;
         let Some(key) = self.key.as_ref() else {
             return Ok(format!("{hash:#x}"));
         };
@@ -209,16 +196,7 @@ impl Credentials {
         let expiration = timestamp
             .checked_add(300)
             .ok_or("Invalid Paradex auth timestamp")?;
-        let signature = self.signature(
-            "Request(method:felt,path:felt,body:felt,timestamp:felt,expiration:felt)",
-            &[
-                short_string("POST").expect("short string"),
-                short_string("/v1/auth").expect("short string"),
-                Felt::ZERO,
-                Felt::from(timestamp),
-                Felt::from(expiration),
-            ],
-        )?;
+        let signature = self.signature(AUTH_TYPE, &auth_values(timestamp, expiration))?;
         Ok(AuthSignature {
             signature,
             timestamp,
@@ -275,37 +253,9 @@ impl Credentials {
         price: Option<&str>,
         id: Option<&str>,
     ) -> Result<OrderSignature, String> {
-        let side = match side {
-            "BUY" => Felt::ONE,
-            "SELL" => Felt::TWO,
-            _ => return Err("Invalid Paradex order side".into()),
-        };
-        let size = quantum(size)?;
-        let price = if order_type == "MARKET" || price.is_none_or(str::is_empty) {
-            "0".into()
-        } else {
-            quantum(price.expect("price is present"))?
-        };
-        let mut values = [
-            Felt::from(now_ms),
-            word(market)?,
-            side,
-            word(order_type)?,
-            felt(&size)?,
-            felt(&price)?,
-            Felt::ZERO,
-        ];
-        if let Some(id) = id {
-            values[6] = word(id)?;
-        }
-        let signature = self.signature(
-            if id.is_some() {
-                "ModifyOrder(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt,id:felt)"
-            } else {
-                "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)"
-            },
-            &values[..if id.is_some() { 7 } else { 6 }],
-        )?;
+        let (definition, values, len) =
+            order_values(now_ms, market, side, order_type, size, price, id)?;
+        let signature = self.signature(definition, &values[..len])?;
         Ok(OrderSignature {
             signature,
             signature_timestamp: now_ms,
@@ -313,7 +263,89 @@ impl Credentials {
     }
 }
 
-fn word(input: &str) -> Result<Felt, String> {
+pub(crate) const AUTH_TYPE: &str =
+    "Request(method:felt,path:felt,body:felt,timestamp:felt,expiration:felt)";
+
+pub(crate) fn auth_values(timestamp: u64, expiration: u64) -> [Felt; 5] {
+    [
+        short_string("POST").expect("short string"),
+        short_string("/v1/auth").expect("short string"),
+        Felt::ZERO,
+        Felt::from(timestamp),
+        Felt::from(expiration),
+    ]
+}
+
+/// The native order/amendment preimage: one definition for local signing and
+/// hosted descriptors, so both hash exactly the same fields.
+pub(crate) fn order_values(
+    now_ms: u64,
+    market: &str,
+    side: &str,
+    order_type: &str,
+    size: &str,
+    price: Option<&str>,
+    id: Option<&str>,
+) -> Result<(&'static str, [Felt; 7], usize), String> {
+    let side = match side {
+        "BUY" => Felt::ONE,
+        "SELL" => Felt::TWO,
+        _ => return Err("Invalid Paradex order side".into()),
+    };
+    let size = quantum(size)?;
+    let price = if order_type == "MARKET" || price.is_none_or(str::is_empty) {
+        "0".into()
+    } else {
+        quantum(price.expect("price is present"))?
+    };
+    let mut values = [
+        Felt::from(now_ms),
+        word(market)?,
+        side,
+        word(order_type)?,
+        felt(&size)?,
+        felt(&price)?,
+        Felt::ZERO,
+    ];
+    let (definition, len) = if let Some(id) = id {
+        values[6] = word(id)?;
+        (
+            "ModifyOrder(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt,id:felt)",
+            7,
+        )
+    } else {
+        (
+            "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)",
+            6,
+        )
+    };
+    Ok((definition, values, len))
+}
+
+/// The Paradex StarkNet typed-data message hash over `values`.
+pub(crate) fn typed_hash(
+    chain_id: Felt,
+    account: Felt,
+    definition: &str,
+    values: &[Felt],
+) -> Result<Felt, String> {
+    let mut fields = vec![selector(definition).map_err(|_| "Invalid Paradex signing type")?];
+    fields.extend_from_slice(values);
+    let domain = hash_elements(&[
+        selector("StarkNetDomain(name:felt,chainId:felt,version:felt)").expect("ASCII type"),
+        short_string("Paradex").expect("short string"),
+        chain_id,
+        Felt::ONE,
+    ]);
+    Ok(hash_elements(&[
+        short_string("StarkNet Message").expect("short string"),
+        domain,
+        account,
+        hash_elements(&fields),
+    ]))
+}
+
+pub(crate) fn word(input: &str) -> Result<Felt, String> {
     if input.is_empty() {
         return Ok(Felt::ZERO);
     }

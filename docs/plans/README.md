@@ -396,6 +396,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Receipt-bound stamp floor | Focused gates/reviews clear; full CI pending | Before monotonic per-request signature or transport reissues; floor grants no resend authority. | [RUST_STAMP_FLOOR.md](RUST_STAMP_FLOOR.md) |
 
 | Bitrue dispatch signing | Production candidate; original REDs green, review and CI pending | Before replacing inline Bitrue HMAC, selection or native signature resend. | [RUST_BITRUE_DISPATCH_SIGNER.md](RUST_BITRUE_DISPATCH_SIGNER.md) |
+| Bitrue request funnel and trading writes | Plan under review | Before converting Bitrue's HTTP funnel, account reads, listen key, lookup/leverage joins or trading writes. | [RUST_BITRUE_REQUEST_FUNNEL.md](RUST_BITRUE_REQUEST_FUNNEL.md) |
 
 | GRVT unsigned candle Read Plan | Managed adoption under review | Before changing candle caller limits, streaming or the six-attempt transport budget. | [RUST_GRVT_CANDLE_CONTEXT.md](RUST_GRVT_CANDLE_CONTEXT.md) |
 
@@ -484,4 +485,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | WOO socket adoption and request funnel | Source/API/native/map carry CLEAR; first-source paired sizes fit, current combined and CI pending | Before importing reviewed WOO sockets or converting its 30 request / 20 signing sites. | [RUST_WOO_ADOPTION_AND_FUNNEL.md](RUST_WOO_ADOPTION_AND_FUNNEL.md) |
 
 - [KuCoin request and signing funnel](RUST_KUCOIN_FUNNEL.md): predecessor preservation, native refusal resend and compiling custody originals; production adoption remains local.
+| Retire an unissued independent Plan call | Plan/originals CLEAR (dazzy3, 4yjlw0); source review pending | Before a venue skips a declared complete-Plan call it decides not to send (Bitrue B2 cancel batches). | [RUST_PLAN_RETIRE_UNISSUED.md](RUST_PLAN_RETIRE_UNISSUED.md) |
 | Bitget history Read funnel | Source CLEAR; exact composed family, combined and counterbalanced CPU gates pending | Before changing history caller bounds, paging, promotion, retry custody or selected identity. | [RUST_BITGET_HISTORY_READ_FUNNEL.md](RUST_BITGET_HISTORY_READ_FUNNEL.md) |

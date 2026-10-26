@@ -13,11 +13,11 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
   for (const value of [0, -1, Infinity, NaN]) assert.match(wasmBudgetError(value, 'combined'), /invalid/);
 });
 
-test('only Bitget, Bybit and AsterDEX carry venue allowances, and only for the venue profile', () => {
+test('only Bitget, Bybit and AsterDEX carry venue overrides, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit']);
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_343_488 + 114_688);
-  assert.equal(wasmBudgetError(1_458_176, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_458_177, 'venue', 'asterdex'), /exceeds 1458176/);
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_326_024 + 4_096);
+  assert.equal(wasmBudgetError(1_330_120, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(1_330_121, 'venue', 'asterdex'), /exceeds 1330120/);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], 1445 * 1024);
     assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1448 * 1024);
