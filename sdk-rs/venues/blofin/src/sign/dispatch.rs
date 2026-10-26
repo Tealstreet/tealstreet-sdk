@@ -181,6 +181,102 @@ impl Http {
         Ok(())
     }
 }
+/// The private socket login: native `/users/self/verify` HMAC over the stamp and
+/// a fresh nonce, signed by the identity the caller selected (the Primary).
+pub struct WsLogin {
+    identity: Identity,
+    url: String,
+    stamp_ms: Option<f64>,
+    nonce: String,
+}
+impl WsLogin {
+    pub fn new(identity: Identity, url: impl Into<String>) -> Self {
+        Self {
+            identity,
+            url: url.into(),
+            stamp_ms: None,
+            nonce: String::new(),
+        }
+    }
+}
+impl SignStep for WsLogin {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        self.stamp_ms = None;
+        self.nonce.clear();
+        if !matches!(outbound, Action::WsSend { .. }) {
+            return Err(SignError::InvalidRequest);
+        }
+        // Native sends a whole-millisecond JSON number.
+        let stamp_ms = dispatch.stamp_ms().floor();
+        ready(&self.identity)?;
+        SignReceipt {
+            stamp_ms: Some(stamp_ms),
+            expiry_ms: None,
+            nonce: None,
+        }
+        .validate()?;
+        let nonce = nonce(dispatch)?;
+        let request = work(
+            &self.identity,
+            [
+                "/users/self/verify",
+                "GET",
+                &num::format(stamp_ms),
+                &nonce,
+                "",
+            ],
+            context(&self.url, "WS", "/users/self/verify"),
+            stamp_ms,
+        )?;
+        self.stamp_ms = Some(stamp_ms);
+        self.nonce = nonce;
+        Ok(request)
+    }
+
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        let stamp_ms = self.stamp_ms.take().ok_or(SignError::InvalidRequest)?;
+        let nonce = std::mem::take(&mut self.nonce);
+        let (key, sign, passphrase) = values(Some(stamp_ms), result)?;
+        let Action::WsSend { text, .. } = outbound else {
+            return Err(SignError::InvalidRequest);
+        };
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Login<'a> {
+            api_key: &'a str,
+            passphrase: &'a str,
+            timestamp: u64,
+            sign: &'a str,
+            nonce: &'a str,
+        }
+        #[derive(serde::Serialize)]
+        struct Auth<'a> {
+            op: &'static str,
+            args: [Login<'a>; 1],
+        }
+        *text = serde_json::to_string(&Auth {
+            op: "login",
+            args: [Login {
+                api_key: key,
+                passphrase,
+                timestamp: stamp_ms as u64,
+                sign: &sign,
+                nonce: &nonce,
+            }],
+        })
+        .map_err(|_| SignError::InvalidResult)?;
+        Ok(())
+    }
+
+    fn freshness_ms(&self) -> f64 {
+        5_000.
+    }
+}
+
 impl SignStep for Http {
     fn unsigned_http_headers(&self) -> &'static [(&'static str, &'static str)] {
         UNSIGNED_HEADERS

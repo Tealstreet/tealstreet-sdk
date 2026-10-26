@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::signing::{Provider, SignError, SignFuture, SignRequest, SignResult, Signer};
-use safe_cex_engine::{Action, Command, Event, Notice, Outcome, Query, RequestId};
+use safe_cex_engine::{Action, Command, Event, Notice, Outcome, Query};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -65,12 +65,6 @@ fn refusing(refuse: Arc<AtomicBool>) -> Harness {
             .unwrap();
     })
 }
-fn classic() -> (Harness, Arc<AtomicBool>) {
-    let parked = Arc::new(AtomicBool::new(false));
-    let mut h = configured(parked.clone());
-    load_classic(&mut h);
-    (h, parked)
-}
 fn load_classic(h: &mut Harness) {
     h.load_public();
     h.respond(
@@ -82,25 +76,6 @@ fn load_classic(h: &mut Harness) {
     h.respond("/account/accounts", 200, ACCOUNT);
     h.orders(OPEN_ORDER);
     h.login();
-}
-fn staged(out: &[Action]) -> RequestId {
-    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
-    out.iter()
-        .find_map(|a| match a {
-            Action::Sign { attempt, .. } => Some(*attempt),
-            _ => None,
-        })
-        .unwrap()
-}
-fn refuse(h: &mut Harness, attempt: RequestId) -> Vec<Action> {
-    h.engine.handle(
-        h.now,
-        Event::Signed {
-            attempt,
-            result: Err(SignError::Refused),
-        },
-    );
-    h.engine.drain_actions().collect()
 }
 #[test]
 fn provider_refused_probe_does_not_promote_classic_or_open_private_socket() {
@@ -153,8 +128,8 @@ fn unsent_identity_provider_refusal_is_typed_and_not_an_empty_success() {
 }
 #[test]
 fn history_provider_refusal_is_strict_without_transport_retry_timer() {
-    let (mut h, parked) = classic();
-    parked.store(true, Ordering::SeqCst);
+    let (mut h, refuse) = refusing_classic();
+    refuse.store(true, Ordering::SeqCst);
     h.engine.handle(
         h.now,
         Event::Command(Command::Query {
@@ -168,15 +143,25 @@ fn history_provider_refusal_is_strict_without_transport_retry_timer() {
             },
         }),
     );
-    let id = staged(&h.engine.drain_actions().collect::<Vec<_>>());
-    let out = refuse(&mut h, id);
+    let out = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+    let failures = failed(&out, 44);
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        failures[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(failures[0].message, "Signing provider refused the request");
     assert!(out.iter().any(|a| matches!(a,Action::Notice(Notice::CommandFailed {command:44,error}) if error.outcome==Some(Outcome::NotSent))));
     assert!(!out.iter().any(|a| matches!(
         a,
-        Action::Http(_)
-            | Action::SetTimer { .. }
-            | Action::Notice(Notice::CommandDone { command: 44, .. })
+        Action::Http(_) | Action::Notice(Notice::CommandDone { command: 44, .. })
     )));
+    // Managed lifecycle bounds are expected; native transport retries are not.
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. }
+        if [250., 500., 750.].iter().any(|delay| *at_ms == h.now + delay)))
+    );
 }
 
 fn place(h: &mut Harness, command: u32) {

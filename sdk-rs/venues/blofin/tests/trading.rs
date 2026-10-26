@@ -820,12 +820,10 @@ fn failed_final_detail_read_is_not_retried_and_never_places() {
 fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
     use safe_cex_engine::{SocketId, TimerId};
     use safe_cex_venue_blofin::Options;
-    let mut e = trusted::trusted_engine(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("pass".into()),
-        ..Options::default()
-    });
+    let mut e = trusted::trusted_engine_with(
+        Options::default(),
+        Some(trusted::Keys::new("key", "secret", "pass")),
+    );
     e.start(0.0);
     let mut h = Harness {
         e,
