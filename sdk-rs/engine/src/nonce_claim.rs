@@ -169,7 +169,7 @@ impl ClaimAuthority {
         if !raw_now.is_finite() || !(0. ..=9_007_199_254_740_991.).contains(&raw_now) {
             return Err(NonceError::InvalidTime);
         }
-        let (ms, scale) = match self.domain.floor {
+        let (ms, scale) = match self.domain.floor() {
             super::NonceFloor::RawMs { scale } => (raw_now, scale),
             super::NonceFloor::ProtocolMs { scale } => (protocol_now, scale),
         };

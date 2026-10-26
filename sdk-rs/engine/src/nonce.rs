@@ -50,13 +50,30 @@ enum NonceSubjectStrategy {
     Address,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonceClock {
+    RawMs,
+    #[cfg(feature = "address-nonce")]
+    ProtocolMs,
+}
+
 /// One family's nonce policy, including the trusted identity source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NonceDomain {
     subject: NonceSubjectStrategy,
     name: &'static str,
-    floor: NonceFloor,
+    clock: NonceClock,
+    scale: u64,
     limit: u64,
+}
+impl NonceDomain {
+    fn floor(&self) -> NonceFloor {
+        match self.clock {
+            NonceClock::RawMs => NonceFloor::RawMs { scale: self.scale },
+            #[cfg(feature = "address-nonce")]
+            NonceClock::ProtocolMs => NonceFloor::ProtocolMs { scale: self.scale },
+        }
+    }
 }
 
 /// Hyperliquid and TxFlow agents (including vaults) share one sequence per
@@ -64,7 +81,8 @@ pub struct NonceDomain {
 pub const HYPERLIQUID_AGENT: NonceDomain = NonceDomain {
     subject: NonceSubjectStrategy::Address,
     name: "hyperliquid-agent",
-    floor: NonceFloor::RawMs { scale: 1 },
+    clock: NonceClock::RawMs,
+    scale: 1,
     limit: (1 << 53) - 1,
 };
 
@@ -73,7 +91,8 @@ pub const HYPERLIQUID_AGENT: NonceDomain = NonceDomain {
 pub const ASTERDEX_V3: NonceDomain = NonceDomain {
     subject: NonceSubjectStrategy::Address,
     name: "asterdex-v3",
-    floor: NonceFloor::ProtocolMs { scale: 1000 },
+    clock: NonceClock::ProtocolMs,
+    scale: 1000,
     limit: u64::MAX,
 };
 
@@ -81,7 +100,8 @@ pub const ASTERDEX_V3: NonceDomain = NonceDomain {
 pub const KRAKEN: NonceDomain = NonceDomain {
     subject: NonceSubjectStrategy::StableId,
     name: "kraken",
-    floor: NonceFloor::RawMs { scale: 1000 },
+    clock: NonceClock::RawMs,
+    scale: 1000,
     limit: u64::MAX,
 };
 
@@ -162,7 +182,7 @@ pub(crate) fn floor(ms: f64, scale: u64, limit: u64) -> Result<u64, NonceError> 
 impl<P> crate::Cx<'_, P> {
     /// Reserve a signing nonce before signing, in one shared monotonic domain.
     pub fn reserve_nonce(&self, domain: &NonceDomain, key: &NonceKey) -> Result<u64, NonceError> {
-        let (ms, scale) = match domain.floor {
+        let (ms, scale) = match domain.floor() {
             NonceFloor::RawMs { scale } => (self.now, scale),
             NonceFloor::ProtocolMs { scale } => (self.protocol_now(), scale),
         };

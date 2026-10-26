@@ -1,4 +1,5 @@
 //! Engine-owned PublicAddress setup. A result is not a resource join.
+#[cfg(feature = "address-nonce")]
 use super::*;
 #[cfg(feature = "address-nonce")]
 use crate::nonce::{NonceDomain, NonceSelectionError};
