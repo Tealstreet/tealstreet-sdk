@@ -110,3 +110,7 @@ ea5ec84ee69b5a6e4f7f90322f9afd285a718a0f:sdk-rs/venues/blofin/tests/hmac_dispatc
 # No production, path-wide or future-commit exception.
 228b4707f09eef9e5e05ddb5d3721e3e06b9029e:sdk-rs/hosts/wasm/js/hosted-operation.integration.mjs:generic-api-key:15
 228b4707f09eef9e5e05ddb5d3721e3e06b9029e:sdk-rs/venues/kraken/src/sign/hosted_tests.rs:generic-api-key:232
+
+# Public Git commit SHA in the Lighter principal plan, beside reviewer prose.
+# Exact historical documentation fingerprint only; no credential bytes.
+25b7d8a4edf1fb1bb7c839783f458b252db6e937:docs/plans/RUST_LIGHTER_SETUP_PRINCIPAL.md:generic-api-key:4
