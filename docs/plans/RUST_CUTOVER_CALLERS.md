@@ -9252,6 +9252,30 @@ proof of normal pressure reachability. Any normally reachable fail-closed row
 goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
 supervision constants are unchanged; no generic coexistence/recovery seam.
 
+## Lighter Schnorr auth recipe and public key (P3 parts 2+3)
+
+Shared prerequisites for the Lighter venue cutover (owner codex-ih35js). Nothing
+calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
+`cfg!(feature = "schnorr")` and declares Lighter's signing ref
+`signingAlgorithm: schnorrDigest` in the same change as the eager-holder removal.
+
+- **Auth token deadline from the signing stamp.** `AuthRecipe` derives the
+  60-second deadline from the dispatch `stamp_ms` (the preparation moment), where
+  legacy `account_auth` uses `cx.now` at issue. The stamp is equal or later, so a
+  parked request's token is valid for 60 s from signing rather than from
+  queueing. Pinned by `re_preparation_replaces_entropy_and_deadline`.
+- **WS subscribe escaping.** The private subscribe frame is serialized, so it is
+  byte-equal to legacy for the real `account_all_orders/{account}` channel but
+  escapes a hostile channel instead of splicing it into JSON.
+- **Canonical public keys.** `lighter::public_key` reduces each little-endian
+  limb below the Goldilocks prime. The field could hold a limb as an unreduced
+  p (it did for the scalar n-1), where Go always reduces; all Go fixture keys
+  are canonical. Pinned by `lighter_public_keys_are_canonically_encoded`.
+- **Declared keys refused at setup.** A ref declared `schnorrDigest` with a
+  non-canonical, zero or wrong-width scalar is refused at trusted setup
+  (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
+  ref is declared at the cutover.
+
 ## Bitrue reads and listen-key sessions leave the legacy funnel (B1, #2173)
 
 Every Bitrue HTTP request except trading now runs under engine-managed authority. Trading writes stay on the legacy funnel until B2.
@@ -9493,6 +9517,23 @@ The remaining conservative request/signing/credential inventory describes manage
 failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
 identity options. This slice retains those rows and all checker rules; completion
 of the custody audit does not claim inventory zero or a new endpoint migration.
+
+
+### Shared hosted operation foundation
+
+The opt-in structured-operation provider/peer uses immutable per-slot negotiated
+bindings and closed native family codecs. Legacy v1 signing contexts and routes
+stay unchanged. Missing business ownership, unknown recipes, replay, deadline or
+clock-revision changes refuse without a fallback. Peer validation failures are
+sanitized NotSent refusals, not credential latch evidence. Late work cannot
+publish a signature or HTTP request, and cancellation grants no joined-resource
+acknowledgement. The 64-entry per-account bound refuses new work rather than
+forgetting replay decisions before the codec freshness horizon.
+
+Kraken's advisory SignRequest context retains the exact wire path instead of the
+stripped signing path; the native preimage builder still strips /derivatives at
+the same cryptographic boundary. HTTP bytes, financial fields and native MACs are
+unchanged. This foundation does not enable hosted Kraken or alter nonce issuers.
 
 ### Address setup at host start
 
