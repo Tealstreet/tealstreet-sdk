@@ -1,13 +1,20 @@
-//! Commands are preflighted as a whole, then executed as sequenced write jobs.
+//! Trading command jobs: each command owns a Preflight root, then one serial
+//! Plan. Jobs run concurrently under the engine's per-order locks; every call
+//! signs Primary, and write outcomes ride the journal.
 use crate::account::{Axis, NativeOrder};
-use crate::error;
 use crate::sign::Params;
 use crate::wire::Str;
-use crate::{BitunixFutures, Pending};
+use crate::{BitunixFutures, Pending, codes, error};
+use safe_cex_engine::classify::{BatchItem, Native, NativeCode, WriteFact};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{
-    Command, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
+use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
+use safe_cex_engine::request_context::{
+    Context, Credential, HttpOwnerRetirement, Operation, Plan, Policy, Preflight, PreflightPolicy,
+    PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
 };
+use safe_cex_engine::signing::Identity as SigningIdentity;
+use safe_cex_engine::{Command, Cx, ErrorKind, Method, Outcome, Response, VenueError, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 const PLACE: &str = "/api/v1/futures/trade/place_order";
@@ -84,21 +91,22 @@ struct Identity<'a> {
     order_id: &'a str,
 }
 
+/// Each call's own bound; the streamed Plan has no whole-job deadline.
+pub(crate) const CALL_MS: u32 = 20_000;
+
 pub struct Request {
     pub command: u32,
-    call: Call,
+    step: Step,
+    slot: Slot,
+    context: Context,
+    resent: bool,
 }
-#[cfg(test)]
 impl Request {
-    /// A trading-job request for selection controls, independent of its method.
-    pub(crate) fn leverage_probe(command: u32) -> Self {
-        Self {
-            command,
-            call: Call::Leverage {
-                symbol: "BTCUSDT".into(),
-                value: 10.,
-            },
-        }
+    /// Bounded correlation for a released write: its endpoint.
+    pub(crate) fn reconciliation(
+        &self,
+    ) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
+        ReconciliationData::new(self.step.path.to_owned())
     }
 }
 enum Call {
@@ -140,27 +148,59 @@ struct Step {
     call: Call,
     delay: f64,
 }
+impl Step {
+    fn read(&self) -> bool {
+        matches!(self.call, Call::ReconcileReplacement { .. })
+    }
+}
 #[derive(Default)]
 struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     optimistic: Vec<String>,
     restore: Vec<OrderStatus>,
-    timer: Option<TimerId>,
     recover: Option<Vec<PlaceOrderOpts>>,
     created: Vec<String>,
-    effective: bool,
-    error: Option<VenueError>,
 }
 struct Prepare {
     orders: Vec<PlaceOrderOpts>,
     stage: u8,
     retried: bool,
 }
+/// One command's authority: its Preflight root, then its serial Plan.
+struct Live {
+    preflight: Preflight,
+    plan: Option<Plan>,
+    /// The delivered call the next one continues from.
+    current: Option<(Slot, Context)>,
+    job: Job,
+    prepare: Option<Prepare>,
+    /// The settings scope this job holds (per symbol, or the account's mode).
+    settings: Option<String>,
+    /// A paced call waiting for the Plan timer.
+    waiting: Option<Step>,
+}
 #[derive(Default)]
 pub struct TradingState {
-    jobs: HashMap<u32, Job>,
-    preparing: HashMap<u32, Prepare>,
+    live: HashMap<u32, Live>,
+    settings: HashSet<String>,
+    /// Jobs the engine sealed itself; their rows restore at the reconcile.
+    retired: Vec<Job>,
+}
+impl TradingState {
+    pub(crate) fn plan(&self, command: u32) -> Option<&Plan> {
+        self.live.get(&command)?.plan.as_ref()
+    }
+    pub(crate) fn preflight(&self, command: u32) -> Option<&Preflight> {
+        self.live.get(&command).map(|live| &live.preflight)
+    }
+    /// Takes the continuation point for a prerequisite Read call.
+    pub(crate) fn take_current(&mut self, command: u32) -> Option<(Slot, Context)> {
+        self.live.get_mut(&command)?.current.take()
+    }
+    pub(crate) fn live(&self, command: u32) -> bool {
+        self.live.contains_key(&command)
+    }
 }
 fn text<T: Serialize>(v: &T) -> String {
     serde_json::to_string(v).expect("finite request fields")
@@ -293,13 +333,17 @@ fn split_quantities(
 }
 
 impl BitunixFutures {
-    fn reject(&self, cx: &mut Cx<'_, Pending>, command: u32, error: String) {
-        let kind = if !self.slots.has_primary() {
-            ErrorKind::AuthInvalid
-        } else {
-            ErrorKind::InvalidInput
-        };
-        cx.fail(command, error::not_sent(error, kind));
+    /// The Primary credential and identity every trading call signs with.
+    pub(crate) fn trade_identity(&self) -> Option<(Credential, SigningIdentity)> {
+        let (selection, identity) = self.slots.select(CredentialRole::Mutation).ok()?;
+        Some((
+            selection.credential(identity.credential.clone()),
+            identity.clone(),
+        ))
+    }
+    /// A validation refusal before any write: the command's one NotSent.
+    fn refuse(&mut self, cx: &mut Cx<'_, Pending>, command: u32, error: String) {
+        self.end(cx, command, error::not_sent(error, ErrorKind::InvalidInput));
     }
     fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
         let mut ids = HashSet::new();
@@ -353,7 +397,40 @@ impl BitunixFutures {
         }
         Ok(())
     }
+    /// Root first: each command opens its Preflight before validation, so
+    /// every refusal is that root's NotSent. Jobs stay concurrent (no FIFO);
+    /// the engine's order lock holds each order for its whole job.
     pub(crate) fn trading_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let settings = match &command {
+            Command::PlaceOrders { .. }
+            | Command::CancelOrders { .. }
+            | Command::CancelSymbolOrders { .. }
+            | Command::AmendOrder { .. } => None,
+            Command::SetLeverage { symbol, .. } | Command::SetMarginType { symbol, .. } => {
+                Some(format!("symbol:{symbol}"))
+            }
+            Command::SetPositionMode { .. } => Some("mode".to_owned()),
+            _ => return,
+        };
+        // Keyless: no write root exists, so the local refusal authority answers.
+        let Some((credential, _)) = self.trade_identity() else {
+            let Ok(context) = cx.admit_http_command(local_mutation_policy()) else {
+                return;
+            };
+            let _ = cx.fail_context(
+                &context,
+                error::not_sent("Bitunix credentials required", ErrorKind::AuthInvalid),
+            );
+            return;
+        };
+        let policy = PreflightPolicy {
+            purpose: PreflightPurpose::WriteAfterReads,
+            read_credential: Some(credential.clone()),
+            write_credential: Some(credential),
+        };
+        let Ok(preflight) = cx.begin_preflight(policy) else {
+            return;
+        };
         let id = match &command {
             Command::PlaceOrders { command, .. }
             | Command::CancelOrders { command, .. }
@@ -364,21 +441,42 @@ impl BitunixFutures {
             | Command::SetPositionMode { command, .. } => *command,
             _ => return,
         };
-        if !self.slots.has_primary() {
-            self.reject(cx, id, "Bitunix credentials required".into());
-            return;
+        self.trading.live.insert(
+            id,
+            Live {
+                preflight,
+                plan: None,
+                current: None,
+                job: Job::default(),
+                prepare: None,
+                settings: None,
+                waiting: None,
+            },
+        );
+        // (b): one settings change per scope; a second is refused, not queued.
+        if let Some(key) = settings {
+            if self.trading.settings.contains(&key) {
+                return self.end(
+                    cx,
+                    id,
+                    error::not_sent(
+                        "Bitunix setting change is already in flight",
+                        ErrorKind::InvalidInput,
+                    ),
+                );
+            }
+            self.trading.settings.insert(key.clone());
+            self.trading.live.get_mut(&id).expect("live job").settings = Some(key);
         }
-        let (command, result) = match command {
+        let result = match command {
             Command::PlaceOrders { command, orders } => {
                 if let Err(e) = self.preflight(cx, &orders) {
-                    self.reject(cx, command, e);
-                    return;
+                    return self.refuse(cx, command, e);
                 }
-                self.start_place(cx, command, orders, false);
-                return;
+                return self.start_place(cx, command, orders, false);
             }
-            Command::CancelOrders { command, ids } => (command, self.plan_cancel(cx, &ids)),
-            Command::CancelSymbolOrders { command, symbol } => {
+            Command::CancelOrders { ids, .. } => self.plan_cancel(cx, &ids),
+            Command::CancelSymbolOrders { symbol, .. } => {
                 let ids: Vec<_> = cx
                     .store
                     .orders()
@@ -386,54 +484,43 @@ impl BitunixFutures {
                     .filter(|o| o.symbol == symbol && o.status == OrderStatus::Open)
                     .map(|o| o.id.clone())
                     .collect();
-                (command, self.plan_cancel(cx, &ids))
+                self.plan_cancel(cx, &ids)
             }
             Command::AmendOrder {
-                command,
-                id,
-                price,
-                amount,
-            } => (command, self.plan_amend(cx, &id, price, amount)),
+                id, price, amount, ..
+            } => self.plan_amend(cx, &id, price, amount),
             Command::SetLeverage {
-                command,
-                symbol,
-                leverage,
-                side: _,
-            } => {
-                let result = (|| {
-                    let m = cx
-                        .store
-                        .market(&symbol)
-                        .ok_or_else(|| format!("Market {symbol} not found"))?;
-                    positive(leverage, "leverage")?;
-                    let value = leverage.clamp(m.limits.leverage.min, m.limits.leverage.max);
-                    #[derive(Serialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct Body<'a> {
-                        margin_coin: &'static str,
-                        symbol: &'a str,
-                        leverage: f64,
-                    }
-                    Ok(Job {
-                        steps: VecDeque::from([Step {
-                            path: "/api/v1/futures/account/change_leverage",
-                            body: text(&Body {
-                                margin_coin: "USDT",
-                                symbol: &symbol,
-                                leverage: value,
-                            }),
-                            call: Call::Leverage { symbol, value },
-                            delay: 0.0,
-                        }]),
-                        ..Job::default()
-                    })
-                })();
-                (command, result)
-            }
+                symbol, leverage, ..
+            } => (|| {
+                let m = cx
+                    .store
+                    .market(&symbol)
+                    .ok_or_else(|| format!("Market {symbol} not found"))?;
+                positive(leverage, "leverage")?;
+                let value = leverage.clamp(m.limits.leverage.min, m.limits.leverage.max);
+                #[derive(Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Body<'a> {
+                    margin_coin: &'static str,
+                    symbol: &'a str,
+                    leverage: f64,
+                }
+                Ok(Job {
+                    steps: VecDeque::from([Step {
+                        path: "/api/v1/futures/account/change_leverage",
+                        body: text(&Body {
+                            margin_coin: "USDT",
+                            symbol: &symbol,
+                            leverage: value,
+                        }),
+                        call: Call::Leverage { symbol, value },
+                        delay: 0.0,
+                    }]),
+                    ..Job::default()
+                })
+            })(),
             Command::SetMarginType {
-                command,
-                symbol,
-                isolated,
+                symbol, isolated, ..
             } => {
                 #[derive(Serialize)]
                 #[serde(rename_all = "camelCase")]
@@ -442,7 +529,7 @@ impl BitunixFutures {
                     margin_mode: &'static str,
                     margin_coin: &'static str,
                 }
-                let result = if cx.store.market(&symbol).is_none() {
+                if cx.store.market(&symbol).is_none() {
                     Err(format!("Market {symbol} not found"))
                 } else {
                     Ok(Job {
@@ -458,15 +545,10 @@ impl BitunixFutures {
                         }]),
                         ..Job::default()
                     })
-                };
-                (command, result)
+                }
             }
-            Command::SetPositionMode {
-                command,
-                hedged,
-                symbol: _,
-            } => {
-                let result = if !cx.store.positions().is_empty() {
+            Command::SetPositionMode { hedged, .. } => {
+                if !cx.store.positions().is_empty() {
                     Err("Please close all positions before switching position mode".into())
                 } else {
                     Ok(Job {
@@ -481,17 +563,16 @@ impl BitunixFutures {
                         }]),
                         ..Job::default()
                     })
-                };
-                (command, result)
+                }
             }
             _ => return,
         };
         match result {
             Ok(job) => {
-                self.trading.jobs.insert(command, job);
-                self.advance(cx, command);
+                self.trading.live.get_mut(&id).expect("live job").job = job;
+                self.advance(cx, id);
             }
-            Err(e) => self.reject(cx, command, e),
+            Err(e) => self.refuse(cx, id, e),
         }
     }
     fn start_place(
@@ -508,31 +589,48 @@ impl BitunixFutures {
                     && self.resolve_position(cx, o, tpsl).is_err())
         });
         if needs_read {
-            self.trading.preparing.insert(
-                command,
-                Prepare {
-                    orders,
-                    stage: 0,
-                    retried,
-                },
-            );
+            let Some(live) = self.trading.live.get_mut(&command) else {
+                return;
+            };
+            live.prepare = Some(Prepare {
+                orders,
+                stage: 0,
+                retried,
+            });
             self.read_axis_for(cx, Axis::Positions, Some(command));
             return;
         }
         self.place_prepared(cx, command, orders, retried);
     }
-    pub(crate) fn prepared(&mut self, cx: &mut Cx<'_, Pending>, command: u32, success: bool) {
-        let Some(mut p) = self.trading.preparing.remove(&command) else {
+    /// A prerequisite read answered (positions, then orders, then TP/SL). Its
+    /// delivery is the continuation point for the next read or the first write.
+    pub(crate) fn prepared(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: u32,
+        success: bool,
+        custody: Option<crate::account::ReadCustody>,
+    ) {
+        let Some(live) = self.trading.live.get_mut(&command) else {
             return;
         };
+        if let Some(crate::account::ReadCustody::Plan(_, slot, context)) = custody {
+            live.current = Some((slot, context));
+        }
         if !success {
-            self.reject(
+            live.prepare = None;
+            return self.end(
                 cx,
                 command,
-                "Bitunix preflight reconciliation failed".into(),
+                error::not_sent(
+                    "Bitunix preflight reconciliation failed",
+                    ErrorKind::InvalidInput,
+                ),
             );
-            return;
         }
+        let Some(p) = live.prepare.as_mut() else {
+            return;
+        };
         if p.stage < 2 {
             p.stage += 1;
             let axis = if p.stage == 1 {
@@ -540,9 +638,9 @@ impl BitunixFutures {
             } else {
                 Axis::Tpsl
             };
-            self.trading.preparing.insert(command, p);
             self.read_axis_for(cx, axis, Some(command));
         } else {
+            let p = live.prepare.take().expect("prepared stage");
             self.place_prepared(cx, command, p.orders, p.retried);
         }
     }
@@ -842,10 +940,13 @@ impl BitunixFutures {
                 }
                 self.account.generations[2] += 1;
                 cx.store.invalidate_order_snapshots();
-                self.trading.jobs.insert(command, job);
+                let Some(live) = self.trading.live.get_mut(&command) else {
+                    return Self::cleanup(cx, &job);
+                };
+                live.job = job;
                 self.advance(cx, command);
             }
-            Err(e) => self.reject(cx, command, e),
+            Err(e) => self.refuse(cx, command, e),
         }
     }
     fn plan_cancel(&self, cx: &Cx<'_, Pending>, ids: &[String]) -> Result<Job, String> {
@@ -1219,131 +1320,277 @@ impl BitunixFutures {
             ..Job::default()
         })
     }
+    /// The serial Plan's next call: admitted at the first call, else continued
+    /// from the delivery that decided it.
+    fn next_slot(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: u32,
+        next: SerialCall,
+    ) -> Result<Slot, VenueError> {
+        let Some((credential, _)) = self.trade_identity() else {
+            return Err(error::not_sent(
+                "Bitunix credentials required",
+                ErrorKind::AuthInvalid,
+            ));
+        };
+        let live = self.trading.live.get_mut(&command).expect("live job");
+        match live.plan.clone() {
+            None => {
+                let policy = SerialPolicy {
+                    credential: Some(credential),
+                    pacing: None,
+                    // Native fails a refused job; it never completes `done []`.
+                    refusals_complete: false,
+                };
+                let (plan, slot) = cx
+                    .admit_serial_plan(&live.preflight, next, policy)
+                    .map_err(|reason| {
+                        error::not_sent(reason.venue_error().message, ErrorKind::Internal)
+                    })?;
+                live.plan = Some(plan);
+                Ok(slot)
+            }
+            Some(plan) => {
+                let Some((slot, current)) = live.current.take() else {
+                    return Err(VenueError::new("Bitunix job lost its continuation"));
+                };
+                cx.continue_serial_plan(&plan, &slot, &current, next)
+                    .map_err(|reason| VenueError::new(reason.venue_error().message))
+            }
+        }
+    }
     fn advance(&mut self, cx: &mut Cx<'_, Pending>, command: u32) {
-        let Some(job) = self.trading.jobs.get_mut(&command) else {
+        let Some(live) = self.trading.live.get_mut(&command) else {
             return;
         };
-        let Some(mut step) = job.steps.pop_front() else {
-            let job = self.trading.jobs.remove(&command).unwrap();
-            cx.store.invalidate_order_snapshots();
-            cx.store
-                .remove_orders(&job.created.iter().map(String::as_str).collect::<Vec<_>>());
-            if let Some(error) = job.error {
-                cx.fail(command, error::aggregate(error, job.effective, &job.ids));
-            } else {
-                cx.done(command, text(&job.ids));
+        let Some(mut step) = live.job.steps.pop_front() else {
+            return self.finish(cx, command);
+        };
+        // Native's gap between batch chunks: the Plan timer issues the call.
+        if step.delay > 0.0
+            && let Some(plan) = live.plan.clone()
+            && let Some((slot, current)) = live.current.take()
+        {
+            let delay = step.delay as u32;
+            step.delay = 0.0;
+            let next = serial(&step);
+            live.waiting = Some(step);
+            if let Err(reason) = cx.continue_serial_plan_after(&plan, &slot, &current, delay, next)
+            {
+                let error = VenueError::new(reason.venue_error().message);
+                return self.end(cx, command, error);
             }
             return;
-        };
-        if step.delay > 0.0 {
-            let delay = step.delay;
-            step.delay = 0.0;
-            job.steps.push_front(step);
-            job.timer = Some(cx.set_timer(delay));
-            return;
         }
-        if let Call::Cancel { ids, .. } = &step.call {
+        let slot = match self.next_slot(cx, command, serial(&step)) {
+            Ok(slot) => slot,
+            Err(error) => return self.end(cx, command, error),
+        };
+        self.issue(cx, command, slot, step, false);
+    }
+    /// A paced continuation's Plan timer fired: issue its waiting call.
+    pub(crate) fn trading_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
+        let Some(command) = self.trading.live.iter().find_map(|(command, live)| {
+            live.plan
+                .as_ref()
+                .filter(|own| own.owner() == plan.owner() && live.waiting.is_some())
+                .map(|_| *command)
+        }) else {
+            return;
+        };
+        let slot = cx
+            .plan_slots(plan)
+            .ok()
+            .and_then(|slots| slots.into_iter().next());
+        let step = self
+            .trading
+            .live
+            .get_mut(&command)
+            .and_then(|live| live.waiting.take());
+        match (slot, step) {
+            (Some(slot), Some(step)) => self.issue(cx, command, slot, step, false),
+            _ => self.end(cx, command, VenueError::new("Bitunix job lost its schedule")),
+        }
+    }
+    /// Queues one Plan call; every call signs Primary.
+    fn issue(&mut self, cx: &mut Cx<'_, Pending>, command: u32, slot: Slot, step: Step, resent: bool) {
+        let Some(plan) = self.trading.plan(command).cloned() else {
+            return;
+        };
+        let context = match cx.plan_leg_context(&plan, &slot) {
+            Ok(context) => context,
+            Err(reason) => {
+                let error = VenueError::new(reason.venue_error().message);
+                return self.end(cx, command, error);
+            }
+        };
+        let Some((_, identity)) = self.trade_identity() else {
+            let error = error::not_sent("Bitunix credentials required", ErrorKind::AuthInvalid);
+            return self.end(cx, command, error);
+        };
+        if let Call::Cancel { ids, .. } = &step.call
+            && !resent
+        {
             self.account.generations[2] += 1;
-            cx.store.invalidate_order_snapshots();
+            let live = self.trading.live.get_mut(&command).expect("live job");
             for id in ids {
-                if cx.store.order(id).is_some_and(|row| {
-                    matches!(row.status, OrderStatus::Closed | OrderStatus::Canceled)
-                }) {
+                let Some(row) = cx.store.order(id) else {
+                    continue;
+                };
+                if matches!(row.status, OrderStatus::Closed | OrderStatus::Canceled) {
                     continue;
                 }
-                if !job.optimistic.contains(id)
-                    && let Some(row) = cx.store.order(id)
-                {
-                    job.optimistic.push(id.clone());
-                    job.restore.push(row.status);
+                if !live.job.optimistic.contains(id) {
+                    live.job.optimistic.push(id.clone());
+                    live.job.restore.push(row.status);
                 }
-
                 cx.store.set_order_status(id, OrderStatus::Canceling);
             }
         }
-        if let Call::ReconcileReplacement { parent, .. } = &step.call {
-            self.signed_request(
-                cx,
-                Method::Get,
-                step.path,
-                Params::default().str("orderId", parent),
-                None,
-                Pending::Trade(Request {
-                    command,
-                    call: step.call,
-                }),
-            );
-            return;
-        }
-        cx.store.invalidate_order_snapshots();
-        self.signed_request(
-            cx,
-            Method::Post,
-            step.path,
-            Params::default(),
-            Some(step.body),
-            Pending::Trade(Request {
-                command,
-                call: step.call,
-            }),
-        );
-    }
-    pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        let command = self.trading.jobs.iter().find_map(|(id, j)| {
-            if j.timer == Some(timer) {
-                Some(*id)
-            } else {
-                None
+        let (method, params, body) = match &step.call {
+            Call::ReconcileReplacement { parent, .. } => {
+                (Method::Get, Params::default().str("orderId", parent), None)
             }
-        });
-        if let Some(command) = command {
-            self.trading.jobs.get_mut(&command).unwrap().timer = None;
-            self.advance(cx, command);
-            true
-        } else {
-            false
-        }
-    }
-    pub(crate) fn trade_failed(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        message: &str,
-    ) {
-        let write = !matches!(request.call, Call::ReconcileReplacement { .. });
-        self.trade_error(cx, request, error::transport(message, write));
-    }
-    pub(crate) fn trade_error(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        request: Request,
-        error: VenueError,
-    ) {
-        let mut failure = Some(error);
-        if let Some(mut job) = self.trading.jobs.remove(&request.command) {
+            _ => (Method::Post, Params::default(), Some(step.body.clone())),
+        };
+        if !step.read() {
             cx.store.invalidate_order_snapshots();
-            if let Some(current) = failure.take() {
-                error::append(&mut job.error, current);
+        }
+        let query = params.query();
+        let url = format!(
+            "{}{}{}{}",
+            crate::REST,
+            step.path,
+            if query.is_empty() { "" } else { "?" },
+            query
+        );
+        let recipe = crate::sign::dispatch::Http::new(
+            identity,
+            method,
+            url.clone(),
+            params.signing(),
+            body.clone(),
+            self.options.testnet,
+        );
+        let pending = Pending::Trade(Request {
+            command,
+            step,
+            slot,
+            context: context.clone(),
+            resent,
+        });
+        if let Err((pending, reason)) =
+            cx.request_signed_managed(context, None, method, url, body, Box::new(recipe), pending)
+            && let Pending::Trade(request) = pending
+        {
+            self.trade_error(cx, request, reason.venue_error());
+        }
+    }
+    /// Restores the job's optimistic rows: Creating removed, Canceling reopened.
+    fn cleanup(cx: &mut Cx<'_, Pending>, job: &Job) {
+        cx.store.invalidate_order_snapshots();
+        cx.store
+            .remove_orders(&job.created.iter().map(String::as_str).collect::<Vec<_>>());
+        for (id, status) in job.optimistic.iter().zip(&job.restore) {
+            if cx
+                .store
+                .order(id)
+                .is_some_and(|o| o.status == OrderStatus::Canceling)
+            {
+                cx.store.set_order_status(id, *status);
             }
-            failure = job
-                .error
-                .map(|error| error::aggregate(error, job.effective, &job.ids));
-            cx.store
-                .remove_orders(&job.created.iter().map(String::as_str).collect::<Vec<_>>());
-            for (id, status) in job.optimistic.iter().zip(job.restore) {
-                if cx
-                    .store
-                    .order(id)
-                    .is_some_and(|o| o.status == OrderStatus::Canceling)
-                {
-                    cx.store.set_order_status(id, status);
+        }
+    }
+    fn take_live(&mut self, command: u32) -> Option<Live> {
+        let live = self.trading.live.remove(&command)?;
+        if let Some(key) = &live.settings {
+            self.trading.settings.remove(key);
+        }
+        Some(live)
+    }
+    /// Fails the job under its owner; the journal projects the outcome.
+    fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, error: VenueError) {
+        let Some(live) = self.take_live(command) else {
+            return;
+        };
+        Self::cleanup(cx, &live.job);
+        match &live.plan {
+            None => {
+                let failed = cx.fail_preflight(&live.preflight, error);
+                debug_assert!(failed.is_ok(), "Preflight terminal stranded");
+            }
+            Some(plan) => {
+                if let Some((slot, context)) = &live.current {
+                    let _ = cx.finish_plan_call(plan, slot, context);
+                }
+                let failed = cx.fail_plan(plan, error);
+                debug_assert!(failed.is_ok(), "Plan terminal stranded");
+            }
+        }
+        self.debounce(cx, Axis::Orders);
+    }
+    fn finish(&mut self, cx: &mut Cx<'_, Pending>, command: u32) {
+        let Some(live) = self.take_live(command) else {
+            return;
+        };
+        Self::cleanup(cx, &live.job);
+        let result = text(&live.job.ids);
+        match &live.plan {
+            // Every cancel target was already closed: nothing was sent.
+            None => {
+                let _ = cx.done_empty_plan(&live.preflight, result);
+            }
+            Some(plan) => {
+                if let Some((slot, context)) = &live.current {
+                    let _ = cx.finish_plan_call(plan, slot, context);
+                }
+                if cx.done_plan(plan, result).is_err() {
+                    let error = VenueError::new("Bitunix job ended without its call");
+                    let failed = cx.fail_plan(plan, error);
+                    debug_assert!(failed.is_ok(), "Plan terminal stranded");
                 }
             }
         }
-        if let Some(error) = failure {
-            cx.fail(request.command, error);
+    }
+    /// The engine retired a trading owner itself; its rows restore at the
+    /// reconcile it asks for.
+    pub(crate) fn trading_retired(&mut self, owner: &HttpOwnerRetirement) {
+        let commands: Vec<u32> = self
+            .trading
+            .live
+            .iter()
+            .filter(|(_, live)| owner.matches_preflight(&live.preflight))
+            .map(|(command, _)| *command)
+            .collect();
+        for command in commands {
+            if let Some(live) = self.take_live(command) {
+                self.trading.retired.push(live.job);
+            }
         }
-        self.debounce(cx, Axis::Orders);
+    }
+    /// Native restore for sealed jobs, then Primary order snapshots.
+    pub(crate) fn reconcile_trading(&mut self, cx: &mut Cx<'_, Pending>) {
+        for job in std::mem::take(&mut self.trading.retired) {
+            Self::cleanup(cx, &job);
+        }
+        self.account.reconcile = true;
+        self.read_axis(cx, Axis::Orders);
+    }
+    /// A call failed in transport; a released write is Unknown.
+    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, message: &str) {
+        let write = !request.step.read();
+        if let Some(plan) = self.trading.plan(request.command).cloned() {
+            let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
+        }
+        self.end(cx, request.command, error::transport(message, write));
+    }
+    /// A call refused before release (signing): NotSent for this call.
+    pub(crate) fn trade_error(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: VenueError) {
+        if let Some(plan) = self.trading.plan(request.command).cloned() {
+            let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
+        }
+        self.end(cx, request.command, error);
     }
     pub(crate) fn trade_response(
         &mut self,
@@ -1352,526 +1599,696 @@ impl BitunixFutures {
         response: Response<'_>,
     ) {
         let command = request.command;
-        let write = !matches!(request.call, Call::ReconcileReplacement { .. });
-        // Fence before parsing: a partial cancellation ACK can apply accepted
-        // effects and then exit on a rejected/malformed sibling.
-        if write {
-            cx.store.invalidate_order_snapshots();
-        }
-        let body = match error::response_data(&response, write) {
-            Ok(body) => body,
-            Err(error) => {
-                // Only a native, definitive refusal permits recovery writes.
-                let definitive = (200..300).contains(&response.status)
-                    && error.outcome == Some(Outcome::Rejected)
-                    && error.venue_code.is_some();
-                if definitive
-                    && error
-                        .message
-                        .to_ascii_lowercase()
-                        .contains("position does not exist")
-                    && matches!(request.call, Call::Place { batch: false, .. })
-                    && let Some(orders) = self
-                        .trading
-                        .jobs
-                        .get_mut(&command)
-                        .filter(|job| !job.effective && job.error.is_none())
-                        .and_then(|j| j.recover.take())
-                {
-                    if let Some(job) = self.trading.jobs.remove(&command) {
-                        cx.store.remove_orders(
-                            &job.created.iter().map(String::as_str).collect::<Vec<_>>(),
-                        );
-                    }
-                    for o in &orders {
-                        self.account
-                            .ws_position_ids
-                            .remove(&format!("{}:long", o.symbol));
-                        self.account
-                            .ws_position_ids
-                            .remove(&format!("{}:short", o.symbol));
-                    }
-                    self.trading.preparing.insert(
-                        command,
-                        Prepare {
-                            orders,
-                            stage: 0,
-                            retried: true,
-                        },
-                    );
-                    self.read_axis_for(cx, Axis::Positions, Some(command));
-                    return;
-                }
-                if definitive
-                    && error
-                        .message
-                        .to_ascii_lowercase()
-                        .contains("order does not support this operation")
-                    && let Call::Amend {
-                        fallback: Some(p),
-                        parent,
-                        id,
-                        leg,
-                        ..
-                    } = &request.call
-                {
-                    let symbol = p.symbol.clone().unwrap();
-                    let ids: Vec<_> = cx
-                        .store
-                        .orders()
-                        .iter()
-                        .filter(|o| {
-                            o.id == *parent
-                                || self
-                                    .account
-                                    .native
-                                    .get(&o.id)
-                                    .is_some_and(|n| n.raw_id == *parent)
-                        })
-                        .map(|o| o.id.clone())
-                        .collect();
-                    let cancel = Step {
-                        path: CANCEL,
-                        body: text(&Cancel {
-                            symbol: &symbol,
-                            order_list: vec![Identity { order_id: parent }],
-                        }),
-                        call: Call::Cancel {
-                            ids,
-                            require_ack: true,
-                        },
-                        delay: 0.0,
-                    };
-                    if let Some(job) = self.trading.jobs.get_mut(&command) {
-                        job.steps.push_front(Step {
-                            path: "/api/v1/futures/trade/get_order_detail",
-                            body: String::new(),
-                            call: Call::ReconcileReplacement {
-                                id: id.clone(),
-                                parent: parent.clone(),
-                                leg: *leg,
-                                payload: p.clone(),
-                            },
-                            delay: 0.0,
-                        });
-                        job.steps.push_front(cancel);
-                        self.advance(cx, command);
-                        return;
-                    }
-                }
-                self.trade_error(cx, request, error);
-                return;
-            }
+        let Some(plan) = self.trading.plan(command).cloned() else {
+            return;
         };
-        let result = (|| {
-            match &request.call {
-                Call::Place { clients, batch } => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct BatchResult<'a> {
-                        #[serde(borrow, default = "empty_list")]
-                        success_list: &'a serde_json::value::RawValue,
-                        #[serde(borrow, default = "empty_list")]
-                        failure_list: &'a serde_json::value::RawValue,
-                    }
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct Failure<'a> {
-                        #[serde(borrow, default)]
-                        error_msg: Str<'a>,
-                        #[serde(default, deserialize_with = "error::present_code")]
-                        error_code: Option<error::Code>,
-                    }
-                    let mut ids = vec![];
-                    let mut failures = None;
-                    if *batch {
-                        let rows: BatchResult<'_> =
-                            serde_json::from_str(body).map_err(|e| e.to_string())?;
-                        let successes = ack_rows(rows.success_list).unwrap_or_else(|error| {
-                            error::append(&mut failures, error::malformed(error, true));
-                            Vec::new()
-                        });
-                        let rejected = ack_rows(rows.failure_list).unwrap_or_else(|error| {
-                            error::append(&mut failures, error::malformed(error, true));
-                            Vec::new()
-                        });
-                        let mut incomplete = successes.len() + rejected.len() != clients.len();
-                        let mut seen = HashSet::new();
-                        // Decode independently so a malformed sibling cannot erase observed IDs.
-                        for raw in successes {
-                            match ack_identity(raw.get(), true) {
-                                Ok((id, malformed)) => {
-                                    if let Some(id) = id {
-                                        if !seen.insert(id.clone()) {
-                                            incomplete = true;
-                                        } else {
-                                            ids.push(id);
-                                        }
-                                    } else {
-                                        incomplete = true;
-                                    }
-                                    if malformed {
-                                        error::append(
-                                            &mut failures,
-                                            error::malformed(
-                                                "Malformed Bitunix order acknowledgement",
-                                                true,
-                                            ),
-                                        );
-                                    }
-                                }
-                                Err(error) => {
-                                    error::append(&mut failures, error::malformed(error, true))
-                                }
-                            }
-                        }
-                        for raw in rejected {
-                            match serde_json::from_str::<Failure<'_>>(raw.get()) {
-                                Ok(failure) => {
-                                    let message = format!(
-                                        "{} ({})",
-                                        failure.error_msg,
-                                        failure.error_code.map_or(0, |code| code.0)
-                                    );
-                                    let mut error =
-                                        error::native(failure.error_code, message, true);
-                                    error.venue_message = Some(failure.error_msg.into_owned());
-                                    error::append(&mut failures, error);
-                                }
-                                Err(error) => error::append(
-                                    &mut failures,
-                                    error::malformed(error.to_string(), true),
-                                ),
-                            }
-                        }
-                        if incomplete {
-                            error::append(
-                                &mut failures,
-                                error::malformed(
-                                    "Bitunix batch response has incomplete order acknowledgements",
-                                    true,
-                                ),
-                            );
-                        }
-                    } else {
-                        let (id, malformed) = ack_identity(body, true)?;
-                        if malformed {
-                            error::append(
-                                &mut failures,
-                                error::malformed("Malformed Bitunix order acknowledgement", true),
-                            );
-                        }
-                        if let Some(id) = id {
-                            ids.push(id);
-                        } else if !malformed {
-                            // code=0 proves acceptance; retain the existing client-ID identity fallback.
-                            ids.push(
-                                clients
-                                    .first()
-                                    .cloned()
-                                    .ok_or("Bitunix place response has no order ID")?,
-                            );
-                        }
-                    }
-                    if let Some(job) = self.trading.jobs.get_mut(&command) {
-                        job.effective |= !ids.is_empty();
-                        job.ids.extend(ids);
-                        if let Some(error) = failures {
-                            error::append(&mut job.error, error);
-                        }
-                    }
-                }
-                Call::ReconcileReplacement {
-                    parent,
-                    id,
-                    leg,
-                    payload,
-                } => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct FinalOrder<'a> {
-                        #[serde(borrow)]
-                        order_id: Str<'a>,
-                        #[serde(borrow)]
-                        symbol: Str<'a>,
-                        #[serde(borrow, alias = "orderStatus")]
-                        status: Str<'a>,
-                        qty: crate::wire::StrictNum,
-                        trade_qty: crate::wire::StrictNum,
-                    }
-                    let row: FinalOrder<'_> =
-                        serde_json::from_str(body).map_err(|e| e.to_string())?;
-                    if row.order_id != parent.as_str()
-                        || row.symbol != payload.symbol.as_deref().unwrap_or("")
-                    {
-                        return Err("Bitunix canceled order identity is not reconciled".into());
-                    }
-                    let status = row.status.to_ascii_uppercase();
-                    if !matches!(status.as_str(), "CANCELED" | "CANCELLED" | "FILLED") {
-                        return Err("Bitunix cancel not final; replacement was not placed".into());
-                    }
-                    let m = cx
-                        .store
-                        .market(&row.symbol)
-                        .ok_or("Bitunix market missing")?;
-                    if status == "FILLED" {
-                        return Ok(());
-                    }
-                    if row.qty.0 <= 0.0
-                        || row.trade_qty.0 < 0.0
-                        || row.trade_qty.0 > row.qty.0
-                        || self
-                            .account
-                            .filled
-                            .get(parent)
-                            .is_some_and(|(filled, _)| row.trade_qty.0 < *filled)
-                    {
-                        return Err("Bitunix canceled fill total is stale or invalid".into());
-                    }
-                    let remaining = num::adjust(row.qty.0 - row.trade_qty.0, m.precision.amount);
-                    if !remaining.is_finite() || remaining < 0.0 {
-                        return Err("Bitunix canceled quantity is not reconciled".into());
-                    }
-                    if remaining > 0.0 {
-                        let mut p = (**payload).clone();
-                        p.qty = Some(num::format(remaining));
-                        if let Some(job) = self.trading.jobs.get_mut(&command) {
-                            job.steps.push_front(Step {
-                                path: PLACE,
-                                body: text(&p),
-                                call: if leg.is_some() {
-                                    Call::Amend {
-                                        id: id.clone(),
-                                        parent: parent.clone(),
-                                        leg: *leg,
-                                        fallback: None,
-                                    }
-                                } else {
-                                    Call::Place {
-                                        clients: p.client_id.into_iter().collect(),
-                                        batch: false,
-                                    }
-                                },
-                                delay: 0.0,
-                            });
-                        }
-                    }
-                }
-                Call::Cancel { ids, require_ack } => {
-                    #[derive(Deserialize, Default)]
-                    #[serde(rename_all = "camelCase")]
-                    struct Item<'a> {
-                        #[serde(borrow, default, alias = "id")]
-                        order_id: Str<'a>,
-                        #[serde(borrow, default)]
-                        error_msg: Str<'a>,
-                        #[serde(default, deserialize_with = "error::present_code")]
-                        error_code: Option<error::Code>,
-                    }
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct Canceled<'a> {
-                        #[serde(borrow, default = "empty_list")]
-                        success_list: &'a serde_json::value::RawValue,
-                        #[serde(borrow, default = "empty_list")]
-                        failure_list: &'a serde_json::value::RawValue,
-                    }
-                    let ack: Canceled<'_> = if body.trim() == "null" {
-                        Canceled {
-                            success_list: empty_list(),
-                            failure_list: empty_list(),
-                        }
-                    } else {
-                        serde_json::from_str(body).map_err(|e| e.to_string())?
-                    };
-                    let mut failure = None;
-                    let successes = ack_rows(ack.success_list).unwrap_or_else(|error| {
-                        error::append(&mut failure, error::malformed(error, true));
-                        Vec::new()
-                    });
-                    let rejected = ack_rows(ack.failure_list).unwrap_or_else(|error| {
-                        error::append(&mut failure, error::malformed(error, true));
-                        Vec::new()
-                    });
-                    let mut succeeded = HashSet::new();
-                    for raw in successes {
-                        match ack_identity(raw.get(), false) {
-                            Ok((id, malformed)) => {
-                                if let Some(id) = id {
-                                    succeeded.insert(id);
-                                } else {
-                                    error::append(
-                                        &mut failure,
-                                        error::malformed(
-                                            "Malformed Bitunix cancellation acknowledgement",
-                                            true,
-                                        ),
-                                    );
-                                }
-                                if malformed || serde_json::from_str::<Item<'_>>(raw.get()).is_err()
-                                {
-                                    error::append(
-                                        &mut failure,
-                                        error::malformed(
-                                            "Malformed Bitunix cancellation acknowledgement",
-                                            true,
-                                        ),
-                                    );
-                                }
-                            }
-                            Err(error) => {
-                                error::append(&mut failure, error::malformed(error, true))
-                            }
-                        }
-                    }
-                    let failed = failure.is_some() || !rejected.is_empty();
-                    let mut effective = false;
-                    for id in ids {
-                        let raw = self
-                            .account
-                            .native
-                            .get(id)
-                            .map_or(id.as_str(), |n| n.raw_id.as_str())
-                            .to_owned();
-                        if (!*require_ack && !failed) || succeeded.contains(raw.as_str()) {
-                            effective = true;
-                            cx.store.update_order(id, |row| {
-                                if !matches!(
-                                    row.status,
-                                    OrderStatus::Closed | OrderStatus::Canceled
-                                ) {
-                                    row.status = OrderStatus::Canceled;
-                                }
-                            });
-                        }
-                    }
-                    if let Some(job) = self.trading.jobs.get_mut(&command) {
-                        job.effective |= effective;
-                    }
-                    for raw in rejected {
-                        match serde_json::from_str::<Item<'_>>(raw.get()) {
-                            Ok(row) => {
-                                let message = if row.error_msg.is_empty() {
-                                    format!("Bitunix cancel failed for {}", row.order_id)
-                                } else {
-                                    row.error_msg.to_string()
-                                };
-                                let mut next = error::native(row.error_code, message, true);
-                                next.venue_message = Some(row.error_msg.into_owned());
-                                error::append(&mut failure, next);
-                            }
-                            Err(error) => error::append(
-                                &mut failure,
-                                error::malformed(error.to_string(), true),
-                            ),
-                        }
-                    }
-                    if *require_ack
-                        && ids.iter().any(|id| {
-                            !succeeded.contains(
-                                self.account
-                                    .native
-                                    .get(id)
-                                    .map_or(id.as_str(), |n| n.raw_id.as_str()),
-                            )
-                        })
-                    {
-                        let message = "Bitunix cancellation not acknowledged for every order; replacement was not placed";
-                        return Err(match failure {
-                            Some(mut error) => {
-                                error.message = message.into();
-                                error
-                            }
-                            None => error::malformed(message, true),
-                        });
-                    }
-                    if let Some(error) = failure {
-                        return Err(error);
-                    }
-                }
-
-                Call::Amend {
-                    id, parent, leg, ..
-                } => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct Ack<'a> {
-                        #[serde(borrow, default, alias = "id")]
-                        order_id: Str<'a>,
-                    }
-                    let ack: Ack<'_> = serde_json::from_str(body).map_err(|e| e.to_string())?;
-                    let raw = if ack.order_id.is_empty() {
-                        parent.as_str()
-                    } else {
-                        ack.order_id.as_ref()
-                    };
-                    let id = if let Some(leg) = leg {
-                        format!("{raw}__{leg}")
-                    } else if id == parent {
-                        raw.to_owned()
-                    } else {
-                        id.clone()
-                    };
-                    if let Some(job) = self.trading.jobs.get_mut(&command) {
-                        job.ids.push(id);
-                    }
-                }
-                Call::Leverage { symbol, value } => {
-                    self.account.generations[Axis::Positions.index()] += 1;
-                    self.account.position_write_revision += 1;
-                    cx.store.update_setting(symbol, |s| s.leverage = *value);
-                    cx.store.update_positions(|p| {
-                        if p.symbol == *symbol {
-                            p.leverage = *value;
-                        }
-                    });
-                }
-                Call::Margin { symbol, isolated } => {
-                    self.account.generations[Axis::Positions.index()] += 1;
-                    self.account.position_write_revision += 1;
-                    let margin = if *isolated {
-                        MarginType::Isolated
-                    } else {
-                        MarginType::Cross
-                    };
-                    cx.store
-                        .update_setting(symbol, |s| s.margin_type = Some(margin));
-                    cx.store.update_positions(|p| {
-                        if p.symbol == *symbol {
-                            p.margin_type = Some(margin);
-                        }
-                    });
-                }
-                Call::Mode { hedged } => {
-                    self.account.balance_write_revision += 1;
-                    self.account.generations[Axis::Balance.index()] += 1;
-                    self.account.generations[Axis::Positions.index()] += 1;
-                    self.account.position_write_revision += 1;
-                    cx.store.set_hedged(*hedged);
-                    self.debounce(cx, Axis::Positions);
-                }
-            }
-            Ok::<_, VenueError>(())
-        })();
-        if let Err(error) = result {
-            let error = if error.kind.is_none() && error.outcome.is_none() {
-                error::malformed(error.message, write)
-            } else {
-                error
-            };
-            self.trade_error(cx, request, error);
+        if cx.validate_plan_delivery(&plan, &request.context).is_err() {
             return;
         }
-        if matches!(
-            request.call,
-            Call::Amend { .. } | Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
-        ) && let Some(job) = self.trading.jobs.get_mut(&command)
+        if request.step.read() {
+            return self.replacement_answer(cx, request, response);
+        }
+        // Fence before parsing: a partial ACK can apply accepted effects and
+        // then stop on a rejected or malformed sibling.
+        cx.store.invalidate_order_snapshots();
+        let data = match error::response_data(&response, true) {
+            Ok(data) => data,
+            Err(error) => return self.write_refused(cx, request, &response, error),
+        };
+        let accepted = match &request.step.call {
+            Call::Place { clients, batch: false } => self.place_answer(cx, &request, data, clients),
+            Call::Place { clients, batch: true } => {
+                self.batch_answer(cx, &request, data, clients.len())
+            }
+            Call::Cancel { ids, require_ack } => {
+                self.cancel_answer(cx, &request, data, ids, *require_ack)
+            }
+            Call::Amend {
+                id, parent, leg, ..
+            } => self.amend_answer(cx, &request, data, id, parent, *leg),
+            Call::Leverage { symbol, value } => {
+                self.account.generations[Axis::Positions.index()] += 1;
+                self.account.position_write_revision += 1;
+                cx.store.update_setting(symbol, |s| s.leverage = *value);
+                cx.store.update_positions(|p| {
+                    if p.symbol == *symbol {
+                        p.leverage = *value;
+                    }
+                });
+                Ok(())
+            }
+            Call::Margin { symbol, isolated } => {
+                self.account.generations[Axis::Positions.index()] += 1;
+                self.account.position_write_revision += 1;
+                let margin = if *isolated {
+                    MarginType::Isolated
+                } else {
+                    MarginType::Cross
+                };
+                cx.store
+                    .update_setting(symbol, |s| s.margin_type = Some(margin));
+                cx.store.update_positions(|p| {
+                    if p.symbol == *symbol {
+                        p.margin_type = Some(margin);
+                    }
+                });
+                Ok(())
+            }
+            Call::Mode { hedged } => {
+                self.account.balance_write_revision += 1;
+                self.account.generations[Axis::Balance.index()] += 1;
+                self.account.generations[Axis::Positions.index()] += 1;
+                self.account.position_write_revision += 1;
+                cx.store.set_hedged(*hedged);
+                self.debounce(cx, Axis::Positions);
+                Ok(())
+            }
+            Call::ReconcileReplacement { .. } => unreachable!("a Read call"),
+        };
+        // Settings writes record their acceptance here; order writes did above.
+        if accepted.is_ok()
+            && matches!(
+                request.step.call,
+                Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
+            )
+            && cx
+                .http_write_fact(
+                    &request.context,
+                    WriteFact::Accepted {
+                        order_ids: Vec::new(),
+                    },
+                    None,
+                )
+                .is_err()
         {
-            job.effective = true;
+            return;
         }
         self.account.generations[2] += 1;
         self.debounce(cx, Axis::Orders);
-        self.advance(cx, command);
+        match accepted {
+            Ok(()) => {
+                if let Some(live) = self.trading.live.get_mut(&command) {
+                    live.current = Some((request.slot, request.context));
+                }
+                self.advance(cx, command);
+            }
+            Err(Some(error)) => {
+                if let Some(live) = self.trading.live.get_mut(&command) {
+                    live.current = Some((request.slot, request.context));
+                }
+                self.end(cx, command, error);
+            }
+            // The journal refused the fact; the engine owns this job now.
+            Err(None) => {}
+        }
+    }
+    /// A refused write: the classified fact, then native's recoveries on a
+    /// definitive refusal, else the job ends.
+    fn write_refused(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: &Response<'_>,
+        error: VenueError,
+    ) {
+        let command = request.command;
+        let code = error.venue_code.as_deref().and_then(|code| code.parse::<i64>().ok());
+        let native = code.map(|code| Native {
+            code: NativeCode::Int(code),
+            message: "",
+        });
+        let grant = match cx.classify_write(
+            &request.context,
+            &codes::BITUNIX,
+            native.as_ref(),
+            error.message.clone(),
+        ) {
+            Ok(fact) => cx.http_write_fact(
+                &request.context,
+                WriteFact::Failed {
+                    fact,
+                    known_effects: false,
+                },
+                None,
+            ),
+            Err(_) => cx
+                .http_write_unproven(&request.context, error.message.clone())
+                .map(|()| None),
+        };
+        let grant = match grant {
+            Ok(grant) => grant,
+            Err(_) => return,
+        };
+        let plan = self.trading.plan(command).cloned().expect("delivered Plan");
+        // 10007: the one re-signed resend, with a fresh nonce.
+        if let Some(grant) = grant
+            && !request.resent
+        {
+            return match cx.plan_resend_context(&plan, &request.slot, &request.context, grant) {
+                Ok(context) => {
+                    let request = Request { context, ..request };
+                    self.issue_resent(cx, request)
+                }
+                Err(reason) => self.end(cx, command, VenueError::new(reason.venue_error().message)),
+            };
+        }
+        let definitive = (200..300).contains(&response.status)
+            && error.outcome == Some(Outcome::Rejected)
+            && error.venue_code.is_some();
+        let message = error.message.to_ascii_lowercase();
+        if let Some(live) = self.trading.live.get_mut(&command) {
+            live.current = Some((request.slot.clone(), request.context.clone()));
+        }
+        if definitive
+            && message.contains("position does not exist")
+            && matches!(request.step.call, Call::Place { batch: false, .. })
+            && let Some(orders) = self
+                .trading
+                .live
+                .get_mut(&command)
+                .filter(|live| live.job.ids.is_empty())
+                .and_then(|live| live.job.recover.take())
+        {
+            // Native `recover`: forget the stale position IDs, re-read and
+            // re-place once, as continuations of this Plan.
+            if let Some(live) = self.trading.live.get_mut(&command) {
+                Self::cleanup(cx, &live.job);
+                live.job.created.clear();
+            }
+            for o in &orders {
+                self.account
+                    .ws_position_ids
+                    .remove(&format!("{}:long", o.symbol));
+                self.account
+                    .ws_position_ids
+                    .remove(&format!("{}:short", o.symbol));
+            }
+            if let Some(live) = self.trading.live.get_mut(&command) {
+                live.prepare = Some(Prepare {
+                    orders,
+                    stage: 0,
+                    retried: true,
+                });
+            }
+            return self.read_axis_for(cx, Axis::Positions, Some(command));
+        }
+        if definitive
+            && message.contains("order does not support this operation")
+            && let Call::Amend {
+                fallback: Some(p),
+                parent,
+                id,
+                leg,
+            } = &request.step.call
+        {
+            // Native fallback: cancel, prove the cancel final, then replace.
+            let symbol = p.symbol.clone().unwrap_or_default();
+            let ids: Vec<_> = cx
+                .store
+                .orders()
+                .iter()
+                .filter(|o| {
+                    o.id == *parent
+                        || self
+                            .account
+                            .native
+                            .get(&o.id)
+                            .is_some_and(|n| n.raw_id == *parent)
+                })
+                .map(|o| o.id.clone())
+                .collect();
+            if let Some(live) = self.trading.live.get_mut(&command) {
+                live.job.steps.push_front(Step {
+                    path: "/api/v1/futures/trade/get_order_detail",
+                    body: String::new(),
+                    call: Call::ReconcileReplacement {
+                        id: id.clone(),
+                        parent: parent.clone(),
+                        leg: *leg,
+                        payload: p.clone(),
+                    },
+                    delay: 0.0,
+                });
+                live.job.steps.push_front(Step {
+                    path: CANCEL,
+                    body: text(&Cancel {
+                        symbol: &symbol,
+                        order_list: vec![Identity { order_id: parent }],
+                    }),
+                    call: Call::Cancel {
+                        ids,
+                        require_ack: true,
+                    },
+                    delay: 0.0,
+                });
+            }
+            return self.advance(cx, command);
+        }
+        self.end(cx, command, error);
+    }
+    /// The same call bytes under the resend Context, re-signed.
+    fn issue_resent(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+        let Request {
+            command,
+            step,
+            slot,
+            context,
+            ..
+        } = request;
+        let Some(plan) = self.trading.plan(command).cloned() else {
+            return;
+        };
+        let Some((_, identity)) = self.trade_identity() else {
+            let error = error::not_sent("Bitunix credentials required", ErrorKind::AuthInvalid);
+            return self.end(cx, command, error);
+        };
+        let url = format!("{}{}", crate::REST, step.path);
+        let body = Some(step.body.clone());
+        let recipe = crate::sign::dispatch::Http::new(
+            identity,
+            Method::Post,
+            url.clone(),
+            String::new(),
+            body.clone(),
+            self.options.testnet,
+        );
+        let _ = plan;
+        let pending = Pending::Trade(Request {
+            command,
+            step,
+            slot,
+            context: context.clone(),
+            resent: true,
+        });
+        if let Err((pending, reason)) = cx.request_signed_managed(
+            context,
+            None,
+            Method::Post,
+            url,
+            body,
+            Box::new(recipe),
+            pending,
+        ) && let Pending::Trade(request) = pending
+        {
+            self.trade_error(cx, request, reason.venue_error());
+        }
+    }
+    /// Records an accepted or unproven write fact; `Err(None)` means the
+    /// journal refused it and the engine owns the job.
+    fn record(
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        accepted: Result<Vec<String>, String>,
+    ) -> Result<(), Option<VenueError>> {
+        match accepted {
+            Ok(order_ids) => cx
+                .http_write_fact(&request.context, WriteFact::Accepted { order_ids }, None)
+                .map(drop)
+                .map_err(|_| None),
+            // A 2xx that does not prove the write is Unknown.
+            Err(message) => match cx.http_write_unproven(&request.context, message.clone()) {
+                Ok(()) => Err(Some(error::malformed(message, true))),
+                Err(_) => Err(None),
+            },
+        }
+    }
+    fn place_answer(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        data: &str,
+        clients: &[String],
+    ) -> Result<(), Option<VenueError>> {
+        let accepted = match ack_identity(data, true) {
+            Ok((Some(id), false)) => Ok(id),
+            // code=0 proves acceptance; keep the client-ID identity fallback.
+            Ok((None, false)) => clients
+                .first()
+                .cloned()
+                .ok_or_else(|| "Bitunix place response has no order ID".to_owned()),
+            Ok((_, true)) => Err("Malformed Bitunix order acknowledgement".to_owned()),
+            Err(error) => Err(error),
+        };
+        if let (Ok(id), Some(live)) = (&accepted, self.trading.live.get_mut(&request.command)) {
+            live.job.ids.push(id.clone());
+        }
+        Self::record(cx, request, accepted.map(|id| vec![id]))
+    }
+    /// A batch ACK: accepted rows ride the journal; a refused or malformed
+    /// row ends the job with the accepted IDs kept.
+    fn batch_answer(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        data: &str,
+        expected: usize,
+    ) -> Result<(), Option<VenueError>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct BatchResult<'a> {
+            #[serde(borrow, default = "empty_list")]
+            success_list: &'a serde_json::value::RawValue,
+            #[serde(borrow, default = "empty_list")]
+            failure_list: &'a serde_json::value::RawValue,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Failure<'a> {
+            #[serde(borrow, default)]
+            error_msg: Str<'a>,
+            #[serde(default, deserialize_with = "error::present_code")]
+            error_code: Option<error::Code>,
+        }
+        let Ok(rows) = serde_json::from_str::<BatchResult<'_>>(data) else {
+            return Self::record(cx, request, Err("Malformed Bitunix batch response".into()));
+        };
+        let successes = ack_rows(rows.success_list).unwrap_or_default();
+        let rejected = ack_rows(rows.failure_list).unwrap_or_default();
+        let mut ids = Vec::new();
+        let mut seen = HashSet::new();
+        // Decode independently: a malformed sibling cannot erase observed IDs,
+        // and a missing one leaves the count short (Unknown).
+        for raw in successes {
+            if let Ok((Some(id), false)) = ack_identity(raw.get(), true)
+                && seen.insert(id.clone())
+            {
+                ids.push(id);
+            }
+        }
+        let failures: Vec<_> = rejected
+            .iter()
+            .filter_map(|raw| serde_json::from_str::<Failure<'_>>(raw.get()).ok())
+            .collect();
+        let messages: Vec<_> = failures
+            .iter()
+            .map(|f| format!("{} ({})", f.error_msg, f.error_code.map_or(0, |code| code.0)))
+            .collect();
+        let mut items: Vec<_> = ids.iter().map(|id| BatchItem::Accepted(id)).collect();
+        items.extend(failures.iter().map(|f| {
+            BatchItem::Native(Native {
+                code: NativeCode::Int(f.error_code.map_or(0, |code| i64::from(code.0))),
+                message: &f.error_msg,
+            })
+        }));
+        let message = if messages.is_empty() {
+            "Bitunix batch response has incomplete order acknowledgements".to_owned()
+        } else {
+            messages.join("; ")
+        };
+        if let Some(live) = self.trading.live.get_mut(&request.command) {
+            live.job.ids.extend(ids.iter().cloned());
+        }
+        match cx.http_write_batch(
+            &request.context,
+            &codes::BITUNIX,
+            expected,
+            &items,
+            message,
+            None,
+        ) {
+            Ok(WriteResult::Accepted { .. }) => Ok(()),
+            Ok(
+                WriteResult::Rejected(error)
+                | WriteResult::KnownPartial(error)
+                | WriteResult::PartialUnknown(error)
+                | WriteResult::Failed(error),
+            ) => Err(Some(error)),
+            Err(_) => Err(None),
+        }
+    }
+    fn cancel_answer(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        data: &str,
+        ids: &[String],
+        require_ack: bool,
+    ) -> Result<(), Option<VenueError>> {
+        #[derive(Deserialize, Default)]
+        #[serde(rename_all = "camelCase")]
+        struct Item<'a> {
+            #[serde(borrow, default, alias = "id")]
+            order_id: Str<'a>,
+            #[serde(borrow, default)]
+            error_msg: Str<'a>,
+            #[serde(default, deserialize_with = "error::present_code")]
+            error_code: Option<error::Code>,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Canceled<'a> {
+            #[serde(borrow, default = "empty_list")]
+            success_list: &'a serde_json::value::RawValue,
+            #[serde(borrow, default = "empty_list")]
+            failure_list: &'a serde_json::value::RawValue,
+        }
+        let ack = if data.trim() == "null" {
+            Ok(Canceled {
+                success_list: empty_list(),
+                failure_list: empty_list(),
+            })
+        } else {
+            serde_json::from_str::<Canceled<'_>>(data)
+        };
+        let Ok(ack) = ack else {
+            return Self::record(cx, request, Err("Malformed Bitunix cancellation".into()));
+        };
+        let raw_id = |id: &String| {
+            self.account
+                .native
+                .get(id)
+                .map_or(id.as_str(), |n| n.raw_id.as_str())
+                .to_owned()
+        };
+        let (successes, rows_valid) = match ack_rows(ack.success_list) {
+            Ok(rows) => (rows, true),
+            Err(_) => (Vec::new(), false),
+        };
+        let rejected = ack_rows(ack.failure_list).unwrap_or_default();
+        let succeeded: HashSet<String> = successes
+            .iter()
+            .filter_map(|raw| match ack_identity(raw.get(), false) {
+                Ok((Some(id), false)) if serde_json::from_str::<Item<'_>>(raw.get()).is_ok() => {
+                    Some(id)
+                }
+                _ => None,
+            })
+            .collect();
+        let failures: Vec<_> = rejected
+            .iter()
+            .filter_map(|raw| serde_json::from_str::<Item<'_>>(raw.get()).ok())
+            .collect();
+        // Native: a clean code-0 answer cancels every target unless an ACK is
+        // required; otherwise only the echoed IDs are proven.
+        let all = !require_ack && rows_valid && rejected.is_empty() && successes.len() == succeeded.len();
+        let mut canceled = Vec::new();
+        for id in ids {
+            if all || succeeded.contains(&raw_id(id)) {
+                canceled.push(id.clone());
+                cx.store.update_order(id, |row| {
+                    if !matches!(row.status, OrderStatus::Closed | OrderStatus::Canceled) {
+                        row.status = OrderStatus::Canceled;
+                    }
+                });
+            }
+        }
+        if all {
+            return Self::record(cx, request, Ok(canceled));
+        }
+        let raws: Vec<_> = canceled.iter().map(raw_id).collect();
+        let mut items: Vec<_> = raws.iter().map(|id| BatchItem::Accepted(id)).collect();
+        items.extend(failures.iter().map(|f| {
+            BatchItem::Native(Native {
+                code: NativeCode::Int(f.error_code.map_or(0, |code| i64::from(code.0))),
+                message: &f.error_msg,
+            })
+        }));
+        let message = failures
+            .iter()
+            .map(|f| {
+                if f.error_msg.is_empty() {
+                    format!("Bitunix cancel failed for {}", f.order_id)
+                } else {
+                    f.error_msg.to_string()
+                }
+            })
+            .collect::<Vec<_>>();
+        let message = if require_ack && canceled.len() != ids.len() {
+            "Bitunix cancellation not acknowledged for every order; replacement was not placed"
+                .to_owned()
+        } else if message.is_empty() {
+            "Malformed Bitunix cancellation acknowledgement".to_owned()
+        } else {
+            message.join("; ")
+        };
+        match cx.http_write_batch(
+            &request.context,
+            &codes::BITUNIX,
+            ids.len(),
+            &items,
+            message,
+            None,
+        ) {
+            Ok(WriteResult::Accepted { .. }) => Ok(()),
+            Ok(
+                WriteResult::Rejected(error)
+                | WriteResult::KnownPartial(error)
+                | WriteResult::PartialUnknown(error)
+                | WriteResult::Failed(error),
+            ) => Err(Some(error)),
+            Err(_) => Err(None),
+        }
+    }
+    fn amend_answer(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &Request,
+        data: &str,
+        id: &str,
+        parent: &str,
+        leg: Option<&'static str>,
+    ) -> Result<(), Option<VenueError>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Ack<'a> {
+            #[serde(borrow, default, alias = "id")]
+            order_id: Str<'a>,
+        }
+        let accepted = match serde_json::from_str::<Ack<'_>>(data) {
+            Ok(ack) => {
+                let raw = if ack.order_id.is_empty() {
+                    parent
+                } else {
+                    ack.order_id.as_ref()
+                };
+                Ok(if let Some(leg) = leg {
+                    format!("{raw}__{leg}")
+                } else if id == parent {
+                    raw.to_owned()
+                } else {
+                    id.to_owned()
+                })
+            }
+            Err(error) => Err(error.to_string()),
+        };
+        if let (Ok(id), Some(live)) = (&accepted, self.trading.live.get_mut(&request.command)) {
+            live.job.ids.push(id.clone());
+        }
+        Self::record(cx, request, accepted.map(|id| vec![id]))
+    }
+    /// The amend fallback's Read: the canceled parent must be final before
+    /// its remainder is re-placed.
+    fn replacement_answer(&mut self, cx: &mut Cx<'_, Pending>, request: Request, response: Response<'_>) {
+        let command = request.command;
+        let Call::ReconcileReplacement {
+            parent,
+            id,
+            leg,
+            payload,
+        } = &request.step.call
+        else {
+            return;
+        };
+        let result = (|| {
+            let body = error::response_data(&response, false).map_err(|e| e.message)?;
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct FinalOrder<'a> {
+                #[serde(borrow)]
+                order_id: Str<'a>,
+                #[serde(borrow)]
+                symbol: Str<'a>,
+                #[serde(borrow, alias = "orderStatus")]
+                status: Str<'a>,
+                qty: crate::wire::StrictNum,
+                trade_qty: crate::wire::StrictNum,
+            }
+            let row: FinalOrder<'_> = serde_json::from_str(body).map_err(|e| e.to_string())?;
+            if row.order_id != parent.as_str() || row.symbol != payload.symbol.as_deref().unwrap_or("") {
+                return Err("Bitunix canceled order identity is not reconciled".to_owned());
+            }
+            let status = row.status.to_ascii_uppercase();
+            if !matches!(status.as_str(), "CANCELED" | "CANCELLED" | "FILLED") {
+                return Err("Bitunix cancel not final; replacement was not placed".into());
+            }
+            let m = cx.store.market(&row.symbol).ok_or("Bitunix market missing")?;
+            if status == "FILLED" {
+                return Ok(None);
+            }
+            if row.qty.0 <= 0.0
+                || row.trade_qty.0 < 0.0
+                || row.trade_qty.0 > row.qty.0
+                || self
+                    .account
+                    .filled
+                    .get(parent)
+                    .is_some_and(|(filled, _)| row.trade_qty.0 < *filled)
+            {
+                return Err("Bitunix canceled fill total is stale or invalid".into());
+            }
+            let remaining = num::adjust(row.qty.0 - row.trade_qty.0, m.precision.amount);
+            if !remaining.is_finite() || remaining < 0.0 {
+                return Err("Bitunix canceled quantity is not reconciled".into());
+            }
+            if remaining == 0.0 {
+                return Ok(None);
+            }
+            let mut p = (**payload).clone();
+            p.qty = Some(num::format(remaining));
+            Ok(Some(Step {
+                path: PLACE,
+                body: text(&p),
+                call: if leg.is_some() {
+                    Call::Amend {
+                        id: id.clone(),
+                        parent: parent.clone(),
+                        leg: *leg,
+                        fallback: None,
+                    }
+                } else {
+                    Call::Place {
+                        clients: p.client_id.into_iter().collect(),
+                        batch: false,
+                    }
+                },
+                delay: 0.0,
+            }))
+        })();
+        let Some(live) = self.trading.live.get_mut(&command) else {
+            return;
+        };
+        live.current = Some((request.slot, request.context));
+        match result {
+            Ok(replacement) => {
+                if let Some(step) = replacement {
+                    live.job.steps.push_front(step);
+                }
+                self.advance(cx, command);
+            }
+            Err(message) => self.end(cx, command, VenueError::new(message)),
+        }
+    }
+}
+fn serial(step: &Step) -> SerialCall {
+    let read = step.read();
+    SerialCall {
+        operation: if read {
+            Operation::Read
+        } else {
+            Operation::Mutation
+        },
+        timeout_ms: CALL_MS,
+        // A write's one 10007 RefusedResend.
+        attempts: if read { 1 } else { 2 },
+    }
+}
+fn local_mutation_policy() -> Policy {
+    Policy {
+        operation: Operation::Mutation,
+        credential: None,
+        timeout_ms: CALL_MS,
+        pacing: None,
+        retry: RetryPolicy::Never,
     }
 }
 fn affected_ids(cx: &Cx<'_, Pending>, n: &NativeOrder) -> Vec<String> {

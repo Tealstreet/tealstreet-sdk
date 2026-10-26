@@ -187,6 +187,8 @@ pub struct OrderReadProgress {
 #[derive(Default)]
 pub struct AccountState {
     pub(crate) recovery: crate::recovery::State,
+    /// The next order snapshots reconcile an uncertain write: Primary-signed.
+    pub reconcile: bool,
     /// Symbols whose leverage/margin mode were read on first candle interest.
     pub symbol_settings: std::collections::HashSet<String>,
     /// Serial of the last balance read that was answered (reply or failure).
@@ -459,12 +461,12 @@ impl BitunixFutures {
         let Some((credential, identity)) = self.trade_identity() else {
             return self.prepared(cx, command, false, None);
         };
-        let Some(live) = self.trading.live_mut(command) else {
-            return self.prepared(cx, command, false, None);
-        };
-        let custody = match live.plan.clone() {
+        if !self.trading.live(command) {
+            return;
+        }
+        let custody = match self.trading.plan(command).cloned() {
             None => {
-                let preflight = live.preflight.clone();
+                let preflight = self.trading.preflight(command).expect("live job").clone();
                 let context = cx.preflight_read_context(
                     &preflight,
                     Policy {
@@ -483,7 +485,7 @@ impl BitunixFutures {
                 );
                 context.map(|context| ReadCustody::Preflight(preflight, context))
             }
-            Some(plan) => match live.current.take() {
+            Some(plan) => match self.trading.take_current(command) {
                 Some((slot, current)) => cx
                     .continue_serial_plan(
                         &plan,
