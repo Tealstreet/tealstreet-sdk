@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+pub mod trading;
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::signing::{Identities, Identity, KeyRef, Provider};
 use safe_cex_engine::{Engine, ReadCredentials};

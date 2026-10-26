@@ -8,13 +8,14 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+hosted-operation-proof = ["kraken", "safe-cex-engine/test-support"]
 address-nonce = ["safe-cex-engine/address-nonce", "safe-cex-venues/address-nonce", "sign-meta"]
 http-mutation-barriers = ["safe-cex-engine/http-mutation-barriers"]
 # Read-only signing-task metadata for hosted signing (Kraken and Paradex).
 sign-meta = ["safe-cex-engine/sign-meta"]
 # Additive provider bootstrap; at least one venue feature is still required.
 dispatch-signing = ["safe-cex-venues/dispatch-signing"]
-bitunix = ["safe-cex-venues/bitunix", "text-ingress"]
+bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing"]
 # Paradex streams binary SBE; its JSON control messages use the stable text entry.
 text-ingress = []
 grvt = ["safe-cex-venues/grvt", "text-ingress"]
