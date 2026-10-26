@@ -173,9 +173,9 @@ it.each([
 
 
 describe('shared credential setup policy', () => {
-  it('declares MEXC primary trimming and secondary preservation once without enabling signing', () => {
+  it('declares MEXC normalization and rejects an inconsistent persisted mapping', () => {
     const policy = deriveSignerSetupPolicy('mexc');
-    expect(policy).toEqual({ primary: { trimCredential: true }, secondary: { trimCredential: false } });
+    expect(policy).toEqual({ primary: { trimCredential: true, signing: 'optional' }, secondary: { trimCredential: false } });
     expect(deriveSignerSetupPolicy('binance')).toEqual({});
     const input = { ...options(), key: '\u0085 primary ', secondary_key: ' secondary ', localSigner: {
       primary: { trimCredential: false, stableId: 'primary/7' },
@@ -192,7 +192,7 @@ describe('shared credential setup policy', () => {
     expect(input.localSigner.primary.trimCredential).toBe(false);
     expect(input.localSigner.secondary.trimCredential).toBe(true);
     expect(input.key).toBe('\u0085 primary ');
-    expect(() => new RustEngineExchange('mexc', input, new DefaultStore())).toThrow(/not supported/);
+    expect(() => new RustEngineExchange('mexc', input, new DefaultStore())).toThrow(/mapping conflicts/);
   });
 
   it.each([['\u0085', false], ['\ufeff', true], [' \t', false], ['  a b  ', true]] as const)(

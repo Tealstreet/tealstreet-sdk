@@ -8,13 +8,15 @@ import { parseArgs } from 'node:util';
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
 // total package size; Sam approved the combined 14 MiB ceiling on 2026-10-26.
 export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_064 });
-// #2193 shared-core: CI Bitget/USDC 1,479,932 rounded up to KiB (overseer ceiling 1448 KiB).
+// #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB).
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
-// allowance over the opt-s 1,330,120 cap; the cap is that rounded up to the KiB. It can only go down.
+// allowance over the opt-s 1,330,120 cap; #2219 signing encodings: CI 1,385,845 rounded up to the KiB.
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
 // Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
-// Kraken composed CI: 1,399,905 bytes rounded up to KiB under the standing venue allowance.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_481_728, bitgetusdc: 1_481_728, bybit: 1_445_888, asterdex: 1_386_496, kraken: 1_400_832, krakenspot: 1_400_832 });
+// #2219 shared signing encodings: CI 1,445,978, 1413 KiB by overseer ruling.
+// Kraken composed CI: 1,399,905, then #2219 signing encodings 1,400,974, rounded up to KiB under the
+// standing venue allowance.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_482_752, bitgetusdc: 1_482_752, bybit: 1_446_912, asterdex: 1_386_496, kraken: 1_401_856, krakenspot: 1_401_856 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {

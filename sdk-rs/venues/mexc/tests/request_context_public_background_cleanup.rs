@@ -116,7 +116,9 @@ fn completed_catalogue_releases_its_slot_before_ticker_admission() {
 }
 #[test]
 fn sibling_issuance_pruning_expired_handle_does_not_strand_depth_recovery() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(options()));
+    let mut e = support::TestEngine::from(safe_cex_engine::test_support::seeded_engine(
+        MexcFutures::new(options()),
+    ));
     e.start(0.);
     let catalogue = http(&collect(&mut e, 0.), "contract/detail");
     let mut rows: serde_json::Value = serde_json::from_str(support::MARKETS).unwrap();
