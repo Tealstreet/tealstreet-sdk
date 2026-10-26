@@ -15,7 +15,10 @@ use safe_cex_engine::model::{
     Balance, CurrencyBalance, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Session};
+use safe_cex_engine::selected_read::{
+    CommandReadError, LocalRefusal, ReadRole, ReadRoot, SelectedRead,
+};
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{
@@ -92,7 +95,7 @@ fn order_tree_ids(item: &str) -> (Vec<String>, bool) {
     }
     (ids, unnamed)
 }
-enum OrderRead {
+pub(crate) enum OrderRead {
     Reconciled,
     Superseded,
     Failed(String),
@@ -125,7 +128,8 @@ pub enum Request {
     Orders {
         symbol: String,
         revision: u64,
-        lookup: Option<(CommandId, String)>,
+        /// A client-order lookup's own Read root and the identity it seeks.
+        lookup: Option<(ReadRoot, String)>,
         rows: SnapshotBuilder<String, Order>,
         quotes: HashMap<String, f64>,
         /// Duplicate ids or an oversized lookup: the whole read is discarded.
@@ -133,6 +137,25 @@ pub enum Request {
     },
 }
 impl Request {
+    /// The command Read root a job's physical pages are legs of.
+    pub(crate) fn root(job: &Job) -> Option<&ReadRoot> {
+        match job {
+            Job::Account(Self::Brackets { root, .. })
+            | Job::Account(Self::Orders {
+                lookup: Some((root, _)),
+                ..
+            }) => Some(root),
+            Job::History(request) => Some(request.root()),
+            _ => None,
+        }
+    }
+    /// A listen-key Session operation: its create or keepalive.
+    fn is_session(&self) -> bool {
+        matches!(self, Self::Listen { .. } | Self::Keepalive { .. })
+    }
+    fn is_create(&self) -> bool {
+        matches!(self, Self::Listen { .. })
+    }
     pub(crate) fn reset(&mut self) {
         match self {
             Self::Snapshot { data, .. } => *data = Snapshot::default(),
@@ -149,6 +172,21 @@ impl Request {
             _ => {}
         }
     }
+}
+/// A finished order read's tail: its census result for trading, the failure
+/// a census owner reports, and the read's queue bookkeeping.
+pub(crate) struct CensusTail {
+    symbol: String,
+    revision: u64,
+    ok: bool,
+    diagnostic: Option<(CommandId, String)>,
+    read: OrderRead,
+}
+/// One joined FetchLeverage owner and the result of the snapshot it joined.
+struct Served {
+    root: ReadRoot,
+    diagnostic: Option<String>,
+    result: Result<String, String>,
 }
 fn local_leverage_read_policy() -> Policy {
     Policy {
@@ -173,6 +211,8 @@ pub struct Snapshot {
 #[derive(Default)]
 pub struct Account {
     started: bool,
+    /// The listen key's Session: each create opens one.
+    pub(crate) session: Option<Session>,
     pub(crate) loaded: bool,
     pub(crate) settings_revision: u64,
     pub(crate) orders_revision: u64,
@@ -198,7 +238,19 @@ pub struct Account {
     execution_fills: HashMap<String, f64>,
     execution_quotes: HashMap<String, (f64, f64)>,
     execution_intervals: HashMap<String, IntervalHistory>,
-    leverage_queries: Vec<(CommandId, String)>,
+    /// Each joined FetchLeverage owner's own Read root, completed from the
+    /// shared Background snapshot.
+    leverage_queries: Vec<(ReadRoot, String)>,
+    /// Owners a snapshot served, completed by `leverage_timer`: a delivery
+    /// never completes another command's root.
+    leverage_served: Vec<Served>,
+    leverage_diagnostic: Option<String>,
+    leverage_timer: Option<TimerId>,
+    /// A finished order read's tail, run by `census_timer` outside its
+    /// delivery in native order: trading's census, then the read's queue
+    /// bookkeeping (B1 interim: B2 runs the census as the job's own reads).
+    pub(crate) census_due: Vec<CensusTail>,
+    census_timer: Option<TimerId>,
     progress_queue: VecDeque<String>,
     terminal: HashMap<String, OrderStatus>,
     terminal_queue: VecDeque<String>,
@@ -547,6 +599,7 @@ impl Bitrue {
             cx.clear_timer(timer);
         }
         self.account.generation += 1;
+        self.retire_session(cx);
         self.account.listen_pending = false;
         self.account.listen_key = None;
         self.account.supervisor.retry(cx);
@@ -679,7 +732,6 @@ impl Bitrue {
     pub(crate) fn lookup_order(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
         symbol: String,
         client_order_id: String,
     ) {
@@ -690,9 +742,15 @@ impl Bitrue {
             .any(|order| matches_lookup(order, &symbol, &client_order_id))
             || !self.authenticated()
         {
-            Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
+            let Ok(context) = cx.admit_http_command(local_leverage_read_policy()) else {
+                return;
+            };
+            Self::finish_lookup(cx, &context, &symbol, &client_order_id, None);
             return;
         }
+        let Some(root) = self.command_root(cx) else {
+            return;
+        };
         self.send(
             cx,
             Method::Get,
@@ -705,17 +763,39 @@ impl Bitrue {
             Job::Account(Request::Orders {
                 symbol,
                 revision: self.account.orders_revision,
-                lookup: Some((command, client_order_id)),
+                lookup: Some((root, client_order_id)),
                 rows: SnapshotBuilder::default(),
                 quotes: HashMap::new(),
                 invalid: false,
             }),
         );
     }
+    /// The command's original Read root on the account read key.
+    pub(crate) fn command_root(&self, cx: &mut Cx<'_, Pending>) -> Option<ReadRoot> {
+        let selected = SelectedRead::select(&self.slots(), ReadRole::Read { scope: None });
+        match SelectedRead::command_root(
+            cx,
+            selected,
+            LocalRefusal {
+                diagnostic: None,
+                error: VenueError::new("Bitrue private credentials required")
+                    .kind(ErrorKind::InvalidInput),
+            },
+        ) {
+            Ok(root) => Some(root),
+            Err(CommandReadError::Entry(
+                safe_cex_engine::request_context::CommandEntryError::Revoked,
+            )) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                None
+            }
+            Err(_) => None,
+        }
+    }
 
     fn finish_lookup(
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        context: &Context,
         symbol: &str,
         client_order_id: &str,
         rows: Option<&[Order]>,
@@ -753,7 +833,7 @@ impl Bitrue {
             definitive,
         })
         .expect("client order lookup");
-        cx.done(command, result);
+        let _ = cx.done_context(context, result);
     }
     fn fast_refresh(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<String>) {
         self.account.settings_revision += 1;
@@ -804,6 +884,18 @@ impl Bitrue {
             }
             Tick::Handled | Tick::Ping => return true,
             Tick::Unhandled => {}
+        }
+        if self.account.census_timer == Some(timer) {
+            self.account.census_timer = None;
+            for tail in std::mem::take(&mut self.account.census_due) {
+                self.finish_census(cx, tail);
+            }
+            return true;
+        }
+        if self.account.leverage_timer == Some(timer) {
+            self.account.leverage_timer = None;
+            self.complete_leverage(cx);
+            return true;
         }
         if self.account.keepalive == Some(timer) {
             self.account.keepalive = None;
@@ -1526,7 +1618,7 @@ impl Bitrue {
             );
             return true;
         }
-        let Command::FetchLeverage { command, symbol } = command else {
+        let Command::FetchLeverage { command: _, symbol } = command else {
             return false;
         };
         let Some(symbol) = self.resolve_symbol(cx, symbol) else {
@@ -1553,19 +1645,20 @@ impl Bitrue {
             );
             return true;
         }
-        self.account.leverage_queries.push((*command, symbol));
+        let Some(root) = self.command_root(cx) else {
+            return true;
+        };
+        self.account.leverage_queries.push((root, symbol));
         self.account.settings_revision += 1;
         self.refresh_account(cx);
         true
     }
-    fn report_leverage_error(&self, cx: &mut Cx<'_, Pending>, message: impl Into<String>) {
+    fn report_leverage_error(&mut self, cx: &mut Cx<'_, Pending>, message: impl Into<String>) {
         let message = message.into();
         if self.account.leverage_queries.is_empty() {
             cx.retried_failure("bitrue.account:1401", message);
         } else {
-            for (command, _) in &self.account.leverage_queries {
-                cx.command_error(*command, message.clone());
-            }
+            self.account.leverage_diagnostic = Some(message);
         }
     }
     fn finish_leverage(
@@ -1582,7 +1675,8 @@ impl Bitrue {
             margin_type: safe_cex_engine::model::MarginType,
             position_mode: PositionMode,
         }
-        for (command, symbol) in std::mem::take(&mut self.account.leverage_queries) {
+        let diagnostic = self.account.leverage_diagnostic.take();
+        for (root, symbol) in std::mem::take(&mut self.account.leverage_queries) {
             let result = settings
                 // A rejected row leaves its contract's leverage unknown.
                 .filter(|(_, positions)| positions.allows_absence(&symbol))
@@ -1601,12 +1695,46 @@ impl Bitrue {
                         position_mode: PositionMode::Oneway,
                     })
                 });
-            match result
-                .map(|r| serde_json::to_string(&r).unwrap())
-                .ok_or_else(|| error.to_owned())
-            {
-                Ok(data) => cx.done(command, data),
-                Err(error) => cx.fail(command, error),
+            self.account.leverage_served.push(Served {
+                root,
+                diagnostic: diagnostic.clone(),
+                result: result
+                    .map(|r| serde_json::to_string(&r).unwrap())
+                    .ok_or_else(|| error.to_owned()),
+            });
+        }
+        if !self.account.leverage_served.is_empty() && self.account.leverage_timer.is_none() {
+            self.account.leverage_timer = Some(cx.set_timer(0.0));
+        }
+    }
+    fn defer_census(&mut self, cx: &mut Cx<'_, Pending>, tail: CensusTail) {
+        // Only a pending protective census completes a command from here.
+        if !self.census_pending() {
+            return self.finish_census(cx, tail);
+        }
+        self.account.census_due.push(tail);
+        if self.account.census_timer.is_none() {
+            self.account.census_timer = Some(cx.set_timer(0.0));
+        }
+    }
+    fn finish_census(&mut self, cx: &mut Cx<'_, Pending>, tail: CensusTail) {
+        if let Some((command, message)) = tail.diagnostic {
+            cx.command_error(command, message);
+        }
+        self.trade_census(cx, &tail.symbol, tail.revision, tail.ok);
+        self.order_finished(cx, tail.symbol, tail.read);
+    }
+    /// Completes each served owner outside any delivery. An owner the engine
+    /// already sealed (expired) refuses its completion; that is a no-op.
+    fn complete_leverage(&mut self, cx: &mut Cx<'_, Pending>) {
+        for served in std::mem::take(&mut self.account.leverage_served) {
+            let context = served.root.context();
+            if let Some(diagnostic) = served.diagnostic {
+                let _ = cx.command_error_context(context, diagnostic);
+            }
+            let _ = match served.result {
+                Ok(data) => cx.done_context(context, data),
+                Err(error) => cx.fail_context(context, VenueError::new(error)),
             };
         }
     }
@@ -1703,11 +1831,11 @@ impl Bitrue {
         request: Request,
         response: Response<'_>,
     ) {
-        let valid = if matches!(request, Request::Listen { .. } | Request::Keepalive { .. }) {
+        let valid = if request.is_session() {
             (200..300).contains(&response.status)
                 && serde_json::from_str::<Listen<'_>>(response.body).is_ok_and(|p| {
                     p.success()
-                        || (matches!(request, Request::Listen { .. })
+                        || (request.is_create()
                             && p.code.is_empty()
                             && (!p.listen_key.is_empty()
                                 || p.data.as_ref().is_some_and(|d| !d.listen_key.is_empty())))
@@ -1936,7 +2064,7 @@ impl Bitrue {
                 }
                 let schema = serde_json::from_str::<OrdersEnvelope>(response.body)
                     .is_ok_and(|v| v.data.is_empty());
-                if let Some((command, client_order_id)) = lookup {
+                if let Some((root, client_order_id)) = lookup {
                     // TS only checks open orders. A failed read falls
                     // back to the cache, and every miss remains non-definitive.
                     if !schema || invalid {
@@ -1948,7 +2076,7 @@ impl Bitrue {
                     }
                     Self::finish_lookup(
                         cx,
-                        command,
+                        root.context(),
                         &symbol,
                         &client_order_id,
                         (schema && !invalid && rows.rejected() == 0).then_some(rows.rows()),
@@ -2034,7 +2162,7 @@ impl Bitrue {
                         cx.store.upsert_order(order);
                     }
                 }
-                let read = if self.trade_census(cx, &symbol, revision, census) {
+                let read = if census {
                     cx.orders_reconciled(Some(&symbol));
                     OrderRead::Reconciled
                 } else if success {
@@ -2046,7 +2174,16 @@ impl Bitrue {
                         "incomplete open-order snapshot; retaining previous state".into(),
                     )
                 };
-                self.order_finished(cx, symbol, read);
+                self.defer_census(
+                    cx,
+                    CensusTail {
+                        symbol,
+                        revision,
+                        ok: census,
+                        diagnostic: None,
+                        read,
+                    },
+                );
             }
         }
     }
@@ -2125,22 +2262,30 @@ impl Bitrue {
                     private_diagnostic(&format!("Bitrue order read for {symbol} failed"), code);
                 // Backoff dedupes and logs this reason; it must not carry transport text.
                 let reason = private_diagnostic("request failed", code);
-                if let Some((command, client_order_id)) = lookup {
-                    cx.command_error(command, message);
-                    Self::finish_lookup(cx, command, &symbol, &client_order_id, None);
+                if let Some((root, client_order_id)) = lookup {
+                    let _ = cx.command_error_context(root.context(), message);
+                    Self::finish_lookup(cx, root.context(), &symbol, &client_order_id, None);
                 } else {
                     // A census owned by a placement fails that command, which reports it;
                     // otherwise order_finished logs the failure once per change.
-                    if let Some(command) = self.census_owner(&symbol, revision) {
-                        cx.command_error(command, message);
+                    let diagnostic = self.census_owner(&symbol, revision).map(|command| {
                         self.account
                             .order_backoff
                             .entry(symbol.clone())
                             .or_default()
                             .error = reason.clone();
-                    }
-                    self.trade_census(cx, &symbol, revision, false);
-                    self.order_finished(cx, symbol, OrderRead::Failed(reason));
+                        (command, message)
+                    });
+                    self.defer_census(
+                        cx,
+                        CensusTail {
+                            symbol,
+                            revision,
+                            ok: false,
+                            diagnostic,
+                            read: OrderRead::Failed(reason),
+                        },
+                    );
                 }
             }
             _ => {}

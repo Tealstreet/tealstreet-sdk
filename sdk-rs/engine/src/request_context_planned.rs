@@ -2124,6 +2124,55 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Retire the current unissued call of an independent complete Plan that
+    /// the venue decides not to send. No journal fact; its reservations return.
+    /// Admitted only where the call could have been issued; every check
+    /// precedes the first change. Retiring every call leaves the Plan unable to
+    /// succeed: a venue whose targets are all closed uses `done_empty_plan`
+    /// before admission. See docs/plans/RUST_PLAN_RETIRE_UNISSUED.md.
+    pub fn retire_unissued_plan_call(&mut self, plan: &Plan, slot: &Slot) -> Result<(), Error> {
+        self.io.core.request_contexts.validate_unbound_plan(plan)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        #[cfg(feature = "serial-plans")]
+        if body.serial.is_some() {
+            return Err(Error::State);
+        }
+        if !body.policy.independent_calls {
+            return Err(Error::Invalid);
+        }
+        let index = body.schedule.ordinal(slot)?;
+        #[cfg(feature = "http-mutation-barriers")]
+        if body.barriers.iter().any(|group| group.contains(&index)) {
+            return Err(Error::Invalid);
+        }
+        let entry = &body.entries[index];
+        if entry.credit != Credit::Unissued
+            || entry.call.is_some()
+            || entry.parked
+            || !body
+                .schedule
+                .available()
+                .any(|candidate| body.schedule.ordinal(&candidate) == Ok(index))
+            || !entry.eligible_at.is_some_and(|at| at <= self.now)
+            || !self.plan_issue_custody(plan, body)
+        {
+            return Err(Error::Revoked);
+        }
+        let body = self.io.core.request_contexts.plan_body_mut(plan)?;
+        body.schedule
+            .retire_unissued(slot)
+            .expect("checked available slot");
+        body.entries[index].credit = Credit::Released;
+        body.refresh_availability(self.now);
+        self.io.core.request_contexts.reserved_contexts -= 1;
+        self.rearm_plan(plan);
+        Ok(())
+    }
+
     /// Explicit empty native plan. No root, Context, physical attempt or accepted
     /// write fact is manufactured for a successful no-op.
     pub fn done_empty_plan(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {
