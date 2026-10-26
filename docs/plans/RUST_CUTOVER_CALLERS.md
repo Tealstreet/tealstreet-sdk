@@ -9749,3 +9749,14 @@ rows if such a venue is ever fronted by CloudFront.
 ### Bitunix account read classification (P1 #33)
 
 A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
+
+### Engine: settle-only condition wait for stream-proven writes
+
+Venue authors gain `serial_plan_settle_wait(plan, slot, context, bound_ms)`
+(feature `condition-waits`). After a write's accepted DATA it settles the call
+and parks the serial Plan with no next call; the venue releases it on exact
+stream proof and calls `done_plan`, or on expiry calls
+`inherit_plan_uncertainty` then `fail_plan`, so the caller sees Unknown with
+every accepted order ID and the scope stays fenced. It is never Done without
+proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
+grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).

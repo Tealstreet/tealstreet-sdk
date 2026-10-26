@@ -51,6 +51,8 @@ mod condition_waits {
         Decline,
         /// Fail the expired owner and wake every other parked Preflight.
         FanOut,
+        /// Raise the Plan to Unknown, then fail it (a settle wait's expiry).
+        Unproven,
     }
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
     enum Release {
@@ -84,6 +86,10 @@ mod condition_waits {
         timer_parks: Vec<(Result<(), Error>, bool)>,
         delayed_before_park: bool,
         stop_after_release: bool,
+        /// Settle the first DATA call with this bound instead of continuing.
+        settle: Option<u32>,
+        /// Admit a Read-policy (non-serial) Plan instead of a serial one.
+        read_plan: bool,
         // State.
         entries: Vec<(CommandId, crate::request_context::Preflight)>,
         parked: Vec<CommandId>,
@@ -105,6 +111,8 @@ mod condition_waits {
         storage: Vec<(usize, usize, usize)>,
         foreign: Option<Context>,
         entry_refusals: usize,
+        settles: Vec<Result<(), Error>>,
+        settle_probes: Vec<(&'static str, Result<(), Error>)>,
     }
 
     fn queue(cx: &mut Cx<'_, Context>, context: Context) {
@@ -167,6 +175,37 @@ mod condition_waits {
         }
         fn admit(&mut self, cx: &mut Cx<'_, Context>, id: CommandId) {
             let preflight = self.preflight(id).expect("entered owner");
+            if self.read_plan {
+                let calls = [crate::request_context::plan::CallBound {
+                    timeout_ms: 20_000,
+                    attempts: 1,
+                    retry_window: crate::request_context::plan::RetryWindow::FreshAttempt,
+                    after_refusal: &[],
+                }];
+                let admitted = cx.admit_plan(
+                    &preflight,
+                    &[crate::request_context::plan::StepBound {
+                        wait_ms: 0,
+                        calls: &calls,
+                    }],
+                    crate::request_context::PlanPolicy {
+                        independent_calls: false,
+                        operation: Operation::Read,
+                        credential: None,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                );
+                self.admissions
+                    .push(admitted.as_ref().map(drop).map_err(|error| *error));
+                if let Ok(plan) = admitted
+                    && let Some(slot) = cx.plan_slots(&plan).ok().and_then(|mut slots| slots.pop())
+                {
+                    self.plans.push((id, plan, slot));
+                    self.issue(cx, id);
+                }
+                return;
+            }
             let admitted = cx.admit_serial_plan(
                 &preflight,
                 mutation(),
@@ -232,6 +271,47 @@ mod condition_waits {
                 let _ = cx.finish_plan_call(&plan, &slot, context);
                 let _ = cx.fail_plan(&plan, "condition wait refused");
             }
+        }
+    }
+
+    impl Cond {
+        /// Settle the DATA call, then probe every way to continue the Plan.
+        fn settle_serial(
+            &mut self,
+            cx: &mut Cx<'_, Context>,
+            id: CommandId,
+            plan: &Plan,
+            slot: &Slot,
+            context: &Context,
+            bound: u32,
+        ) {
+            let result = cx.serial_plan_settle_wait(plan, slot, context, bound);
+            self.settles.push(result.as_ref().map(drop).map_err(|error| *error));
+            let Ok(wait) = result else {
+                let _ = cx.finish_plan_call(plan, slot, context);
+                let _ = cx.fail_plan(plan, "settle wait refused");
+                return;
+            };
+            let probes: [(&'static str, Result<(), Error>); 5] = [
+                (
+                    "second settle",
+                    cx.serial_plan_settle_wait(plan, slot, context, bound).map(drop),
+                ),
+                (
+                    "condition wait",
+                    cx.serial_plan_condition_wait(plan, slot, context, mutation(), Some(bound))
+                        .map(drop),
+                ),
+                (
+                    "continue",
+                    cx.continue_serial_plan(plan, slot, context, mutation()).map(drop),
+                ),
+                ("leg", cx.plan_leg_context(plan, slot).map(drop)),
+                ("done while parked", cx.done_plan(plan, "[]".into())),
+            ];
+            self.settle_probes.extend(probes);
+            let _ = id;
+            self.waits.push(wait);
         }
     }
 
@@ -310,6 +390,10 @@ mod condition_waits {
                 return;
             }
             self.last_data = Some((id, context.clone()));
+            if let Some(bound) = self.settle {
+                self.settle_serial(cx, id, &plan, &slot, &context, bound);
+                return;
+            }
             if seen <= self.serial_parks {
                 self.park_serial(cx, id, &context);
                 if self.release_in_park {
@@ -366,6 +450,15 @@ mod condition_waits {
             self.plan_ready += 1;
             self.ready_in_callback |= self.in_callback;
             let id = command_of(plan.owner());
+            if self.settle.is_some() {
+                if let (Some((plan, slot)), Some((_, context))) = (self.plan(id), self.last_data.clone()) {
+                    let again = cx.serial_plan_settle_wait(&plan, &slot, &context, 500).map(drop);
+                    self.settle_probes.push(("settle after release", again));
+                }
+                let done = cx.done_plan(plan, format!("[{}]", self.job_ids.join(",")));
+                self.settle_probes.push(("done after release", done));
+                return;
+            }
             if let Some(slot) = cx.plan_slots(plan).ok().and_then(|mut slots| slots.pop()) {
                 self.plans.push((id, plan.clone(), slot));
                 self.issue(cx, id);
@@ -390,6 +483,9 @@ mod condition_waits {
                     let _ = cx.fail_preflight(preflight, native());
                 }
                 ConditionOwner::Plan(plan) => {
+                    if self.on_expired == OnExpired::Unproven {
+                        let _ = cx.inherit_plan_uncertainty(plan);
+                    }
                     let _ = cx.fail_plan(plan, native());
                 }
             }
@@ -1343,5 +1439,191 @@ mod condition_waits {
         assert_eq!(terminals(&actions, 8), [Ok("[a,b]".to_owned())]);
         assert!(!e.io.core.order_locks.contains(8));
         assert!(!e.io.core.order_locks.uncertain("BTCUSD"));
+    }
+
+    // Settle-only condition waits (serial_plan_settle_wait): the Plan keeps no
+    // next entry; stream proof readies it for `done_plan`, expiry fails it.
+    fn settled(venue: Cond, body: &str) -> (Engine<Cond>, Vec<Action>, f64) {
+        let mut e = engine(venue);
+        place(&mut e, 0., 7);
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let (actions, now) = drive(&mut e, actions, 0., [body]);
+        (e, actions, now)
+    }
+
+    #[test]
+    fn settle_00_a_zero_bound_is_refused_before_any_change() {
+        let (e, actions, _) = settled(
+            Cond {
+                settle: Some(0),
+                ..Default::default()
+            },
+            "ok:a",
+        );
+        assert_eq!(e.venue.settles, [Err(Error::Invalid)]);
+        let result = terminals(&actions, 7);
+        assert!(matches!(&result[..], [Err(_)]), "{result:?}");
+    }
+
+    #[test]
+    fn settle_01_release_readies_the_plan_and_done_completes_it_once() {
+        let (mut e, actions, now) = settled(
+            Cond {
+                settle: Some(10_000),
+                ..Default::default()
+            },
+            "ok:a,b",
+        );
+        assert_eq!(e.venue.settles, [Ok(())]);
+        assert!(prepared(&actions).is_none(), "no next call exists");
+        assert!(terminals(&actions, 7).is_empty(), "never Done without proof");
+        assert_eq!(
+            e.venue.settle_probes,
+            [
+                ("second settle", Err(Error::Invalid)),
+                ("condition wait", Err(Error::Invalid)),
+                ("continue", Err(Error::Invalid)),
+                ("leg", Err(Error::Invalid)),
+                ("done while parked", Err(Error::State)),
+            ]
+        );
+        let actions = borrowed_read(&mut e, now + 1_000.);
+        assert_eq!(e.venue.plan_ready, 1, "released into on_http_plan_ready once");
+        assert_eq!(
+            e.venue.settle_probes[5..],
+            [
+                ("settle after release", Err(Error::Invalid)),
+                ("done after release", Ok(())),
+            ]
+        );
+        assert_eq!(terminals(&actions, 7), [Ok("[a,b]".to_owned())]);
+        assert!(prepared(&actions).is_none());
+        let wait = e.venue.releases.len();
+        let mut cx = Cx {
+            now: now + 2_000.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        let late = cx.release_condition_wait(&ConditionWait {
+            plan: e.venue.plans[0].1.clone(),
+            wait: 1,
+        });
+        assert_eq!(late, Err(Error::Revoked), "a completed Plan's handle");
+        assert_eq!(e.venue.releases.len(), wait);
+        let after = e.drain_actions().collect::<Vec<_>>();
+        assert!(terminals(&after, 7).is_empty());
+        assert!(e.venue.expired.is_empty(), "a released wait never expires");
+    }
+
+    #[test]
+    fn settle_02_expiry_fires_once_and_fails_unknown_with_every_id() {
+        let (mut e, actions, now) = settled(
+            Cond {
+                settle: Some(500),
+                release: Release::None,
+                on_expired: OnExpired::Unproven,
+                ..Default::default()
+            },
+            "ok:a,b",
+        );
+        assert_eq!(e.venue.settles, [Ok(())]);
+        let timer = timer_at(&actions, now + 500.).expect("the settle bound");
+        e.handle(now + 500., Event::TimerFired { timer });
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(e.venue.expired, [7]);
+        let result = terminals(&actions, 7);
+        let [Err(error)] = &result[..] else {
+            panic!("one failure: {result:?}");
+        };
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a", "b"]);
+        assert!(prepared(&actions).is_none(), "nothing is replayed");
+        #[cfg(feature = "order-locks")]
+        assert!(e.io.core.order_locks.uncertain("BTCUSD"), "the scope stays fenced");
+        e.handle(now + 5_000., Event::TimerFired { timer });
+        let wait = e.venue.waits[0].clone();
+        let mut cx = Cx {
+            now: now + 6_000.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        assert_eq!(
+            cx.release_condition_wait(&wait),
+            Err(Error::Revoked),
+            "a release after expiry cannot resurrect the Plan"
+        );
+        let after = e.drain_actions().collect::<Vec<_>>();
+        assert_eq!(e.venue.expired, [7], "on_condition_wait_expired exactly once");
+        assert_eq!(e.venue.plan_ready, 0);
+        assert!(terminals(&after, 7).is_empty());
+    }
+
+    #[test]
+    fn settle_03_a_declining_expiry_hook_still_ends_the_plan_once() {
+        let (mut e, actions, now) = settled(
+            Cond {
+                settle: Some(500),
+                release: Release::None,
+                on_expired: OnExpired::Decline,
+                ..Default::default()
+            },
+            "ok:a",
+        );
+        let timer = timer_at(&actions, now + 500.).expect("the settle bound");
+        e.handle(now + 500., Event::TimerFired { timer });
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let result = terminals(&actions, 7);
+        let [Err(error)] = &result[..] else {
+            panic!("one failure: {result:?}");
+        };
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
+        assert_ne!(error.outcome, Some(crate::Outcome::NotSent));
+    }
+
+    #[test]
+    fn settle_04_the_caller_wait_never_completes_a_settled_plan() {
+        let (mut e, actions, now) = settled(
+            Cond {
+                settle: Some(200_000),
+                release: Release::None,
+                on_expired: OnExpired::Unproven,
+                ..Default::default()
+            },
+            "ok:a",
+        );
+        assert_eq!(e.venue.settles, [Ok(())]);
+        assert!(terminals(&actions, 7).is_empty());
+        let timer = timer_at(&actions, now + 200_000.).expect("the settle bound");
+        let actions = borrowed_read(&mut e, now + 130_000.);
+        assert!(
+            terminals(&actions, 7).is_empty(),
+            "still unproven after the 120 s caller wait, never Done"
+        );
+        e.handle(now + 200_000., Event::TimerFired { timer });
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let result = terminals(&actions, 7);
+        let [Err(error)] = &result[..] else {
+            panic!("one failure at the bound: {result:?}");
+        };
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
+        #[cfg(feature = "order-locks")]
+        assert!(e.io.core.order_locks.uncertain("BTCUSD"));
+    }
+
+    #[test]
+    fn settle_05_a_read_policy_plan_cannot_settle() {
+        let mut e = engine(Cond {
+            settle: Some(1_000),
+            read_preflight: true,
+            balance_command: true,
+            read_plan: true,
+            ..Default::default()
+        });
+        place(&mut e, 0., 7);
+        assert_eq!(e.venue.admissions, [Ok(())], "positive control: a Read Plan");
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        drive(&mut e, actions, 0., ["ok:"]);
+        assert_eq!(e.venue.settles, [Err(Error::Invalid)]);
     }
 }
