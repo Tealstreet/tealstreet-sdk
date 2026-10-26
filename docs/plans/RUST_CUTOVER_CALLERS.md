@@ -9589,6 +9589,22 @@ cleanup/task failures return a sanitized server error. Aborted actors retain the
 original cleanup in the live runtime and grant no retirement or replacement
 acknowledgement. Runtime teardown remains no join.
 
+### Explicit authentication on serial calls
+
+SerialCall declares Preflight or Session authentication. Existing adopters use
+Preflight with their previous read/write policy. A Session call carries no
+credential, signing or nonce authority and uses the retained login Session's
+explicit egress. Installed unsigned-only commands may deliberately use a Session
+root; sign-requiring commands never fall back to it. Credential-bearing login
+Sessions must match the engine's own installed Primary slot and credential ref.
+The venue selects the actual login Session: the engine checks authority and
+liveness but cannot distinguish its business purpose from a listen-key Session.
+Mixed roots retain the exact write credential for their later Preflight calls.
+Session calls keep Mutation journal evidence, order locks and Unknown on an
+unproven released send. Their resend freezes codec bytes while refreshing the
+bundle at Bind; Preflight signed calls repeat their existing provider work.
+No current venue enables a new auth mode in this engine slice.
+
 ### Orderly O1: provider-signed account reads, history and socket auth
 
 Orderly's private reads and its socket auth now sign through an installed Ed25519 provider; the venue holds only identity refs ([RUST_ORDERLY_PROVIDER_READS.md](RUST_ORDERLY_PROVIDER_READS.md)). Trading still signs locally with the seed until O2.

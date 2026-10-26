@@ -9,6 +9,7 @@ use safe_cex_engine::request_context::{
 
 /// Each ordered write has its native 20 s bound; 100001 permits one resend.
 pub(super) const SERIAL: SerialCall = SerialCall {
+    auth: safe_cex_engine::request_context::plan::CallAuth::Preflight,
     operation: Operation::Mutation,
     timeout_ms: 20_000,
     attempts: 2,

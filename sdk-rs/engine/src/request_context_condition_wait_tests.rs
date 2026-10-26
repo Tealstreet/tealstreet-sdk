@@ -20,6 +20,7 @@ mod condition_waits {
     }
     fn mutation() -> SerialCall {
         SerialCall {
+            auth: Default::default(),
             operation: Operation::Mutation,
             timeout_ms: 20_000,
             attempts: 1,
@@ -786,6 +787,7 @@ mod condition_waits {
             total: 3,
             serial_parks: 1,
             park_next: Some(SerialCall {
+                auth: Default::default(),
                 operation: Operation::Read,
                 ..mutation()
             }),

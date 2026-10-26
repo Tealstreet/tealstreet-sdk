@@ -2123,6 +2123,7 @@ fn answer_failure(response: &Response<'_>, message: String, documented: bool) ->
 fn serial(step: &Step) -> SerialCall {
     let read = step.read();
     SerialCall {
+        auth: safe_cex_engine::request_context::plan::CallAuth::Preflight,
         operation: if read {
             Operation::Read
         } else {
@@ -2177,4 +2178,35 @@ pub(crate) fn trade_reconciliation(
     request: &Request,
 ) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
     ReconciliationData::new(request.step.path.clone())
+}
+
+#[cfg(test)]
+mod serial_auth_tests {
+    use super::*;
+    use safe_cex_engine::request_context::plan::CallAuth;
+
+    #[test]
+    fn serial_reads_and_writes_keep_the_declared_preflight_credential_policy() {
+        let read = census("BTCUSDT");
+        let write = Step {
+            method: Method::Post,
+            path: "/fapi/v2/leverage".into(),
+            body: None,
+            effect: Effect::Leverage {
+                symbol: "BTC/USDT:USDT".into(),
+                leverage: 2.,
+            },
+            receipts: vec![],
+        };
+        for (step, operation, attempts) in [
+            (&read, Operation::Read, 1),
+            (&write, Operation::Mutation, 2),
+        ] {
+            let call = serial(step);
+            assert_eq!(call.auth, CallAuth::Preflight);
+            assert_eq!(call.operation, operation);
+            assert_eq!(call.attempts, attempts);
+            assert_eq!(call.timeout_ms, CALL_MS);
+        }
+    }
 }
