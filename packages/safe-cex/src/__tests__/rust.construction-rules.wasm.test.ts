@@ -182,7 +182,7 @@ it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lig
         payloadSigner: async () => { signatures++; return { signature: 'unexpected' }; },
       }, new DefaultStore());
       running.push(exchange);
-      const message = `Rust ${name} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials.`;
+      const message = `Rust ${name} does not support payloadSigner; remote signing for this venue is not supported in this build yet. Remove payloadSigner and configure local signing credentials.`;
       await expect(exchange.start()).rejects.toMatchObject({ message, kind: 'unsupported', outcome: 'notSent' });
       await expect(exchange.validateAccount()).resolves.toMatchObject({ kind: 'unsupported', error: message });
     }
