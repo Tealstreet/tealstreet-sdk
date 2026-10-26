@@ -49,7 +49,11 @@ Review records (fe7lgm, low findings):
   syncs leave the ticker set unchanged unless the markets changed.
 - Tickers are capped so the requested books, candles and trades always fit the
   engine's MAX_INTERESTS (8192); one notice reports a cap per Ready. MAX_FRAMES
-  (4096) is not binding at ten topics per frame.
+  (4096) is not binding at ten topics per frame. This cap is a deliberate
+  improvement over the legacy supervisor, which sent every ticker uncapped: an
+  oversized catalog now keeps a live, degraded feed instead of overflowing.
+  Accepted edge: if requested books, candles and trades alone ever exceed the
+  bound, set_socket_interests still fails into socket_failed.
 
 ## Size and budget
 
