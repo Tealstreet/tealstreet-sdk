@@ -9178,6 +9178,27 @@ Follow-up (engine owner, fe7lgm): a granted plan resend can only be
 released from plan custody. A venue whose resend must wait on a venue
 condition therefore needs a serial-plan condition wait, as AsterDEX does here.
 A custody-preserving parked resend would remove that need.
+## AsterDEX managed sockets
+
+Both AsterDEX streams are engine-managed
+([RUST_ASTERDEX_SOCKET_ADOPTION.md](RUST_ASTERDEX_SOCKET_ADOPTION.md)).
+Callers see the same topics, opening order, ping cadence, idle and connect
+bounds, and book clearing on disconnect.
+
+Stricter than before:
+- Frames before open, after the idle deadline, or from a retired epoch are
+  dropped.
+- A duplicate open does not resubscribe or refresh again.
+- A late pong cannot revive an expired private stream.
+
+Interim, until Phase C: the venue owns listen-key acquisition. A create has a
+10 s deadline, and a failed create retries with the venue's 1 s to 30 s
+backoff, so the private stream reconnects instead of stalling. Phase C moves
+this into the engine.
+
+A refused public topic set raises a notice and keeps the feed serving its
+other topics.
+
 ## WOO engine-owned socket lifecycle
 
 WOO public and private feeds use the shared Engine epoch, supervision, auth and
@@ -9460,6 +9481,18 @@ Address-keyed nonce claims without the feature now refuse instead of accepting
 stable-id text as an address subject. No current adopter uses that unsupported
 path. The additive selection errors preserve typed missing/signing-not-configured
 and setup-capability refusals without adding an auth-health latch.
+### WEEX remaining inventory and identity custody
+
+WEEX keeps one immutable `Slots<Identity>` owner for selected reads, required
+Primary history, Mutation signing and private SessionAuth. The redundant venue
+identity container and per-history slot reconstruction are removed. Existing
+completeness filters, public-only suppression, primary-private eligibility,
+secondary read preference, wire bytes and all failure/outcome policy are retained.
+
+The remaining conservative request/signing/credential inventory describes managed
+failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
+identity options. This slice retains those rows and all checker rules; completion
+of the custody audit does not claim inventory zero or a new endpoint migration.
 
 ### Orderly O1: provider-signed account reads, history and socket auth
 
