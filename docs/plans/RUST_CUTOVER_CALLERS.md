@@ -9418,3 +9418,58 @@ Every Bitrue trading command now owns a Preflight root, and the legacy funnel is
 - **Cancel batches (Q1).** Each target is an independent call. A child closed by its parent's ACK or by the stream is retired unissued, and all targets closed is a successful empty Plan. The terminal message is the journal's selected leg error followed by native's aggregate JSON (`canceledOrderIds`, `failedOrders`), bounded at 4 KiB. An Unknown leg projects Unknown, with the confirmed IDs.
 - **Protective census (D4).** The census is the job's own final Primary open-order read, issued right after the placement. A clean census completes the command. A failed one carries native's "order read failed" diagnostic and the "outcome is uncertain" text, and projects Unknown with the accepted placement IDs (fe7lgm's `inherit_plan_uncertainty`, #2205). The B1 interim deferral is gone.
 - **Reconcile.** An Unknown seal reconciles through Primary open-order snapshots (`PrimaryRead { PostUnknownOrderRead }`). A clean snapshot postdating a protective fence releases cancel-all.
+
+## AsterDEX V3 configured signer mismatch (approved, adoption pending)
+
+The address-nonce consumer must refuse at trusted setup when the configured
+signer address differs from the selected signing key's verified public address,
+using a clear typed error that identifies the mismatch. Native currently sends
+the mismatched configured signer and fails at the venue; the approved change
+moves that refusal earlier and makes its reason precise. It must not silently
+substitute the derived address. Refusal is NotSent for only that slot's private
+address path, before business signing, with no auth-health latch; public work
+continues. It is neither a startup-wide failure nor repeated InvalidSubject on
+each request. Matching accounts and legitimately installed
+primary/read aliases retain their behavior. A native-versus-new original must
+pin both refusals before consumer source closes this gate. This is a recorded
+ruling, not an implemented or activated path. The generic nonce mint accepts
+no configured address and has no mismatch exception.
+
+
+### Address setup source: owned completion and claim-free access
+
+The address-nonce feature is opt-in and enables no venue in this PR. Setup accepts
+an exact PublicAddress result only after the original provider work and cleanup
+join within its frozen20s bound. Timeout/abort wrappers and remote responses alone
+cannot install a signer or unblock replacement. Missing owned-provider/host support
+refuses the address-dependent path before allocating a task, without an auth latch;
+public and claim-free work continue. An explicit pre-start reinitialization waits
+for true old-owner retirement, with no automatic retry. Both results and cleanup
+are retained across timeout and provider replacement.
+
+The shared address carrier also supports a claim-free consumer: GRVT can request
+the actual installed signer's address without declaring a nonce domain. This
+source adopts no GRVT request and changes no configured signer policy. Consumer
+adoption pins its warning-only option and exact actual signer before CreateOrder.
+Aster separately pins typed per-slot mismatch refusal and cold-instance replacement;
+HL separately accounts for its legacy prepared/released work. No nonce counter is
+reset and no possibly-sent mutation is replayed by setup or retirement.
+
+Native address-setup shutdown retains its independent cleanup owner before
+observer callbacks can escape. Observer panics propagate after actual cleanup
+joins. Cancelling or dropping the native run future transfers that same driver
+into the live Tokio runtime; cancellation is never retirement evidence, and the
+runtime must remain alive through the genuine join. Runtime teardown itself is
+not a resource-retirement report. Local setup handles retain only the derived
+20-byte public result, with scalar bytes staying in the installed store.
+
+The address setup public API stays additive when its feature is disabled. Its
+provider hooks and retirement variant have a measured default-off Bybit cost
+of437 bytes on the reviewed pair, explicitly accepted by the overseer. No
+consumer is enabled by this shared prerequisite; CI measures family sizes, and
+the current composed local combined must fit the14 MiB budget.
+
+Address-keyed nonce claims without the feature now refuse instead of accepting
+stable-id text as an address subject. No current adopter uses that unsupported
+path. The additive selection errors preserve typed missing/signing-not-configured
+and setup-capability refusals without adding an auth-health latch.
