@@ -1162,10 +1162,11 @@ impl Bitrue {
                     let error = not_sent("Bitrue trading requires API credentials");
                     return self.end(cx, active, None, error);
                 };
+                // Native Bitrue fails a refused job; it never completes `done []`.
                 let policy = SerialPolicy {
-                    credential,
+                    credential: Some(credential),
                     pacing: None,
-                    refusals_complete: true,
+                    refusals_complete: false,
                 };
                 match cx.admit_serial_plan(&active.preflight, next, policy) {
                     Ok((plan, slot)) => {
