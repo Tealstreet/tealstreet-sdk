@@ -9501,4 +9501,6 @@ root. A release-domain member resolves through `domain_pacing` at admission and
 every continuation, so it names only what the domain admits; any other call,
 including a Read in a `Mutations` domain, stays unpaced and names only a
 zero-gap group. Legs are stamped from the call, not the root. Existing adopters
-pass `None` and are unchanged.
+pass `None` and are unchanged. Serial is deliberately stricter than Background:
+a non-member serial Read naming a positive-gap domain pacing is Invalid, while a
+Background Read naming it is admitted and kept out of the FIFO.
