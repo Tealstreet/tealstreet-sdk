@@ -188,7 +188,7 @@ test('native watchdog heartbeat counts do not shift across the OKX EU tape horiz
 test('Kraken Spot replay registers books after open for either startup order and sends each subscription once', () => {
   const script = `
     import assert from 'node:assert/strict';
-    import { KrakenSpotPublicWebsocket } from './packages/safe-cex/src/exchanges/kraken/krakenspot.ws-public.ts';
+    import { KrakenSpotPublicWebsocket } from './packages/safe-cex/src/__tests__/reference/kraken/krakenspot.ws-public.ts';
     import { krakenspot } from './sdk-rs/harness/krakenspot.mjs';
     globalThis.WebSocket = { OPEN: 1 };
     const expectedBooks = ['BTC/USD', 'ETH/USD'].map(symbol => ({

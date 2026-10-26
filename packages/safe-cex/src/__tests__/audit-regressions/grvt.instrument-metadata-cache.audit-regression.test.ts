@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { ENDPOINTS } from '../../exchanges/grvt/grvt.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';

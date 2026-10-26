@@ -2,8 +2,8 @@ import type { ExchangeOptions } from '../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { OKXEUExchange } from '../exchanges/okx/okxeu.exchange';
-import { OKXEUDemoExchange } from '../exchanges/okx/okxeudemo.exchange';
+import { OKXEUExchange } from './reference/okx/okxeu.exchange';
+import { OKXEUDemoExchange } from './reference/okx/okxeudemo.exchange';
 import { ENDPOINTS } from '../exchanges/okx/okx.types';
 import { DefaultStore } from '../store/store.base';
 

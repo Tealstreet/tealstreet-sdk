@@ -5,8 +5,8 @@ import {
   parseGammaMarketTokens,
   PolymarketExchange,
   precisionFromTickSize,
-} from '../../exchanges/polymarket/polymarket.exchange';
-import type { GammaMarketInfo } from '../../exchanges/polymarket/polymarket.types';
+} from '../reference/polymarket/polymarket.exchange';
+import type { GammaMarketInfo } from '../reference/polymarket/polymarket.types';
 
 const gammaMarket = {
   id: '123',

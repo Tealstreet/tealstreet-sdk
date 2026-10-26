@@ -2,8 +2,8 @@ import type { PublicDataSource } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
-import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { InProcessPublicDataProvider } from '../../exchanges/in-process-public-data';
 import { DefaultStore } from '../../store/store.base';
 

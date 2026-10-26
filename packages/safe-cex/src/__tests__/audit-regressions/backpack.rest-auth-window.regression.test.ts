@@ -2,8 +2,8 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 import { describe, expect, it } from 'vitest';
 
-import { createAPI, resolveBackpackAuthWindow } from '../../exchanges/backpack/backpack.api';
-import { ENDPOINTS } from '../../exchanges/backpack/backpack.types';
+import { createAPI, resolveBackpackAuthWindow } from '../reference/backpack/backpack.api';
+import { ENDPOINTS } from '../reference/backpack/backpack.types';
 
 const privateKey = Buffer.alloc(32, 7).toString('base64');
 

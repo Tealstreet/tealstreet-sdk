@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
-import { splitWooQuantity } from '../../exchanges/woo/woo.order-state';
-import { ENDPOINTS } from '../../exchanges/woo/woo.types';
+import { WOOXExchange } from '../reference/woo/woo.exchange';
+import { splitWooQuantity } from '../reference/woo/woo.order-state';
+import { ENDPOINTS } from '../reference/woo/woo.types';
 import { DefaultStore } from '../../store/store.base';
 import {
   MarginType,

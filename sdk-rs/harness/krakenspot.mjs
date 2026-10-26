@@ -83,7 +83,7 @@ export const krakenspot = {
   rust: 'krakenspot',
   virtualPrivateClock: true,
   recordAfterReady: true,
-  ts: { module: '../../packages/safe-cex/src/exchanges/kraken/krakenspot.exchange.ts', className: 'KrakenSpotExchange', name: 'krakenspot' },
+  ts: { module: '../../packages/safe-cex/src/__tests__/reference/kraken/krakenspot.exchange.ts', className: 'KrakenSpotExchange', name: 'krakenspot' },
   replayCredentials: KRAKEN_SPOT_REPLAY,
   privateSocket: 'ws-auth.kraken.com',
   requestBodies: true,

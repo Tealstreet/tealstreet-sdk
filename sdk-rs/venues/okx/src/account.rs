@@ -124,6 +124,9 @@ pub enum Request {
         context: Option<Context>,
         generation: u64,
         version: u64,
+        /// The order-uncertainty epoch when this census began: its pages run
+        /// under separate contexts, so it releases only what its first page saw.
+        epoch: u64,
         kind: usize,
         product: usize,
         rows: SnapshotBuilder<String, Order>,
@@ -375,6 +378,7 @@ impl Okx {
                     context: None,
                     generation,
                     version: self.account.revision,
+                    epoch: cx.order_read_epoch(),
                     kind: 0,
                     product: 0,
                     rows: SnapshotBuilder::default(),
@@ -900,6 +904,7 @@ impl Okx {
                 context,
                 generation,
                 version,
+                epoch,
                 mut kind,
                 mut product,
                 rows,
@@ -926,6 +931,7 @@ impl Okx {
                             context: None,
                             generation,
                             version,
+                            epoch,
                             kind,
                             product,
                             rows,
@@ -951,6 +957,7 @@ impl Okx {
                             context: None,
                             generation,
                             version,
+                            epoch,
                             kind,
                             product,
                             rows,
@@ -1009,7 +1016,7 @@ impl Okx {
                 cx.store.set_orders(rows);
                 // A rejected row may be an uncertain placement; it proves nothing.
                 if clean {
-                    cx.orders_reconciled(None);
+                    cx.orders_reconciled_since(None, epoch);
                 }
                 self.trading
                     .acknowledged
@@ -2286,11 +2293,14 @@ mod key_refusal_tests {
                 code: NativeCode::Int(code),
                 message: "native",
             };
-            assert_eq!(
-                crate::trading::CODES.verdict(&native, Intent::Place),
-                Verdict::Refused(kind),
-                "{code}"
-            );
+            let verdict = crate::trading::CODES.verdict(&native, Intent::Place);
+            // 50113 (a rejected signature) is the one key refusal re-signed once.
+            let expected = if code == 50113 {
+                Verdict::RefusedResend(kind)
+            } else {
+                Verdict::Refused(kind)
+            };
+            assert_eq!(verdict, expected, "{code}");
         }
     }
 }

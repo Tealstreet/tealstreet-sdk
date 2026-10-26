@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BitrueExchange } from '../../exchanges/bitrue/bitrue.exchange';
-import { BASE_WS_URL, ENDPOINTS } from '../../exchanges/bitrue/bitrue.types';
+import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
+import { BASE_WS_URL, ENDPOINTS } from '../reference/bitrue/bitrue.types';
 import { DefaultStore } from '../../store/store.base';
 import { Market } from '../../types';
 
