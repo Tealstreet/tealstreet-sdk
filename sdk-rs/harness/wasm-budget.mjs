@@ -20,7 +20,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // 5% venue allowance; unrelated venue overrides remain unchanged.
 // #2261 Bitunix capability enums (shared engine code): CI 1,405,040, 1373 KiB under the
 // standing <=2 KiB shared-code allowance.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_483_776, bitgetusdc: 1_483_776, bybit: 1_446_912, asterdex: 1_387_520, kraken: 1_405_952, krakenspot: 1_405_952 });
+// AsterDEX host address setup (#2233): CI 1,417,307, rounded up to 1385 KiB under the
+// standing venue allowance; the larger of it and the incoming cap.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_483_776, bitgetusdc: 1_483_776, bybit: 1_446_912, asterdex: 1_418_240, kraken: 1_405_952, krakenspot: 1_405_952 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {

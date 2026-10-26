@@ -9200,6 +9200,51 @@ Follow-up (engine owner, fe7lgm): a granted plan resend can only be
 released from plan custody. A venue whose resend must wait on a venue
 condition therefore needs a serial-plan condition wait, as AsterDEX does here.
 A custody-preserving parked resend would remove that need.
+## AsterDEX V3 nonces from the engine address domain
+
+AsterDEX V3 signing nonces now come from the engine's `asterdex-v3` address
+domain ([RUST_ADDRESS_NONCE_DOMAINS.md](RUST_ADDRESS_NONCE_DOMAINS.md)), keyed
+by the API wallet address that the installed signing key proves at trusted
+setup. The venue allocator (`NONCES`) is deleted in the same build.
+
+Unchanged:
+- The values: the calibrated protocol millisecond x1000, or the previous value
+  plus 1.
+- One sequence per API wallet across every engine, user and network in one
+  process or WASM memory, including an aliased read slot (`auth.privateKey`).
+- Nonces are not persisted. Activation is a cold whole-process or
+  WASM-instance replacement.
+- V1 HMAC accounts are claim-free and unchanged.
+
+The wire `signer` is now the EIP-55 form of the verified address rather than
+the configured string. The two are equal for every accepted configuration.
+
+**N1 (overseer ruling).** If a slot's configured V3 API wallet differs from
+the address its signing key proves, native signed and sent the configured
+wallet, and the venue rejected every request on that slot. That covers
+`auth.signerAddress`, else the API key, or the read key for the read slot. It
+includes an aliased read slot that names its read key while signing with the
+primary wallet.
+
+Rust now refuses that slot at startup with a `CONFIG_INVALID` notice, "Aster
+V3 API wallet address <configured> does not match the signing key's address
+<derived>":
+- Requests on that slot fail with the same message, not sent, before any nonce
+  is reserved.
+- Job validation reports it as `InvalidInput`, not an authentication failure,
+  so no auth health latches.
+- Public data and the other slot keep working.
+- The derived address is never substituted.
+
+Two admission tests that pinned such mismatched configurations now assert this
+refusal, and also cover a matching alias.
+
+V3 private work also requires host address setup before start. An engine
+started without it, or a custom signer without owned public-address setup,
+refuses V3 private requests as not sent. A signature completing after a newer
+nonce from the same wallet was released is prepared again with a fresh nonce,
+never sent stale.
+
 ## AsterDEX managed sockets
 
 Both AsterDEX streams are engine-managed
@@ -9764,3 +9809,15 @@ orders are still refused, exactly as TypeScript refuses them.
 ### Binance request refusals: typed command terminals
 
 Binance's local pre-admission refusals (unsupported commands, Spot derivative settings, stop-limit amend, keyless trading, invalid plans, bad candle intervals or ranges) are now each the command's own typed engine terminal, with native text, kind and NotSent, and no I/O ([RUST_BINANCE_REQUEST_REFUSALS.md](RUST_BINANCE_REQUEST_REFUSALS.md)). An unsupported candle interval is now typed `Unsupported`; it was a bare message.
+
+### Orderly O1: provider-signed account reads, history and socket auth
+
+Orderly's private reads and its socket auth now sign through an installed Ed25519 provider; the venue holds only identity refs ([RUST_ORDERLY_PROVIDER_READS.md](RUST_ORDERLY_PROVIDER_READS.md)). Trading still signs locally with the seed until O2.
+- **Headers and frame.** Unchanged in names, order and bytes. Each stamp is the request's release time, which is native's own instant whenever nothing was queued.
+- **Account reads.** Bounded Background reads (20 s each). A delivery from a superseded read changes nothing. A failed or refused read is reported and retried exactly as a native failed read is, including the 5 s startup retry. A refused signature is never silent.
+- **History (better than TypeScript).**
+  - The caller's wait bounds the whole walk, including the funding spacing delays. An expired walk fails with the shared typed refusal instead of sending late pages.
+  - A lost page keeps its `Network` kind; it was `Internal`.
+  - A signing refusal fails the query outright, even after accepted pages, as before.
+- **Socket auth.** A provider refusal sends no frame and closes the socket. Without a Primary identity the socket closes without signing.
+- **Interim (until O2).** A protective placement that an account snapshot confirms completes one tick after that snapshot, rather than inside it. The result is unchanged.
