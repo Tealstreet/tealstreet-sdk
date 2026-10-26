@@ -350,3 +350,60 @@ fn cancel_all_stays_refused_while_fenced() {
         );
     }
 }
+
+fn order_reads_pending(h: &Harness, variant: Variant) -> usize {
+    h.requests
+        .iter()
+        .filter(|r| {
+            r.method == Method::Get && order_reads(variant).iter().any(|p| r.url.contains(p))
+        })
+        .count()
+}
+
+/// Engine re-asks (1, 2, 4 s) join the slow post-write read: nothing restarts it,
+/// a placement meanwhile stays refused, and its clean answer still releases.
+#[test]
+fn engine_reasks_join_a_slow_post_write_read_that_still_releases() {
+    let variant = Variant::UsdM;
+    let mut h = ready(variant);
+    unknown_placement(&mut h, variant, 80);
+    let slow = order_reads(variant).len();
+    assert_eq!(
+        order_reads_pending(&h, variant),
+        slow,
+        "one post-write read set"
+    );
+    for step in [1_000.0, 2_000.0, 4_000.0] {
+        h.advance(step);
+        assert_eq!(
+            order_reads_pending(&h, variant),
+            slow,
+            "a re-ask never restarts or duplicates the in-flight read"
+        );
+    }
+    h.advance(500.0);
+    place(&mut h, variant, 81);
+    assert_eq!(posts(&h, variant), 0, "no POST while fenced");
+    assert!(
+        refused_uncertain(&h, 81),
+        "placement refused NotSent while the read is slow"
+    );
+    let reads = take_reads(&mut h, variant);
+    answer(&mut h, reads, "[]");
+    assert!(
+        order_reads_pending(&h, variant) <= slow,
+        "at most one owed read follows: {:?}",
+        h.requests
+    );
+    let owed = h
+        .requests
+        .iter()
+        .filter(|r| r.method == Method::Get)
+        .cloned()
+        .collect::<Vec<_>>();
+    for read in owed {
+        h.reply(read.id, 200, "", "[]");
+    }
+    place(&mut h, variant, 82);
+    assert_eq!(posts(&h, variant), 1, "the retry places after release");
+}
