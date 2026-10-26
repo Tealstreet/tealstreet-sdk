@@ -9213,3 +9213,9 @@ Startup seed fixtures complete real preparation/binding/claim at their original
 observation clocks through a seed-only collector. The shared raw requests()
 helper and private/candle/book collectors remain unchanged. No blanket timer
 flush, fabricated request/context or financial-clock supersession is used.
+
+The socket-only supervision fixture explicitly fails each released Funding
+observation at its original cadence clock, so the real returned cleanup removes
+its deadline before the next minute. It does not filter timers. The positional
+trading fixture only changes its0/10 seed release collector. Original financial
+payloads, assertions and clocks stay intact; all264 family controls pass locally.

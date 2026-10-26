@@ -2,17 +2,21 @@
 
 ## Status and prerequisites
 
-The overseer authorizes local originals and source implementation; all work stays
-unpushed while exact review and qualification proceed. #2169 landed as25ca8466d63d8f39954618635305cc083f9ec3f2,
-which is integrated locally without rebase. Its exact landing tree is
-3bc41fd92fe8e1baa8db1e3fbc9d6065fc0c09b8. Reviewer: codex-hcmq3f.
-The plan/matrix direction is CLEAR in scratch artifact
-ad94dc2a7d30df24af1eee7ce7cdace07e78246c9000ef389471e9b8772686b4;
-this committed copy updates status and adds the index row, with the reviewed
-API and complete typed-matrix proposal retained. Originals qualification and
-exact review remain before any production candidate.
+Local source, originals and reviewed fixture adoption are committed and unpushed.
+Source/API/control/fixture direction is CLEAR (codex-hcmq3f). On the actual
+74a0ba44d38 composition, the complete WOO family executes264PASS/0FAIL with no
+ignored or filtered tests; strict all-target Clippy and formatting pass. The
+source/map bans and ratchets pass on the source-exact e4f9 checkpoint. CI is not
+started: this local-only checkpoint is not READY or a CI family-size record.
 
-The committed funnel map is RUST_WOO_ADOPTION_AND_FUNNEL.md. This narrows its
+#2169 landed as25ca8466d63d8f39954618635305cc083f9ec3f2 and was integrated
+without rebase. The landing tip74a0ba44d3838f0ddf9885a5bc7358107f068eea was
+plain-merged before the first source measurement. Only README required manual
+resolution, preserving full incoming text plus the own row once. Reviewed plan
+matrix ad94dc2a7d30df24af1eee7ce7cdace07e78246c9000ef389471e9b8772686b4
+is implemented; immutable receipt artifacts remain outside the repository.
+
+The committed funnel map is RUST_WOO_ADOPTION_AND_FUNNEL.md. This adopts its
 unsigned Background observation block, without taking caller candles, depth,
 identity/account/history or signed writes. Recheck open PRs and checked-out
 branches before implementation: the current query found only #2169 as a WOO
@@ -174,7 +178,7 @@ The managed-release, typed precommit, expired-owned cleanup, sole-credit turnove
 full256-slot funding refusal/cadence and recovery suffixes remain honestly gated
 on the legacy runtime. All infinity variants and the full type matrix must
 execute after source adoption; this checkpoint does not claim they passed.
-Exact original/source/fixture review remains before any production candidate.
+That historical checkpoint predates the subsequently reviewed local source and fixture adoption.
 The checkpoint is local and unpushed, with no new PR or CI dispatch.
 
 The cleanup correction captures the physical timer and preparation from genuine
@@ -190,10 +194,10 @@ payload for all three seed routes. Corrected originals execute32/32PASS with no
 ignored tests. Two native controls distinguish exact cancellation cleanup from
 new work; nonfinite controls separately pin the inherited engine startup
 watchdog notice before applying the strict physical cleanup ledger. Exact
-source/control review is pending. The first full family run has11 fixture-target
+source/control review is now CLEAR. The first full family run had11 fixture-target
 failures because raw startup collectors cannot capture managed preparations;
-these are qualification failures, not infrastructure. Narrow fixture artifacts
-are under review before adoption. No full-family GREEN or publication claim.
+these were qualification failures, not infrastructure. The exact fixture artifacts
+were reviewed before adoption and the eventual complete rerun is264PASS.
 
 The current tip74a0ba44d38 is plain-merged at8a73888af55; README is full incoming
 plus the own row once. No incoming WOO source overlap. First-source measurements
@@ -210,3 +214,32 @@ cap. This local qualification pair is not a CI family record. Both Node/Web
 outputs match, and each scratch target was deleted before the next build.
 The current bare/composed combined pair is still running; no combined delta or
 budget PASS is claimed until its optimized artifacts finish.
+
+
+## Completed local first-source measurements
+
+Exact first-source pair: bare74a0ba44d38 versus e4f9e6784f5. Later committed
+changes are reviewed test fixtures and documentation only; all production,
+Cargo and WASM build inputs remain byte-exact to the measured source.
+
+| Target | Bare | Composed | Delta | Existing budget | Headroom |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| WOO local qualification pair | 1,321,862 | 1,335,186 | +13,324 | 1,343,488 | 8,302 |
+| Combined local pair | 14,015,391 | 14,020,706 | +5,315 | 14,155,776 | 135,070 |
+
+Rust1.99.0, wasm-bindgen0.2.129, Binaryen132, jobs4/cores4, exact build.sh
+commands and unchanged checked-in profiles. Every optimized Node/Web pair is
+byte-identical, all eight saved artifacts are hash-verified, and every tracked
+source blob in both archives matches its pinned Git tree. All scratch targets
+were deleted after each measurement. No budget or performance gate is changed.
+The local WOO pair was the specifically requested first-source qualification;
+CI remains the authoritative family record when publication is authorized.
+
+The final two reviewed fixture corrections release the positional-engine seed
+at its original0/10 clocks and explicitly fail each genuinely released Funding
+request at its cadence observation in the socket-only supervision harness.
+Returned cleanup goes through the unchanged timer ledger; no timer filtering
+or blanket flush hides managed deadlines. Original financial/assertion tokens
+remain intact. The earlier261PASS/3FAIL result stays historical; after adoption,
+all264 family tests, strict Clippy and fmt pass on661ce15abb1. Nothing is pushed,
+no PR or CI run is created, and no READY/landing claim is made here.
