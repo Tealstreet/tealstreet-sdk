@@ -356,10 +356,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
         self.host.turn(|host| {
             let now = (host.clock)();
             #[cfg(feature = "address-nonce")]
-            if !host.engine.address_nonce_setup_ready()
+            if !host.engine.has_started()
                 && let Err(error) = host.engine.initialize_address_nonce(now)
             {
-                host.engine.startup_failed(error);
+                host.terminal = Some(error);
+                return;
             }
             host.engine.start(now);
         });

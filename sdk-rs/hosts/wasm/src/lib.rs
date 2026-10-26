@@ -49,6 +49,10 @@ use managed_http::{HttpPacket, HttpPhaseOut};
 
 trait AnyEngine {
     #[cfg(feature = "address-nonce")]
+    fn has_started(&self) -> bool {
+        false
+    }
+    #[cfg(feature = "address-nonce")]
     fn address_setup_support(
         &mut self,
         _supported: bool,
@@ -172,6 +176,10 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    #[cfg(feature = "address-nonce")]
+    fn has_started(&self) -> bool {
+        Engine::has_started(self)
+    }
     #[cfg(feature = "address-nonce")]
     fn address_setup_support(
         &mut self,
@@ -300,12 +308,6 @@ impl<V: Venue> AnyEngine for Engine<V> {
         Engine::apply_public_feed(self, now, update)
     }
     fn start(&mut self, now: f64) {
-        #[cfg(feature = "address-nonce")]
-        if !self.address_nonce_setup_ready()
-            && let Err(error) = self.initialize_address_nonce(now)
-        {
-            self.startup_failed(error);
-        }
         Engine::start(self, now);
     }
 
@@ -1195,6 +1197,12 @@ impl WasmEngine {
     }
 
     pub fn start(&mut self, now: f64) -> String {
+        #[cfg(feature = "address-nonce")]
+        if !self.inner.has_started()
+            && let Err(error) = self.inner.initialize_address_setup(now, false)
+        {
+            return encode(&[Action::Notice(Notice::StartupFailed { error })]);
+        }
         self.inner.start(now);
         self.flush()
     }
