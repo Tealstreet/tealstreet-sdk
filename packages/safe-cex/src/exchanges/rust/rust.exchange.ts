@@ -2216,7 +2216,10 @@ export class RustEngineExchange extends BaseExchange {
     return copyHistoryCompleteness(rows, records);
   };
 
-  /** Reported closed axis, as TS `BitunixExchange.fetchHistoricalPositions`: bitunix folds to nothing from fills. */
+  /**
+   * The reported closed axis TS `BitunixExchange.fetchHistoricalPositions` reads (fills fold to nothing).
+   * Unlike TS, which returned [] or partial rows, a failed read throws under the journal rule above.
+   */
   private bitunixJournal = async (opts: { account: string; from?: number; to?: number }) => {
     if (this.isPublicDataOnly) return [];
     const rows = await this.fetchClosedPositionRows({ from: opts.from, to: opts.to }, false);
