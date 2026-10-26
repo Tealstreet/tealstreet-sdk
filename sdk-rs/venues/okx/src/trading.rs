@@ -25,6 +25,7 @@ const SERIAL: SerialCall = SerialCall {
     operation: Operation::Mutation,
     timeout_ms: 20_000,
     attempts: 2,
+    pacing: None,
 };
 
 /// OKX's native write codes. 51xxx are trading-rule refusals, and the listed

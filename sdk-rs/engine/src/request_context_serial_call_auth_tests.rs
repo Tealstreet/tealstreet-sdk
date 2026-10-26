@@ -129,6 +129,7 @@ mod serial_call_auth {
             operation,
             timeout_ms: 20_000,
             attempts: 2,
+            pacing: None,
         }
     }
     #[derive(Default)]

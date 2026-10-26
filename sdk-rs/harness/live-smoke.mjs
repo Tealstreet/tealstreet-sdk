@@ -5,7 +5,8 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
+import { EngineHost } from '../hosts/wasm/js/host.mjs';
+import { gateTransport } from './gate-transport.mjs';
 import { prepareFetch } from '../hosts/wasm/js/managed-http.mjs';
 import { Frame, LOADED_FLAG, MARKET_COLUMNS, MARKET_FLAG, orderEnums } from '../hosts/wasm/js/wire.mjs';
 import { loadEngine } from './engine.mjs';
@@ -379,7 +380,7 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     const write = (record) => writeSync(fd, `${JSON.stringify(record)}\n`);
     process.on('SIGINT', interrupt);
     process.on('SIGTERM', interrupt);
-    const network = nativeTransport();
+    const network = gateTransport();
     // fetch's default follows redirects, which could escape the endpoint fence.
     network.prepareHttp = (request) => prepareFetch({ ...request,
       timeoutMs: Math.min(request.timeoutMs ?? 20000, values.timeoutMs, 20000) });
