@@ -1120,14 +1120,11 @@ impl Venue for Orderly {
             },
         }
     }
-    /// A provider refusal of a private read: history is strict, and the
-    /// startup Info read is not re-armed (the engine has already reported it).
+    /// A provider refusal of a private read: history is strict; an account
+    /// read fails as a native failed read does, reported and retried.
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::History(request) => self.history_refused(cx, request, error),
-            Pending::Account(read, request) if request.is_info() => {
-                let _ = cx.finish_http_context(read.context());
-            }
             pending => self.on_sign_failed(cx, pending, &error.message),
         }
     }

@@ -206,12 +206,8 @@ impl safe_cex_engine::signing::Signer for Refusable {
         self.inner.can_sign(key, algorithm)
     }
 }
-/// `ready()` over a provider that a test can switch to refusing.
-pub fn ready_refusable() -> (
-    Driver,
-    SocketId,
-    std::sync::Arc<std::sync::atomic::AtomicBool>,
-) {
+/// A keyed engine whose provider a test can switch to refusing.
+pub fn refusable_engine() -> (Driver, std::sync::Arc<std::sync::atomic::AtomicBool>) {
     let (signer, options) = trusted(options());
     let refuse = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let identities = options.identities.clone();
@@ -222,6 +218,15 @@ pub fn ready_refusable() -> (
     })))
     .unwrap();
     e.set_identities(identities).unwrap();
+    (e, refuse)
+}
+/// `ready()` over a provider that a test can switch to refusing.
+pub fn ready_refusable() -> (
+    Driver,
+    SocketId,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let (e, refuse) = refusable_engine();
     let (e, socket, _, _) = bootstrap(e, ORDER, "[]", POSITIONS);
     (e, socket, refuse)
 }

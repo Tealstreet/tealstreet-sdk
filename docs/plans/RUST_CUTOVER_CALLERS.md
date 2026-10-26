@@ -9317,3 +9317,14 @@ Covered reconciliation reads publish one merged Orders snapshot before retiring 
 The separately owned core CancelOnly overlap rule landed in #2181. Per the overseer's #2181 ruling, repair cancel and foreground cancel-all may coexist on the same symbol without capturing the cancel-all's IDs. Explicit-ID CancelOrders still conflicts on the same ID, and repair/Place-or-Amend conflicts stay fenced. A newer cancel-all racing the repair retains native refusal -> Rejected -> one manual-cancel error; no gone/Satisfied mapping is added. Existing trading.rs native controls and the frozen 19 repair originals are retained verbatim. No consumer deferral, re-queue, numeric completion or raw HTTP fallback is introduced.
 
 Phemex late-repair source corrections retain native envelope/row refusal codes and typed classification. A refused repair admission refreshes the account; non-capacity mint refusals give an explicit manual-cancel diagnostic. Retry reads can temporarily overlap the retiring Read by one Context to retain snapshot DATA custody. Phemex does not advance the selective snapshot fence; retirement relies on the receipt's begin-after-mint check and actual absence. The dispatch-signing fixture's Pending variant matcher changes; signing vectors do not.
+
+### Orderly O1: provider-signed account reads, history and socket auth
+
+Orderly's private reads and its socket auth now sign through an installed Ed25519 provider; the venue holds only identity refs ([RUST_ORDERLY_PROVIDER_READS.md](RUST_ORDERLY_PROVIDER_READS.md)). Trading still signs locally with the seed until O2.
+- **Headers and frame.** Unchanged in names, order and bytes. Each stamp is the request's release time, which is native's own instant whenever nothing was queued.
+- **Account reads.** Bounded Background reads (20 s each). A delivery from a superseded read changes nothing. A failed or refused read is reported and retried exactly as a native failed read is, including the 5 s startup retry. A refused signature is never silent.
+- **History (better than TypeScript).**
+  - The caller's wait bounds the whole walk, including the funding spacing delays. An expired walk fails with the shared typed refusal instead of sending late pages.
+  - A lost page keeps its `Network` kind; it was `Internal`.
+  - A signing refusal fails the query outright, even after accepted pages, as before.
+- **Socket auth.** A provider refusal sends no frame and closes the socket. Without a Primary identity the socket closes without signing.
