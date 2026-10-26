@@ -12,7 +12,7 @@ const work = {
 const action = { op: 'sign', attempt: 7, timeoutMs: 1000, work };
 const tick = async () => { for (let n = 0; n < 8; n++) await Promise.resolve(); };
 
-function rig({ readMeta, live = true, signer }) {
+function rig({ readMeta, live = true, signer, onDead }) {
   const events = [], reads = [], timers = new Map();
   let next = 1;
   const engine = {
@@ -26,7 +26,7 @@ function rig({ readMeta, live = true, signer }) {
     now: () => 1234,
     setTimeout(fn) { const id = next++; timers.set(id, fn); return id; },
     clearTimeout(id) { timers.delete(id); },
-  }, {}, { signer });
+  }, { onDead }, { signer });
   return { host, events, reads, timers };
 }
 
@@ -137,6 +137,9 @@ for (const [name, change] of [
   ['fractional owner generation', (m) => { m.owner.generation = 3.25; }],
   ['string task', (m) => { m.task = '7'; }],
   ['unknown slot', (m) => { m.slot = 'fallback'; }],
+  ['deferred setup owner', (m) => { m.owner = { kind: 'setup', generation: 1 }; }],
+  ['negative deadline', (m) => { m.deadlineMs = -0.25; }],
+  ['secondary SessionAuth', (m) => { m.owner = { kind: 'session', generation: 1 }; m.role = { kind: 'sessionAuth' }; }],
   ['unknown owner', (m) => { m.owner.kind = 'command'; }],
   ['unknown role', (m) => { m.role.kind = 'background'; }],
   ['unknown scope', (m) => { m.role.scope = 'wallet'; }],
@@ -217,4 +220,52 @@ for (const ErrorType of [WebAssembly.RuntimeError, RangeError]) {
       assert.equal(r.host.primitiveSignings.size, 0);
     } finally { r.host.dispose(); }
   });
+}
+
+for (const [size, forwarded] of [[1_048_576, true], [1_048_577, false]]) {
+  test(`metadata JSON at ${size} bytes ${forwarded ? 'is accepted' : 'exceeds the cap'}`, async () => {
+    const json = JSON.stringify(validMeta());
+    let context;
+    const r = rig({ readMeta: () => json.padEnd(size, ' '), signer: (request, actual) => {
+      context = actual;
+      return { receipt: request.receipt, values: [[1]] };
+    } });
+    try {
+      r.host.execute(action);
+      await tick();
+      assert.deepEqual(r.reads, [7]);
+      assert.equal(Object.hasOwn(context, 'meta'), forwarded);
+      assert.equal(r.events[0]?.[0], 'signed');
+      assert.equal(r.timers.size, 0);
+    } finally { r.host.dispose(); }
+  });
+}
+
+for (const ErrorType of [WebAssembly.RuntimeError, RangeError]) {
+  for (const failingHook of ['onDead', 'cleanup']) {
+    test(`${ErrorType.name} preserves a throwing ${failingHook} after fatal metadata cleanup`, async () => {
+      const failure = new Error('fatal-cleanup-sentinel');
+      let calls = 0, deaths = 0;
+      const r = rig({ readMeta: () => { throw new ErrorType('fatal-export-sentinel'); },
+        signer: () => { calls++; }, onDead: () => {
+          deaths++;
+          if (failingHook === 'onDead') throw failure;
+        } });
+      if (failingHook === 'cleanup') {
+        const cleanup = r.host.cleanup.bind(r.host);
+        r.host.cleanup = () => { cleanup(); throw failure; };
+      }
+      try {
+        assert.throws(() => r.host.execute(action), (error) => error === failure);
+        await tick();
+        assert.deepEqual(r.reads, [7]);
+        assert.equal(deaths, 1);
+        assert.equal(r.host.disposed, true);
+        assert.equal(calls, 0);
+        assert.deepEqual(r.events, []);
+        assert.equal(r.timers.size, 0);
+        assert.equal(r.host.primitiveSignings.size, 0);
+      } finally { r.host.dispose(); }
+    });
+  }
 }

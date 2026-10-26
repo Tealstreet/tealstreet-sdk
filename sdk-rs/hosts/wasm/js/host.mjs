@@ -802,7 +802,10 @@ export class EngineHost {
     try {
       const readMeta = this.engine.signMeta;
       if (typeof readMeta === 'function') meta = checkedSigningMeta(this.invoke(readMeta, id), id);
-    } catch { /* An ordinary export failure leaves the legacy context intact. */ }
+    } catch (error) {
+      if (this.disposed) throw error;
+      // An ordinary export failure leaves the legacy context intact.
+    }
     if (this.disposed) return;
     const pending = this.primitiveSigning(action.work, action.timeoutMs,
       this.signer && ((context) => this.signer(action.work, meta ? { ...context, meta } : context)), (result, code) => {

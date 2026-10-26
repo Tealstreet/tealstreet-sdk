@@ -169,3 +169,11 @@ is not the full envelope or actual Kraken peer/nonce proof. Setup metadata and
 the owned execution/retirement transport join the shared module only with their
 separate genuine engine API and capability support; they do not fall back to
 business ownership. F1/F2, actual WASM/peer proof and activation remain gates.
+
+The source-review follow-up preserves exceptions thrown by fatal cleanup or
+onDead instead of downgrading them to absent metadata. Four controls reproduce
+that swallowed-exception failure before the fix; all four pass after it, without
+provider, timer or pending revival. Explicit malformed cases cover a negative
+deadline, the deferred setup owner and secondary SessionAuth. JSON whitespace
+padding pins acceptance at the 1 MiB cap and refusal one byte above it. All 64
+metadata controls and the 20 existing signer/nonce controls pass, zero skipped.
