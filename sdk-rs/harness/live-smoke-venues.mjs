@@ -40,7 +40,7 @@ register('cryptocom', 'CRYPTOCOM', modes(
   endpoints('https://uat-api.3ona.co', 'wss://uat-stream.3ona.co'),
   endpoints('https://api.crypto.com', 'wss://stream.crypto.com'),
 ));
-register('hyperliquid', 'HYPERLIQUID', modes(
+register('hyperliquid hyperliquidspot', 'HYPERLIQUID', modes(
   endpoints('https://api.hyperliquid-testnet.xyz', 'wss://api.hyperliquid-testnet.xyz'),
   endpoints('https://api.hyperliquid.xyz', 'wss://api-ui.hyperliquid.xyz'),
 ), { key: 'SIGNER_ADDRESS', secret: 'PRIVATE_KEY', applicationId: 'ACCOUNT_ADDRESS' }, {
@@ -245,7 +245,7 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
     venue: name, mode, availableModes, options, secrets,
     // Bitrue rejects non-GTC; Polymarket's engine does not send postOnly yet.
     postOnly: !['bitrue', 'polymarket'].includes(name),
-    leverage: ['bybitspot', 'coinbasespot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
+    leverage: ['bybitspot', 'coinbasespot', 'hyperliquidspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
     secretValues: Object.values(secrets), credentialEnv,
     endpoints: { http: [...endpointSet.http], ws: [...endpointSet.ws] },
     allowUrl, canonicalizeUrl, validateRequest, validateSocket, validateSocketMessage,

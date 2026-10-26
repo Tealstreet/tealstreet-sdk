@@ -23,7 +23,7 @@ test('OKX smoke profiles use default TLS on the exact live/demo entity host', ()
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
     // KuCoin Spot needs a separate host and sizing review.
-    if (['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'].includes(venue)) {
+    if (['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'krakenspot'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
@@ -41,7 +41,7 @@ test('every registry name has an explicitly reviewed environment or fails closed
 
 test('unreviewed profiles refuse all modes before credential access', () => {
   const env = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
-  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'])
+  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'krakenspot'])
     for (const mode of [undefined, 'testnet', 'demo', 'mainnet'])
       assert.throws(() => liveSmokeProfile(venue, mode, env), /no reviewed/);
 });
@@ -195,4 +195,32 @@ test('reviewed venue profiles enable post-only whenever the engine supports it',
     catch { try { profile = liveSmokeProfile(venue, 'mainnet', env); } catch { continue; } }
     assert.equal(profile.postOnly, !['bitrue', 'polymarket'].includes(venue), venue);
   }
+});
+
+
+test('Hyperliquid Spot uses the same agent and account fields with fixed leverage', () => {
+  const prefix = 'RUST_LIVE_SMOKE_HYPERLIQUID_MAINNET_';
+  const values = { [prefix + 'SIGNER_ADDRESS']: '0x' + '11'.repeat(20),
+    [prefix + 'PRIVATE_KEY']: '0x' + '22'.repeat(32),
+    [prefix + 'ACCOUNT_ADDRESS']: '0x' + '33'.repeat(20) };
+  const perps = liveSmokeProfile('hyperliquid', 'mainnet', values);
+  const spot = liveSmokeProfile('hyperliquidspot', 'mainnet', values);
+  assert.deepEqual(spot.credentialEnv, perps.credentialEnv);
+  assert.deepEqual(spot.options, perps.options);
+  assert.notEqual(spot.options.key, spot.options.applicationId);
+  assert.equal(spot.leverage, 'fixed');
+  assert.equal(spot.postOnly, true);
+  assert.equal(spot.options.publicDataOnly, false);
+  spot.validateRequest({ method: 'POST', url: 'https://api.hyperliquid.xyz/exchange' });
+  spot.validateSocket('wss://api-ui.hyperliquid.xyz/ws');
+  for (const url of ['https://api.hyperliquid-testnet.xyz/info',
+    'https://api.hyperliquid.xyz.evil.example/exchange', 'https://api.hyperliquid.xyz:123/exchange'])
+    assert.throws(() => spot.validateRequest({ method: 'POST', url }), /outside/);
+  assert.throws(() => spot.validateSocket('wss://api.hyperliquid-testnet.xyz/ws'), /outside/);
+  const poisoned = new Proxy({}, { get: () => { throw Error('credentials accessed'); } });
+  assert.throws(() => liveSmokeProfile('hyperliquidspot', 'demo', poisoned), /unsupported/);
+  assert.throws(() => liveSmokeProfile('hyperliquidspot', 'mainnet', {}), /SIGNER_ADDRESS/);
+  const testnet = liveSmokeProfile('hyperliquidspot', undefined, env);
+  assert.equal(testnet.mode, 'testnet');
+  assert.equal(testnet.allowUrl('https://api.hyperliquid.xyz/info'), false);
 });
