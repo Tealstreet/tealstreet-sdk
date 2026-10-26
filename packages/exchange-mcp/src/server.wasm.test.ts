@@ -1,3 +1,11 @@
+vi.mock('@tealstreet/safe-cex/src/exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('@tealstreet/safe-cex/src/__tests__/reference/retainedRustPolicy');
+  return retainedRustPolicy(
+    await importOriginal<typeof import('@tealstreet/safe-cex/src/exchanges/rust/betaVenues')>(),
+    true,
+  );
+});
+
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -181,8 +189,11 @@ it('retains native REST polling for BreakoutProp MCP ticker reads', async () => 
   expect(fixture.failures).toEqual([]);
 }, 15000);
 
-it('keeps TypeScript MCP accounts on demand with polling disabled', async () => {
+it('selects Rust by default without disabling native polling or public sockets', async () => {
+  const disablePublic = vi.spyOn(RustEngineExchange.prototype, 'disablePublicWebsockets');
   instance = await createServer(readConfig({ EXCHANGE: 'bybit' }), 'test');
-  expect(instance.exchange).not.toBeInstanceOf(RustEngineExchange);
-  expect(instance.exchange.options.extra?.tickInterval).toBe(Number.POSITIVE_INFINITY);
+  expect(instance.exchange).toBeInstanceOf(RustEngineExchange);
+  expect(instance.exchange.options.extra?.tickInterval).not.toBe(Number.POSITIVE_INFINITY);
+  expect(disablePublic).not.toHaveBeenCalled();
+  disablePublic.mockRestore();
 });

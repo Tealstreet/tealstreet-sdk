@@ -11,11 +11,11 @@ Reflect.deleteProperty(globalThis, 'TextEncoder');
 Reflect.deleteProperty(globalThis, 'WebAssembly');
 const { setReactNativeRustEngineLoader } = await import('../src');
 const { exchangeRegistry } = await import('@tealstreet/safe-cex/src/exchanges/registry.native');
-const NativeExchange = await exchangeRegistry.coinbasespot();
+const NativeExchange = await exchangeRegistry.binancespot();
 const { RustEngineExchange, setRustEngineTransport } =
   await import('@tealstreet/safe-cex/src/exchanges/rust/rust.exchange');
-if (NativeExchange !== RustEngineExchange || (await exchangeRegistry.coinbase()) !== RustEngineExchange)
-  throw new Error('Native registry did not resolve the Rust Coinbase family');
+if (NativeExchange !== RustEngineExchange || (await exchangeRegistry.binance()) !== RustEngineExchange)
+  throw new Error('Native registry did not resolve the Rust Binance family');
 // Registering the host bridge also needs neither codecs nor WebAssembly. Actual
 // binary frame I/O below uses the runtime's restored codec/WASM implementation.
 await setReactNativeRustEngineLoader(async () => {
@@ -30,9 +30,9 @@ globalThis.TextEncoder = encoder;
 globalThis.WebAssembly = wasm;
 const { DefaultStore } = await import('@tealstreet/safe-cex/src/store/store.base');
 const { realVenue } = await import('@tealstreet/safe-cex/src/__tests__/cutover/realVenue');
-const fixture = realVenue('coinbasespot');
+const fixture = realVenue('binancespot');
 setRustEngineTransport(() => fixture.transport);
-const exchange = new NativeExchange('coinbasespot', fixture.options, new DefaultStore());
+const exchange = new NativeExchange('binancespot', fixture.options, new DefaultStore());
 let timeout: ReturnType<typeof setTimeout> | undefined;
 try {
   await Promise.race([
@@ -46,7 +46,7 @@ try {
   ]);
   if (!exchange.store.loaded.markets || !exchange.store.markets.length) throw new Error('Native catalog is empty');
   if (fixture.errors.length) throw new Error(fixture.errors.join('; '));
-  console.log('mobile-native-registry: Coinbase aliases loaded a native catalog');
+  console.log('mobile-native-registry: Binance aliases loaded a native catalog');
 } finally {
   clearTimeout(timeout);
   exchange.dispose();

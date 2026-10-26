@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -62,7 +67,7 @@ describe('KuCoin spot Rust SDK boundary', () => {
 
   it('registers a spot account and loads once for account queries before startup', async () => {
     const { exchange, construct } = setup();
-    expect(isRustVenue('kucoinspot')).toBe(true);
+    expect(isRustVenue('kucoinspot')).toBe(false);
     expect(exchange.isSpot).toBe(true);
     await expect(exchange.getAccount()).resolves.toEqual({ userId: 'user', subId: null, affiliateId: null });
     await exchange.start();
