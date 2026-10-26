@@ -5,7 +5,7 @@ name: CI
 
 on:
   push:
-    branches: [master, feat/rust-rewrite]
+    branches: ['**']
   pull_request:
   workflow_dispatch: # manual re-run (e.g. validation after a sync)
 

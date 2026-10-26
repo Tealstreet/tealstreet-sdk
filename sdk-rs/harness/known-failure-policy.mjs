@@ -46,10 +46,7 @@ export function validateKnownFailures(manifest) {
   return errors;
 }
 
-export const assessGateReport = (report, manifest) => assessReport(report, manifest, false);
-export const assessCorrectnessReport = (report, manifest) => assessReport(report, manifest, true);
-
-function assessReport(report, manifest, correctnessOnly) {
+export function assessGateReport(report, manifest) {
   const errors = [...validateKnownFailures(manifest)];
   if (errors.length) return { errors, known: [], resolved: [] };
   if (report?.schema !== 1 || !['PASS', 'FAIL'].includes(report.status) ||
@@ -57,11 +54,6 @@ function assessReport(report, manifest, correctnessOnly) {
       (report.status === 'PASS') !== (report.failures.length === 0) ||
       typeof report.private !== 'boolean' || !/^[a-f0-9]{64}$/.test(report.tapeSha256 ?? ''))
     return { errors: [...errors, 'invalid strict gate report'], known: [], resolved: [] };
-  if (correctnessOnly !== (report.correctnessOnly === true))
-    errors.push('correctness-only reports cannot substitute for measured gate evidence');
-  if (correctnessOnly && (report.runs !== 0 || report.correctnessRuns !== 1 ||
-      report.coverage?.performance !== 'not-run' || report.coverage?.correctness !== (report.replayFailure ? 'incomplete' : 'complete')))
-    errors.push('invalid correctness-only replay coverage');
   const entry = manifest.failures.find((candidate) => candidate.venue === report.venue && candidate.tapeSha256 === report.tapeSha256);
   const declarations = new Map(declaredDiagnostics(entry).map((item) => [item.key, item]));
   if (report.replayFailure) {
@@ -80,17 +72,16 @@ function assessReport(report, manifest, correctnessOnly) {
   // their strict result remains FAIL and never certifies complete parity.
   for (const impl of ['ts', 'rust']) {
     const samples = report.samples?.[impl];
-    const correctness = report.private || correctnessOnly;
-    const expected = correctness ? report.correctnessRuns : report.runs;
-    if (!Number.isSafeInteger(expected) || expected < (correctness ? 1 : 7) || !Array.isArray(samples) || samples.length !== expected) {
+    const expected = report.private ? report.correctnessRuns : report.runs;
+    if (!Number.isSafeInteger(expected) || expected < (report.private ? 1 : 7) || !Array.isArray(samples) || samples.length !== expected) {
       errors.push(`${impl}: incomplete gate samples`);
       continue;
     }
     for (const sample of samples) errors.push(...memoryMetricErrors(sample),
-      ...performanceMetricErrors(sample, correctness ? 'correctness' : 'performance'));
+      ...performanceMetricErrors(sample, report.private ? 'correctness' : 'performance'));
   }
   const protectedFailure = /baseline is invalid|invalid (?:cpuMs|steadyCpuMs|processCpuMs)|incomplete replay workload|workload differs|checkpoint snapshots missing|invalid tape boundary|empty public seed|requested book .* is missing|fixer modified Rust|fixer changed undeclared/;
-  if (!report.private && !correctnessOnly) {
+  if (!report.private) {
     if (report.requiredImprovement !== 0.10) errors.push('performance improvement contract differs from 10%');
     if (!errors.length) for (const missing of performanceFailures(report.samples.ts, report.samples.rust))
       if (!report.failures.includes(missing)) errors.push(`strict report omitted ${missing}`);
