@@ -359,7 +359,7 @@ deserialization and equality with the ordinary identity before testing claim
 refusal; a future unknown-field refusal cannot silently bypass the assertion.
 The earlier 8b0 qualification remains attributed to its original source.
 
-## Scope, zero-growth and publication gates
+## Scope, feature costs and publication gates
 
 The shared public-address carrier also has a claim-free GRVT consumer. GRVT
 needs the actual selected Primary signing ref's sealed address before
@@ -425,15 +425,19 @@ Proposed non-default engine feature:
 `address-nonce = ["dispatch-nonce", "sign-meta"]`. Gate runtime carrier fields,
 subject strategy, declaration capture and setup handling. Public retirement
 and selection-error variant sets stay unconditional, so Cargo unification
-cannot change the cases seen by dependent crates. Feature-off shipping equality
-must be measured, including any unused public-variant cost. This shared PR
+cannot change the cases seen by dependent crates. Feature-off shipping costs
+must be measured, including unused public-variant and provider-vtable costs. This shared PR
 enables no venue dependency feature and adopts none of the consumers.
 Phase3 actual landing plus m26 and both consumer reviews precede source.
 
-At first source, merge the actual Rust landing tip. Measure paired default
-Bybit, Bitget and stable-id Kraken families and one LOCAL composed combined
-build; non-adopters must have zero byte growth with the feature off. Test the
-address feature on separately, including dispatch-nonce/serial/selection modes;
+At first source, merge the actual Rust landing tip. The original zero-growth
+gate was superseded by the overseer after the paired default-off Bybit build
+measured1,444,849 ->1,445,286 (+437 bytes). The stable additive public API
+residual is accepted; do not hide it with unrelated shrinking or continue byte
+hunting. Retain this pair at its exact baseline/composition pins. CI supplies
+the family records; one LOCAL current composed combined build is required.
+The current combined cap is14,680,064 bytes after #2194. Test the address
+feature on separately, including dispatch-nonce/serial/selection modes;
 do not relabel a test harness as consumer adoption or current WASM execution.
 Consumers later enable the feature in their own measured family/combined PRs.
 Keep fixed budgets and current counterbalanced Bitget CPU policy, no overrides.
@@ -454,3 +458,9 @@ polls the original driver, while only its actual completion proves settlement.
 The sign-meta business carrier is a separate fe7-owned prerequisite PR; this
 address seam contributes only the genuine setup-table accessor branch and its
 setup construction on that carrier.
+
+The accepted +437-byte pair is scoped to the automatic a982+exact #2199
+prerequisite baseline dcd6f797067 and composed60008f49266. A single later
+Bybit method-order pair checks appending the new Signer hooks after the old
+methods; it is diagnostic, not a new zero-growth hold. Source composes on
+actual #2199 landing d3756f2a5fe, with its business carrier incoming-exact.

@@ -9294,3 +9294,9 @@ into the live Tokio runtime; cancellation is never retirement evidence, and the
 runtime must remain alive through the genuine join. Runtime teardown itself is
 not a resource-retirement report. Local setup handles retain only the derived
 20-byte public result, with scalar bytes staying in the installed store.
+
+The address setup public API stays additive when its feature is disabled. Its
+provider hooks and retirement variant have a measured default-off Bybit cost
+of437 bytes on the reviewed pair, explicitly accepted by the overseer. No
+consumer is enabled by this shared prerequisite; CI measures family sizes, and
+the current composed local combined must fit the14 MiB budget.
