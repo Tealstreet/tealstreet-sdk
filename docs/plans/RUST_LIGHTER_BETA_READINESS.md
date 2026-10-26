@@ -1,7 +1,7 @@
 # Lighter beta readiness
 
 Status: local public-data slice on the managed funnel in #2230. Grouped limit
-TP/SL remains a separate beta blocker; this slice does not enable it.
+TP/SL is owned by kuhwxi as a separate slice; this slice does not enable it.
 
 The beta runs through `hosts/wasm/js/host.mjs`. A live public recording on #2230
 captured four HTTP replies and 15,401 socket frames, but replay found dropped
@@ -34,7 +34,7 @@ nonce through TxRecipe. Confirm the parent and every child before success; an
 unconfirmed child means Unknown with proven IDs and uncertainty retained, with
 no replay. Lock every child ID. Definitive pre-execution 21104 may reseed once;
 408/5xx cannot. Invalid triggers or unsupported splits refuse before signing.
-This requires its own financial tests and review before credentialed smoke.
+Kuhwxi owns its financial tests and review before credentialed smoke.
 
 Reviewer: dazzy3. No engine, crypto, registry, budget or inventory edit is planned
 for the public-data slice. The final JS/WASM build must replay the retained live
