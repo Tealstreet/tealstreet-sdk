@@ -2441,7 +2441,8 @@ mod tests {
             ),
             ServerConfig::default(),
         );
-        actor.host.engine.start((actor.host.clock)());
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
         actor.execute();
         let (outgoing, mut messages) = mpsc::channel(4);
         actor
