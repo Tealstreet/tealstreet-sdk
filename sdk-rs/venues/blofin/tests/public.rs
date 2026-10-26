@@ -389,12 +389,10 @@ fn full_top_five_preserves_deeper_prices_and_thin_or_empty_sides_clear_them() {
 
 #[test]
 fn null_ticker_row_is_reported_without_hiding_other_symbols_or_halting_private_startup() {
-    let mut engine = trusted::trusted_engine(Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("pass".into()),
-        ..Options::default()
-    });
+    let mut engine = trusted::trusted_engine_with(
+        Options::default(),
+        Some(trusted::Keys::new("key", "secret", "pass")),
+    );
     engine.start(0.0);
     let id = request(&mut engine);
     reply(&mut engine, id, INSTRUMENT);

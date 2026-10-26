@@ -27,7 +27,13 @@ impl EraseSecrets for Options {
     }
 }
 impl Options {
-    pub fn build(mut self) -> (PhemexPerpetuals, safe_cex_engine::signing::Provider) {
+    pub fn build(
+        mut self,
+    ) -> (
+        PhemexPerpetuals,
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ) {
         let primary = self
             .key
             .take()
@@ -64,17 +70,19 @@ impl Options {
             PhemexPerpetuals::new(NativeOptions {
                 testnet: self.testnet,
                 public_data_only: self.public_data_only,
-                credentials: identities.primary,
-                read_credentials: identities.secondary,
+                credentials: identities.primary.clone(),
+                read_credentials: identities.secondary.clone(),
             }),
             std::sync::Arc::new(local),
+            identities,
         )
     }
 }
 pub fn engine(options: Options) -> Engine<PhemexPerpetuals> {
-    let (venue, provider) = options.build();
+    let (venue, provider, identities) = options.build();
     let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
     engine.set_signer(Some(provider)).unwrap();
+    engine.set_identities(identities).unwrap();
     engine
 }
 

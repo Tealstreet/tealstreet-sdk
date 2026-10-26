@@ -1617,6 +1617,10 @@ struct IoCore {
     domain_queue: std::collections::VecDeque<RequestId>,
     #[cfg(feature = "release-domains")]
     domain_held: Vec<(RequestId, Action)>,
+    /// Parked WriteAfterReads Preflights bounded by their caller's receipt:
+    /// (cap, owner, its timer).
+    #[cfg(feature = "write-preflight-wait")]
+    write_preflight_waits: Vec<(f64, crate::request_context::Preflight, TimerId)>,
     /// Action capacity right after the sweep's reservation, for tests.
     #[cfg(test)]
     read_root_sweep_capacity: Option<usize>,
@@ -1747,6 +1751,8 @@ impl Default for IoCore {
             placement_acks: Default::default(),
             execution_timer: None,
             read_roots: Vec::with_capacity(256),
+            #[cfg(feature = "write-preflight-wait")]
+            write_preflight_waits: Vec::new(),
             read_roots_expiring: false,
             #[cfg(feature = "release-domains")]
             release_domain: None,
@@ -4022,6 +4028,12 @@ impl<V: Venue> Engine<V> {
         self.expire_read_roots(now);
         if let Event::TimerFired { timer } = &event
             && self.io.read_root_timer(*timer, now)
+        {
+            return;
+        }
+        #[cfg(feature = "write-preflight-wait")]
+        if let Event::TimerFired { timer } = &event
+            && self.io.write_preflight_timer(*timer, now)
         {
             return;
         }

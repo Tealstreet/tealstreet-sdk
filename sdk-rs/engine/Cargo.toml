@@ -17,6 +17,8 @@ serial-plans = ["http-plans"]
 condition-waits = ["serial-plans"]
 # One venue-declared FIFO, release-paced REST domain (Hyperliquid, Coinbase); adopters only.
 release-domains = ["serial-plans"]
+# The caller wait bounds a parked WriteAfterReads Preflight; adopters only.
+write-preflight-wait = ["http-plans"]
 # Session-bound managed requests (venue session headers just in time); only
 # adopting venues link it.
 session-bearer = []
