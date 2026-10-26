@@ -1518,6 +1518,8 @@ impl Bitrue {
                 );
                 error = VenueError::new(CENSUS_UNCERTAIN);
                 active.work.note = Some(CENSUS_UNCERTAIN.into());
+                // D4: the accepted placement's protection may or may not be live.
+                let _ = cx.inherit_plan_uncertainty(&plan);
             }
             return self.end(cx, active, None, error);
         }
@@ -1593,6 +1595,8 @@ impl Bitrue {
                     // uncertainty always follows it.
                     if request.step.is_census() {
                         active.work.note = Some(CENSUS_UNCERTAIN.into());
+                        // D4: the accepted placement's protection may or may not be live.
+                        let _ = cx.inherit_plan_uncertainty(&plan);
                     }
                     self.end(cx, active, current, VenueError::new(error))
                 }
