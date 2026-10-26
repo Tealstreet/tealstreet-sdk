@@ -2661,6 +2661,18 @@ metadata/settings or fill-completeness state. Existing TS internal snapshot
 seeding/gap repair is separate; the bounded NX/CLI/MCP audit established no
 direct default producer or new caller argument.
 
+### Hyperliquid mixed batch effects and accepted identities
+
+Rust retains every proven Resting/Filled order ID from a correctly correlated
+batch, even when another row refuses. The failure carries structured partial
+order IDs and Unknown for a mixed result; it never reports the whole batch as
+rejected or resends it. Accepted rows run the normal account reducer. A mixed
+cancel removes successful/terminal legs and restores only refused legs, so a
+cancelled order is never resurrected. All-refused batches retain Rejected with
+no accepted IDs. An accepted earlier physical call followed by a later refusal
+also retains its IDs and projects Unknown. This deliberately fixes the native early-error return; existing
+custody originals that described its dropped-ID behaviour now pin this contract.
+
 ### Hyperliquid signed cancellation scheduling (#1693)
 
 The existing perpetual `scheduleCancel(time?: number | null): Promise<void>`
@@ -9698,3 +9710,7 @@ and message while shared 408/5xx precedence preserves uncertainty.
 Rust-native tests are regression evidence only. Browser beta readiness requires
 separate JS `EngineHost` plus compiled WASM replay/live-public results, using the
 managed-HTTP recorder fix; no native-host run counts as browser readiness.
+
+### Binance signing residue: legacy test oracle retired
+
+No caller-visible change. Binance already signed every request through the provider. The remaining legacy signing code was a test-only HMAC oracle and fixtures, now replaced by provider-path proofs of the documented vector and of every configured receive window ([RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md)). Signing inventory for Binance: 27 → 4, the four being the dispatch recipe's own lines.
