@@ -41,9 +41,14 @@ def modes():
     # No family links session-bearer yet; its tests run only here.
     grouped[('http-mutation-barriers', 'http-plans', 'session-bearer', 'test-support')] = [
         'session-bearer control']
+    # Seeded resend spans both opt-ins; their isolated modes cannot execute it.
+    grouped[('condition-waits', 'http-mutation-barriers', 'http-plans', 'order-locks',
+             'serial-plans', 'session-bearer', 'test-support')] = ['serial Session resend control']
     # session-bearer OFF control: Session bindings are refused (session_bearer_off.rs).
     grouped.setdefault(('http-plans', 'test-support'), []).append('session-bearer OFF control')
     grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'order-locks', 'test-support')] = ['explicit nonce control']
+    grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'serial-plans', 'test-support')] = [
+        'Kraken serial nonce prerequisite control']
     for family in families:
         tree = subprocess.check_output([
             'cargo', 'tree', '--locked', '--target', 'wasm32-unknown-unknown',

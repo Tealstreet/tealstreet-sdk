@@ -5,6 +5,7 @@ mod account;
 mod fixture;
 mod history;
 mod request;
+pub(crate) use request::command_read_root;
 pub mod sign;
 mod trading;
 mod wire;
@@ -825,7 +826,7 @@ impl Venue for AsterDex {
             Pending::Signed(req) => self.on_signed_response(cx, req, Ok(response)),
             Pending::Clock(req) => self.on_clock_response(cx, req, Ok(response)),
             Pending::Account(req) => self.on_account_response(cx, req, Ok(response)),
-            Pending::Trade(req) => self.on_trade_response(cx, req, Ok(response)),
+            Pending::Trade(req) => self.on_trade_response(cx, req, Ok(response), None, false),
             Pending::History(req) => self.on_history_response(cx, req, Ok(response)),
             Pending::ExchangeInfo { rows, skipped } => {
                 log_skipped_rows(cx, "market", &skipped);
@@ -976,6 +977,49 @@ impl Venue for AsterDex {
         }
     }
 
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Signed(signed) => match &signed.pending {
+                Pending::Trade(trade) => trade.reconciliation(),
+                _ => Err(safe_cex_engine::request_context::Error::Invalid),
+            },
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.on_resync_ready(cx, plan);
+    }
+
+    fn on_condition_wait_expired(
+        &mut self,
+        _cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::ConditionOwner,
+        _error: VenueError,
+    ) {
+        if let safe_cex_engine::request_context::ConditionOwner::Plan(plan) = owner {
+            self.on_resync_expired(plan);
+        }
+    }
+
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.on_trade_preflight_ready(cx, preflight);
+    }
+
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::Signed(req) => self.on_signed_failed(cx, req, error),
@@ -1014,7 +1058,7 @@ impl Venue for AsterDex {
             Pending::Signed(req) => self.on_signed_response(cx, req, Err(error)),
             Pending::Clock(req) => self.on_clock_response(cx, req, Err(error)),
             Pending::Account(req) => self.on_account_response(cx, req, Err(error)),
-            Pending::Trade(req) => self.on_trade_response(cx, req, Err(error)),
+            Pending::Trade(req) => self.on_trade_response(cx, req, Err(error), None, false),
             Pending::History(req) => self.on_history_response(cx, req, Err(error)),
             Pending::OpenInterest {
                 initial, single, ..
@@ -1202,8 +1246,8 @@ impl Venue for AsterDex {
                 };
                 self.get(cx, &path, Pending::DepthRead { context });
             }
-            Command::FetchAccount { command } => self.fetch_account_info(cx, command),
-            Command::Query { command, query } => self.start_query(cx, command, query),
+            Command::FetchAccount { .. } => self.fetch_account_info(cx),
+            Command::Query { query, .. } => self.start_query(cx, query),
             command => self.on_trade_command(cx, command),
         }
     }
@@ -1257,8 +1301,18 @@ impl AsterDex {
         error: VenueError,
     ) {
         match pending {
-            Pending::DepthRead { context } | Pending::Klines { context, .. } => {
-                let _ = cx.fail_context(&context, error);
+            Pending::DepthRead { context: root }
+            | Pending::Klines { context: root, .. }
+            | Pending::Account(account::Request::Info { root }) => {
+                let _ = cx.fail_context(&root, error);
+            }
+            Pending::History(history) => {
+                let _ = cx.fail_context(history.root(), error);
+            }
+            Pending::Trade(trading::Request {
+                root: Some(root), ..
+            }) => {
+                let _ = cx.fail_context(&root, error);
             }
             pending => self.on_request_failed(cx, pending, &error.message),
         }
