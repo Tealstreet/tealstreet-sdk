@@ -303,18 +303,17 @@ impl BybitLinear {
         }
         let pause = discovery_rate_limit_pause_ms(&response, cx.now);
         self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
-        if let Some((code, message)) = venue_error(&response) {
+        if let Some((_, message)) = venue_error(&response) {
             let kind = if pause > 0.0 {
                 ErrorKind::RateLimited
             } else {
                 ErrorKind::VenueUnavailable
             };
-            self.fail_refresh(
-                cx,
-                VenueError::new(message)
-                    .kind(kind)
-                    .venue_code(code.to_string()),
-            );
+            let mut error = VenueError::new(message).kind(kind);
+            if let Some(code) = crate::native_code(&response) {
+                error = error.venue_code(code.to_string());
+            }
+            self.fail_refresh(cx, error);
             return;
         }
         let envelope = match serde_json::from_str::<Envelope>(response.body) {
