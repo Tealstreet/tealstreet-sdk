@@ -376,8 +376,9 @@ AsterDEX is the first production consumer. These pieces have landed:
 
 It depends on the host start-site calls (owned by codex-uufub4). Enabling
 `address-nonce` in the workspace grows every `Identity` by its inline address
-capability. The engine stores that capability boxed, so unified venue enums
-stay under clippy's large-variant bound.
+capability. Workspace clippy then flags unified venue enums for large
+variants. Boxing that capability in the engine is requested from
+codex-uufub4.
 
 The parked-trade-versus-reads question is not reachable for AsterDEX:
 - A parked trade holds no nonce, and reserves above the reads when it wakes.
