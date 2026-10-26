@@ -61,6 +61,10 @@ test('edited integration controls execute, and engine support shared with wire e
     assert.equal(result.sizeRequired, false);
   }
   assert.equal(select('sdk-rs/engine/tests/support/mod.rs').combinedRequired, true);
+  const familyChecker = select('sdk-rs/harness/families.integration.mjs');
+  assert.deepEqual(familyChecker.families, venueFamilies);
+  assert.deepEqual(familyChecker.integrationTests, []);
+  assert.equal(familyChecker.full, true);
 });
 
 test('documentation included by Rust, and unresolved include macros, select full checks', () => {

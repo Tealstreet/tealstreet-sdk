@@ -87,6 +87,9 @@ export function selectCi({ paths, manifests, full = false, documents = { paths: 
       if (path.startsWith('sdk-rs/engine/tests/support/')) consumerTests = true;
       continue;
     }
+    if (path === 'sdk-rs/harness/families.integration.mjs') {
+      full = true; reasons.push('Family-isolation checker'); continue;
+    }
     if (/^sdk-rs\/harness\/.*\.integration\.[cm]?[jt]s$/.test(path)) {
       consumerTests = true; integrationTests.push(path); continue;
     }
