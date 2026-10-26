@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::{Action, Command, Event, PublicFeedPolicy, SocketChannel, SocketId, TimerId};
 use safe_cex_venue_woo::{Options, Woo};
-use support::{MARKETS, TICKERS, TestEngine, requests, response};
+use support::{MARKETS, TICKERS, TestEngine, response};
 
 const PING: &str = r#"{"event":"ping"}"#;
 const PONG: &str = r#"{"event":"pong"}"#;
@@ -28,9 +28,9 @@ impl Harness {
         }));
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(0.0);
-        let r = requests(&mut engine).remove(0);
+        let r = support::prepared_seed_requests(&mut engine, 0.).remove(0);
         response(&mut engine, &r, 10.0, MARKETS);
-        let r = requests(&mut engine).remove(0);
+        let r = support::prepared_seed_requests(&mut engine, 10.).remove(0);
         let mut h = Self {
             engine,
             now: 20.0,

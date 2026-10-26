@@ -44,9 +44,9 @@ fn pending_with(catalogue: &str) -> (Engine<Woo>, HttpRequest, TimerId, TimerId)
         ..Default::default()
     }));
     e.start(0.0);
-    let catalogue_request = request(&e.drain_actions().collect::<Vec<_>>(), "/public/info");
+    let catalogue_request = request(&support::prepared_seed_actions(&mut e, 0.), "/public/info");
     reply(&mut e, &catalogue_request, 0.0, catalogue);
-    let early = e.drain_actions().collect::<Vec<_>>();
+    let early = support::prepared_seed_actions(&mut e, 0.);
     let info = request(&early, "/v3/accountinfo");
     let ticker = request(&early, "/public/futures");
     let poll = early
@@ -149,7 +149,10 @@ fn ticker_recovery_immediately_reconciles_a_previously_unpriced_position() {
     reply(&mut e, &positions, 0.0, UNPRICED);
     e.drain_actions().for_each(drop);
     e.handle(1000.0, Event::TimerFired { timer: retry });
-    let ticker = request(&e.drain_actions().collect::<Vec<_>>(), "/public/futures");
+    let ticker = request(
+        &support::prepared_seed_actions(&mut e, 1000.),
+        "/public/futures",
+    );
     reply(&mut e, &ticker, 1000.0, TICKERS);
     let positions = request(&e.drain_actions().collect::<Vec<_>>(), "/v3/positions");
     reply(&mut e, &positions, 1000.0, UNPRICED);

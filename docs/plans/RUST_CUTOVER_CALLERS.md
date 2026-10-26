@@ -9208,3 +9208,8 @@ work or diagnostics. The inherited engine startup watchdog may independently
 emit its exact startup.incomplete notice at positive infinity; the control pins
 that separately from exact once-only physical timer/preparation cleanup.
 Native no-newwork controls now distinguish that cleanup from new dispatch.
+
+Startup seed fixtures complete real preparation/binding/claim at their original
+observation clocks through a seed-only collector. The shared raw requests()
+helper and private/candle/book collectors remain unchanged. No blanket timer
+flush, fabricated request/context or financial-clock supersession is used.
