@@ -100,11 +100,21 @@ impl Venue for Audit {
                 .unwrap(),
             );
         }
-        let fence = self.state.check_fence.get().then(|| cx.store.begin_orders_snapshot().expect("genuine Store fence probe"));
+        let fence = self.state.check_fence.get().then(|| {
+            cx.store
+                .begin_orders_snapshot()
+                .expect("genuine Store fence probe")
+        });
         self.native.on_response(cx, p, r);
         if self.state.check_fence.replace(false) {
-            assert!(!cx.store.orders_snapshot_current(&fence.expect("issued probe")), "accepted write invalidates older Orders BEFORE notice refresh, even if mapping failed");
-            self.state.checked_fences.set(self.state.checked_fences.get()+1);
+            assert!(
+                !cx.store
+                    .orders_snapshot_current(&fence.expect("issued probe")),
+                "accepted write invalidates older Orders BEFORE notice refresh, even if mapping failed"
+            );
+            self.state
+                .checked_fences
+                .set(self.state.checked_fences.get() + 1);
         }
         for c in self.state.peers.borrow().iter() {
             cx.validate_http_context(c).unwrap();
@@ -171,6 +181,19 @@ impl Venue for Audit {
         e: &mut safe_cex_engine::request_context::UnprovenEvidence,
     ) {
         self.native.unproven_http_evidence(p, r, e)
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.native.on_http_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) {
+        self.native.on_http_owner_retired(owner);
     }
     fn on_repair_notice(&mut self, cx: &mut Cx<'_, Pending>, n: RepairNotice<'_>) {
         match &n {
@@ -630,6 +653,11 @@ fn open_observation(
     let mut queue: std::collections::VecDeque<_> = drain(e).into();
     let mut peer = None;
     while let Some(p) = queue.pop_front() {
+        assert_eq!(
+            p.request.method,
+            Method::Get,
+            "opening helper never releases an unexpected mutation"
+        );
         let r = release(e, &p, 1000.);
         if hold_peer && r.url.ends_with("/position") {
             peer = Some(p);
@@ -874,78 +902,218 @@ fn completing_read_and_cancel_reuse_the_sole_credit_beside_255_genuine_peers() {
 
 #[test]
 fn already_released_successor_keeps_unknown_evidence_and_never_becomes_not_sent() {
-    let (mut e,state,p,socket)=accepted_cancel("0");
-    open(&mut e,socket);
-    let request=release(&mut e,&p,1000.);
-    stream(&mut e,socket,"1");
-    let actions:Vec<_>=e.drain_actions().collect();
-    exact_retirement(&actions,&p);
-    assert_eq!(state.facts.borrow().len(),1);
-    assert_eq!(state.facts.borrow()[0][0].cancel,Effect::Accepted);
-    assert_eq!(state.facts.borrow()[0][0].place,Some(Effect::Unknown));
-    assert_eq!(e.store().order("123").unwrap().filled,1.);
-    reply(&mut e,&request,2000.,&old("0").replace(r#""123""#,r#""late-replacement""#));
+    let (mut e, state, p, socket) = accepted_cancel("0");
+    open(&mut e, socket);
+    let request = release(&mut e, &p, 1000.);
+    stream(&mut e, socket, "1");
+    let actions: Vec<_> = e.drain_actions().collect();
+    exact_retirement(&actions, &p);
+    assert_eq!(state.facts.borrow().len(), 1);
+    assert_eq!(state.facts.borrow()[0][0].cancel, Effect::Accepted);
+    assert_eq!(state.facts.borrow()[0][0].place, Some(Effect::Unknown));
+    assert_eq!(e.store().order("123").unwrap().filled, 1.);
+    reply(
+        &mut e,
+        &request,
+        2000.,
+        &old("0").replace(r#""123""#, r#""late-replacement""#),
+    );
     assert!(e.store().order("late-replacement").is_none());
-    assert!(!drain(&mut e).iter().any(|p|p.request.method==Method::Post));
-    assert_eq!(state.facts.borrow().len(),1);
+    assert!(
+        !drain(&mut e)
+            .iter()
+            .any(|p| p.request.method == Method::Post)
+    );
+    assert_eq!(state.facts.borrow().len(), 1);
 }
 
 #[test]
 fn accepted_place_with_malformed_mapping_keeps_identity_and_fences_an_older_orders_read() {
-    let (mut e,state,p,socket)=accepted_cancel("0");
-    e.handle(1000.,Event::WsOpened{socket});
-    let work=drain(&mut e);
-    let mut held=None;
+    let (mut e, state, p, socket) = accepted_cancel("0");
+    e.handle(1000., Event::WsOpened { socket });
+    let work = drain(&mut e);
+    let mut held = None;
     for packet in work {
-        let r=release(&mut e,&packet,1000.);
-        if r.url.ends_with("/orders") {held=Some(r);continue;}
-        reply(&mut e,&r,1000.,if r.url.ends_with("/position") {support::POSITIONS} else {support::BALANCE});
+        let r = release(&mut e, &packet, 1000.);
+        if r.url.ends_with("/orders") {
+            held = Some(r);
+            continue;
+        }
+        reply(
+            &mut e,
+            &r,
+            1000.,
+            if r.url.ends_with("/position") {
+                support::POSITIONS
+            } else {
+                support::BALANCE
+            },
+        );
         assert!(drain(&mut e).is_empty());
     }
-    let held=held.expect("genuine older released Orders observation");
-    let r=release(&mut e,&p,1000.);
-    let malformed=old("0").replace(r#""123""#,r#""replacement""#).replace(r#""quantity":"5""#,r#""quantity":null"#).replace(r#","triggerQuantity":"5""#,"");
+    let held = held.expect("genuine older released Orders observation");
+    let r = release(&mut e, &p, 1000.);
+    let malformed = old("0")
+        .replace(r#""123""#, r#""replacement""#)
+        .replace(r#""quantity":"5""#, r#""quantity":null"#)
+        .replace(r#","triggerQuantity":"5""#, "");
     state.check_fence.set(true);
-    reply(&mut e,&r,1000.,&malformed);
-    assert_eq!(state.checked_fences.get(),1);
+    reply(&mut e, &r, 1000., &malformed);
+    assert_eq!(state.checked_fences.get(), 1);
     assert!(e.store().order("123").is_some());
     assert!(e.store().order("replacement").is_none());
-    assert_eq!(state.facts.borrow()[0][0].place,Some(Effect::Accepted));
+    assert_eq!(state.facts.borrow()[0][0].place, Some(Effect::Accepted));
     e.drain_actions().for_each(drop);
-    reply(&mut e,&held,1000.,&format!("[{}]",old("0")));
-    assert_eq!(e.store().order("123").unwrap().status,safe_cex_engine::model::OrderStatus::Canceled);
-    assert!(!drain(&mut e).iter().any(|p|p.request.method!=Method::Get));
+    reply(&mut e, &held, 1000., &format!("[{}]", old("0")));
+    assert_eq!(
+        e.store().order("123").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Canceled
+    );
+    assert!(
+        !drain(&mut e)
+            .iter()
+            .any(|p| p.request.method != Method::Get)
+    );
 }
 
 fn background_delivery_revokes_successor(bind_first: bool) {
-    let (mut e,state,p,socket)=accepted_cancel("0");
-    e.handle(1000.,Event::WsOpened{socket});
-    let work=drain(&mut e);
-    let mut orders=None;
+    let (mut e, state, p, socket) = accepted_cancel("0");
+    e.handle(1000., Event::WsOpened { socket });
+    let work = drain(&mut e);
+    let mut orders = None;
     for packet in work {
-        let r=release(&mut e,&packet,1000.);
-        if r.url.ends_with("/orders") {orders=Some(r);continue;}
-        reply(&mut e,&r,1000.,if r.url.ends_with("/position") {support::POSITIONS} else {support::BALANCE});
+        let r = release(&mut e, &packet, 1000.);
+        if r.url.ends_with("/orders") {
+            orders = Some(r);
+            continue;
+        }
+        reply(
+            &mut e,
+            &r,
+            1000.,
+            if r.url.ends_with("/position") {
+                support::POSITIONS
+            } else {
+                support::BALANCE
+            },
+        );
         assert!(drain(&mut e).is_empty());
     }
-    let permit=bind_first.then(||bind(&mut e,&p,1000.).0);
-    let body=old("1").replacen("{",r#"{"triggerBy":"MarkPrice","#,1);
-    reply(&mut e,&orders.unwrap(),1000.,&format!("[{body}]"));
-    let actions:Vec<_>=e.drain_actions().collect();
-    exact_retirement(&actions,&p);
-    assert_eq!(e.store().order("123").unwrap().filled,1.);
-    if let Some(permit)=permit {assert!(e.claim_http(1000.,permit).is_err());}
-    e.http_prepared(1000.,p.preparation,Prepared{id:p.request.id.0,expires_at:None});
-    assert!(!e.drain_actions().any(|a|match a {
-        Action::Http(r)=>r.method==Method::Post,
-        Action::ManagedHttp(a)=>matches!(a.as_ref(),HttpAction::Bind{request,..} if request.method==Method::Post),
-        _=>false,
+    let permit = bind_first.then(|| bind(&mut e, &p, 1000.).0);
+    let body = old("1").replacen("{", r#"{"triggerBy":"MarkPrice","#, 1);
+    reply(&mut e, &orders.unwrap(), 1000., &format!("[{body}]"));
+    let actions: Vec<_> = e.drain_actions().collect();
+    exact_retirement(&actions, &p);
+    assert_eq!(e.store().order("123").unwrap().filled, 1.);
+    if let Some(permit) = permit {
+        assert!(e.claim_http(1000., permit).is_err());
+    }
+    e.http_prepared(
+        1000.,
+        p.preparation,
+        Prepared {
+            id: p.request.id.0,
+            expires_at: None,
+        },
+    );
+    assert!(!e.drain_actions().any(|a| match a {
+        Action::Http(r) => r.method == Method::Post,
+        Action::ManagedHttp(a) =>
+            matches!(a.as_ref(),HttpAction::Bind{request,..} if request.method==Method::Post),
+        _ => false,
     }));
-    assert_eq!(state.facts.borrow().len(),1,"Background delivery must settle the OTHER repair owner once (#2202)");
-    assert_eq!(state.facts.borrow()[0][0].cancel,Effect::Accepted);
-    assert_eq!(state.facts.borrow()[0][0].place,Some(Effect::NotSent));
+    assert_eq!(
+        state.facts.borrow().len(),
+        1,
+        "Background delivery must settle the OTHER repair owner once (#2202)"
+    );
+    assert_eq!(state.facts.borrow()[0][0].cancel, Effect::Accepted);
+    assert_eq!(state.facts.borrow()[0][0].place, Some(Effect::NotSent));
 }
 #[test]
-fn background_fill_revokes_held_prepare_and_settles_the_other_root() {background_delivery_revokes_successor(false);}
+fn background_fill_revokes_held_prepare_and_settles_the_other_root() {
+    background_delivery_revokes_successor(false);
+}
 #[test]
-fn background_fill_revokes_held_bind_and_settles_the_other_root() {background_delivery_revokes_successor(true);}
+fn background_fill_revokes_held_bind_and_settles_the_other_root() {
+    background_delivery_revokes_successor(true);
+}
+
+#[test]
+fn held_repair_refuses_a_conflicting_real_command_without_losing_its_own_custody() {
+    let (mut e, state, work, _, _) = discovery(true, &format!("[{}]", old("0")));
+    let p = work
+        .into_iter()
+        .find(|p| p.request.method == Method::Delete)
+        .unwrap();
+    e.handle(
+        1000.,
+        Event::Command(Command::CancelOrders {
+            command: 901,
+            ids: vec!["123".into()],
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 901, .. })
+    )));
+    assert!(
+        capture(actions).is_empty(),
+        "conflicting command never issues a physical mutation"
+    );
+    assert!(e.http_preparation_pending(p.preparation));
+    assert!(state.facts.borrow().is_empty());
+    let r = release(&mut e, &p, 1000.);
+    reply(
+        &mut e,
+        &r,
+        1000.,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
+    assert_eq!(
+        drain(&mut e)
+            .iter()
+            .filter(|p| p.request.method == Method::Post)
+            .count(),
+        1
+    );
+}
+#[test]
+fn held_real_command_refuses_repair_admission_without_consuming_command_work() {
+    let (mut e, state, work, _, socket) = discovery(true, &format!("[{}]", ineligible()));
+    assert!(work.is_empty());
+    e.handle(
+        1000.,
+        Event::Command(Command::CancelOrders {
+            command: 902,
+            ids: vec!["123".into()],
+        }),
+    );
+    let p = drain(&mut e)
+        .into_iter()
+        .find(|p| p.request.method == Method::Delete)
+        .expect("real foreground cancel");
+    open_observation(&mut e, socket, &format!("[{}]", old("0")), false);
+    assert!(state.facts.borrow().is_empty());
+    assert!(e.http_preparation_pending(p.preparation));
+    let r = release(&mut e, &p, 1000.);
+    reply(
+        &mut e,
+        &r,
+        1000.,
+        r#"{"id":"123","status":"Cancelled","executedQuantity":"0"}"#,
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 902, .. })))
+    );
+    assert!(
+        !capture(actions)
+            .iter()
+            .any(|p| p.request.method != Method::Get)
+    );
+    assert!(state.facts.borrow().is_empty());
+}

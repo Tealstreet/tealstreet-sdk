@@ -50,8 +50,6 @@ impl safe_cex_crypto::secrets::EraseSecrets for Options {
 
 pub enum Pending {
     SocketSnapshot(String),
-    #[cfg(test)]
-    SigningProbe,
     Identity(identity::Request),
     BookQuery {
         context: Context,

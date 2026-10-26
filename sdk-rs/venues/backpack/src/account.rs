@@ -316,57 +316,6 @@ impl Backpack {
     pub(crate) fn order_stream_time(&self, id: &str) -> f64 {
         self.account.order_times.get(id).copied().unwrap_or(0.0)
     }
-    #[allow(clippy::too_many_arguments)]
-    #[cfg(test)]
-    pub(crate) fn signed(
-        &self,
-        cx: &mut Cx<'_, Pending>,
-        method: Method,
-        path: &str,
-        params: Params,
-        body: Option<String>,
-        pending: Pending,
-    ) -> Result<(), String> {
-        let read_credentials = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get)
-            .map(|read| {
-                let mut c = Credentials::new(read.key.clone(), &read.secret)?;
-                c.window = self
-                    .account
-                    .credentials
-                    .as_ref()
-                    .map_or(60000, |primary| primary.window);
-                Ok::<_, String>(c)
-            })
-            .transpose()?;
-        let credentials = read_credentials
-            .as_ref()
-            .or(self.account.credentials.as_ref())
-            .ok_or("Backpack credentials unavailable")?;
-        let headers = credentials.headers(
-            instruction(method, path),
-            std::slice::from_ref(&params),
-            cx.now,
-        );
-        let query = if method == Method::Get {
-            crate::sign::query(&params)
-        } else {
-            String::new()
-        };
-        let url = format!(
-            "{REST}{path}{}",
-            if query.is_empty() {
-                String::new()
-            } else {
-                format!("?{query}")
-            }
-        );
-        cx.request(method, url, headers, body, pending);
-        Ok(())
-    }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.options.public_data_only || self.options.key.as_ref().is_none_or(String::is_empty) {
             return;
@@ -1172,24 +1121,6 @@ impl Backpack {
     }
 }
 
-#[cfg(test)]
-fn instruction(method: Method, path: &str) -> &'static str {
-    match (method, path) {
-        (Method::Get, "/api/v1/account") => "accountQuery",
-        (Method::Patch, "/api/v1/account") => "accountUpdate",
-        (Method::Get, "/api/v1/position") => "positionQuery",
-        (Method::Get, "/api/v1/capital/collateral") => "collateralQuery",
-        (Method::Get, "/api/v1/orders") => "orderQueryAll",
-        (Method::Post, "/api/v1/order" | "/api/v1/orders") => "orderExecute",
-        (Method::Delete, "/api/v1/order") => "orderCancel",
-        (Method::Delete, "/api/v1/orders") => "orderCancelAll",
-        (Method::Get, "/wapi/v1/history/fills") => "fillHistoryQueryAll",
-        (Method::Get, "/wapi/v1/history/orders") => "orderHistoryQueryAll",
-        (Method::Get, "/wapi/v1/history/funding") => "fundingHistoryQueryAll",
-        _ => unreachable!("unregistered Backpack instruction"),
-    }
-}
-
 impl crate::Backpack {
     /// A trigger read before any price defaults to StopLoss; relabel it from
     /// the seeded price once that exists.
@@ -1345,17 +1276,54 @@ mod repair_readiness_tests {
         e.set_signer(Some(Arc::new(signer))).unwrap();
         e.set_identities(identities).unwrap();
         e.start(1000.);
-        let work = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.);
-        let timer = work.iter().find_map(|a| match a {
-            Action::SetTimer { timer, .. } => Some(*timer), _ => None,
-        }).expect("actual account read deadline");
-        let r = work
+        let work: Vec<_> = e.drain_actions().collect();
+        let timer = work
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, .. } => Some(*timer),
+                _ => None,
+            })
+            .expect("actual account read deadline");
+        let (issued, r) = work
             .into_iter()
             .find_map(|a| match a {
-                Action::Http(r) => Some(r),
+                Action::ManagedHttp(a) => match *a {
+                    safe_cex_engine::request_context::HttpAction::Prepare {
+                        preparation,
+                        request: outbound,
+                        ..
+                    } => Some((preparation, outbound)),
+                    _ => None,
+                },
                 _ => None,
             })
             .expect("actual managed account Read");
+        e.http_prepared(
+            1000.,
+            issued,
+            safe_cex_engine::request_context::Prepared {
+                id: r.id.0,
+                expires_at: None,
+            },
+        );
+        let (permit, r) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    safe_cex_engine::request_context::HttpAction::Bind {
+                        preparation,
+                        permit,
+                        request: outbound,
+                    } if preparation == issued => Some((permit, outbound)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("exact genuine account Bind");
+        assert!(matches!(
+            e.claim_http(1000., permit),
+            Ok(safe_cex_engine::request_context::Claim::Released(_))
+        ));
         assert!(r.url.ends_with("/orders"));
         assert!(
             r.headers
@@ -1370,11 +1338,17 @@ mod repair_readiness_tests {
         );
         let actions: Vec<_> = e.drain_actions().collect();
         assert_eq!(actions.iter().filter(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::Event(n)) if n.message=="Backpack automatic trigger repair awaits managed account signing")).count(),1);
-        assert_eq!(actions.iter().filter(|a| matches!(a, Action::ClearTimer { timer: t } if *t == timer)).count(), 1);
-        assert_eq!(actions.iter().filter(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), safe_cex_engine::request_context::HttpAction::Cancel { preparation, .. } if preparation.attempt().request == r.id))).count(), 1);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::ClearTimer { timer: t } if *t == timer))
+                .count(),
+            1
+        );
+        assert_eq!(actions.iter().filter(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), safe_cex_engine::request_context::HttpAction::Cancel { preparation, .. } if *preparation == issued))).count(), 1);
         assert!(!actions.iter().any(|a| match a {
             Action::Http(_) => true,
-            Action::ManagedHttp(a) => !matches!(a.as_ref(), safe_cex_engine::request_context::HttpAction::Cancel { preparation, .. } if preparation.attempt().request == r.id),
+            Action::ManagedHttp(a) => !matches!(a.as_ref(), safe_cex_engine::request_context::HttpAction::Cancel { preparation, .. } if *preparation == issued),
             Action::ClearTimer { timer: t } => *t != timer,
             _ => false,
         }));

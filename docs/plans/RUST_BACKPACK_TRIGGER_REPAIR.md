@@ -1,11 +1,10 @@
 # Backpack trigger repair on the landed repair owner
 
-Status: venue-only implementation authorized after WOO seed publication. The
-existing-API and corrected financial/control plan are CLEAR (fe7lgm/hcmq3f).
-WOO seed is published separately as #2198. Baseline originally inspected:
-origin/feat/rust-rewrite 74a0ba44d3838f0ddf9885a5bc7358107f068eea, containing
-repair core #2151 (8f5f9a2f957) and cancel-overlap correction #2181. Recheck and
-plain-merge the actual landing tip before originals/source; never rebase.
+Status: local consumer source is applied under hcmq3f's exact source review.
+WOO seed #2198 landed as adb6555aeac. The actual #2202 settlement correction
+(a71a90faf30) is plain-merged in 2006e0cf0dd; no engine source is owned here.
+Existing-API and financial/control plan review is CLEAR (fe7lgm/hcmq3f).
+Publication waits for the final source/fixture/map review and correctness gates.
 
 ## Ownership and scope
 
@@ -201,8 +200,12 @@ Working controls first, then meaningful assertion REDs on actual tip:
 Venue-only plan/originals/source may share one PR under current policy. Keep WOO
 source publication separate; after WOO is moving, commit this plan with its own
 README row on the consumer branch. Exact API/financial review precedes source;
-scoped/native/strict/fmt/bans, exact scanner prune, local combined pair plus CI family
-record, frozen source review, green run and auditor GO remain landing gates.
+scoped/native/strict/fmt/bans, exact scanner prune, frozen source review and the
+venue replay remain correctness gates. Under the current speed-mode ruling,
+eligible venue-only work uses one reviewer CLEAR and a guarded owner merge;
+CPU/certification and auditor GO are not gates for this removal-only slice.
+CI is the family-size record. No local combined measurement is required while
+combined headroom exceeds 200 KiB.
 
 ## Existing API review
 
@@ -224,7 +227,7 @@ These are financial/control-plan requirements, not source execution claims.
 Originals start on actualfff73624e857 after rechecking open Backpack PRs (none).
 The shared core and foreground Backpack remain untouched in the original stage.
 No engine source is authorized. This plan and the originals/source ship together
-in one consumer PR after exact review, qualification and local combined proof.
+in one consumer PR after exact review and the current correctness gates.
 
 ## Missing installed Primary disposition
 
@@ -235,3 +238,36 @@ accepted snapshot, not per row, with the core repair.unavailable wording. With
 an installed Primary, always call the core with its genuine Credential and
 retain every core authority/refusal check. Secondary-only controls must pin zero
 mint calls, zero repair preparations/HTTP and exactly one local diagnostic.
+
+## Implemented safety and qualification
+
+Replacement requires explicit finite zero cumulative fill in the accepted raw
+snapshot and cancel acknowledgement. Unknown, partial, decreasing or later
+positive evidence is sticky across accepted REST rows, private frames and Store
+rollback. Raw row evidence is independent of trigger eligibility and preserved
+when a malformed row retains an older Store copy. A matching unlisted-symbol
+frame cannot leave a held successor authorized.
+
+Held Prepare and Bind work retires by exact Context; late preparation and old
+claims cannot release it. Before release this is Some(NotSent); an already
+released successor remains Unknown. Suppression without issuing a successor is
+place=None, preserving the actual accepted cancellation. These intentionally
+safer choices replace native full-quantity repair after insufficient fill proof.
+
+A malformed accepted placement row keeps the old Store identity and creates no
+replacement row. The accepted placement still invalidates older Orders tokens
+before reconciliation. Its Accepted write fact is never changed to NotSent.
+
+The 22 original controls remain unchanged. Three additive initial nonfinite-row
+controls were corrected after inspecting their historical failures: the native
+strict decoder already rejected those rows before any cancel. They now pin
+no row, cancel or place rather than requiring a nonexistent cancel. The initial
+28-test log was 3 native GREEN, 22 meaningful assertion RED and 3 missing-cancel
+helper failures; it was not 25 meaningful unsafe-placement REDs.
+
+On the actual #2202 composition the 21 lifecycle controls pass, including both
+Background-delivery settlement controls that were assertion RED before that
+core fix, 255-peer single-credit turnover, all-256-credit reuse, both command/
+repair lock directions, raw REST proof and held/released effect distinctions.
+The original 28 controls pass on the locally adopted source. Full composed
+native, strict/fmt/bans and CI/replay results remain separate final evidence.

@@ -347,7 +347,10 @@ macro_rules! invalid_snapshot {
         #[test]
         fn $name() {
             let (e, _, work) = discover(&format!("[{}]", old($fill)));
-            assert!(e.store().order("123").is_none(), "strict native decoder rejects nonfinite rows");
+            assert!(
+                e.store().order("123").is_none(),
+                "strict native decoder rejects nonfinite rows"
+            );
             no_place(&work);
             assert!(!work.iter().any(|p| p.request.method == Method::Delete));
         }
