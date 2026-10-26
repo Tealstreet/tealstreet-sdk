@@ -2,9 +2,8 @@
 
 Owner: codex-9czdjh. Reviewer: codex-uufub4 (socket/nonce custody); shared API
 changes additionally need the engine owner. Baseline: actual
-`49a5b54f36232d1c926f4280141d92060db18e2b`. Plan landed as #2172; shared timing modes landed as #2177. The local venue
-checkpoint below contains originals only, with no source, feature, inventory,
-hosted activation or signing cutover. Native-drain #2171 and NX #8172 establish
+`49a5b54f36232d1c926f4280141d92060db18e2b`. Plan landed as #2172; shared timing modes landed as #2177. The first venue checkpoint below contains inert originals; the successor implements
+the four managed feeds without hosted activation or signing cutover. Native-drain #2171 and NX #8172 establish
 separate retirement prerequisites, not socket or nonce takeover authority.
 
 ## Scope and exact inventory
@@ -43,7 +42,7 @@ traffic-based reset, not a reset from opening alone.
 
 | Feed | Endpoint | Connect / idle / ping | Backoff cap | Native auth/readiness |
 | --- | --- | --- | --- | --- |
-| Futures public | futures.kraken.com/ws/v1; demo-futures.kraken.com/ws/v1 on testnet | 45,000 / 45,000 / 15,000 | 16,000 | No auth; native public interest replay on open. Current open text refreshes receive before decoding. |
+| Futures public | futures.kraken.com/ws/v1; demo-futures.kraken.com/ws/v1 on testnet | 45,000 / 45,000 / 15,000 | 16,000 | No auth; native public interest replay on open. Only successfully decoded Message envelopes refresh receive. |
 | Futures private | Same configured Futures WS URL | 15,000 / 60,000 / 10,000 | 30,000 | Challenge wait OPEN+15,000; one accepted nonempty challenge renews ACK wait to receipt+15,000. All three distinct subscribed ACKs end auth. Only successfully decoded native Ws envelopes refresh receive. |
 | Spot public | ws.kraken.com/v2 | 45,000 / 45,000 / 15,000 | 16,000 | No auth. Native ticker/book/OHLC replay; current text refreshes receive, including malformed text. |
 | Spot private | ws-auth.kraken.com/v2 | 45,000 / 45,000 / 15,000 | 16,000 | On open, signed HTTP GetWebSocketsToken then executions/balances subscriptions. No separate native auth ACK deadline or wait-for-ACK publication gate. Current text refreshes receive before decoding. |
@@ -94,7 +93,7 @@ the codec must not classify it as an invalid credential or grant a write resend.
    rejection classes still reconnect with their native diagnostics; no new
    account latch, retry or permanent startup refusal.
 5. Spot private maps to AuthMode::None for lifecycle readiness, with native error
-   decoding and AnyText traffic. Open starts the existing token HTTP request,
+   decoding and declared successful-decode traffic. Open starts the existing token HTTP request,
    bound in Pending to the exact engine-issued Epoch. Adopt its response only
    while that same epoch is current/open; a token for an old socket cannot send
    on a replacement. Keep the exact two subscription JSON shapes and order
@@ -189,10 +188,10 @@ managed expiry/resource/retirement differences in CALLERS, without implying a
 nonce takeover, remote nonexecution or journal rewrite.
 
 CI records Kraken family sizes. Measure one local composed combined on the
-current landing tip before READY; keep a paired Kraken/combined comparison for
-the newly linked managed lifecycle. If generic engine/provider code is required,
-measure Bybit and Bitget on that same composed tree too. No budget/profile/gate
-changes. Delete each own scratch target after measurement, keep sources/logs and
+current landing tip before READY. CI is the family size record; do not run a
+local family matrix. Attribute the newly linked managed lifecycle cost per #2189.
+Generic engine/provider changes require their own shared gates. No profile or
+gate changes are part of this venue slice. Delete each own scratch target after measurement, keep sources/logs and
 the size table, and run no competing size builds in this lane. Source CLEAR,
 qualified green CI and auditor exact-tree GO precede guarded SDK landing. This
 plan records source inspection only; no originals, builds or execution claimed.
@@ -224,3 +223,26 @@ occurrences together, retaining REST/signing custody separately. CI is the
 family size record; the source PR also needs a composed combined measurement.
 Record the managed-sockets feature-link cost identified by #2189 alongside
 Kraken's measured family result; do not attribute that cost solely to codec code.
+
+## Local source qualification
+
+All four physical connects use managed feed/epoch admission. The eligible public
+and private feeds register before either physical connection begins. Public
+subscriptions are transactional ticker/book/OHLC interests; repairs use the
+engine repair operation rather than a coalescible unsubscribe/subscribe pair.
+Futures challenge frames remain epoch-owned one-shot authentication work. Spot
+token Pending holds the exact Epoch, rejects stale responses/retries before any
+legacy signing work, and releases its two native frames through the existing
+epoch-bound one-shot queue, never persistent replay interests.
+
+The original Spot stale-token test's setup requested a second token by sending
+a duplicate OPEN to an already open socket. Its successor uses a genuine first
+OPEN with the private transport deliberately held unopened; all original wire,
+fresh-signature, old-token refusal and new-token assertions remain unchanged.
+The new duplicate-OPEN controls require the safer inert result.
+
+The first local source run passed 30/32 socket controls and exposed an incorrect
+persistent-token replay implementation. That implementation was removed. The
+corrected source passed 32/32, then 37/37 after five additive controls. The first
+broader native run stopped at the duplicate-OPEN fixture setup described above;
+it is not reported as a green suite. Frozen composed qualification follows.

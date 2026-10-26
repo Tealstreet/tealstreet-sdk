@@ -9222,3 +9222,23 @@ financial outcome or authentication latch. Negotiated v2 refuses missing
 ownership before transport; no route, timeout or method fabricates metadata.
 Setup ownership remains a distinct reviewed extension with its own negotiated
 owned-execution and retirement support, not a SessionAuth substitute.
+
+
+### Kraken managed socket admission
+
+Futures and Spot public/private sockets now use engine-issued feed epochs and
+shared lifecycle timers. Duplicate OPEN cannot replay auth/subscriptions, and
+connect, auth or receive ingress at deadline equality refuses before delayed
+timer delivery. Unopened or retired Spot balances cannot issue account HTTP.
+Only successfully decoded envelopes refresh receive; malformed Spot traffic
+therefore no longer keeps a silent connection alive. These safer differences
+are pinned by actual-ingress controls, not venue-owned clocks.
+
+Futures challenge and three distinct ACKs remain separate from the OPEN+180s
+validated initial-payload bound. Its post-Ready Timeout(Auth) means lifecycle
+timeout, never invalid credentials or a write resend. Spot tokens belong to
+the exact physical epoch; obsolete token responses/retries are inert, and the
+two native subscription frames use an epoch-bound one-shot queue with final
+release expiry checks. Native HTTP signing and nonce namespace stay unchanged.
+The newly linked managed-sockets feature has a family cost (#2189); CI records
+Kraken size, and the source PR measures the composed combined bundle.

@@ -195,3 +195,144 @@ fn unopened_spot_balance_frame_cannot_create_http_work() {
         "unopened financial ingress must not create account HTTP: {actions:?}"
     );
 }
+
+#[test]
+fn repeated_challenge_and_duplicate_ack_do_not_extend_authentication() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    let opened = h.now;
+    let challenge = r#"{"event":"challenge","message":"once-only-challenge"}"#;
+    h.message(socket, challenge);
+    let frames: Vec<_> = h
+        .sent
+        .iter()
+        .filter(|(_, text)| text.contains("signed_challenge"))
+        .cloned()
+        .collect();
+    assert_eq!(frames.len(), 3);
+    h.now = opened + 1_000.;
+    h.message(socket, challenge);
+    assert_eq!(
+        h.sent
+            .iter()
+            .filter(|(_, text)| text.contains("signed_challenge"))
+            .count(),
+        3
+    );
+    h.now = opened + 5_000.;
+    let ack = r#"{"event":"subscribed","feed":"fills"}"#;
+    h.message(socket, ack);
+    h.advance(opened + 19_000.);
+    h.message(socket, ack);
+    h.advance(opened + 20_000.);
+    assert!(
+        h.closed.contains(&socket),
+        "a duplicate ACK cannot renew the distinct-ACK bound"
+    );
+}
+
+#[test]
+fn authenticated_pongs_cannot_discharge_missing_initial_payloads() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    let opened = h.now;
+    for step in 1..18 {
+        h.advance(opened + f64::from(step) * 10_000.);
+        h.message(socket, FUTURES_PONG);
+    }
+    h.advance(opened + 180_000.);
+    assert!(h.closed.contains(&socket));
+}
+
+fn take_spot_token(h: &mut H<KrakenSpot>, socket: SocketId) -> safe_cex_engine::RequestId {
+    h.engine.handle(h.now, Event::WsOpened { socket });
+    let mut token = None;
+    for action in safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now) {
+        match action {
+            Action::Http(request) => {
+                assert!(request.url.ends_with("GetWebSocketsToken"));
+                assert!(token.replace(request.id).is_none());
+            }
+            Action::SetTimer { timer, at_ms } => h.timers.push((timer, at_ms)),
+            Action::ClearTimer { timer } => h.timers.retain(|(t, _)| *t != timer),
+            Action::WsSend { .. } => {
+                panic!("token consumers cannot subscribe before a token result")
+            }
+            _ => (),
+        }
+    }
+    token.expect("real native token acquisition")
+}
+
+#[test]
+fn a_retired_epoch_token_cannot_subscribe_the_replacement() {
+    let mut h = spot(false, PublicFeedPolicy::Direct);
+    let old_socket = h.socket();
+    let old_token = take_spot_token(&mut h, old_socket);
+    let delay = h.close(old_socket);
+    h.wait(delay);
+    let socket = h.socket();
+    assert_ne!(socket, old_socket);
+    let token = take_spot_token(&mut h, socket);
+    h.sent.clear();
+    h.event(Event::HttpResponse {
+        request: old_token,
+        response: Response {
+            status: 200,
+            headers: "",
+            body: SPOT_TOKEN,
+        },
+    });
+    assert!(
+        h.sent.is_empty(),
+        "a late token has no authority over either epoch"
+    );
+    h.event(Event::HttpResponse {
+        request: token,
+        response: Response {
+            status: 200,
+            headers: "",
+            body: SPOT_TOKEN,
+        },
+    });
+    assert_eq!(h.sent.len(), 2);
+    assert!(h.sent.iter().all(|(id, _)| *id == socket));
+    assert!(h.sent[0].1.contains("executions"));
+    assert!(h.sent[1].1.contains("balances"));
+}
+
+#[test]
+fn authentication_rejection_retires_without_publishing_financial_data() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    h.sent.clear();
+    h.message(socket, r#"{"event":"subscribed_failed","feed":"fills"}"#);
+    assert!(h.closed.contains(&socket));
+    assert!(h.sent.is_empty());
+    h.message(socket, r#"{"event":"challenge","message":"late"}"#);
+    assert!(h.sent.is_empty());
+}
+
+fn invalid_time<V: Venue>(mut h: H<V>, auth: fn(&mut H<V>, SocketId)) {
+    let socket = ready_socket(&mut h, auth);
+    h.sent.clear();
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        h.engine
+            .handle(now, Event::WsMessage { socket, text: "{}" });
+        let actions: Vec<_> = h.engine.drain_actions().collect();
+        assert!(
+            actions.iter().all(|a| !matches!(
+                a,
+                Action::WsSend { .. } | Action::Http(_) | Action::ManagedHttp(_)
+            )),
+            "nonfinite ingress emitted work: {actions:?}"
+        );
+    }
+}
+#[test]
+fn nonfinite_socket_receipts_produce_no_native_work() {
+    invalid_time(futures(true, PublicFeedPolicy::Direct), noop);
+    invalid_time(futures(false, PublicFeedPolicy::Direct), authenticate);
+    invalid_time(spot(true, PublicFeedPolicy::Direct), noop);
+    invalid_time(spot(false, PublicFeedPolicy::Direct), spot_subscribed);
+}

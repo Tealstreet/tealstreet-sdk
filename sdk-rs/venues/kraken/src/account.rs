@@ -5,10 +5,9 @@ use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
 use safe_cex_engine::log::code;
 use safe_cex_engine::{
-    Cx, Fill, Method, Response, SocketChannel, SocketId, TimerId,
+    Cx, Fill, Method, Response, SocketId, TimerId,
     json::{self, ArrayAt},
     model::*,
-    socket::{Config, Supervisor, Tick, Timeout},
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -94,15 +93,14 @@ pub struct Account {
     terminal: RecentIds<16384>,
     inflight: HashSet<u8>,
     started: bool,
+    pub(super) feed: Option<safe_cex_engine::socket_lifecycle::FeedId>,
     socket: Option<SocketId>,
     open: bool,
     challenge: Option<String>,
     signed_challenge: Option<String>,
     waiting_challenge: bool,
     acks: HashSet<String>,
-    deadline: f64,
-    opened_at: f64,
-    supervisor: Supervisor,
+    payload_complete: bool,
     poll: Option<TimerId>,
     heal: Option<TimerId>,
     seen_fills: RecentIds<8192>,
@@ -129,11 +127,6 @@ impl Account {
         Self {
             skip_logged: RowReports::new(RowRepeat::ErrorUpgrade),
             unlisted_logged: RowReports::unbounded(RowRepeat::Once),
-            supervisor: Supervisor::new(Config {
-                connect_timeout_ms: 15_000.0,
-                ping_interval_ms: Some(10_000.0),
-                ..Config::default()
-            }),
             ..Self::default()
         }
     }
@@ -608,12 +601,10 @@ impl Kraken {
         self.account_refresh(cx);
         self.account.poll = Some(cx.set_poll_timer(5000.0));
     }
-    fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.supervisor.connecting(cx);
-        self.account.socket = Some(cx.connect(
-            safe_cex_engine::SocketSpec::new(self.ws_url()).channel(SocketChannel::Private),
-        ));
-        self.account.open = false;
+    pub(super) fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Err(error) = self.managed_connect(cx, true) {
+            self.socket_error(cx, true, error);
+        }
     }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.signer.is_none() {
@@ -682,6 +673,51 @@ impl Kraken {
             self.account.heal = Some(cx.set_timer(delay));
         }
     }
+    pub(super) fn account_control(
+        &self,
+        authenticated: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        use safe_cex_engine::socket_lifecycle::{AuthEvidence, Control};
+        let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
+            return Control::Other;
+        };
+        if msg.event == "pong" {
+            return Control::Pong;
+        }
+        if msg.event == "error"
+            || msg.event == "alert"
+            || msg.event == "subscribed_failed"
+            || msg.event == "unsubscribed_failed"
+            || (msg.event == "info" && msg.message.to_ascii_lowercase().contains("authentication"))
+        {
+            return Control::Auth(AuthEvidence::Rejected(safe_cex_engine::VenueError::new(
+                "Kraken private subscription rejected",
+            )));
+        }
+        if !authenticated {
+            if msg.event == "challenge" && self.account.waiting_challenge && !msg.message.is_empty()
+            {
+                return Control::Auth(AuthEvidence::Progress);
+            }
+            if msg.event == "subscribed"
+                && FEEDS.contains(&msg.feed.as_ref())
+                && self.account.signed_challenge.is_some()
+                && !self.account.acks.contains(msg.feed.as_ref())
+            {
+                return Control::Auth(if self.account.acks.len() == FEEDS.len() - 1 {
+                    AuthEvidence::Accepted
+                } else {
+                    AuthEvidence::Progress
+                });
+            }
+        }
+        Control::Traffic
+    }
+    pub(super) fn install_account_socket(&mut self, socket: SocketId) {
+        self.account.socket = Some(socket);
+        self.account.open = false;
+    }
     pub(crate) fn account_ws_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
             return false;
@@ -695,8 +731,7 @@ impl Kraken {
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.payloads.clear();
-        self.account.opened_at = cx.now;
-        self.account.deadline = cx.now + 15000.0;
+        self.account.payload_complete = false;
         cx.send(
             socket,
             serde_json::to_string(
@@ -704,10 +739,9 @@ impl Kraken {
             )
             .unwrap(),
         );
-        self.account.supervisor.opened(cx);
         true
     }
-    pub(crate) fn account_ws_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+    pub(crate) fn account_ws_close(&mut self, _cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {
             return false;
         }
@@ -719,14 +753,18 @@ impl Kraken {
         self.account.signed_challenge = None;
         self.account.acks.clear();
         self.account.waiting_challenge = false;
-        self.account.supervisor.retry(cx);
         true
     }
     fn account_disconnect(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
         cx.notice(Level::Error, code::STREAM_UNAVAILABLE, message);
         if let Some(socket) = self.account.socket {
-            cx.close(socket);
-            self.account_ws_close(cx, socket);
+            if let Some(feed) = self.account.feed {
+                cx.retire_socket(
+                    feed,
+                    safe_cex_engine::socket_lifecycle::RetireReason::Closed,
+                );
+            }
+            let _ = socket;
         }
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -741,30 +779,7 @@ impl Kraken {
             self.account_refresh(cx);
             return true;
         }
-        let tick = self.account.supervisor.on_timer(cx, timer);
-        match tick {
-            Tick::Unhandled => return false,
-            Tick::Reconnect => self.account_connect(cx),
-            Tick::TimedOut(Timeout::Connect) => {
-                self.account_disconnect(cx, "Kraken private socket open timed out")
-            }
-            Tick::TimedOut(_) => self.account_disconnect(cx, "Kraken private socket timed out"),
-            Tick::Handled | Tick::Ping if !self.account.open => (),
-            Tick::Handled | Tick::Ping => {
-                if (self.account.acks.len() < FEEDS.len() && cx.now >= self.account.deadline)
-                // Fills and orders are event driven: a confirmed empty snapshot
-                // may legitimately be followed by hours with only ping replies.
-                // Missing initial snapshots are different from a quiet account.
-                || (cx.now-self.account.opened_at>=180000.0
-                    &&FEEDS.iter().any(|feed|!self.account.payloads.contains_key(*feed)))
-                {
-                    self.account_disconnect(cx, "Kraken private socket timed out");
-                } else if let (Tick::Ping, Some(socket)) = (tick, self.account.socket) {
-                    cx.send(socket, r#"{"event":"ping"}"#);
-                }
-            }
-        }
-        true
+        false
     }
     pub(crate) fn account_ws_message(
         &mut self,
@@ -781,7 +796,6 @@ impl Kraken {
         let Ok(msg) = serde_json::from_str::<Ws<'_>>(text) else {
             return true;
         };
-        self.account.supervisor.received(cx.now);
         if msg.event == "challenge" {
             if !self.account.waiting_challenge || msg.message.is_empty() {
                 return true;
@@ -794,9 +808,8 @@ impl Kraken {
             };
             let signature = signer.challenge(&msg.message);
             self.account.signed_challenge = Some(signature.clone());
-            self.account.deadline = cx.now + 15000.0;
             for feed in FEEDS {
-                cx.send(socket,serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string());
+                cx.send(socket, serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string());
             }
             return true;
         }
@@ -983,6 +996,16 @@ impl Kraken {
                 }
             }
             _ => {}
+        }
+        if !self.account.payload_complete
+            && FEEDS
+                .iter()
+                .all(|feed| self.account.payloads.contains_key(*feed))
+        {
+            match cx.complete_socket_initial_payload() {
+                Ok(()) => self.account.payload_complete = true,
+                Err(error) => self.socket_error(cx, true, error),
+            }
         }
         true
     }
