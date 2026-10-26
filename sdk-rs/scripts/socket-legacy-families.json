@@ -9,7 +9,6 @@
     "bitrue": "venues/bitrue/src/",
     "bitunix": "venues/bitunix/src/",
     "blofin": "venues/blofin/src/",
-    "bybit": "venues/bybit/src/",
     "coinbase": "venues/coinbase/src/",
     "cryptocom": "venues/cryptocom/src/",
     "grvt": "venues/grvt/src/",

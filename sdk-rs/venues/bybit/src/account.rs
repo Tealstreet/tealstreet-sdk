@@ -1212,9 +1212,11 @@ impl BybitLinear {
             code::STREAM_UNAVAILABLE,
             format!("HyroTrader {message}"),
         );
-        if let Some(socket) = self.private.socket {
-            cx.close(socket);
-            self.on_socket_closed(cx, Channel::Private, 4001);
+        if let Some(feed) = self.private.feed {
+            cx.retire_socket(
+                feed,
+                safe_cex_engine::socket_lifecycle::RetireReason::Authentication,
+            );
         }
     }
 
@@ -1416,7 +1418,7 @@ impl BybitLinear {
             return;
         }
         if self.category == self.primary_category {
-            self.connect(cx, Channel::Private);
+            self.open_feed(cx, Channel::Private);
         }
         if self.variant.is_hyro() {
             return;
@@ -2107,10 +2109,12 @@ impl BybitLinear {
                 );
                 // An unauthenticated socket answers pings but carries no topics.
                 if op == "auth"
-                    && let Some(socket) = self.private.socket
+                    && let Some(feed) = self.private.feed
                 {
-                    cx.close(socket);
-                    self.on_socket_closed(cx, Channel::Private, 4001);
+                    cx.retire_socket(
+                        feed,
+                        safe_cex_engine::socket_lifecycle::RetireReason::Authentication,
+                    );
                 }
             }
             _ => {}

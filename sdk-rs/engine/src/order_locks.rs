@@ -24,6 +24,8 @@ struct Scope {
     // An absent-order answer arrived while this placement still held its
     // lock: its reconcile read waits for finish, when a read can clear it.
     absent: bool,
+    // Cancels only: two cancel scopes can race only on the same order.
+    cancel_only: bool,
     ids: Vec<String>,
     symbols: Vec<String>,
     all_symbol: Option<String>,
@@ -61,6 +63,16 @@ fn overlaps(scope: &Scope, held: &Scope) -> bool {
         || held.all_symbol.as_ref().is_some_and(|s| symbol(s, scope))
 }
 
+/// A repair against a foreground scope: two cancel-only scopes conflict only
+/// on an explicit order ID; every other pair keeps the symbol overlap.
+#[cfg(feature = "repair-mutations")]
+fn repair_conflicts(repair: &Scope, foreground: &Scope) -> bool {
+    if repair.cancel_only && foreground.cancel_only {
+        return repair.ids.iter().any(|id| foreground.ids.contains(id));
+    }
+    overlaps(repair, foreground) || overlaps(foreground, repair)
+}
+
 /// Concurrent order-command scopes; a scope conflict is reported first.
 pub(crate) const ACTIVE_SCOPES: usize = 64;
 /// An order command refused only by `ACTIVE_SCOPES`; nothing was sent.
@@ -91,6 +103,7 @@ impl OrderLocks {
             symbols: Vec::new(),
             all_symbol: None,
             placing: false,
+            cancel_only: false,
             sent: false,
             managed: false,
             unknown_symbol: false,
@@ -120,10 +133,12 @@ impl OrderLocks {
                 *command
             }
             Command::CancelOrders { command, ids } => {
+                scope.cancel_only = true;
                 scope.ids.clone_from(ids);
                 *command
             }
             Command::CancelOrdersWithSymbols { command, orders } => {
+                scope.cancel_only = true;
                 scope.ids.extend(orders.iter().map(|o| o.id.clone()));
                 scope
                     .symbols
@@ -131,6 +146,7 @@ impl OrderLocks {
                 *command
             }
             Command::CancelSymbolOrders { command, symbol } => {
+                scope.cancel_only = true;
                 scope.all_symbol = Some(symbol.clone());
                 *command
             }
@@ -179,7 +195,11 @@ impl OrderLocks {
             return Err(Refusal::Conflict(command));
         }
         #[cfg(feature = "repair-mutations")]
-        if self.repairs.iter().any(|(_, held)| overlaps(&scope, held)) {
+        if self
+            .repairs
+            .iter()
+            .any(|(_, held)| repair_conflicts(held, &scope))
+        {
             return Err(Refusal::Conflict(command));
         }
         if self.held_scopes() >= ACTIVE_SCOPES {
@@ -224,6 +244,7 @@ impl OrderLocks {
     ) -> Result<(), Refusal> {
         let scope = Scope {
             placing,
+            cancel_only: !placing,
             sent: false,
             managed: true,
             unknown_symbol: false,
@@ -235,9 +256,11 @@ impl OrderLocks {
         let conflict = self
             .active
             .iter()
-            .map(|(_, held)| held)
-            .chain(self.repairs.iter().map(|(_, held)| held))
-            .any(|held| overlaps(&scope, held) || overlaps(held, &scope));
+            .any(|(_, held)| repair_conflicts(&scope, held))
+            || self
+                .repairs
+                .iter()
+                .any(|(_, held)| overlaps(&scope, held) || overlaps(held, &scope));
         if conflict {
             return Err(Refusal::Conflict(0));
         }
@@ -562,5 +585,105 @@ mod managed_tests {
         locks.note_write();
         locks.finish(7, true);
         assert!(locks.uncertain(""));
+    }
+}
+
+#[cfg(all(test, feature = "repair-mutations"))]
+mod repair_cancel_overlap_tests {
+    use super::*;
+
+    fn cancel_all(command: CommandId) -> Command {
+        Command::CancelSymbolOrders {
+            command,
+            symbol: "S".into(),
+        }
+    }
+    fn cancel(command: CommandId, id: &str) -> Command {
+        Command::CancelOrders {
+            command,
+            ids: vec![id.into()],
+        }
+    }
+    fn amend(command: CommandId, id: &str) -> Command {
+        Command::AmendOrder {
+            command,
+            id: id.into(),
+            price: Some(1.),
+            amount: None,
+        }
+    }
+    fn repair(locks: &mut OrderLocks, root: u64, id: &str, placing: bool) -> Result<(), Refusal> {
+        locks.acquire_repair(root, vec![id.into()], vec!["S".into()], placing)
+    }
+
+    #[test]
+    fn a_repair_cancel_runs_beside_a_held_foreground_cancel_all() {
+        let mut locks = OrderLocks::default();
+        locks
+            .acquire(&cancel_all(1), &Store::default(), false)
+            .unwrap();
+        assert_eq!(repair(&mut locks, 10, "late", false), Ok(()));
+    }
+
+    #[test]
+    fn a_repair_cancel_conflicts_only_on_a_foreground_cancels_exact_id() {
+        let mut locks = OrderLocks::default();
+        locks
+            .acquire(&cancel(1, "x"), &Store::default(), false)
+            .unwrap();
+        assert_eq!(
+            repair(&mut locks, 10, "x", false),
+            Err(Refusal::Conflict(0))
+        );
+        assert_eq!(repair(&mut locks, 11, "y", false), Ok(()));
+    }
+
+    #[test]
+    fn a_placing_repair_still_conflicts_with_a_foreground_cancel_all() {
+        let mut locks = OrderLocks::default();
+        locks
+            .acquire(&cancel_all(1), &Store::default(), false)
+            .unwrap();
+        assert_eq!(repair(&mut locks, 10, "x", true), Err(Refusal::Conflict(0)));
+    }
+
+    #[test]
+    fn a_foreground_cancel_all_runs_beside_a_held_repair_cancel() {
+        let mut locks = OrderLocks::default();
+        repair(&mut locks, 10, "late", false).unwrap();
+        assert_eq!(
+            locks.acquire(&cancel_all(1), &Store::default(), false),
+            Ok(())
+        );
+        assert_eq!(
+            locks.acquire(&cancel(2, "late"), &Store::default(), false),
+            Err(Refusal::Conflict(2)),
+            "the same order still conflicts"
+        );
+        assert_eq!(
+            locks.acquire(&amend(3, "late"), &Store::default(), false),
+            Err(Refusal::Conflict(3)),
+            "a non-cancel foreground scope keeps the full rule"
+        );
+    }
+
+    #[test]
+    fn a_foreground_cancel_all_still_conflicts_with_a_held_placing_repair() {
+        let mut locks = OrderLocks::default();
+        repair(&mut locks, 10, "x", true).unwrap();
+        assert_eq!(
+            locks.acquire(&cancel_all(1), &Store::default(), false),
+            Err(Refusal::Conflict(1))
+        );
+    }
+
+    #[test]
+    fn repair_against_repair_is_unchanged() {
+        let mut locks = OrderLocks::default();
+        repair(&mut locks, 10, "x", false).unwrap();
+        assert_eq!(
+            repair(&mut locks, 11, "x", false),
+            Err(Refusal::Conflict(0))
+        );
     }
 }
