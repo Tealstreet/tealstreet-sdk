@@ -301,3 +301,36 @@ cargo test -p safe-cex-venue-hyperliquid --features private-adoption-originals
 --test request_context_trading -- --test-threads=1. Normal workspace CI retains
 all existing native tests. The original target is unchanged from 17baf7b6cbf;
 the gate is not a production feature or a claim that the custody gaps are fixed.
+
+
+## Additional native originals after the checkpoint landing
+
+Local preparation extends the target by appending eight controls; the complete
+landed 29-control target stays an exact unchanged prefix. These require no new
+nonce subject, scalar-only constructor, provider fixture or release-pacing API.
+They use distinct actual agents and the same real engine/native ingress helpers.
+
+The additions pin accepted rows after an earlier rejection, ordered diagnostics
+when every row is rejected, short and long status-array cardinality, wrong
+response kind, both waiting statuses without invented order IDs, the terminal
+cancel exception versus amendment proof, and a source fill after replacement
+dispatch preserving the confirmed replacement order/client IDs.
+
+A separate native control records an accepted prefix followed by an unknown
+status: the current reducer has already published the accepted order and the
+command terminal preserves Unknown despite retaining its ID. This is native evidence,
+not authorization to skip full-array classification in the adopted journal or
+to claim Store/outcome parity. Any changed publication or terminal projection
+needs an explicit source disposition and CALLERS disclosure. The existing
+mixed-refusal control remains unchanged. No shared prerequisite is implemented,
+no inventory is pruned, and native adoption remains held.
+
+The extended target executes 37 tests against unchanged native production:
+13 intended assertion REDs and 24 GREENs, zero ignored. All eight added native
+controls are GREEN, and every previous first assertion and GREEN body remains
+unchanged. Strict scoped clippy with -D warnings, target formatting and
+patch whitespace checks pass. The first extension run caught an incorrect new
+expectation that Unknown was stripped; the corrected assertion matches the
+native finish_trade rule, which strips only Rejected/NotSent after progress.
+That mistaken expectation is not counted as a custody RED. Own review target
+removed; no WASM build or additional activation proof is claimed.
