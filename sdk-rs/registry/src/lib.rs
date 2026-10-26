@@ -1497,6 +1497,7 @@ pub fn build_with_signer<T: Visit>(
             {
                 return Err(invalid("Engine signing provider is required"));
             }
+            let installed = identities.clone();
             let mut engine = Engine::new(
                 AsterDex::new(AsterOptions {
                     testnet: options.testnet,
@@ -1519,6 +1520,8 @@ pub fn build_with_signer<T: Visit>(
                 entropy,
             )?;
             engine.set_signer(signer)?;
+            // V3 address setup proves each slot's wallet from these identities.
+            engine.set_identities(installed)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "orderly")]

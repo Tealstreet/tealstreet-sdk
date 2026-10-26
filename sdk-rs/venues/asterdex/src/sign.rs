@@ -1,6 +1,5 @@
 //! Aster's legacy HMAC and API-wallet signing. Exact payload policy stays here.
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Mutex, OnceLock};
+use std::collections::BTreeMap;
 
 use safe_cex_crypto::{eip712, ethereum};
 use safe_cex_engine::signing::{
@@ -200,21 +199,6 @@ fn code_endpoint(method: Method, path: &str) -> bool {
             && (path.ends_with("/fapi/v3/builder") || path.ends_with("/fapi/v3/agent")))
 }
 
-fn next_nonce(scope: &str, now_ms: u64) -> Result<u64, String> {
-    static NONCES: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
-    let mut nonces = NONCES
-        .get_or_init(Mutex::default)
-        .lock()
-        .map_err(|_| "Aster nonce state unavailable")?;
-    let previous = nonces.get(scope).copied().unwrap_or(0);
-    let nonce = now_ms
-        .checked_mul(1000)
-        .ok_or("Aster nonce overflow")?
-        .max(previous.checked_add(1).ok_or("Aster nonce overflow")?);
-    nonces.insert(scope.into(), nonce);
-    Ok(nonce)
-}
-
 fn word(value: u64) -> [u8; 32] {
     let mut word = [0; 32];
     word[24..].copy_from_slice(&value.to_be_bytes());
@@ -291,27 +275,54 @@ fn join(params: &[(String, String)], encoded: bool) -> String {
     result
 }
 
-/// Source of the V3 replay nonce, called at every preparation with the
-/// checksummed signer address. The engine-owned allocator replaces
-/// `interim_nonce` once it lands; no second allocator exists meanwhile.
-pub type NonceSource = Box<dyn FnMut(&DispatchContext<'_>, &str) -> Result<u64, SignError> + Send>;
-
-/// Interim V3 source: the existing per-signer allocator, fed the protocol stamp.
-pub fn interim_nonce() -> NonceSource {
-    Box::new(|dispatch, signer| {
-        next_nonce(signer, dispatch.stamp_ms() as u64).map_err(|_| SignError::Unavailable)
-    })
+/// Verification oracle: the signed V3 URL for an explicit nonce, through the
+/// same preimage and wire code the recipe uses, signed with `private_key`. The
+/// unit vectors pin this path; tests compare engine-reserved nonces against it.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn v3_wire_for_nonce(
+    method: Method,
+    origin: &str,
+    path: &str,
+    query: Query,
+    user: &str,
+    signer: &str,
+    nonce: u64,
+    stamp_ms: f64,
+    testnet: bool,
+    private_key: &str,
+) -> Result<String, String> {
+    let mode = Mode::V3 {
+        user: ethereum::get_address(user)?,
+        signer: ethereum::get_address(signer)?,
+        nonce,
+    };
+    let prepared = query.prepared(&mode, method, path, stamp_ms, testnet)?;
+    let Preimage::Digest(digest) = &prepared.preimage else {
+        return Err("V3 preimage must be a digest".into());
+    };
+    let signature = ethereum::sign_digest(digest, private_key)?;
+    Ok(format!("{origin}{path}?{}", prepared.finish(&signature)))
 }
 
-/// Selected signing contract for one recipe. V3 addresses are public config.
-/// The V3 identity's signing key is the 32-byte API-wallet private key, which
-/// trusted setup decodes as hex with an optional `0x` prefix.
+/// Selected signing contract for one recipe. The V3 identity's signing key is
+/// the 32-byte API-wallet private key; its nonce comes from the engine's
+/// `asterdex-v3` address domain, keyed by the wallet address setup verified.
 pub enum Auth {
     V1,
     V3 {
         user: String,
+        claim: safe_cex_engine::nonce::NonceClaim,
+    },
+}
+
+enum Resolved {
+    V1,
+    /// `signer` is the EIP-55 form of the verified wallet address.
+    V3 {
+        user: String,
         signer: String,
-        nonce: NonceSource,
+        claim: safe_cex_engine::nonce::NonceClaim,
     },
 }
 
@@ -320,7 +331,7 @@ pub enum Auth {
 /// unsigned business params and writes the full signed URL at apply.
 pub struct Recipe {
     identity: Identity,
-    auth: Auth,
+    auth: Resolved,
     method: Method,
     origin: String,
     path: String,
@@ -340,16 +351,17 @@ impl Recipe {
         testnet: bool,
     ) -> Result<Self, String> {
         let auth = match auth {
-            Auth::V1 => Auth::V1,
-            Auth::V3 {
-                user,
-                signer,
-                nonce,
-            } => Auth::V3 {
-                user: ethereum::get_address(&user)?,
-                signer: ethereum::get_address(&signer)?,
-                nonce,
-            },
+            Auth::V1 => Resolved::V1,
+            Auth::V3 { user, claim } => {
+                let address = identity
+                    .verified_signing_address()
+                    .map_err(|error| error.to_string())?;
+                Resolved::V3 {
+                    user: ethereum::get_address(&user)?,
+                    signer: ethereum::get_address(&format!("0x{}", safe_cex_crypto::hex(&address)))?,
+                    claim,
+                }
+            }
         };
         Ok(Self {
             identity,
@@ -364,6 +376,12 @@ impl Recipe {
     }
 }
 impl SignStep for Recipe {
+    fn nonce_claim(&self) -> Option<&safe_cex_engine::nonce::NonceClaim> {
+        match &self.auth {
+            Resolved::V1 => None,
+            Resolved::V3 { claim, .. } => Some(claim),
+        }
+    }
     fn prepare(
         &mut self,
         outbound: &mut Action,
@@ -377,17 +395,24 @@ impl SignStep for Recipe {
             return Err(SignError::InvalidRequest);
         }
         let stamp = dispatch.stamp_ms();
-        let mode = match &mut self.auth {
-            Auth::V1 => Mode::V1,
-            Auth::V3 {
+        let mode = match &self.auth {
+            Resolved::V1 => Mode::V1,
+            // Reserved once per preparation; overflow stays a provider outage.
+            Resolved::V3 {
                 user,
                 signer,
-                nonce,
+                claim,
             } => Mode::V3 {
-                nonce: nonce(dispatch, signer)?,
+                nonce: dispatch
+                    .reserve_nonce(claim)
+                    .map_err(|_| SignError::Unavailable)?,
                 user: user.clone(),
                 signer: signer.clone(),
             },
+        };
+        let nonce = match &mode {
+            Mode::V3 { nonce, .. } => Some(*nonce),
+            Mode::V1 => None,
         };
         let code = matches!(mode, Mode::V3 { .. }) && code_endpoint(self.method, &self.path);
         let prepared = self
@@ -408,7 +433,7 @@ impl SignStep for Recipe {
         Ok(SignRequest {
             // Code queries carry a nonce, not a signed timestamp.
             receipt: SignReceipt {
-                nonce: None,
+                nonce,
                 stamp_ms: (!code).then_some(stamp),
                 expiry_ms: None,
             },
@@ -540,17 +565,6 @@ mod tests {
             // The provider-signed V1, Code and standard V3 wires are pinned
             // against these vectors in tests/dispatch_recipe.rs.
         }
-    }
-
-    #[test]
-    fn signer_nonce_is_shared_monotonic_and_independent() {
-        let scope = "unit-test-clock-regression";
-        let first = next_nonce(scope, 100).unwrap();
-        assert_eq!(first, 100_000);
-        assert_eq!(next_nonce(scope, 100).unwrap(), first + 1);
-        assert_eq!(next_nonce(scope, 90).unwrap(), first + 2);
-        assert_eq!(next_nonce(scope, 101).unwrap(), 101_000);
-        assert_eq!(next_nonce("unit-test-other-signer", 90).unwrap(), 90_000);
     }
 
     #[test]
