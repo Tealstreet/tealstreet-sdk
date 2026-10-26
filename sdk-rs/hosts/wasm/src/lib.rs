@@ -2294,7 +2294,14 @@ mod tests {
                 },
                 account_tier: any(&["lighter", "lighter-robinhood"], venue),
                 closed_positions: any(
-                    &["bybit", "bybitdemo", "hyrotrader", "bybitinverse", "blofin"],
+                    &[
+                        "bybit",
+                        "bybitdemo",
+                        "hyrotrader",
+                        "bybitinverse",
+                        "blofin",
+                        "bitunix",
+                    ],
                     venue,
                 ) || any(&OKX, venue),
                 balance_info: any(
@@ -2322,6 +2329,7 @@ mod tests {
                     }
                     "blofin" => safe_cex_engine::PositionHistory::Blofin,
                     "woo" => safe_cex_engine::PositionHistory::WooOrders,
+                    "bitunix" => safe_cex_engine::PositionHistory::Bitunix,
                     _ => safe_cex_engine::PositionHistory::Unsupported,
                 },
                 closed_position_format: match venue {
@@ -2332,6 +2340,7 @@ mod tests {
                         safe_cex_engine::ClosedPositionFormat::Okx
                     }
                     "blofin" => safe_cex_engine::ClosedPositionFormat::Blofin,
+                    "bitunix" => safe_cex_engine::ClosedPositionFormat::Bitunix,
                     _ => safe_cex_engine::ClosedPositionFormat::Unsupported,
                 },
                 fill_history_time: match venue {
