@@ -610,16 +610,14 @@ fn native_post_pins_primary_hmac_over_the_exact_caller_body() {
 fn private_start_still_requires_primary_passphrase_with_valid_secondary() {
     let mut opts = options(true);
     opts.passphrase = None;
-    let mut rig = Rig::new(opts, false, false);
-    rig.reply("/market/instruments", MARKET);
-    assert!(
-        rig.requests
-            .iter()
-            .all(|request| !request.url.contains("/account/"))
-    );
+    let rig = Rig::new(opts, false, false);
+    // Refused at startup, before discovery or entropy, naming the Primary.
+    assert!(rig.requests.is_empty());
     assert!(rig.draws.lock().unwrap().is_empty());
     assert!(rig.actions.iter().any(|action| matches!(action,
         Action::Notice(Notice::Event(event)) if event.message=="BloFin requires a passphrase")));
+    assert!(!rig.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.message.contains("Secondary"))));
 }
 
 #[test]

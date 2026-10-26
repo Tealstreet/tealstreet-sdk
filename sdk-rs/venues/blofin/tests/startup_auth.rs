@@ -332,25 +332,15 @@ fn missing_passphrase_fails_startup() {
     });
     let mut rig = Rig::default();
     engine.start(0.);
-    let instruments = rig.take_prepared(&mut engine, 0.).remove(0);
-    respond(&mut engine, &instruments, 200, INSTRUMENTS, 1.);
-    rig.take_prepared(&mut engine, 1.);
+    // Refused at startup, before any discovery request (better than TS, which
+    // discovered first).
+    assert!(!rig.take_prepared(&mut engine, 0.).iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
+    )));
     assert_eq!(rig.failures.len(), 1);
     assert_eq!(rig.failures[0].message, "BloFin requires a passphrase");
     assert_eq!(rig.failures[0].kind, Some(ErrorKind::InvalidInput));
-}
-
-/// The venue never sees raw read material. An invalid read key is refused by
-/// the registry's construction gate (`validate_read_key`, which runs
-/// `ReadCredentials::validate`) before any venue or provider work.
-#[test]
-fn invalid_read_only_credentials_are_refused_at_construction() {
-    let read = ReadCredentials {
-        key: "read".into(),
-        secret: String::new(),
-        passphrase: None,
-    };
-    assert!(read.validate().is_err());
 }
 
 #[test]

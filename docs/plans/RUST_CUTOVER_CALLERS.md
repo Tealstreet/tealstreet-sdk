@@ -3560,11 +3560,16 @@ and read credentials are gone from the venue
 - **Presence comes from identities.** Without a usable Primary identity the
   venue is keyless and runs no private work at all: no settings read, private
   socket, signature or refusal notice.
+- **Passphrases (better than TypeScript).** A missing passphrase now refuses at
+  startup, before discovery or any signed request, rather than after
+  discovery. A Primary without one fails with "BloFin requires a passphrase". A
+  read key whose own passphrase is explicitly empty, with no inherited one,
+  fails with "Secondary read credentials require a passphrase". Both are
+  `InvalidInput`, `config.invalid` and `StartupFailed`. The Primary is checked
+  first, because a read key inherits its passphrase.
 - **Read keys.** An invalid read key is refused at construction by the
   registry's shared read-key gate, before the venue exists. Native refused it at
-  startup. An explicitly empty read-key passphrase still fails startup with
-  "Secondary read credentials require a passphrase" (`InvalidInput`,
-  `config.invalid`).
+  startup.
 - **Inventories.** BloFin's credential-selection sites go 5 → 0 and its legacy
   signing sites 11 → 0. Its `sign/` directory joins the migrated signing ban,
   with the two dispatch HMAC work references frozen as other migrated families'

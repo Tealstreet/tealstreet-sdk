@@ -581,18 +581,6 @@ impl Blofin {
         if !self.signed() {
             return;
         }
-        if self
-            .options
-            .identities
-            .primary
-            .as_ref()
-            .is_none_or(|primary| primary.passphrase.is_none())
-        {
-            let error =
-                VenueError::new("BloFin requires a passphrase").kind(ErrorKind::InvalidInput);
-            self.reject_startup(cx, error, false);
-            return;
-        }
         self.account.session_started = cx.now;
         self.private_connect(cx);
         self.account.tick = Some(cx.set_poll_timer(10_000.0));

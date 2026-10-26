@@ -687,16 +687,25 @@ impl Venue for Blofin {
         }
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        // Trusted setup drops an empty effective passphrase; a Secondary
-        // without one refuses startup before discovery or entropy.
-        if self
-            .options
-            .identities
+        // Trusted setup drops an empty effective passphrase, and a Secondary
+        // inherits the Primary's, so a missing one refuses before discovery or
+        // entropy, naming the slot that lacks it.
+        let identities = &self.options.identities;
+        let primary_lacks = !self.options.public_data_only
+            && identities
+                .primary
+                .as_ref()
+                .is_some_and(|primary| primary.passphrase.is_none());
+        let secondary_lacks = identities
             .secondary
             .as_ref()
-            .is_some_and(|read| read.passphrase.is_none())
-        {
-            let error = "Secondary read credentials require a passphrase";
+            .is_some_and(|read| read.passphrase.is_none());
+        if primary_lacks || secondary_lacks {
+            let error = if primary_lacks {
+                "BloFin requires a passphrase"
+            } else {
+                "Secondary read credentials require a passphrase"
+            };
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             self.account.startup_rejected = true;
             cx.startup_failed(VenueError::new(error).kind(ErrorKind::InvalidInput));

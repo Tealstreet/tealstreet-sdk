@@ -214,21 +214,47 @@ fn a_provider_refusal_latches_the_private_role_without_a_frame_or_reconnect() {
             .any(|a| matches!(a, Action::WsConnect { url, .. } if url.ends_with("/private"))),
         "a latched private role never reconnects"
     );
-    let notices = |needle: &str| {
-        h.actions
+    // The first refused signature (the startup settings reads, before the
+    // socket opened) latched and reported once. The login itself adds
+    // nothing: no notice and no second startup failure from `before` on.
+    let notices = |from: usize, needle: &str| {
+        h.actions[from..]
             .iter()
             .filter(|a| matches!(a, Action::Notice(n) if format!("{n:?}").contains(needle)))
             .count()
     };
+    let latch =
+        "Signing cannot succeed with the installed credentials: Signing key is not installed";
+    assert_eq!(notices(0, latch), 1);
+    assert_eq!(notices(0, "StartupFailed"), 1);
+    assert_eq!(notices(before, latch), 0);
+    assert_eq!(notices(before, "StartupFailed"), 0);
     assert_eq!(
-        notices(
-            "Signing cannot succeed with the installed credentials: Signing key is not installed"
-        ),
-        1
-    );
-    assert_eq!(notices("StartupFailed"), 1);
-    assert_eq!(
-        notices("STREAM_UNAVAILABLE") + notices("stream.unavailable"),
+        notices(before, "STREAM_UNAVAILABLE") + notices(before, "stream.unavailable"),
         0
+    );
+}
+
+/// Native order: the login, then the ping. The engine holds a plain send behind
+/// a socket's pending signature (`Cx::send` → `signing.hold`), so the ping never
+/// reaches the wire ahead of the login, whatever the provider's timing.
+#[test]
+fn the_ping_follows_the_login_on_the_wire() {
+    let mut h = Harness::new();
+    let before = h.actions.len();
+    open(&mut h);
+    let socket = h.private;
+    let sends: Vec<&str> = h.actions[before..]
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { socket: s, text } if *s == socket => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let login = sends.iter().position(|t| t.contains("\"op\":\"login\""));
+    let ping = sends.iter().position(|t| *t == "ping");
+    assert!(
+        matches!((login, ping), (Some(l), Some(p)) if l < p),
+        "login before ping: {login:?} {ping:?}"
     );
 }
