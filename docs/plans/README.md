@@ -491,4 +491,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | WOO unsigned public-seed read custody | Local source/fixtures CLEAR;264PASS, sizes fit; unpushed, CI pending | Before converting Markets, Tickers or Funding to independent Background Read observations. | [RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md](RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md) |
 
-| Bitget history Read funnel | Source CLEAR; exact composed family, combined and counterbalanced CPU gates pending | Before changing history caller bounds, paging, promotion, retry custody or selected identity. | [RUST_BITGET_HISTORY_READ_FUNNEL.md](RUST_BITGET_HISTORY_READ_FUNNEL.md) |
+| Bitget history Read funnel | Source CLEAR; correctness green; direct overseer landing GO | Before changing history caller bounds, paging, promotion, retry custody or selected identity. | [RUST_BITGET_HISTORY_READ_FUNNEL.md](RUST_BITGET_HISTORY_READ_FUNNEL.md) |
