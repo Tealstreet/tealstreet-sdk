@@ -23,7 +23,7 @@ test('OKX smoke profiles use default TLS on the exact live/demo entity host', ()
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
     // KuCoin Spot needs a separate host and sizing review.
-    if (['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'].includes(venue)) {
+    if (['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
@@ -41,14 +41,14 @@ test('every registry name has an explicitly reviewed environment or fails closed
 
 test('unreviewed profiles refuse all modes before credential access', () => {
   const env = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
-  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'])
+  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot'])
     for (const mode of [undefined, 'testnet', 'demo', 'mainnet'])
       assert.throws(() => liveSmokeProfile(venue, mode, env), /no reviewed/);
 });
 
 test('production-only modes refuse before credentials can be read', () => {
   const poisonedEnv = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
-  for (const venue of ['kucoin', 'coinbase', 'coinbasespot', 'backpack', 'mexc', 'bingx', 'weex', 'bitrue', 'polymarket']) {
+  for (const venue of ['kucoin', 'coinbase', 'coinbasespot', 'backpack', 'mexc', 'bingx', 'weex', 'bitrue', 'polymarket', 'krakenspot']) {
     assert.throws(() => liveSmokeProfile(venue, undefined, poisonedEnv), /explicit --mainnet/);
     assert.throws(() => liveSmokeProfile(venue, 'testnet', poisonedEnv), /unsupported/);
     assert.throws(() => liveSmokeProfile(venue, 'demo', poisonedEnv), /unsupported/);
@@ -195,4 +195,40 @@ test('reviewed venue profiles enable post-only whenever the engine supports it',
     catch { try { profile = liveSmokeProfile(venue, 'mainnet', env); } catch { continue; } }
     assert.equal(profile.postOnly, !['bitrue', 'polymarket'].includes(venue), venue);
   }
+});
+
+
+test('Kraken Spot requires explicit mainnet before touching its separate credentials', () => {
+  const poisoned = new Proxy({}, { get() { throw new Error('credentials accessed'); } });
+  assert.throws(() => liveSmokeProfile('krakenspot', undefined, poisoned), /explicit --mainnet/);
+  for (const mode of ['testnet', 'demo'])
+    assert.throws(() => liveSmokeProfile('krakenspot', mode, poisoned), /unsupported/);
+  const profile = liveSmokeProfile('krakenspot', 'mainnet', env);
+  assert.equal(profile.credentialEnv.key, 'RUST_LIVE_SMOKE_KRAKEN_SPOT_MAINNET_KEY');
+  assert.equal(profile.credentialEnv.secret, 'RUST_LIVE_SMOKE_KRAKEN_SPOT_MAINNET_SECRET');
+  assert.equal(profile.leverage, 'fixed');
+  assert.equal(profile.postOnly, true);
+  assert.equal(profile.options.testnet, false);
+  assert.equal(profile.options.publicDataOnly, false);
+});
+
+test('Kraken Spot endpoint fences exclude Futures, beta, impostor hosts and alternate ports', () => {
+  const profile = liveSmokeProfile('krakenspot', 'mainnet', env);
+  profile.validateRequest({ method: 'POST', url: 'https://api.kraken.com/0/private/AddOrder' });
+  profile.validateSocket('wss://ws.kraken.com/v2');
+  profile.validateSocket('wss://ws-auth.kraken.com/v2');
+  for (const url of ['https://futures.kraken.com/derivatives/api/v3/sendorder',
+    'https://demo-futures.kraken.com/derivatives/api/v3/sendorder',
+    'https://api.kraken.com.evil.example/0/private/AddOrder', 'https://api.kraken.com:8443/0/private/AddOrder'])
+    assert.throws(() => profile.validateRequest({ method: 'POST', url }), /outside/);
+  for (const url of ['wss://beta-ws.kraken.com/v2', 'wss://beta-ws-auth.kraken.com/v2',
+    'wss://futures.kraken.com/ws/v1', 'wss://ws-auth.kraken.com:8443/v2'])
+    assert.throws(() => profile.validateSocket(url), /outside/);
+});
+
+test('Kraken Spot never borrows Futures keys and the Futures default stays demo', () => {
+  const futuresOnly = { RUST_LIVE_SMOKE_KRAKEN_MAINNET_KEY: 'fixture-key',
+    RUST_LIVE_SMOKE_KRAKEN_MAINNET_SECRET: 'fixture-secret' };
+  assert.throws(() => liveSmokeProfile('krakenspot', 'mainnet', futuresOnly), /KRAKEN_SPOT_MAINNET_KEY/);
+  assert.equal(liveSmokeProfile('kraken', undefined, env).mode, 'demo');
 });

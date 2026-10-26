@@ -85,6 +85,9 @@ register('kraken', 'KRAKEN', {
   demo: endpoints('https://demo-futures.kraken.com', 'wss://demo-futures.kraken.com'),
   mainnet: endpoints('https://futures.kraken.com', 'wss://futures.kraken.com'),
 });
+register('krakenspot', 'KRAKEN_SPOT', {
+  mainnet: endpoints('https://api.kraken.com', 'wss://ws.kraken.com wss://ws-auth.kraken.com'),
+});
 register('coinbase coinbasespot', 'COINBASE', {
   mainnet: endpoints('https://api.coinbase.com https://api.international.coinbase.com',
     'wss://advanced-trade-ws.coinbase.com wss://advanced-trade-ws-user.coinbase.com'),
@@ -245,7 +248,7 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
     venue: name, mode, availableModes, options, secrets,
     // Bitrue rejects non-GTC; Polymarket's engine does not send postOnly yet.
     postOnly: !['bitrue', 'polymarket'].includes(name),
-    leverage: ['bybitspot', 'coinbasespot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
+    leverage: ['bybitspot', 'coinbasespot', 'krakenspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
     secretValues: Object.values(secrets), credentialEnv,
     endpoints: { http: [...endpointSet.http], ws: [...endpointSet.ws] },
     allowUrl, canonicalizeUrl, validateRequest, validateSocket, validateSocketMessage,

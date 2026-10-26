@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { smokeOrder, LIVE_SMOKE_MAX_NOTIONAL } from './live-smoke.mjs';
+import { MARKET_FLAG } from '../hosts/wasm/js/wire.mjs';
 import { venueMarketRules, LIVE_SMOKE_RULE_SOURCES, LIVE_SMOKE_UNKNOWN_RULES } from './live-smoke-rules.mjs';
 
 const market = { id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT',
@@ -47,6 +49,10 @@ const fixtures = [
     http('https://api.backpack.exchange/api/v1/markets', [{ symbol: 'BTC_USDC_PERP', filters: { quantity: { minQuantity: '0.001', maxQuantity: '1000', stepSize: '0.001' } } }]), 0, 0.001, 0.001, 1],
   ['kraken', 'kraken', { ...market, symbol: 'PF_XBTUSD' },
     http('https://demo-futures.kraken.com/derivatives/api/v3/instruments', { result: 'success', instruments: [{ symbol: 'PF_XBTUSD', contractValueTradePrecision: 4, contractSize: 1 }] }), 0, 0.0001, 0.0001, 1],
+  ['krakenspot', 'krakenspot', { ...market, id: 'BTC/USD', symbol: 'XBT/USD', quote: 'USD' },
+    http('https://api.kraken.com/0/public/AssetPairs', { error: [], result: { XXBTZUSD: {
+      wsname: 'XBT/USD', status: 'online', ordermin: '0.00006', costmin: '0.5', lot_decimals: 8, lot_multiplier: 1,
+    } } }), 0.5, 0.00006, 1e-8, 1],
   ['kucoin', 'kucoin', { ...market, id: 'XBTUSDTM', symbol: 'BTCUSDT' },
     http('https://api-futures.kucoin.com/api/v1/contracts/active', { code: '200000', data: [{ symbol: 'XBTUSDTM', lotSize: 1, multiplier: 0.001, isInverse: false, maxOrderQty: 1000000 }] }), 0, 1, 1, 0.001],
   ['mexc', 'mexc', { ...market, id: 'BTC_USDT' },
@@ -79,7 +85,7 @@ for (const [family, venue, selected, record, notional, minimum, step, scale] of 
 }
 
 test('coverage census includes every enabled rule family, unsupported names fail closed', () => {
-  assert.equal(fixtures.length, 21);
+  assert.equal(fixtures.length, 22);
   assert.deepEqual([...new Set(fixtures.map(([family]) => family))].sort(), Object.keys(LIVE_SMOKE_RULE_SOURCES).sort());
   for (const venue of [...Object.keys(LIVE_SMOKE_UNKNOWN_RULES), 'future-unknown-venue'])
     assert.deepEqual(venueMarketRules(venue, fixtures.map((fixture) => fixture[3]), market), { notionalKnown: false, minNotional: 0 });
@@ -188,4 +194,69 @@ test('malformed scalar and null rows fail closed without throwing', () => {
     symbols: [null, 0, ['BTCUSDT'], { symbol: 'BTCUSDT', filters: [null, 0] }],
   });
   assert.equal(venueMarketRules('binance', [source], market).notionalKnown, false);
+});
+
+const spotMarket = { ...market, id: 'BTC/USD', symbol: 'XBT/USD', base: 'BTC', quote: 'USD' };
+const spotPair = { wsname: 'XBT/USD', status: 'online', ordermin: '0.00006', costmin: '0.5', lot_decimals: 8, lot_multiplier: 1 };
+const spotDiscovery = (row = spotPair) => http('https://api.kraken.com/0/public/AssetPairs',
+  { error: [], result: { XXBTZUSD: row } });
+
+test('Kraken Spot discovery keeps quote-cost and base-volume minima in their native units', () => {
+  const result = venueMarketRules('krakenspot', [spotDiscovery()], spotMarket);
+  assert.equal(result.notionalKnown, true);
+  assert.equal(result.minNotional, 0.5);
+  assert.equal(result.minimumAmount, 0.00006);
+  assert.equal(result.amountStep, 1e-8);
+  assert.equal(result.notionalPerAmount, 1);
+  assert.equal(result.quoteQuantity, false);
+});
+
+test('Kraken Spot missing, inconsistent or non-unit metadata refuses sizing', () => {
+  const check = (row) => assert.deepEqual(venueMarketRules('krakenspot', [spotDiscovery(row)], spotMarket),
+    { notionalKnown: false, minNotional: 0 });
+  for (const field of ['costmin', 'ordermin', 'lot_decimals', 'lot_multiplier']) {
+    const row = { ...spotPair }; delete row[field]; check(row);
+  }
+  for (const row of [{ ...spotPair, wsname: 'ETH/USD' }, { ...spotPair, status: 'cancel_only' },
+    { ...spotPair, costmin: 'NaN' }, { ...spotPair, ordermin: '-1' },
+    { ...spotPair, lot_decimals: 1.5 }, { ...spotPair, lot_decimals: 19 }, { ...spotPair, lot_multiplier: 2 }]) check(row);
+  assert.deepEqual(venueMarketRules('krakenspot', [spotDiscovery()], { ...spotMarket, id: 'ETH/USD' }),
+    { notionalKnown: false, minNotional: 0 });
+});
+
+test('Kraken Spot uses the unique native display symbol, not the REST pair key', () => {
+  const catalog = (result) => http('https://api.kraken.com/0/public/AssetPairs', { error: [], result });
+  assert.equal(venueMarketRules('krakenspot', [catalog({ XXBTZUSD: spotPair,
+    'XXBTZUSD.d': spotPair })], spotMarket).notionalKnown, true);
+  for (const result of [{ XXBTZUSD: spotPair, renamed: { ...spotPair } },
+    { 'XXBTZUSD.d': spotPair }, { XXBTZUSD: { ...spotPair, wsname: 'BTC/USD' } }])
+    assert.equal(venueMarketRules('krakenspot', [catalog(result)], spotMarket).notionalKnown, false);
+  assert.equal(venueMarketRules('krakenspot', [spotDiscovery()],
+    { ...spotMarket, id: 'XXBTZUSD' }).notionalKnown, false);
+});
+
+test('Kraken Spot later complete-catalog failure revokes an earlier sizing rule', () => {
+  const good = spotDiscovery();
+  for (const later of [
+    { ...good, body: '{' }, { ...good, body: 'null' }, { ...good, body: '[]' },
+    { ...good, status: 503 },
+    { ...good, body: JSON.stringify({ error: [], result: {} }) },
+    { ...good, body: JSON.stringify({ error: ['EService:Unavailable'], result: { XXBTZUSD: spotPair } }) },
+    spotDiscovery({ ...spotPair, wsname: 'ETH/USD' }),
+  ]) assert.deepEqual(venueMarketRules('krakenspot', [good, later], spotMarket),
+    { notionalKnown: false, minNotional: 0 });
+  assert.equal(venueMarketRules('krakenspot', [{ ...good, body: '{' }, good], spotMarket).notionalKnown, true);
+});
+
+
+test('Kraken Spot smoke quantity stays post-only, above both minima and below the cap', () => {
+  const rules = venueMarketRules('krakenspot', [spotDiscovery()], spotMarket);
+  const order = smokeOrder({ ...spotMarket, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.SPOT,
+    precisionPrice: 0.1, minPrice: 0.1 }, { bids: [100000, 1], asks: [100001, 1] }, rules);
+  assert.equal(order.timeInForce, 'PostOnly');
+  assert.equal(order.side, 'buy');
+  assert.ok(order.amount >= Number(spotPair.ordermin));
+  assert.ok(order.amount * order.amendPrice >= Number(spotPair.costmin));
+  assert.ok(order.amount * order.price <= LIVE_SMOKE_MAX_NOTIONAL);
+  assert.ok(Math.abs(order.amount / rules.amountStep - Math.round(order.amount / rules.amountStep)) < 1e-8);
 });
