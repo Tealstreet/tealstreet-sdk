@@ -45,6 +45,9 @@ const fixtures = [
     http('https://api.testnet.paradex.trade/v1/markets', { results: [{ symbol: 'BTC-USD-PERP', min_notional: '10', order_size_increment: '0.001' }] }), 10, 0.001, 0.001, 1],
   ['hyperliquid', 'hyperliquid', { ...market, id: 'BTC', symbol: 'BTC-PERP' },
     http('https://api.hyperliquid-testnet.xyz/info', [{ universe: [{ name: 'BTC', szDecimals: 5 }] }, []], { method: 'POST', requestBody: '{"type":"metaAndAssetCtxs"}' }), 10, 0.00001, 0.00001, 1],
+  ['hyperliquidspot', 'hyperliquidspot', { ...market, id: '@142', symbol: 'UBTC/USDC', base: 'UBTC', quote: 'USDC' },
+    http('https://api.hyperliquid.xyz/info', [{ tokens: [{ index: 0, name: 'USDC', szDecimals: 8 }, { index: 197, name: 'UBTC', szDecimals: 5 }],
+      universe: [{ name: '@142', index: 142, tokens: [197, 0] }] }, []], { method: 'POST', requestBody: '{"type":"spotMetaAndAssetCtxs"}' }), 10, 0.00001, 0.00001, 1],
   ['okx', 'okx', { ...market, id: 'BTC-USDT-SWAP' },
     http('https://openapi.okx.com/api/v5/public/instruments?instType=SWAP', { code: '0', data: [{ instId: 'BTC-USDT-SWAP', ctType: 'linear', ctVal: '0.01', minSz: '0.1', lotSz: '0.1', maxLmtSz: '1000' }] }), 0, 0.1, 0.1, 0.01],
   ['blofin', 'blofin', { ...market, id: 'BTC-USDT' },
@@ -91,7 +94,7 @@ for (const [family, venue, selected, record, notional, minimum, step, scale] of 
 }
 
 test('coverage census includes every enabled rule family, unsupported names fail closed', () => {
-  assert.equal(fixtures.length, 23);
+  assert.equal(fixtures.length, 24);
   assert.deepEqual([...new Set(fixtures.map(([family]) => family))].sort(), Object.keys(LIVE_SMOKE_RULE_SOURCES).sort());
   for (const venue of [...Object.keys(LIVE_SMOKE_UNKNOWN_RULES), 'future-unknown-venue'])
     assert.deepEqual(venueMarketRules(venue, fixtures.map((fixture) => fixture[3]), market), { notionalKnown: false, minNotional: 0 });
@@ -200,6 +203,63 @@ test('malformed scalar and null rows fail closed without throwing', () => {
     symbols: [null, 0, ['BTCUSDT'], { symbol: 'BTCUSDT', filters: [null, 0] }],
   });
   assert.equal(venueMarketRules('binance', [source], market).notionalKnown, false);
+});
+
+
+test('Hyperliquid Spot sizing binds the exact pair, base lot and USDC quote', () => {
+  const [, venue, selected, record] = fixtures.find(([family]) => family === 'hyperliquidspot');
+  const check = (edit) => {
+    const payload = JSON.parse(record.body); edit(payload[0]);
+    assert.deepEqual(venueMarketRules(venue, [{ ...record, body: JSON.stringify(payload) }], selected),
+      { notionalKnown: false, minNotional: 0 });
+  };
+  for (const edit of [
+    (m) => { m.universe[0].name = '@143'; },
+    (m) => { m.universe[0].index = 143; },
+    (m) => { m.universe.push({ ...m.universe[0] }); },
+    (m) => { m.universe.push({ ...m.universe[0], name: '@143' }); },
+    (m) => { m.universe[0].tokens = [0, 197]; },
+    (m) => { m.tokens[0].name = 'HYPE'; },
+    (m) => { m.tokens[1].name = 'ETH'; },
+    (m) => { delete m.tokens[1].szDecimals; },
+    (m) => { m.tokens.push({ ...m.tokens[1] }); },
+  ]) check(edit);
+  for (const patch of [{ method: 'GET' }, { requestBody: '{"type":"metaAndAssetCtxs"}' }])
+    assert.deepEqual(venueMarketRules(venue, [{ ...record, ...patch }], selected), { notionalKnown: false, minNotional: 0 });
+  assert.deepEqual(venueMarketRules(venue, [record], { ...selected, quote: 'HYPE' }), { notionalKnown: false, minNotional: 0 });
+});
+
+
+test('Hyperliquid Spot later ambiguous metadata invalidates earlier sizing', () => {
+  const [, venue, selected, record] = fixtures.find(([family]) => family === 'hyperliquidspot');
+  const payload = JSON.parse(record.body);
+  payload[0].universe.push({ ...payload[0].universe[0] });
+  assert.deepEqual(venueMarketRules(venue, [record, { ...record, body: JSON.stringify(payload) }], selected),
+    { notionalKnown: false, minNotional: 0 });
+});
+
+
+test('Hyperliquid Spot minimum order remains post-only, step-aligned and below the smoke cap', () => {
+  const [, venue, selected, record] = fixtures.find(([family]) => family === 'hyperliquidspot');
+  const rules = venueMarketRules(venue, [record], selected);
+  const order = smokeOrder({ ...selected, flags: MARKET_FLAG.ACTIVE | MARKET_FLAG.SPOT,
+    precisionPrice: 0.1, minPrice: 0.1 }, { bids: [100000, 1], asks: [100001, 1] }, rules);
+  assert.equal(order.timeInForce, 'PostOnly');
+  assert.equal(order.side, 'buy');
+  assert.ok(order.price < 100000 * 0.98);
+  assert.ok(order.amount * order.amendPrice >= 10);
+  assert.ok(order.amount * order.price <= LIVE_SMOKE_MAX_NOTIONAL);
+  assert.ok(Math.abs(order.amount / rules.amountStep - Math.round(order.amount / rules.amountStep)) < 1e-8);
+});
+
+
+test('Hyperliquid Spot full replacement snapshots revoke sizing for absent or renamed pairs', () => {
+  const [, venue, selected, record] = fixtures.find(([family]) => family === 'hyperliquidspot');
+  for (const universe of [[], [{ name: '@143', index: 143, tokens: [197, 0] }]]) {
+    const payload = JSON.parse(record.body); payload[0].universe = universe;
+    assert.deepEqual(venueMarketRules(venue, [record, { ...record, body: JSON.stringify(payload) }], selected),
+      { notionalKnown: false, minNotional: 0 });
+  }
 });
 
 const spotMarket = { ...market, id: 'BTC/USD', symbol: 'XBT/USD', base: 'BTC', quote: 'USD' };

@@ -45,7 +45,7 @@ register('cryptocom', 'CRYPTOCOM', modes(
   endpoints('https://uat-api.3ona.co', 'wss://uat-stream.3ona.co'),
   endpoints('https://api.crypto.com', 'wss://stream.crypto.com'),
 ));
-register('hyperliquid', 'HYPERLIQUID', modes(
+register('hyperliquid hyperliquidspot', 'HYPERLIQUID', modes(
   endpoints('https://api.hyperliquid-testnet.xyz', 'wss://api.hyperliquid-testnet.xyz'),
   endpoints('https://api.hyperliquid.xyz', 'wss://api-ui.hyperliquid.xyz'),
 ), { key: 'SIGNER_ADDRESS', secret: 'PRIVATE_KEY', applicationId: 'ACCOUNT_ADDRESS' }, {
@@ -184,6 +184,8 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
   };
   for (const [path, suffix] of Object.entries(profile.fields)) read(path, suffix, true);
   for (const [path, suffix] of Object.entries(profile.optionalFields ?? {})) read(path, suffix, false);
+  if (profile.family === 'HYPERLIQUID' && options.key.toLowerCase() === options.applicationId.toLowerCase())
+    throw new Error('Hyperliquid smoke requires an agent wallet distinct from the account');
   const endpointSet = profile.environments[mode];
   const allowUrl = (url, kind) => {
     try {
@@ -257,7 +259,7 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
     venue: name, mode, availableModes, options, secrets,
     // Bitrue rejects non-GTC; Polymarket's engine does not send postOnly yet.
     postOnly: !['bitrue', 'polymarket'].includes(name),
-    leverage: ['binancespot', 'bybitspot', 'coinbasespot', 'krakenspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
+    leverage: ['binancespot', 'bybitspot', 'coinbasespot', 'hyperliquidspot', 'krakenspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
     secretValues: Object.values(secrets), credentialEnv,
     endpoints: { http: [...endpointSet.http], ws: [...endpointSet.ws] },
     allowUrl, canonicalizeUrl, validateRequest, validateSocket, validateSocketMessage,

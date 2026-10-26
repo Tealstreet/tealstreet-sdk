@@ -13,6 +13,7 @@ export const LIVE_SMOKE_RULE_SOURCES = Object.freeze({
   lighter: 'https://github.com/elliottech/lighter-python/blob/main/lighter/models/order_book_details.py',
   paradex: 'https://docs.paradex.trade/api/testnet/markets/get-markets',
   hyperliquid: 'https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses',
+  hyperliquidspot: 'https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses',
   okx: 'https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments',
   blofin: 'https://docs.blofin.com/index.html#get-instruments',
   apexomni: 'https://api-docs.pro.apex.exchange/#get-configs',
@@ -77,6 +78,7 @@ const hosts = {
   lighter: /^(?:testnet-api\.lighter\.xyz|mainnet\.zklighter\.elliot\.ai)$/,
   paradex: /^api\.(?:prod|testnet)\.paradex\.trade$/,
   hyperliquid: /^api\.hyperliquid(?:-testnet)?\.xyz$/,
+  hyperliquidspot: /^api\.hyperliquid(?:-testnet)?\.xyz$/,
   okx: /^(?:www|openapi|eea)\.okx\.com$/,
   blofin: /^(?:openapi|demo-trading-openapi)\.blofin\.com$/,
   apexomni: /^(?:testnet\.)?omni\.apex\.exchange$/,
@@ -209,6 +211,30 @@ export function venueMarketRules(venue, records, market) {
         match = (row) => row.name === market.id || (typeof row.name === 'string' && request.dex && `${request.dex}:${row.name}` === market.id);
         // Official MinTradeNtl defines $10 for perps; never apply it to spot.
         rule = (row) => known(10, decimalStep(row.szDecimals), decimalStep(row.szDecimals)); break;
+      }
+      case 'hyperliquidspot': {
+        if (method !== 'POST' || path !== '/info' || market.quote !== 'USDC') continue;
+        let request;
+        try { request = JSON.parse(record.requestBody); } catch { continue; }
+        if (request?.type !== 'spotMetaAndAssetCtxs') continue;
+        result = unknown();
+        if (!Array.isArray(payload)) continue;
+        const meta = payload[0];
+        rows = array(meta?.universe).filter((row) => row?.name === market.id);
+        match = () => true;
+        rule = (row) => {
+          if (array(meta.universe).filter((candidate) => candidate?.index === row.index).length !== 1 ||
+            !Number.isSafeInteger(row.index) || row.index < 0 ||
+            (row.name.startsWith('@') && row.name !== `@${row.index}`) ||
+            !Array.isArray(row.tokens) || row.tokens.length !== 2 ||
+            row.tokens.some((index) => !Number.isSafeInteger(index) || index < 0) || row.tokens[0] === row.tokens[1]) return unknown();
+          const base = array(meta.tokens).filter((token) => token?.index === row.tokens[0]);
+          const quote = array(meta.tokens).filter((token) => token?.index === row.tokens[1]);
+          if (base.length !== 1 || quote.length !== 1 || base[0].name !== market.base || quote[0].name !== market.quote) return unknown();
+          const step = decimalStep(base[0].szDecimals);
+          // MinTradeSpotNtl is 10 quote tokens; only USDC is dollar-bounded here.
+          return known(10, step, step);
+        }; break;
       }
       case 'okx':
         if (method !== 'GET' || path !== '/api/v5/public/instruments' || !code(payload.code)) continue;
