@@ -496,3 +496,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Phemex late cancel repair: final four | Source CLEAR; correctness green; direct overseer landing GO | Before retiring Phemex’s four commandless late-cancel request holdouts. | [RUST_PHEMEX_LATE_REPAIR_CONTEXT.md](RUST_PHEMEX_LATE_REPAIR_CONTEXT.md) |
 
 | Keyless Session serial Plans | Plan and originals; source held | Before admitting a credential-free Session-authenticated serial root or changing SerialPolicy credential optionality. | [RUST_KEYLESS_SERIAL_SESSION.md](RUST_KEYLESS_SERIAL_SESSION.md) |
+| Polymarket trading and signing on managed authority | Plan; engine prerequisites and the P6b ruling pending | Before moving Polymarket L2 or EIP-712 signing or its trading terminals. | [RUST_POLYMARKET_TRADING_SIGNING.md](RUST_POLYMARKET_TRADING_SIGNING.md) |
