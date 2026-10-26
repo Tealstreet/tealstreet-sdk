@@ -1639,21 +1639,47 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "bitunix")]
-        "bitunix" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "bitunix" => {
+            // Empty public placeholders are no credential (as WEEX).
+            if [&options.key, &options.secret]
+                .iter()
+                .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Bitunix credentials belong in signer setup, not engine options",
+                ));
+            }
+            let mut identities = options.signing.take().unwrap_or_default();
+            // Setup trims; whitespace-only material is absent, never an empty key.
+            identities.primary = identities.primary.filter(|identity| {
+                !identity.credential.0.is_empty()
+                    && identity.signing_ref().is_ok_and(|key| !key.0.is_empty())
+            });
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if let Some(primary) = &identities.primary {
+                primary.validate().map_err(invalid)?;
+            }
+            let registered = identities.clone();
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
+            let mut engine = Engine::new(
                 BitunixFutures::new(BitunixOptions {
-                    read_credentials: options.read_credentials.take(),
+                    read_credentials: identities.secondary,
+                    credentials: identities.primary,
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "backpack")]
         "backpack" => {
             // Transitional dual custody (RUST_BACKPACK_SIGNER_ADMISSION.md, option

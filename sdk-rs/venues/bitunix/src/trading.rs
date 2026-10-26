@@ -88,6 +88,19 @@ pub struct Request {
     pub command: u32,
     call: Call,
 }
+#[cfg(test)]
+impl Request {
+    /// A trading-job request for selection controls, independent of its method.
+    pub(crate) fn leverage_probe(command: u32) -> Self {
+        Self {
+            command,
+            call: Call::Leverage {
+                symbol: "BTCUSDT".into(),
+                value: 10.,
+            },
+        }
+    }
+}
 enum Call {
     Place {
         clients: Vec<String>,
@@ -281,7 +294,7 @@ fn split_quantities(
 
 impl BitunixFutures {
     fn reject(&self, cx: &mut Cx<'_, Pending>, command: u32, error: String) {
-        let kind = if self.credentials.is_none() {
+        let kind = if !self.slots.has_primary() {
             ErrorKind::AuthInvalid
         } else {
             ErrorKind::InvalidInput
@@ -351,7 +364,7 @@ impl BitunixFutures {
             | Command::SetPositionMode { command, .. } => *command,
             _ => return,
         };
-        if self.credentials.is_none() {
+        if !self.slots.has_primary() {
             self.reject(cx, id, "Bitunix credentials required".into());
             return;
         }

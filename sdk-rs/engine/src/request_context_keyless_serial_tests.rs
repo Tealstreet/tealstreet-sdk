@@ -201,6 +201,9 @@ mod keyless_serial {
         }
     }
     impl Venue for Probe {
+        fn http_mutation_barriers() -> bool {
+            true
+        }
         type Pending = Pending;
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
             let intent =

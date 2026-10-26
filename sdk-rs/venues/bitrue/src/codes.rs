@@ -20,15 +20,23 @@ pub const BITRUE: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
+        // Insufficient balance: a business refusal, as native classified it.
         Row {
             key: Key::Int(-2017),
-            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },
     ],
     success: &[Key::Int(0)],
     unlisted: Verdict::Unknown(None),
-    status: &[],
+    // Bitrue futures API "HTTP Return Codes": 403 is the WAF limit and 429 a
+    // request-rate limit, both before execution; 401 keeps native's
+    // unauthenticated refusal.
+    status: &[
+        (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+        (403, Verdict::Refused(ErrorKind::AuthPermission)),
+        (429, Verdict::Refused(ErrorKind::RateLimited)),
+    ],
 };
 
 #[derive(serde::Deserialize)]
