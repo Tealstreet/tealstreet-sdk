@@ -5159,11 +5159,15 @@ impl<V: Venue> Engine<V> {
     /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        self.flush_keyless_session_roots(now);
         if self.io.core.request_contexts.has_plans() {
             self.flush_live_http_plans(now);
         }
         // Bearer fences first, then parked Slots (which drain fences per pass).
         self.flush_bearer_fences(now);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        self.flush_keyless_session_roots(now);
         // Last, at every outer Plan flush, including after the final Plan
         // sealed: parked Slots whose Session ended or whose Plan sealed.
         self.flush_plan_session_waits(now);

@@ -249,6 +249,11 @@ impl<P> Cx<'_, P> {
         if !self.now.is_finite() {
             return Err(Error::Invalid);
         }
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        self.io
+            .core
+            .request_contexts
+            .validate_keyless_session(handle.owner())?;
         self.io.core.request_contexts.queue_preflight_ready(handle)
     }
 

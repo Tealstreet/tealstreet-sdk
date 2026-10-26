@@ -18,6 +18,10 @@ const CAPACITY: usize = 256;
 #[path = "local_setting.rs"]
 mod local_setting;
 
+#[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+#[path = "request_context_keyless_session.rs"]
+mod keyless_session;
+
 #[path = "session_context.rs"]
 pub(super) mod session;
 
