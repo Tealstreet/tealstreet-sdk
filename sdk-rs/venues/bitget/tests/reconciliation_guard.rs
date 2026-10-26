@@ -268,3 +268,56 @@ fn engine_re_asks_join_a_slow_census_that_still_releases() {
         h.done
     );
 }
+
+/// 4yjlw0 (#2282): a census whose Normal page predates the write must not
+/// release on its later, post-mark Protection/Trailing pages.
+#[test]
+fn a_census_whose_normal_page_predates_the_write_never_releases() {
+    let mut h = Harness::classic();
+    // A census is already out: its Normal page predates the write.
+    let normal = h.take("/orders-pending");
+    place(&mut h, 71);
+    let write = h.take("/batch-place-order");
+    h.event(Event::HttpFailed {
+        request: write.id,
+        error: "response lost after acceptance",
+    });
+    // The Normal page answers (served before the POST); later pages are post-mark.
+    h.reply(
+        normal.id,
+        200,
+        r#"{"code":"00000","data":{"entrustedList":[]}}"#,
+    );
+    for path in ["planType=profit_loss", "planType=track_plan"] {
+        if h.requests.iter().any(|r| r.url.contains(path)) {
+            let body = if path.contains("track") {
+                r#"{"code":"00000","data":[]}"#
+            } else {
+                r#"{"code":"00000","data":{"entrustedList":[]}}"#
+            };
+            h.respond(path, 200, body);
+        }
+    }
+    h.failures.clear();
+    place(&mut h, 72);
+    assert!(
+        fenced(&h, 72),
+        "a census straddling the write never releases: {:?}",
+        h.done
+    );
+    // A census wholly after the write follows, and it releases.
+    assert!(
+        h.requests.iter().any(|r| r.url.contains("/orders-pending")),
+        "a post-write census follows: {:?}",
+        h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
+    place(&mut h, 73);
+    assert!(
+        h.requests
+            .iter()
+            .any(|r| r.url.contains("/batch-place-order")),
+        "the post-write census releases: {:?}",
+        h.done
+    );
+}
