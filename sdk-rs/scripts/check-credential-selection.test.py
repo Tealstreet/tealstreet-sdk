@@ -55,6 +55,9 @@ class CredentialSelectionBan(unittest.TestCase):
             'path_module_inside_crate': {'src/lib.rs': '#[path = "inner/wire.rs"] mod wire;\n' + P + FIELD + USE,
                                          'src/inner/wire.rs': '#[derive(Default)]\npub struct Wire { a: u8 }\n'},
             'std_default_import': 'use std::default::Default;\n' + P + FIELD + USE,
+            # A value-namespace fn named like a root binds no path root.
+            'fn_named_like_serde_root': P + '#[derive(serde::Deserialize)]\npub struct W { a: u8 }\n'
+                                        'fn serde(error: u8) -> u8 { error }\n' + FIELD + USE,
             'impl_only_workspace_macro': P + FIELD + 'safe_cex_crypto::redacted_debug!(Options);\n'
                 '#[derive(Clone, Debug, serde::Deserialize)]\n#[serde(default)]\npub struct Wire { a: u8 }\n'
                 'fn g() { assert!(true); format!("x"); }\n' + USE,
@@ -135,6 +138,8 @@ class CredentialSelectionBan(unittest.TestCase):
             'aliased_core_root': 'use foreign as core;\nuse core::default::Default;\n#[derive(Default)]\npub struct W;\n'
                                  + P + FIELD + USE,
             'local_std_module': 'mod std { pub mod default { pub use foreign::Default; } }\n' + P + FIELD + USE,
+            'mod_named_like_serde_root': P + '#[derive(serde::Deserialize)]\npub struct W { a: u8 }\n'
+                                         'mod serde {}\n' + FIELD + USE,
         }
         with tempfile.TemporaryDirectory() as directory:
             try:
