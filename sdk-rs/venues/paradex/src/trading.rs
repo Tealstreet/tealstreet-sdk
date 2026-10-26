@@ -116,7 +116,12 @@ impl Job {
         {
             error.outcome = None;
         }
-        error
+        // Accepted orders stay visible beside the failure.
+        if self.results.is_empty() {
+            error
+        } else {
+            error.partial_ids(&self.results)
+        }
     }
 }
 struct Preparation {
@@ -808,7 +813,14 @@ impl Trading {
             );
         } else {
             let state = self.jobs.remove(&job).unwrap();
-            if state.errors.is_empty() || (state.placement && !state.results.is_empty()) {
+            // An accepted placement reports success only when no leg's outcome is
+            // unknown; a lost request may have taken effect.
+            let unknown = state
+                .errors
+                .iter()
+                .any(|e| e.outcome == Some(Outcome::Unknown));
+            if state.errors.is_empty() || (state.placement && !state.results.is_empty() && !unknown)
+            {
                 let result = if state.placement {
                     serde_json::to_string(&state.results).map_err(|e| e.to_string())
                 } else {
@@ -987,14 +999,21 @@ impl Trading {
         self.complete(cx, account, request, Err(error), false);
     }
     /// Failed before it was sent: authentication or signing never completed.
-    pub fn on_unsent(
+    /// Refused before transport with the account's own typed reason.
+    pub fn on_refused(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         account: &mut Account,
         request: Request,
-        error: &str,
+        error: VenueError,
     ) {
-        self.complete(cx, account, request, Err(not_sent(error)), true);
+        self.complete(
+            cx,
+            account,
+            request,
+            Err(error.outcome(Outcome::NotSent)),
+            true,
+        );
     }
     pub fn on_sign_failed(
         &mut self,
@@ -1066,6 +1085,8 @@ impl Trading {
                         {
                             job.operations.pop_front();
                         }
+                        job.errors.push(error);
+                    } else if error.outcome == Some(Outcome::Unknown) {
                         job.errors.push(error);
                     }
                 } else {
