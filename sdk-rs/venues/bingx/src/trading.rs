@@ -4,6 +4,10 @@
 use crate::Pending;
 #[path = "trading/context.rs"]
 mod context;
+
+/// BingX key refusals (common codes): bad signature, key without the permission,
+/// incorrect key, IP not whitelisted. Reads and writes share this one list.
+pub(crate) const KEY_REFUSALS: [i64; 4] = [100001, 100004, 100413, 100419];
 use crate::sign::{Credentials, Params};
 use context::{Entry, SERIAL, TABLE};
 use safe_cex_engine::classify::{Intent, Native, NativeCode, Verdict, WriteFact};
