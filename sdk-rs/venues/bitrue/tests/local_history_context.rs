@@ -162,6 +162,9 @@ fn local_queries(keyed: bool) -> Vec<Query> {
     }
     q
 }
+fn drain(e: &mut Engine<Probe>, now: f64) -> std::vec::IntoIter<Action> {
+    safe_cex_engine::test_support::prepared_actions(e, now).into_iter()
+}
 fn query(e: &mut Engine<Probe>, now: f64, q: Query) -> Vec<Action> {
     e.handle(
         now,
@@ -170,7 +173,7 @@ fn query(e: &mut Engine<Probe>, now: f64, q: Query) -> Vec<Action> {
             query: q,
         }),
     );
-    e.drain_actions().collect()
+    drain(e, now).collect()
 }
 fn failure(a: &[Action]) -> &VenueError {
     assert_eq!(
@@ -290,7 +293,7 @@ fn saturated_genuine_roots_refuse_local_work_without_numeric_fallback_and_recove
                 symbols: vec!["saturate".into()],
             }),
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(drain(&mut e, 100.).next().is_none());
         assert_eq!(e.venue().held.len(), 256);
         for _ in 0..270 {
             for q in local_queries(keyed) {
@@ -306,7 +309,7 @@ fn saturated_genuine_roots_refuse_local_work_without_numeric_fallback_and_recove
             100.,
             Event::Command(Command::SetTickerSymbols { symbols: vec![] }),
         );
-        assert!(e.drain_actions().next().is_none());
+        assert!(drain(&mut e, 100.).next().is_none());
         assert!(e.venue().held.is_empty());
         let a = query(&mut e, 100., orders());
         assert_eq!(failure(&a).kind, Some(ErrorKind::Unsupported));
@@ -394,7 +397,10 @@ fn valid_signed_fills_preserve_aliases_flooring_and_clamped_native_limit() {
                 },
             },
         );
-        let a = e.drain_actions().collect::<Vec<_>>();
+        // The managed request's own timers clear beside its one terminal.
+        let a = drain(&mut e, 100.)
+            .filter(|a| !matches!(a, Action::ClearTimer { .. }))
+            .collect::<Vec<_>>();
         assert_eq!(a.len(), 1);
         assert!(
             matches!(&a[0],Action::Notice(Notice::CommandDone{command:71,result})if result=="[]")
