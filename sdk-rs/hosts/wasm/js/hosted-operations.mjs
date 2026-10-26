@@ -57,7 +57,7 @@ function role(value, slot) {
   if (value.kind === 'read' || value.kind === 'primaryRead') {
     const keys = value.kind === 'read' ? ['kind','scope'] : ['kind','scope','reason'];
     if (!exact(value,keys) || value.scope !== null && !scopes.has(value.scope)) throw refused();
-    if (value.kind === 'primaryRead' && (!['clientOrderLookup','postUnknownOrderRead','degradedRead','catalog','history'].includes(value.reason) || slot !== 'primary')) throw refused();
+    if (value.kind === 'primaryRead' && (!['clientOrderLookup','postUnknownOrderRead','degradedRead','catalog','history','keyPermissions'].includes(value.reason) || slot !== 'primary')) throw refused();
   } else if (!['mutation','sessionAuth'].includes(value.kind) || !exact(value,['kind']) || slot !== 'primary') throw refused();
 }
 function meta(value) {

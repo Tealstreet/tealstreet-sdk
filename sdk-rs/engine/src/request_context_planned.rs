@@ -1197,12 +1197,14 @@ impl<P> Cx<'_, P> {
         // in a Mutations domain is not paced.
         // A serial call carries its own resolved pacing.
         #[cfg(feature = "release-domains")]
-        let pacing = match (body.serial.as_ref(), body.policy.pacing) {
-            (Some(serial), _) => serial.pacing(),
-            (None, Some(root)) if self.io.core.domain_paces(root) => {
-                self.io.core.domain_pacing(operation, None)?
-            }
-            (None, root) => root,
+        let pacing = match body.serial.as_ref() {
+            Some(serial) => serial.pacing(),
+            None if self.io.core.domain_paces(body.policy.pacing) => self
+                .io
+                .core
+                .domain_member(operation)
+                .and(body.policy.pacing),
+            None => body.policy.pacing,
         };
         #[cfg(all(feature = "serial-plans", not(feature = "release-domains")))]
         let pacing = body

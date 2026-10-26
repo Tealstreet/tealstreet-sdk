@@ -166,7 +166,7 @@ impl crate::engine::IoCore {
             return Ok(SerialCall { pacing, ..call });
         }
         #[cfg(feature = "release-domains")]
-        let root = root.filter(|root| !self.domain_paces(*root));
+        let root = root.filter(|root| !self.domain_paces(Some(*root)));
         let pacing = call.pacing.or(root);
         if pacing.is_some_and(|pacing| pacing.minimum_gap_ms != 0.) {
             return Err(Error::Invalid);
@@ -230,7 +230,7 @@ impl<P> Cx<'_, P> {
         #[cfg(not(feature = "release-domains"))]
         let pacing = policy.pacing;
         #[cfg(feature = "release-domains")]
-        let in_domain = pacing.is_some_and(|pacing| self.io.core.domain_paces(pacing));
+        let in_domain = self.io.core.domain_paces(pacing);
         #[cfg(not(feature = "release-domains"))]
         let in_domain = false;
         if !in_domain {
