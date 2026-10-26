@@ -116,7 +116,7 @@ fn refused(actions: &[Action], command: u32) {
     ));
 }
 
-fn unknown_then_stale_then_fresh(spot: bool) {
+fn unknown_then_stale_then_fresh(spot: bool, contaminated: bool) {
     let (mut engine, old_read) = boot(spot);
     let first = place(&mut engine, 2_000.0, 101, spot);
     let first = write(&first);
@@ -151,9 +151,37 @@ fn unknown_then_stale_then_fresh(spot: bool) {
     assert_ne!(old_read.id, fresh.id);
     refused(&place(&mut engine, 3_300.0, 103, spot), 103);
 
-    response(&mut engine, 3_400.0, &fresh, "[]");
+    let coin = if spot { "@1" } else { "BTC" };
+    let row = format!(
+        r#"{{"coin":"{coin}","oid":7,"side":"B","limitPx":"1","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}}"#
+    );
+    let (fresh, clean_at, retry_at) = if contaminated {
+        response(&mut engine, 3_400.0, &fresh, &format!("[{row},{row}]"));
+        let mut actions: Vec<_> = engine.drain_actions().collect();
+        let retry = place(&mut engine, 3_800.0, 105, spot);
+        refused(&retry, 105);
+        actions.extend(retry);
+        let next = actions
+            .into_iter()
+            .find_map(|action| match action {
+                Action::Http(request) if support::kind(&request) == "frontendOpenOrders" => {
+                    Some(request)
+                }
+                _ => None,
+            })
+            .expect("engine re-asks after a contaminated snapshot");
+        assert_ne!(fresh.id, next.id);
+        (next, 3_900.0, 4_300.0)
+    } else {
+        (fresh, 3_400.0, 3_800.0)
+    };
+    response(&mut engine, clean_at, &fresh, &format!("[{row}]"));
+    assert!(
+        engine.store().order("7").is_some(),
+        "publish before releasing"
+    );
     engine.drain_actions().for_each(drop);
-    let retry = place(&mut engine, 3_800.0, 104, spot);
+    let retry = place(&mut engine, retry_at, 104, spot);
     write(&retry);
     assert!(!retry.iter().any(|action| matches!(
         action,
@@ -195,10 +223,17 @@ fn repeated_reconcile_hooks_join_one_real_open_orders_read() {
 
 #[test]
 fn perps_unknown_placement_is_fenced_until_a_fresh_complete_read() {
-    unknown_then_stale_then_fresh(false);
+    unknown_then_stale_then_fresh(false, false);
 }
 
 #[test]
 fn spot_unknown_placement_is_fenced_until_a_fresh_complete_read() {
-    unknown_then_stale_then_fresh(true);
+    unknown_then_stale_then_fresh(true, false);
+}
+
+#[test]
+fn duplicate_rows_cannot_release_perps_or_spot_uncertainty() {
+    for spot in [false, true] {
+        unknown_then_stale_then_fresh(spot, true);
+    }
 }

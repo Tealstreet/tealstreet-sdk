@@ -981,6 +981,10 @@ impl Venue for Hyperliquid {
         true
     }
 
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.reconcile_order_scopes(cx, symbols);
     }

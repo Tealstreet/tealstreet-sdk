@@ -9949,7 +9949,10 @@ only a clean snapshot with zero rejected rows reports that scope reconciled;
 duplicate or malformed rows cannot release it. The engine's dispatch token
 keeps a pre-write read from releasing a newer uncertainty fence.
 
-The placement-fence opt-in still awaits the generic legacy-write Phase B of
-the engine fence fix. The two four-step venue controls currently fail at the
-post-Unknown retry assertion; their stale/fresh-read suffixes are not yet runtime
-proof. This slice adds no venue retry loop or write resend.
+Both products opt into `fence_uncertain_placements` on the engine's generic
+legacy-write Phase B. An Unknown placement or amend refuses overlapping new
+placements and amends as NotSent until a fresh clean read reconciles them.
+Cancel by ID remains available. The perps and Spot four-step controls were RED
+at the retry assertion before Phase B and now execute through stale-read
+refusal, fresh Store publication and a successful retry. Duplicate rows keep
+the fence standing. This slice adds no venue retry loop or write resend.
