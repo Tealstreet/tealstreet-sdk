@@ -29,6 +29,12 @@ pub(super) struct Serial {
     pub(super) condition: Option<(u64, f64)>,
     #[cfg(feature = "condition-waits")]
     pub(super) waits: u64,
+    /// A settle wait left no next entry: nothing more can be issued, and its
+    /// release only readies the Plan (once, at the stored time) for `done_plan`.
+    #[cfg(feature = "condition-waits")]
+    pub(super) settled: bool,
+    #[cfg(feature = "condition-waits")]
+    pub(super) settle_ready: Option<f64>,
 }
 
 /// How a continuation's next call becomes eligible.
@@ -277,6 +283,10 @@ impl<P> Cx<'_, P> {
                 condition: None,
                 #[cfg(feature = "condition-waits")]
                 waits: 0,
+                #[cfg(feature = "condition-waits")]
+                settled: false,
+                #[cfg(feature = "condition-waits")]
+                settle_ready: None,
             }),
         )?;
         let slot = self
@@ -375,6 +385,10 @@ impl crate::engine::CoreCx<'_> {
             .request_contexts
             .validate_plan(plan, self.now)?;
         let serial = body.serial.as_ref().ok_or(Error::Invalid)?;
+        #[cfg(feature = "condition-waits")]
+        if serial.settled {
+            return Err(Error::Invalid);
+        }
         Serial::validate_auth(next, &body.policy.credential, serial.has_session_root())?;
         let index = body.schedule.ordinal(slot)?;
         let call = body.entries[index]
