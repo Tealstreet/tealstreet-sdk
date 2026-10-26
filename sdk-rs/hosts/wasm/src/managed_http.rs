@@ -461,6 +461,7 @@ mod sign_meta {
                             PrimaryReason::DegradedRead => "degradedRead",
                             PrimaryReason::Catalog => "catalog",
                             PrimaryReason::History => "history",
+                            PrimaryReason::KeyPermissions => "keyPermissions",
                         },
                         scope: scope(s),
                     },
@@ -541,6 +542,7 @@ mod sign_meta_wire_tests {
             (PrimaryReason::DegradedRead, "degradedRead"),
             (PrimaryReason::Catalog, "catalog"),
             (PrimaryReason::History, "history"),
+            (PrimaryReason::KeyPermissions, "keyPermissions"),
         ] {
             assert_eq!(
                 wire(
