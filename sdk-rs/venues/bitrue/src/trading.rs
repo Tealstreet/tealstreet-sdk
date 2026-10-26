@@ -1079,6 +1079,10 @@ impl Bitrue {
         }
         self.trade_next(cx);
     }
+    /// A protective placement waits on a census, or a census tail is queued.
+    pub(crate) fn census_pending(&self) -> bool {
+        self.trading.census.is_some() || !self.account.census_due.is_empty()
+    }
     /// The command whose protective placement this order read would certify.
     pub(crate) fn census_owner(&self, symbol: &str, revision: u64) -> Option<CommandId> {
         self.trading.census.as_ref().and_then(|(plan, minimum)| {
