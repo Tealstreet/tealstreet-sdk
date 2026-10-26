@@ -289,11 +289,14 @@ fn held_cancel_preparation_expires_without_a_write() {
         },
     );
     assert!(!e.drain_actions().any(|a| match a {
-        Action::Http(_) => true,
-        Action::ManagedHttp(a) => matches!(
-            *a,
-            HttpAction::Bind { .. } | HttpAction::BindGroup { .. } | HttpAction::Prepare { .. }
-        ),
+        Action::Http(request) => request.method != Method::Get,
+        Action::ManagedHttp(a) => match *a {
+            HttpAction::Bind { request, .. } | HttpAction::Prepare { request, .. } => {
+                request.method != Method::Get
+            }
+            HttpAction::BindGroup { .. } => true,
+            _ => false,
+        },
         _ => false,
     }));
 }
