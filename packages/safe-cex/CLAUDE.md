@@ -44,7 +44,7 @@ package setting; measured performance evidence covers WASM.
 
 Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
 The construction-rules `dispatchSigning` flag selects provider setup, currently
-Binance's four aliases, Bybit's five aliases, WEEX (hosted admission disabled)
+Binance's four aliases, Bybit's five aliases, WEEX (hosted admission disabled),
 AsterDEX and Lighter. AsterDEX first maps its account through `asterdexSignerSetup.ts`
 (resolved API version, hex V3 wallet keys, read agent aliasing the primary
 wallet); native setup and `asterdex-signer-setup.golden.json` pin the same
