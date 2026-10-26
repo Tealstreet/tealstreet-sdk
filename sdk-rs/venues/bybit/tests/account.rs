@@ -3162,6 +3162,96 @@ fn a_reconcile_during_an_in_flight_order_read_issues_its_own_read() {
     assert!(h.engine.store().order("abandoned-order").is_none());
 }
 
+/// P1 fence: an Unknown placement refuses a retry on its symbol NotSent until a
+/// fresh, clean order read reconciles it. Bybit has no placement scope, so the
+/// engine marks it only from the Unknown write fact (fe7's Phase B); until then
+/// this stays RED at the first retry.
+#[test]
+fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
+    let mut h = ready();
+    let realtime = |h: &Harness| -> Vec<_> {
+        h.requests
+            .iter()
+            .filter(|r| r.url.contains("/v5/order/realtime"))
+            .map(|r| r.id)
+            .collect()
+    };
+    const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[],"nextPageCursor":""}}"#;
+    // An earlier Unknown on ETH leaves its reconcile read out.
+    place(
+        &mut h,
+        30,
+        vec![limit("ETHUSDT", OrderSide::Buy, 0.1, 3000.0)],
+    );
+    let eth = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: eth,
+        error: "connection reset",
+    });
+    let older = realtime(&h);
+    assert!(!older.is_empty(), "ETH's reconcile read");
+    // The BTC placement's answer is lost: it may rest, so it seals Unknown.
+    place(
+        &mut h,
+        31,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let btc = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: btc,
+        error: "connection reset",
+    });
+    assert!(
+        h.result(31).is_some_and(Result::is_err),
+        "the placement seals Unknown"
+    );
+    let fresh: Vec<_> = realtime(&h)
+        .into_iter()
+        .filter(|id| !older.contains(id))
+        .collect();
+    assert!(!fresh.is_empty(), "BTC's own reconcile read");
+    let fenced = |h: &Harness, command| {
+        h.result(command)
+            .is_some_and(|result| result.as_ref().is_err_and(|e| e.contains("uncertain")))
+            && !h.has_request("/v5/order/create-batch")
+    };
+    // 1. A user retry on BTC is refused NotSent and sends nothing.
+    place(
+        &mut h,
+        32,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    assert!(fenced(&h, 32), "a retry is fenced: {:?}", h.result(32));
+    // 2. The older read, which predates the BTC write, answers late: still fenced.
+    for id in older {
+        h.reply(id, 200, EMPTY);
+    }
+    place(
+        &mut h,
+        33,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    assert!(
+        fenced(&h, 33),
+        "a stale read never releases: {:?}",
+        h.result(33)
+    );
+    // 3. BTC's fresh clean read releases it, and a retry places again.
+    for id in fresh {
+        h.reply(id, 200, EMPTY);
+    }
+    place(
+        &mut h,
+        34,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    assert!(
+        h.has_request("/v5/order/create-batch"),
+        "a fresh read clears the fence: {:?}",
+        h.result(34)
+    );
+}
+
 /// A refused snapshot page is re-read once, re-signed with Bybit's corrected
 /// clock, through the classifier (a streamed refusal carries no list).
 #[test]
