@@ -868,6 +868,17 @@ rejection may enter the existing recovery-write path; no automatic caller retry
 is introduced. This extends B9's field-based integration to Bitunix, with no
 new application method or error shape.
 
+#### Late-cancel repair beside a foreground cancel-all (#2181)
+
+An automatic late-cancel repair and a user cancel-all on the same symbol now run
+side by side, as native venues do; only an explicit-ID cancel of the same order
+still conflicts. No order IDs are captured from a cancel-all. If a newer
+cancel-all and an in-flight repair cancel the same order, the loser gets the
+provider's refusal: the repair settles Rejected and the venue emits its usual
+manual-cancel error, exactly as native. A repair whose send is refused before
+release now settles once as NotSent and releases its lock, instead of stalling the
+venue's late-cancel queue. No caller method, event or error shape changes.
+
 #### Events and worker protocol
 
 | Change | tealstreet-next file:line | Old usage | New usage | Impact |
@@ -3572,12 +3583,16 @@ projects every outcome.
 - **Store effects.** Creating rows, Canceling marks and the order revision bump
   now apply per call, after admission and before release, rather than all at job
   start. Commit effects still apply only after a successful terminal.
-- **W1-to-W2 interim (hedged isolated leverage).** The long leg goes first and the
-  short leg only after long is Accepted, at the cost of one extra round trip. A
-  long 503 or refusal means short is never sent. A short refusal or 503 after
-  long keeps long's effect (outcome None, or Unknown for the 503), applies no
-  commit and refreshes the account as before. W2's barrier restores native
-  parallel release.
+- **Hedged isolated leverage: serial, permanent (overseer ruling (b),
+  2026-10-26).** The long leg goes first and the short leg only after long is
+  Accepted, at the cost of one extra round trip. A long 503 or refusal means
+  short is never sent. A short refusal or 503 after long keeps long's effect
+  (outcome None, or Unknown for the 503), applies no commit and refreshes the
+  account as before. This replaces native's parallel release for good. The W2
+  barrier join (#2179, closed) linked `http-mutation-barriers` into every
+  monomorphized `Engine<V>` of the combined bundle (+395,294 combined, over
+  budget). Parallel release returns only if the per-venue feature-runtime
+  investigation produces a per-venue gate.
 - **Unchanged.** Paths, bodies, batch sizes (20/10/1), the 1000-lot split, the
   350/1000 ms pauses, client-ID rules, broker attribution, receipts and result
   JSON.

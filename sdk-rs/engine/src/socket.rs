@@ -57,6 +57,12 @@ pub struct Supervisor {
     phase: Phase,
     #[cfg(feature = "managed-sockets")]
     snapshot_deadline: Option<f64>,
+    #[cfg(feature = "socket-native-timing")]
+    initial_payload_deadline: Option<f64>,
+    #[cfg(feature = "socket-native-timing")]
+    stable_anchor: crate::socket_lifecycle::StableAnchor,
+    #[cfg(feature = "socket-native-timing")]
+    stable_since: f64,
     since: f64,
     received: f64,
     idle_enabled: bool,
@@ -91,6 +97,12 @@ impl Supervisor {
             phase: Phase::Stopped,
             #[cfg(feature = "managed-sockets")]
             snapshot_deadline: None,
+            #[cfg(feature = "socket-native-timing")]
+            initial_payload_deadline: None,
+            #[cfg(feature = "socket-native-timing")]
+            stable_anchor: crate::socket_lifecycle::StableAnchor::Ready,
+            #[cfg(feature = "socket-native-timing")]
+            stable_since: 0.,
             since: 0.0,
             received: 0.0,
             idle_enabled: true,
@@ -111,6 +123,10 @@ impl Supervisor {
         }
         self.phase = Phase::Connecting;
         self.since = cx.now;
+        #[cfg(feature = "socket-native-timing")]
+        {
+            self.stable_since = cx.now;
+        }
         self.received = cx.now;
         self.arm(cx);
     }
@@ -125,6 +141,10 @@ impl Supervisor {
             Phase::Ready
         };
         self.since = cx.now;
+        #[cfg(feature = "socket-native-timing")]
+        {
+            self.stable_since = cx.now;
+        }
         self.received = cx.now;
         self.next_ping = self.config.ping_interval_ms.map(|ms| cx.now + ms);
         self.rearm(cx);
@@ -174,7 +194,13 @@ impl Supervisor {
     pub fn received(&mut self, now: f64) {
         if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
             self.received = now;
-            if self.phase == Phase::Ready && now - self.since >= self.config.stable_ms {
+            let since = self.since;
+            #[cfg(feature = "socket-native-timing")]
+            let since = match self.stable_anchor {
+                crate::socket_lifecycle::StableAnchor::Ready => since,
+                crate::socket_lifecycle::StableAnchor::Open => self.stable_since,
+            };
+            if self.phase == Phase::Ready && now - since >= self.config.stable_ms {
                 self.failures = 0;
             }
         }
@@ -212,6 +238,12 @@ impl Supervisor {
     /// delayed timer delivery cannot revive an expired connection. This query
     /// does not consume the timer or change phase.
     pub fn expired(&self, now: f64) -> Option<Timeout> {
+        #[cfg(feature = "socket-native-timing")]
+        if matches!(self.phase, Phase::Authenticating | Phase::Ready)
+            && self.initial_payload_deadline.is_some_and(|at| now >= at)
+        {
+            return Some(Timeout::Auth);
+        }
         #[cfg(feature = "managed-sockets")]
         if matches!(self.phase, Phase::Connecting | Phase::Authenticating)
             && self.snapshot_deadline.is_some_and(|at| {
@@ -241,6 +273,31 @@ impl Supervisor {
             }
             _ => None,
         }
+    }
+
+    #[cfg(feature = "socket-native-timing")]
+    pub(crate) fn set_stable_anchor(&mut self, anchor: crate::socket_lifecycle::StableAnchor) {
+        assert!(self.phase == Phase::Stopped);
+        self.stable_anchor = anchor;
+    }
+
+    #[cfg(feature = "socket-native-timing")]
+    pub(crate) fn arm_initial_payload(&mut self, now: f64, timeout: f64) {
+        assert!(
+            self.phase == Phase::Connecting && (now + timeout).is_finite() && now + timeout > now
+        );
+        self.initial_payload_deadline = Some(now + timeout);
+    }
+
+    #[cfg(feature = "socket-native-timing")]
+    pub(crate) fn initial_payload_pending(&self) -> bool {
+        self.initial_payload_deadline.is_some()
+            && matches!(self.phase, Phase::Authenticating | Phase::Ready)
+    }
+
+    #[cfg(feature = "socket-native-timing")]
+    pub(crate) fn complete_initial_payload(&mut self) {
+        self.initial_payload_deadline = None;
     }
 
     #[cfg(feature = "managed-sockets")]
@@ -313,6 +370,10 @@ impl Supervisor {
             cx.clear_timer(timer);
         }
         self.watch_at = None;
+        #[cfg(feature = "socket-native-timing")]
+        {
+            self.initial_payload_deadline = None;
+        }
         #[cfg(feature = "managed-sockets")]
         {
             self.snapshot_deadline = None;
@@ -390,6 +451,11 @@ impl Supervisor {
         };
         #[cfg(feature = "managed-sockets")]
         let deadline = match (deadline, self.snapshot_deadline) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        #[cfg(feature = "socket-native-timing")]
+        let deadline = match (deadline, self.initial_payload_deadline) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         };

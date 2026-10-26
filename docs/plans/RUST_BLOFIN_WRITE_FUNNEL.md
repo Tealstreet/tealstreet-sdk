@@ -31,8 +31,14 @@ BloFin's last 8 request-inventory entries, all in `trading.rs`.
   long is Accepted: one extra round trip, and a long failure means short is
   never sent. That's strictly more conservative. CALLERS records it as a W1-to-W2
   interim, and the READY note names it to the overseer.
-- **W2** (one PR, queued immediately after W1 lands): the barrier join, which
-  restores native parallel release. BloFin is the named first consumer of
+- **W2: CLOSED (overseer ruling (b), 2026-10-26).** The barrier join (#2179)
+  measured +395,294 on the combined bundle, over budget. Its feature compiled
+  the barrier runtime into every monomorphized `Engine<V>`, not just BloFin's.
+  W1's serial hedged join is the permanent shape. Parallel release can be
+  reopened only if the core investigation of per-venue feature runtime (owned
+  by claude-55ao7t) yields a per-venue gate. The cleared W2 plan and REDs stay on
+  the closed #2179 branch for that case. Originally queued right after W1 as the
+  barrier join restoring native parallel release. BloFin is the named first consumer of
   `RUST_PLAN_MUTATION_PREPARE_BARRIER.md`, whose engine side has landed with
   no venue using it yet. W2's scope and REDs are unchanged.
 
