@@ -13,6 +13,16 @@ members = [
     "safe-cex-types",
     "venues/*",
 ]
+# A bare `cargo build|test` never unifies the candle-cache serde_json features
+# into the port; those crates build only with `-p`.
+default-members = [
+    "crypto",
+    "engine",
+    "hosts/native",
+    "hosts/wasm",
+    "registry",
+    "venues/*",
+]
 
 [workspace.package]
 version = "0.1.0"

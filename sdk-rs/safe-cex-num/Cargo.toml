@@ -6,12 +6,12 @@ publish.workspace = true
 
 [dependencies]
 safe-cex-types.workspace = true
-indexmap = { version = "=2.14.2", features = ["serde"] }
+indexmap = { version = "2.14.2", features = ["serde"] }
 ryu-js = "1"
 serde.workspace = true
-serde_json = { version = "=1.0.152", features = ["float_roundtrip", "preserve_order", "arbitrary_precision", "raw_value"] }
-num-bigint = "=0.4.6"
-num-traits = "=0.2.19"
+serde_json = { version = "1.0.152", features = ["float_roundtrip", "preserve_order", "arbitrary_precision", "raw_value"] }
+num-bigint = "0.4.6"
+num-traits = "0.2.19"
 
 
 icu_collator = "=2.3.1"
@@ -28,4 +28,4 @@ icu_locale_fallback_data = "=2.3.0"
 workspace = true
 
 [dev-dependencies]
-trybuild = "=1.0.116"
+trybuild = "1.0.116"
