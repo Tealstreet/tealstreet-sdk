@@ -10071,7 +10071,8 @@ census without depending on periodic polling; a clean complete census releases.
 The fence census freshness proof is single-context for BingX's whole Orders
 snapshot and single-context per symbol for Phemex's activeList; Phemex clears
 only that symbol. BloFin spans pages and three families: every page retains
-the census-start order revision, and a new mark leaves reconcile_owed set.
+the census-start order revision and uncertainty generation. Only a new engine
+mark advances the generation; an ordinary re-ask does not.
 Either change blocks clearance and requires a new complete census. A real
 pre-mark first page/post-mark final family control is RED with both guards
 disabled, and green with them intact; ordinary re-asks still join the read.

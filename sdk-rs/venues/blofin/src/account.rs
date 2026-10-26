@@ -102,6 +102,7 @@ pub(crate) struct Account {
     orders_seeded: bool,
     /// A reconcile snapshot was requested while another was in flight.
     reconcile_owed: bool,
+    uncertainty_generation: u64,
     reporting_started: f64,
     startup_executions: VecDeque<Execution>,
     account_busy: bool,
@@ -224,6 +225,7 @@ pub enum Request {
         revision: u64,
         /// A Primary-signed reconcile snapshot: only it may clear an order fence.
         reconcile: bool,
+        uncertainty_generation: u64,
         failed: bool,
     },
 }
@@ -745,6 +747,14 @@ impl Blofin {
             true,
         );
     }
+    pub(crate) fn reconcile_uncertain_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !cx.reconcile_reask() {
+            self.account.uncertainty_generation =
+                self.account.uncertainty_generation.wrapping_add(1);
+        }
+        self.settle_retired_trade(cx);
+        self.reconcile_orders(cx);
+    }
     /// A Primary order snapshot that may clear an order fence; owed when
     /// another snapshot is in flight.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -773,6 +783,7 @@ impl Blofin {
                 sources: HashMap::new(),
                 revision: self.account.orders_revision,
                 reconcile,
+                uncertainty_generation: self.account.uncertainty_generation,
                 failed: false,
             },
         );
@@ -1471,6 +1482,7 @@ impl Blofin {
                 mut sources,
                 revision,
                 reconcile,
+                uncertainty_generation,
                 failed: false,
             } => {
                 if page_rows > 0 {
@@ -1488,6 +1500,7 @@ impl Blofin {
                                 sources,
                                 revision,
                                 reconcile,
+                                uncertainty_generation,
                                 failed: true,
                             },
                             "BloFin pending order pagination did not advance",
@@ -1507,6 +1520,7 @@ impl Blofin {
                             sources,
                             revision,
                             reconcile,
+                            uncertainty_generation,
                             failed: false,
                         },
                     );
@@ -1524,6 +1538,7 @@ impl Blofin {
                             sources,
                             revision,
                             reconcile,
+                            uncertainty_generation,
                             failed: false,
                         },
                     );
@@ -1661,9 +1676,12 @@ impl Blofin {
                         rows.extend(kept);
                         self.account.sources = sources;
                         cx.store.set_orders(rows);
-                        // A new mark after page one leaves reconcile_owed set.
-                        // Neither it nor a rejected row proves placement absence.
-                        if clean && reconcile && !self.account.reconcile_owed {
+                        // The last page's token cannot freshen a pre-mark first page.
+                        if clean
+                            && reconcile
+                            && uncertainty_generation == self.account.uncertainty_generation
+                        {
+                            self.account.reconcile_owed = false;
                             cx.orders_reconciled(None);
                         } else if reconcile {
                             self.account.reconcile_owed = true;
