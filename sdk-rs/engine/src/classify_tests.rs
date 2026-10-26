@@ -709,6 +709,16 @@ fn a_cdn_refusal_is_a_block_not_a_bad_key() {
             "a block waits like a rate limit"
         );
     }
+    // A venue auth error that merely names a CloudFront host is still the key.
+    let echoed = Response {
+        status: 403,
+        headers: "",
+        body: r#"{"error":"invalid api key","host":"d1234.cloudfront.net"}"#,
+    };
+    assert_eq!(
+        verdict(&TABLE, Intent::Place, Released::Response(&echoed), None),
+        Verdict::Unknown(Some(ErrorKind::AuthPermission))
+    );
     // Controls: a bare 403 is still the key, and native evidence still wins.
     assert_eq!(
         classify(403, None, Intent::Place),
