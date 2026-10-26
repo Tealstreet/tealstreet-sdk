@@ -30,11 +30,14 @@ fn wasm_start_initializes_real_local_provider_before_venue_start_once() {
             hosted_captures: Default::default(),
             inner: Box::new(inner),
         };
-        let actions: serde_json::Value = serde_json::from_str(&engine.start(100.)).unwrap();
+        let output = engine.start(100.);
+        let actions: Vec<serde_json::Value> = if output.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&output).unwrap()
+        };
         assert!(
             !actions
-                .as_array()
-                .unwrap()
                 .iter()
                 .any(|a| a["op"] == "sign" || a["op"] == "retireAddressSetup")
         );
@@ -42,8 +45,7 @@ fn wasm_start_initializes_real_local_provider_before_venue_start_once() {
             *observations.lock().unwrap(),
             vec![vec![Ok(ADDRESS), Ok(ADDRESS)]]
         );
-        let again: serde_json::Value = serde_json::from_str(&engine.start(101.)).unwrap();
-        assert_eq!(again, serde_json::json!([]));
+        assert_eq!(engine.start(101.), "");
         assert_eq!(observations.lock().unwrap().len(), 1);
     }
 }
