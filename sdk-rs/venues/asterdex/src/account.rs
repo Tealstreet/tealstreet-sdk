@@ -46,6 +46,9 @@ pub struct AccountState {
     last_balance: f64,
     positions_in_flight: bool,
     orders_in_flight: bool,
+    /// An uncertain write wants a read that starts after it; the in-flight
+    /// one predates it, so its completion starts the fresh read at once.
+    orders_requery: bool,
     balance_in_flight: bool,
     position_version: u64,
     mode_version: u64,
@@ -501,6 +504,15 @@ impl AsterDex {
                 settings: Vec::new(),
             }),
         );
+    }
+    /// A fresh authoritative order read for an uncertain write: now, or as
+    /// soon as the read already in flight (which predates it) completes.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.orders_in_flight {
+            self.account.orders_requery = true;
+        } else {
+            self.request_refresh_orders(cx);
+        }
     }
     pub(crate) fn request_refresh_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.orders_in_flight {
@@ -958,6 +970,9 @@ impl AsterDex {
                         cx.store.set_orders(rows);
                         cx.orders_reconciled(None);
                     }
+                }
+                if std::mem::take(&mut self.account.orders_requery) {
+                    self.request_refresh_orders(cx);
                 }
             }
         }

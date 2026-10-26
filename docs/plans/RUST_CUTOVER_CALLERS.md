@@ -9920,7 +9920,9 @@ Cancel by ID and cancel-all stay admitted, because neither can place;
 `fence_uncertain_cancel_all` keeps its own opt-out (Phemex). A venue opts in only
 when `reconcile_uncertain` starts the fresh read at once, so the fence is
 short-lived; without that hook the fence could hang, which is why the default is
-off. OKX opts in. Not covered yet: venues with no placement scope
+off. OKX opts in. AsterDEX opts in: its hook starts an open-orders read at once,
+or, when a read is already in flight (which predates the seal and cannot clear
+the fence), starts the fresh one as that read completes. Not covered yet: venues with no placement scope
 (`guard_pending_placements` or `guard_order_mutations` false: Bybit, Crypto.com,
 BingX, ApeX, Lighter), and amend roots whose replacement places
 (the zs5e83 audit, /tmp/codex-beta-plan-fence-audit/report.md).

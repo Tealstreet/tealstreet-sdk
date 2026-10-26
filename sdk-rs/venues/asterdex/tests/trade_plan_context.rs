@@ -385,7 +385,16 @@ fn a_released_gateway_failure_is_unknown_and_never_resent() {
     let sent = command(&mut e, place());
     let order = write(&sent, Method::Post, "/order").clone();
     let failed = answer(&mut e, &order, 503, "upstream timeout");
-    assert!(failed.requests.is_empty());
+    // Never resent; the only request is the fresh order read that reconciles it.
+    assert!(
+        failed
+            .requests
+            .iter()
+            .all(|r| r.url.contains("/openOrders")),
+        "{:?}",
+        failed.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    assert_eq!(failed.requests.len(), 1);
     let error = terminal(&failed).expect("one terminal").unwrap_err();
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
 }
@@ -396,7 +405,16 @@ fn a_transport_loss_after_release_is_unknown_and_never_resent() {
     let sent = command(&mut e, place());
     let order = write(&sent, Method::Post, "/order").clone();
     let failed = lost(&mut e, &order);
-    assert!(failed.requests.is_empty());
+    // Never resent; the only request is the fresh order read that reconciles it.
+    assert!(
+        failed
+            .requests
+            .iter()
+            .all(|r| r.url.contains("/openOrders")),
+        "{:?}",
+        failed.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    assert_eq!(failed.requests.len(), 1);
     let error = terminal(&failed).expect("one terminal").unwrap_err();
     assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
 }
@@ -505,4 +523,57 @@ fn a_v3_stp_read_signs_as_the_read_agent_and_a_write_as_the_primary() {
         query(&setting.url, "signer"),
         Some(primary_address.as_str())
     );
+}
+
+/// An Unknown placement fences its symbol: a retry is refused NotSent, a read
+/// that started before the seal cannot release it, and the fresh read the
+/// venue starts for it does.
+#[test]
+fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
+    let mut e = engine();
+    // A proven placement leaves an order read in flight from before the seal.
+    let sent = command(&mut e, place());
+    let order = write(&sent, Method::Post, "/order").clone();
+    let placed = answer(&mut e, &order, 200, r#"{"orderId":1}"#);
+    let stale = placed
+        .requests
+        .iter()
+        .find(|r| r.url.contains("/openOrders"))
+        .expect("a read after the placement")
+        .clone();
+    // A gateway failure seals the next placement Unknown.
+    let sent = command(&mut e, place());
+    let lost = write(&sent, Method::Post, "/order").clone();
+    let failed = answer(&mut e, &lost, 503, "upstream timeout");
+    let error = terminal(&failed).expect("one terminal").unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+    let retry = |e: &mut Engine<AsterDex>| command(e, place());
+    let refused = retry(&mut e);
+    assert!(
+        refused.requests.iter().all(|r| !r.url.contains("/order?")),
+        "no second placement"
+    );
+    let error = terminal(&refused).expect("one terminal").unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
+    assert!(error.legacy_text().contains("uncertain"), "{error:?}");
+    // The read started before the seal completes: still fenced.
+    let after_stale = answer(&mut e, &stale, 200, "[]");
+    let still = retry(&mut e);
+    assert_eq!(
+        terminal(&still).expect("one terminal").unwrap_err().outcome,
+        Some(Outcome::NotSent)
+    );
+    // The venue's fresh read starts at once and releases the fence.
+    let fresh = failed
+        .requests
+        .iter()
+        .chain(&refused.requests)
+        .chain(&after_stale.requests)
+        .chain(&still.requests)
+        .find(|r| r.url.contains("/openOrders") && r.id != stale.id)
+        .expect("a fresh order read without waiting for a timer")
+        .clone();
+    answer(&mut e, &fresh, 200, "[]");
+    let admitted = retry(&mut e);
+    write(&admitted, Method::Post, "/order");
 }
