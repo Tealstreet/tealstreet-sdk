@@ -5530,6 +5530,68 @@ mod tests {
 
     #[cfg(feature = "order-locks")]
     #[test]
+    fn a_managed_unknown_placement_fences_its_symbol_until_reconciled() {
+        let place = |command, symbol: &str| Command::PlaceOrders {
+            command,
+            orders: vec![
+                serde_json::from_str(&format!(
+                    r#"{{"symbol":"{symbol}","type":"limit","side":"buy","amount":1,"price":1}}"#
+                ))
+                .unwrap(),
+            ],
+        };
+        let (mut engine, _) = start(Probe::default());
+        engine.io.core.order_locks = crate::order_locks::OrderLocks::fencing_placements(true);
+        // A released managed placement that seals Unknown (a lost 503 answer).
+        seal_uncertain(
+            &mut engine,
+            &place(7, "BTCUSDT"),
+            6.,
+            VenueError::new("lost"),
+        );
+        assert!(engine.io.core.order_locks.uncertain("BTCUSDT"));
+        assert_eq!(
+            engine.venue.reconciles,
+            vec![Some(vec!["BTCUSDT".to_owned()])],
+            "the Unknown seal asks for its reconcile at once"
+        );
+        let locks = &mut engine.io.core.order_locks;
+        assert_eq!(
+            locks.acquire(&place(8, "BTCUSDT"), &engine.store, false),
+            Err(crate::order_locks::Refusal::Uncertain(8)),
+            "a retry cannot duplicate the possibly placed order"
+        );
+        assert!(
+            locks
+                .acquire(&place(9, "ETHUSDT"), &engine.store, false)
+                .is_ok()
+        );
+        assert!(
+            locks
+                .acquire(
+                    &Command::CancelOrders {
+                        command: 10,
+                        ids: vec!["resting".into()],
+                    },
+                    &engine.store,
+                    false,
+                )
+                .is_ok(),
+            "a cancel is still admitted"
+        );
+        // A fresh read for the symbol, after the write, releases the fence.
+        let token = locks.token();
+        locks.reconciled(Some("BTCUSDT"), token);
+        assert!(!locks.uncertain("BTCUSDT"));
+        assert!(
+            locks
+                .acquire(&place(11, "BTCUSDT"), &engine.store, false)
+                .is_ok()
+        );
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
     fn unlocked_uncertain_writes_full_read_and_waits_are_bounded() {
         // A managed write the order lock never held still reconciles in full.
         let (mut engine, _) = start(Probe::default());
@@ -5800,9 +5862,17 @@ mod tests {
             6.,
             VenueError::new("lost"),
         );
+        // A second placement on the uncertain symbol is now refused at entry; a
+        // routed cancel there is still admitted and its uncertain seal asks again.
         seal_uncertain(
             &mut engine,
-            &place(8, "BTCUSDT"),
+            &Command::CancelOrdersWithSymbols {
+                command: 8,
+                orders: vec![crate::model::CancelOrderRef {
+                    id: "x".into(),
+                    symbol: "BTCUSDT".into(),
+                }],
+            },
             7.,
             VenueError::new("lost"),
         );

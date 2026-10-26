@@ -11,6 +11,9 @@ pub(crate) struct OrderLocks {
     waiting: Vec<(CommandId, String, bool, Option<u64>)>,
     uncertain: HashMap<String, u64>,
     epoch: u64,
+    /// The venue reconciles an Unknown placement at once, so a later placement
+    /// or amend on its symbol may wait for that read (`fence_uncertain_placements`).
+    fence_placements: bool,
     /// Scopes held by repair roots, keyed by root rather than any CommandId.
     #[cfg(feature = "repair-mutations")]
     repairs: Vec<(u64, Scope)>,
@@ -87,9 +90,18 @@ pub(crate) const CAPACITY_REACHED: &str =
 pub(crate) enum Refusal {
     Conflict(CommandId),
     Capacity(CommandId),
+    /// A placement or amend on a symbol whose earlier placement is Unknown.
+    Uncertain(CommandId),
 }
 
 impl OrderLocks {
+    pub fn fencing_placements(fence_placements: bool) -> Self {
+        Self {
+            fence_placements,
+            ..Self::default()
+        }
+    }
+
     pub fn contains(&self, command: CommandId) -> bool {
         self.active.iter().any(|(id, _)| *id == command)
             || self.waiting.iter().any(|(id, ..)| *id == command)
@@ -178,6 +190,17 @@ impl OrderLocks {
                     .as_ref()
                     .is_some_and(|s| s.is_empty() || s == all)
         };
+        // Until a fresh order read resolves an Unknown placement, another
+        // placement or amend on its symbol could duplicate it. Cancels stay
+        // admitted: they cannot place (cancel-all is the venue's opt-in below).
+        let mutates = scope.placing || !scope.cancel_only && !scope.ids.is_empty();
+        if self.fence_placements
+            && mutates
+            && (scope.unknown_symbol && !self.uncertain.is_empty()
+                || scope.symbols.iter().any(|symbol| self.uncertain(symbol)))
+        {
+            return Err(Refusal::Uncertain(command));
+        }
         if fence_uncertain
             && scope
                 .all_symbol

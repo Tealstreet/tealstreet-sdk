@@ -3401,6 +3401,13 @@ pub trait Venue {
         true
     }
 
+    /// Refuse a placement or amend on a symbol whose earlier placement is
+    /// Unknown until a fresh order read resolves it. Opt in only when
+    /// `reconcile_uncertain` starts that read at once, so the fence is short-lived.
+    fn fence_uncertain_placements(&self) -> bool {
+        false
+    }
+
     /// What this venue answers beyond the common commands; the engine gates
     /// option and symbol-routed commands from it.
     fn capabilities(&self) -> Capabilities {
@@ -3697,6 +3704,9 @@ impl<V: Venue> Engine<V> {
         )
         .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
         let http_release = V::http_release();
+        #[cfg(feature = "order-locks")]
+        let order_locks =
+            crate::order_locks::OrderLocks::fencing_placements(venue.fence_uncertain_placements());
         #[cfg(feature = "release-domains")]
         let release_domain = V::http_release_domain();
         #[cfg(feature = "release-domains")]
@@ -3729,6 +3739,8 @@ impl<V: Venue> Engine<V> {
                     mutation_barriers_declared: V::http_mutation_barriers(),
                     #[cfg(feature = "managed-sockets")]
                     socket_capabilities: V::socket_capabilities(),
+                    #[cfg(feature = "order-locks")]
+                    order_locks,
                     ..IoCore::default()
                 },
                 ..Io::default()
@@ -4768,6 +4780,12 @@ impl<V: Venue> Engine<V> {
                                     .kind(ErrorKind::Internal)
                                     .outcome(crate::Outcome::NotSent)
                             }
+                            (crate::order_locks::Refusal::Uncertain(_), _) => {
+                                VenueError::new(
+                                    "Placement outcome is uncertain; reconcile before placing or amending",
+                                )
+                                .outcome(crate::Outcome::NotSent)
+                            }
                             (_, Command::CancelSymbolOrders { symbol, .. })
                                 if self.venue.fence_uncertain_cancel_all()
                                     && cx.io.core.order_locks.uncertain(symbol) =>
@@ -4777,7 +4795,8 @@ impl<V: Venue> Engine<V> {
                             _ => "Order amendment or cancellation is already in flight".into(),
                         };
                         let (crate::order_locks::Refusal::Conflict(id)
-                        | crate::order_locks::Refusal::Capacity(id)) = refusal;
+                        | crate::order_locks::Refusal::Capacity(id)
+                        | crate::order_locks::Refusal::Uncertain(id)) = refusal;
                         cx.refuse_before_entry(id, error);
                         return;
                     }
@@ -6533,6 +6552,9 @@ mod streaming_tests {
         fn fence_uncertain_cancel_all(&self) -> bool {
             self.fence_uncertain
         }
+        fn fence_uncertain_placements(&self) -> bool {
+            true
+        }
         type Pending = Vec<String>;
         fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
             cx.request_streamed(
@@ -6944,13 +6966,15 @@ mod streaming_tests {
         engine.io.core.order_locks.note_write();
         complete_held(&mut engine, 1, true);
         assert!(engine.io.core.order_locks.uncertain("A"));
-        for (command, symbol) in [(2, "A"), (3, "B")] {
-            engine.handle(0., Event::Command(held_place(command, symbol)));
-            engine.io.core.order_locks.note_write();
-            // Every batch row has either an exact native identity or a definite rejection.
-            engine.io.core.order_locks.resolved(command);
-            complete_held(&mut engine, command, true);
-        }
+        // A later placement on the ambiguous symbol is refused at entry, so it
+        // can neither duplicate nor clear the earlier one.
+        engine.handle(0., Event::Command(held_place(2, "A")));
+        assert_eq!(engine.venue.commands.len(), 1);
+        engine.handle(0., Event::Command(held_place(3, "B")));
+        engine.io.core.order_locks.note_write();
+        // Every batch row has either an exact native identity or a definite rejection.
+        engine.io.core.order_locks.resolved(3);
+        complete_held(&mut engine, 3, true);
         assert!(
             engine.io.core.order_locks.uncertain("A"),
             "known later error cannot clear earlier ambiguous placement"
@@ -6966,7 +6990,106 @@ mod streaming_tests {
                 symbol: "B".into(),
             }),
         );
-        assert_eq!(engine.venue.commands.len(), 4);
+        assert_eq!(engine.venue.commands.len(), 3);
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn an_uncertain_placement_fences_later_placements_and_amends_until_reconciled() {
+        let mut engine = frame_engine();
+        // Cancels stay admitted on an uncertain symbol unless a venue opts in.
+        engine.venue.fence_uncertain = false;
+        let message = |engine: &mut Engine<StreamVenue>, text| {
+            engine.handle(
+                0.,
+                Event::WsMessage {
+                    socket: SocketId(1),
+                    text,
+                },
+            );
+        };
+        let request = |engine: &mut Engine<StreamVenue>| {
+            engine
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Http(request) => Some(request.id),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let refused = |engine: &mut Engine<StreamVenue>, id: u32| {
+            engine.drain_actions().any(|a| {
+                matches!(a, Action::Notice(Notice::CommandFailed { command, error })
+                    if command == id
+                        && error.outcome == Some(crate::Outcome::NotSent)
+                        && error.legacy_text().contains("uncertain"))
+            })
+        };
+        engine.handle(0., Event::Command(held_place(1, "A")));
+        message(&mut engine, "write-order");
+        request(&mut engine);
+        complete_held(&mut engine, 1, true);
+        assert!(engine.io.core.order_locks.uncertain("A"));
+        assert!(
+            !engine.io.core.reconcile_due.is_empty() || engine.drain_actions().count() > 0,
+            "the Unknown placement queues its reconcile at once"
+        );
+        engine.drain_actions().for_each(drop);
+        let admitted = engine.venue.commands.len();
+
+        // A retry on the uncertain symbol is refused NotSent, never sent.
+        engine.handle(0., Event::Command(held_place(2, "A")));
+        assert!(refused(&mut engine, 2), "a placement retry is fenced");
+        // An unroutable amend may target the uncertain symbol.
+        let amend = Command::AmendOrder {
+            command: 3,
+            id: "resting".into(),
+            price: Some(101.),
+            amount: None,
+        };
+        engine.handle(0., Event::Command(amend));
+        assert!(refused(&mut engine, 3), "an amend is fenced");
+        assert_eq!(engine.venue.commands.len(), admitted);
+
+        // Another symbol, and cancels on this one, are unaffected.
+        engine.handle(0., Event::Command(held_place(4, "B")));
+        complete_held(&mut engine, 4, false);
+        engine.handle(
+            0.,
+            Event::Command(Command::CancelOrders {
+                command: 5,
+                ids: vec!["resting".into()],
+            }),
+        );
+        complete_held(&mut engine, 5, false);
+        engine.handle(
+            0.,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 6,
+                symbol: "A".into(),
+            }),
+        );
+        complete_held(&mut engine, 6, false);
+        assert_eq!(engine.venue.commands.len(), admitted + 3);
+        engine.drain_actions().for_each(drop);
+
+        // The first successful fresh order read clears the fence.
+        message(&mut engine, "read-orders:A");
+        let fresh = request(&mut engine);
+        engine.handle(
+            1.,
+            Event::HttpResponse {
+                request: fresh,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "[]",
+                },
+            },
+        );
+        assert!(!engine.io.core.order_locks.uncertain("A"));
+        engine.handle(0., Event::Command(held_place(7, "A")));
+        assert_eq!(engine.venue.commands.len(), admitted + 4);
     }
 
     #[cfg(feature = "order-locks")]
