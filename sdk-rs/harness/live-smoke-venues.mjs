@@ -13,6 +13,11 @@ register('binance', 'BINANCE', modes(
   endpoints('https://demo-fapi.binance.com', 'wss://demo-fstream.binance.com'),
   endpoints('https://fapi.binance.com', 'wss://fstream.binance.com'),
 ));
+// Spot testnet keys are separate from futures demo keys, so Spot has its own env family.
+register('binancespot', 'BINANCESPOT', modes(
+  endpoints('https://testnet.binance.vision', 'wss://stream.testnet.binance.vision wss://ws-api.testnet.binance.vision'),
+  endpoints('https://api.binance.com', 'wss://stream.binance.com:9443 wss://ws-api.binance.com'),
+));
 for (const name of ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo']) {
   const testnet = endpoints('https://api-testnet.bybit.com', 'wss://stream-testnet.bybit.com');
   const demo = endpoints('https://api-demo.bybit.com', 'wss://stream.bybit.com wss://stream-demo.bybit.com');
@@ -40,7 +45,7 @@ register('cryptocom', 'CRYPTOCOM', modes(
   endpoints('https://uat-api.3ona.co', 'wss://uat-stream.3ona.co'),
   endpoints('https://api.crypto.com', 'wss://stream.crypto.com'),
 ));
-register('hyperliquid', 'HYPERLIQUID', modes(
+register('hyperliquid hyperliquidspot', 'HYPERLIQUID', modes(
   endpoints('https://api.hyperliquid-testnet.xyz', 'wss://api.hyperliquid-testnet.xyz'),
   endpoints('https://api.hyperliquid.xyz', 'wss://api-ui.hyperliquid.xyz'),
 ), { key: 'SIGNER_ADDRESS', secret: 'PRIVATE_KEY', applicationId: 'ACCOUNT_ADDRESS' }, {
@@ -104,6 +109,10 @@ register('weex', 'WEEX', {
 register('bitrue', 'BITRUE', {
   mainnet: endpoints('https://fapi.bitrue.com https://fapiws-auth.bitrue.com',
     'wss://fmarket-ws.bitrue.com wss://fapiws.bitrue.com'),
+});
+register('bitunix', 'BITUNIX', {
+  mainnet: endpoints('https://fapi.bitunix.com',
+    'wss://fapi.bitunix.com wss://api.bitunix.com'),
 });
 register('kucoin', 'KUCOIN', {
   mainnet: endpoints('https://api-futures.kucoin.com', 'wss://ws-api-futures.kucoin.com'),
@@ -172,6 +181,8 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
   };
   for (const [path, suffix] of Object.entries(profile.fields)) read(path, suffix, true);
   for (const [path, suffix] of Object.entries(profile.optionalFields ?? {})) read(path, suffix, false);
+  if (profile.family === 'HYPERLIQUID' && options.key.toLowerCase() === options.applicationId.toLowerCase())
+    throw new Error('Hyperliquid smoke requires an agent wallet distinct from the account');
   const endpointSet = profile.environments[mode];
   const allowUrl = (url, kind) => {
     try {
@@ -245,7 +256,7 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
     venue: name, mode, availableModes, options, secrets,
     // Bitrue rejects non-GTC; Polymarket's engine does not send postOnly yet.
     postOnly: !['bitrue', 'polymarket'].includes(name),
-    leverage: ['bybitspot', 'coinbasespot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
+    leverage: ['binancespot', 'bybitspot', 'coinbasespot', 'hyperliquidspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
     secretValues: Object.values(secrets), credentialEnv,
     endpoints: { http: [...endpointSet.http], ws: [...endpointSet.ws] },
     allowUrl, canonicalizeUrl, validateRequest, validateSocket, validateSocketMessage,
