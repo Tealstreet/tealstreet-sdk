@@ -111,7 +111,24 @@ fn js_string(value: &RawValue) -> Option<String> {
     if text == "null" {
         return None;
     }
-    Some(serde_json::from_str::<String>(text).unwrap_or_else(|_| text.to_owned()))
+    if let Ok(string) = serde_json::from_str::<String>(text) {
+        return Some(string);
+    }
+    // A JSON number prints as JS does: in full inside [1e-6, 1e21), else in
+    // exponent form, whose leading digit is all `parseInt` then reads.
+    if let Ok(number) = text.parse::<f64>()
+        && number.is_finite()
+    {
+        let magnitude = number.abs();
+        return Some(if number == 0.0 {
+            "0".to_owned()
+        } else if (1e-6..1e21).contains(&magnitude) {
+            format!("{number}")
+        } else {
+            format!("{number:e}")
+        });
+    }
+    Some(text.to_owned())
 }
 /// JS `parseInt(text, 10)`; `None` is NaN.
 fn js_parse_int(text: &str) -> Option<f64> {

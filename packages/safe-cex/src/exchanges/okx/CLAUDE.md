@@ -1192,7 +1192,7 @@ instrument, is skipped with "Skipped malformed public discovery row".
 
 Rust startup is fail-open per row and retried per read through the shared
 engine `startup::Backoff` (1, 2, 4 … 30 s, separately for the catalogue and the
-ticker seed). A malformed instrument row is skipped with a warning and its
+ticker seed). A malformed instrument row is skipped with a Debug notice and its
 instId remembered, so a position or working order on it logs an error and keeps
 the previous account snapshot instead of disappearing. A failed or malformed
 read restarts its whole product chain without publishing a partial union; when

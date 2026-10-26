@@ -259,9 +259,11 @@ pub fn rate_limit_pause_ms(response: &crate::Response<'_>, default_ms: f64) -> f
 }
 
 /// Do not expose raw catalogue rows, which can arrive through authenticated APIs.
+/// Debug, as TS: a skipped row is routine catalogue noise (OKX EEA logs dozens),
+/// while an incomplete or partial catalogue is still reported by its venue.
 pub fn skipped_row<P>(cx: &mut Cx<'_, P>) {
     cx.notice(
-        Level::Warn,
+        Level::Debug,
         code::ROW_SKIPPED,
         "Skipped malformed public discovery row",
     );
