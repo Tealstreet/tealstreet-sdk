@@ -95,6 +95,17 @@ function config(options) {
 function alive(now, deadline, signal) {
   if (!time(now) || !time(deadline) || now >= deadline || signal?.aborted) throw refused();
 }
+function receive(send, frame, signal, now, deadline) {
+  let timer, abort;
+  return new Promise((resolve, reject) => {
+    abort = () => reject(refused());
+    signal.addEventListener('abort', abort, {once:true});
+    if (signal.aborted) { reject(refused()); return; }
+    timer = setTimeout(abort, Math.max(0, deadline-now()));
+    try { Promise.resolve(send(frame,{signal})).then(resolve,reject); }
+    catch (error) { reject(error); }
+  }).finally(() => { clearTimeout(timer); signal.removeEventListener('abort',abort); });
+}
 function request(value) {
   if (!exact(value,['attemptId','deadlineMs','receipt','slot','role','binding','descriptor']) || !integer(value.attemptId)
     || !time(value.deadlineMs) || !record(value.descriptor)) throw refused();
@@ -131,7 +142,7 @@ export function createOperationProvider(options) {
       if (!id(correlation) || pending.has(correlation)) throw refused();
       pending.add(correlation);registered=true;
       const frame = encode({id:correlation,type:'op',v:2,exchangeName:options.exchangeName,accountName:options.accountName,request:req});
-      const response = decode(await send(frame,{signal:context.signal}));
+      const response = decode(await receive(send,frame,context.signal,now,deadlineMs));
       alive(now(),deadlineMs,context.signal);
       if (!exact(response,['id','type','v','attemptId','result']) || response.id !== correlation || response.type !== 'op'
         || response.v !== 2 || response.attemptId !== m.task) throw refused();

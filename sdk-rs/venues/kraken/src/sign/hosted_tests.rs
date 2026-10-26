@@ -112,7 +112,7 @@ fn receipt_presence_stamp_and_nonce_disagreement_refuse() {
 }
 
 #[test]
-fn futures_literal_macs_match_independent_hashlib_corpus() {
+fn futures_literal_macs_match_pinned_corpus() {
     let (signer, ids) = provider();
     for (nonce, expected) in [
         (

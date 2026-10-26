@@ -451,3 +451,10 @@ remain pure codec/MAC vectors; they are not claimed as near-limit reservations.
 This checkpoint changes no construction admission, native private callers, NX
 routing, live credential import or activation. NX consumes this module only
 after the shared PR's reviewer/CI/size/auditor gates.
+
+The Kraken family intentionally ships the pure codec and trusted signing-only
+executor exports. Their presence grants no negotiated peer capability and does
+not connect a live Kraken account to the hosted route. Other family modules do
+not export them; their declarations live in `kraken-engine.d.mts`. A canceled or
+expired origin wait releases its correlation slot even if transport ignores abort;
+late settlement grants no result or joined-resource evidence.

@@ -121,3 +121,20 @@ test('fresh deadline after original expiry cannot re-sign a still-fresh receipt'
  await assert.rejects(p.provider(work,{...context(),meta:{...meta,deadlineMs:3500}}));
  assert.equal(p.calls(),1);
 });
+
+
+test('abort releases an origin correlation even when transport never settles',async()=>{
+ let sent=0;const p=pair({id:()=> 'reused',send:()=>{sent++;return new Promise(()=>{});}});
+ for(let task=0;task<65;task++) {
+  const controller=new AbortController();
+  const pending=p.provider(work,{signal:controller.signal,meta:{...meta,task}});
+  controller.abort();await assert.rejects(pending);
+ }
+ assert.equal(sent,65);
+});
+test('deadline releases an origin correlation when transport ignores cancellation',async()=>{
+ let sent=0;const p=pair({id:()=> 'reused',send:()=>{sent++;return new Promise(()=>{});}});
+ for(let task=0;task<2;task++)
+  await assert.rejects(p.provider(work,{...context(),meta:{...meta,task,deadlineMs:1001}}));
+ assert.equal(sent,2);
+});
