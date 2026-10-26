@@ -48,6 +48,7 @@ fn absent_empty_and_blank_keys_install_an_absent_credential_with_original_facts(
         assert_eq!(facts.primary_key(), presence);
         let identity = ids.primary.unwrap();
         assert!(identity.credential_absent());
+        assert_eq!(identity.credential_ref(), None);
         assert_eq!(identity.validate(), Ok(()));
         assert!(identity.signing_ref().is_ok());
         // Nothing is presentable: no ref matches the absent credential.
@@ -67,6 +68,7 @@ fn a_nonblank_key_takes_the_ordinary_installed_path() {
     let identity = ids.primary.unwrap();
     assert!(!identity.credential_absent());
     assert_eq!(identity.credential, KeyRef("primary.credential".into()));
+    assert_eq!(identity.credential_ref(), Some(&identity.credential));
     assert_eq!(identity.validate(), Ok(()));
 }
 
@@ -79,6 +81,8 @@ fn every_other_policy_keeps_todays_refusal_and_a_missing_scalar_is_never_absent(
     .unwrap();
     let identity = ids.primary.unwrap();
     assert!(!identity.credential_absent() && identity.validate().is_err());
+    // An empty ordinary credential is never a presentable ref.
+    assert_eq!(identity.credential_ref(), None);
 
     let (_, ids, _) = setup(scalar_only(), serde_json::json!({"key": ""})).unwrap();
     let identity = ids.primary.unwrap();

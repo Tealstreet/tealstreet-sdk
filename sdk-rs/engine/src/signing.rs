@@ -458,6 +458,12 @@ impl Identity {
         self.credential_absent
     }
 
+    /// The presentable credential ref: `None` when it is absent or invalid.
+    #[inline]
+    pub fn credential_ref(&self) -> Option<&KeyRef> {
+        (!self.credential_absent && valid_key_ref(&self.credential)).then_some(&self.credential)
+    }
+
     /// The ref a request authority names for this identity: its credential,
     /// or for a credential-absent primary its signing ref, which is then
     /// signing-only (never presented or interpolated).

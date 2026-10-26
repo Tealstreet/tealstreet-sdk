@@ -407,6 +407,9 @@ separate and stays Lighter-only.
   It does so only when setup built no credential (key Absent or Empty, or Blank
   under the family's trim) and installed a valid signing ref. A Nonblank key
   takes the ordinary installed path.
+- `Identity::credential_ref()` is the ban-safe read of a present, valid
+  credential ref (`None` when absent or invalid); venues use it instead of
+  `validate_credential`.
 - `Identity::credential_absent()` is the typed state. `validate()` accepts it,
   `owns()` never matches its credential, and the provider refuses to present
   it. The marker is `serde(skip)`, so injected JSON, the registry's

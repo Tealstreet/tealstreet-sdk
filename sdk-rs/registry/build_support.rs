@@ -112,6 +112,16 @@ struct IdentitySetupPolicy {
     extra: Option<ExtraKeyPolicy>,
     signing_algorithm: Option<SigningAlgorithm>,
     signing: SigningPolicy,
+    source: PrimarySource,
+}
+
+/// Scalar-only primary acceptance; `required` is today's behaviour.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum PrimarySource {
+    #[default]
+    Required,
+    ScalarOnly,
 }
 
 /// Credential-only acceptance; `required` is today's behaviour.
@@ -281,8 +291,8 @@ fn rule(value: &Rule) -> String {
                 |algorithm| format!("Some(safe_cex_engine::signing::Algorithm::{algorithm:?})"),
             );
             format!(
-                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm}, signing: safe_cex_engine::signing::SigningPolicy::{:?} }})",
-                value.trim_credential, value.signing
+                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm}, signing: safe_cex_engine::signing::SigningPolicy::{:?}, source: safe_cex_engine::signing::PrimarySource::{:?} }})",
+                value.trim_credential, value.signing, value.source
             )
         }
         None => "None".into(),
@@ -417,9 +427,9 @@ mod tests {
                 "evm":{"signerSetup":{"primary":{"signingAlgorithm":"secp256k1Digest"}}}
             }
         }"#).unwrap();
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }) }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: None }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest), signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required, source: safe_cex_engine::signing::PrimarySource::Required }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required, source: safe_cex_engine::signing::PrimarySource::Required }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required, source: safe_cex_engine::signing::PrimarySource::Required }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest), signing: safe_cex_engine::signing::SigningPolicy::Required, source: safe_cex_engine::signing::PrimarySource::Required }), secondary: None }"));
         // Lighter's Schnorr key is declarable for Sign typing.
         assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"schnorrDigest"}}}}}"#).unwrap().contains("Algorithm::SchnorrDigest"));
         // MAC algorithms are never declarable.
