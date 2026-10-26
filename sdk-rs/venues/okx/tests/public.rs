@@ -25,7 +25,8 @@ fn accepts_sequence_reset_keepalive_and_recovers_gap_once() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    prepared(&mut e, 4.0);
+    // Keeps the books frame's 50 ms batch timer for the paced resubscribe below.
+    let subscribed = prepared(&mut e, 4.0);
     ws(
         &mut e,
         socket,
@@ -47,12 +48,20 @@ fn accepts_sequence_reset_keepalive_and_recovers_gap_once() {
     let gap = r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{"seqId":12,"prevSeqId":11,"bids":[],"asks":[]}]}"#;
     ws(&mut e, socket, gap);
     assert!(e.book("BTCUSDT").is_none());
+    // Paced 50 ms apart, the gap's unsubscribe and resubscribe coalesce with
+    // the pending first subscribe into one books subscribe: one recovery.
+    let mut sent = subscribed.clone();
+    sent.extend(prepared(&mut e, 4.0));
+    let frames: Vec<String> = release_paced(&mut e, 4.0, sent)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
     assert_eq!(
-        prepared(&mut e, 4.0)
-            .iter()
-            .filter(|a| matches!(a, Action::WsSend { .. }))
-            .count(),
-        2
+        frames,
+        [r#"{"op":"subscribe","args":[{"channel":"books","instId":"BTC-USDT-SWAP"}]}"#]
     );
     ws(&mut e, socket, gap);
     assert!(prepared(&mut e, 4.0).is_empty());
@@ -201,7 +210,8 @@ fn malformed_levels_force_resnapshot_and_valid_depth_ignores_stale_trade() {
             symbol: "BTCUSDT".into(),
         }),
     );
-    prepared(&mut e, 4.0);
+    // Keeps the books frame's 50 ms batch timer for the paced resubscribe below.
+    let subscribed = prepared(&mut e, 4.0);
     ws(
         &mut e,
         socket,
@@ -214,12 +224,20 @@ fn malformed_levels_force_resnapshot_and_valid_depth_ignores_stale_trade() {
         r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{"seqId":101,"prevSeqId":100,"bids":[["40002"]],"asks":[]}]}"#,
     );
     assert!(e.book("BTCUSDT").is_none());
+    // Paced 50 ms apart, the gap's unsubscribe and resubscribe coalesce with
+    // the pending first subscribe into one books subscribe: one recovery.
+    let mut sent = subscribed.clone();
+    sent.extend(prepared(&mut e, 4.0));
+    let frames: Vec<String> = release_paced(&mut e, 4.0, sent)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
     assert_eq!(
-        prepared(&mut e, 4.0)
-            .iter()
-            .filter(|a| matches!(a, Action::WsSend { .. }))
-            .count(),
-        2
+        frames,
+        [r#"{"op":"subscribe","args":[{"channel":"books","instId":"BTC-USDT-SWAP"}]}"#]
     );
     ws(
         &mut e,
@@ -429,7 +447,8 @@ fn public_topics_keep_their_order_and_cap_across_market_boundaries() {
         })
         .unwrap();
     e.handle(3.0, Event::WsOpened { socket });
-    let batches: Vec<serde_json::Value> = prepared(&mut e, 3.0)
+    let opened = prepared(&mut e, 3.0);
+    let batches: Vec<serde_json::Value> = release_paced(&mut e, 3.0, opened)
         .into_iter()
         .filter_map(|action| match action {
             Action::WsSend { text, .. } if text != "ping" => {
@@ -616,4 +635,66 @@ fn null_live_price_fields_keep_the_last_good_values() {
         ),
         (40000.0, 16.0, 0.002, 1800.0, 17.0)
     );
+}
+
+/// OKX EEA (772 markets, about 40 subscribe frames) resets a public socket
+/// that writes every frame in the open tick. The feed paces frames 50 ms
+/// apart, and a watched book leads so it is not queued behind the sweep.
+#[test]
+fn public_subscribe_frames_are_paced_and_a_watched_book_leads() {
+    let mut e = crate::support::engine(Options::default());
+    e.start(0.0);
+    // A user's book is requested before discovery completes, as the host does.
+    e.handle(
+        0.5,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let market_rows = (0..150)
+        .map(|i| MARKET.replace("BTC", &format!("COIN{i}")))
+        .chain([MARKET.to_owned()])
+        .collect::<Vec<_>>()
+        .join(",");
+    let request = take_http(&mut prepared(&mut e, 0.0));
+    reply(&mut e, &request, &envelope(&market_rows), 1.0);
+    let request = take_http(&mut prepared(&mut e, 1.0));
+    reply(&mut e, &request, &envelope(TICKER), 2.0);
+    let socket = prepared(&mut e, 2.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/public") => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(3.0, Event::WsOpened { socket });
+    let opened = prepared(&mut e, 3.0);
+    let subscribes = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::WsSend { text, .. } if text.contains("subscribe")))
+            .count()
+    };
+    let first = opened
+        .iter()
+        .find_map(|a| match a {
+            Action::WsSend { text, .. } if text.contains("subscribe") => Some(text.clone()),
+            _ => None,
+        })
+        .expect("a subscribe frame at open");
+    assert!(
+        first.starts_with(
+            r#"{"op":"subscribe","args":[{"channel":"books","instId":"BTC-USDT-SWAP"}"#
+        ),
+        "{first}"
+    );
+    assert_eq!(subscribes(&opened), 1, "only one frame in the open tick");
+    assert!(
+        opened
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms >= 53.0)),
+        "the next frame waits 50 ms"
+    );
+    let all = release_paced(&mut e, 3.0, opened);
+    assert!(subscribes(&all) > 1, "the sweep still streams, paced");
 }

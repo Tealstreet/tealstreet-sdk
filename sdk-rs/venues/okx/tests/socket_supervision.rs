@@ -293,6 +293,9 @@ fn reconnected_public_socket_resubscribes_and_ignores_retired_frames() {
     h.sent.clear();
     let socket = h.open("/public");
     assert_ne!(socket, old);
+    // The public feed paces its subscribe frames 50 ms apart.
+    let now = h.now;
+    h.advance(now + 1_000.0);
     let sent: Vec<_> = h.sent.iter().filter(|(s, _)| *s == socket).collect();
     for topic in [
         r#""channel":"tickers""#,
