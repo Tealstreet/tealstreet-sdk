@@ -9460,6 +9460,18 @@ Address-keyed nonce claims without the feature now refuse instead of accepting
 stable-id text as an address subject. No current adopter uses that unsupported
 path. The additive selection errors preserve typed missing/signing-not-configured
 and setup-capability refusals without adding an auth-health latch.
+### WEEX remaining inventory and identity custody
+
+WEEX keeps one immutable `Slots<Identity>` owner for selected reads, required
+Primary history, Mutation signing and private SessionAuth. The redundant venue
+identity container and per-history slot reconstruction are removed. Existing
+completeness filters, public-only suppression, primary-private eligibility,
+secondary read preference, wire bytes and all failure/outcome policy are retained.
+
+The remaining conservative request/signing/credential inventory describes managed
+failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
+identity options. This slice retains those rows and all checker rules; completion
+of the custody audit does not claim inventory zero or a new endpoint migration.
 
 ### Explicit authentication on serial calls
 
