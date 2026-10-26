@@ -45,7 +45,7 @@ package setting; measured performance evidence covers WASM.
 Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
 The construction-rules `dispatchSigning` flag selects provider setup, currently
 Binance's four aliases, Bybit's five aliases, WEEX (hosted admission disabled)
-and AsterDEX. AsterDEX first maps its account through `asterdexSignerSetup.ts`
+AsterDEX and Lighter. AsterDEX first maps its account through `asterdexSignerSetup.ts`
 (resolved API version, hex V3 wallet keys, read agent aliasing the primary
 wallet); native setup and `asterdex-signer-setup.golden.json` pin the same
 mapping. High-level credential input is consumed by a trusted
@@ -55,6 +55,13 @@ argument is private provider setup, separate from engine-options JSON. Cached
 construction metadata preserves `canSign`/public mode; transport receives only
 read-identity presence; managed routing uses explicit credential intent before
 credentials are materialised, while legacy requests retain header-based routing.
+Lighter's trusted native/JSON mapping uses a typed API-index principal when a
+private Schnorr signing ref exists and the original key is not Nonblank.
+Original SetupFacts stay unchanged; the principal is never presentable. Validated
+public L1 lookup metadata is captured before stripping credentials. The resolved
+Account/API index and installed signing ref bind the transaction/auth recipes.
+Schnorr activation and eager-holder removal ship together in the venue cutover.
+
 Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
 `base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
 `stableId` per primary/secondary identity. It is consumed with passphrases through
