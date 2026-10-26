@@ -2918,8 +2918,8 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "address-nonce", feature = "dispatch-signing"))]
+#[cfg(all(test, feature = "address-nonce", feature = "asterdex"))]
 #[path = "../../native/tests/support/address_start.rs"]
 mod address_start_fixture;
-#[cfg(all(test, feature = "address-nonce", feature = "dispatch-signing"))]
+#[cfg(all(test, feature = "address-nonce", feature = "asterdex"))]
 mod address_start_tests;

@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex};
 #[test]
 fn wasm_start_initializes_real_local_provider_before_venue_start_once() {
     for domain in [Some(&HYPERLIQUID_AGENT), Some(&ASTERDEX_V3), None] {
-        let (provider, mut identities) = safe_cex_venues::local_signer_from_json(format!(
-            r#"{{"primary":{{"key":"opaque-credential","secret":"{}01","secretEncoding":"hex","signingAlgorithm":"secp256k1Digest"}}}}"#,
+        let (provider, mut identities) = safe_cex_venues::local_signer_from_json_for_mode("asterdex", format!(
+            r#"{{"primary":{{"key":"opaque-credential","secret":"{}01","secretEncoding":"hex"}}}}"#,
             "00".repeat(31),
-        )).unwrap();
+        ), &serde_json::from_str(r#"{"asterdex":{"apiVersion":"v3"}}"#).unwrap()).unwrap();
         identities.secondary = identities.primary.clone();
         let observations = Arc::new(Mutex::new(Vec::new()));
         let inner = engine(
