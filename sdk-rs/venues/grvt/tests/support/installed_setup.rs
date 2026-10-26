@@ -66,6 +66,15 @@ fn trusted_presence_and_public_mode_control_login_and_identity_eligibility() {
                     installed.write_credential().is_some(),
                     installed.primary().is_some()
                 );
+                if let Some(identity) = installed.primary() {
+                    assert_eq!(identity.credential, KeyRef("primary.credential".into()));
+                    if !scalar {
+                        assert_eq!(
+                            identity.signing_ref(),
+                            Err(safe_cex_engine::signing::SignError::SigningNotConfigured)
+                        );
+                    }
+                }
                 let policy = installed.session_policy();
                 match expected_login.filter(|_| !public) {
                     Some(PrimaryLogin::Empty) => {
