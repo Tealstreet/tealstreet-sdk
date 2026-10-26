@@ -36,6 +36,29 @@ test('default verifier preserves strict complete suite coverage', () => {
   assert.ok(verifyGateSuite({ suite: 'mexc', entries: [...entries(), entries()[0]], manifest }).errors.length);
 });
 
+test('correctness-only suite keeps every case and cannot enter strict or collect acceptance', () => {
+  const values = entries();
+  for (const { report } of values) {
+    report.correctnessOnly = true;
+    report.coverage = { correctness: 'complete', performance: 'not-run' };
+    report.runs = 0;
+    report.samples = { ts: [metric(200, 'correctness')], rust: [metric(400, 'correctness')] };
+  }
+  assert.deepEqual(verifyGateSuite({ suite: 'mexc', entries: values, manifest, mode: 'correctness' }).errors, []);
+  for (const mode of ['strict', 'collect'])
+    assert(verifyGateSuite({ suite: 'mexc', entries: values, manifest, mode }).errors.length);
+  assert(verifyGateSuite({ suite: 'mexc', entries: values.slice(1), manifest, mode: 'correctness' }).errors.length);
+  assert(verifyGateSuite({ suite: 'mexc', entries: entries(), manifest, mode: 'correctness' }).errors.length);
+  const bad = structuredClone(values);
+  bad[0].report.status = 'FAIL'; bad[0].exitCode = 1; bad[0].report.failures = ['ticker BTC.last: ts=1 rust=2'];
+  assert(verifyGateSuite({ suite: 'mexc', entries: bad, manifest, mode: 'correctness' }).errors.length);
+  for (const mutate of [r => { r.samples.rust = []; }, r => { r.coverage.correctness = 'incomplete'; },
+    r => { r.samples.rust[0].measuredMode = 'performance'; }, r => { r.correctnessRuns = 2; }]) {
+    const invalid = structuredClone(values); mutate(invalid[0].report);
+    assert(verifyGateSuite({ suite: 'mexc', entries: invalid, manifest, mode: 'correctness' }).errors.length);
+  }
+});
+
 test('default strict mode refuses CPU failure and collection needs full raw evidence', () => {
   const values = entries(); const entry = values[0];
   for (const sample of entry.report.samples.rust) {

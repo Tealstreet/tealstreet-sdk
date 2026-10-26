@@ -170,7 +170,7 @@ mod serial_session {
                     self.attempts,
                 ),
                 SerialPolicy {
-                    credential: key(),
+                    credential: Some(key()),
                     pacing: None,
                     refusals_complete: true,
                 },

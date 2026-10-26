@@ -22,6 +22,7 @@ import { assessBitgetPairedSteady, pairedSteadyAssessment, bitgetAnchorAuthority
   combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
 
 import { CPU_REMEASURE_SUITES, requireCpuRemeasureSuite } from './cpu-rollout.mjs';
+import { runCpuWorkers } from './cpu-workers.mjs';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const insist = (ok, message) => { if (!ok) throw new Error(`CPU certification: ${message}`); };
 const same = isDeepStrictEqual;
@@ -524,8 +525,7 @@ async function gatherSuite(context, suite) {
 }
 
 async function planMeasurements(context, destination) {
-  const suites = [];
-  for (const suite of CPU_REMEASURE_SUITES) suites.push(await gatherSuite(context, suite));
+  const suites = await runCpuWorkers(context, 'plan', destination);
   const plan = validatePlannedCases({ schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, suites });
   write(resolve(destination, 'plan.json'), plan);
   const matrix = secondMatrix(plan);
@@ -617,8 +617,7 @@ export async function evidenceEndCheck(context) {
 }
 
 async function certifyAll(context, destination) {
-  const certificates = {};
-  for (const suite of CPU_REMEASURE_SUITES) certificates[suite] = await certifySuite(context, suite, resolve(destination, suite));
+  const certificates = Object.fromEntries((await runCpuWorkers(context, 'certify', destination)).map(row => [row.suite, row]));
   await evidenceEndCheck(context);
   const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha,
     suites: Object.fromEntries(CPU_REMEASURE_SUITES.map(suite => [suite, true])) };
@@ -636,8 +635,9 @@ export function requireCertifiedSuite({ suite, results, result, runId, checkoutS
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { values } = parseArgs({ options: { command: { type: 'string' }, suite: { type: 'string' }, out: { type: 'string' }, mode: { type: 'string', default: 'family' } } });
-  if (!['plan', 'certify'].includes(values.command)) requireCpuRemeasureSuite(values.suite);
+  const { values } = parseArgs({ options: { command: { type: 'string' }, suite: { type: 'string' }, out: { type: 'string' },
+    'worker-suites': { type: 'string' }, mode: { type: 'string', default: 'family' } } });
+  if (!['plan', 'certify', 'plan-worker', 'certify-worker'].includes(values.command)) requireCpuRemeasureSuite(values.suite);
   if (values.command === 'status') {
     const checkout = spawnSync('git', ['rev-parse', '--verify', 'HEAD'], { encoding: 'utf8' });
     insist(checkout.status === 0, 'missing wrapper checkout');
@@ -650,12 +650,23 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     if (values.command === 'prepare') await prepareMeasurement(context, values.suite, resolve(values.out), values.mode);
     else if (values.command === 'collect') collectMeasurement(context, values.suite);
+    else if (['plan-worker', 'certify-worker'].includes(values.command)) {
+      const suites = JSON.parse(values['worker-suites']);
+      insist(Array.isArray(suites) && suites.length > 0 && new Set(suites).size === suites.length, 'invalid verification partition');
+      suites.forEach(requireCpuRemeasureSuite);
+      const phase = values.command.split('-')[0], rows = [];
+      for (const suite of suites) rows.push(phase === 'plan' ? await gatherSuite(context, suite)
+        : await certifySuite(context, suite, resolve(values.out, suite)));
+      await evidenceEndCheck(context);
+      write(resolve(values.out, 'worker.json'), { phase, runId: context.runId, checkoutSha: context.checkoutSha, rows,
+        bindings: context.bindings, secondDispositions: [...(context.secondDispositions ?? [])] });
+    }
     else if (values.command === 'plan') { await planMeasurements(context, resolve(values.out)); await evidenceEndCheck(context); }
     else if (values.command === 'second') { await secondMeasurement(context, values.suite, resolve(values.out)); await evidenceEndCheck(context); }
     else if (values.command === 'certify') await certifyAll(context, resolve(values.out));
     else throw new Error('unknown bounded CPU command');
   } finally {
-    if (['plan', 'certify'].includes(values.command)) retainApiEvidence(context.reader, resolve(values.out));
+    if (['plan', 'certify', 'plan-worker', 'certify-worker'].includes(values.command)) retainApiEvidence(context.reader, resolve(values.out));
     else if (values.command === 'second') retainApiEvidence(context.reader, resolve(context.root, 'sdk-rs/harness/out/cpu-second'));
   }
 }
