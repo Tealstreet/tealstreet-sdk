@@ -75,6 +75,7 @@ pub(crate) fn native(
     } else {
         None
     };
+    // Lighter has no login intent; preserve original facts without interpreting primary_login.
     let (provider, identities, _original_facts) = install_with_facts(
         LocalSetup {
             primary,
@@ -94,6 +95,7 @@ pub(crate) fn json(
     let input = zeroize::Zeroizing::new(input);
     let setup = serde_json::from_str::<LocalSetup>(&input)
         .map_err(|_| invalid("Invalid Lighter local signer setup"))?;
+    // Lighter has no login intent; preserve original facts without interpreting primary_login.
     let (provider, identities, _original_facts) = install_with_facts(setup, policy, options)?;
     Ok((provider, identities))
 }
