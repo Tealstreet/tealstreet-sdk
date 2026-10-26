@@ -4,7 +4,8 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Interval, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::paging::{PageRow, RangeWalk, Step};
-use safe_cex_engine::{Command, CommandId, Cx, Query as Read, Response, TimerId};
+use safe_cex_engine::request_context::Context;
+use safe_cex_engine::{Command, Cx, Query as Read, Response, TimerId};
 use safe_cex_venue_binance::wire::{HistoricalOrderRow, UserTrade};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -21,7 +22,7 @@ pub(crate) enum LocalRead<'a> {
 
 #[derive(Default)]
 pub struct HistoryState {
-    delayed: HashMap<TimerId, (CommandId, DelayedWalk)>,
+    delayed: HashMap<TimerId, (Context, DelayedWalk)>,
 }
 
 enum DelayedWalk {
@@ -51,30 +52,39 @@ pub struct IncomeWalk {
 
 pub enum Request {
     Fills {
-        command: CommandId,
+        root: Context,
         rows: Vec<Execution>,
         invalid: bool,
         range: Option<Box<FillWalk>>,
     },
     Orders {
-        command: CommandId,
+        root: Context,
         rows: Vec<HistoricalOrder>,
         invalid: bool,
     },
     Income {
-        command: CommandId,
+        root: Context,
         rows: Vec<Income>,
         invalid: bool,
         range: Option<Box<IncomeWalk>>,
     },
     Trades {
-        command: CommandId,
+        root: Context,
         symbol: String,
         rows: Vec<Trade>,
         invalid: bool,
     },
 }
 impl Request {
+    pub(crate) fn root(&self) -> &Context {
+        match self {
+            Self::Fills { root, .. }
+            | Self::Orders { root, .. }
+            | Self::Income { root, .. }
+            | Self::Trades { root, .. } => root,
+        }
+    }
+
     pub(crate) fn reset(&mut self) {
         match self {
             Self::Fills { rows, invalid, .. } => {
@@ -370,7 +380,10 @@ impl AsterDex {
         }
     }
 
-    pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, read: Read) {
+    pub(crate) fn start_query(&mut self, cx: &mut Cx<'_, Pending>, read: Read) {
+        let Some(root) = crate::command_read_root(cx) else {
+            return;
+        };
         let (endpoint, query, pending, private) = match read {
             Read::OrderByClientId { .. } => unreachable!("local read handled at command entry"),
             Read::Fills {
@@ -385,7 +398,7 @@ impl AsterDex {
                     let limit = limit.unwrap_or(500).clamp(1, 1000);
                     self.next_fill_page(
                         cx,
-                        command,
+                        root,
                         Box::new(FillWalk {
                             // RangeWalk needs a positive span. Clip its requests back to
                             // the exact caller end, including a single-millisecond read.
@@ -415,7 +428,7 @@ impl AsterDex {
                         .opt_num("startTime", from_ms)
                         .opt_num("endTime", to_ms),
                     Request::Fills {
-                        command,
+                        root,
                         rows: Vec::new(),
                         invalid: false,
                         range: None,
@@ -436,7 +449,7 @@ impl AsterDex {
                     .opt_num("startTime", from_ms)
                     .opt_num("endTime", to_ms),
                 Request::Orders {
-                    command,
+                    root,
                     rows: Vec::new(),
                     invalid: false,
                 },
@@ -453,7 +466,7 @@ impl AsterDex {
                     let limit = limit.unwrap_or(1000).clamp(1, 1000);
                     self.next_income_page(
                         cx,
-                        command,
+                        root,
                         Box::new(IncomeWalk {
                             walk: RangeWalk::new(from, to, MAX_WINDOW_MS, limit as usize),
                             window: (from, to),
@@ -474,7 +487,7 @@ impl AsterDex {
                         .opt_num("endTime", to_ms)
                         .num("limit", f64::from(limit.unwrap_or(100).clamp(1, 1000))),
                     Request::Income {
-                        command,
+                        root,
                         rows: Vec::new(),
                         invalid: false,
                         range: None,
@@ -488,7 +501,7 @@ impl AsterDex {
                     .str("symbol", &symbol)
                     .num("limit", f64::from(limit.unwrap_or(500).clamp(1, 1000))),
                 Request::Trades {
-                    command,
+                    root,
                     symbol,
                     rows: Vec::new(),
                     invalid: false,
@@ -649,18 +662,18 @@ impl AsterDex {
                 .or_else(|| native_error(r.body)),
             Err(e) => Some(e.into()),
         };
-        let (command, invalid, result) = match request {
+        let (root, invalid, result) = match request {
             Request::Fills {
-                command,
+                root,
                 rows,
                 invalid,
                 range: Some(mut range),
             } => {
                 if let Some(error) = error {
-                    cx.fail(command, error);
+                    let _ = cx.fail_context(&root, error);
                 } else if range.single_millisecond && rows.len() >= range.limit as usize {
-                    cx.fail(
-                        command,
+                    let _ = cx.fail_context(
+                        &root,
                         "Aster fills timestamp saturated; no partial result returned",
                     );
                 } else if invalid
@@ -673,7 +686,7 @@ impl AsterDex {
                             || row.time_ms > range.window.1
                     })
                 {
-                    cx.fail(command, "Malformed Aster history response");
+                    let _ = cx.fail_context(&root, "Malformed Aster history response");
                 } else {
                     let metadata = rows
                         .iter()
@@ -689,41 +702,41 @@ impl AsterDex {
                             fresh.binary_search(&index).is_ok().then_some(row)
                         }));
                     if range.single_millisecond {
-                        self.finish_fill_range(cx, command, *range);
+                        self.finish_fill_range(cx, root, *range);
                     } else {
-                        self.next_fill_page(cx, command, range);
+                        self.next_fill_page(cx, root, range);
                     }
                 }
                 return;
             }
             Request::Fills {
-                command,
+                root,
                 mut rows,
                 invalid,
                 range: None,
             } => {
                 normalize(&mut rows);
                 rows.retain(|row| row.price.is_finite() && row.qty.is_finite() && row.qty > 0.0);
-                (command, invalid, serde_json::to_string(&rows))
+                (root, invalid, serde_json::to_string(&rows))
             }
             Request::Orders {
-                command,
+                root,
                 mut rows,
                 invalid,
             } => {
                 rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
-                (command, invalid, serde_json::to_string(&rows))
+                (root, invalid, serde_json::to_string(&rows))
             }
             Request::Income {
-                command,
+                root,
                 rows,
                 invalid,
                 range: Some(mut range),
             } => {
                 if let Some(error) = error {
-                    cx.fail(command, error);
+                    let _ = cx.fail_context(&root, error);
                 } else if invalid {
-                    cx.fail(command, "Malformed Aster history response");
+                    let _ = cx.fail_context(&root, "Malformed Aster history response");
                 } else {
                     let metadata = rows
                         .iter()
@@ -738,22 +751,22 @@ impl AsterDex {
                         .extend(rows.into_iter().enumerate().filter_map(|(index, row)| {
                             fresh.binary_search(&index).is_ok().then_some(row)
                         }));
-                    self.next_income_page(cx, command, range);
+                    self.next_income_page(cx, root, range);
                 }
                 return;
             }
             Request::Income {
-                command,
+                root,
                 rows,
                 invalid,
                 range: None,
-            } => (command, invalid, serde_json::to_string(&rows)),
+            } => (root, invalid, serde_json::to_string(&rows)),
             Request::Trades {
-                command,
+                root,
                 rows,
                 invalid,
                 ..
-            } => (command, invalid, serde_json::to_string(&rows)),
+            } => (root, invalid, serde_json::to_string(&rows)),
         };
         let result = if let Some(e) = error {
             Err(e)
@@ -762,16 +775,16 @@ impl AsterDex {
         } else {
             result.map_err(|e| e.to_string())
         };
-        match result {
-            Ok(data) => cx.done(command, data),
-            Err(error) => cx.fail(command, error),
+        let _ = match result {
+            Ok(data) => cx.done_context(&root, data),
+            Err(error) => cx.fail_context(&root, error),
         };
     }
 
     fn next_income_page(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        root: Context,
         mut range: Box<IncomeWalk>,
     ) {
         match range.walk.step() {
@@ -788,7 +801,7 @@ impl AsterDex {
                     &self.path("income"),
                     query,
                     Pending::History(Request::Income {
-                        command,
+                        root,
                         rows: Vec::new(),
                         invalid: false,
                         range: Some(range),
@@ -799,7 +812,7 @@ impl AsterDex {
                 let timer = cx.set_timer(INCOME_CHUNK_DELAY_MS);
                 self.history
                     .delayed
-                    .insert(timer, (command, DelayedWalk::Income(range)));
+                    .insert(timer, (root, DelayedWalk::Income(range)));
             }
             Step::Finished => {
                 let result = if range.walk.truncated {
@@ -810,9 +823,9 @@ impl AsterDex {
                 } else {
                     serde_json::to_string(&range.collected).map_err(|error| error.to_string())
                 };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                let _ = match result {
+                    Ok(data) => cx.done_context(&root, data),
+                    Err(error) => cx.fail_context(&root, error),
                 };
             }
         }
@@ -821,14 +834,14 @@ impl AsterDex {
     fn next_fill_page(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        command: CommandId,
+        root: Context,
         mut range: Box<FillWalk>,
     ) {
         match range.walk.step() {
             Step::Fetch { from, to } => {
                 if range.walk.requests > 1000 {
-                    cx.fail(
-                        command,
+                    let _ = cx.fail_context(
+                        &root,
                         "Aster fills range exceeded request budget; no partial result returned",
                     );
                     return;
@@ -847,7 +860,7 @@ impl AsterDex {
                     &self.path("userTrades"),
                     query,
                     Pending::History(Request::Fills {
-                        command,
+                        root,
                         rows: Vec::new(),
                         invalid: false,
                         range: Some(range),
@@ -858,27 +871,22 @@ impl AsterDex {
                 let timer = cx.set_timer(INCOME_CHUNK_DELAY_MS);
                 self.history
                     .delayed
-                    .insert(timer, (command, DelayedWalk::Fills(range)));
+                    .insert(timer, (root, DelayedWalk::Fills(range)));
             }
             Step::Finished => {
                 if range.walk.truncated {
-                    cx.fail(
-                        command,
+                    let _ = cx.fail_context(
+                        &root,
                         "Aster fills range could not be exhausted; no partial result returned",
                     );
                     return;
                 }
-                self.finish_fill_range(cx, command, *range);
+                self.finish_fill_range(cx, root, *range);
             }
         }
     }
 
-    fn finish_fill_range(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        command: CommandId,
-        mut range: FillWalk,
-    ) {
+    fn finish_fill_range(&mut self, cx: &mut Cx<'_, Pending>, root: Context, mut range: FillWalk) {
         normalize(&mut range.collected);
         range.collected.retain(|row| {
             row.price.is_finite()
@@ -886,17 +894,17 @@ impl AsterDex {
                 && row.qty > 0.0
                 && range.order_id.as_ref().is_none_or(|id| row.order_id == *id)
         });
-        match serde_json::to_string(&range.collected) {
-            Ok(data) => cx.done(command, data),
-            Err(error) => cx.fail(command, error.to_string()),
-        }
+        let _ = match serde_json::to_string(&range.collected) {
+            Ok(data) => cx.done_context(&root, data),
+            Err(error) => cx.fail_context(&root, error.to_string()),
+        };
     }
 
     pub(crate) fn on_history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if let Some((command, range)) = self.history.delayed.remove(&timer) {
+        if let Some((root, range)) = self.history.delayed.remove(&timer) {
             match range {
-                DelayedWalk::Income(range) => self.next_income_page(cx, command, range),
-                DelayedWalk::Fills(range) => self.next_fill_page(cx, command, range),
+                DelayedWalk::Income(range) => self.next_income_page(cx, root, range),
+                DelayedWalk::Fills(range) => self.next_fill_page(cx, root, range),
             }
             true
         } else {

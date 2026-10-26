@@ -397,3 +397,99 @@ Decisions (overseer, 2026-10-25):
 2. Slice 3 waits for #2093 (`sign.rs`) and merges (never rebases) whichever
    lands first; slices 1 and 2 proceed now. Reviewer:
    claude-m26ps4.
+
+### Slice 2 as built
+
+- FetchAccount and every history command admit the caller's read root
+  (`admit_caller_read_root`) at ingress. Each physical attempt mints a 20 s leg
+  under that root (`http_leg_context`) in the release path, after any clock
+  wait. The leg is retired before the next page or resend.
+- Background signed reads (account snapshots, private brackets) keep one
+  Context, and each resend goes through `http_retry_context(ReadFailure)`.
+- Deviation for review: history validates each page with
+  `validate_read_http_delivery(root, leg)` and completes only through the
+  root. It does not stage rows through `ReadHistoryRows`. Aster's strict
+  refusals (malformed rows, saturation, request budget, unexhausted range) still
+  fail the whole command with no partial result. Skipping `ReadHistoryRows`
+  saves budget; if review requires it, it is added here.
+- Prune: account.rs and history.rs reach zero, and the legacy public branch in
+  request.rs is deleted (17 occurrences). The signed write branch, trading and
+  listenKey remain for slice 3.
+
+
+### Slice 3 design (trade plans)
+
+#2093 has landed. Base: slice 2 (PR 2148). Scope: every trading job in
+`trading.rs` and the last legacy signed branch in `request.rs`, so AsterDEX
+reaches zero inventory (7 occurrences).
+
+1. **Entry.** Every trade command opens `begin_preflight`
+   (`WriteAfterReads`, with the primary write credential). The native local
+   refusals keep their order (CommandError, then the failure) and end through
+   `fail_preflight`. This replaces today's `admit_http_command`-on-refusal path.
+   Validation, routing capacity and acknowledged-ID pruning are unchanged.
+2. **Admission.** A valid job admits one Plan at entry (`admit_plan`):
+   - One `StepBound` per native step.
+   - Each step has one `CallBound { timeout_ms: 20_000, attempts: 2,
+     retry_window: FreshAttempt }`; the second attempt exists only for the
+     -1022/-1021 resend.
+   - `independent_calls` follows the job's native `continue_on_error`
+     (cancel batches and multi-order placement continue after a failure;
+     amend and single settings do not).
+   - Retry is `DefinitiveRefusal`.
+   - Amend declares a `MutationTerminalBound` after its cancel step. "Filled
+     while cancelling" ends the plan with data, and no replacement is sent.
+3. **Release.** Each step mints `plan_leg_context_with_intent` (Place, Cancel,
+   Amend or Setting) when it dequeues, after any clock wait. It releases through
+   `request_signed_managed` with the existing `Recipe`. Nothing signs while
+   awaiting the clock.
+4. **Facts.**
+   - A native success reports `WriteFact::Accepted` (placed ID or cancelled ID).
+   - A native error is classified with a static AsterDEX table:
+     - -1022 (V1) and -1021 are definitive pre-execution refusals that earn one
+       resend through `plan_resend_context`. -1021 resyncs the clock first.
+     - -2011 "unknown order" on an ordinary cancel stays an idempotent success.
+     - Other codes are Rejected.
+   - A released 408/5xx, or a transport loss after release, is
+     `http_write_unproven` (Unknown).
+   - Earlier accepted IDs survive a later failure.
+5. **Terminal.** `done_plan` with the native result bytes, or `fail_plan` with
+   the native error. Today's aggregation stays: a later rejection after a
+   success is not Rejected.
+6. **FetchStpMode** is a read, so it becomes a slice-2 command read (caller
+   root plus leg), not a Plan.
+7. **Deleted:** the legacy signed `request`/`request_streamed` branch,
+   `selection.sign`, and the `Pending::Signed` write handling.
+
+Open questions for review:
+
+1. Does `independent_calls: true` give the native "continue after a failed
+   cancel" semantics, with outcomes aggregated per call, or do batches need one
+   plan per independent step?
+2. Is FetchStpMode as a command read acceptable, instead of a ReadOnly
+   preflight?
+
+Budget: measured on the composed tip and on dazzy3's S1, per the overseer's
+ruling, with the exact numbers taken to the overseer.
+
+### Slice 3 as built
+
+- One serial plan per trade job (`admit_serial_plan` from a WriteAfterReads
+  preflight, with the `condition-waits` engine feature). Each native step is a
+  serial call: 20 s bound, 2 attempts, released in plan custody.
+- Entry: a stale clock parks the preflight (`park_preflight`). The clock
+  settle requests readiness, and the plan is admitted in
+  `on_http_preflight_ready`.
+- Facts: Accepted, classified with the `ASTER` table, or unproven. Then
+  `continue_serial_plan` into the next step, or `finish_plan_call` plus
+  `done_plan`/`fail_plan`. Jobs with no steps end with `done_empty_plan`.
+- V1 -1022: one in-custody resend (`ASTER_RESEND` grant, `plan_resend_context`).
+- -1021: a refused fact, then `serial_plan_condition_wait` (25 s bound). The
+  clock settle releases it, and the frozen request is reissued as the next
+  call in `on_http_plan_ready`.
+- Local refusals keep slice 2's command-Context path. FetchStpMode is a
+  command read under the caller root.
+- Budget: per the overseer's ruling, AsterDEX's per-venue budget is 1,458,176.
+  Local, on S1 tip 9977ccf1aa6: 1,340,777 to 1,443,796; enabling the engine
+  features alone accounts for about 55K of that.
+
