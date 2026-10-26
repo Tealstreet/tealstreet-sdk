@@ -1537,6 +1537,13 @@ impl PhemexPerpetuals {
             self.cancel_late(cx, symbol, late);
         }
     }
+    pub(crate) fn reconcile_uncertain_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.settle_retired_trading(cx);
+        if self.account.reconcile_timer.is_none() {
+            self.orders_reconcile(cx);
+        }
+    }
+
     /// Starts each owed read once it is due and no placement on that symbol is in flight.
     pub(crate) fn orders_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.credentials.is_none() {
@@ -1680,6 +1687,7 @@ impl PhemexPerpetuals {
                         row.order_id, row.status, row.kind
                     ),
                 );
+                complete = false;
                 continue;
             }
             if row.orders(cx.now).is_none() {
