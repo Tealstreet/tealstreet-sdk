@@ -124,9 +124,24 @@ impl Harness {
     fn socket(&self) -> SocketId {
         *self.sockets.last().unwrap()
     }
+    fn release_snapshot_handoff(&mut self) {
+        let Some(timer) = self
+            .timers
+            .iter()
+            .find(|(_, at)| *at == self.now)
+            .map(|(timer, _)| *timer)
+        else {
+            return;
+        };
+        self.timers.retain(|(issued, _)| *issued != timer);
+        self.event(Event::TimerFired { timer });
+    }
     fn open(&mut self) -> SocketId {
         let socket = self.socket();
         self.event(Event::WsOpened { socket });
+        if self.channel == SocketChannel::Public {
+            self.release_snapshot_handoff();
+        }
         socket
     }
     fn message(&mut self, socket: SocketId, text: &str) {
@@ -212,6 +227,7 @@ fn reconnect_resubscribes_live_topics_resnapshots_and_ignores_retired_socket() {
     h.event(Event::Command(Command::SubscribeOrderBook {
         symbol: "SOL_USDC_PERP".into(),
     }));
+    h.release_snapshot_handoff();
     let delay = h.close(old);
     h.reconnect(delay);
     h.sent.clear();

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { archiveCiWasm, assertBuildEnvironment, buildInputFingerprint, validateCiWasm } from './ci-wasm.mjs';
+import { archiveCiWasm, assertBuildEnvironment, buildInputFingerprint, validateCiWasm, validatePairedCiWasm } from './ci-wasm.mjs';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const fixture = (t) => {
@@ -273,4 +273,36 @@ test('gate passes validated wasm only to Rust and records its provenance', (t) =
   const result = spawnSync(process.execPath, [runner], { cwd: f.root, encoding: 'utf8', timeout: 10000 });
   assert.equal(result.status, 0, result.stderr + result.stdout);
   assert.match(result.stdout, /\nPASS\n$/);
+});
+
+test('paired Bitget validates the sealed old source while executing from clean common harness HEAD', t => {
+  const f = fixture(t);
+  f.metadata.family = 'bitget'; f.metadata.venue = 'bitget'; f.save();
+  const sourceHead = f.metadata.sourceHead;
+  writeFileSync(f.source, '// candidate runtime\n'); f.git('add', 'sdk-rs/engine/src/lib.rs');
+  f.git('commit', '--quiet', '-m', 'candidate runtime');
+  const env = { GITHUB_ACTIONS: 'true', GITHUB_RUN_ATTEMPT: '1', GITHUB_RUN_ID: '123' };
+  const args = { root: f.root, directory: f.directory, venue: 'bitget', sourceHead, env };
+  assert.throws(() => validateCiWasm(args), /fingerprint differs/);
+  assert.equal(validatePairedCiWasm(args).metadata.sourceHead, sourceHead);
+  assert.notEqual(f.git('rev-parse', 'HEAD'), sourceHead);
+  for (const mutate of [x => { x.venue = 'bitgetusdc'; }, x => { x.sourceHead = f.git('rev-parse', 'HEAD'); },
+    x => { x.sourceHead = 'f'.repeat(40); }, x => { x.env.GITHUB_RUN_ATTEMPT = '2'; },
+    x => { x.env.GITHUB_RUN_ID = '124'; }, x => { x.env.GITHUB_ACTIONS = 'false'; }]) {
+    const x = structuredClone(args); mutate(x); assert.throws(() => validatePairedCiWasm(x));
+  }
+  writeFileSync(f.source, '// dirty measurement checkout\n');
+  assert.throws(() => validatePairedCiWasm(args), /dirty or untracked/);
+});
+
+test('paired source cannot be selected outside the dedicated nine-pair Bitget CI measurement', t => {
+  const f = fixture(t), gate = new URL('./gate.mjs', import.meta.url);
+  for (const args of [[], ['--ci-wasm', f.directory, '--venue', 'binance', '--runs', '9'],
+    ['--ci-wasm', f.directory, '--venue', 'bitget', '--runs', '1'],
+    ['--ci-wasm', f.directory, '--venue', 'bitget', '--runs', '9']]) {
+    const result = spawnSync(process.execPath, [gate.pathname, '--paired-source', f.metadata.sourceHead, ...args],
+      { cwd: f.root, encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: 'false' } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Paired source|Paired module selection/);
+  }
 });

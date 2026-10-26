@@ -241,6 +241,8 @@ fn market_attached_brackets_and_standalone_trigger_payloads() {
 fn amend_validates_before_cancel_and_never_reuses_the_original_caller_id() {
     // Seed the caller's order through the real private stream path.
     let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
     ws(
         &mut e,
         socket,
@@ -326,6 +328,8 @@ fn no_write_retry_after_lost_response_and_leverage_is_global_patch() {
 #[test]
 fn delayed_cancel_responses_preserve_new_fills_and_new_orders() {
     let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
     let event = |id: &str, time: u32, status: &str| {
         format!(
             r#"{{"e":"orderAccepted","i":"{id}","E":{time},"X":"{status}","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"0","f":"GTC"}}"#
@@ -537,6 +541,8 @@ fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
 #[test]
 fn amend_trigger_limit_preserves_execution_price_and_trigger_source() {
     let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
     ws(
         &mut e,
         socket,
@@ -583,6 +589,8 @@ fn rest_and_stream_post_only_orders_remain_post_only_when_amended() {
         } else {
             ready()
         };
+        e.handle(1000.0, Event::WsOpened { socket });
+        safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
         if !rest {
             ws(
                 &mut e,
@@ -699,6 +707,8 @@ fn trigger_limit_repairs_preserve_post_only_time_in_force_and_reduce_only() {
 fn reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements() {
     for all in [false, true] {
         let (mut e, socket) = ready();
+        e.handle(1000.0, Event::WsOpened { socket });
+        safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
         ws(
             &mut e,
             socket,
@@ -719,12 +729,50 @@ fn reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements()
         };
         e.handle(2000.0, Event::Command(command));
         let cancel = requests(&mut e).pop().unwrap();
-        e.handle(2100.0, Event::WsOpened { socket });
-        let read = requests(&mut e)
+        e.handle(2100.0, Event::WsClosed { socket, code: 1006 });
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .expect("actual private reconnect timer");
+        e.handle(at, Event::TimerFired { timer });
+        let replacement = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::WsConnect {
+                    socket,
+                    channel: Some(safe_cex_engine::SocketChannel::Private),
+                    ..
+                } => Some(socket),
+                _ => None,
+            })
+            .expect("actual replacement private socket");
+        e.handle(
+            at,
+            Event::WsOpened {
+                socket: replacement,
+            },
+        );
+        let read = safe_cex_engine::test_support::prepared_actions(&mut e, at)
             .into_iter()
-            .find(|r| r.url.ends_with("/orders"))
+            .find_map(|action| match action {
+                Action::Http(request) if request.url.ends_with("/orders") => Some(request),
+                _ => None,
+            })
             .unwrap();
-        reply(&mut e, &read, 200, &format!("[{ORDER}]"));
+        e.handle(
+            at,
+            Event::HttpResponse {
+                request: read.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body: &format!("[{ORDER}]"),
+                },
+            },
+        );
         assert_eq!(e.store().order("123").unwrap().last_update, 1000.0);
         reply(
             &mut e,
@@ -754,6 +802,8 @@ fn amend_replaces_only_the_unfilled_total_including_fills_during_cancel() {
                 &format!("\"executedQuantity\":\"{initial}\"")
             )
         ));
+        e.handle(1000.0, Event::WsOpened { socket });
+        safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0);
         e.drain_actions().for_each(drop);
         e.handle(
             2000.0,
