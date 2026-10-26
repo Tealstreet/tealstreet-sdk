@@ -2847,6 +2847,8 @@ mod tests {
     include!("request_context_plan_expiry_tests.rs");
     #[cfg(feature = "http-plans")]
     include!("request_context_plan_independence_tests.rs");
+    #[cfg(feature = "http-plans")]
+    include!("request_context_plan_retire_tests.rs");
     #[cfg(feature = "serial-plans")]
     include!("request_context_serial_plan_tests.rs");
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
