@@ -9974,6 +9974,11 @@ their reconcile; any other end drops the mark. Amend roots are marked too, so an
 Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
 same-ID amend fence stays as is.
 
+Paradex opts in: after an Unknown placement or amend it reads `/orders` and
+releases on a clean snapshot. Cancel-all keeps the engine default (refused
+until reconciled). If `/auth` has been refused (401/403), no order read can run,
+so the fence holds until the account is reconnected or re-keyed.
+
 ## Lighter public beta data
 
 Market snapshots seed last price and start ticker hydration before socket Open.
@@ -10020,6 +10025,23 @@ The journal refuses a second resend, so a second rejection fails as
 `AuthInvalid`/`Rejected` with no third send. Every other refusal is still never
 resent. Kraken spot already re-signs a trade once on `EAPI:Invalid signature`
 (`spot/account.rs` `private_response`), and Bitunix `10007` landed in #2207.
+
+### Kraken and KrakenSpot uncertain-placement opt-in
+
+Both products opt into the shared Phase B placement/amend fence. An Unknown
+terminal keeps accepted IDs and refuses a later overlapping placement or amend
+NotSent until a complete, clean open-orders read publishes and calls
+`orders_reconciled`. Cancel by ID remains admitted; store-composed cancel-all
+keeps the shared uncertainty guard. A pre-mark read cannot release a newer mark.
+
+The account hook uses `cx.reconcile_reask` to join a running or already-owed
+read. A new seal owes a follow-up behind an older read; engine backoff re-asks
+do not restart a fresh read or perpetually owe another one. Failed or
+malformed reads leave the fence in place until a clean retry. This is local-key
+beta safety; it does not enable hosted signing. Native engine controls prove
+retry/amend refusal, stale/fresh release, held reads across three engine re-asks,
+503 recovery and rejected-row refusal. Browser readiness remains a separate
+JS/WASM host gate.
 
 ### Lighter: an Unknown placement fences its symbol
 

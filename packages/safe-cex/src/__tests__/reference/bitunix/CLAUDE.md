@@ -502,6 +502,13 @@ Malformed or missing numeric fields are treated as `0` so a payload drift cannot
 - WS events also trigger throttled REST refresh for consistency
 - Virtual TP/SL orders generated from both REST data and WS data
 
+Rust opts into the engine's uncertain-placement fence. An Unknown placement
+refuses later placements and amends on its symbol (NotSent) until a clean
+regular and TP/SL census, dispatched after the seal, commits; cancels stay
+admitted. The uncertain census supersedes an ordinary census in flight, joins
+an owed one, and stays owed until a census numbered at or after the request
+commits.
+
 ### Positions Response Format
 
 The API may return positions in several formats:

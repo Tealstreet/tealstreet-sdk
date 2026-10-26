@@ -183,14 +183,29 @@ pub struct OrderReadProgress {
     issued: f64,
     timer: TimerId,
     dirty: bool,
+    /// Issued as an owed uncertain-write census: a later request joins it.
+    owed: bool,
+    /// `writes_settled` when issued: unchanged, a later request is a re-ask.
+    writes_settled: u64,
     newer: RowAdmission<String>,
     rejected: RowAdmission<String>,
 }
 #[derive(Default)]
 pub struct AccountState {
     pub(crate) recovery: crate::recovery::State,
-    /// The next order snapshots reconcile an uncertain write: Primary-signed.
+    /// Set while an uncertain write's census is issued: it supersedes an
+    /// ordinary census in flight and joins an owed one.
     pub reconcile: bool,
+    /// Regular and TP/SL census owed to an uncertain write: the first serial
+    /// issued after the request. Reads stay Primary-signed until a complete
+    /// snapshot at or past it commits.
+    pub owed: [Option<u64>; 2],
+    /// Trading writes settled (answered or lost) and jobs ended, engine
+    /// retirement included. Every uncertain seal bumps it, so an owed census
+    /// issued since the last bump is still fresh.
+    pub writes_settled: u64,
+    /// `writes_settled` at the last uncertain-write request.
+    pub request_writes: Option<u64>,
     /// Regular and TP/SL order snapshots committed since that reconcile.
     pub reconciled: [bool; 2],
     /// Symbols whose leverage/margin mode were read on first candle interest.
@@ -579,9 +594,20 @@ impl BitunixFutures {
             }
         }
         if let Some(slot) = axis.order_slot() {
+            // A re-ask keeps an owed census issued since the last settled write;
+            // after a newer write only a later census pays the debt.
+            let fresh = self.account.order_reads[slot]
+                .as_ref()
+                .is_some_and(|progress| {
+                    progress.owed && progress.writes_settled == self.account.writes_settled
+                });
+            if self.account.reconcile && !fresh {
+                self.account.owed[slot] = Some(self.account.serials[slot + 2] + 1);
+            }
             if after.is_none()
                 && let Some(progress) = self.account.order_reads[slot].as_mut()
                 && cx.now < progress.issued + ORDER_STALL_MS
+                && (progress.owed || !self.account.reconcile)
             {
                 progress.dirty = true;
                 return;
@@ -631,7 +657,9 @@ impl BitunixFutures {
             native: vec![],
             invalid: false,
             baselines: vec![],
-            reconcile: self.account.reconcile && axis.order_slot().is_some(),
+            reconcile: axis
+                .order_slot()
+                .is_some_and(|slot| self.account.owed[slot].is_some()),
         };
         if let Some(slot) = axis.order_slot() {
             self.account.order_reads[slot] = Some(OrderReadProgress {
@@ -639,6 +667,8 @@ impl BitunixFutures {
                 issued: cx.now,
                 timer: cx.set_timer(ORDER_STALL_MS),
                 dirty: false,
+                owed: read.reconcile,
+                writes_settled: self.account.writes_settled,
                 newer: Default::default(),
                 rejected: Default::default(),
             });
@@ -1338,10 +1368,11 @@ impl BitunixFutures {
         let Some(token) = read.order_token.take() else {
             return;
         };
-        let (reconcile, slot, partial) = (
+        let (reconcile, slot, partial, serial) = (
             read.reconcile,
             usize::from(read.axis == Axis::Tpsl),
             read.partial_orders(),
+            read.serial,
         );
         if !cx
             .store
@@ -1350,8 +1381,11 @@ impl BitunixFutures {
             self.debounce(cx, Axis::Orders);
             return;
         }
-        // Both complete Primary snapshots postdate the uncertain write.
-        if reconcile && !partial {
+        // A slot counts only when its own clean snapshot pays the debt: the
+        // engine judges freshness by the last response alone, so a joined
+        // census older than the latest request must never complete a release.
+        if reconcile && !partial && self.account.owed[slot].is_some_and(|owed| serial >= owed) {
+            self.account.owed[slot] = None;
             self.account.reconciled[slot] = true;
             if self.account.reconciled == [true, true] {
                 self.account.reconciled = [false, false];
