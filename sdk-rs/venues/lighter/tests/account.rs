@@ -316,18 +316,19 @@ fn invalid_fill_cannot_consume_a_later_valid_execution_and_market_scopes_do_not_
     }
 }
 #[test]
-fn api_key_zero_signs_and_255_keeps_unsigned_account_snapshots() {
+fn api_key_zero_signs_and_invalid_private_index_refuses_at_setup() {
     let mut opts = options();
     opts.api_key_index = Some("0".into());
     let (e, _) = ready_with(opts);
     assert_eq!(e.store().positions().len(), 1);
     let mut opts = options();
     opts.api_key_index = Some("255".into());
-    let (e, _) = ready_with(opts);
-    assert_eq!(e.store().positions().len(), 1);
-    assert_eq!(e.store().balance().free, 900.0);
-    assert!(e.store().orders().is_empty());
+    assert!(matches!(
+        try_engine(opts),
+        Err(safe_cex_engine::signing::SignError::InvalidRequest)
+    ));
 }
+
 #[test]
 fn sparse_position_aggregate_does_not_close_existing_exposure() {
     let (mut e, s) = ready();
@@ -489,9 +490,8 @@ fn direct_account_fill_arrays_accept_both_fill_and_trade_ids_without_duplicate_f
 #[test]
 fn initial_and_reconnecting_private_handshakes_have_watchdogs_before_open() {
     use safe_cex_engine::SocketChannel;
-    use safe_cex_venue_lighter::Lighter;
     let mut timers = Timers::new();
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(options()));
+    let mut e = support::engine(options());
     e.start(NOW);
     let meta = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
         .into_iter()
@@ -618,9 +618,7 @@ fn unmapped_working_order_is_skipped_with_a_warning_and_terminal_unknown_rows_ar
 #[test]
 fn unmapped_initial_position_values_the_balance_only_with_its_native_pnl() {
     for pnl in [true, false] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(
-            safe_cex_venue_lighter::Lighter::new(options()),
-        );
+        let mut e = support::engine(options());
         e.start(NOW);
         let mut bad = ACCOUNT.replace("\"market_id\":1", "\"market_id\":999");
         if !pnl {
@@ -720,8 +718,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    let mut pending: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, due)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
