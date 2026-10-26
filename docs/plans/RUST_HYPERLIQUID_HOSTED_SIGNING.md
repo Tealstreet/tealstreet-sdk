@@ -6,7 +6,11 @@ feat/rust-hyperliquid-hosted-signing. Plan first; no runtime or admission change
 in this checkpoint. Source review and auditor 8x5tm1 GO are required before
 activation because the slice crosses registry, provider and WASM host boundaries.
 
-## Beta result and scope
+## Post-beta scope and current beta result
+
+Hosted HL/HLSpot accounts are post-beta by the overseer disposition relayed in
+fe7lgm's plan review. Beta stays local-key only, and R1 continues to refuse hosted
+accounts as NotSent. This lane must not block local-key beta gates or smoke.
 
 Enable explicitly selected Rust Hyperliquid and HyperliquidSpot accounts whose
 agent key stays with a browser/hosted provider, through RemoteSigner and an
@@ -62,14 +66,33 @@ provider, never inferred from wallet, applicationId, vault, stableId or key text
 Use the exact installed Primary signing ref and the engine-sealed VerifiedAddress.
 No secondary signing or credential fallback is introduced.
 
-m26ps4 owns TWO credential prerequisites: #2223's local ScalarOnly carrier, then
-its reviewed hosted sibling install_scalar_only_hosted_primary. The latter is
-proposed only for trusted registry hosted construction, ban-scoped to the agreed
-file, with family policy ScalarOnly, Required signing and Secp256k1Digest. It
-installs genuine credential absence with the provider's own signing ref, checks
-cross-slot collisions, and leaves SetupFacts unchanged. It is NOT an injected
-credential_absent bit or an ordinary credential minted from options.key.
-These APIs are not claimed landed on the research base.
+The shared prerequisites are explicit, separately owned slices; an unpublished
+follow-up has no invented PR number or assumed landed API:
+
+| Prerequisite | Owner and source/review boundary |
+| --- | --- |
+| Local ScalarOnly carrier #2223 | m26ps4; must land before the hosted carrier |
+| Trusted hosted signing-only construction, install_scalar_only_hosted_primary | m26ps4; follow-up PR after #2223, not published at this checkpoint; registry/src/hosted_signing.rs is the exact trusted ban-scoped caller |
+| Approved descriptor carrier (A), extracted from deferred Paradex mode 2 | m26ps4; standalone shared PR after the hosted carrier, not published at this checkpoint; 9czdjh shared-module review, kuhwxi security review, 8x5tm1 GO; fe7lgm remains a core reviewer |
+| Setup-owner admission in shared JS metadata/v2 channel | 9czdjh; follow-up PR not published at this checkpoint; fe7lgm sign-meta/core review |
+
+The hosted construction prerequisite requires family policy ScalarOnly, Required
+signing and Secp256k1Digest. It installs genuine credential absence with the
+provider-declared per-slot agent signing ref from the trusted provider binding,
+never options.key or caller JSON. A collision with ANY other slot's credential
+or signing ref refuses. SetupFacts stay unchanged. This is not an injected
+credential_absent bit or an ordinary credential minted from a public address.
+The sole address proof is the engine's genuine Setup result. An unsupported
+Setup capability (including a v1-only peer) refuses private activation with no
+partial installed hosted identity. These APIs are not claimed landed here.
+
+This marker is also a provider security boundary. LocalSigner refuses Present
+of a declared asymmetric ref everywhere, but the hosted/remote path relies on
+the ENGINE's identity-keyed check, which covers a credential-absent primary's
+signing ref. Therefore hosted HL MUST use install_scalar_only_hosted_primary;
+an ordinary credential-plus-signing identity would evade that specific check.
+Pin Present and Credential interpolation of the agent ref as refusals BEFORE
+any hosted callback. Do not rely on a remote provider copying LocalSigner policy.
 
 Local and hosted construction converge on the same refs/authority and provider
 recipes. Consume scalar material through trusted setup before retaining venue
@@ -151,22 +174,29 @@ A v1-only peer refuses this capability before a private command can be sent.
 The production RemoteSigner transport and browser receiver must actually expose
 this channel; standalone peer fixtures alone do not make an account eligible.
 
-Two shared API directions require core review before source:
+Consume the approved descriptor carrier (A), owner m26ps4; do not design a new
+seam. SignStep::descriptor() -> Option<String> defaults to None, preserving
+existing recipes. Only for a hosted provider, the engine copies that descriptor
+into sign-meta's optional closed descriptor string (at most 4 KiB); invalid
+presence/size refuses. The shared JS metadata validator accepts exactly the
+reviewed closed keys plus descriptor. The descriptor grants no owner, role,
+slot or binding. HL's codec describe recomputes the native digests from it plus
+the trusted binding and requires byte-equality with the ENTIRE original work
+graph, not merely its final digest. Preserve task/preparation lifetime, with
+no global descriptor lookup, fake hash operation or second pending-task map.
 
-1. A closed descriptor must be retained beside the exact recipe/preparation and
-   forwarded with that real task. A digest-only SignRequest and advisory Context
-   cannot supply it. Prefer the existing owned capture/metadata mechanism if it
-   can retain this field with the same lifetime; otherwise have fe7lgm review a
-   narrowly gated task-bound descriptor seam. No global descriptor lookup, extra
-   fake hash operation or independent pending-task map.
-2. The same channel needs a typed setup-public-address capability for the real
-   Setup owner, with no Mutation/Session role. Preserve its separate setup
-   generation and join semantics; never relax business metadata validation to
-   accept role-less work. Exact field spelling and execution ownership are core
-   gates, not APIs claimed by this plan.
+The native setup-meta shape is already landed (#2199):
+SignKind::Setup { generation, operation: PublicAddress, slot }, serialized as
+owner { kind: setup, generation } plus setup { operation: publicAddress, slot }.
+The remaining prerequisite is shared JS validation and v2 channel admission,
+owner 9czdjh with fe7lgm review. Admit Setup only for PublicAddress-only work,
+with its exact slot, no business role and no credential. Keep the real setup
+generation, result AND resource-join contract and RetireAddressSetup lifecycle.
+Do not manufacture a Mutation/Session owner or accept arbitrary role-less work.
+This source must land before HL consumes it.
 
-PayloadSigner is an explicit structured HL scheme to be reviewed with the shared
-provider owners: the callback receives the same validated action/nonce/vault/
+PayloadSigner is an explicit structured HL scheme owned by this PR, with
+9czdjh shared-host and kuhwxi security review of PayloadSignerRequest: the callback receives the same validated action/nonce/vault/
 network descriptor and returns the exact raw-signature/public-address contract,
 not an HMAC, arbitrary digest or callback-selected URL/body. The agent address
 capability must exist at setup too; a signature-only callback is Unsupported,
@@ -200,6 +230,10 @@ assertion REDs from setup/compile failure and entry-gated suffixes.
    unsupported Setup, malformed address, C8 injection, missing carrier, changed
    address and high-s/recovery/receipt mismatch all refuse before transport;
    a later ordinary valid signed operation still works without an auth latch.
+   Hosted installation takes only the provider-bound agent ref, rejects every
+   cross-slot ref collision and rolls back unsupported Setup without a partial
+   identity. A recipe naming Present or Credential interpolation of that agent
+   ref refuses in the engine before any callback, on nonce and non-nonce paths.
 4. Hosted descriptor: tamper every financial field, order of hashed fields,
    method/host/path, action kind, nonce/receipt and requested peer binding. Verify
    complete-batch refusal before any callback and no scalar/credential Present.
@@ -227,16 +261,29 @@ agent-wallet keys via oneshot-secret peek; never master keys, logs or test secre
 
 ## Composition, sizes and delivery
 
-Coordinate shared provider literal/schema/codec changes with Bitunix #2262 and
-Kraken's active hosted lane. 9czdjh confirmed no authored shared runtime edits at
-73521d53441 when this research began. m26ps4 owns credential carrier source;
-fe7lgm reviews the descriptor/setup boundary. Recheck their immutable source pins
-and landed APIs before dependent implementation; do not stack on assumed source.
+Compose shared provider/codec edits only AFTER Bitunix #2262 lands. Its owner
+4yjlw0 supplied source c85ca651b15, head cacb23f8b6a/tree 953a457a3ed, still awaiting
+review/GO at this checkpoint. It owns remoteSignerProvider.ts's fused matcher
+and per-venue remoteSignerAlgorithms(name), delegatedSignerSetup.ts algorithm
+advertisement, hosted_signing.rs OutputKind::layout(), host input format and
+legacySigning.ts, plus only the Bitunix construction row. Add HL matcher/output
+siblings, retaining that ONE per-venue algorithm switch; do not edit them in
+parallel or assume their unpublished APIs have landed. Preserve HMAC behavior.
+
+Coordinate Kraken's active hosted lane with 9czdjh, who confirmed no authored
+shared runtime edits at 73521d53441 when this research began. Credential and
+carrier sequencing is #2223 -> hosted signing-only construction -> carrier (A),
+all owned by m26ps4; the shared Setup-channel slice belongs to 9czdjh. Recheck
+exact published PRs, immutable API pins and actual landings before dependent
+implementation. This plan's credential direction is CLEAR at 092018dcf37 with
+the reviewed corrections folded here; no source approval follows from that.
 
 Measure the local composed combined once for shared/provider feature adoption;
 CI is the record for HL family sizes. If a core change reaches other families,
 measure only the specific pairs required by its owner/ruling (normally Bybit and
-Bitget), one cargo build at a time, jobs=4, deleting own target after each. Keep
+Bitget), one cargo invocation per lane at a time. Use CARGO_BUILD_JOBS=2 for
+test/check builds; 4 only for a single WASM/size build. Delete own target after
+each measurement/build; an exit 137 is rerun under the machine rule. Keep
 budgets fixed except explicitly approved standing allowance adjustments, reported
 separately. Feature-off/nonadopter checks must demonstrate the actual cost.
 
