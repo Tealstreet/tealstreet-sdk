@@ -205,6 +205,16 @@ impl<P> Cx<'_, P> {
         self.with_command_entry(operation, |cx, command| cx.issue_preflight(command, policy))
     }
 
+    /// Inert original-test boundary; keyless policy is still refused.
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub fn begin_preflight_with_session(
+        &mut self,
+        policy: PreflightPolicy,
+        _session: &crate::request_context::Session,
+    ) -> Result<Preflight, crate::request_context::CommandEntryError> {
+        self.begin_preflight(policy)
+    }
+
     /// Opt into the exact caller receipt cap before asynchronous Read work.
     /// Missing receipt uses the shared typed refusal. Expired capture is Revoked
     /// without effects; Fresh custody remains for reject_expired_command(Read).

@@ -132,6 +132,9 @@ impl<P> Cx<'_, P> {
                 Error::Revoked
             });
         }
+        if policy.credential.is_none() {
+            return Err(Error::Invalid);
+        }
         validate_call(first)?;
         let (intent, _) = self.preflight_plan_origin(preflight)?;
         if policy
@@ -154,7 +157,7 @@ impl<P> Cx<'_, P> {
                 policy: PlanPolicy {
                     independent_calls: false,
                     operation: Operation::Mutation,
-                    credential: Some(policy.credential),
+                    credential: policy.credential,
                     pacing: policy.pacing,
                     retry: retry_policy(first),
                 },

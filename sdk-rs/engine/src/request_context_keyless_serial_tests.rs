@@ -1,0 +1,658 @@
+// Keyless serial originals: the entry stub is intentionally inert. Suffixes
+// after the entry assertion are source gates until genuine admission exists.
+#[allow(clippy::result_large_err)]
+mod keyless_serial {
+    use super::*;
+    use crate::book::Book;
+    use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
+    use crate::request_context::{
+        Plan, PreflightPolicy, PreflightPurpose, SecretHeaderValue, Session, SessionBearer,
+        SessionHeaders, SessionPolicy, SessionResend,
+        plan::{CallBound, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound},
+    };
+
+    const CANCEL: &str = r#"{"order_id":"one"}"#;
+    const LEVERAGE: &str = r#"{"leverage":3}"#;
+    const TABLE: CodeTable = CodeTable {
+        rows: &[Row {
+            key: Key::Int(1000),
+            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+            only: None,
+        }],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    };
+    #[derive(Clone, Copy, Default, PartialEq, Eq)]
+    enum Mode {
+        #[default]
+        Chain,
+        Ordinary,
+        Retired,
+        Foreign,
+        ReadOnly,
+        ReadKey,
+        Mixed,
+        Complete,
+        EmptyDone,
+        EmptyFail,
+        RetireBetween,
+        WrongBearer,
+        NoBearer,
+        Signed,
+        Read,
+        Auth,
+    }
+    enum Pending {
+        Login(Context),
+        Call(Context),
+    }
+    #[derive(Default)]
+    struct Probe {
+        mode: Mode,
+        session: Option<Session>,
+        foreign: Option<Session>,
+        revision: u64,
+        timer: Option<TimerId>,
+        plan: Option<Plan>,
+        slot: Option<Slot>,
+        entry: Option<Result<(), Error>>,
+        admitted: Option<Result<(), Error>>,
+        selection: Option<Result<(), Error>>,
+        issue: Option<Result<(), Error>>,
+        before: Option<crate::resource_ids::ResourceIds>,
+        after: Option<crate::resource_ids::ResourceIds>,
+        calls: usize,
+        selected: usize,
+        cleanup: bool,
+    }
+    fn credential() -> crate::request_context::Credential {
+        crate::request_context::Credential {
+            slot: crate::CredentialSlot::Primary,
+            reference: crate::signing::KeyRef("read-ref-must-not-fall-back".into()),
+        }
+    }
+    fn call(operation: Operation) -> SerialCall {
+        SerialCall {
+            operation,
+            timeout_ms: 20_000,
+            attempts: 2,
+        }
+    }
+    impl Probe {
+        fn issue(&mut self, cx: &mut Cx<'_, Pending>, context: Context) {
+            assert!(
+                context.credential().is_none(),
+                "keyless context cannot sign"
+            );
+            let session = if self.mode == Mode::NoBearer {
+                None
+            } else if self.mode == Mode::WrongBearer {
+                self.foreign.as_ref()
+            } else {
+                self.session.as_ref()
+            };
+            let url = if self.calls == 0 {
+                "https://venue.test/cancel"
+            } else {
+                "https://venue.test/leverage"
+            };
+            let body = if self.calls == 0 { CANCEL } else { LEVERAGE };
+            self.before = Some(cx.io.core.next_id);
+            let result = if self.mode == Mode::Signed {
+                cx.request_signed_managed(
+                    context.clone(),
+                    session,
+                    Method::Post,
+                    url.into(),
+                    Some(body.into()),
+                    Box::new(Recipe),
+                    Pending::Call(context),
+                )
+            } else {
+                cx.request_managed(
+                    context.clone(),
+                    session,
+                    Method::Post,
+                    url.into(),
+                    Some(body.into()),
+                    Pending::Call(context),
+                )
+            };
+            self.after = Some(cx.io.core.next_id);
+            self.issue = Some(result.map(drop).map_err(|(_, e)| e));
+        }
+    }
+    impl Venue for Probe {
+        type Pending = Pending;
+        fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+            let intent =
+                crate::signing::SetupFacts::new(crate::signing::KeyPresence::Empty).primary_login();
+            let slots = crate::credential_selection::Slots::new(intent, None, Default::default());
+            let (selection, intent) = slots
+                .select(crate::credential_selection::CredentialRole::SessionAuth)
+                .unwrap();
+            assert_eq!(*intent, crate::signing::PrimaryLogin::Empty);
+            assert!(cx.io.core.identities.primary.is_none());
+            let session = cx
+                .open_session(SessionPolicy {
+                    credential: None,
+                    repeat_safe: true,
+                    private_egress: selection.session_egress(),
+                })
+                .unwrap();
+            let context = cx
+                .session_context(
+                    &session,
+                    Policy {
+                        operation: Operation::Mutation,
+                        credential: None,
+                        timeout_ms: 20_000,
+                        pacing: None,
+                        retry: crate::request_context::RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            cx.request_managed(
+                context.clone(),
+                None,
+                Method::Post,
+                "https://venue.test/login".into(),
+                Some(r#"{"api_key":""}"#.into()),
+                Pending::Login(context),
+            )
+            .map_err(|(_, e)| e)
+            .unwrap();
+            self.session = Some(session);
+        }
+        fn on_command(&mut self, cx: &mut Cx<'_, Pending>, _: Command) {
+            if self.mode == Mode::Retired {
+                cx.retire_session(self.session.as_ref().unwrap()).unwrap();
+            }
+            let policy = PreflightPolicy {
+                purpose: if self.mode == Mode::ReadOnly {
+                    PreflightPurpose::ReadOnly
+                } else {
+                    PreflightPurpose::WriteAfterReads
+                },
+                read_credential: (self.mode == Mode::ReadKey).then(credential),
+                write_credential: None,
+            };
+            self.before = Some(cx.io.core.next_id);
+            let result = if self.mode == Mode::Ordinary {
+                cx.begin_preflight(policy)
+            } else {
+                cx.begin_preflight_with_session(
+                    policy,
+                    if self.mode == Mode::Foreign {
+                        self.foreign.as_ref().unwrap()
+                    } else {
+                        self.session.as_ref().unwrap()
+                    },
+                )
+            };
+            self.after = Some(cx.io.core.next_id);
+            self.entry = Some(result.as_ref().map(drop).map_err(|e| match e {
+                crate::request_context::CommandEntryError::Rejected(reason) => *reason,
+                crate::request_context::CommandEntryError::Revoked => Error::Revoked,
+            }));
+            let Ok(preflight) = result else {
+                return;
+            };
+            if self.mode == Mode::EmptyDone {
+                self.selection = Some(cx.done_empty_plan(&preflight, "[]".into()));
+                self.cleanup = true;
+                return;
+            }
+            if self.mode == Mode::EmptyFail {
+                self.selection = Some(cx.fail_preflight(&preflight, "no work"));
+                self.cleanup = true;
+                return;
+            }
+            if self.mode == Mode::Complete {
+                let calls = [CallBound {
+                    timeout_ms: 20_000,
+                    attempts: 1,
+                    retry_window: RetryWindow::Shared,
+                    after_refusal: &[],
+                }];
+                let steps = [StepBound {
+                    wait_ms: 0,
+                    calls: &calls,
+                }];
+                let policy = crate::request_context::PlanPolicy {
+                    independent_calls: false,
+                    operation: Operation::Mutation,
+                    credential: None,
+                    pacing: None,
+                    retry: crate::request_context::RetryPolicy::Never,
+                };
+                let before = cx.io.core.next_id;
+                self.selection = Some(cx.admit_plan(&preflight, &steps, policy.clone()).map(drop));
+                assert_eq!(self.selection, Some(Err(Error::Invalid)));
+                assert_eq!(cx.io.core.next_id, before);
+                #[cfg(feature = "http-mutation-barriers")]
+                {
+                    assert_eq!(
+                        cx.admit_plan_with_barriers(
+                            &preflight,
+                            &steps,
+                            policy,
+                            &[crate::request_context::plan::MutationBarrierBound { step: 0 }]
+                        )
+                        .map(drop),
+                        Err(Error::Invalid)
+                    );
+                    assert_eq!(cx.io.core.next_id, before);
+                }
+            }
+            let result = cx.admit_serial_plan(
+                &preflight,
+                call(if self.mode == Mode::Read {
+                    Operation::Read
+                } else {
+                    Operation::Mutation
+                }),
+                SerialPolicy {
+                    credential: (self.mode == Mode::Mixed).then(credential),
+                    pacing: None,
+                    refusals_complete: true,
+                },
+            );
+            self.admitted = Some(result.as_ref().map(drop).map_err(|e| *e));
+            if let Ok((plan, slot)) = result {
+                let context = cx.plan_leg_context(&plan, &slot).unwrap();
+                self.plan = Some(plan);
+                self.slot = Some(slot);
+                self.issue(cx, context);
+            }
+        }
+        fn session_bearer(&self, generation: u64) -> SessionBearer {
+            if self
+                .session
+                .as_ref()
+                .is_some_and(|s| s.owner() == crate::request_context::Owner::Session { generation })
+                && self.revision > 0
+            {
+                SessionBearer::Ready {
+                    headers: SessionHeaders::new(vec![(
+                        "Cookie",
+                        SecretHeaderValue::new(format!("cookie-{}", self.revision)).unwrap(),
+                    )])
+                    .unwrap(),
+                    revision: self.revision,
+                }
+            } else {
+                SessionBearer::NotReady
+            }
+        }
+        fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
+            self.session
+                .as_ref()
+                .filter(|s| s.owner() == crate::request_context::Owner::Session { generation })
+                .map(|_| self.revision)
+        }
+        fn on_response(
+            &mut self,
+            cx: &mut Cx<'_, Pending>,
+            pending: Pending,
+            response: Response<'_>,
+        ) {
+            let context = match pending {
+                Pending::Login(context) => {
+                    assert_eq!(response.body, "login-ok");
+                    cx.http_write_result(
+                        &context,
+                        crate::request_context::WriteResult::Accepted { order_ids: vec![] },
+                    )
+                    .unwrap();
+                    cx.finish_http_context(&context).unwrap();
+                    self.revision = 1;
+                    assert!(cx.session_ready(self.session.as_ref().unwrap()).is_empty());
+                    return;
+                }
+                Pending::Call(context) => context,
+            };
+            let plan = self.plan.clone().unwrap();
+            let slot = self.slot.clone().unwrap();
+            cx.validate_plan_delivery(&plan, &context).unwrap();
+            if response.body == "auth" {
+                let (_, grant) = cx
+                    .http_write_failure(
+                        &context,
+                        &TABLE,
+                        Some(&Native {
+                            code: NativeCode::Int(1000),
+                            message: "auth",
+                        }),
+                        "auth",
+                        None,
+                    )
+                    .unwrap();
+                self.before = Some(cx.io.core.next_id);
+                let next = cx.serial_plan_session_resend(
+                    &plan,
+                    &slot,
+                    &context,
+                    SessionResend::Write(grant.unwrap()),
+                );
+                self.after = Some(cx.io.core.next_id);
+                self.selected += 1;
+                self.selection = Some(next.as_ref().map(drop).map_err(|e| *e));
+                if let Ok(next) = next {
+                    self.issue(cx, next);
+                    self.timer = Some(cx.set_timer(1.));
+                }
+                return;
+            }
+            if context.operation() == Operation::Mutation {
+                cx.http_write_result(
+                    &context,
+                    crate::request_context::WriteResult::Accepted { order_ids: vec![] },
+                )
+                .unwrap();
+            }
+            self.calls += 1;
+            if self.calls == 1 {
+                if self.mode == Mode::RetireBetween {
+                    cx.retire_session(self.session.as_ref().unwrap()).unwrap();
+                }
+                self.before = Some(cx.io.core.next_id);
+                let next =
+                    cx.continue_serial_plan(&plan, &slot, &context, call(Operation::Mutation));
+                self.after = Some(cx.io.core.next_id);
+                self.selection = Some(next.as_ref().map(drop).map_err(|e| *e));
+                if let Ok(slot) = next {
+                    self.slot = Some(slot.clone());
+                    let context = cx.plan_leg_context(&plan, &slot).unwrap();
+                    self.issue(cx, context);
+                }
+            } else {
+                cx.finish_plan_call(&plan, &slot, &context).unwrap();
+                cx.done_plan(&plan, "[]".into()).unwrap();
+            }
+        }
+        fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {
+            panic!("unexpected transport failure");
+        }
+        fn capture_http_reconciliation(
+            &self,
+            _: &Pending,
+        ) -> Result<crate::request_context::ReconciliationData, Error> {
+            crate::request_context::ReconciliationData::new("keyless-serial".into())
+        }
+        fn reconcile_uncertain(&mut self, _: &mut Cx<'_, Pending>, _: Option<&[String]>) {}
+        fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
+        fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+        fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
+        fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+            if self.timer == Some(timer) {
+                self.revision += 1;
+                assert!(cx.session_ready(self.session.as_ref().unwrap()).is_empty());
+            }
+        }
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    fn local_session_refusal(e: &mut Engine<Probe>) {
+        assert_eq!(e.health().auth_failures, 0);
+        assert!(!e.io.core.signing.refused());
+        let actions: Vec<_> = e.drain_actions().collect();
+        no_sign(&actions);
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].outcome, Some(crate::Outcome::NotSent));
+        assert_ne!(failures[0].kind, Some(ErrorKind::AuthInvalid));
+        assert_ne!(failures[0].kind, Some(ErrorKind::AuthExpired));
+    }
+    fn no_sign(actions: &[Action]) {
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Sign { .. })),
+            "no provider signing work"
+        );
+    }
+    fn drive(e: &mut Engine<Probe>, actions: Vec<Action>, now: f64) -> Vec<HttpRequest> {
+        no_sign(&actions);
+        let mut packets = Vec::new();
+        for action in actions {
+            if let Action::ManagedHttp(action) = action {
+                match *action {
+                    HttpAction::Prepare { preparation, .. } => {
+                        e.http_prepared(
+                            now,
+                            preparation,
+                            Prepared {
+                                id: preparation.attempt().request.0,
+                                expires_at: None,
+                            },
+                        );
+                        let next = e.drain_actions().collect();
+                        packets.extend(drive(e, next, now));
+                    }
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => {
+                        assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
+                        packets.push(request);
+                    }
+                    HttpAction::BindGroup { .. } => panic!("serial calls never group"),
+                    _ => {}
+                }
+            }
+        }
+        packets
+    }
+    fn reply(e: &mut Engine<Probe>, request: RequestId, body: &str) {
+        reply_at(e, request, body, 1.);
+    }
+    fn reply_at(e: &mut Engine<Probe>, request: RequestId, body: &str, now: f64) {
+        e.handle(
+            now,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+    fn ready(mode: Mode) -> Engine<Probe> {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            mode,
+            ..Default::default()
+        });
+        e.start(0.);
+        let actions = e.drain_actions().collect();
+        let login = drive(&mut e, actions, 0.).pop().unwrap();
+        assert_eq!(login.body.as_deref(), Some(r#"{"api_key":""}"#));
+        reply(&mut e, login.id, "login-ok");
+        let actions: Vec<_> = e.drain_actions().collect();
+        no_sign(&actions);
+        e
+    }
+    fn enter(e: &mut Engine<Probe>) {
+        e.handle_command(
+            1.,
+            Command::CancelOrdersWithSymbols {
+                command: 7,
+                orders: vec![],
+            },
+            None,
+        )
+        .unwrap();
+    }
+    fn admitted(mode: Mode) -> Engine<Probe> {
+        let mut e = ready(mode);
+        enter(&mut e);
+        assert_eq!(e.venue.entry, Some(Ok(())), "genuine keyless Session entry");
+        assert_eq!(e.venue.admitted, Some(Ok(())), "keyless serial admission");
+        e
+    }
+    #[test]
+    fn empty_login_cancel_then_leverage_without_any_provider_work() {
+        let mut e = admitted(Mode::Chain);
+        let actions = e.drain_actions().collect();
+        let cancel = drive(&mut e, actions, 1.).pop().unwrap();
+        assert_eq!(cancel.body.as_deref(), Some(CANCEL));
+        assert_eq!(cancel.headers, vec![("Cookie", "cookie-1".into())]);
+        reply(&mut e, cancel.id, "ok");
+        let actions = e.drain_actions().collect();
+        let leverage = drive(&mut e, actions, 1.).pop().unwrap();
+        assert_eq!(leverage.body.as_deref(), Some(LEVERAGE));
+        reply(&mut e, leverage.id, "ok");
+        let actions: Vec<_> = e.drain_actions().collect();
+        no_sign(&actions);
+        assert_eq!(e.venue.calls, 2);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+                .count(),
+            1
+        );
+    }
+    #[test]
+    fn ordinary_keyless_preflight_stays_invalid_without_resource_spend() {
+        let mut e = ready(Mode::Ordinary);
+        enter(&mut e);
+        assert_eq!(e.venue.entry, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.before, e.venue.after);
+        no_sign(&e.drain_actions().collect::<Vec<_>>());
+    }
+    #[test]
+    fn foreign_engine_session_with_equal_generation_cannot_admit() {
+        let foreign = ready(Mode::Chain);
+        let mut e = ready(Mode::Foreign);
+        assert_eq!(
+            e.venue.session.as_ref().unwrap().owner(),
+            foreign.venue.session.as_ref().unwrap().owner()
+        );
+        e.venue.foreign = foreign.venue.session.clone();
+        enter(&mut e);
+        assert_eq!(e.venue.entry, Some(Err(Error::Revoked)));
+        assert_eq!(e.venue.before, e.venue.after);
+        local_session_refusal(&mut e);
+    }
+    #[test]
+    fn retired_session_cannot_admit() {
+        let mut e = ready(Mode::Retired);
+        enter(&mut e);
+        assert_eq!(e.venue.entry, Some(Err(Error::Revoked)));
+        assert_eq!(e.venue.before, e.venue.after);
+        local_session_refusal(&mut e);
+    }
+    #[test]
+    fn read_key_and_readonly_do_not_enter_the_session_exception() {
+        for mode in [Mode::ReadKey, Mode::ReadOnly] {
+            let mut e = ready(mode);
+            enter(&mut e);
+            assert_eq!(e.venue.entry, Some(Err(Error::Invalid)));
+            assert_eq!(e.venue.before, e.venue.after);
+        }
+    }
+    #[test]
+    fn complete_plan_refusal_preserves_serial_opportunity() {
+        let e = admitted(Mode::Complete);
+        assert_eq!(e.venue.selection, Some(Err(Error::Invalid)));
+    }
+    #[test]
+    fn mixed_credential_cannot_admit() {
+        let mut e = ready(Mode::Mixed);
+        enter(&mut e);
+        assert_eq!(e.venue.entry, Some(Ok(())), "genuine entry before mismatch");
+        assert_eq!(e.venue.admitted, Some(Err(Error::Invalid)));
+    }
+    #[test]
+    fn entry_without_plan_can_finish_empty_without_retiring_session() {
+        for mode in [Mode::EmptyDone, Mode::EmptyFail] {
+            let mut e = ready(mode);
+            enter(&mut e);
+            assert_eq!(e.venue.entry, Some(Ok(())));
+            assert_eq!(e.venue.selection, Some(Ok(())));
+            assert!(e.venue.cleanup);
+            assert!(
+                e.io.core
+                    .request_contexts
+                    .validate_session(e.venue.session.as_ref().unwrap())
+                    .is_ok()
+            );
+        }
+    }
+    #[test]
+    fn signing_recipe_under_keyless_root_refuses_before_ids() {
+        let e = admitted(Mode::Signed);
+        assert_eq!(e.venue.issue, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.before, e.venue.after);
+    }
+    #[test]
+    fn missing_and_foreign_bearer_refuse_before_ids() {
+        for mode in [Mode::NoBearer, Mode::WrongBearer] {
+            let foreign = ready(Mode::Chain);
+            let mut e = ready(mode);
+            e.venue.foreign = foreign.venue.session.clone();
+            enter(&mut e);
+            assert_eq!(e.venue.entry, Some(Ok(())), "genuine keyless entry");
+            assert_eq!(e.venue.admitted, Some(Ok(())));
+            assert_eq!(e.venue.issue, Some(Err(Error::Revoked)));
+            assert_eq!(e.venue.before, e.venue.after);
+        }
+    }
+    #[test]
+    fn session_retirement_between_calls_blocks_continuation_before_ids() {
+        let mut e = admitted(Mode::RetireBetween);
+        let actions = e.drain_actions().collect();
+        let request = drive(&mut e, actions, 1.).pop().unwrap();
+        reply(&mut e, request.id, "ok");
+        assert_eq!(e.venue.selection, Some(Err(Error::Revoked)));
+        assert_eq!(e.venue.before, e.venue.after);
+        no_sign(&e.drain_actions().collect::<Vec<_>>());
+    }
+    #[test]
+    fn keyless_read_uses_same_session_without_secondary_fallback() {
+        let mut e = admitted(Mode::Read);
+        let actions = e.drain_actions().collect();
+        let request = drive(&mut e, actions, 1.).pop().unwrap();
+        assert_eq!(request.headers, vec![("Cookie", "cookie-1".into())]);
+    }
+    #[test]
+    fn auth_resend_waits_for_new_cookie_preserving_body_and_unsigned_work() {
+        let mut e = admitted(Mode::Auth);
+        let actions = e.drain_actions().collect();
+        let first = drive(&mut e, actions, 1.).pop().unwrap();
+        reply(&mut e, first.id, "auth");
+        assert_eq!(e.venue.selection, Some(Ok(())));
+        let actions = e.drain_actions().collect();
+        let packets = drive(&mut e, actions, 1.);
+        assert!(packets.is_empty(), "old revision cannot bind");
+        e.handle(
+            2.,
+            Event::TimerFired {
+                timer: e.venue.timer.unwrap(),
+            },
+        );
+        let actions = e.drain_actions().collect();
+        let second = drive(&mut e, actions, 2.)
+            .pop()
+            .expect("new revision releases resend");
+        assert_eq!(second.body, first.body, "immutable resend body");
+        assert_ne!(second.id, first.id);
+        assert_eq!(second.headers, vec![("Cookie", "cookie-2".into())]);
+        reply_at(&mut e, second.id, "auth", 3.);
+        assert_eq!(e.venue.selection, Some(Err(Error::RetryForbidden)));
+        assert_eq!(e.venue.before, e.venue.after);
+        let actions = e.drain_actions().collect();
+        assert!(drive(&mut e, actions, 2.).is_empty(), "no third send");
+    }
+}

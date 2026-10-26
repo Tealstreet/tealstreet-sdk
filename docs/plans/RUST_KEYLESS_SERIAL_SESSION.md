@@ -29,7 +29,12 @@ WriteAfterReads with read_credential None and write_credential None. Validate
 the actual live issuer-checked Session before issuing the command generation,
 and store its generation privately in Preflight state. Existing begin_preflight,
 PreflightPolicy::validate and caller-wait receipt admission retain their rules.
-This Session Preflight binds no caller receipt cap.
+This Session Preflight binds no caller receipt cap. The retained generation is
+issuer-bound; equal generation numbers from different engines never match.
+The engine cannot inspect trusted setup facts. GRVT may use this seam only when
+trusted SetupFacts::primary_login() is Some(PrimaryLogin::Empty), from landed
+phase 3 D3. Installed and Absent never downgrade into it; those negative controls
+belong to GRVT adoption, not this engine prerequisite.
 
 admit_serial_plan keeps its three arguments. Its Optional credential must equal
 the Preflight write credential exactly. None requires the retained live Session;
@@ -64,8 +69,12 @@ A parsed definitive refusal may select the declared remaining physical attempt
 under the same live Session, with the refused revision as the floor. It does
 not mint a provider-signing authorization. Attempts, timers, generation,
 auth ledger and immutable body are not reset. A second refusal cannot select
-again. Earlier released calls still determine the command's journal projection;
+again. Its own Bind re-reads the newer bundle and sends that cookie, never the
+refused revision. Earlier released calls still determine the command's journal projection;
 NotSent describes an unreleased operation, not necessarily the whole command.
+Foreign/retired Session refusal is NotSent per operation and changes no auth
+health or #2109/#2119 account latch. A Session Preflight without an admitted Plan
+can fail_preflight or done_empty_plan without retiring the Session.
 
 ## Originals before source
 
@@ -115,3 +124,36 @@ Originals review precedes source publication. Source needs exact fe7/dazzy revie
 and m26 credential fit, fresh PR CI, READY and auditor 8x5tm1 exact-tree GO.
 Owner then performs the guarded head-matched merge. No activation of GRVT or
 unlanded public-address setup is inferred from this engine prerequisite.
+
+## Original checkpoint receipt
+
+The mechanical Option and Some wrappers are isolated in d373d770924: twelve
+single-line edits, with no assertion changes. The following checkpoint adds
+only an inert begin_preflight_with_session delegator to existing admission,
+a mandatory-Some guard preserving the old serial behavior, the new test include,
+and its controls. It grants no keyless write authority.
+
+Thirteen controls execute: twelve behavior assertion REDs and one GREEN, zero
+ignored. Eight fail at the genuine keyless entry assertion, the empty-cleanup
+and mixed-policy controls likewise stop at entry, foreign and retired controls
+observe Invalid instead of Revoked, and the ReadOnly rejection control observes
+that the stub still delegates ordinary ReadOnly admission. Missing methods,
+fixture signature/import/timer spelling compile errors from development are
+excluded from the RED count. The ordinary keyless refusal is the GREEN.
+Every fixture first completes a real managed Empty-body login using the typed
+PrimaryLogin selection to obtain SessionAuth egress, with no Identity/KeyRef or
+provider work. This is engine custody evidence, not constructor certification.
+
+All suffixes after those first assertions remain unexecuted: serial admission,
+complete/barrier rejection preserving serial opportunity, actual cancel/leverage
+wire, per-operation NotSent/auth-health/latch assertions, signed recipe and
+wrong/missing bearer refusal, between-call retirement, Read routing, and seeded
+resend/new-cookie/body/no-third-send. They must execute after source. The full
+nonce/selected attachment, parked-Preflight retirement, late/equality expiry
+and keyless Read resend variants remain required source controls; they are not
+represented as executed originals or empty passing stubs.
+
+Existing signed Session controls: 35 PASS; existing serial controls: 32 PASS,
+zero ignored. Scoped strict clippy passes with serial-plans, session-bearer,
+condition-waits and mutation barriers. Logs and exact hashes are retained in
+/tmp/codex-keyless-serial. No size, runtime source or CI clearance is claimed.
