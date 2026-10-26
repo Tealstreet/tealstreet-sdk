@@ -920,19 +920,6 @@ impl<T: ?Sized> SetupExecutionBounds for T {}
 /// Host-injected signing. Providers own secrets and may complete asynchronously.
 /// Hosts enforce cancellation/timeout independently of the signing future settling.
 pub trait Signer: ProviderBounds {
-    fn owned_public_address_capability(&self) -> Capability {
-        Capability::Unsupported
-    }
-    /// Dormant owned work; refuse anything except one own-ref Secp256k1 PublicAddress
-    /// with an empty receipt/context. Pure local derivation may happen here;
-    /// asynchronous emission starts only through the retained execution's start.
-    fn create_public_address_setup(
-        &self,
-        _request: SignRequest,
-    ) -> Option<Box<dyn OwnedSetupExecution>> {
-        None
-    }
-
     fn sign(&self, request: SignRequest) -> SignFuture;
     /// True only when sign_ready always completes inline (normal local provider).
     fn immediate(&self) -> bool {
@@ -948,6 +935,19 @@ pub trait Signer: ProviderBounds {
     fn can_sign(&self, _key: &KeyRef, _algorithm: Algorithm) -> Capability {
         Capability::Unknown
     }
+    fn owned_public_address_capability(&self) -> Capability {
+        Capability::Unsupported
+    }
+    /// Dormant owned work; refuse anything except one own-ref Secp256k1 PublicAddress
+    /// with an empty receipt/context. Pure local derivation may happen here;
+    /// asynchronous emission starts only through the retained execution's start.
+    fn create_public_address_setup(
+        &self,
+        _request: SignRequest,
+    ) -> Option<Box<dyn OwnedSetupExecution>> {
+        None
+    }
+
 }
 pub type Provider = Arc<dyn Signer>;
 
