@@ -2,8 +2,8 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 import { describe, expect, it } from 'vitest';
 
-import { createExchangeAPI, createInfoAPI } from '../exchanges/hyperliquid/hyperliquid.api';
-import { createAPI as createSpotAPI } from '../exchanges/hyperliquid/hyperliquidspot.api';
+import { createExchangeAPI, createInfoAPI } from './reference/hyperliquid/hyperliquid.api';
+import { createAPI as createSpotAPI } from './reference/hyperliquid/hyperliquidspot.api';
 
 // Well-known test key; no value, never used in production.
 const KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';

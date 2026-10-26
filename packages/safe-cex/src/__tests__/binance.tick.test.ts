@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../exchanges/binance/binance.exchange';
+import { BinanceExchange } from './reference/binance/binance.exchange';
 import { loop } from '../utils/loop';
 
 vi.mock('../utils/loop', () => ({ loop: vi.fn() }));

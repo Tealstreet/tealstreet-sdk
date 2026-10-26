@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { BASE_URLS, BASE_WS_URLS } from '../../exchanges/okx/okx.types';
-import { OKXDemoExchange } from '../../exchanges/okx/okxdemo.exchange';
-import { OKXEUDemoExchange } from '../../exchanges/okx/okxeudemo.exchange';
+import { OKXDemoExchange } from '../reference/okx/okxdemo.exchange';
+import { OKXEUDemoExchange } from '../reference/okx/okxeudemo.exchange';
 import { exchangeRegistry } from '../../exchanges/registry';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';

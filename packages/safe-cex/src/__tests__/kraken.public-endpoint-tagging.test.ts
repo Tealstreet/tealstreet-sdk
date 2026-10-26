@@ -2,7 +2,7 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 import { describe, expect, it } from 'vitest';
 
-import { createAPI } from '../exchanges/kraken/kraken.api';
+import { createAPI } from './reference/kraken/kraken.api';
 
 // Drives the real request interceptor and captures the config it produces,
 // rather than asserting on the tag helper in isolation. The interceptor is

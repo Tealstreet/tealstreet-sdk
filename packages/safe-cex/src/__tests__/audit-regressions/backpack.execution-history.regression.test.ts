@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
-import { ENDPOINTS } from '../../exchanges/backpack/backpack.types';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
+import { ENDPOINTS } from '../reference/backpack/backpack.types';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, OrderSide } from '../../types';
 

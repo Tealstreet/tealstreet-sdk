@@ -2,7 +2,7 @@ import type { Market } from '../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BlofinExchange } from '../exchanges/blofin/blofin.exchange';
+import { BlofinExchange } from './reference/blofin/blofin.exchange';
 import { DefaultStore } from '../store/store.base';
 import { ENDPOINTS } from '../exchanges/blofin/blofin.types';
 import { createPositionId } from '../utils/createPositionId';
@@ -10,7 +10,7 @@ import { MarginType, OrderSide, OrderType, PositionMode, PositionSide } from '..
 
 const createAPIMock = vi.fn();
 
-vi.mock('../exchanges/blofin/blofin.api', () => ({
+vi.mock('./reference/blofin/blofin.api', () => ({
   createAPI: (...args: any[]) => createAPIMock(...args),
 }));
 

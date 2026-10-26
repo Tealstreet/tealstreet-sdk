@@ -2,17 +2,17 @@ import type { Market } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
-import { mapBinanceHistoricalOrder } from '../../exchanges/binance/binance.order-history';
-import { mapBitunixHistoricalOrder } from '../../exchanges/bitunix/bitunix.order-history';
-import { mapBlofinHistoricalOrder } from '../../exchanges/blofin/blofin.order-history';
+import { mapBinanceHistoricalOrder } from '../reference/binance/binance.order-history';
+import { mapBitunixHistoricalOrder } from '../reference/bitunix/bitunix.order-history';
+import { mapBlofinHistoricalOrder } from '../reference/blofin/blofin.order-history';
 import {
   collapseHyperliquidOrderHistory,
   mapHyperliquidHistoricalOrder,
-} from '../../exchanges/hyperliquid/hyperliquid.order-history';
-import { mapOkxHistoricalOrder } from '../../exchanges/okx/okx.order-history';
-import { mapParadexHistoricalOrder } from '../../exchanges/paradex/paradex.order-history';
-import { mapWooHistoricalOrder } from '../../exchanges/woo/woo.order-history';
-import { normalizeSymbol } from '../../exchanges/woo/woo.utils';
+} from '../reference/hyperliquid/hyperliquid.order-history';
+import { mapOkxHistoricalOrder } from '../reference/okx/okx.order-history';
+import { mapParadexHistoricalOrder } from '../reference/paradex/paradex.order-history';
+import { mapWooHistoricalOrder } from '../reference/woo/woo.order-history';
+import { normalizeSymbol } from '../reference/woo/woo.utils';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../../types';
 
 /** Shapes captured live: binance sheet row 2, blofin row 41. */

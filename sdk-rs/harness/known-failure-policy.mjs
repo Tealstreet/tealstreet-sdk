@@ -10,7 +10,14 @@ export const diagnosticKey = (failure) => failure
 // Group exact paths sharing a rationale without repeating prose thousands of
 // times for catalogue/depth rows. This never introduces patterns or ranges.
 const declaredDiagnostics = (entry) => (entry?.diagnostics ?? []).flatMap((item) =>
-  (item.keys ?? [item.key]).map((key) => ({ key, divergence: item.divergence })));
+  (item.keys ?? [item.key]).map((key) => ({ key, divergence: item.divergence, condition: item.condition })));
+
+const lighterDailyCounter = /^checkpoint 0 tickers\[\d+\]\.(?:percentage|quoteVolume|volume)$/;
+const matchesCondition = (declaration, failure) => {
+  if (declaration?.condition === undefined) return true;
+  const values = /^checkpoint 0 tickers\[\d+\]\.(?:percentage|quoteVolume|volume): ts=0 rust=(-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)$/i.exec(failure);
+  return declaration.condition === 'lighter-zero-bootstrap' && values !== null && Number.isFinite(Number(values[1]));
+};
 
 export function validateKnownFailures(manifest) {
   const errors = [];
@@ -40,6 +47,9 @@ export function validateKnownFailures(manifest) {
         if (typeof path !== 'string' || !path || path.includes('*') || keys.has(path))
           errors.push(`invalid diagnostic declaration ${identity}`);
         keys.add(path);
+        if (diagnostic.condition !== undefined && (diagnostic.condition !== 'lighter-zero-bootstrap' ||
+            entry.venue !== 'lighter' || !lighterDailyCounter.test(path)))
+          errors.push(`invalid conditional diagnostic ${identity}`);
       }
     }
   }
@@ -103,7 +113,8 @@ function assessReport(report, manifest, correctnessOnly) {
     // Every implementation must reproduce its own audited replay. Snapshot
     // leaf and duplicate-row diagnostics have no common "workload" suffix.
     const ownReplayFailure = /^(?:ts|rust) performance run \d+(?:[ :]|$)/.test(failure);
-    if (ownReplayFailure || failure.startsWith('checkpoint coverage ') || protectedFailure.test(failure) || !declarations.has(key)) errors.push(`${report.venue}: unexpected ${failure}`);
+    if (ownReplayFailure || failure.startsWith('checkpoint coverage ') || protectedFailure.test(failure) ||
+        !declarations.has(key) || !matchesCondition(declarations.get(key), failure)) errors.push(`${report.venue}: unexpected ${failure}`);
     else known.push({ key, divergence: declarations.get(key).divergence });
   }
   return { errors, known, resolved: [...declarations.keys()].filter((key) => !observed.has(key)) };
