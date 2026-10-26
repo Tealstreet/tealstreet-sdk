@@ -31,33 +31,74 @@ class CredentialSelectionBan(unittest.TestCase):
     def test_read_credentials_are_adopted_only_where_every_holder_is_proven(self):
         import tempfile
         old_root = ban.ROOT
+        P = 'use safe_cex_engine::signing::Identity;\n'
+        FIELD = 'pub struct Options { pub read_credentials: Option<Identity> }\n'
+        USE = 'fn f(o: &Options) { o.read_credentials.as_ref(); }\n'
         adopted = {
-            'imported': 'use safe_cex_engine::signing::Identity;\npub struct Options { pub read_credentials: Option<Identity> }\nfn f(o: &Options) { o.read_credentials.as_ref(); }\n',
-            'pathed': 'pub struct Options { pub read_credentials: Option<safe_cex_engine::signing::Identity> }\nfn f(o: &Options) { o.read_credentials.as_ref(); }\n',
-            'local_struct_elsewhere': 'use safe_cex_engine::signing::Identity;\npub struct Options { pub read_credentials: Option<Identity> }\nfn g() { struct Identity { id: u64 } }\n',
-            'grouped_with_glob': 'use wire::*;\nuse safe_cex_engine::signing::{Identity, KeyRef};\npub struct Options { pub read_credentials: Option<Identity> }\n',
-            'literal_pattern_param': 'use safe_cex_engine::signing::Identity;\npub struct Options { pub read_credentials: Option<Identity> }\n'
+            'imported': P + FIELD + USE,
+            'pathed': 'pub struct Options { pub read_credentials: Option<safe_cex_engine::signing::Identity> }\n' + USE,
+            'local_struct_elsewhere': P + FIELD + 'fn g() { struct Identity { id: u64 } }\n',
+            'grouped_with_engine_glob': 'use safe_cex_engine::model::*;\n'
+                                        'use safe_cex_engine::signing::{Identity, KeyRef};\n' + FIELD,
+            'literal_pattern_param': P + FIELD +
                 'fn a(read_credentials: Option<Identity>) -> Options { Options { read_credentials } }\n'
                 'fn b(o: Options) { let Options { read_credentials, .. } = o; }\n'
                 'fn c(x: Option<Identity>) -> Options { Options { read_credentials: x } }\n',
+            'self_holder': P + 'pub struct Venue { read_credentials: Option<Identity> }\n'
+                'impl Venue { fn f(&self) -> bool { self.read_credentials.is_some() } '
+                'fn n() -> Self { Self { read_credentials: None } } }\n',
+            'self_field_holder': P + FIELD + 'pub struct Venue { options: Options }\n'
+                'impl Venue { fn f(&self) { self.options.read_credentials.as_ref(); } }\n',
+            'rebind_borrow_move': P + FIELD + 'pub struct Venue { options: Options }\n'
+                'fn n(options: Options) -> Venue { let mut options = options; helper(&options); '
+                'options.read_credentials.take(); Venue { options } }\n',
+            'impl_only_workspace_macro': P + FIELD + 'safe_cex_crypto::redacted_debug!(Options);\n'
+                '#[derive(Clone, Debug, serde::Deserialize)]\n#[serde(default)]\npub struct Wire { a: u8 }\n'
+                'fn g() { assert!(true); format!("x"); }\n' + USE,
         }
         counted = {
-            'raw': 'pub struct Options { pub read_credentials: Option<ReadCredentials> }\nfn f(o: &Options) { o.read_credentials.as_ref(); }\n',
-            'mixed': 'use safe_cex_engine::signing::Identity;\npub struct Options { pub read_credentials: Option<Identity> }\npub struct B { pub read_credentials: Option<sign::Credentials> }\n',
-            'unimported': 'pub struct Options { pub read_credentials: Option<Identity> }\n',
-            'import_in_other_fn': 'fn a() { use safe_cex_engine::signing::Identity; }\n'
-                                  'struct Identity;\npub struct Options { pub read_credentials: Option<Identity> }\n',
-            'nested_module_local': 'use safe_cex_engine::signing::Identity;\nmod m { struct Identity; pub struct O { pub read_credentials: Option<Identity> } }\n',
-            'generic_parameter': 'use safe_cex_engine::signing::Identity;\npub struct O<Identity> { pub read_credentials: Option<Identity> }\n',
-            'raw_identifier_holder': 'use safe_cex_engine::signing::Identity;\npub struct Options { pub read_credentials: Option<Identity> }\npub struct B { pub r#read_credentials: Option<RawKeys> }\n',
-            'non_option_holder': 'use safe_cex_engine::signing::Identity;\npub struct Options { pub read_credentials: Option<Identity> }\npub struct B { pub read_credentials: RawKeys }\n',
-            'aliased_import': 'use safe_cex_engine::signing::{Raw as Identity};\npub struct Options { pub read_credentials: Option<Identity> }\n',
-            'renamed_local': 'use crate::Raw as Identity;\npub struct Options { pub read_credentials: Option<Identity> }\n',
-            'type_alias': 'type Identity = RawKeys;\npub struct Options { pub read_credentials: Option<Identity> }\n',
-            'glob_only': 'use other::*;\npub struct Options { pub read_credentials: Option<Identity> }\n',
-            'callable': 'use safe_cex_engine::signing::Identity;\npub struct Options { pub read_credentials: Option<Identity> }\nfn read_credentials() -> RawKeys { RawKeys }\n',
-            'local_binding': 'use safe_cex_engine::signing::Identity;\npub struct Options { pub read_credentials: Option<Identity> }\nfn g(raw: RawKeys) { let read_credentials = raw; }\n',
-            'undeclared': 'fn f(o: &Options) { o.read_credentials.as_ref(); }\n',
+            'raw': 'pub struct Options { pub read_credentials: Option<ReadCredentials> }\n' + USE,
+            'mixed': P + FIELD + 'pub struct B { pub read_credentials: Option<sign::Credentials> }\n',
+            'unimported': FIELD,
+            'import_in_other_fn': 'fn a() { use safe_cex_engine::signing::Identity; }\nstruct Identity;\n' + FIELD,
+            'nested_module_local': P + 'mod m { struct Identity; pub struct O { pub read_credentials: Option<Identity> } }\n',
+            'generic_parameter': P + 'pub struct O<Identity> { pub read_credentials: Option<Identity> }\n',
+            'raw_identifier_holder': P + FIELD + 'pub struct B { pub r#read_credentials: Option<RawKeys> }\n',
+            'non_option_holder': P + FIELD + 'pub struct B { pub read_credentials: RawKeys }\n',
+            'aliased_import': 'use safe_cex_engine::signing::{Raw as Identity};\n' + FIELD,
+            'renamed_local': 'use crate::Raw as Identity;\n' + FIELD,
+            'type_alias': 'type Identity = RawKeys;\n' + FIELD,
+            'glob_only': 'use other::*;\n' + FIELD,
+            'callable': P + FIELD + 'fn read_credentials() -> RawKeys { RawKeys }\n',
+            'local_binding': P + FIELD + 'fn g(raw: RawKeys) { let read_credentials = raw; }\n',
+            'undeclared': USE,
+            # Receivers must be typed to a proven holder.
+            'foreign_receiver': P + FIELD + 'fn g(raw: &vendor::Options) { raw.read_credentials.as_ref(); }\n',
+            'member_call': P + FIELD + 'fn g(raw: &Options) { raw.read_credentials(); }\n',
+            'foreign_literal': P + FIELD + 'fn g() -> vendor::Options { vendor::Options { read_credentials: raw() } }\n',
+            'foreign_pattern': P + FIELD + 'fn g(v: Raw) { let vendor::Options { read_credentials, .. } = v; }\n',
+            'untyped_receiver': P + FIELD + 'fn g(o: Thing) { o.read_credentials.as_ref(); }\n',
+            'rebound_receiver': P + FIELD + 'fn g(o: &Options, raw: Raw) { let o = raw; o.read_credentials.as_ref(); }\n',
+            'closure_receiver': P + FIELD + 'fn g(o: &Options) { let h = |o: Raw| o.read_credentials; }\n',
+            'pattern_receiver': P + FIELD + 'fn g(o: &Options, r: Raw) { if let Some(o) = r.get() { o.read_credentials.as_ref(); } }\n',
+            'foreign_self': P + FIELD + 'impl vendor::Thing { fn g(&self) { self.read_credentials.as_ref(); } }\n',
+            'unholder_self_field': P + FIELD + 'pub struct Venue { options: vendor::Options }\n'
+                'impl Venue { fn g(&self) { self.options.read_credentials.as_ref(); } }\n',
+            # Generators, roots and wrappers must be closed.
+            'item_generator': P + 'install!();\n' + FIELD + USE,
+            'block_generator': P + FIELD + 'fn g(o: &Options) { install!(); o.read_credentials.as_ref(); }\n',
+            'untrusted_attribute': P + '#[vendor::magic]\n' + FIELD + USE,
+            'untrusted_derive': P + '#[derive(Magic)]\npub struct W;\n' + FIELD + USE,
+            'shadowed_trusted_macro': P + 'macro_rules! format { () => {} }\n' + FIELD + USE,
+            'local_engine_module': 'mod safe_cex_engine { pub mod signing { pub struct Identity; } }\n'
+                'pub struct Options { pub read_credentials: Option<safe_cex_engine::signing::Identity> }\n' + USE,
+            'aliased_engine_root': 'use crate::wire as safe_cex_engine;\n'
+                'pub struct Options { pub read_credentials: Option<safe_cex_engine::signing::Identity> }\n' + USE,
+            'local_option': P + 'pub struct Option<T> { value: T, key: Vec<u8> }\n' + FIELD + USE,
+            'foreign_holder_import': P + FIELD + 'mod m { use vendor::Options; fn g(o: &Options) { o.read_credentials.as_ref(); } }\n',
+            'duplicate_holder_name': P + FIELD + 'mod m { pub struct Options { pub read_credentials: Option<RawKeys> } }\n' + USE,
+            'unproven_glob': P + 'use vendor::*;\n' + FIELD + USE,
+            'non_impl_workspace_macro': P + 'safe_cex_crypto::other_macro!(Options);\n' + FIELD + USE,
         }
         with tempfile.TemporaryDirectory() as directory:
             try:

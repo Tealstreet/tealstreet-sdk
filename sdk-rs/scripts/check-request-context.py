@@ -8,6 +8,7 @@ inventory reuses. Neither confers managed retry, release or outcome guarantees.
 """
 import collections
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -18,6 +19,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = 'scripts/request-legacy-sites.json'
 TEST_MANIFEST = 'scripts/request-legacy-test-sites.json'
 ENGINE_LIB = 'engine/src/lib.rs'
+# Engine and workspace-macro sources the crate-wide proof reads; never a fixture root.
+ENGINE_SOURCES = pathlib.Path(__file__).resolve().parents[1]
 SUPER_GLOB = ['use', 'super', '::', '*', ';']
 # Prelude macros trusted where the same scope proof shows no definition, import or
 # glob can shadow them; none can introduce a textual macro or an import.
@@ -675,6 +678,7 @@ class MacroImportProof:
         self.sources = sources
         self.tracked = tracked
         self.engine_tracked = engine_tracked
+        self.engine_root_cache = {}
         self.streams = {path: tokens(source) for path, source in sources.items()}
         self.links = {path: plain_module_links(path, stream, sources)
                       for path, stream in self.streams.items()}
@@ -782,6 +786,21 @@ class MacroImportProof:
 
         return lambda index: macro_imports_at(self.streams[path], index, glob_proof, chain_proof)
 
+    def engine_root_proven(self, source_dir):
+        """Whether the crate binds no local `safe_cex_engine` (item, alias, module or
+        generated name) and every glob and generator in it is closed, so the root of
+        `use safe_cex_engine::...` is the dependency."""
+        if source_dir not in self.engine_root_cache:
+            spec = importlib.util.spec_from_file_location(
+                'rust_scope', pathlib.Path(__file__).with_name('rust_scope.py'))
+            scope = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(scope)
+            streams = {path: stream for path, stream in self.streams.items()
+                       if source_dir in path.parents}
+            self.engine_root_cache[source_dir] = not scope.crate_refusals(
+                ENGINE_SOURCES, streams, {'safe_cex_engine'})
+        return self.engine_root_cache[source_dir]
+
     def engine_glob_proof(self, root, part):
         """`use safe_cex_engine::<module>::*;` from the workspace engine imports only
         that module's `pub` items; a macro can enter that namespace solely by a
@@ -804,7 +823,7 @@ class MacroImportProof:
         if workspace.count('safe-cex-engine = { path = "engine" }') != 1 \
                 or re.search(r'package\s*=\s*"safe-cex-engine"', workspace):
             return None
-        if engine_lib not in self.engine_tracked:
+        if engine_lib not in self.engine_tracked or not self.engine_root_proven(root.parent):
             return None
         lib_stream = tokens(engine_lib.read_text())
         if source_macro_hazard(lib_stream, True):

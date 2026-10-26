@@ -13,6 +13,33 @@ spec.loader.exec_module(ban)
 
 
 class SigningBan(unittest.TestCase):
+    def test_engine_algorithm_needs_a_closed_crate(self):
+        declaration = 'use safe_cex_engine::signing::{Algorithm, KeyRef};\nconst A: Algorithm = Algorithm::HmacSha256;\n'
+        crates = {
+            'clean': declaration + '#[derive(Debug)]\npub struct W;\nfn g() { assert!(true); }\n',
+            'item_generator': 'install!();\n' + declaration,
+            'block_generator': declaration + 'fn g() { install!(); let a = Algorithm::HmacSha256; }\n',
+            'local_engine_module': 'mod safe_cex_engine { pub mod signing { pub enum Algorithm { HmacSha256 } } }\n' + declaration,
+            'aliased_engine_root': 'use crate::wire as safe_cex_engine;\n' + declaration,
+            'unproven_glob': 'use vendor::*;\n' + declaration,
+            'untrusted_attribute': '#[vendor::magic]\n' + declaration,
+        }
+        old_root = ban.ROOT
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                ban.ROOT = pathlib.Path(directory)
+                for crate, source in crates.items():
+                    path = ban.ROOT / f'venues/{crate}/src/lib.rs'
+                    path.parent.mkdir(parents=True)
+                    path.write_text(source)
+                self.assertEqual(ban.proven_crates(), {'clean'})
+                found = ban.sites()
+                self.assertNotIn('venues/clean/src/lib.rs', found)
+                for crate in set(crates) - {'clean'}:
+                    self.assertIn(f'venues/{crate}/src/lib.rs', found, crate)
+            finally:
+                ban.ROOT = old_root
+
     def test_only_proven_engine_algorithm_variants_are_not_sites(self):
         def lines(source):
             declared = ban.declared_variants(source)

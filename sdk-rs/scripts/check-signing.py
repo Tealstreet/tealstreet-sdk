@@ -14,6 +14,8 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+# Engine and workspace-macro sources the crate-wide proof reads; never a fixture root.
+SDK = pathlib.Path(__file__).resolve().parents[1]
 PATTERN = re.compile(r'\b(?:hmac\w*|ed25519\w*|\w*secret\w*)\b', re.I)
 # A dispatch recipe names its provider algorithm (`Algorithm::HmacSha256`); that
 # declaration holds no material. Only a proven engine enum variant is ignored;
@@ -35,8 +37,12 @@ _tokens = _load('request_tokens', 'check-request-context.py').tokens
 rust_scope = _load('rust_scope', 'rust_scope.py')
 
 
-def declared_variants(source):
-    """Line number -> count of proven engine `Algorithm::<variant>` uses."""
+def declared_variants(source, crate_proven=True):
+    """Line number -> count of proven engine `Algorithm::<variant>` uses; none unless
+    the crate-wide proof closes every generator and glob and leaves the engine root
+    unshadowed."""
+    if not crate_proven:
+        return collections.Counter()
     try:
         positioned = _tokens(source, positions=True)
     except ValueError:
@@ -67,14 +73,24 @@ def counted(line, declared):
     return bool(PATTERN.search(line))
 
 
+def proven_crates():
+    """Venue crates whose sources pass the crate-wide proof for the engine root."""
+    by_crate = collections.defaultdict(dict)
+    for path in sorted((ROOT / 'venues').glob('*/src/**/*.rs')):
+        by_crate[path.relative_to(ROOT / 'venues').parts[0]][path] = _tokens(path.read_text())
+    return {crate for crate, streams in by_crate.items()
+            if not rust_scope.crate_refusals(SDK, streams, {'safe_cex_engine'})}
+
+
 def sites():
     found = collections.defaultdict(collections.Counter)
+    proven = proven_crates()
     for path in sorted((ROOT / 'venues').glob('*/src/**/*.rs')):
         relative = path.relative_to(ROOT / 'venues')
         if relative.parts[0] not in {'asterdex', 'binance', 'bingx', 'bybit', 'okx', 'bitget', 'phemex', 'bitrue'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
             continue
         source = path.read_text()
-        declared = declared_variants(source)
+        declared = declared_variants(source, relative.parts[0] in proven)
         for number, line in enumerate(source.splitlines(), 1):
             if not line.strip().startswith('//') and counted(line, declared[number]):
                 digest = hashlib.sha256(line.strip().encode()).hexdigest()

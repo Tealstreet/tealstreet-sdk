@@ -730,6 +730,18 @@ class DataMacroModuleProvenance(unittest.TestCase):
             self.assertTrue(self.inventory(consumer_prefix='use safe_cex_engine::model::*;', engine=engine,
                                            untracked={'engine/src/model.rs': model}))
 
+    def test_engine_glob_needs_the_dependency_as_the_visible_root(self):
+        for root, prefix, extras in [
+                ('mod wire; mod account;', 'use crate::wire as safe_cex_engine; use safe_cex_engine::model::*;', {}),
+                ('mod wire; mod account; mod safe_cex_engine { pub mod model {} }', 'use safe_cex_engine::model::*;', {}),
+                ('mod wire; mod account; mod other;', 'use safe_cex_engine::model::*;', {'other.rs': 'install!();'}),
+                ('mod wire; mod account; mod other;', 'use safe_cex_engine::model::*;',
+                 {'other.rs': '#[vendor::magic] pub struct X;'}),
+                ('mod wire; mod account; mod other;', 'use safe_cex_engine::model::*;', {'other.rs': 'use vendor::*;'})]:
+            with self.subTest(root=root, extras=extras):
+                self.assertTrue(self.inventory(root_source=root, consumer_prefix=prefix, extras=extras,
+                                               engine=self.ENGINE))
+
     def test_engine_glob_proof_keeps_legacy_calls_and_shadows_counted(self):
         for body in ['matches!(cx.request(1), Kind::Normal);', 'cx.request(1);']:
             with self.subTest(body=body):
