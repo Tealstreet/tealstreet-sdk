@@ -36,6 +36,11 @@ signs only what it can rebuild from a closed descriptor.
    exists only when the peer negotiates `paradex.orderBatch/1`. The legacy
    TypeScript `payloadSigner` in tealstreet-next safe-cex is untouched and keeps
    its one-order limit. No dual route.
+   Paradex is the only user of the SDK's bare-digest `PayloadSignRequest` route
+   (engine action, WASM host and native transport handlers). Step 2 removes it
+   entirely, as an orphan, in the same cutover (kuhwxi M3). A ban then forbids
+   reintroducing `PayloadSignRequest` or any digest-only "stark"/"felt-pair"
+   payload route.
 3. tealstreet-next device consumer, after Copybara imports step 1 and the shared
    `@tealstreet/safe-cex-wasm/hosted-signing` wire module (codex-9czdjh) lands.
    `buildInitPayload` key exclusion and the public-subkey descriptor ship in this
@@ -73,7 +78,7 @@ interchangeable.
   "items": [Order, ...] }                                   // 1..=10
 { "family":"paradex", "op":"orderModify", "revision":"paradex/1",
   "id": string, "timestampMs": int, "market": string, "side": Side,
-  "orderType": OrderType, "size": decimal, "price": decimal,
+  "orderType": ModifyOrderType, "size": decimal, "price": decimal,
   "triggerPrice": decimal|null }
 
 Order = { "timestampMs": int, "market": string, "side": Side,
@@ -83,8 +88,15 @@ Order = { "timestampMs": int, "market": string, "side": Side,
   "clientId": string|null }
 Side = "BUY"|"SELL"
 OrderType = "LIMIT"|"MARKET"|"STOP_LIMIT"|"STOP_MARKET"|"TAKE_PROFIT_MARKET"
+ModifyOrderType = "LIMIT"|"STOP_LIMIT"|"STOP_MARKET"|"STOP_LOSS_LIMIT"
+  |"STOP_LOSS_MARKET"|"TAKE_PROFIT_LIMIT"|"TAKE_PROFIT_MARKET"
 Instruction = "GTC"|"IOC"|"POST_ONLY"
 ```
+
+The create and modify type sets are separate and closed. Modify mirrors native
+amend admission: a reconciled LIMIT that is NEW/OPEN, or an UNTRIGGERED order
+of a native `is_trigger` kind, using the venue's own type spelling. This does
+not widen create.
 
 Negotiated recipe ids map one to one and closed: `paradex.auth/1`,
 `paradex.orderCreate/1`, `paradex.orderBatch/1`, `paradex.orderModify/1`. Batch
@@ -111,16 +123,19 @@ asserted rules.
 - stp and clientId: both non-null for a top-level order, both null for an
   attached child. clientId is 1..=64 chars with no CR/LF, unique within a
   command (native `validate_caller_ids`).
-- Batch item: exactly native `native_batch` eligibility. That means orderType
-  LIMIT, triggerPrice null, no attached TP/SL legs, not close, and a top-level
-  order (stp and clientId non-null, unique across items). Reduce-only is
-  allowed: flags is `["REDUCE_ONLY"]` or null. On the wire, instruction is
-  GTC|IOC|POST_ONLY. Native excludes a FOK time-in-force at the origin, but FOK
-  and IOC both emit "IOC", so the peer validates the wire value and the origin
-  applies `native_batch` itself.
+- Batch item, and orderCreate with target `ordersBatchSingle`: the same
+  batch-eligible projection. That is orderType LIMIT, triggerPrice null, a
+  top-level order (stp and clientId non-null, unique across items),
+  flags `["REDUCE_ONLY"]` or null, and instruction GTC|IOC|POST_ONLY. Only
+  target `orders` admits the other order types.
+- Provenance is checked by the origin only. native_batch also excludes an
+  original FOK time-in-force, close and attached legs. Those facts are absent
+  from the wire projection (FOK and IOC both emit "IOC"), so native ORIGIN
+  admission enforces them. The peer can't infer them and the plan doesn't claim
+  it does.
 - Modify: id is non-empty and renders the one encoded path component; price is
-  always present (native signs `0` for MARKET); triggerPrice follows the
-  native modify builder.
+  always present; triggerPrice is non-null exactly for the `is_trigger` kinds,
+  per the native modify builder.
 
 ## What is hashed and what is authorized
 
@@ -129,24 +144,40 @@ Hash only what native hashes, through the one native builder:
 - order: timestampMs, market, side, orderType, quantum(size), and quantum(price) or 0;
 - modify: the same plus id.
 
-The unhashed fields are still part of the authorized operation.
+The unhashed fields (triggerPrice, instruction, flags, stp, clientId and the
+create target) are still part of the authorized operation.
 - Origin: ONE projection function maps the frozen native Placement/Modify to the
   descriptor. Before sending the frame, the origin asserts that the descriptor
   equals the projection of the exact body and target it will publish,
-  including the encoded modify id. Unsigned economic fields can't drift around
-  the same digest.
+  including the encoded modify id. This is an honest origin's self-check.
 - Peer: validates every closed value and the presence table above, and binds
   account, chain and expected public subkey from its OWN installed slot. Only
   then does it hash. It signs nothing it can't fully describe.
+
+Residual risk, stated plainly (kuhwxi M1): Paradex's signature does not cover
+the unhashed fields. That is the venue's signing scheme, exactly as with local
+signing today. A compromised origin could publish different unhashed fields
+beside a valid signature, or pair the signature with another body within the
+venue's validity window. The device's guarantees are key custody, correctness
+of the hashed fields, policy conformance of the described operation, and the
+time bounds. Binding the unhashed fields rests on origin integrity.
 
 ## Pure builder and export
 
 ```rust
 pub fn digests(d: &ParadexDescriptor, b: &ParadexBinding) -> Result<Digests, DescriptorError>;
 pub struct Digests(/* 1..=10 */ Vec<[u8; 32]>);  // auth/create/modify: exactly 1; batch: N, item order
-pub fn validate(d: &ParadexDescriptor, b: &ParadexBinding, peer_now_ms: u64, deadline_ms: f64)
+pub fn validate(d: &ParadexDescriptor, b: &ParadexBinding, peer_now_ms: f64, deadline_ms: f64)
     -> Result<(), DescriptorError>;
 ```
+
+Both times are raw milliseconds. Before anything else, validate refuses a
+non-finite (NaN, ±Infinity) or negative peer_now_ms or deadline_ms with a closed
+code, so a NaN can never pass "equal or later refuses". The deadline comparison
+uses the raw values, fractional ones included (#2156 keeps fractional bounds).
+Only the native skew checks convert units, flooring exactly as native does
+(`now_ms as u64`, seconds = ms / 1000). The declared ≤5 s hosted-capture cap
+is unchanged.
 
 Local signing (`Credentials::auth/order/modify`) is refactored to call the same
 `digests` before its local Stark sign. Local and hosted therefore hash the same
@@ -170,15 +201,21 @@ cached from receipt time.
 
 ## Signing and result
 
-One request, one receipt, one task. The peer builds ONE SignRequest with N
-StarkDigest operations (N=1 except batch; N≤10 is inside the 32-operation
-limit) on its own installed ref. It returns exactly N 64-byte values in item
-order. Each r/s is range-checked and verified against its own recomputed digest
-and the same bound public subkey. The result is all-or-nothing: if the deadline
-passes, a cancel arrives or a signature fails during partial signing, there is
-no partial result. The origin checks count, width and order, verifies each
-value against its digest and the bound subkey, and only then renders the native
-decimal felt pair into the native body.
+One request, one receipt, one task, with the shared #2156 operation graph. The
+peer builds ONE SignRequest on its own installed same-slot refs:
+`Present(account credential)` followed by N StarkDigest `Sign` operations
+(N=1 except batch, N≤10, so at most 11 operations, inside the 32 limit). The
+result is exactly N+1 values in that order: first the exact credential bytes,
+then N 64-byte signatures in item order. Each r/s is range-checked and verified
+against its own recomputed digest and the same bound public subkey.
+
+The result is all-or-nothing: if the deadline passes, a cancel arrives or a
+signature fails during partial signing, there is no partial result. The origin
+checks count, width and order. It compares the Present bytes with the exact
+expected credential (D-a) and verifies each signature against its digest and
+the bound subkey. Only then does it render the native credential header and
+decimal felt pairs into the native body. The startup PublicKey(StarkDigest)
+check of the public subkey is separate and unchanged.
 
 ## Time policy
 
@@ -193,10 +230,12 @@ These are the #2156 security pins, applied at the actual signing moment:
 
 Positives:
 - auth;
-- each orderType through orderCreate, both targets;
-- a reduce-only LIMIT, single and in a batch;
+- orderCreate target `orders`, for each create orderType;
+- orderCreate target `ordersBatchSingle`, for a plain LIMIT only, with and
+  without reduce-only;
+- a reduce-only LIMIT inside a batch;
 - batches of 1 and 10 items;
-- modify.
+- modify for LIMIT and for each native `is_trigger` kind (UNTRIGGERED).
 
 Each positive is checked against native fixtures with WHOLE-operation native
 body equality: the local path and the hosted path produce byte-equal bodies,
@@ -216,6 +255,9 @@ Refusals, all with zero callbacks and no HTTP:
   - a non-eligible item;
   - an un-negotiated batch;
 - operations and targets:
+  - a non-LIMIT order or a triggerPrice on target `ordersBatchSingle`;
+  - a create-only type (MARKET) on modify, and a modify-only type on create;
+  - a Present credential that differs from the expected credential;
   - each excluded op (cancel-by-signature, onboarding, transfer, withdraw, unknown);
   - a method, path or subkey substitution;
   - a descriptor carrying a digest;
@@ -223,6 +265,8 @@ Refusals, all with zero callbacks and no HTTP:
 - signatures:
   - swapped, missing, extra or invalid signatures;
 - timing:
+  - a NaN, ±Infinity or negative peerNowMs or deadlineMs, refused before any
+    digest (a fractional finite value is valid);
   - each time-policy edge (inclusive bounds);
   - a deadline or cancel during partial signing, with no partial result.
 
