@@ -4817,11 +4817,8 @@ impl<V: Venue> Engine<V> {
                 if !(self.venue.guard_order_mutations()
                     && (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements()))
-                    && let Err(refusal) = cx.io.core.order_locks.admit_unscoped(&command, cx.store)
+                    && let Err(id) = cx.io.core.order_locks.admit_unscoped(&command, cx.store)
                 {
-                    let (crate::order_locks::Refusal::Conflict(id)
-                    | crate::order_locks::Refusal::Capacity(id)
-                    | crate::order_locks::Refusal::Uncertain(id)) = refusal;
                     cx.refuse_before_entry(
                         id,
                         VenueError::new(UNCERTAIN_PLACEMENT).outcome(crate::Outcome::NotSent),

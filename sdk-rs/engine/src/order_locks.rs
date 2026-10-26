@@ -200,13 +200,14 @@ impl OrderLocks {
     }
 
     /// Admission for a placement or amend that holds no lock scope: refused
-    /// while its symbols are uncertain, else marked for an Unknown outcome.
-    pub fn admit_unscoped(&mut self, command: &Command, store: &Store) -> Result<(), Refusal> {
+    /// (with its ID) only while its symbols are uncertain, else marked for an
+    /// Unknown outcome. It holds nothing, so it cannot conflict or fill capacity.
+    pub fn admit_unscoped(&mut self, command: &Command, store: &Store) -> Result<(), CommandId> {
         let Some((command, scope)) = scope_of(command, store) else {
             return Ok(());
         };
         if self.fenced(&scope) {
-            return Err(Refusal::Uncertain(command));
+            return Err(command);
         }
         self.mark(command, &scope);
         Ok(())
