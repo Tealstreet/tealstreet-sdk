@@ -135,6 +135,24 @@ fn respond(e: &mut TestEngine, now: f64, r: &HttpRequest, status: u16, body: &st
     );
     actions(e, now)
 }
+/// After an Unknown write the only private HTTP is the engine-owned reconcile
+/// read: it starts at once (fence opt-in), and nothing continues or resends.
+fn only_reconcile_read(a: &[Action]) {
+    let private: Vec<_> = a
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.url.contains("/private/") => Some(r.url.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        private
+            .iter()
+            .all(|url| url.contains("private/get-positions")),
+        "only the reconcile read may follow an Unknown write: {private:?}"
+    );
+    assert_eq!(private.len(), 1, "the reconcile read starts at once");
+}
 fn no_private_http(a: &[Action]) {
     assert!(
         !a.iter()
@@ -591,7 +609,7 @@ fn write_500_with_signature_code_cannot_resend() {
             body: r#"{"code":40101,"message":"bad signature"}"#,
         },
     });
-    no_private_http(&h.actions);
+    only_reconcile_read(&h.actions);
     pace(&mut h);
     let t = terminals(&h.actions);
     assert_eq!(t.len(), 1);
@@ -1552,7 +1570,7 @@ fn independent_all_released_failures_emit_one_failure_and_no_success() {
             terminal[0].as_ref().unwrap_err().outcome,
             Some(Outcome::Unknown)
         );
-        no_private_http(&h.actions);
+        only_reconcile_read(&h.actions);
     }
 }
 
@@ -1575,7 +1593,7 @@ fn coupled_leverage_released_failure_never_continues_or_resends() {
         pace(&mut h);
         let write = h.http("private/change-account-leverage");
         fail_released_write(&mut h, &write, timeout);
-        no_private_http(&h.actions);
+        only_reconcile_read(&h.actions);
         let terminal = terminals(&h.actions);
         assert_eq!(terminal.len(), 1);
         assert_eq!(

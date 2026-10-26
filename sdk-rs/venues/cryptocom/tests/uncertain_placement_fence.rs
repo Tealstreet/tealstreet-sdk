@@ -79,8 +79,14 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     // Retry on the same symbol: refused NotSent, nothing posted.
     place(&mut h, 2, "retry");
     advance(&mut h, 50.0);
-    assert!(refused_uncertain(&h), "the retry must be refused while the placement is uncertain");
-    assert!(!sent(&h, "private/create-order"), "no write may leave while fenced");
+    assert!(
+        refused_uncertain(&h),
+        "the retry must be refused while the placement is uncertain"
+    );
+    assert!(
+        !sent(&h, "private/create-order"),
+        "no write may leave while fenced"
+    );
 
     // The stale read completes cleanly; its regular leg predates the mark.
     h.respond(&stale, EMPTY);
@@ -88,7 +94,10 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     h.failures.clear();
     place(&mut h, 3, "retry-after-stale");
     advance(&mut h, 50.0);
-    assert!(refused_uncertain(&h), "a stale read must not release the fence");
+    assert!(
+        refused_uncertain(&h),
+        "a stale read must not release the fence"
+    );
     assert!(!sent(&h, "private/create-order"));
 
     // The owed fresh read follows at once and releases it.
@@ -99,6 +108,12 @@ fn an_unknown_placement_fences_its_symbol_until_a_fresh_order_read() {
     h.failures.clear();
     place(&mut h, 4, "retry-after-fresh");
     advance(&mut h, 50.0);
-    assert!(!refused_uncertain(&h), "a fresh clean read releases the fence");
-    assert!(sent(&h, "private/create-order"), "the retry places once released");
+    assert!(
+        !refused_uncertain(&h),
+        "a fresh clean read releases the fence"
+    );
+    assert!(
+        sent(&h, "private/create-order"),
+        "the retry places once released"
+    );
 }

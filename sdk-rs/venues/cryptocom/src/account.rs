@@ -789,7 +789,8 @@ impl Cryptocom {
                     };
                     self.account.order_token = Some(token);
                     self.account.order_revision = self.account.revision;
-                    self.account.order_read_fresh = std::mem::take(&mut self.account.reconcile_owed);
+                    self.account.order_read_fresh =
+                        std::mem::take(&mut self.account.reconcile_owed);
                     self.read_account(cx, Read::Orders, 0);
                 } else {
                     self.account.count += 1;
