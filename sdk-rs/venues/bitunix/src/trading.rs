@@ -2513,6 +2513,7 @@ fn serial(step: &Step) -> SerialCall {
         timeout_ms: CALL_MS,
         // A write's one 10007 RefusedResend.
         attempts: if read { 1 } else { 2 },
+        pacing: None,
     }
 }
 fn local_mutation_policy() -> Policy {
