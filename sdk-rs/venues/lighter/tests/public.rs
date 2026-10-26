@@ -500,3 +500,112 @@ fn silent_book_is_cleared_while_other_channels_keep_socket_alive() {
     );
     assert_eq!(e.book("ETH").unwrap().best_bid(), Some(97.0));
 }
+
+#[test]
+fn base_and_usd_open_interest_can_coexist_in_a_live_stats_row() {
+    let (mut e, socket) = seeded();
+    send(
+        &mut e,
+        socket,
+        2_000.0,
+        r#"{"channel":"market_stats:all","market_stats":{"0":{"symbol":"ETH","market_id":0,"mark_price":"2333.18","index_price":"2333.93","last_trade_price":"2333.21","open_interest":"76059298.189074","open_interest_usd":"152118596.378148"}}}"#,
+    );
+    let ticker = e.store().ticker("ETH").unwrap();
+    assert_eq!(ticker.mark, 2333.18);
+    assert_eq!(ticker.index, 2333.93);
+    assert_eq!(ticker.last, 2333.21);
+    assert_eq!(ticker.open_interest, 76059298.189074);
+}
+
+#[test]
+fn rest_depth_aggregates_native_lots_without_binary_residue() {
+    let (mut e, _) = seeded();
+    book(&mut e);
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookOrders") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(
+        &mut e,
+        request.id,
+        r#"{"code":200,"bids":[{"price":"100","remaining_base_amount":"0.1"},{"price":"100","remaining_base_amount":"0.2"}],"asks":[{"price":"101","remaining_base_amount":"0.1"},{"price":"101","remaining_base_amount":"0.2"}]}"#,
+    );
+    let book = e.book("ETH").unwrap();
+    assert_eq!(book.bids(), [(100.0, 0.3)]);
+    assert_eq!(book.asks(), [(101.0, 0.3)]);
+}
+
+#[test]
+fn public_close_primes_the_book_before_the_reconnect_timer() {
+    let (mut e, socket) = seeded();
+    book(&mut e);
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookOrders") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(
+        &mut e,
+        request.id,
+        r#"{"code":200,"bids":[{"price":"100","remaining_base_amount":"1"}],"asks":[]}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(2_000.0, Event::WsClosed { socket, code: 1006 });
+    let recovery = safe_cex_engine::test_support::prepared_actions(&mut e, 2_000.0)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookOrders") => Some(request),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(recovery.len(), 1, "close must not wait for another poll");
+    e.handle(
+        2_001.0,
+        Event::HttpResponse {
+            request: recovery[0].id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":200,"bids":[{"price":"99","remaining_base_amount":"2"}],"asks":[]}"#,
+            },
+        },
+    );
+    assert_eq!(e.book("ETH").unwrap().bids(), [(99.0, 2.0)]);
+    for now in [2_002.0, 2_003.0, 2_004.0] {
+        e.handle(now, Event::WsClosed { socket, code: 1006 });
+    }
+    assert!(
+        safe_cex_engine::test_support::prepared_actions(&mut e, 2_004.0)
+            .into_iter()
+            .all(|action| !matches!(action, Action::Http(request) if request.url.contains("orderBookOrders")))
+    );
+}
+
+#[test]
+fn market_snapshot_seeds_last_price_before_socket_stats() {
+    let mut e = support::engine(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    e.start(1_000.0);
+    let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.contains("orderBookDetails") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    let markets = MARKETS.replacen(
+        "\"market_id\":0,",
+        "\"market_id\":0,\"last_trade_price\":\"2333.21\",",
+        1,
+    );
+    reply(&mut e, request.id, &markets);
+    assert_eq!(e.store().ticker("ETH").unwrap().last, 2333.21);
+    assert_eq!(e.store().ticker("BTC").unwrap().last, 0.0);
+}
