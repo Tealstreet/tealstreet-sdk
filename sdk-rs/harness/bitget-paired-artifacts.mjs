@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { parseCohortJson } from './cpu-cohort.mjs';
 import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256 } from './bitget-paired-steady.mjs';
@@ -35,15 +35,7 @@ export function readBitgetPairedEvidence(directory) {
     const names = readdirSync(resolve(root, packagePath)).sort();
     insist(JSON.stringify(names) === JSON.stringify(['build.json', 'package.json', 'safe_cex_wasm.js', 'safe_cex_wasm_bg.wasm']),
       'unexpected independent archive inventory');
-    const shipped = existsSync(resolve(root, `${arm}/shipped`)) ? Object.fromEntries(['node', 'web'].map(target => {
-      const path = `${arm}/shipped/${target}`, actual = readdirSync(resolve(root, path)).sort();
-      const expected = ['safe_cex_wasm.d.ts', 'safe_cex_wasm.js', 'safe_cex_wasm_bg.wasm', 'safe_cex_wasm_bg.wasm.d.ts',
-        ...(target === 'node' ? ['package.json'] : [])].sort();
-      insist(JSON.stringify(actual) === JSON.stringify(expected), 'incomplete shipped node/web inventory');
-      return [target, Object.fromEntries(actual.map(name => [name, sha(read(`${path}/${name}`))]))];
-    })) : undefined;
     return [arm, { source: plan.refs[arm], metadataBytes, metadata: parseCohortJson(metadataBytes),
-      ...(shipped ? { shipped } : {}),
       files: Object.fromEntries(names.map(name => [name, sha(read(`${packagePath}/${name}`))])) }];
   }));
   insist(comparison.cohorts?.length === 8, 'missing complete cohort receipt');

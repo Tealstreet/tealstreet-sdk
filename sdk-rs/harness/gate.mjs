@@ -37,11 +37,8 @@ const { values } = parseArgs({
     'recorded-evidence': { type: 'string' },
     'runtime-capsule': { type: 'string' },
     'no-egress': { type: 'boolean', default: false },
-    'correctness-only': { type: 'boolean', default: false },
   },
 });
-if (values['correctness-only'] && (values['paired-source'] || values['runtime-capsule'] || values['recorded-evidence'] || values.runs))
-  throw new Error('Correctness-only replay cannot supply CPU measurement evidence');
 // Validate before spawning either implementation; a bad artifact has no fallback.
 if (values['paired-source'] !== undefined && (!values['ci-wasm'] || values.venue !== 'bitget' ||
     values.runs !== '9' || values['runtime-capsule'] || values['recorded-evidence'] || values['no-egress']))
@@ -141,8 +138,8 @@ const isPrivate =
   tapeRecords.find((record) => record.type === 'meta')?.private ??
   tapeRecords.some((record) => venue.isPrivateRecord ? venue.isPrivateRecord(record)
     : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)));
-let runs = values['correctness-only'] ? 0 : replayRunCount(values.runs ?? (isPrivate ? undefined : process.env.RUST_REPLAY_PUBLIC_RUNS), isPrivate);
-const correctnessRuns = values['correctness-only'] ? 1 : isPrivate ? runs : 1;
+let runs = replayRunCount(values.runs, isPrivate);
+const correctnessRuns = isPrivate ? runs : 1;
 const checkpointPlans = Object.fromEntries(['ts', 'rust'].map((impl) => [impl, expectedCheckpointPlan(tapeRecords, venue, impl)]));
 const results = { ts: [], rust: [] };
 const performanceResults = { ts: [], rust: [] };
@@ -150,7 +147,7 @@ try {
 for (let run = 0; run < correctnessRuns; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
-if (!isPrivate && !values['correctness-only']) {
+if (!isPrivate) {
   for (let run = 0; run < runs; run++)
     for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
   // Small windows get more pairs (performance-policy.mjs).
@@ -168,7 +165,6 @@ if (!isPrivate && !values['correctness-only']) {
     ...(ciWasm ? { ciWasm: ciWasm.metadata } : {}),
     tapeSha256: createHash('sha256').update(tapeBytes).digest('hex'),
     private: isPrivate, status: 'FAIL', failures: [error.message], replayFailure: error.failure,
-    ...(values['correctness-only'] ? { correctnessOnly: true } : {}),
     coverage: { correctness: 'incomplete', performance: 'not-run' },
     runs: 0, correctnessRuns, artifacts, fixers: [], samples: { ts: [], rust: [] },
   }, null, 2) + '\n');
@@ -345,7 +341,7 @@ if (!isPrivate) for (const impl of ['ts', 'rust']) for (const [run, output] of p
   if (!output.transportReceipt || !isDeepStrictEqual(rawAudited[impl].transportReceipt, output.transportReceipt))
     differences.push(`${impl} performance run ${run + 1}: transport workload differs from audited replay`);
 }
-const measuredResults = isPrivate || values['correctness-only'] ? results : performanceResults;
+const measuredResults = isPrivate ? results : performanceResults;
 const summary = (impl) => ({
   cpuMs: median(measuredResults[impl].map((r) => r.metrics.cpuMs)),
   idleLoadCpuMs: median(measuredResults[impl].map((r) => r.metrics.idleLoadCpuMs)),
@@ -392,7 +388,7 @@ if (venue.family === 'coinbase')
 recorded?.finish();
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
-if (!isPrivate && !values['correctness-only']) failures.push(...performanceFailures(
+if (!isPrivate) failures.push(...performanceFailures(
   performanceResults.ts.map((output) => output.metrics), performanceResults.rust.map((output) => output.metrics)));
 // Report order must not depend on the arrival order of keyed replay rows.
 failures.sort();
@@ -401,7 +397,6 @@ writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   ...(ciWasm ? { ciWasm: ciWasm.metadata } : {}),
   tapeSha256: createHash('sha256').update(tapeBytes).digest('hex'),
   private: isPrivate, books: values.books, runs: isPrivate ? 0 : runs, correctnessRuns, requiredImprovement: 0.10,
-  ...(values['correctness-only'] ? { correctnessOnly: true, coverage: { correctness: 'complete', performance: 'not-run' } } : {}),
   status: failures.length ? 'FAIL' : 'PASS', failures, artifacts, fixers: fixerReports,
   summary: { ts: t, rust: r },
   samples: { ts: measuredResults.ts.map((output) => output.metrics), rust: measuredResults.rust.map((output) => output.metrics) },

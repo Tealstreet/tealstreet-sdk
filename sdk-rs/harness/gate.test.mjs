@@ -47,7 +47,7 @@ test('margin expectation uses native input and preserves unsupported cases', () 
 
 // Exercise the actual CLI and comparison call sites. Stub only the expensive
 // replay subprocess, supplying independently controlled TS and Rust results.
-const gate = (venue, isPrivate = false, defect, correctnessOnly = false) => {
+const gate = (venue, isPrivate = false, defect) => {
   const cwd = mkdtempSync(join(tmpdir(), 'safe-cex-gate-'));
   const tape = join(cwd, 'tape.jsonl');
   const reportPath = join(cwd, 'gate.json');
@@ -121,7 +121,6 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false) => {
     const records = ${JSON.stringify(records)};
     const venue = ${JSON.stringify(venue)};
     const isPrivate = ${JSON.stringify(isPrivate)};
-    const correctnessOnly = ${JSON.stringify(correctnessOnly)};
     const strictCommandCount = ${JSON.stringify(['orderly', 'coinbase'].includes(VENUES[venue].family))};
     const defect = ${JSON.stringify(defect ?? null)};
     const midpoint = ${JSON.stringify(Boolean(midpoint))};
@@ -133,8 +132,7 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false) => {
     process.env.ESBUILD_WORKER_THREADS = '1';
     process.env.HARNESS_TEST_INHERITED = 'retained';
     process.argv = ['node', 'gate.mjs', '--venue', venue, '--tape', ${JSON.stringify(tape)},
-      '--books', midpoint ? 'DEEP-USD' : 'BTCUSDT',
-      ...(correctnessOnly ? ['--correctness-only'] : ['--runs', isPrivate ? '2' : '7']), '--report', ${JSON.stringify(reportPath)}];
+      '--books', midpoint ? 'DEEP-USD' : 'BTCUSDT', '--runs', isPrivate ? '2' : '7', '--report', ${JSON.stringify(reportPath)}];
     const spawned = new Set();
     const calls = [];
     childProcess.spawnSync = (_executable, args, options) => {
@@ -346,8 +344,7 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false) => {
       assert.deepEqual(compareRecordedReport(original, JSON.parse(readFileSync(offlinePath, 'utf8'))), []);
     }
     assert.deepEqual([...spawned].sort(), ['rust', 'ts']);
-    if (correctnessOnly) assert.deepEqual(calls, [['correctness', 'ts'], ['correctness', 'rust']]);
-    else if (!isPrivate) {
+    if (!isPrivate) {
       assert.deepEqual(calls.slice(0, 2), [['correctness', 'ts'], ['correctness', 'rust']]);
       // Stub CPU is a few ms, so the small-window policy extends seven pairs to nine.
       assert.equal(calls.length, 20);
@@ -368,20 +365,6 @@ const gate = (venue, isPrivate = false, defect, correctnessOnly = false) => {
     rmSync(cwd, { recursive: true, force: true });
   }
 };
-
-test('PR correctness mode executes exactly one audited pair and retains all output refusals', () => {
-  for (const isPrivate of [false, true]) {
-    const result = gate('bybitinverse', isPrivate, 'process-cpu', true);
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.report.correctnessOnly, true);
-    assert.equal(result.report.runs, 0); assert.equal(result.report.correctnessRuns, 1);
-    assert.equal(result.report.artifacts.length, 2);
-    assert.deepEqual(result.report.coverage, { correctness: 'complete', performance: 'not-run' });
-    const bad = gate('bybitinverse', isPrivate, 'comparisons', true);
-    assert.equal(bad.status, 1, bad.stderr);
-    assert.match(bad.stdout, /ticker BTCUSDT.last:/);
-  }
-});
 
 test('gate CLI orders complete failures deterministically before report and console truncation', () => {
   const expected = [
