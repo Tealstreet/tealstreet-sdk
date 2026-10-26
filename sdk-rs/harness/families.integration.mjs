@@ -18,7 +18,9 @@ test('the venue list is read from the family map', () => {
   for (const venue of venues) assert.doesNotThrow(() => venueFamily(venue), venue);
 });
 
-for (const family of venueFamilies) {
+const selectedFamilies = process.env.RUST_TEST_FAMILY ? [process.env.RUST_TEST_FAMILY] : venueFamilies;
+if (selectedFamilies.some(family => !venueFamilies.includes(family))) throw new Error('Unknown family test shard');
+for (const family of selectedFamilies) {
   test(`${family} family package`, async () => {
     for (const target of ['web', 'node']) {
       const size = statSync(new URL(`${target}/${family}/safe_cex_wasm_bg.wasm`, pkg)).size;

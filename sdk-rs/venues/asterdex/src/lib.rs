@@ -20,13 +20,19 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::signing::Identity;
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::socket::Config;
+use safe_cex_engine::socket_lifecycle::{
+    AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
+    Interest as SocketInterest, Invalidation, LifecycleEvent, MAX_FRAME_BYTES, SocketCapabilities,
+    SocketError, TrafficPolicy,
+};
 use safe_cex_engine::{
     Command, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue, VenueError,
     json, num,
 };
 use serde_json::value::RawValue;
 use sign::Version;
+use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use wire::*;
 
@@ -124,26 +130,42 @@ pub enum Pending {
     },
 }
 
-struct Connection {
-    socket: Option<SocketId>,
-    open: bool,
-    supervisor: Supervisor,
-    next_request_id: u64,
-}
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            socket: None,
-            open: false,
-            supervisor: Supervisor::new(Config {
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(5_000.0),
-                backoff_base_ms: 500.0,
-                ..Config::default()
-            }),
-            next_request_id: 0,
-        }
+/// Both feeds keep the legacy supervisor timings: 20 s idle, 5 s protocol ping.
+fn feed_policy(role: SocketChannel, backoff_base_ms: f64) -> FeedPolicy {
+    FeedPolicy {
+        role,
+        supervision: Config {
+            idle_timeout_ms: 20_000.0,
+            ping_interval_ms: Some(5_000.0),
+            backoff_base_ms,
+            ..Config::default()
+        },
+        // The listen key in the URL is the private credential; neither feed logs in.
+        auth: AuthMode::None,
+        recovery: AuthRecovery::Reconnect,
+        permanent_refusal_group: None,
+        traffic: TrafficPolicy::AnyText,
+        controls: ControlPolicy::None,
+        invalidation: Invalidation::Required,
+        subscription_interval_ms: 0.0,
     }
+}
+
+fn socket_failed(cx: &mut Cx<'_, Pending>, error: SocketError) {
+    cx.notice(
+        Level::Error,
+        code::SUBSCRIPTION_REJECTED,
+        format!("AsterDEX socket admission failed: {error:?}"),
+    );
+}
+
+#[derive(Default)]
+struct Connection {
+    feed: Option<FeedId>,
+    /// The current epoch's socket, from connect until retirement.
+    socket: Option<SocketId>,
+    /// Subscribe frame ids; never reset, so ids stay unique across reconnects.
+    next_request_id: Cell<u64>,
 }
 
 #[derive(Default)]
@@ -303,50 +325,96 @@ impl AsterDex {
         );
     }
     fn public_ready(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.connect_public(cx);
+        self.ensure_public_feed(cx);
     }
 
-    fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.public.socket.is_some() {
+    /// Registers the public feed once and connects it when it has no epoch.
+    /// Suppressed public feeds never register, so they never churn retries.
+    fn ensure_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.public_feed_policy() != PublicFeedPolicy::Direct {
             return;
         }
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public.supervisor.connecting(cx);
+        let feed = match self.public.feed {
+            Some(feed) if cx.socket_epoch(feed).is_some() => return,
+            Some(feed) => feed,
+            None => match cx.register_socket_feed(feed_policy(SocketChannel::Public, 500.0)) {
+                Ok(feed) => {
+                    self.public.feed = Some(feed);
+                    self.sync_public_interests(cx);
+                    feed
+                }
+                Err(error) => return socket_failed(cx, error),
+            },
+        };
+        match cx.connect_socket(feed, self.urls.public_ws) {
+            Ok(epoch) => self.public.socket = Some(epoch.socket()),
+            Err(error) => socket_failed(cx, error),
         }
-        self.public.socket = Some(cx.connect(
-            safe_cex_engine::SocketSpec::new(self.urls.public_ws).channel(SocketChannel::Public),
-        ));
-        self.public.open = false;
     }
 
-    fn close_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = None;
-        self.public.open = false;
-        for (symbol, state) in &mut self.books {
-            state.book.clear();
-            state.last_id = None;
-            cx.book_changed(symbol);
-        }
-        self.public.supervisor.retry(cx);
+    /// The desired public topics; the engine replays them on every open and
+    /// encodes only the deltas while connected.
+    fn public_interests(&self) -> Vec<SocketInterest> {
+        let mut topics = vec!["!ticker@arr".to_owned(), "!markPrice@arr@1s".to_owned()];
+        topics.extend(
+            self.books
+                .keys()
+                .map(|symbol| format!("{}@depth20@100ms", symbol.to_ascii_lowercase())),
+        );
+        topics.extend(
+            self.candles.keys().map(|(symbol, interval)| {
+                format!("{}@kline_{interval}", symbol.to_ascii_lowercase())
+            }),
+        );
+        topics
+            .into_iter()
+            .map(SocketInterest::from_wire_args)
+            .collect()
     }
 
-    fn subscribe(&mut self, cx: &mut Cx<'_, Pending>, method: &str, topics: &[String]) {
-        let (Some(socket), true) = (self.public.socket, self.public.open) else {
+    fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(feed) = self.public.feed else {
             return;
         };
-        if topics.is_empty() {
-            return;
+        if let Err(error) = cx.set_socket_interests(feed, self.public_interests()) {
+            socket_failed(cx, error);
         }
-        self.public.next_request_id += 1;
-        let params = serde_json::to_string(topics).unwrap_or_default();
-        cx.send(
-            socket,
-            format!(
-                "{{\"method\":\"{method}\",\"params\":{params},\"id\":{}}}",
-                self.public.next_request_id
-            ),
-        );
+    }
+
+    fn public_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        match event {
+            LifecycleEvent::Opened(epoch) => {
+                self.public.socket = Some(epoch.socket());
+                for state in self.books.values_mut() {
+                    state.last_id = None;
+                }
+                // Sent before the engine replays the subscriptions, as legacy did.
+                cx.send(
+                    epoch.socket(),
+                    "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}",
+                );
+            }
+            LifecycleEvent::Ping(epoch) => {
+                cx.send(epoch.socket(), r#"{"id":-1,"method":"LIST_SUBSCRIPTIONS"}"#)
+            }
+            LifecycleEvent::Reconnect(_) => self.ensure_public_feed(cx),
+            LifecycleEvent::Retired { .. } => {
+                self.public.socket = None;
+                for (symbol, state) in &mut self.books {
+                    state.book.clear();
+                    state.last_id = None;
+                    cx.book_changed(symbol);
+                }
+            }
+            // A refused set is reported; the feed keeps serving its other topics.
+            LifecycleEvent::InterestsRefused { error, .. } => socket_failed(cx, error),
+            _ => {}
+        }
+        Ok(())
     }
 
     fn request_interest(&mut self, cx: &mut Cx<'_, Pending>, initial: bool, symbol: Option<&str>) {
@@ -704,44 +772,102 @@ impl Venue for AsterDex {
         self.start_requests(cx);
     }
 
-    fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
-        if self.on_account_open(cx, socket) {
-            return;
-        }
-        if self.public.socket != Some(socket) {
-            return;
-        }
-        self.public.open = true;
-        self.public.supervisor.opened(cx);
-        cx.send(socket, "{\"id\":-1,\"method\":\"LIST_SUBSCRIPTIONS\"}");
-        let mut topics = vec!["!ticker@arr".to_owned(), "!markPrice@arr@1s".to_owned()];
-        for (symbol, state) in &mut self.books {
-            state.last_id = None;
-            topics.push(format!("{}@depth20@100ms", symbol.to_ascii_lowercase()));
-        }
-        for (symbol, interval) in self.candles.keys() {
-            topics.push(format!("{}@kline_{interval}", symbol.to_ascii_lowercase()));
-        }
-        self.subscribe(cx, "SUBSCRIBE", &topics);
-    }
+    // Both feeds are engine-managed: opens, closes and liveness arrive as socket events.
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
 
+    /// The engine delivers only frames of an open, current, unexpired epoch.
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.on_account_message(cx, socket, text) {
             return;
         }
         if self.public.socket == Some(socket) {
-            self.public.supervisor.received(cx.now);
             self.on_public_frame(cx, text);
         }
     }
 
-    fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.on_account_close(cx, socket) {
-            return;
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+
+    fn socket_capabilities() -> SocketCapabilities {
+        // No AsterDEX work waits on a subscription release; continuations compile out.
+        SocketCapabilities { handoff: false }
+    }
+
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: LifecycleEvent,
+    ) -> Result<(), SocketError> {
+        let feed = match &event {
+            LifecycleEvent::Opened(epoch)
+            | LifecycleEvent::Ready { epoch, .. }
+            | LifecycleEvent::Authenticated { epoch, .. }
+            | LifecycleEvent::AuthFailure { epoch, .. }
+            | LifecycleEvent::Retired { epoch, .. }
+            | LifecycleEvent::Ping(epoch)
+            | LifecycleEvent::RetryLogin(epoch) => epoch.feed(),
+            LifecycleEvent::Reconnect(feed)
+            | LifecycleEvent::InterestsCommitted { feed, .. }
+            | LifecycleEvent::InterestsRefused { feed, .. } => *feed,
+        };
+        if self.account_feed() == Some(feed) {
+            self.account_socket_event(cx, event)
+        } else if self.public.feed == Some(feed) {
+            self.public_socket_event(cx, event)
+        } else {
+            Err(SocketError::Stale)
         }
-        if self.public.socket == Some(socket) {
-            self.close_public(cx);
+    }
+
+    /// One `{"method","params","id"}` frame per batch, split only to stay under
+    /// the engine's frame bound; the private feed carries no interests.
+    fn encode_socket_interests(
+        &self,
+        _store: &safe_cex_engine::Store,
+        feed: FeedId,
+        subscribe: bool,
+        interests: &[SocketInterest],
+        emit: &mut dyn FnMut(EncodedBatch) -> Result<(), SocketError>,
+    ) -> Result<(), SocketError> {
+        if self.public.feed != Some(feed) || interests.is_empty() {
+            return Ok(());
         }
+        let method = if subscribe {
+            "SUBSCRIBE"
+        } else {
+            "UNSUBSCRIBE"
+        };
+        let mut start = 0;
+        while start < interests.len() {
+            let mut end = start + 1;
+            let frame = |chunk: &[SocketInterest], id: u64| {
+                let params: Vec<&str> = chunk.iter().map(|i| i.wire_args.as_ref()).collect();
+                format!(
+                    "{{\"method\":\"{method}\",\"params\":{},\"id\":{id}}}",
+                    serde_json::to_string(&params).unwrap_or_default()
+                )
+            };
+            let id = self
+                .public
+                .next_request_id
+                .get()
+                .checked_add(1)
+                .ok_or(SocketError::Capacity)?;
+            while end < interests.len()
+                && frame(&interests[start..=end], id).len() <= MAX_FRAME_BYTES
+            {
+                end += 1;
+            }
+            self.public.next_request_id.set(id);
+            emit(EncodedBatch {
+                text: frame(&interests[start..end], id),
+                covered_keys: interests[start..end]
+                    .iter()
+                    .map(|i| i.key.clone())
+                    .collect(),
+            })?;
+            start = end;
+        }
+        Ok(())
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -1086,21 +1212,6 @@ impl Venue for AsterDex {
         {
             return;
         }
-        match self.public.supervisor.on_timer(cx, timer) {
-            Tick::Reconnect => self.connect_public(cx),
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.public.socket {
-                    cx.close(socket);
-                }
-                self.close_public(cx);
-            }
-            Tick::Ping => {
-                if let Some(socket) = self.public.socket {
-                    cx.send(socket, r#"{"id":-1,"method":"LIST_SUBSCRIPTIONS"}"#);
-                }
-            }
-            Tick::Handled | Tick::Unhandled => {}
-        }
         if self.interest_timer == Some(timer) {
             self.interest_timer = None;
             self.request_interest(cx, false, None);
@@ -1142,11 +1253,7 @@ impl Venue for AsterDex {
                 let state = self.books.entry(symbol.clone()).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
-                    self.subscribe(
-                        cx,
-                        "SUBSCRIBE",
-                        &[format!("{}@depth20@100ms", symbol.to_ascii_lowercase())],
-                    );
+                    self.sync_public_interests(cx);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1154,11 +1261,7 @@ impl Venue for AsterDex {
                     state.subscribers -= 1;
                     if state.subscribers == 0 {
                         self.books.remove(&symbol);
-                        self.subscribe(
-                            cx,
-                            "UNSUBSCRIBE",
-                            &[format!("{}@depth20@100ms", symbol.to_ascii_lowercase())],
-                        );
+                        self.sync_public_interests(cx);
                     }
                 }
             }
@@ -1174,11 +1277,7 @@ impl Venue for AsterDex {
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1 {
-                    self.subscribe(
-                        cx,
-                        "SUBSCRIBE",
-                        &[format!("{}@kline_{interval}", symbol.to_ascii_lowercase())],
-                    );
+                    self.sync_public_interests(cx);
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
@@ -1187,11 +1286,7 @@ impl Venue for AsterDex {
                     *count -= 1;
                     if *count == 0 {
                         self.candles.remove(&key);
-                        self.subscribe(
-                            cx,
-                            "UNSUBSCRIBE",
-                            &[format!("{}@kline_{}", key.0.to_ascii_lowercase(), key.1)],
-                        );
+                        self.sync_public_interests(cx);
                     }
                 }
             }
