@@ -49,6 +49,9 @@ pub struct Options {
     pub secret: Option<String>,
     pub application_id: Option<String>,
     pub tick_interval: Option<f64>,
+    /// Opaque refs installed by trusted setup; the provider signs every
+    /// private read and the socket auth with them.
+    pub identities: safe_cex_engine::signing::Identities,
 }
 safe_cex_crypto::redacted_debug!(Options);
 impl safe_cex_crypto::secrets::EraseSecrets for Options {
@@ -66,7 +69,10 @@ pub fn signing_keys_valid(key: &str, secret: &str) -> bool {
 pub enum Pending {
     History(history::Request),
     Trade(trading::Request),
-    Account(account::Request),
+    Account(
+        safe_cex_engine::selected_read::AdmittedRead,
+        account::Request,
+    ),
     Markets {
         context: Context,
         rows: Vec<Market>,
@@ -821,8 +827,13 @@ impl Venue for Orderly {
             let _ = cx.fail_context(context, reason.venue_error());
             return;
         }
-        if let Pending::Account(request) = pending {
-            self.account_item(cx, request, item);
+        if let Pending::Account(read, request) = pending {
+            if cx
+                .validate_background_read_http_delivery(read.context())
+                .is_ok()
+            {
+                self.account_item(cx, request, item);
+            }
             return;
         }
         if let Pending::History(request) = pending {
@@ -831,7 +842,7 @@ impl Venue for Orderly {
         }
         let result: Result<(), String> = (|| {
             match pending {
-                Pending::Account(_)
+                Pending::Account(..)
                 | Pending::Trade(_)
                 | Pending::History(_)
                 | Pending::CandleHistory { .. } => unreachable!(),
@@ -945,7 +956,7 @@ impl Venue for Orderly {
                     return;
                 }
                 Pending::Candles { invalid, .. } => *invalid = true,
-                Pending::Account(_)
+                Pending::Account(..)
                 | Pending::Trade(_)
                 | Pending::History(_)
                 | Pending::CandleHistory { .. } => unreachable!(),
@@ -966,9 +977,16 @@ impl Venue for Orderly {
             let _ = cx.fail_context(context, reason.venue_error());
             return;
         }
-        if let Pending::Account(request) = pending {
-            self.account_response(cx, request, response);
-            self.trade_reconcile(cx);
+        if let Pending::Account(read, request) = pending {
+            let current = cx
+                .validate_background_read_http_delivery(read.context())
+                .is_ok();
+            // Every terminal finishes the leg; a stale delivery changes nothing.
+            let _ = cx.finish_http_context(read.context());
+            if current {
+                self.account_response(cx, request, response);
+                self.defer_trade_reconcile(cx);
+            }
             return;
         }
         if let Pending::Trade(request) = pending {
@@ -1092,10 +1110,56 @@ impl Venue for Orderly {
         }
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        if let Some(context) = Self::candle_context(&pending) {
-            let _ = cx.fail_context(context, error);
-        } else {
-            self.on_request_failed(cx, pending, &error.message);
+        match pending {
+            Pending::History(request) => self.history_failed(cx, request, error),
+            pending => match Self::candle_context(&pending) {
+                Some(context) => {
+                    let _ = cx.fail_context(context, error);
+                }
+                None => self.on_request_failed(cx, pending, &error.message),
+            },
+        }
+    }
+    /// A provider refusal of a private read: history is strict; an account
+    /// read fails as a native failed read does, reported and retried.
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        match pending {
+            Pending::History(request) => self.history_refused(cx, request, error),
+            pending => self.on_sign_failed(cx, pending, &error.message),
+        }
+    }
+    /// A malformed stream was delivered, so its custody is checked first: a
+    /// stale or superseded leg only closes its Context and changes nothing.
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        _status: u16,
+        _headers: &str,
+        error: &str,
+    ) {
+        match pending {
+            Pending::Account(read, request) => {
+                let current = cx
+                    .validate_background_read_http_delivery(read.context())
+                    .is_ok();
+                let _ = cx.finish_http_context(read.context());
+                if current {
+                    self.account_failed(cx, request, error);
+                }
+            }
+            Pending::History(mut request) => {
+                if request.valid_delivery(cx) {
+                    self.history_failed(cx, request, VenueError::new(error));
+                } else {
+                    request.release(cx);
+                }
+            }
+            pending => self.on_http_failed(
+                cx,
+                pending,
+                VenueError::new(error).kind(safe_cex_engine::ErrorKind::Internal),
+            ),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1106,7 +1170,16 @@ impl Venue for Orderly {
             return;
         }
         match pending {
-            Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Account(read, request) => {
+                // A superseded read's failure only closes its own leg.
+                let current = cx
+                    .validate_background_read_http_delivery(read.context())
+                    .is_ok();
+                let _ = cx.finish_http_context(read.context());
+                if current {
+                    self.account_failed(cx, request, error);
+                }
+            }
             Pending::Trade(request) => {
                 let error = safe_cex_engine::VenueError::new(error)
                     .kind(safe_cex_engine::ErrorKind::Network);
@@ -1120,7 +1193,7 @@ impl Venue for Orderly {
                     )
                 }
             }
-            Pending::History(request) => self.history_failed(cx, request, error),
+            Pending::History(request) => self.history_failed(cx, request, VenueError::new(error)),
             Pending::Markets { .. } | Pending::Tickers { .. } => unreachable!(),
             Pending::Candles { context, .. } | Pending::CandleHistory { context, .. } => {
                 let _ = cx.fail_context(&context, error);

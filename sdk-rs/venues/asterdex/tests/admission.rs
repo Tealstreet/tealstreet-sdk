@@ -1,16 +1,11 @@
 //! Venue admission: slot selection, setup mapping and the dispatch recipe
-//! agree. Each venue request is replayed through `Recipe` directly with the
-//! expected refs and wallets, so only the selection under test can differ.
+//! agree. Each signed V3 request is recomputed for the nonce the engine
+//! reserved, with the expected wallet key, so only the selection can differ.
 mod support;
-use safe_cex_engine::book::Book;
-use safe_cex_engine::signing::{Identity, KeyRef, Provider};
-use safe_cex_engine::test_support::{prepared_actions, seeded_entropy};
-use safe_cex_engine::{
-    Action, Command, Cx, Engine, Event, HttpRequest, Method, Response, SignStep, SocketId, TimerId,
-    Venue,
-};
+use safe_cex_engine::test_support::prepared_actions;
+use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Response};
 use safe_cex_venue_asterdex::AsterDex;
-use safe_cex_venue_asterdex::sign::{Auth, Query, Recipe};
+use safe_cex_venue_asterdex::sign::Query;
 use support::Options;
 
 const ORIGIN: &str = "https://fapi.asterdex.com";
@@ -25,33 +20,6 @@ fn wallet(byte: u8) -> (String, String) {
     (key, address)
 }
 
-fn identity(credential: &str, signing: &str) -> Identity {
-    Identity::new(KeyRef(credential.into()), Some(KeyRef(signing.into())))
-}
-
-struct Issue(Option<(Method, String, Box<dyn SignStep>)>);
-impl Venue for Issue {
-    type Pending = ();
-    fn start(&mut self, cx: &mut Cx<'_, ()>) {
-        let (method, path, step) = self.0.take().unwrap();
-        let id = cx.request(method, format!("{ORIGIN}{path}"), vec![], None, ());
-        cx.sign_http(id, step);
-    }
-    fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-    fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
-    fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
-    fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
-    fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
-    fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
-    fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
-    fn book(&self, _: &str) -> Option<&Book> {
-        None
-    }
-    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(std::iter::empty())
-    }
-}
-
 fn param<'a>(url: &'a str, name: &str) -> Option<&'a str> {
     url.split_once('?')?
         .1
@@ -59,50 +27,30 @@ fn param<'a>(url: &'a str, name: &str) -> Option<&'a str> {
         .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
 }
 
-/// The same request through `Recipe` with the expected identity and wallets,
-/// pinned to the nonce and stamp the venue used.
-fn replay(provider: &Provider, request: &HttpRequest, identity: Identity, signer: &str) -> String {
+/// The same request recomputed for the nonce and stamp the engine used,
+/// signed with `key` for the configured `signer` wallet.
+fn replay(request: &HttpRequest, key: &str, signer: &str) -> String {
     let path = request.url[ORIGIN.len()..].split('?').next().unwrap();
     let nonce: u64 = param(&request.url, "nonce").unwrap().parse().unwrap();
     let now = param(&request.url, "timestamp").map_or(NOW, |t| t.parse().unwrap());
-    let auth = Auth::V3 {
-        user: USER.into(),
-        signer: signer.into(),
-        nonce: Box::new(move |_, _| Ok(nonce)),
-    };
-    let recipe = Recipe::new(
-        identity,
-        auth,
+    safe_cex_venue_asterdex::sign::v3_wire_for_nonce(
         request.method,
         ORIGIN,
         path,
         Query::new(),
+        USER,
+        signer,
+        nonce,
+        now,
         false,
+        key,
     )
-    .unwrap();
-    let mut engine = Engine::new(
-        Issue(Some((request.method, path.into(), Box::new(recipe)))),
-        Some(seeded_entropy(9)),
-    )
-    .unwrap();
-    engine.set_signer(Some(provider.clone())).unwrap();
-    engine.start(now);
-    let http = prepared_actions(&mut engine, now)
-        .into_iter()
-        .find_map(|action| match action {
-            Action::Http(http) => Some(http),
-            _ => None,
-        })
-        .unwrap();
-    assert_eq!(http.headers, request.headers);
-    http.url
+    .unwrap()
 }
 
 /// Start the venue, sync the clock and markets, and return signed requests.
-fn signed_requests(options: Options, command: Option<Command>) -> (Vec<HttpRequest>, Provider) {
-    let (venue, provider) = options.build();
-    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
-    engine.set_signer(Some(provider.clone())).unwrap();
+fn signed_requests(options: Options, command: Option<Command>) -> Vec<HttpRequest> {
+    let mut engine = support::engine(options);
     engine.start(NOW);
     let mut signed = Vec::new();
     let mut pending: Vec<HttpRequest> = Vec::new();
@@ -144,17 +92,18 @@ fn signed_requests(options: Options, command: Option<Command>) -> (Vec<HttpReque
         );
         collect(&mut engine, &mut pending);
     }
-    (signed, provider)
+    signed
 }
 
 #[test]
 fn v3_read_agent_presents_its_key_and_signs_with_the_aliased_0x_wallet() {
     let (key, signer) = wallet(0x31);
-    let (signed, provider) = signed_requests(
+    let signed = signed_requests(
         Options {
             key: Some(signer.clone()),
             application_id: Some(USER.into()),
-            auth_private_key: Some(key),
+            auth_private_key: Some(key.clone()),
+            auth_signer_address: Some(signer.clone()),
             read_key: Some("0x2222222222222222222222222222222222222222".into()),
             read_secret: Some("ignored-when-aliased".into()),
             ..Options::default()
@@ -172,32 +121,60 @@ fn v3_read_agent_presents_its_key_and_signs_with_the_aliased_0x_wallet() {
             "0x2222222222222222222222222222222222222222".into()
         )]
     );
-    // The read agent wallet defaults to the read key; the signature is the
-    // primary wallet's, through the secondary slot's aliased signing ref.
-    let read_signer = "0x2222222222222222222222222222222222222222";
-    assert!(read.url.contains(&format!("signer={read_signer}")));
-    let expected = identity("secondary.credential", "primary.signing");
-    assert_eq!(replay(&provider, read, expected, read_signer), read.url);
+    // The aliased read slot presents its own key and signs with the primary
+    // wallet, which is also the wallet it names.
+    assert!(read.url.contains(&format!("signer={signer}")));
+    assert_eq!(replay(read, &key, &signer), read.url);
     let listen = signed
         .iter()
         .find(|r| r.method == Method::Post && r.url.contains("/fapi/v3/listenKey?"))
         .expect("listen key through the recipe");
-    let expected = identity("primary.credential", "primary.signing");
-    assert_eq!(replay(&provider, listen, expected, &signer), listen.url);
+    assert_eq!(replay(listen, &key, &signer), listen.url);
+}
+
+/// N1: an aliased read slot that names another wallet (the read key) while
+/// signing with the primary wallet is refused at startup; native signed it
+/// and the venue rejected every read.
+#[test]
+fn an_aliased_read_slot_naming_another_wallet_is_refused() {
+    let (key, signer) = wallet(0x35);
+    let signed = signed_requests(
+        Options {
+            key: Some(signer.clone()),
+            application_id: Some(USER.into()),
+            auth_private_key: Some(key),
+            read_key: Some("0x2222222222222222222222222222222222222222".into()),
+            read_secret: Some("ignored-when-aliased".into()),
+            ..Options::default()
+        },
+        None,
+    );
+    assert!(
+        !signed
+            .iter()
+            .any(|r| r.headers.iter().any(|(_, v)| v.contains("0x2222"))),
+        "the mismatched read slot signs nothing"
+    );
+    assert!(
+        signed.iter().any(|r| r.url.contains("/fapi/v3/listenKey?")),
+        "the primary still signs"
+    );
 }
 
 #[test]
 fn public_data_only_keeps_signing_reads_with_the_read_identity() {
+    let read_key = format!("0x{}", "33".repeat(32));
+    let read_signer = safe_cex_crypto::ethereum::private_key_address(&read_key).unwrap();
     let (key, signer) = wallet(0x32);
-    let (signed, provider) = signed_requests(
+    let signed = signed_requests(
         Options {
             public_data_only: true,
             key: Some(signer.clone()),
             secret: Some(key),
             application_id: Some(USER.into()),
-            auth_signer_address: Some(signer.clone()),
+            auth_signer_address: Some(read_signer.clone()),
             read_key: Some("read-agent-key".into()),
-            read_secret: Some(format!("0x{}", "33".repeat(32))),
+            read_secret: Some(read_key.clone()),
             ..Options::default()
         },
         Some(Command::FetchAccount { command: 1 }),
@@ -211,15 +188,12 @@ fn public_data_only_keeps_signing_reads_with_the_read_identity() {
         read.headers,
         vec![("X-MBX-APIKEY", "read-agent-key".into())]
     );
-    let expected = identity("secondary.credential", "secondary.signing");
-    assert_eq!(replay(&provider, read, expected, &signer), read.url);
+    assert_eq!(replay(read, &read_key, &read_signer), read.url);
 }
 
 /// FetchAccount over V1 or V3 with the given account body; returns the result.
 fn account_user_id(options: Options, body: &str) -> Result<String, String> {
-    let (venue, provider) = options.build();
-    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
-    engine.set_signer(Some(provider)).unwrap();
+    let mut engine = support::engine(options);
     engine.start(NOW);
     engine.handle(NOW, Event::Command(Command::FetchAccount { command: 1 }));
     let mut pending: Vec<_> = prepared_actions(&mut engine, NOW);

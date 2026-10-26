@@ -14,7 +14,7 @@ mod wire;
 use Options as VenueOptions;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
-use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::{CredentialRole, Selection, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
@@ -27,8 +27,8 @@ use safe_cex_engine::socket_lifecycle::{
     SocketError, TrafficPolicy,
 };
 use safe_cex_engine::{
-    Command, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue, VenueError,
-    json, num,
+    Command, CredentialSlot, Cx, ErrorKind, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    TimerId, Venue, VenueError, json, num,
 };
 use serde_json::value::RawValue;
 use sign::Version;
@@ -175,17 +175,15 @@ struct BookState {
     last_id: Option<u64>,
 }
 
-/// One slot's provider refs and the V3 API wallet that signs for it.
-#[derive(Clone)]
-struct Slot {
-    identity: Identity,
-    signer: Option<String>,
-}
-
 pub struct AsterDex {
     options: Options,
     version: Version,
-    credentials: Slots<Slot>,
+    credentials: Slots<Identity>,
+    /// N1: a slot whose configured V3 wallet differs from the address its
+    /// signing key proved at setup is refused, never silently re-addressed.
+    signer_mismatch: [Option<String>; 2],
+    /// `start` latched the V3 slots from the engine's sealed identities.
+    signing_sealed: bool,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
@@ -201,30 +199,44 @@ pub struct AsterDex {
     interest_fallback: VecDeque<String>,
 }
 
+fn slot_index(slot: CredentialSlot) -> usize {
+    match slot {
+        CredentialSlot::Primary => 0,
+        CredentialSlot::Secondary => 1,
+    }
+}
+
 fn nonempty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 impl AsterDex {
-    pub fn new(options: Options) -> Self {
-        let slot = |identity: &Option<Identity>, signer: &Option<String>| {
-            // An incomplete identity cannot sign, as before setup moved here.
-            identity
-                .clone()
-                .filter(|id| id.validate().is_ok())
-                .map(|identity| Slot {
-                    identity,
-                    signer: nonempty(signer.as_deref()).map(str::to_owned),
-                })
-        };
-        // A read key keeps signing reads even for public-data-only accounts.
-        let credentials = Slots::new(
-            slot(&options.credentials, &options.signer_address)
-                .filter(|_| !options.public_data_only),
-            slot(&options.read_credentials, &options.read_signer_address),
+    /// Signing slots with today's filters: an incomplete identity cannot
+    /// sign, and a read key keeps signing reads for public-data-only accounts.
+    fn slots(
+        options: &Options,
+        primary: Option<Identity>,
+        secondary: Option<Identity>,
+    ) -> Slots<Identity> {
+        let valid = |identity: Option<Identity>| identity.filter(|id| id.validate().is_ok());
+        Slots::new(
+            valid(primary).filter(|_| !options.public_data_only),
+            valid(secondary),
             SlotPolicy::default(),
+        )
+    }
+
+    pub fn new(options: Options) -> Self {
+        // Construction clones answer presence only; V3 signs with the
+        // engine's sealed identities, installed at start.
+        let credentials = Self::slots(
+            &options,
+            options.credentials.clone(),
+            options.read_credentials.clone(),
         );
         Self {
+            signer_mismatch: [None, None],
+            signing_sealed: false,
             urls: Urls::new(options.testnet),
             version: options.api_version.unwrap_or_default(),
             options,
@@ -253,26 +265,113 @@ impl AsterDex {
         if self.options.api_version.is_none() {
             return Some("Aster signing requires a resolved API version".into());
         }
-        let (_, primary) = self.credentials.select(CredentialRole::Mutation).ok()?;
-        self.auth(primary).err()
+        let (selection, _) = self.credentials.select(CredentialRole::Mutation).ok()?;
+        self.v3_fields(selection.slot()).err()
     }
 
-    /// The recipe contract for one selected slot.
-    fn auth(&self, slot: &Slot) -> Result<sign::Auth, String> {
+    fn configured_signer(&self, slot: CredentialSlot) -> Option<&str> {
+        nonempty(match slot {
+            CredentialSlot::Primary => self.options.signer_address.as_deref(),
+            CredentialSlot::Secondary => self.options.read_signer_address.as_deref(),
+        })
+    }
+
+    /// The V3 main wallet, after checking the slot's configured wallet fields.
+    fn v3_fields(&self, slot: CredentialSlot) -> Result<String, String> {
         if self.version == Version::V1 {
-            return Ok(sign::Auth::V1);
+            return Ok(String::new());
         }
         let user = nonempty(self.options.user_address.as_deref());
-        let (Some(user), Some(signer)) = (user, slot.signer.as_deref()) else {
+        let (Some(user), Some(signer)) = (user, self.configured_signer(slot)) else {
             return Err("Missing required Aster v3 auth fields: Main Wallet Address, API Wallet Address, and Generated Private Key".into());
         };
         safe_cex_crypto::ethereum::get_address(user)?;
         safe_cex_crypto::ethereum::get_address(signer)?;
-        Ok(sign::Auth::V3 {
-            user: user.into(),
-            signer: signer.into(),
-            nonce: sign::interim_nonce(),
-        })
+        Ok(user.into())
+    }
+
+    /// Checks a role's signing contract without reserving a nonce. A mismatch
+    /// is a configuration refusal, never an authentication failure.
+    fn check_signing(&self, role: CredentialRole) -> Result<(), (String, ErrorKind)> {
+        let (selection, _) = self.credentials.select(role).map_err(|_| {
+            (
+                "Missing required Aster credentials".to_owned(),
+                ErrorKind::AuthInvalid,
+            )
+        })?;
+        if let Some(error) = &self.signer_mismatch[slot_index(selection.slot())] {
+            return Err((error.clone(), ErrorKind::InvalidInput));
+        }
+        self.v3_fields(selection.slot())
+            .map(drop)
+            .map_err(|error| (error, ErrorKind::AuthInvalid))
+    }
+
+    /// The selected identity and its recipe contract. V3 mints a nonce claim
+    /// against the wallet address the slot's signing key proved at setup.
+    fn signing(&self, role: CredentialRole) -> Result<(Selection, Identity, sign::Auth), String> {
+        self.check_signing(role).map_err(|(error, _)| error)?;
+        let (selection, identity) = self
+            .credentials
+            .select(role)
+            .map_err(|_| "Missing required Aster credentials".to_owned())?;
+        if self.version == Version::V1 {
+            return Ok((selection, identity.clone(), sign::Auth::V1));
+        }
+        let user = self.v3_fields(selection.slot())?;
+        let (selection, identity, claim) = self
+            .credentials
+            .select_with_nonce(role, &safe_cex_engine::nonce::ASTERDEX_V3)
+            .map_err(|error| error.sign_error().to_string())?;
+        Ok((selection, identity.clone(), sign::Auth::V3 { user, claim }))
+    }
+
+    /// Rebuilds V3 slots from the sealed identities and records any slot
+    /// whose configured wallet differs from the address its key proved.
+    /// Before start, setup may still be initialized or reinitialized, so each
+    /// call reads the engine's current identities; only `start` latches them.
+    fn seal_signing(&mut self, cx: &mut Cx<'_, Pending>, at_start: bool) {
+        if self.version != Version::V3 || self.signing_sealed {
+            return;
+        }
+        self.signing_sealed = at_start;
+        self.signer_mismatch = [None, None];
+        let sealed = cx.address_nonce_identities().clone();
+        self.credentials = Self::slots(
+            &self.options,
+            sealed.primary.clone(),
+            sealed.secondary.clone(),
+        );
+        for (slot, identity) in [
+            (CredentialSlot::Primary, &sealed.primary),
+            (CredentialSlot::Secondary, &sealed.secondary),
+        ] {
+            let (Some(identity), Some(configured)) = (identity, self.configured_signer(slot))
+            else {
+                continue;
+            };
+            let (Ok(configured), Ok(proved)) = (
+                safe_cex_crypto::ethereum::get_address(configured),
+                identity.verified_signing_address(),
+            ) else {
+                continue;
+            };
+            let Ok(proved) = safe_cex_crypto::ethereum::get_address(&format!(
+                "0x{}",
+                safe_cex_crypto::hex(&proved)
+            )) else {
+                continue;
+            };
+            if configured != proved {
+                let error = format!(
+                    "Aster V3 API wallet address {configured} does not match the signing key's address {proved}"
+                );
+                if at_start {
+                    cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
+                }
+                self.signer_mismatch[slot_index(slot)] = Some(error);
+            }
+        }
     }
 
     pub fn is_private(&self) -> bool {
@@ -764,11 +863,36 @@ impl Venue for AsterDex {
         }
     }
 
+    fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
+        (self.version == Version::V3).then_some(&safe_cex_engine::nonce::ASTERDEX_V3)
+    }
+
+    /// Only slots that sign V3 gain address setup; a public-data-only
+    /// primary never signs.
+    fn public_address_slots(&self) -> safe_cex_engine::AddressSetupSlots {
+        use safe_cex_engine::AddressSetupSlots;
+        match (self.version, self.options.public_data_only) {
+            (Version::V1, _) => AddressSetupSlots::None,
+            (Version::V3, true) => AddressSetupSlots::Secondary,
+            (Version::V3, false) => AddressSetupSlots::Both,
+        }
+    }
+
+    fn dispatch_nonce() -> bool {
+        true
+    }
+
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    }
+
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Configured fields are checked first; sealing then binds the slots.
         if let Some(error) = self.signing_config_error() {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
+        self.seal_signing(cx, true);
         self.start_requests(cx);
     }
 

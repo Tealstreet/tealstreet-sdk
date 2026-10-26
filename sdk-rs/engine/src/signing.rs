@@ -35,6 +35,25 @@ pub struct IdentitySetupPolicy {
     /// Whether a credential-only slot (no signing ref) is accepted.
     #[serde(skip_serializing_if = "SigningPolicy::is_required")]
     pub signing: SigningPolicy,
+    /// Whether trusted local setup may install a primary with no credential.
+    #[serde(skip_serializing_if = "PrimarySource::is_required")]
+    pub source: PrimarySource,
+}
+
+/// `Required` keeps today's behaviour exactly. `ScalarOnly` (primary only,
+/// declared `Secp256k1Digest`) lets trusted local setup install a signing-only
+/// primary whose credential is explicitly absent; injected identities never are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PrimarySource {
+    #[default]
+    Required,
+    ScalarOnly,
+}
+impl PrimarySource {
+    pub fn is_required(&self) -> bool {
+        *self == Self::Required
+    }
 }
 
 /// `Required` keeps today's behaviour exactly; only `Optional` families accept
@@ -250,6 +269,46 @@ impl CredentialSetupPolicy {
         }
         Ok(())
     }
+
+    /// Trusted local setup only (bans-scoped): marks a `ScalarOnly` primary
+    /// that setup built without a credential as explicitly credential-absent.
+    /// Injected identities never pass through here, so they cannot be absent.
+    pub fn install_scalar_only_primary(
+        &self,
+        identities: &mut Identities,
+    ) -> Result<(), SignError> {
+        let scalar_only = |policy: Option<IdentitySetupPolicy>| {
+            policy.is_some_and(|policy| policy.source == PrimarySource::ScalarOnly)
+        };
+        if scalar_only(self.secondary) {
+            return Err(SignError::InvalidRequest);
+        }
+        let Some(policy) = self.primary.filter(|policy| scalar_only(Some(*policy))) else {
+            return Ok(());
+        };
+        if policy.signing_algorithm != Some(Algorithm::Secp256k1Digest)
+            || !policy.signing.is_required()
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        let Some(identity) = identities.primary.as_mut() else {
+            return Ok(());
+        };
+        if !identity.credential.0.is_empty() {
+            return Ok(());
+        }
+        let Some(signing) = identity.signing.as_ref().filter(|key| valid_key_ref(key)) else {
+            return Ok(());
+        };
+        // The authority ref must select exactly one identity.
+        if identities.secondary.as_ref().is_some_and(|other| {
+            other.credential == *signing || other.signing.as_ref() == Some(signing)
+        }) {
+            return Err(SignError::InvalidRequest);
+        }
+        identity.credential_absent = true;
+        Ok(())
+    }
 }
 
 /// Raw presence of the primary key, classified by trusted setup before any
@@ -322,6 +381,10 @@ pub struct Identity {
     /// setup policy, never transported: a serialized copy loses it.
     #[serde(skip)]
     signing_not_configured: bool,
+    /// A `ScalarOnly` primary's explicit credential absence. Set only by
+    /// trusted local setup, never transported: a serialized copy loses it.
+    #[serde(skip)]
+    credential_absent: bool,
     #[cfg(feature = "address-nonce")]
     #[serde(skip)]
     pub(crate) address: crate::engine::address_nonce_setup::AddressCapability,
@@ -336,6 +399,7 @@ impl Identity {
             stable_id: None,
             extra: Default::default(),
             signing_not_configured: false,
+            credential_absent: false,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
         }
@@ -393,9 +457,33 @@ impl Identity {
             .ok_or(SignError::InvalidRequest)
     }
 
+    /// Whether this primary has no credential by trusted `ScalarOnly` setup;
+    /// nothing may be presented for it.
+    #[inline]
+    pub fn credential_absent(&self) -> bool {
+        self.credential_absent
+    }
+
+    /// The presentable credential ref: `None` when it is absent or invalid.
+    #[inline]
+    pub fn credential_ref(&self) -> Option<&KeyRef> {
+        (!self.credential_absent && valid_key_ref(&self.credential)).then_some(&self.credential)
+    }
+
+    /// The ref a request authority names for this identity: its credential,
+    /// or for a credential-absent primary its signing ref, which is then
+    /// signing-only (never presented or interpolated).
+    #[inline]
+    pub fn authority_ref(&self) -> &KeyRef {
+        match &self.signing {
+            Some(signing) if self.credential_absent => signing,
+            _ => &self.credential,
+        }
+    }
+
     /// Whether `key` is one of this slot's refs.
     pub fn owns(&self, key: &KeyRef) -> bool {
-        self.credential == *key
+        !self.credential_absent && self.credential == *key
             || self.signing.as_ref() == Some(key)
             || self.passphrase.as_ref() == Some(key)
             || self.extra.values().any(|extra| extra == key)
@@ -426,7 +514,12 @@ impl Identity {
     }
 
     fn checked(&self, signing_required: bool) -> Result<(), &'static str> {
-        if !valid_key_ref(&self.credential)
+        let credential = if self.credential_absent {
+            self.credential.0.is_empty() && self.signing.is_some()
+        } else {
+            valid_key_ref(&self.credential)
+        };
+        if !credential
             || self
                 .signing
                 .as_ref()
@@ -464,6 +557,15 @@ impl Identities {
                 .primary
                 .as_ref()
                 .is_some_and(|primary| work.any_key_ref(&|key| primary.owns(key)))
+    }
+
+    /// The signing-only ref of a credential-absent primary, which no request
+    /// may present or interpolate.
+    pub fn signing_only_ref(&self) -> Option<&KeyRef> {
+        self.primary
+            .as_ref()
+            .filter(|primary| primary.credential_absent)
+            .and_then(|primary| primary.signing.as_ref())
     }
 
     /// Setup requires a secondary's signing ref, so a step refused for an
@@ -729,6 +831,16 @@ impl SignRequest {
             }
         }
         false
+    }
+    /// Whether any operation presents `key` or interpolates it into a payload.
+    pub fn presents(&self, key: &KeyRef) -> bool {
+        self.operations.iter().any(|op| match op {
+            Operation::Present { key: presented } => presented == key,
+            Operation::Sign { payload, .. } | Operation::Sha256 { payload } => payload
+                .iter()
+                .any(|part| matches!(part, PayloadPart::Credential { key: part } if part == key)),
+            Operation::PublicAddress { .. } | Operation::PublicKey { .. } => false,
+        })
     }
     /// Shared structural bounds also apply to injected providers. Expanded secret
     /// input bounds are enforced privately by the provider before allocation.
@@ -1074,6 +1186,7 @@ mod setup_field_policy_tests {
             stable_id: None,
             extra: Default::default(),
             signing_not_configured: false,
+            credential_absent: false,
             #[cfg(feature = "address-nonce")]
             address: Default::default(),
         }
@@ -1128,6 +1241,7 @@ mod setup_field_policy_tests {
                 stable_id: None,
                 extra: Default::default(),
                 signing_not_configured: false,
+                credential_absent: false,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
             }),
@@ -1148,6 +1262,7 @@ mod setup_field_policy_tests {
                 stable_id: None,
                 extra: Default::default(),
                 signing_not_configured: false,
+                credential_absent: false,
                 #[cfg(feature = "address-nonce")]
                 address: Default::default(),
             }),
