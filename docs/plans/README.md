@@ -505,3 +505,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | WEEX remaining inventory and identity custody | One immutable Slots owner; conservative inventory retained | Before changing WEEX role selection or claiming remaining lexical rows are raw senders. | [RUST_WEEX_REMAINING_INVENTORY.md](RUST_WEEX_REMAINING_INVENTORY.md) |
 
 | Explicit serial call authentication | Plan; originals and source pending | Before mixing unsigned Session calls and provider-signed calls under one serial root. | [RUST_SERIAL_CALL_AUTH.md](RUST_SERIAL_CALL_AUTH.md) |
+
+| MEXC installed signing and private custody | Signing/private-read PR; trading custody follows separately | Before changing MEXC credential setup, identity mapping, REST/WS signing or private request owners. | [RUST_MEXC_INSTALLED_SIGNING.md](RUST_MEXC_INSTALLED_SIGNING.md) |
