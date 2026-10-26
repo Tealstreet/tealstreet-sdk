@@ -83,13 +83,13 @@ struct AccountAccess {
     commands: mpsc::Sender<Control>,
 }
 
-/// Call `add_account` and `serve` inside a tokio `LocalSet`. Each engine remains
-/// single-threaded, including venues whose pending jobs are not `Send`.
 #[cfg(feature = "address-nonce")]
 type AccountResult = io::Result<()>;
 #[cfg(not(feature = "address-nonce"))]
 type AccountResult = ();
 
+/// Call `add_account` and `serve` inside a tokio `LocalSet`. Each engine remains
+/// single-threaded, including venues whose pending jobs are not `Send`.
 pub struct FrameServer {
     config: ServerConfig,
     accounts: HashMap<String, AccountAccess>,
