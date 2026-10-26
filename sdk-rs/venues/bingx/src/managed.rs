@@ -11,9 +11,7 @@ use safe_cex_engine::selected_read::{
     AdmittedRead, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
 };
 use safe_cex_engine::signing::Identity;
-use safe_cex_engine::{
-    AccountReadScope, CredentialSlot, Cx, ErrorKind, Method, Outcome, RequestId, VenueError,
-};
+use safe_cex_engine::{CredentialSlot, Cx, ErrorKind, Method, Outcome, RequestId, VenueError};
 
 type Queued = Result<RequestId, (Box<Pending>, VenueError)>;
 fn refused() -> VenueError {
@@ -26,12 +24,14 @@ fn refused() -> VenueError {
 pub(crate) enum Custody {
     Read(AdmittedRead),
     Session(Context),
+    /// A keyless public read: there is no signature to resend.
+    Public(Context),
 }
 impl Custody {
     pub(crate) fn context(&self) -> &Context {
         match self {
             Self::Read(read) => read.context(),
-            Self::Session(context) => context,
+            Self::Session(context) | Self::Public(context) => context,
         }
     }
 }
@@ -42,15 +42,15 @@ pub(crate) struct Read {
     pub params: Params,
     pub at: Option<ArrayAt>,
 }
-/// One account-data read on the configured read key (the primary without
-/// one), tagged with `evidence` for account-auth outcomes.
+/// One account-data read on the key `role` selects: the configured read key
+/// (the primary without one) unless the role is primary-only.
 pub(crate) fn read(
     cx: &mut Cx<'_, Pending>,
     slots: &Slots<Identity>,
     read: Read,
     pending: Pending,
     scope: Scope,
-    evidence: Option<AccountReadScope>,
+    role: ReadRole,
 ) -> Queued {
     let Read {
         method,
@@ -58,7 +58,7 @@ pub(crate) fn read(
         params,
         at,
     } = read;
-    let selected = SelectedRead::select(slots, ReadRole::Read { scope: evidence });
+    let selected = SelectedRead::select(slots, role);
     let policy = ReadPolicy {
         timeout_ms: 20_000,
         pacing: None,
@@ -80,6 +80,56 @@ pub(crate) fn read(
             custody: None,
         },
     )
+}
+/// A keyless public read: unsigned managed HTTP under its own Read Context,
+/// with the native public headers.
+pub(crate) fn public(
+    cx: &mut Cx<'_, Pending>,
+    read: Read,
+    pending: Pending,
+    scope: Scope,
+) -> Queued {
+    let Read {
+        method,
+        path,
+        params,
+        at,
+    } = read;
+    let policy = Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: 20_000,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    };
+    let Ok(context) = cx.http_context(scope, policy) else {
+        return Err((Box::new(pending), refused()));
+    };
+    let (url, _, body) = crate::sign::dispatch::unsigned(method, path, &params);
+    let signed = Signed {
+        inner: pending,
+        method,
+        path,
+        params,
+        at,
+        resent: true,
+        custody: Some(Custody::Public(context.clone())),
+    };
+    let id = cx
+        .request_managed_with_headers(
+            context,
+            None,
+            method,
+            url,
+            crate::sign::unsigned_headers(method),
+            body,
+            Pending::Signed(Box::new(signed)),
+        )
+        .map_err(|(pending, _)| (Box::new(pending), refused()))?;
+    if let Some(at) = at {
+        cx.stream_response(id, at);
+    }
+    Ok(id)
 }
 /// Listen-key upkeep as one session write. Shared dispatch signs at send time;
 /// listen keys present only the API key, so there is no signature resend.

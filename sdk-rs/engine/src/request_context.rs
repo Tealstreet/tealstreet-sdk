@@ -98,6 +98,12 @@ pub enum Owner {
     Execution {
         generation: u64,
     },
+    /// One engine-issued repair root (cancel or cancel-then-place) spending
+    /// repair entitlements; it has a journal but no command terminal.
+    #[cfg(feature = "repair-mutations")]
+    Repair {
+        generation: u64,
+    },
 }
 
 /// Engine-issued session authority. Holds no key, token or credential value.
@@ -1229,6 +1235,14 @@ pub struct ResendGrant {
     pub(crate) attempt: RequestId,
 }
 
+/// Evidence for the current serial call's one Session-authentication resend.
+#[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+#[derive(Debug)]
+pub enum SessionResend {
+    Write(ResendGrant),
+    Read,
+}
+
 /// Native codecs supply definitive facts. HTTP status and exception text are
 /// deliberately absent from this contract.
 #[derive(Clone, Debug, PartialEq)]
@@ -1666,6 +1680,15 @@ impl CommandWrites {
 
     pub(crate) fn leg_attempts(&self, leg: u64) -> usize {
         self.attempts.iter().filter(|a| a.leg == leg).count()
+    }
+
+    /// The latest attempt of `leg`: whether it was released, and its result.
+    #[cfg(feature = "repair-mutations")]
+    pub(crate) fn leg_outcome(&self, leg: u64) -> Option<(bool, Option<&WriteResult>)> {
+        self.attempts
+            .iter()
+            .rfind(|attempt| attempt.leg == leg)
+            .map(|attempt| (attempt.released, attempt.result.as_ref()))
     }
 
     pub(crate) fn latest(&self, leg: u64) -> Option<RequestId> {

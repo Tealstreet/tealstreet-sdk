@@ -19,6 +19,8 @@ pub use transport::{
     BoundHttp, HttpPrepareError, HttpPrepareFuture, NetworkTransport, PayloadSigner,
     PayloadSignerFuture, PayloadSignerResult, PreparedHttp, Transport,
 };
+#[cfg(feature = "nonce-drain")]
+pub use transport::{DrainFuture, Drained};
 
 use safe_cex_engine::{
     Action, Command, Engine, Event, Notice, RequestId, SocketId, TimerId, Venue, VenueError,
@@ -165,6 +167,13 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     /// Feed live configuration alongside transport completions.
+    /// Read-only metadata of the current managed signing task; see
+    /// `Engine::sign_meta`. Descriptive only.
+    #[cfg(feature = "sign-meta")]
+    pub fn sign_meta(&self, task: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
+        self.engine.sign_meta(task)
+    }
+
     pub fn event_sender(&self) -> Events {
         self.events.clone()
     }

@@ -232,8 +232,62 @@ impl CredentialSetupPolicy {
         {
             return Err(SignError::InvalidRequest);
         }
+        // An accepted Optional primary without a signing ref is an intentional
+        // absence: its signing operations refuse per operation (D6).
+        if let Some(identity) = identities.primary.as_mut()
+            && identity.signing.is_none()
+            && self
+                .primary
+                .is_some_and(|policy| !policy.signing.is_required())
+        {
+            identity.signing_not_configured = true;
+        }
         Ok(())
     }
+}
+
+/// Raw presence of the primary key, classified by trusted setup before any
+/// trim policy (D3). Only the variant name is ever formatted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KeyPresence {
+    Absent,
+    Empty,
+    Blank,
+    Nonblank,
+}
+
+/// Non-secret facts trusted setup derives beside `Identities`; never parsed
+/// from caller JSON.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupFacts {
+    primary_key: KeyPresence,
+}
+impl SetupFacts {
+    pub fn new(primary_key: KeyPresence) -> Self {
+        Self { primary_key }
+    }
+    pub fn primary_key(&self) -> KeyPresence {
+        self.primary_key
+    }
+    /// The typed login intent (G3): Empty logs in keyless on the primary;
+    /// Blank/Nonblank use the installed credential; Absent has none.
+    pub fn primary_login(&self) -> Option<PrimaryLogin> {
+        match self.primary_key {
+            KeyPresence::Absent => None,
+            KeyPresence::Empty => Some(PrimaryLogin::Empty),
+            KeyPresence::Blank | KeyPresence::Nonblank => Some(PrimaryLogin::Installed),
+        }
+    }
+}
+
+/// A non-secret login intent selected through `Slots<PrimaryLogin>`; it
+/// carries no `Identity` or `KeyRef`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrimaryLogin {
+    Empty,
+    Installed,
 }
 
 /// Opaque provider-owned identity. This is not an API key or a private key.
@@ -258,6 +312,10 @@ pub struct Identity {
     /// Additional signing refs owned by this slot; see `ExtraKey`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub extra: std::collections::BTreeMap<ExtraKey, KeyRef>,
+    /// An Optional family's intentional absence (D6). Set only by trusted
+    /// setup policy, never transported: a serialized copy loses it.
+    #[serde(skip)]
+    signing_not_configured: bool,
 }
 impl Identity {
     #[inline]
@@ -268,6 +326,7 @@ impl Identity {
             passphrase: None,
             stable_id: None,
             extra: Default::default(),
+            signing_not_configured: false,
         }
     }
 
@@ -293,7 +352,11 @@ impl Identity {
     /// before any provider work.
     #[inline]
     pub fn signing_ref(&self) -> Result<&KeyRef, SignError> {
-        self.signing.as_ref().ok_or(SignError::MissingKey)
+        self.signing.as_ref().ok_or(if self.signing_not_configured {
+            SignError::SigningNotConfigured
+        } else {
+            SignError::MissingKey
+        })
     }
 
     /// Setup, construction resolution and the alias check only (bans-scoped).
@@ -773,13 +836,19 @@ pub enum SignError {
     /// The request names a ref the credentials do not have. No retry with the
     /// same credentials can sign, so this alone ends signing for the account.
     MissingKey,
+    /// An Optional family's slot intentionally has no signing ref: this
+    /// operation refuses; nothing latches (D6).
+    SigningNotConfigured,
 }
 impl SignError {
     pub fn venue_error(self) -> crate::VenueError {
         use crate::{ErrorKind, Outcome, VenueError};
         let kind = match self {
             Self::TimedOut => ErrorKind::Timeout,
-            Self::Refused | Self::InvalidRequest | Self::MissingKey => ErrorKind::InvalidInput,
+            Self::Refused
+            | Self::InvalidRequest
+            | Self::MissingKey
+            | Self::SigningNotConfigured => ErrorKind::InvalidInput,
             Self::Unsupported => ErrorKind::Unsupported,
             _ => ErrorKind::Internal,
         };
@@ -798,6 +867,7 @@ impl std::fmt::Display for SignError {
             Self::InvalidResult => "Invalid signing result",
             Self::TimedOut => "Signing timed out before dispatch",
             Self::MissingKey => "Signing key is not installed",
+            Self::SigningNotConfigured => "Signing is not configured for this account",
         })
     }
 }
@@ -894,6 +964,7 @@ mod setup_field_policy_tests {
             passphrase: passphrase.map(|p| KeyRef(p.into())),
             stable_id: None,
             extra: Default::default(),
+            signing_not_configured: false,
         }
     }
 
@@ -945,6 +1016,7 @@ mod setup_field_policy_tests {
                 passphrase: Some(KeyRef("primary.passphrase".into())),
                 stable_id: None,
                 extra: Default::default(),
+                signing_not_configured: false,
             }),
             secondary: Some(identity("secondary", None)),
         };
@@ -962,6 +1034,7 @@ mod setup_field_policy_tests {
                 passphrase: None,
                 stable_id: None,
                 extra: Default::default(),
+                signing_not_configured: false,
             }),
         };
         let original = ids.clone();

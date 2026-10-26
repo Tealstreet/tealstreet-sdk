@@ -75,7 +75,7 @@ pub(crate) fn local_setup(
     let wallet = take(wallet);
     let wallet = if blank {
         drop(wallet);
-        Secret::default()
+        Secret::empty()
     } else {
         wallet
     };
@@ -101,7 +101,7 @@ pub(crate) fn local_setup(
             key,
             secret: if aliased {
                 drop(secret);
-                Secret::default()
+                Secret::empty()
             } else {
                 secret
             },

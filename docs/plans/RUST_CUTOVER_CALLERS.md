@@ -868,6 +868,17 @@ rejection may enter the existing recovery-write path; no automatic caller retry
 is introduced. This extends B9's field-based integration to Bitunix, with no
 new application method or error shape.
 
+#### Late-cancel repair beside a foreground cancel-all (#2181)
+
+An automatic late-cancel repair and a user cancel-all on the same symbol now run
+side by side, as native venues do; only an explicit-ID cancel of the same order
+still conflicts. No order IDs are captured from a cancel-all. If a newer
+cancel-all and an in-flight repair cancel the same order, the loser gets the
+provider's refusal: the repair settles Rejected and the venue emits its usual
+manual-cancel error, exactly as native. A repair whose send is refused before
+release now settles once as NotSent and releases its lock, instead of stalling the
+venue's late-cancel queue. No caller method, event or error shape changes.
+
 #### Events and worker protocol
 
 | Change | tealstreet-next file:line | Old usage | New usage | Impact |
@@ -3527,6 +3538,64 @@ each one Background read.
   recoverable page failure, and general history's signing refusal stays strict.
 - **Unchanged.** Query bytes, results, row mapping and account Store effects. No
   new frame or result schema.
+
+### BloFin trading writes: Preflight roots and one serial Plan per job (W1)
+
+Every BloFin trading command (place, cancel, cancel-all, amend, leverage, margin
+type, position mode) now opens a Preflight root before validation and runs as one
+streamed serial Plan ([RUST_BLOFIN_WRITE_FUNNEL.md](RUST_BLOFIN_WRITE_FUNNEL.md)).
+Writes are Primary managed Mutations signed by the #2084 recipe, with one 20 s
+bound and no resend. The replacement Verify GET is a managed Read under the
+Secondary-else-Primary read credential and is never retried. The journal now
+projects every outcome.
+- **D-a, documented codes.** The cited BloFin codes (parameter, price/size, balance,
+  duplicate client ID, setting and auth refusals) are typed Rejected refusals.
+  Native row and setting refusals used to have no outcome. Unlisted codes and
+  shape mismatches are Unknown. BloFin returns its 400 ("Bad Request") and 401
+  ("Invalid signature") codes in a 200 body, so they're code rows. The only
+  documented HTTP statuses are 403 (firewall) and 429, and both stay Rejected.
+  Any other non-2xx without a cited body code is now Unknown; native had
+  Rejected for every 4xx. A 5xx is Unknown with kind `venueUnavailable`, and an
+  unproven acknowledgement is Unknown with kind `internal`. The journal owns
+  every outcome and kind. Text is unchanged.
+- **D-b.** A Verify failure after an accepted cancel is never NotSent.
+- **D-c, cancel "gone".** Code 1000 or 102068 on a plain cancel is satisfied.
+  "Gone" is now decided by code alone: the "does not exist" text is 102068's
+  own message. A row with that text under any other code is classified by its
+  code (unlisted is Unknown) and stops the job with its row kept, where native
+  removed the row and continued.
+  That's a behaviour change, under the shared absent-order rule: it now fences the
+  symbol and queues one fresh order snapshot (deferred while a placing scope is
+  held), and a clean snapshot clears the fence. Under a dependent replacement,
+  "gone" still stops with no replacement call.
+- **D-d.** Execution progress between steps ends the job before its next call.
+- **D-e, partial IDs.** IDs accepted before a later refusal now survive on the
+  failure's `partial` instead of being dropped.
+- **Reconcile.** Any Unknown write seal now queues one fresh order snapshot through
+  `reconcile_uncertain`; the native path had none. That snapshot is
+  Primary-signed (`PostUnknownOrderRead`) on every page, even with a read key
+  configured. Only a clean reconcile snapshot clears an order fence, and one
+  requested while another snapshot is in flight runs right after it. Ordinary
+  refreshes still read Secondary-else-Primary.
+- **Queue.** Commands still run in native FIFO order, each parked on its own
+  Preflight. A command whose caller wait lapsed while parked fails once (typed
+  Timeout, NotSent) at its turn and sends nothing.
+- **Store effects.** Creating rows, Canceling marks and the order revision bump
+  now apply per call, after admission and before release, rather than all at job
+  start. Commit effects still apply only after a successful terminal.
+- **Hedged isolated leverage: serial, permanent (overseer ruling (b),
+  2026-10-26).** The long leg goes first and the short leg only after long is
+  Accepted, at the cost of one extra round trip. A long 503 or refusal means
+  short is never sent. A short refusal or 503 after long keeps long's effect
+  (outcome None, or Unknown for the 503), applies no commit and refreshes the
+  account as before. This replaces native's parallel release for good. The W2
+  barrier join (#2179, closed) linked `http-mutation-barriers` into every
+  monomorphized `Engine<V>` of the combined bundle (+395,294 combined, over
+  budget). Parallel release returns only if the per-venue feature-runtime
+  investigation produces a per-venue gate.
+- **Unchanged.** Paths, bodies, batch sizes (20/10/1), the 1000-lot split, the
+  350/1000 ms pauses, client-ID rules, broker attribution, receipts and result
+  JSON.
 
 ### Bitunix histories: shared cursor and accepted-page completion
 
@@ -6793,6 +6862,24 @@ when one is configured, otherwise the primary key. An unanswered read ends at
 20 s and startup discovery retries on its native backoff. URLs, row decoding,
 partial-catalogue rules, the seeded ticker count and the 429 pause are unchanged.
 
+## BingX trading and request funnel (#2159, supersedes #1954)
+
+codex-uufub4's reviewed #1954 source is adopted and its native controls are kept. What changes:
+
+- **Ordered writes stream.** PlaceOrders (split lots and protection legs), AmendOrder, CancelSymbolOrders, SetLeverage, SetMarginType and SetPositionMode run on one streamed serial Plan behind a WriteAfterReads Preflight. Each next call is admitted from the previous call's accepted DATA (`continue_serial_plan`), so native `split()`'s 10,000-lot maximum is no longer refused for request capacity. Each call keeps its native 20 s bound. A parsed numeric 100001 still permits one fresh-signature resend, with the same client order ID.
+- **Independent cancels stay complete.** CancelOrders, the only native `continue_on_error` job, keeps #1954's complete Plan with `independent_calls`. A sibling continues past any failure, Unknown included, with no retry.
+- **cancelReplace refusal is outcome None.** Under STOP_ON_FAILURE the cancel may already have taken effect, so a refused `/trade/cancelReplace` is recorded with known effects. It projects outcome None, keeps its kind, grants no resend (100001 included) and makes no further call. The original order stays until a read proves otherwise.
+- **Unchanged from #1954:**
+  - 80016 is absence, not cancellation. It is satisfied only for a plain Cancel leg.
+  - The symbol stays fenced until `orders_reconciled`. An older snapshot can neither clear the fence nor overwrite a newer read.
+  - Unknown, system and malformed replies are explicit Unknown, with native messages and accepted-prefix IDs kept.
+  - A trigger replace whose cancel answers 80016 prepares no replacement.
+- **Primary-signed reconcile snapshot.** The order snapshot that `reconcile_uncertain` issues selects `PrimaryRead { PostUnknownOrderRead }`. A configured read key never signs the read that clears an unknown-write fence.
+- **No cancel-all fence after a lost create (known gap).** BingX keeps native concurrency (no `guard_pending_placements`), per overseer ruling. A lost create therefore reconciles on the primary key but does not fence cancel-all. Venues with placement guards close this gap.
+- **Keyless reads are managed.** Without a key, the tickers and lists are managed unsigned Background reads and klines is a command Read. Both complete and fail through their Context, with the native public headers. `stage()`, `issue()`, the legacy signed resend and the numeric candle `done`/`fail` are deleted. A candle read whose admission is refused fails through a fresh command Context.
+
+`account.rs`'s remaining legacy sites are a later slice.
+
 ## Lighter synchronous history Read custody
 
 The seven native local history replies (unsupported client ID/income category,
@@ -8824,3 +8911,286 @@ TS-visible changes:
   - Unknown: 50001, 50004, 50013 and 50026 keep their Unknown outcome, but now with no refusal kind.
 - **Unproven acknowledgements.** A malformed body, a missing order ID, a row-count mismatch or a row-level 50004 projects as the engine's fixed Internal / Unknown.
 - **Uncertain writes reconcile through the engine.** The uncertain-write account refresh now runs from the engine's `reconcile_uncertain`, once per uncertain seal. Cancel-all stays fenced until that fresh order snapshot is accepted.
+
+
+### Seeded serial Session resend (engine API; GRVT adoption still separate)
+
+With serial-plans and session-bearer, a serial call may reserve two attempts.
+serial_plan_session_resend selects the same call's one remaining attempt from
+its exact DATA custody: a Mutation needs its classifier-created RefusedResend
+grant, and a Read keeps generic RetryPolicy Never. The selected attempt is seeded
+with the refused packet's bound Session revision and parks until a newer bundle
+is ready. It spends no additional logical call or refresh attempt. Existing
+write resend and Session resend share that one second credit. Engine-proven
+released Read transport failures may immediately continue as a new Read call;
+codec/integrity and unreleased failures cannot use that immediate path.
+
+The default-false status_exempt_refusal hook is venue-declared. Only a complete
+Unproven-status delivery (408 or 5xx) may consult it; a trusted full-envelope
+refusal then reaches DATA and the ordinary classified grant. Other and malformed
+bodies preserve Unknown, reconciliation and the fence. GRVT's parsed-code-1000
+override remains a separate adoption, with no status-wide grant or raw fallback.
+A parked operation expires Timeout/NotSent, while the command still follows its
+journal: released refusal plus an unreleased resend is Unknown with a fence and
+reconciliation; earlier IDs remain. No existing journal projection is changed.
+
+### Backpack public and private sockets
+
+Both native connections use engine feed/epoch custody with the existing 20s idle,
+5s ping, 1s–16s backoff and 10s connect policy. Private authentication remains the
+native freshly signed SUBSCRIBE, then PING and loaded-Orders-guarded account
+reads, once per real Opened epoch; there is no ACK wait or managed-signing claim.
+Public 4002 retains native half-RTT publication, and current malformed text still
+refreshes AnyText liveness. Account HTTP reducers, fill/poll and repair behavior
+stay outside this lifecycle adoption.
+
+Public additions/removals commit their local demand only with the exact interest
+proposal. Refusal rolls back that change and preserves committed peers. Each
+book snapshot waits for its own genuine depth-interest handoff; surviving keys
+keep current rebased wake custody when another key is removed. Native book
+recovery requests the same handoff before its existing bounded HTTP observation.
+
+NEW resource-pressure policy: unresolved current-epoch interests may make at most
+three capacity observations, 1s apart, after the initial refusal. Only Capacity
+schedules this work. A captured early timer rearms to its original not-before
+without consuming an observation; equality or later delivery consumes one.
+Commits do not reset cooldown/exhaustion, and resolved demand cancels its exact
+timer. Nonfinite time schedules no work. This grants no HTTP, authentication or
+socket retry authority. The native encoder refuses serialized frames above
+65,536 bytes as Capacity before shared emission. Engine Ready replay failures
+retain the inherited fail-closed feed disposition; they are separate from
+recoverable venue proposals. Both legacy socket sites and their family row are
+removed together; no generic engine, signer or credential migration is included.
+
+Native fixture qualification replaces duplicate Opened reread triggers only in
+one_malformed_row_keeps_its_stored_copy_while_valid_peers_commit and
+unproven_trigger_quantity_keeps_its_identity_while_valid_peers_commit_without_repair
+with real reconnects and replies at their captured advertised observation times.
+This supersedes only those fixture clocks/socket IDs; payload timestamps and
+all native financial/assertion predicates remain unchanged. Other fixture clocks
+and shared startup/message/reply helpers remain intact.
+
+The additional account-read overlap sites native_live_stale_positions_keep_next_without_publication,
+balance_overlap (including its254-peer fanout consumer), and
+native_balance_older_than_committed_never_wins_after_two_more_discards now use
+real first-open/settled refreshes before the original poll, then genuine reconnect
+for the newer snapshot. Relative fill/discard/acceptance spacing follows that
+actual opening. fill() derives wire E from the observation clock, so those generated
+E values and observation-derived Store timestamps shift with it. This necessary
+fixture-clock supersession is approved; raw financial literals, prices, amounts,
+fill counts, all assertion predicates and production reducers remain unchanged.
+
+Two further fixture-only clock supersessions are approved: public
+rest_query_success_failure_and_stream_resubscription_have_independent_state
+resubscribes and answers its held query/new seed at3 after its existing removal
+at3; unrelated subscribe() callers retain0. Trading
+reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements
+replaces duplicate Opened2100 with an actual Close/retry-at/new socket/Open and
+prepared read at that observation time. ORDER.createdAt1000, last_update1000,
+all financial assertions and the original cancellation request/ACK are unchanged.
+
+## Kraken local prerequisite policy and caller projection
+
+Inert prerequisite policy and shared-fixture checkpoint, started on
+9977ccf1aa6; no runtime change, activation or inventory prune. The overseer approved NEW Futures 20s physical calls and Spot 100s
+nontrade/token retry-chain bounds while preserving native Spot 20s physical
+timeouts, native retry ledgers, history 50-page/caller-wait caps and serial
+command length. Token work remains socket-epoch bound. The exact owner table is
+[RUST_KRAKEN_PRIVATE_PREREQUISITES.md](RUST_KRAKEN_PRIVATE_PREREQUISITES.md).
+
+Named follow-up: richer Kraken partial-write caller projection. Shared journal
+per-item Rejected/NotSent truth is retained; caller-visible errors deliberately
+keep native outcome=None after progress, accepted IDs or protective cancel.
+Source controls must assert journal truth and caller projection independently.
+Native cancel/ACK/replacement ordering remains serial; this grants no parallel
+nonce barrier authority. Namespace takeover still requires bounded owner review. Protective amendment
+uses the existing serial Plan and its cancel DATA/fact custody, with current
+Store provenance checked before replacement; no new release hook or parallel
+barrier authority is introduced. Hosted adapter and activation stay held.
+
+The takeover census covers issuers we own: SDK nonce core, native/WASM hosts,
+and tealstreet-next worker/process generations. Their epoch-bound fence and
+joined work-lease retirement precede atomic import of both reserved and
+released maxima, including the target's state. No proof of remote nonexecution
+is required. Another application using the same Kraken API key is outside the
+census, with native-equivalent exposure: an invalid-nonce collision is a
+definitive pre-execution refusal, not permission to replay the write. Unknown
+external issuers therefore do not block takeover. This ruling grants no hosted
+activation; the working exact-nonce adapter remains a prerequisite.
+
+## WEEX Depth and both socket lifecycle custody (local qualification)
+
+Subscription Depth uses independent keyless Primary Background observations
+with a NEW20s physical bound, Never retry and no pacing. Pre-open/bootstrap,
+reconnect and gap observations remain independent of eligible topic handoff.
+Live accepted publication precedes exact retirement and response-driven native
+reconciliation. Both socket roles use engine epochs with unchanged signed
+primary upgrade bytes and no authentication ACK wait; native subscription and
+refresh work occurs once on Opened. No generic engine or signing cutover occurs.
+
+Fixture supersessions are explicit: seven account stream controls add genuine
+first Opened/prepared drain at their existing NOW before the six pending reads
+finish. Three public Depth controls (depth_ignores_old_frames_and_heals_gaps_with_buffered_diffs,
+old_snapshots_and_failures_cannot_replace_a_resubscribed_book, and
+malformed_depth_is_not_an_authoritative_deletion) align physical observations to
+bootstrap1773295700000 plus the same relative offsets, with replies at that
+actual clock. Payloads and original financial/wire assertions remain unchanged;
+other public adaptations only drive actual preparation at existing clocks.
+Two public interest fixtures (websocket_candles_allow_two_hours_but_rest_rejects_it
+and active_tickers_send_incremental_diffs_and_identical_updates_send_nothing)
+use genuine bootstrap observation0 before their unchanged0..3 events. The
+parameterized bootstrap preserves every wire literal and test assertion; default
+started() retains the original1773295700000 clock for all other callers. Other
+shared helpers and dedicated delayed/equality expiry controls remain intact.
+On refused required public invalidation, exact native Depth cleanup precedes
+failure propagation and public replacement is denied; sibling feeds/read owners
+remain independent. Expanded custody, quota and native qualification remain gates.
+
+Two post-start private-fill trading oracles add only Engine.start1000 and its
+genuine prepared drain before their unchanged account importer:
+fill_only_socket_event_during_cancel_blocks_replacement_before_order_update and
+fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliation.
+Their first Opened1002, all prior assertions/payloads and financial/event clocks
+stay exact; the new initial catalogue read is unanswered. No global autostart
+or new command-before-start compatibility is implied.
+
+Native topic ordering is retained in both directions: subscriptions use the
+proposed order, while removed topics use their previous committed order. A
+reverse-catalogue ticker control pins the exact unsubscribe wire order.
+
+Corrected local source qualification preserves the NEW20s Depth observation
+bound and approved fixture supersessions above. The current-tip local pair is
+WEEX1212633->1274315 (+61682) and combined13908680->13920684 (+12004),
+with unchanged fixed budgets and Node/Web parity. Combined is local evidence;
+frozen-head CI remains the family-size record. Remaining14F/20O request refs
+and all signing/credential inventory stay unchanged.
+
+### GRVT provider recipe: approved future external-signature contract
+
+Plan only: RUST_GRVT_PROVIDER_RECIPE.md; this is not an installed Rust GRVT
+provider path yet. At adoption, the local provider preserves exact native
+wire-byte parity through deterministic RFC6979 signing. An external provider
+may return fresh signatures differing ONLY in r/s/v: the EIP712 digest, pinned
+actual signer and every frozen order/unsigned field must remain identical,
+with low-s and signed_by verification. A different recovered signer or digest
+refuses the resend before release. External determinism is not required;
+deduplication follows the unchanged order identity. No cached signed bytes,
+nonce/expiry/client-ID renewal or attempt reset is permitted. Required future
+controls accept distinct valid signatures over one digest and refuse wrong
+signer/digest results. The overseer approved this criterion; recipe adoption,
+shared credential-only setup and measured GRVT WASM budget gates remain open.
+
+## AsterDEX managed signed reads
+
+AsterDEX's signed reads now go through engine read Contexts (remaining-funnel
+slice 2, [RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md)).
+This covers FetchAccount, the account snapshots (balance, positions, open
+orders, position mode), the private leverage brackets, and every history read:
+fills, order history, income and keyless public trades. Signed writes, the STP
+read and the listenKey session keep their current paths until slice 3.
+
+- **Signing at release.** Each attempt is signed when the engine releases it,
+  after any clock sync. Nothing signs while waiting for the clock.
+- **Read bound.** Each signed attempt has a 20 s bound that starts at release.
+  A command's whole read, including clock waits and history pages, stays within
+  the caller's own wait. Today a signed read has no venue bound.
+- **Retries.** Transport loss and retryable 429/5xx still retry up to three
+  times after 1, 2 and 3 s. V1 signature rejection (-1022) still resends once,
+  and the -1021 timestamp rejection still resyncs once. Each resend needs
+  engine permission and is signed again.
+- **Typed errors.** FetchAccount and history failures keep the engine's error
+  kind (`network`, `timeout`, `internal`). Native messages are unchanged.
+- **Completion.** FetchAccount and history commands complete once, through the
+  caller's read root. A late page or duplicate response completes nothing.
+
+## AsterDEX managed trade plans
+
+AsterDEX trading commands now run as engine serial plans (remaining-funnel
+slice 3, [RUST_ASTERDEX_REQUEST_CONTEXT.md](RUST_ASTERDEX_REQUEST_CONTEXT.md)).
+This covers placement, cancellation (by ID, by symbol, with symbols),
+amendment, and the leverage, margin, position-mode and STP settings. AsterDEX
+has no legacy request path left.
+
+Unchanged:
+- Native validation, refusal text and order (CommandError, then the failure).
+- Acknowledged-order routing, batch continuation after a failed step.
+- Result bytes, idempotent unknown-order cancels.
+- The single V1 -1022 resend.
+
+Each write is signed at release, after any clock wait.
+
+- **Timestamp rejection (-1021).** The rejected call is recorded as a refusal.
+  The plan waits on the clock resync (bounded at 25 s), then sends the same
+  request again as the next call with a fresh timestamp and signature. A
+  second -1021 is final. If the resync does not finish within its bound, the
+  write is not resent and fails as not sent.
+- **Clock at entry.** A trade command whose clock is stale waits for the
+  sync before its plan is admitted. Nothing signs earlier.
+- **Full engine capacity.** A valid trade command at full managed capacity
+  now fails at once with a typed "Engine request capacity reached"
+  (`internal`, not sent), before any diagnostic or I/O. Before, it was sent
+  outside engine custody.
+- **Error kinds.** The engine's shared classifier now picks kinds for
+  released writes. A 503/504 reply is `venueUnavailable` (outcome unknown)
+  whatever its body; before, it took the body's code or no kind. A success
+  reply without an order ID is `internal` (outcome unknown). Rejection codes
+  keep their native kinds.
+- **FetchStpMode** is a command read with a 20 s bound; read failures carry
+  no outcome.
+
+Follow-up (engine owner, fe7lgm): a granted plan resend can only be
+released from plan custody. A venue whose resend must wait on a venue
+condition therefore needs a serial-plan condition wait, as AsterDEX does here.
+A custody-preserving parked resend would remove that need.
+## WOO engine-owned socket lifecycle
+
+WOO public and private feeds use the shared Engine epoch, supervision, auth and
+subscription lifecycle. Duplicate opens, pre-open data and retired or expired
+socket events cannot replay subscriptions, authenticate a replacement, publish
+native data or refresh private health. Private authentication refusal retains
+WOO's reconnect/backoff policy and existing error notice; malformed proof does
+not authenticate. Account snapshots and reconciliation state survive retirement.
+
+Current public book, candle and trade interests retain native reference counts,
+wire bytes and replay order. Retirement clears the retiring public books and
+advances their native seed generation before reconnect; late old HTTP seeds and
+socket updates cannot repopulate the new generation. Shared/None public policies
+suppress the public transport. Private setup, request/signature construction,
+account reducers, polling and financial freshness fences keep their contracts.
+
+Hosts continue using the existing connect/send/close/timer interface. WOO's
+private auth frame and fixed subscriptions keep their native field order, with
+the post-auth ping following subscription release. Other venue families keep
+their current adapters, including Sam's excluded Bitunix boundary.
+
+WOO dynamic and reconnect book seeds now use the landed released-interest
+continuation: the complete subscription batch is returned first, then a genuine
+subsequent timer ingress may issue the native HTTP seed. This is host handoff,
+not peer acknowledgement. Current-epoch deltas received between those steps
+remain buffered for the existing snapshot join. Required-interest removal,
+retirement and stale or expired wakes cannot issue a seed for newer work.
+Native one-second snapshot retry timing and request/reducer freshness stay with
+their existing owners. A synchronous shared admission-capacity refusal retires
+the matching public feed with shared backoff; due seeds survive its reconnect.
+
+
+### WOO socket refusal disposition during #1930 adoption
+
+The overseer approved public asynchronous Capacity using the same shared Closed
+and native backoff as synchronous Capacity, retaining desired refs/seed_due.
+There is no HTTP/auth retry grant or private-sibling retirement. Exact pressure
+originals and current-source review gate the correction in #2169.
+
+Three named divergences remain explicit under that ruling. Native WOO emits
+its topic frames directly and retains its Supervisor; it has no corresponding
+managed key/coverage/admission/replay-budget failure. Managed permanent encoder
+or invalid-interest defects stop only the affected feed
+(WOO_SOCKET_DEFECT_FAIL_CLOSED); private admission/encoding failure keeps the
+same affected-feed stop (WOO_SOCKET_PRIVATE_ADMISSION_FAIL_CLOSED); inherited
+initial-Ready replay failure stops that feed before venue Ready
+(WOO_SOCKET_READY_REPLAY_FAIL_CLOSED). socket_pressure.rs pins actual malformed
+key behavior, public and private inherited Ready encoder-failure disposition,
+and sibling liveness. The injected Ready Capacity is a boundary control, not
+proof of normal pressure reachability. Any normally reachable fail-closed row
+goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
+supervision constants are unchanged; no generic coexistence/recovery seam.

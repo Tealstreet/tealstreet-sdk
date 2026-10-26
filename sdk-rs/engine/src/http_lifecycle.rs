@@ -24,6 +24,47 @@ enum ManagedRecipe {
         Box<dyn crate::SignStep>,
         Option<std::sync::Arc<crate::nonce::ClaimAuthority>>,
     ),
+    /// A signed recipe with the explicit Selection that chose its credential.
+    #[cfg(feature = "sign-meta")]
+    Selected(
+        Box<dyn crate::SignStep>,
+        crate::credential_selection::Selection,
+    ),
+}
+
+/// The one role source for a managed signing task, checked against its
+/// Context before any ID: a nonce claim's own Selection, or an explicit one.
+#[cfg(feature = "sign-meta")]
+fn sign_role(
+    claim: Option<&crate::nonce::ClaimAuthority>,
+    explicit: Option<crate::credential_selection::Selection>,
+    context: &Context,
+) -> Result<Option<crate::credential_selection::CredentialRole>, Error> {
+    use crate::credential_selection::CredentialRole;
+    let selection = match (claim, explicit) {
+        (Some(_), Some(_)) => return Err(Error::Invalid),
+        #[cfg(feature = "dispatch-nonce")]
+        (Some(claim), None) => claim.selection,
+        // Without dispatch-nonce a claimed recipe was already refused.
+        #[cfg(not(feature = "dispatch-nonce"))]
+        (Some(_), None) => return Err(Error::Invalid),
+        (None, Some(selection)) => selection,
+        (None, None) => return Ok(None),
+    };
+    let role = selection.role();
+    let session = matches!(context.owner(), Owner::Session { .. });
+    let fits = match role {
+        CredentialRole::SessionAuth => session,
+        _ if session => false,
+        CredentialRole::Mutation => context.operation() == Operation::Mutation,
+        CredentialRole::Read { .. } | CredentialRole::PrimaryRead { .. } => {
+            context.operation() == Operation::Read
+        }
+    };
+    if !fits || context.credential().map(|c| c.slot) != Some(selection.slot()) {
+        return Err(Error::Invalid);
+    }
+    Ok(Some(role))
 }
 
 #[cfg(feature = "dispatch-nonce")]
@@ -45,6 +86,9 @@ pub(super) struct Managed {
     #[cfg(feature = "http-mutation-barriers")]
     group: Option<Box<mutation_group::Member>>,
     waiting_route: Option<Prepared>,
+    /// The signing role captured at admission; see `Engine::sign_meta`.
+    #[cfg(feature = "sign-meta")]
+    role: Option<crate::credential_selection::CredentialRole>,
 }
 
 /// A Session-bound packet's generation and the revision its header carries.
@@ -475,6 +519,32 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    /// As `request_signed_managed`, recording the exact credential role of
+    /// `selection` for `Engine::sign_meta`.
+    #[cfg(feature = "sign-meta")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn request_selected_managed(
+        &mut self,
+        context: Context,
+        selection: &crate::credential_selection::Selection,
+        bearer: Option<&Session>,
+        method: Method,
+        url: String,
+        body: Option<String>,
+        step: Box<dyn crate::SignStep>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        self.queue_managed(
+            context,
+            bearer,
+            method,
+            url,
+            body,
+            ManagedRecipe::Selected(step, *selection),
+            pending,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn request_selected_read_managed(
         &mut self,
@@ -605,6 +675,12 @@ impl<P> Cx<'_, P> {
                 generation => generation,
             },
         };
+        #[cfg(feature = "serial-plans")]
+        if let Some((seeded, _)) = registry.serial_session_seed(context)
+            && generation != Some(seeded)
+        {
+            return Err(Error::Revoked);
+        }
         if let Some(generation) = generation {
             self.io.core.request_contexts.reserve_leg_bearer()?;
             self.io.reserve_bearer_bound(generation)?;
@@ -639,6 +715,8 @@ impl<P> Cx<'_, P> {
         pending: P,
         #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
+        #[cfg(feature = "sign-meta")]
+        let mut explicit = None;
         let (step, public_headers, selected_claim) = match recipe {
             ManagedRecipe::Unsigned(headers) => (
                 None,
@@ -648,6 +726,11 @@ impl<P> Cx<'_, P> {
             ManagedRecipe::Signed(step) => (Some(step), &[][..], None),
             #[cfg(feature = "dispatch-nonce")]
             ManagedRecipe::SelectedRead(step, claim) => (Some(step), &[][..], Some(claim)),
+            #[cfg(feature = "sign-meta")]
+            ManagedRecipe::Selected(step, selection) => {
+                explicit = Some(selection);
+                (Some(step), &[][..], None)
+            }
         };
         if let Err(error) = self
             .io
@@ -704,6 +787,11 @@ impl<P> Cx<'_, P> {
                 return Err((pending, Error::Invalid));
             }
             nonce_claim
+        };
+        #[cfg(feature = "sign-meta")]
+        let role = match sign_role(nonce_claim.as_deref(), explicit, &context) {
+            Ok(role) => role,
+            Err(error) => return Err((pending, error)),
         };
         if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
@@ -846,6 +934,19 @@ impl<P> Cx<'_, P> {
         };
         #[cfg(not(feature = "session-bearer"))]
         let intent = context.routing_intent();
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let floor = self
+            .io
+            .core
+            .request_contexts
+            .serial_session_seed(&context)
+            .map(|(_, floor)| floor);
+        let managed_bearer = bearer.and_then(Bearer::new);
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let managed_bearer = managed_bearer.map(|mut bearer| {
+            bearer.floor = floor;
+            bearer
+        });
         let lifecycle = Lifecycle::with_deadline(
             context,
             Attempt {
@@ -867,10 +968,12 @@ impl<P> Cx<'_, P> {
                 signing_attempt,
                 recipe: None,
                 intent,
-                bearer: bearer.and_then(Bearer::new),
+                bearer: managed_bearer,
                 #[cfg(feature = "http-mutation-barriers")]
                 group,
                 waiting_route: None,
+                #[cfg(feature = "sign-meta")]
+                role,
             },
         );
         #[cfg(feature = "session-bearer")]
@@ -917,6 +1020,33 @@ impl<P> Io<P> {
                 && managed.lifecycle.accepts_response()
                 && managed.validate(&self.core.request_contexts, now).is_ok()
         })
+    }
+
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(super) fn serial_session_revision(
+        &self,
+        delivery: &request_context_registry::Delivery,
+    ) -> Result<(u64, u64), Error> {
+        let managed = self
+            .core
+            .managed_http
+            .get(&delivery.attempt.request)
+            .ok_or(Error::Revoked)?;
+        if !managed.released_delivery(delivery) {
+            return Err(Error::Revoked);
+        }
+        let bearer = managed.bearer.ok_or(Error::Invalid)?;
+        if !self
+            .core
+            .request_contexts
+            .session_generation_live(bearer.generation)
+        {
+            return Err(Error::Revoked);
+        }
+        Ok((
+            bearer.generation,
+            bearer.bound_revision().ok_or(Error::State)?,
+        ))
     }
 
     #[inline]
@@ -1440,6 +1570,38 @@ impl<V: Venue> Engine<V> {
         }
     }
 
+    /// Metadata of the CURRENT prepared signing task of a managed request whose
+    /// role was captured at admission. Descriptive only: it grants nothing.
+    #[cfg(feature = "sign-meta")]
+    pub fn sign_meta(&self, task: RequestId) -> Option<crate::sign_meta::SignMeta> {
+        use crate::sign_meta::{SignMeta, SignOwner};
+        let (request, deadline_ms) = self.io.core.signing.prepared_task(task)?;
+        let managed = self.io.core.managed_http.get(&request)?;
+        if managed.signing_attempt != Some(task) {
+            return None;
+        }
+        let role = managed.role?;
+        let context = managed.lifecycle.context();
+        let slot = context.credential()?.slot;
+        let owner = match context.owner() {
+            Owner::Session { generation } => SignOwner::Session { generation },
+            _ => {
+                let attempt = managed.lifecycle.attempt();
+                SignOwner::Managed {
+                    request: attempt.request,
+                    generation: attempt.generation,
+                }
+            }
+        };
+        Some(SignMeta {
+            task,
+            owner,
+            deadline_ms,
+            slot,
+            role,
+        })
+    }
+
     pub(super) fn managed_sign_completed(
         &mut self,
         now: f64,
@@ -1670,12 +1832,16 @@ impl<V: Venue> Engine<V> {
             self.io.core.http_delivery = previous;
         }
         self.io.core.request_contexts.exit_delivery(&delivery);
+        #[cfg(feature = "repair-mutations")]
+        self.repair_delivered(&delivery, now);
         self.finish_event_scope(now);
         self.sweep_executions(now);
         self.flush_preflight_readiness(now);
         if self.venue.cancel_needs_stored_order() {
             self.release_held(now);
         }
+        #[cfg(feature = "repair-mutations")]
+        self.flush_repair_notices(now);
     }
 
     /// Fail the attempts a Session retire fenced, each through the common
@@ -2018,6 +2184,13 @@ impl<V: Venue> Engine<V> {
                                 self.io.core.order_locks.note_command_write(id);
                             }
                         }
+                        #[cfg(feature = "repair-mutations")]
+                        Owner::Repair { generation } => super::repair_core::repair_released(
+                            &self.io.core.repairs,
+                            &mut self.io.core.order_locks,
+                            generation,
+                            managed.lifecycle.context(),
+                        ),
                         _ => {}
                     }
                 }
@@ -2412,7 +2585,12 @@ impl<V: Venue> Engine<V> {
                 self.io.core.http_history_failure = None;
             }
             let previous = self.io.core.http_delivery.replace(delivery.clone());
-            if let Some(error) = proof.error() {
+            #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+            let exempt = proof.error().is_some()
+                && self.venue.status_exempt_refusal(&pending.value, response);
+            #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+            let exempt = false;
+            if let Some(error) = proof.error().filter(|_| !exempt) {
                 let venue = &self.venue;
                 let recorded = self.io.core.request_contexts.unproven_result(
                     &delivery,
@@ -2470,6 +2648,13 @@ impl<V: Venue> Engine<V> {
                 );
                 self.io.core.http_write_reply =
                     Some((response.status, response.headers.to_owned()));
+                #[cfg(feature = "repair-mutations")]
+                let previous_data = self.begin_repair_data(Some(request));
+                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+                let previous_exempt = std::mem::replace(
+                    &mut self.io.core.http_status_exempt,
+                    exempt.then_some(request),
+                );
                 self.venue.on_response(
                     &mut Cx {
                         now,
@@ -2479,10 +2664,18 @@ impl<V: Venue> Engine<V> {
                     pending.value,
                     response,
                 );
+                #[cfg(feature = "repair-mutations")]
+                self.end_repair_data(previous_data);
                 self.io.core.http_write_reply = None;
+                #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+                {
+                    self.io.core.http_status_exempt = previous_exempt;
+                }
             }
             self.io.core.http_delivery = previous;
             self.io.core.request_contexts.exit_delivery(&delivery);
+            #[cfg(feature = "repair-mutations")]
+            self.repair_delivered(&delivery, now);
             self.io.discard_managed(request);
         }
         drop(record);
@@ -2633,8 +2826,14 @@ mod tests {
     include!("request_context_plan_independence_tests.rs");
     #[cfg(feature = "serial-plans")]
     include!("request_context_serial_plan_tests.rs");
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    include!("request_context_serial_session_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
+    #[cfg(feature = "sign-meta")]
+    include!("sign_meta_tests.rs");
+    #[cfg(feature = "repair-mutations")]
+    include!("repair_tests.rs");
 
     /// Bearer bundle attach and Bind-admission units (`session-bearer` only).
     #[cfg(feature = "session-bearer")]

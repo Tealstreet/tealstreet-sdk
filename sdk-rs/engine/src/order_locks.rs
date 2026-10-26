@@ -11,6 +11,9 @@ pub(crate) struct OrderLocks {
     waiting: Vec<(CommandId, String, bool, Option<u64>)>,
     uncertain: HashMap<String, u64>,
     epoch: u64,
+    /// Scopes held by repair roots, keyed by root rather than any CommandId.
+    #[cfg(feature = "repair-mutations")]
+    repairs: Vec<(u64, Scope)>,
 }
 
 struct Scope {
@@ -21,6 +24,8 @@ struct Scope {
     // An absent-order answer arrived while this placement still held its
     // lock: its reconcile read waits for finish, when a read can clear it.
     absent: bool,
+    // Cancels only: two cancel scopes can race only on the same order.
+    cancel_only: bool,
     ids: Vec<String>,
     symbols: Vec<String>,
     all_symbol: Option<String>,
@@ -38,6 +43,34 @@ fn native(id: &str) -> &str {
     .iter()
     .find_map(|suffix| id.strip_suffix(suffix))
     .unwrap_or(id)
+}
+
+/// Whether `scope` and `held` touch the same order or symbol, as `acquire`
+/// decides between two command scopes.
+#[cfg(feature = "repair-mutations")]
+fn overlaps(scope: &Scope, held: &Scope) -> bool {
+    let symbol = |all: &str, other: &Scope| {
+        all.is_empty()
+            || other.unknown_symbol
+            || other.symbols.iter().any(|s| s == all)
+            || other
+                .all_symbol
+                .as_ref()
+                .is_some_and(|s| s.is_empty() || s == all)
+    };
+    scope.ids.iter().any(|id| held.ids.contains(id))
+        || scope.all_symbol.as_ref().is_some_and(|s| symbol(s, held))
+        || held.all_symbol.as_ref().is_some_and(|s| symbol(s, scope))
+}
+
+/// A repair against a foreground scope: two cancel-only scopes conflict only
+/// on an explicit order ID; every other pair keeps the symbol overlap.
+#[cfg(feature = "repair-mutations")]
+fn repair_conflicts(repair: &Scope, foreground: &Scope) -> bool {
+    if repair.cancel_only && foreground.cancel_only {
+        return repair.ids.iter().any(|id| foreground.ids.contains(id));
+    }
+    overlaps(repair, foreground) || overlaps(foreground, repair)
 }
 
 /// Concurrent order-command scopes; a scope conflict is reported first.
@@ -70,6 +103,7 @@ impl OrderLocks {
             symbols: Vec::new(),
             all_symbol: None,
             placing: false,
+            cancel_only: false,
             sent: false,
             managed: false,
             unknown_symbol: false,
@@ -99,10 +133,12 @@ impl OrderLocks {
                 *command
             }
             Command::CancelOrders { command, ids } => {
+                scope.cancel_only = true;
                 scope.ids.clone_from(ids);
                 *command
             }
             Command::CancelOrdersWithSymbols { command, orders } => {
+                scope.cancel_only = true;
                 scope.ids.extend(orders.iter().map(|o| o.id.clone()));
                 scope
                     .symbols
@@ -110,6 +146,7 @@ impl OrderLocks {
                 *command
             }
             Command::CancelSymbolOrders { command, symbol } => {
+                scope.cancel_only = true;
                 scope.all_symbol = Some(symbol.clone());
                 *command
             }
@@ -157,18 +194,121 @@ impl OrderLocks {
         {
             return Err(Refusal::Conflict(command));
         }
-        if self.active.len() >= ACTIVE_SCOPES {
+        #[cfg(feature = "repair-mutations")]
+        if self
+            .repairs
+            .iter()
+            .any(|(_, held)| repair_conflicts(held, &scope))
+        {
+            return Err(Refusal::Conflict(command));
+        }
+        if self.held_scopes() >= ACTIVE_SCOPES {
             return Err(Refusal::Capacity(command));
         }
         self.active.push((command, scope));
         Ok(())
     }
 
+    #[inline(always)]
+    fn repair_placing_cfg(&self, _symbol: &str) -> bool {
+        #[cfg(feature = "repair-mutations")]
+        return self.repair_placing(_symbol);
+        #[cfg(not(feature = "repair-mutations"))]
+        false
+    }
+
+    fn held_scopes(&self) -> usize {
+        #[cfg(feature = "repair-mutations")]
+        return self.active.len() + self.repairs.len();
+        #[cfg(not(feature = "repair-mutations"))]
+        self.active.len()
+    }
+
+    /// Whether a repair root holds a placing scope on `symbol` (empty: any).
+    #[cfg(feature = "repair-mutations")]
+    fn repair_placing(&self, symbol: &str) -> bool {
+        self.repairs.iter().any(|(_, held)| {
+            held.placing && (symbol.is_empty() || held.symbols.iter().any(|s| s == symbol))
+        })
+    }
+
+    /// A repair root's exact cancel IDs and symbols; `placing` reserves the
+    /// symbol for its declared placement from admission. Refuses on conflict.
+    #[cfg(feature = "repair-mutations")]
+    pub fn acquire_repair(
+        &mut self,
+        root: u64,
+        ids: Vec<String>,
+        symbols: Vec<String>,
+        placing: bool,
+    ) -> Result<(), Refusal> {
+        let scope = Scope {
+            placing,
+            cancel_only: !placing,
+            sent: false,
+            managed: true,
+            unknown_symbol: false,
+            absent: false,
+            ids,
+            symbols,
+            all_symbol: None,
+        };
+        let conflict = self
+            .active
+            .iter()
+            .any(|(_, held)| repair_conflicts(&scope, held))
+            || self
+                .repairs
+                .iter()
+                .any(|(_, held)| overlaps(&scope, held) || overlaps(held, &scope));
+        if conflict {
+            return Err(Refusal::Conflict(0));
+        }
+        if self.held_scopes() >= ACTIVE_SCOPES {
+            return Err(Refusal::Capacity(0));
+        }
+        self.repairs.push((root, scope));
+        Ok(())
+    }
+
+    #[cfg(feature = "repair-mutations")]
+    pub fn note_repair_write(&mut self, root: u64) {
+        if let Some((_, scope)) = self.repairs.iter_mut().find(|(id, _)| *id == root) {
+            scope.sent |= scope.placing;
+        }
+    }
+
+    /// Release a repair root's scope. A sent placement that failed marks its
+    /// symbols uncertain, exactly as a command's `finish` does.
+    #[cfg(feature = "repair-mutations")]
+    pub fn finish_repair(&mut self, root: u64, failed: bool) -> Vec<String> {
+        let mut marked = Vec::new();
+        if failed
+            && let Some((_, scope)) = self
+                .repairs
+                .iter()
+                .find(|(id, scope)| *id == root && scope.placing && scope.sent)
+        {
+            self.epoch = self.epoch.saturating_add(1);
+            for symbol in &scope.symbols {
+                self.uncertain.insert(symbol.clone(), self.epoch);
+            }
+            marked.clone_from(&scope.symbols);
+            for (_, symbol, failed, _) in &mut self.waiting {
+                if symbol.is_empty() || scope.symbols.contains(symbol) {
+                    *failed = true;
+                }
+            }
+        }
+        self.repairs.retain(|(id, _)| *id != root);
+        marked
+    }
+
     pub fn defer(&mut self, command: &Command, receipt: Option<u64>) -> bool {
         if let Command::CancelSymbolOrders { command, symbol } = command
-            && self.active.iter().any(|(_, held)| {
+            && (self.active.iter().any(|(_, held)| {
                 held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
-            })
+            }) || self.repair_placing_cfg(symbol))
         {
             if self.waiting.len() >= 64 {
                 return false;
@@ -186,9 +326,17 @@ impl OrderLocks {
     }
 
     pub fn ready(&mut self) -> Vec<(Command, bool, Option<u64>)> {
+        #[cfg(feature = "repair-mutations")]
+        let repairs = &self.repairs;
         let (active, uncertain) = (&self.active, &self.uncertain);
         self.waiting
             .extract_if(.., |(_, symbol, ..)| {
+                #[cfg(feature = "repair-mutations")]
+                if repairs.iter().any(|(_, held)| {
+                    held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
+                }) {
+                    return false;
+                }
                 !active.iter().any(|(_, held)| {
                     held.placing && (symbol.is_empty() || held.symbols.contains(symbol))
                 })
@@ -358,6 +506,9 @@ impl OrderLocks {
     }
 
     pub fn reconciled(&mut self, symbol: Option<&str>, token: u64) {
+        if self.repair_placing_cfg(symbol.unwrap_or("")) {
+            return;
+        }
         if self.active.iter().any(|(_, scope)| {
             scope.placing
                 && symbol.is_none_or(|s| {
@@ -434,5 +585,105 @@ mod managed_tests {
         locks.note_write();
         locks.finish(7, true);
         assert!(locks.uncertain(""));
+    }
+}
+
+#[cfg(all(test, feature = "repair-mutations"))]
+mod repair_cancel_overlap_tests {
+    use super::*;
+
+    fn cancel_all(command: CommandId) -> Command {
+        Command::CancelSymbolOrders {
+            command,
+            symbol: "S".into(),
+        }
+    }
+    fn cancel(command: CommandId, id: &str) -> Command {
+        Command::CancelOrders {
+            command,
+            ids: vec![id.into()],
+        }
+    }
+    fn amend(command: CommandId, id: &str) -> Command {
+        Command::AmendOrder {
+            command,
+            id: id.into(),
+            price: Some(1.),
+            amount: None,
+        }
+    }
+    fn repair(locks: &mut OrderLocks, root: u64, id: &str, placing: bool) -> Result<(), Refusal> {
+        locks.acquire_repair(root, vec![id.into()], vec!["S".into()], placing)
+    }
+
+    #[test]
+    fn a_repair_cancel_runs_beside_a_held_foreground_cancel_all() {
+        let mut locks = OrderLocks::default();
+        locks
+            .acquire(&cancel_all(1), &Store::default(), false)
+            .unwrap();
+        assert_eq!(repair(&mut locks, 10, "late", false), Ok(()));
+    }
+
+    #[test]
+    fn a_repair_cancel_conflicts_only_on_a_foreground_cancels_exact_id() {
+        let mut locks = OrderLocks::default();
+        locks
+            .acquire(&cancel(1, "x"), &Store::default(), false)
+            .unwrap();
+        assert_eq!(
+            repair(&mut locks, 10, "x", false),
+            Err(Refusal::Conflict(0))
+        );
+        assert_eq!(repair(&mut locks, 11, "y", false), Ok(()));
+    }
+
+    #[test]
+    fn a_placing_repair_still_conflicts_with_a_foreground_cancel_all() {
+        let mut locks = OrderLocks::default();
+        locks
+            .acquire(&cancel_all(1), &Store::default(), false)
+            .unwrap();
+        assert_eq!(repair(&mut locks, 10, "x", true), Err(Refusal::Conflict(0)));
+    }
+
+    #[test]
+    fn a_foreground_cancel_all_runs_beside_a_held_repair_cancel() {
+        let mut locks = OrderLocks::default();
+        repair(&mut locks, 10, "late", false).unwrap();
+        assert_eq!(
+            locks.acquire(&cancel_all(1), &Store::default(), false),
+            Ok(())
+        );
+        assert_eq!(
+            locks.acquire(&cancel(2, "late"), &Store::default(), false),
+            Err(Refusal::Conflict(2)),
+            "the same order still conflicts"
+        );
+        assert_eq!(
+            locks.acquire(&amend(3, "late"), &Store::default(), false),
+            Err(Refusal::Conflict(3)),
+            "a non-cancel foreground scope keeps the full rule"
+        );
+    }
+
+    #[test]
+    fn a_foreground_cancel_all_still_conflicts_with_a_held_placing_repair() {
+        let mut locks = OrderLocks::default();
+        repair(&mut locks, 10, "x", true).unwrap();
+        assert_eq!(
+            locks.acquire(&cancel_all(1), &Store::default(), false),
+            Err(Refusal::Conflict(1))
+        );
+    }
+
+    #[test]
+    fn repair_against_repair_is_unchanged() {
+        let mut locks = OrderLocks::default();
+        repair(&mut locks, 10, "x", false).unwrap();
+        assert_eq!(
+            repair(&mut locks, 11, "x", false),
+            Err(Refusal::Conflict(0))
+        );
     }
 }
