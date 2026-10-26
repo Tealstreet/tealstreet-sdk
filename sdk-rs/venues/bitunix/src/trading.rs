@@ -1592,6 +1592,9 @@ impl BitunixFutures {
     /// stays held until a fresh read; any other ends with the job.
     fn take_live(&mut self, command: u32) -> Option<Live> {
         let live = self.trading.live.remove(&command)?;
+        // Every job exit (done, failed, engine-retired) may follow a new
+        // uncertain seal: never let a later request read as a re-ask.
+        self.account.writes_settled += 1;
         if let Some(key) = &live.settings {
             self.trading.settings.remove(key);
             if live.settings_released {

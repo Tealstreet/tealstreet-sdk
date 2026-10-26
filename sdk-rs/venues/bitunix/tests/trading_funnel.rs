@@ -1222,3 +1222,98 @@ fn engine_re_asks_join_a_slow_owed_census_that_still_releases() {
         "the slow owed census still releases"
     );
 }
+
+/// 9czdjh: an engine-retired placement (its 20 s deadline expires) is a new
+/// seal, not a re-ask. A regular slot paid before it must not complete the
+/// release with only the new seal's TP/SL census.
+#[test]
+fn an_engine_expired_placement_is_a_new_request_not_a_re_ask() {
+    let pairs = PAIRS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","base":"ETH","quote":"USDT","symbolStatus":"OPEN","basePrecision":2,"quotePrecision":2,"maxLimitOrderVolume":"1000"}]}"#,
+    );
+    let tickers = TICKERS.replace(
+        "}]}",
+        r#"},{"symbol":"ETHUSDT","last":"3000","open":"2900","markPrice":"3001","baseVol":"10","quoteVol":"30000"}]}"#,
+    );
+    let (mut e, _) = startup_serving(
+        engine(Options {
+            key: Some("replay-key".into()),
+            secret: Some("replay-secret".into()),
+            ..Options::default()
+        }),
+        &pairs,
+        &tickers,
+    );
+    let place = |command: u32, symbol: &str, price: f64| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol": symbol, "type": "limit", "side": "buy", "price": price, "amount": 1.0,
+            }))
+            .unwrap(),
+        ],
+    };
+    let reads = |actions: &[Action], tpsl: bool| -> Vec<HttpRequest> {
+        http(actions)
+            .into_iter()
+            .filter(|r| r.url.ends_with("get_pending_orders") && r.url.contains("/tpsl/") == tpsl)
+            .collect()
+    };
+    let eth_refused = |e: &mut TestEngine, command: u32, at: f64| {
+        e.handle(at, Event::Command(place(command, "ETHUSDT", 2900.0)));
+        writes_of(&prepared(e, at), "place_order") == 0
+    };
+
+    // Mark 1 (BTC, a lost ACK): regular A pays its slot; TP/SL B stays owed.
+    e.handle(1000.0, Event::Command(place(601, "BTCUSDT", 90000.0)));
+    let write = post(&http(&prepared(&mut e, 1000.0)), "place_order").expect("BTC placement");
+    e.handle(
+        1010.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "lost placement ACK",
+        },
+    );
+    let sealed = prepared(&mut e, 1010.0);
+    let a = reads(&sealed, false);
+    assert_eq!(a.len(), 1);
+    answer(&mut e, 1100.0, &a[0], ORDERS);
+
+    // ETH is released, never answered, and expires through the engine deadline.
+    e.handle(1200.0, Event::Command(place(602, "ETHUSDT", 2900.0)));
+    let dispatched = prepared(&mut e, 1200.0);
+    assert!(
+        post(&http(&dispatched), "place_order").is_some(),
+        "ETH released"
+    );
+    let deadline = dispatched
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 21_200.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("the engine's 20 s request deadline");
+    e.handle(21_200.0, Event::TimerFired { timer: deadline });
+    let expired = prepared(&mut e, 21_200.0);
+    assert_eq!(
+        failure(&expired, 602).and_then(|e| e.outcome),
+        Some(Outcome::Unknown),
+        "the engine retires the released write as Unknown"
+    );
+    let (c, d) = (reads(&expired, false), reads(&expired, true));
+    assert_eq!(d.len(), 1, "a TP/SL census after the ETH mark");
+    // Only the TP/SL side answers: A's pre-ETH regular slot must not count.
+    answer(&mut e, 21_300.0, &d[0], TPSL);
+    assert!(
+        eth_refused(&mut e, 603, 21_400.0),
+        "no regular census after the ETH mark has committed"
+    );
+    // Control: the regular census owed to the ETH mark releases it.
+    assert_eq!(c.len(), 1, "a regular census after the ETH mark");
+    answer(&mut e, 21_500.0, &c[0], ORDERS);
+    assert!(
+        !eth_refused(&mut e, 604, 21_600.0),
+        "both post-mark slots release ETH"
+    );
+}

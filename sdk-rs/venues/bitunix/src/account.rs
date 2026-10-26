@@ -200,8 +200,9 @@ pub struct AccountState {
     /// issued after the request. Reads stay Primary-signed until a complete
     /// snapshot at or past it commits.
     pub owed: [Option<u64>; 2],
-    /// Trading writes settled (answered or lost). Every uncertain seal is one,
-    /// so an owed census issued since the last settled write is still fresh.
+    /// Trading writes settled (answered or lost) and jobs ended, engine
+    /// retirement included. Every uncertain seal bumps it, so an owed census
+    /// issued since the last bump is still fresh.
     pub writes_settled: u64,
     /// `writes_settled` at the last uncertain-write request.
     pub request_writes: Option<u64>,
