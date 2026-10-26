@@ -9,12 +9,12 @@ import { parseArgs } from 'node:util';
 // total package size; Sam approved the combined 14 MiB ceiling on 2026-10-26.
 export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_064 });
 // #2193 shared-core: CI Bitget/USDC 1,479,932 rounded up to KiB (overseer ceiling 1448 KiB).
-// AsterDEX: the venue crate at opt-level "s" (#2178) measured 1,326,024 in CI. Per the overseer's
-// ruling the cap is that plus 4 KiB, below the shared venue budget. It can only go down.
+// AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
+// allowance over the opt-s 1,330,120 cap; the cap is that rounded up to the KiB. It can only go down.
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
 // Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
-// Kraken hosted operation foundation: CI 1,399,777 rounded up to KiB.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ kraken: 1_399_808, krakenspot: 1_399_808, bitget: 1_480_704, bitgetusdc: 1_480_704, bybit: 1_445_888, asterdex: 1_330_120 });
+// Kraken hosted signing: approved 1,399,777 CI bytes rounded up to KiB.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_480_704, bitgetusdc: 1_480_704, bybit: 1_445_888, asterdex: 1_385_472, kraken: 1_399_808, krakenspot: 1_399_808 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
