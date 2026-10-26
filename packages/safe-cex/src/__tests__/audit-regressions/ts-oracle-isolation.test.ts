@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import { BETA_VENUES } from '../../exchanges/rust/betaVenues';
@@ -66,9 +67,39 @@ const NON_BETA_KEPT_FAMILIES: Record<string, string> = {
 const SRC = resolve(__dirname, '../..');
 const EXCHANGES = join(SRC, 'exchanges');
 const ALIAS = '@tealstreet/safe-cex/src/';
-const SPECIFIER =
-  /(?:\bfrom\s*|\bimport\s*\(\s*(?:\/\*[^*]*\*\/\s*)?|\brequire\s*\(\s*|^\s*import\s+)(['"])([^'"\n]+)\1/gm;
-const EXTENSIONS = ['', '.ts', '.tsx', '.json', '/index.ts'];
+const EXTENSIONS = ['', '.ts', '.tsx', '.json', '/index.ts', '/index.tsx'];
+
+// Module specifiers from the TS AST: static imports/exports, import types and literal
+// import()/require() arguments, untagged templates included. A computed one is unresolved.
+const specifiers = (file: string, text = readFileSync(file, 'utf8')) => {
+  const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+  const found: string[] = [];
+  const computed: string[] = [];
+  const literal = (node?: ts.Node) =>
+    node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : undefined;
+  const visit = (node: ts.Node) => {
+    let specifier: string | undefined;
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
+      specifier = literal(node.moduleSpecifier);
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      specifier = literal(node.moduleReference.expression);
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      specifier = literal(node.argument.literal);
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+    ) {
+      specifier = literal(node.arguments[0]);
+      if (specifier === undefined) computed.push(`${relative(SRC, file)}: ${node.getText(source).slice(0, 80)}`);
+    }
+    if (specifier !== undefined) found.push(specifier);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return { found, computed };
+};
 
 const isTest = (file: string) => /\.(?:test|spec)\.tsx?$/.test(file);
 const venueOf = (file: string) => {
@@ -97,7 +128,7 @@ const resolveImport = (from: string, specifier: string) => {
   return undefined;
 };
 
-// Every non-test runtime source outside the oracle and the venue directories.
+// Every non-test runtime source (.ts and .tsx) outside the oracle and the venue directories.
 const runtimeRoots = () =>
   walk(SRC).filter(
     (file) =>
@@ -108,19 +139,23 @@ const runtimeRoots = () =>
   );
 
 // Type and value imports both count: tsc and consumers that compile from source need them.
-const reachable = () => {
+// `extra` substitutes in-memory source for a file, for the negative controls.
+const reachable = (extra: Record<string, string> = {}) => {
   const seen = new Set<string>();
-  const queue = runtimeRoots();
+  const computed: string[] = [];
+  const queue = [...runtimeRoots(), ...Object.keys(extra)];
   while (queue.length) {
     const file = queue.pop()!;
-    if (seen.has(file) || !file.endsWith('.ts')) continue;
+    if (seen.has(file) || !/\.tsx?$/.test(file)) continue;
     seen.add(file);
-    for (const match of readFileSync(file, 'utf8').matchAll(SPECIFIER)) {
-      const target = resolveImport(file, match[2]);
+    const scan = specifiers(file, extra[file]);
+    computed.push(...scan.computed);
+    for (const specifier of scan.found) {
+      const target = resolveImport(file, specifier);
       if (target && !seen.has(target)) queue.push(target);
     }
   }
-  return [...seen].map((file) => relative(SRC, file));
+  return { paths: [...seen].map((file) => relative(SRC, file)), computed };
 };
 
 const venueFiles = (paths: string[]) =>
@@ -131,9 +166,28 @@ const venueFiles = (paths: string[]) =>
 
 describe('the TS venue oracle is unreachable from the SDK runtime', () => {
   it('static type and value imports reach no oracle code and only the reviewed venue files', () => {
-    const paths = reachable();
+    const { paths, computed } = reachable();
     expect(paths.filter((path) => path.startsWith('__tests__/'))).toEqual([]);
     expect(venueFiles(paths)).toEqual([...KEPT_VENUE_FILES].sort());
+    expect(computed, 'a computed runtime import cannot be checked').toEqual([]);
+  });
+
+  it('negative controls: template, quoted and require imports into the oracle are all caught', () => {
+    const oracle = '../__tests__/reference/binance/binance.exchange';
+    for (const statement of [
+      `void import(\`${oracle}\`);`,
+      `void import("${oracle}");`,
+      `require('${oracle}');`,
+      `export * from '${oracle}';`,
+      `type Leak = typeof import('${oracle}');`,
+    ]) {
+      const { found } = specifiers(join(EXCHANGES, 'registry.native.ts'), statement);
+      expect(found, statement).toEqual([oracle]);
+    }
+    // A native-root leak reaches the oracle through the same walk the guard uses.
+    const native = join(EXCHANGES, 'registry.native.ts');
+    const leaked = reachable({ [native]: `${readFileSync(native, 'utf8')}\nvoid import(\`${oracle}\`);\n` });
+    expect(leaked.paths).toContain('__tests__/reference/binance/binance.exchange.ts');
   });
 
   it('production venue directories hold only the reviewed files, and no adapter module', () => {
@@ -153,20 +207,23 @@ describe('the TS venue oracle is unreachable from the SDK runtime', () => {
   it('source-consumer helpers import only shared modules', () => {
     for (const file of SOURCE_CONSUMER_FILES) {
       const path = join(EXCHANGES, file);
-      for (const match of readFileSync(path, 'utf8').matchAll(SPECIFIER)) {
-        const target = resolveImport(path, match[2]);
+      const { found, computed } = specifiers(path);
+      expect(computed, file).toEqual([]);
+      for (const specifier of found) {
+        const target = resolveImport(path, specifier);
         if (!target) continue;
-        expect(relative(SRC, target).startsWith('__tests__/'), `${file} -> ${match[2]}`).toBe(false);
-        expect(venueOf(target), `${file} -> ${match[2]}`).toBeUndefined();
+        expect(relative(SRC, target).startsWith('__tests__/'), `${file} -> ${specifier}`).toBe(false);
+        expect(venueOf(target), `${file} -> ${specifier}`).toBeUndefined();
       }
     }
   });
 
   it('the bundled SDK entry contains no oracle or adapter module', async () => {
     const result = await build({
-      entryPoints: [join(SRC, 'index.ts')],
+      entryPoints: [join(SRC, 'index.ts'), join(EXCHANGES, 'registry.ts'), join(EXCHANGES, 'registry.native.ts')],
       bundle: true,
       write: false,
+      outdir: join(SRC, '.oracle-isolation-bundle'),
       metafile: true,
       platform: 'node',
       format: 'esm',
