@@ -28,7 +28,10 @@ fn response<V: Venue>(e: &mut Engine<V>, now: f64, request: RequestId, status: u
 }
 
 fn seeded<V: Venue>(venue: V) -> Engine<V> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+    started(safe_cex_engine::test_support::seeded_engine(venue))
+}
+
+fn started<V: Venue>(mut e: Engine<V>) -> Engine<V> {
     e.start(0.);
     for (path, body) in [
         ("instruments", MARKETS),
@@ -47,14 +50,27 @@ fn seeded<V: Venue>(venue: V) -> Engine<V> {
     e
 }
 
-fn venue(keyed: bool) -> Blofin {
+fn venue() -> Blofin {
     Blofin::new(Options {
-        public_data_only: !keyed,
-        key: keyed.then(|| "fixture-key".into()),
-        secret: keyed.then(|| "fixture-secret".into()),
-        passphrase: keyed.then(|| "fixture-pass".into()),
+        public_data_only: true,
         ..Options::default()
     })
+}
+
+/// A keyed engine through trusted setup: refs on the venue, provider installed.
+fn seeded_keyed() -> Engine<Blofin> {
+    let (signer, identities) = safe_cex_crypto::signer::LocalSigner::from_json(
+        r#"{"primary":{"key":"fixture-key","secret":"fixture-secret","passphrase":"fixture-pass"}}"#
+            .into(),
+    )
+    .unwrap();
+    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
+        identities: identities.clone(),
+        ..Options::default()
+    }));
+    e.set_signer(Some(std::sync::Arc::new(signer))).unwrap();
+    e.set_identities(identities).unwrap();
+    started(e)
 }
 
 fn query<V: Venue>(e: &mut Engine<V>, now: f64, command: u32, symbol: &str, limit: Option<u32>) {
@@ -165,7 +181,7 @@ fn released<V: Venue>(e: &mut Engine<V>, now: f64) -> (HttpRequest, Vec<Action>)
 
 #[test]
 fn public_trades_wait_for_managed_preparation() {
-    let mut e = seeded(venue(false));
+    let mut e = seeded(venue());
     query(&mut e, 100., 71, "BTCUSDT", Some(2));
     let actions = e.drain_actions().collect::<Vec<_>>();
     let (_, request) = preparation(&actions);
@@ -184,7 +200,7 @@ fn public_trades_wait_for_managed_preparation() {
 #[test]
 fn unreleased_and_unclaimed_replies_cannot_complete_the_owner() {
     for prepared in [false, true] {
-        let mut e = seeded(venue(false));
+        let mut e = seeded(venue());
         query(&mut e, 100., 71, "BTCUSDT", None);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let token = actions.iter().find_map(|a| match a {
@@ -225,7 +241,7 @@ fn unreleased_and_unclaimed_replies_cannot_complete_the_owner() {
 
 #[test]
 fn response_at_original_deadline_uses_typed_physical_expiry() {
-    let mut e = seeded(venue(false));
+    let mut e = seeded(venue());
     query(&mut e, 100., 71, "BTCUSDT", None);
     let (request, actions) = released(&mut e, 100.);
     let timer = actions
@@ -263,7 +279,7 @@ fn response_at_original_deadline_uses_typed_physical_expiry() {
 #[test]
 fn parked_preparation_expiry_and_refusal_retain_typed_failures() {
     for timeout in [false, true] {
-        let mut e = seeded(venue(false));
+        let mut e = seeded(venue());
         query(&mut e, 100., 71, "BTCUSDT", None);
         let actions = e.drain_actions().collect::<Vec<_>>();
         let (token, _) = preparation(&actions);
@@ -306,7 +322,7 @@ fn parked_preparation_expiry_and_refusal_retain_typed_failures() {
 
 #[test]
 fn released_transport_failure_keeps_the_shared_network_kind() {
-    let mut e = seeded(venue(false));
+    let mut e = seeded(venue());
     query(&mut e, 100., 71, "BTCUSDT", None);
     let (request, _) = released(&mut e, 100.);
     e.handle(
@@ -324,7 +340,7 @@ fn released_transport_failure_keeps_the_shared_network_kind() {
 
 #[test]
 fn duplicate_command_cannot_allocate_another_trade_request() {
-    let mut e = seeded(venue(false));
+    let mut e = seeded(venue());
     query(&mut e, 100., 71, "BTCUSDT", None);
     let (first, _) = released(&mut e, 100.);
     query(&mut e, 101., 71, "BTCUSDT", None);
@@ -348,7 +364,11 @@ fn duplicate_command_cannot_allocate_another_trade_request() {
 fn wire_limits_and_keyed_unsigned_requests_remain_native() {
     for keyed in [false, true] {
         for (limit, expected) in [(None, 100), (Some(0), 1), (Some(2), 2), (Some(999), 100)] {
-            let mut e = seeded(venue(keyed));
+            let mut e = if keyed {
+                seeded_keyed()
+            } else {
+                seeded(venue())
+            };
             query(&mut e, 100., 71, "BTCUSDT", limit);
             let (request, _) = released(&mut e, 100.);
             assert_eq!(request.method, Method::Get);
@@ -367,7 +387,7 @@ fn wire_limits_and_keyed_unsigned_requests_remain_native() {
 
 #[test]
 fn native_cross_market_identity_defaults_order_and_wire_only_limit_are_preserved() {
-    let mut e = seeded(venue(false));
+    let mut e = seeded(venue());
     query(&mut e, 100., 71, "BTCUSDT", Some(1));
     let (request, _) = released(&mut e, 100.);
     response(
@@ -407,7 +427,7 @@ fn rejected_or_malformed_first_pages_never_publish_the_streamed_prefix() {
         r#"{"code":"0","data":null}"#,
         r#"{"code":"0","data":{}}"#,
     ] {
-        let mut e = seeded(venue(false));
+        let mut e = seeded(venue());
         query(&mut e, 100., 71, "BTCUSDT", None);
         let (request, _) = released(&mut e, 100.);
         response(&mut e, 101., request.id, 200, body);
@@ -421,7 +441,7 @@ fn rejected_or_malformed_first_pages_never_publish_the_streamed_prefix() {
 
 #[test]
 fn preflight_and_success_retire_the_original_owner_at_fixed_clock() {
-    let mut e = seeded(venue(false));
+    let mut e = seeded(venue());
     for _ in 0..270 {
         query(&mut e, 100., 71, "MISSING", None);
         let actions = e.drain_actions().collect::<Vec<_>>();
@@ -556,7 +576,7 @@ impl Venue for FullQueue {
 #[test]
 fn immediate_managed_queue_refusal_is_typed_and_retires_each_read_owner() {
     let mut e = seeded(FullQueue {
-        venue: venue(false),
+        venue: venue(),
         filled: false,
     });
     // Park unrelated work in its own event. The subsequent genuine Query must

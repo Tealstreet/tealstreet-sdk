@@ -404,9 +404,9 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     })
 }
 
-/// BloFin's one provider setup from the configured strings. The adopted
-/// FetchLeverage Read signs through it; unadopted paths keep the raw fields
-/// until the family cutover. Passphrase refs mirror native `headers` exactly.
+/// BloFin's one provider setup from the configured strings. Every private
+/// request and the socket login sign through it; the venue holds only refs.
+/// Passphrase refs keep native inheritance exactly.
 #[cfg(feature = "blofin")]
 fn blofin_signer(
     options: &EngineOptions,
@@ -1688,12 +1688,8 @@ pub fn build_with_signer<T: Visit>(
             let mut engine = Engine::new(
                 Blofin::new(BlofinOptions {
                     broker_attribution: options.broker_attribution,
-                    read_credentials: options.read_credentials.take(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
                     identities: identities.clone(),
                 }),
                 entropy,
