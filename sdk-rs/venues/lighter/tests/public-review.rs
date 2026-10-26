@@ -1,7 +1,8 @@
 //! Regressions from the independent public-phase audit.
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, TimerId};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 const MARKETS: &str = r#"{"code":200,"order_book_details":[{"market_id":0,"symbol":"ETH","status":"active","market_type":"perp"},{"market_id":1,"symbol":"BTC","status":"active","market_type":"perp"}]}"#;
 fn reply(e: &mut Engine<Lighter>, r: &HttpRequest, t: f64, body: &str) {
     e.handle(
@@ -17,10 +18,10 @@ fn reply(e: &mut Engine<Lighter>, r: &HttpRequest, t: f64, body: &str) {
     );
 }
 fn setup() -> (Engine<Lighter>, SocketId, HttpRequest, TimerId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(1_000.0);
     let request = safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
         .into_iter()

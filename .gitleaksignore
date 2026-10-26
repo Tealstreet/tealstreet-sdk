@@ -125,3 +125,7 @@ c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-r
 
 # Historical public impostor-URL fixture; no credential, now assembled from URL components.
 2fe0c6b5007f157d12a19ff1c5e77302cbe030c6:sdk-rs/harness/live-smoke-venues.test.mjs:generic-api-key:222
+
+# Public reviewer names in historical Lighter plan prose; no credential material.
+# Exact commit/path/rule/line only.
+94f58d0d64773c6c915a6da1ada5d756442f8871:docs/plans/RUST_LIGHTER_REMAINING_FUNNEL.md:generic-api-key:7

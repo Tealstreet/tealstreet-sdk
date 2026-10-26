@@ -135,7 +135,7 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
     httpFailed: idle,
     timer: idle,
   };
-  const construct = vi.fn(function (_name: string, _options: string) {
+  const construct = vi.fn(function (_name: string, _options: string, _setup?: string) {
     return native;
   });
   setWasmEngineLoader(async () => ({ WasmEngine: construct as unknown as WasmEngineModule['WasmEngine'] }));
@@ -270,7 +270,10 @@ it.each(['lighter', 'lighter-robinhood'] as const)(
     r.result({ userId: '0', affiliateId: '900719925474099312346' });
     await expect(r.exchange.getAccount()).resolves.toEqual({ userId: '0', affiliateId: '900719925474099312346' });
     const nativeOptions = JSON.parse(r.construct.mock.calls[0][1]);
-    expect(nativeOptions).toMatchObject({ publicDataOnly: true, key: '', secret: '', applicationId: '0' });
+    expect(nativeOptions).toMatchObject({ publicDataOnly: true, applicationId: '0' });
+    expect(nativeOptions).not.toHaveProperty('key');
+    expect(nativeOptions).not.toHaveProperty('secret');
+    expect(JSON.parse(r.construct.mock.calls[0][2]!)).toMatchObject({ primary: { key: '', secret: '' } });
     expect(nativeOptions).not.toHaveProperty('apiKeyIndex');
     expect(r.native.start).not.toHaveBeenCalled();
   },
