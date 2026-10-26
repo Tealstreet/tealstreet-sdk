@@ -485,3 +485,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | WOO socket adoption and request funnel | Source/API/native/map carry CLEAR; first-source paired sizes fit, current combined and CI pending | Before importing reviewed WOO sockets or converting its 30 request / 20 signing sites. | [RUST_WOO_ADOPTION_AND_FUNNEL.md](RUST_WOO_ADOPTION_AND_FUNNEL.md) |
 
 - [KuCoin request and signing funnel](RUST_KUCOIN_FUNNEL.md): predecessor preservation, native refusal resend and compiling custody originals; production adoption remains local.
+| Retire an unissued independent Plan call | Plan/originals CLEAR (dazzy3, 4yjlw0); source review pending | Before a venue skips a declared complete-Plan call it decides not to send (Bitrue B2 cancel batches). | [RUST_PLAN_RETIRE_UNISSUED.md](RUST_PLAN_RETIRE_UNISSUED.md) |
+
+| WOO unsigned public-seed read custody | Local source/fixtures CLEAR;264PASS, sizes fit; unpushed, CI pending | Before converting Markets, Tickers or Funding to independent Background Read observations. | [RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md](RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md) |

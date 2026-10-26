@@ -2,6 +2,7 @@
 mod account;
 mod depth_query;
 mod history;
+pub mod hosted;
 mod identity;
 mod public;
 mod sbe;

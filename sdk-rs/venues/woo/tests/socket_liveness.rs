@@ -7,7 +7,7 @@ const ACCEPTED: &str = r#"{"event":"auth","success":true}"#;
 const PONG: &str = r#"{"event":"pong"}"#;
 // Private startup begins at markets, so its socket may connect before tickers.
 fn seed_tickers(e: &mut LivenessEngine) -> Vec<Action> {
-    let mut actions: Vec<_> = e.drain_actions().collect();
+    let mut actions = support::prepared_seed_actions(e, 10.);
     let request = actions
         .iter()
         .find_map(|a| match a {
@@ -30,7 +30,7 @@ fn connecting() -> (LivenessEngine, SocketId, f64, bool) {
         },
     ));
     e.start(0.0);
-    let request = support::requests(&mut e).remove(0);
+    let request = support::prepared_seed_requests(&mut e, 0.).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);
     let socket = seed_tickers(&mut e)
         .into_iter()
@@ -252,7 +252,7 @@ fn private_connection_that_never_opens_is_closed_and_backed_off() {
         },
     ));
     e.start(0.0);
-    let request = support::requests(&mut e).remove(0);
+    let request = support::prepared_seed_requests(&mut e, 0.).remove(0);
     support::response(&mut e, &request, 10.0, support::MARKETS);
     let now = 20.0;
     let actions = seed_tickers(&mut e);
