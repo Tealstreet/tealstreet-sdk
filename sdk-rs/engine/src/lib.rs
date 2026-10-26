@@ -81,6 +81,6 @@ pub use store::{OrderSnapshotToken, Store};
 
 pub use public_feed::{PublicFeedPolicy, PublicFeedUpdate};
 
-pub use engine::SetupRetirement;
 #[cfg(feature = "address-nonce")]
-pub use engine::{AddressSetupCleanup, AddressSetupProgress, AddressSetupSlots, SetupHostSupport};
+pub use engine::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
+pub use engine::{AddressSetupSlots, SetupRetirement};

@@ -2,11 +2,9 @@
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 #[path = "address_nonce_setup.rs"]
 pub(crate) mod address_nonce_setup;
-pub use address_nonce_setup::SetupRetirement;
 #[cfg(feature = "address-nonce")]
-pub use address_nonce_setup::{
-    AddressSetupCleanup, AddressSetupProgress, AddressSetupSlots, SetupHostSupport,
-};
+pub use address_nonce_setup::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
+pub use address_nonce_setup::{AddressSetupSlots, SetupRetirement};
 
 use crate::book::{Book, BookSide};
 use crate::capabilities::{AccountLookup, Capabilities};
@@ -3095,11 +3093,9 @@ impl<V: Venue> Clone for HttpRelease<V> {
 
 /// One exchange implementation. All methods are synchronous and must not block.
 pub trait Venue {
-    #[cfg(feature = "address-nonce")]
     fn address_nonce_domain(&self) -> Option<&'static crate::nonce::NonceDomain> {
         None
     }
-    #[cfg(feature = "address-nonce")]
     fn public_address_slots(&self) -> AddressSetupSlots {
         AddressSetupSlots::None
     }

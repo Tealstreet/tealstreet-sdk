@@ -8,6 +8,26 @@ use crate::signing::{Identity, KeyRef, SignError};
 #[cfg(feature = "address-nonce")]
 use std::sync::Arc;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AddressSetupSlots {
+    #[default]
+    None,
+    Primary,
+    Secondary,
+    Both,
+}
+#[cfg(feature = "address-nonce")]
+impl AddressSetupSlots {
+    fn contains(self, slot: CredentialSlot) -> bool {
+        matches!(
+            (self, slot),
+            (Self::Both, _)
+                | (Self::Primary, CredentialSlot::Primary)
+                | (Self::Secondary, CredentialSlot::Secondary)
+        )
+    }
+}
+
 #[derive(Debug)]
 pub struct SetupRetirement {
     #[cfg(feature = "address-nonce")]
@@ -68,24 +88,6 @@ mod enabled {
     }
     const MAX_GENERATION: u64 = (1 << 53) - 2;
 
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-    pub enum AddressSetupSlots {
-        #[default]
-        None,
-        Primary,
-        Secondary,
-        Both,
-    }
-    impl AddressSetupSlots {
-        fn contains(self, slot: CredentialSlot) -> bool {
-            matches!(
-                (self, slot),
-                (Self::Both, _)
-                    | (Self::Primary, CredentialSlot::Primary)
-                    | (Self::Secondary, CredentialSlot::Secondary)
-            )
-        }
-    }
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub enum SetupHostSupport {
         #[default]
@@ -696,4 +698,4 @@ pub(super) use enabled::AddressNonceSetup;
 #[cfg(feature = "address-nonce")]
 pub(crate) use enabled::{AddressCapability, VerifiedAddress};
 #[cfg(feature = "address-nonce")]
-pub use enabled::{AddressSetupCleanup, AddressSetupProgress, AddressSetupSlots, SetupHostSupport};
+pub use enabled::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
