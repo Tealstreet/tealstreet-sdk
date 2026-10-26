@@ -166,9 +166,10 @@ All use a registered 334 ms domain group.
    - a Policy naming another group is `Invalid`.
 5. **Construction:** an unregistered group, or a gap that differs from the
    registry, refuses engine construction.
-6. **No credit spent:** a refused, stale or re-prepared claim, a duplicate, or a
-   non-finite clock spends no floor and no nonce (with `dispatch-nonce`). A
-   re-prepare keeps the member's place.
+6. **No floor spent:** a refused, stale or re-prepared claim, a duplicate, or a
+   non-finite clock commits no pacing floor and no released-nonce floor (with
+   `dispatch-nonce`). A re-prepare keeps the member's place, and may reserve a
+   new nonce without rolling back any reserved maximum.
 7. **Bound:**
    - a floor past the 20 s call deadline is `TimedOut`/NotSent;
    - queueing never extends a call deadline;
@@ -232,8 +233,10 @@ and the 256 bound, Hyperliquid's builder prerequisites.
 ## Open questions for review
 
 - (a) **Head on re-prepare. RESOLVED** (Hyperliquid consumer review). A Stale
-  re-prepare keeps the SAME domain entry and head, spends no floor or nonce,
-  and re-prepares within its original deadline.
+  re-prepare keeps the SAME domain entry and head, and re-prepares within its
+  original deadline. It commits neither a pacing floor nor a released-nonce
+  floor. Its fresh preparation may reserve a new nonce, under section 3's
+  never-rolled-back reserved maxima and the cumulative repair budget.
 - (b) **Hyperliquid scope. RESOLVED.** `Mutations` is correct: native
   `pump_trades` applies 334 ms only to actual /exchange writes (Place, Cancel,
   Leverage, ScheduleCancel), and builder, info, account and history reads don't
