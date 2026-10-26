@@ -11,12 +11,14 @@ fn failed(actions: &[Action]) -> &VenueError {
         .expect("one failed batch")
 }
 fn pair(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    let order = opts(r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":1}"#);
+    let mut order =
+        opts(r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":1}"#);
+    order.stop_loss = Some(80.);
     e.handle(
         2000.,
         Event::Command(Command::PlaceOrders {
             command: 81,
-            orders: vec![order.clone(), order],
+            orders: vec![order],
         }),
     );
     write(e)
