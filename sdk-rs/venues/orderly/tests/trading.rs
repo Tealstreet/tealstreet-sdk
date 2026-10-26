@@ -2095,3 +2095,50 @@ fn a_retired_write_settles_before_the_queued_successor_plans() {
         "the retired placement stays uncertain"
     );
 }
+
+/// M3: a parent listed with only one of its two placed legs does not confirm
+/// the pair; the job ends Unknown with the accepted IDs, never success.
+#[test]
+fn a_parent_listed_with_one_of_two_legs_ends_unknown() {
+    let (mut e, s) = ready();
+    requests(&mut e);
+    place(
+        &mut e,
+        1,
+        r#"[{"symbol":"BTCUSDC","type":"market","side":"buy","amount":1,"stopLoss":49000,"takeProfit":55000}]"#,
+    );
+    let entry = requests(&mut e).pop().unwrap();
+    reply(&mut e, &entry, 200, r#"{"success":true,"data":{"order_id":50}}"#);
+    let pair = requests(&mut e).pop().unwrap();
+    reply(&mut e, &pair, 200, r#"{"success":true,"data":{"order_id":51}}"#);
+    for (id, kind, seq) in [(510, "STOP_LOSS", 1), (511, "TAKE_PROFIT", 2)] {
+        ws(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"topic":"algoexecutionreportv2","ts":3000,"data":{{"algoOrderId":{id},"rootAlgoOrderId":51,"symbol":"PERP_BTC_USDC","algoType":"{kind}","algoStatus":"NEW","triggerPrice":49000,"side":"SELL","quantity":0,"seq":{seq}}}}}"#
+            ),
+        );
+    }
+    let verify = settled_requests(&mut e, 2000.0)
+        .into_iter()
+        .filter(|r| r.url.contains("/v1/algo/orders?"))
+        .last()
+        .expect("the verification read");
+    reply(
+        &mut e,
+        &verify,
+        200,
+        r#"{"success":true,"data":{"rows":[{"algo_order_id":51,"child_orders":[{"algo_order_id":510}]}]}}"#,
+    );
+    let error = settled(&mut e, 2000.0)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
+            _ => None,
+        })
+        .expect("one terminal");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    let ids = error.partial.expect("the accepted IDs").order_ids;
+    assert!(ids.contains(&"50".to_owned()) && ids.contains(&"51".to_owned()), "{ids:?}");
+}

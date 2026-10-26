@@ -1406,16 +1406,24 @@ impl Orderly {
         } else {
             cx.plan_leg_context(&plan, &slot)
         };
-        let context = match context {
-            Ok(context) => context,
-            Err(reason) => {
+        let identity = self.trade_identity().map(|(_, identity)| identity);
+        let (context, identity) = match (context, identity) {
+            (Ok(context), Some(identity)) => (context, identity),
+            // A verification leg follows an accepted pair: never NotSent.
+            _ if step.is_verify() => {
+                let Effect::Verify(waiting) = step.effect else {
+                    unreachable!()
+                };
+                return self.unconfirmed(cx, active, None, Some(waiting));
+            }
+            (Err(reason), _) => {
                 let error = VenueError::new(reason.venue_error().message);
                 return self.end(cx, active, None, error);
             }
-        };
-        let Some((_, identity)) = self.trade_identity() else {
-            let error = not_sent("Orderly private account is not ready");
-            return self.end(cx, active, None, error);
+            (Ok(_), None) => {
+                let error = not_sent("Orderly private account is not ready");
+                return self.end(cx, active, None, error);
+            }
         };
         let command = active.job.command;
         match &mut step.effect {
@@ -1832,10 +1840,13 @@ impl Orderly {
                 self.trading.active = Some(active);
                 self.account_poll(cx, true);
             }
-            Err(reason) => {
-                let error = VenueError::new(reason.venue_error().message);
-                self.end(cx, active, Some((&request.slot, &request.context)), error);
-            }
+            // The pair or parent cancel was accepted: never a plain failure.
+            Err(_) => self.unconfirmed(
+                cx,
+                active,
+                Some((&request.slot, &request.context)),
+                Some(waiting),
+            ),
         }
     }
     /// An accepted pair whose legs cannot be confirmed: the Plan inherits
@@ -1904,6 +1915,8 @@ impl Orderly {
             return self.call_failed(cx, active, request.step.clone(), error, true, current);
         }
         // A successful envelope with an unusable ACK cannot prove a write was rejected.
+        // The IDs this answer adds, for its own write fact.
+        let ids_before = active.job.ids.len();
         let unknown_ack = write
             && (200..300).contains(&response.status)
             && serde_json::from_str::<Rest<'_>>(response.body).map_or(true, |rest| rest.success);
@@ -2161,7 +2174,27 @@ impl Orderly {
                         walk(row, &mut listed);
                     }
                     let confirmed = if !waiting.parent.is_empty() {
-                        listed.contains(&waiting.parent) || self.root_terminal(&waiting.parent)
+                        // Every placed leg: listed under the parent, or terminal.
+                        let mut legs: HashSet<String> = rows
+                            .rows
+                            .iter()
+                            .filter(|row| {
+                                row.algo_order_id.as_ref().is_some_and(|id| id.0 == waiting.parent)
+                            })
+                            .flat_map(|row| &row.child_orders)
+                            .filter_map(|child| child.algo_order_id.as_ref().map(|id| id.0.clone()))
+                            .collect();
+                        legs.extend(
+                            cx.store
+                                .orders()
+                                .iter()
+                                .filter(|o| {
+                                    o.parent_id.as_deref() == Some(waiting.parent.as_str())
+                                        && self.order_terminal(&o.id)
+                                })
+                                .map(|o| o.id.clone()),
+                        );
+                        self.root_terminal(&waiting.parent) || legs.len() >= waiting.legs
                     } else {
                         waiting
                             .ids
@@ -2212,16 +2245,7 @@ impl Orderly {
         match result {
             Ok(answer) => {
                 if write {
-                    let order_ids = match &request.step.effect {
-                        Effect::Place(_) | Effect::Amend { .. } => {
-                            active.job.ids.last().cloned().into_iter().collect()
-                        }
-                        Effect::Pair { legs, .. } => {
-                            let start = active.job.ids.len().saturating_sub(*legs);
-                            active.job.ids[start..].to_vec()
-                        }
-                        _ => vec![],
-                    };
+                    let order_ids = active.job.ids[ids_before..].to_vec();
                     let accepted = WriteFact::Accepted { order_ids };
                     let _ = cx.http_write_fact(&request.context, accepted, None);
                 }
@@ -2242,7 +2266,6 @@ impl Orderly {
                             let error = VenueError::new("Orderly leverage read could not complete");
                             return self.end(cx, active, current, error);
                         }
-                        let _ = cx.finish_plan_call(&plan, &request.slot, &request.context);
                         self.next_job(cx);
                     }
                 }

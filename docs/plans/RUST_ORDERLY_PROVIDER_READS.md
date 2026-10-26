@@ -62,6 +62,10 @@ In `account.rs`, the two `matches!(request, Request::Info)` checks become the `R
 - **Raw seed retired.** `Options` no longer has the key or seed, and `sign::Credentials`, its erasure and the `Sensitive` wrapper are deleted. The registry's shape check is the stateless `sign::keys_valid`, and a mismatched key and seed pair is still caught only by the venue (dazzy3's nit, deferred: every fixture uses an unpaired key).
 - **O1 interim deleted.** The zero-delay deferred reconcile is removed: a condition-wait release only schedules, so it is legal inside a managed delivery.
 - **Inventory after O2:** request 18 → 0 and signing 12 → 0 for Orderly.
+- **Review record (dazzy3's O2 lows).**
+  - **L5.** `orders_reconciled` follows the regular-orders snapshot alone. The engine's lock fences placements, which are regular orders; positional pairs stay behind the venue's own detached fence until an algo snapshot satisfies it.
+  - **L6.** A read discarded after a later write's revision bump is re-read at the next poll tick, as native. Re-polling at the discard changed which read a native recovery control answers, so it is left for a separate change.
+  - **L7.** A bulk cancellation is parked at the FIFO front even with 100 queued (native: it supersedes rather than queues). If that park fails, its terminal is NotSent and the superseded commands keep their own NotSent terminals.
 - **Replay:** the private broker tapes (orderly and woofi on mainnet, kodiakfi on testnet) match the base wasm exactly, 912/912 declared known failures.
 - **Engine features:** `condition-waits`, `http-plans`, `order-locks` and `serial-plans`. The combined build already links all four through other venues, so only Orderly's family grows. CI measures it.
 
