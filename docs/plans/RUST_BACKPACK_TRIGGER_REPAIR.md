@@ -225,3 +225,13 @@ Originals start on actualfff73624e857 after rechecking open Backpack PRs (none).
 The shared core and foreground Backpack remain untouched in the original stage.
 No engine source is authorized. This plan and the originals/source ship together
 in one consumer PR after exact review, qualification and local combined proof.
+
+## Missing installed Primary disposition
+
+The exact API disposition from fe7 is local typed NoPrimary when no installed
+Primary identity exists. There is no mint call and the discovery/read key is
+never passed as a write credential, even to provoke refusal. Emit one Warn per
+accepted snapshot, not per row, with the core repair.unavailable wording. With
+an installed Primary, always call the core with its genuine Credential and
+retain every core authority/refusal check. Secondary-only controls must pin zero
+mint calls, zero repair preparations/HTTP and exactly one local diagnostic.
