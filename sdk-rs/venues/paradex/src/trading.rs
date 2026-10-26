@@ -819,8 +819,7 @@ impl Trading {
                 .errors
                 .iter()
                 .any(|e| e.outcome == Some(Outcome::Unknown));
-            if state.errors.is_empty()
-                || (state.placement && !state.results.is_empty() && !unknown)
+            if state.errors.is_empty() || (state.placement && !state.results.is_empty() && !unknown)
             {
                 let result = if state.placement {
                     serde_json::to_string(&state.results).map_err(|e| e.to_string())
@@ -1000,14 +999,21 @@ impl Trading {
         self.complete(cx, account, request, Err(error), false);
     }
     /// Failed before it was sent: authentication or signing never completed.
-    pub fn on_unsent(
+    /// Refused before transport with the account's own typed reason.
+    pub fn on_refused(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         account: &mut Account,
         request: Request,
-        error: &str,
+        error: VenueError,
     ) {
-        self.complete(cx, account, request, Err(not_sent(error)), true);
+        self.complete(
+            cx,
+            account,
+            request,
+            Err(error.outcome(Outcome::NotSent)),
+            true,
+        );
     }
     pub fn on_sign_failed(
         &mut self,
