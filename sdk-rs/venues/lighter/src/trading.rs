@@ -10,11 +10,15 @@ use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
 use serde::Deserialize;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const TIER_MESSAGE: &str = "Lighter requires Plus or Premium account tier for Tealstreet partner-attributed orders with non-zero integrator fees. Switch this account to Plus or Premium, then retry.";
 const APPROVAL_MESSAGE: &str = "Tealstreet partner attribution is not yet approved for this Lighter account. Open Account Settings, edit this Lighter account, then click \"Approve Builder Fee\" and retry.";
 const POSITION_READ_TIMEOUT_MS: f64 = 10_000.0;
+// Provisional: no recorded Lighter private tape measures the ACK-to-stream gap,
+// so the group proof bound matches POSITION_READ_TIMEOUT_MS; refine at live smoke.
+const GROUP_PROOF_BOUND_MS: u32 = 10_000;
+const GROUP_PENDING_MESSAGE: &str = "is awaiting confirmation of its grouped placement";
 const RATE_MESSAGE: &str = "Lighter rate limit is active; wait before retrying. Limits can apply to IP, account or transaction quota.";
 const MAX_CLIENT_INDEX: u64 = (1 << 48) - 1;
 
@@ -58,6 +62,21 @@ struct Job {
     amend_filled: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// Every grouped-order leg this job prepared; held against cancel/amend.
+    group_legs: Vec<String>,
+    /// Legs of acknowledged groups that the stream or a snapshot must prove.
+    group_accepted: Vec<String>,
+    group_seen: HashSet<String>,
+    /// The plan is parked in a settle-only wait for group proof.
+    settled: bool,
+}
+impl Job {
+    /// Every acknowledged group leg has been seen by its own id.
+    fn group_proven(&self) -> bool {
+        self.group_accepted
+            .iter()
+            .all(|id| self.group_seen.contains(id))
+    }
 }
 enum Step {
     Position {
@@ -66,6 +85,11 @@ enum Step {
         requested: bool,
     },
     Place(Vec<Prepared>),
+    /// One create_grouped_orders transaction: parent, then SL, then TP.
+    Group {
+        grouping: u8,
+        orders: Vec<Prepared>,
+    },
     Cancel(Box<Order>),
     Setting {
         symbol: String,
@@ -85,6 +109,8 @@ pub enum Request {
 pub struct Submission {
     effect: Effect,
     count: usize,
+    /// A grouped placement is never resent, even on a nonce refusal.
+    grouped: bool,
 }
 #[derive(Clone)]
 enum Effect {
@@ -156,7 +182,16 @@ struct Integrator {
 }
 
 impl Lighter {
-    pub(crate) fn trade_order_observed(&mut self, id: &str, filled: f64, status: OrderStatus) {
+    /// An authoritative stream or snapshot row. `client_index` is the row's own
+    /// client order index when present; either identity proves a grouped leg.
+    pub(crate) fn trade_order_observed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        client_index: Option<&str>,
+        filled: f64,
+        status: OrderStatus,
+    ) {
         for job in self
             .trading
             .active
@@ -168,7 +203,73 @@ impl Lighter {
             }) {
                 job.amend_filled = true;
             }
+            for leg in [Some(id), client_index].into_iter().flatten() {
+                if job.group_legs.iter().any(|own| own == leg) {
+                    job.group_seen.insert(leg.to_string());
+                }
+            }
         }
+        if let Some(job) = self.trading.active.as_ref()
+            && job.settled
+            && job.group_proven()
+            && let Some(wait) = &job.condition
+        {
+            let _ = cx.release_condition_wait(wait);
+        }
+    }
+
+    /// The private stream is the only proof source; losing it while a group is
+    /// settling ends the wait now, and the ready handler reports Unknown.
+    pub(crate) fn trade_stream_lost(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(job) = self.trading.active.as_ref()
+            && job.settled
+            && let Some(wait) = &job.condition
+        {
+            let _ = cx.release_condition_wait(wait);
+        }
+    }
+
+    /// After every step: park in a settle-only wait until the stream proves
+    /// each acknowledged leg, or fail Unknown with every id.
+    fn trade_settle_group(&mut self, cx: &mut Cx<'_, Pending>) {
+        let job = self.trading.active.as_mut().unwrap();
+        let (Some(plan), Some(slot), Some(context)) =
+            (job.plan.clone(), job.slot.take(), job.live.take())
+        else {
+            self.trade_group_unconfirmed(cx);
+            return;
+        };
+        match cx.serial_plan_settle_wait(&plan, &slot, &context, GROUP_PROOF_BOUND_MS) {
+            Ok(wait) => {
+                job.condition = Some(wait);
+                job.waiting_plan = true;
+                job.settled = true;
+            }
+            Err(_) => {
+                job.slot = Some(slot);
+                job.live = Some(context);
+                self.trade_group_unconfirmed(cx);
+            }
+        }
+    }
+
+    /// Unknown with every accepted id kept and the plan's uncertainty inherited;
+    /// an orders refresh follows so the next complete snapshot reconciles. No replay.
+    fn trade_group_unconfirmed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(plan) = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.plan.clone())
+        {
+            let _ = cx.inherit_plan_uncertainty(&plan);
+        }
+        self.trading.next_nonce.invalidate();
+        self.refresh_orders(cx);
+        self.trade_finish(
+            cx,
+            uncertain("Lighter accepted the grouped order but the account stream did not confirm every leg; check open orders before retrying"),
+        );
     }
 
     pub(crate) fn trade_execution_observed(&mut self, id: &str, timestamp: f64) {
@@ -212,6 +313,13 @@ impl Lighter {
             Command::CancelOrders { command, ids } => {
                 let mut steps = VecDeque::new();
                 for id in ids {
+                    if self.group_pending(&id) {
+                        refuse(
+                            cx,
+                            not_sent(format!("Lighter order {id} {GROUP_PENDING_MESSAGE}")),
+                        );
+                        return;
+                    }
                     if id.parse::<u64>().is_err() {
                         refuse(
                             cx,
@@ -231,9 +339,9 @@ impl Lighter {
                 }
                 (command, steps)
             }
-            Command::CancelSymbolOrders { command, symbol } => (
-                command,
-                cx.store
+            Command::CancelSymbolOrders { command, symbol } => {
+                let orders: Vec<Order> = cx
+                    .store
                     .orders()
                     .iter()
                     .filter(|o| {
@@ -241,9 +349,25 @@ impl Lighter {
                             && matches!(o.status, OrderStatus::Open | OrderStatus::Creating)
                     })
                     .cloned()
-                    .map(|order| Step::Cancel(Box::new(order)))
-                    .collect(),
-            ),
+                    .collect();
+                if let Some(order) = orders.iter().find(|o| self.group_pending(&o.id)) {
+                    refuse(
+                        cx,
+                        not_sent(format!(
+                            "Lighter order {} {GROUP_PENDING_MESSAGE}",
+                            order.id
+                        )),
+                    );
+                    return;
+                }
+                (
+                    command,
+                    orders
+                        .into_iter()
+                        .map(|order| Step::Cancel(Box::new(order)))
+                        .collect(),
+                )
+            }
             Command::AmendOrder {
                 command,
                 id,
@@ -260,6 +384,13 @@ impl Lighter {
                     refuse(
                         cx,
                         not_sent("Lighter order already has an amendment pending"),
+                    );
+                    return;
+                }
+                if self.group_pending(&id) {
+                    refuse(
+                        cx,
+                        not_sent(format!("Lighter order {id} {GROUP_PENDING_MESSAGE}")),
                     );
                     return;
                 }
@@ -359,6 +490,14 @@ impl Lighter {
             }
             _ => return,
         };
+        let group_legs: Vec<String> = steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::Group { orders, .. } => Some(orders.iter().map(|p| p.order.id.clone())),
+                _ => None,
+            })
+            .flatten()
+            .collect();
         let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
             read_credential: None,
@@ -392,10 +531,23 @@ impl Lighter {
             amend,
             amend_filled: false,
             effective: false,
+            group_legs,
+            group_accepted: Vec::new(),
+            group_seen: HashSet::new(),
+            settled: false,
         });
         if !queued {
             self.trade_kick(cx);
         }
+    }
+
+    /// A leg of a grouped placement whose job has not finished.
+    fn group_pending(&self, id: &str) -> bool {
+        self.trading
+            .active
+            .iter()
+            .chain(self.trading.queue.iter())
+            .any(|job| job.group_legs.iter().any(|leg| leg == id))
     }
 
     fn builder(&self) -> Option<sign::Builder> {
@@ -432,6 +584,10 @@ impl Lighter {
             return;
         }
         if job.steps.is_empty() {
+            if !job.group_proven() {
+                self.trade_settle_group(cx);
+                return;
+            }
             let job = self.trading.active.take().unwrap();
             if let Some(plan) = job.plan {
                 if let (Some(slot), Some(context)) = (&job.slot, &job.live) {
@@ -538,7 +694,10 @@ impl Lighter {
             return;
         }
         if self.builder().is_some()
-            && job.steps.iter().any(|s| matches!(s, Step::Place(_)))
+            && job
+                .steps
+                .iter()
+                .any(|s| matches!(s, Step::Place(_) | Step::Group { .. }))
             && job.builder_stage < 2
         {
             if job.builder_stage == 0 {
@@ -640,7 +799,8 @@ impl Lighter {
             self.account_setting_write(symbol);
         }
         let job = self.trading.active.as_ref().unwrap();
-        if let Some(Step::Place(orders)) = job.steps.front() {
+        let grouped = matches!(job.steps.front(), Some(Step::Group { .. }));
+        if let Some(Step::Place(orders) | Step::Group { orders, .. }) = job.steps.front() {
             cx.command_progress(
                 job.command,
                 orders
@@ -662,7 +822,11 @@ impl Lighter {
             format!("{}/api/v1/{path}", self.host()),
             None,
             Box::new(sign::FormRecipe(recipe)),
-            Pending::Trade(Request::Submit(Submission { effect, count })),
+            Pending::Trade(Request::Submit(Submission {
+                effect,
+                count,
+                grouped,
+            })),
         ) {
             self.trading.inflight = false;
             self.trade_finish(cx, error.venue_error());
@@ -688,6 +852,14 @@ impl Lighter {
                     Effect::Place,
                 ))
             }
+            Step::Group { grouping, orders } => Ok((
+                vec![sign::Transaction::Grouped {
+                    grouping: *grouping,
+                    orders: orders.iter().map(|p| p.native.clone()).collect(),
+                    builder: self.builder(),
+                }],
+                Effect::Place,
+            )),
             Step::Cancel(order) => Ok((
                 vec![sign::Transaction::Cancel {
                     market_id: market_id(cx, &order.symbol)?,
@@ -884,6 +1056,7 @@ impl Lighter {
                 };
                 let code = reply.code.as_ref().and_then(Number::integer);
                 if submission.count == 1
+                    && !submission.grouped
                     && code == Some(21104)
                     && response.status < 500
                     && !matches!(response.status, 405 | 429)
@@ -908,6 +1081,7 @@ impl Lighter {
                     self.trading.next_nonce.invalidate();
                     // The sequencer may still accept individual transactions of a refused batch.
                     let unknown = response.status >= 500
+                        || (submission.grouped && (response.status == 408 || code == Some(21104)))
                         || code.is_none()
                         || code == Some(200)
                         || submission.count > 1
@@ -974,7 +1148,7 @@ impl Lighter {
                     return;
                 }
                 let ids: Vec<String> = match self.trading.active.as_ref().unwrap().steps.front() {
-                    Some(Step::Place(orders)) => {
+                    Some(Step::Place(orders) | Step::Group { orders, .. }) => {
                         orders.iter().map(|p| p.order.id.clone()).collect()
                     }
                     _ => Vec::new(),
@@ -1001,9 +1175,14 @@ impl Lighter {
                     .steps
                     .pop_front()
                     .unwrap();
+                if let Step::Group { orders, .. } = &step {
+                    let job = self.trading.active.as_mut().unwrap();
+                    job.group_accepted
+                        .extend(orders.iter().map(|p| p.order.id.clone()));
+                }
                 match step {
                     Step::Position { .. } => unreachable!(),
-                    Step::Place(orders) => {
+                    Step::Place(orders) | Step::Group { orders, .. } => {
                         for mut p in orders {
                             p.order.last_update = cx.now;
                             self.record_placement(p.order.clone());
@@ -1253,6 +1432,13 @@ impl Lighter {
                     requested: false,
                 });
             }
+            if opts.kind == OrderType::Limit
+                && !opts.reduce_only.unwrap_or(false)
+                && (opts.stop_loss.is_some() || opts.take_profit.is_some())
+            {
+                steps.push_back(self.prepare_group(cx, &opts)?);
+                continue;
+            }
             let bracket = matches!(opts.kind, OrderType::Limit | OrderType::Market)
                 && !opts.reduce_only.unwrap_or(false);
             let prepared = self.prepare_one(cx, &opts)?;
@@ -1289,6 +1475,50 @@ impl Lighter {
             steps.push_back(Step::Place(batched));
         }
         Ok(steps)
+    }
+
+    /// TS d94e9d744f1: a limit entry with protections is one grouped transaction,
+    /// OTO (1) with one child or OTOCO (3) with both, parent then SL then TP.
+    fn prepare_group(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Step, String> {
+        const SPLIT: &str =
+            "Lighter attached TP/SL limit orders cannot be split into multiple native lots.";
+        let mut orders = self.prepare_one(cx, opts)?;
+        if orders.len() != 1 {
+            return Err(SPLIT.into());
+        }
+        for (kind, trigger) in [
+            (OrderType::StopLoss, opts.stop_loss),
+            (OrderType::TakeProfit, opts.take_profit),
+        ] {
+            let Some(trigger) = trigger else {
+                continue;
+            };
+            let mut child = opts.clone();
+            child.kind = kind;
+            child.side = opts.side.opposite();
+            child.price = Some(trigger);
+            child.trigger_price = Some(trigger);
+            child.stop_loss = None;
+            child.take_profit = None;
+            child.reduce_only = Some(true);
+            child.time_in_force = Some(TimeInForce::ImmediateOrCancel);
+            let mut leg = self.prepare_one(cx, &child)?;
+            if leg.len() != 1 {
+                return Err(SPLIT.into());
+            }
+            let mut leg = leg.pop().unwrap();
+            // Children close the filled parent: native amount zero.
+            leg.native.amount = 0;
+            orders.push(leg);
+        }
+        Ok(Step::Group {
+            grouping: if orders.len() == 3 { 3 } else { 1 },
+            orders,
+        })
     }
 
     fn prepare_one(
@@ -1797,6 +2027,27 @@ impl Lighter {
         }) else {
             return;
         };
+        if job.settled {
+            // A released settled Plan has no bound left: every path seals it.
+            job.condition = None;
+            job.waiting_plan = false;
+            if !job.group_proven() {
+                self.trade_group_unconfirmed(cx);
+                return;
+            }
+            let job = self.trading.active.take().unwrap();
+            let plan = job.plan.clone().unwrap();
+            if cx
+                .done_plan(&plan, serde_json::to_string(&job.ids).unwrap())
+                .is_err()
+            {
+                self.trading.active = Some(job);
+                self.trade_group_unconfirmed(cx);
+                return;
+            }
+            self.trade_wake_next(cx);
+            return;
+        }
         job.slot = cx
             .plan_slots(plan)
             .ok()
@@ -1893,7 +2144,13 @@ impl Lighter {
                 .as_ref()
                 .is_some_and(|own| own.owner() == plan.owner()),
         });
-        if matches {
+        if !matches {
+            return;
+        }
+        if self.trading.active.as_ref().is_some_and(|job| job.settled) {
+            self.trading.active.as_mut().unwrap().condition = None;
+            self.trade_group_unconfirmed(cx);
+        } else {
             self.trade_finish(cx, error);
         }
     }

@@ -273,13 +273,17 @@ fn generated_client_order_indices_are_receipted_before_the_signed_batch() {
 
 #[test]
 fn bracket_waits_for_each_ack_and_gives_siblings_their_own_indexes() {
+    // Market entries keep separate protective transactions; a limit entry with
+    // protections is one grouped transaction (tests/grouped_tpsl.rs).
     let (mut e, _) = ready_unattributed();
     let mut opts = limit();
+    opts.kind = OrderType::Market;
+    opts.price = None;
     opts.stop_loss = Some(95.0);
     opts.take_profit = Some(110.0);
     let first = begin(&mut e, vec![opts]);
     let entry = wire(&first);
-    assert_eq!(entry["Type"], 0);
+    assert_eq!(entry["Type"], 1);
     ack(&mut e, &first);
     let t = timer(&mut e);
     e.handle(NOW + 100.0, Event::TimerFired { timer: t });

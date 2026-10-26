@@ -9877,3 +9877,20 @@ stream proof and calls `done_plan`, or on expiry calls
 every accepted order ID and the scope stays fenced. It is never Done without
 proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
 grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).
+
+### Lighter grouped limit entry with TP/SL
+
+A Lighter limit order with `stopLoss`/`takeProfit` is now one grouped
+transaction (OTO or OTOCO), as in TS d94e9d744f1, so the protections no longer
+rest without a position. What callers see:
+- `placeOrders` completes only after the account stream (or a complete orders
+  snapshot) shows the parent and every protective leg, with the ids parent
+  first. Within the provisional 10 s bound this looks like ordinary placement.
+- If proof does not arrive in time, or the private stream drops, the command
+  fails Unknown carrying every accepted id; check open orders before retrying.
+  It is never resent. The next orders snapshot shows what actually landed.
+- A parent large enough to split into several native lots, or an invalid
+  trigger, is refused NotSent before anything is sent.
+- Cancelling or amending a leg of a group that is still being confirmed is
+  refused NotSent until the placement command finishes.
+
