@@ -118,7 +118,7 @@ impl Venue for Probe {
                         attempts: 1,
                     },
                     crate::request_context::plan::SerialPolicy {
-                        credential: write_policy().write_credential.unwrap(),
+                        credential: Some(write_policy().write_credential.unwrap()),
                         pacing: None,
                         refusals_complete: false,
                     },

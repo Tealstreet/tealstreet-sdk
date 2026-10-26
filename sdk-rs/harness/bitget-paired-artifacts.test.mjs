@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
-import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256 } from './bitget-paired-steady.mjs';
+import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256, identicalBitgetShipping } from './bitget-paired-steady.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 function fixture(t) {
@@ -44,6 +44,24 @@ test('reader derives seals from independent package bytes and retains all 160 or
   assert.equal(result.cohorts.length, 8);
   assert.ok(result.cohorts.every(row => row.evidence.raw.length === 20));
   assert.equal(result.archives.baseline.files['safe_cex_wasm_bg.wasm'], sha('fixture'));
+});
+
+test('identity is computed from every shipped node/web file, never a supplied hash claim', t => {
+  const x = fixture(t);
+  for (const arm of ['baseline', 'candidate']) for (const target of ['node', 'web']) {
+    const names = ['safe_cex_wasm.js', 'safe_cex_wasm_bg.wasm', 'safe_cex_wasm.d.ts', 'safe_cex_wasm_bg.wasm.d.ts',
+      ...(target === 'node' ? ['package.json'] : [])];
+    for (const name of names) x.write(`${arm}/shipped/${target}/${name}`,
+      target === 'node' && !name.endsWith('.d.ts') ? readFileSync(resolve(x.root, arm, 'node', name)) : `fixture ${target}/${name}`);
+  }
+  assert.equal(identicalBitgetShipping(readBitgetPairedEvidence(x.root).archives), true);
+  const plan = x.json('plan.json'); plan.shippingIdentical = true; plan.shippingSha256 = sha('forged'); x.write('plan.json', plan);
+  x.write('candidate/shipped/web/safe_cex_wasm.js', 'one byte different');
+  const changed = readBitgetPairedEvidence(x.root);
+  assert.equal(changed.archives.candidate.shipped.web['safe_cex_wasm.js'], sha('one byte different'));
+  assert.equal(identicalBitgetShipping(changed.archives), false);
+  rmSync(resolve(x.root, 'candidate/shipped/web/safe_cex_wasm.d.ts'));
+  assert.throws(() => readBitgetPairedEvidence(x.root), /shipped.*inventory/);
 });
 
 test('duplicate raw files, symlink escape, truncated inventories and protocol edits fail closed', async t => {
