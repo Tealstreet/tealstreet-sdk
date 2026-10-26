@@ -199,14 +199,22 @@ impl OrderLocks {
             || self.waiting.iter().any(|(id, ..)| *id == command)
     }
 
-    /// Admission for a placement or amend that holds no lock scope: refused
-    /// while its symbols are uncertain, else marked for an Unknown outcome.
-    pub fn admit_unscoped(&mut self, command: &Command, store: &Store) -> Result<(), Refusal> {
+    /// Admission for a command that holds no lock scope: a placement or amend
+    /// is refused (with its ID) while its symbols are uncertain, else marked for
+    /// an Unknown outcome; a cancel-all on an uncertain symbol is refused when
+    /// the venue fences it. It holds nothing, so it cannot conflict or fill capacity.
+    pub fn admit_unscoped(
+        &mut self,
+        command: &Command,
+        store: &Store,
+        fence_cancel_all: bool,
+    ) -> Result<(), CommandId> {
         let Some((command, scope)) = scope_of(command, store) else {
             return Ok(());
         };
-        if self.fenced(&scope) {
-            return Err(Refusal::Uncertain(command));
+        let cancel_all = |symbol: &String| fence_cancel_all && self.uncertain(symbol);
+        if self.fenced(&scope) || scope.all_symbol.as_ref().is_some_and(cancel_all) {
+            return Err(command);
         }
         self.mark(command, &scope);
         Ok(())
@@ -227,6 +235,11 @@ impl OrderLocks {
             let symbols = (!scope.unknown_symbol).then(|| scope.symbols.clone());
             self.marks.push((command, symbols));
         }
+    }
+
+    #[cfg(test)]
+    pub fn marked(&self) -> usize {
+        self.marks.len()
     }
 
     /// Settles an admitted placement or amend's mark: an Unknown outcome fences
