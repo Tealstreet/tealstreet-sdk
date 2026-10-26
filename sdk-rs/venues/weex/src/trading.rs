@@ -6,6 +6,7 @@ use crate::{Pending, Task, WeexFutures};
 mod context;
 use context::{Entry, record};
 use safe_cex_engine::Level;
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     MarginType, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus,
@@ -768,7 +769,12 @@ impl WeexFutures {
             }
             _ => return Some(command),
         };
-        let entry = Entry::begin(cx, self.credentials.primary.as_ref())?;
+        let primary = self
+            .slots
+            .select(CredentialRole::Mutation)
+            .ok()
+            .map(|(_, identity)| identity);
+        let entry = Entry::begin(cx, primary)?;
         // Serialize settings admission: a later command must be planned from
         // acknowledged settings, never an older in-flight mode/margin cache.
         if let Command::SetLeverage { command: id, .. }
@@ -1105,7 +1111,7 @@ impl WeexFutures {
                 return None;
             }
         };
-        if !steps.is_empty() && self.credentials.primary.is_none() {
+        if !steps.is_empty() && !self.slots.has_primary() {
             entry.reject(
                 cx,
                 not_sent("WEEX private credentials required").kind(ErrorKind::AuthInvalid),
@@ -1234,10 +1240,10 @@ impl WeexFutures {
                 );
             }
             let identity = self
-                .credentials
-                .primary
-                .as_ref()
+                .slots
+                .select(CredentialRole::Mutation)
                 .expect("admitted write credential")
+                .1
                 .clone();
             let mut pairs = step
                 .query

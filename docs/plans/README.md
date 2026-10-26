@@ -499,3 +499,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Keyless Session serial Plans | Plan and originals; source held | Before admitting a credential-free Session-authenticated serial root or changing SerialPolicy credential optionality. | [RUST_KEYLESS_SERIAL_SESSION.md](RUST_KEYLESS_SERIAL_SESSION.md) |
 
 | RUST_BACKPACK_TRIGGER_REPAIR.md | Backpack snapshot-issued trigger repair; existing core, zero-fill replacement safety, venue-only originals/source in progress. |
+
+| WEEX remaining inventory and identity custody | One immutable Slots owner; conservative inventory retained | Before changing WEEX role selection or claiming remaining lexical rows are raw senders. | [RUST_WEEX_REMAINING_INVENTORY.md](RUST_WEEX_REMAINING_INVENTORY.md) |

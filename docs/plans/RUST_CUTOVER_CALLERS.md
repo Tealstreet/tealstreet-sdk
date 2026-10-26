@@ -9231,6 +9231,30 @@ proof of normal pressure reachability. Any normally reachable fail-closed row
 goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
 supervision constants are unchanged; no generic coexistence/recovery seam.
 
+## Lighter Schnorr auth recipe and public key (P3 parts 2+3)
+
+Shared prerequisites for the Lighter venue cutover (owner codex-ih35js). Nothing
+calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
+`cfg!(feature = "schnorr")` and declares Lighter's signing ref
+`signingAlgorithm: schnorrDigest` in the same change as the eager-holder removal.
+
+- **Auth token deadline from the signing stamp.** `AuthRecipe` derives the
+  60-second deadline from the dispatch `stamp_ms` (the preparation moment), where
+  legacy `account_auth` uses `cx.now` at issue. The stamp is equal or later, so a
+  parked request's token is valid for 60 s from signing rather than from
+  queueing. Pinned by `re_preparation_replaces_entropy_and_deadline`.
+- **WS subscribe escaping.** The private subscribe frame is serialized, so it is
+  byte-equal to legacy for the real `account_all_orders/{account}` channel but
+  escapes a hostile channel instead of splicing it into JSON.
+- **Canonical public keys.** `lighter::public_key` reduces each little-endian
+  limb below the Goldilocks prime. The field could hold a limb as an unreduced
+  p (it did for the scalar n-1), where Go always reduces; all Go fixture keys
+  are canonical. Pinned by `lighter_public_keys_are_canonically_encoded`.
+- **Declared keys refused at setup.** A ref declared `schnorrDigest` with a
+  non-canonical, zero or wrong-width scalar is refused at trusted setup
+  (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
+  ref is declared at the cutover.
+
 ## Bitrue reads and listen-key sessions leave the legacy funnel (B1, #2173)
 
 Every Bitrue HTTP request except trading now runs under engine-managed authority. Trading writes stay on the legacy funnel until B2.
@@ -9460,27 +9484,15 @@ Address-keyed nonce claims without the feature now refuse instead of accepting
 stable-id text as an address subject. No current adopter uses that unsupported
 path. The additive selection errors preserve typed missing/signing-not-configured
 and setup-capability refusals without adding an auth-health latch.
+### WEEX remaining inventory and identity custody
 
-## Lighter Schnorr auth recipe and public key (P3 parts 2+3)
+WEEX keeps one immutable `Slots<Identity>` owner for selected reads, required
+Primary history, Mutation signing and private SessionAuth. The redundant venue
+identity container and per-history slot reconstruction are removed. Existing
+completeness filters, public-only suppression, primary-private eligibility,
+secondary read preference, wire bytes and all failure/outcome policy are retained.
 
-Shared prerequisites for the Lighter venue cutover (owner codex-ih35js). Nothing
-calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
-`cfg!(feature = "schnorr")` and declares Lighter's signing ref
-`signingAlgorithm: schnorrDigest` in the same change as the eager-holder removal.
-
-- **Auth token deadline from the signing stamp.** `AuthRecipe` derives the
-  60-second deadline from the dispatch `stamp_ms` (the preparation moment), where
-  legacy `account_auth` uses `cx.now` at issue. The stamp is equal or later, so a
-  parked request's token is valid for 60 s from signing rather than from
-  queueing. Pinned by `re_preparation_replaces_entropy_and_deadline`.
-- **WS subscribe escaping.** The private subscribe frame is serialized, so it is
-  byte-equal to legacy for the real `account_all_orders/{account}` channel but
-  escapes a hostile channel instead of splicing it into JSON.
-- **Canonical public keys.** `lighter::public_key` reduces each little-endian
-  limb below the Goldilocks prime. The field could hold a limb as an unreduced
-  p (it did for the scalar n-1), where Go always reduces; all Go fixture keys
-  are canonical. Pinned by `lighter_public_keys_are_canonically_encoded`.
-- **Declared keys refused at setup.** A ref declared `schnorrDigest` with a
-  non-canonical, zero or wrong-width scalar is refused at trusted setup
-  (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
-  ref is declared at the cutover.
+The remaining conservative request/signing/credential inventory describes managed
+failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
+identity options. This slice retains those rows and all checker rules; completion
+of the custody audit does not claim inventory zero or a new endpoint migration.
