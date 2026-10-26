@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
+import { WOOXExchange } from '../reference/woo/woo.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderType, PositionMode, PositionSide } from '../../types';
 
@@ -138,7 +138,7 @@ describe('WOO legacy allocation-conscious list building', () => {
     expect(emitError).toHaveBeenCalledWith('Detected isolated margin position. Only cross margin is supported');
   });
 
-  it('maps valid limit orders in source order while skipping invalid rows', async () => {
+  it('maps valid limit orders in source order while skipping untracked symbols', async () => {
     const setup = makeExchange();
     exchange = setup.exchange;
     vi.spyOn(exchange, 'fetchOrdersRecursively').mockResolvedValue([
@@ -152,7 +152,6 @@ describe('WOO legacy allocation-conscious list building', () => {
         price: 100,
         status: 'NEW',
       },
-      { symbol: 'PERP_BTC_USDT', quantity: 1 },
       { order_id: 999, symbol: 'PERP_UNKNOWN_USDT', quantity: 1 },
       {
         order_id: 1,

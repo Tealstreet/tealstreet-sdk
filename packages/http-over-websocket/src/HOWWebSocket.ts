@@ -64,6 +64,8 @@ export class HOWWebSocket {
   private _emitter: Emitter.TinyEmitter = new (Emitter as any)();
 
   retries = 0;
+  /** Invalidates readiness across connection or authentication transitions. */
+  epoch = 0;
 
   private _activeEventHandlers = new Set<string>();
 
@@ -84,7 +86,10 @@ export class HOWWebSocket {
 
   private url: string | undefined;
 
-  constructor(url: string) {
+  constructor(
+    url: string,
+    private readonly WebSocketCtor?: typeof WebSocket,
+  ) {
     if (!url) {
       throw new Error('No HOW websocket endpoint provided');
     }
@@ -100,8 +105,9 @@ export class HOWWebSocket {
     // 3. Force HTTP/1.1 via ALPNProtocols (WebSocket upgrade doesn't work over HTTP/2)
     const options: Record<string, unknown> = {};
 
-    if (NodeWebSocket) {
-      options.WebSocket = NodeWebSocket;
+    const Socket = this.WebSocketCtor ?? NodeWebSocket;
+    if (Socket) {
+      options.WebSocket = Socket;
       options.headers = {
         Origin: 'https://preview.tealstreet.io',
         'User-Agent':
@@ -138,9 +144,10 @@ export class HOWWebSocket {
     return false;
   };
 
-  private validateAndSend(message: string, data: any, isTokenSend = false): boolean {
+  private validateAndSend(message: string, data: any, isTokenSend = false, redacted = false): boolean {
     // Pre-check WebSocket state to avoid the opaque DOMException
     if (this.ws?.readyState !== WebSocket.OPEN) {
+      if (redacted) throw new Error('Prepared HTTP tunnel connection is not open');
       const wsState = this.ws?.readyState;
       const stateNames = ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'];
       const stateName = wsState !== undefined ? stateNames[wsState] : 'undefined';
@@ -183,6 +190,12 @@ export class HOWWebSocket {
     }
   };
 
+  /** Already validated/serialized at binding; no callbacks before raw send. */
+  sendPrepared = (message: string, url: string) => {
+    this.validateAndSend(message, { type: 'rpc.http' }, false, true);
+    this.trackDomainFromUrl(url);
+  };
+
   connectAndSubscribe = () => {
     this.isInitialized = true;
     if (!this.isDisposed) {
@@ -197,6 +210,7 @@ export class HOWWebSocket {
   };
 
   onOpen = async () => {
+    this.epoch++;
     if (!this.isDisposed) {
       this.isOpen = true;
 
@@ -220,6 +234,7 @@ export class HOWWebSocket {
   };
 
   sendToken = (data: any) => {
+    this.epoch++;
     this.isTokenSent = true;
     this.authState = HOWWebSocketAuthState.Unknown;
     const message = JSON.stringify(data);
@@ -231,6 +246,7 @@ export class HOWWebSocket {
       try {
         const json = await decodeTradeTunnelMessage(msgData);
         if (json?.type === 'rpc.auth') {
+          this.epoch++;
           //{"type":"rpc.auth","error":"ExpiredSignature"}
           if (Boolean(json?.error)) {
             console.error(`[HOW] Tunnel auth failed: ${json.error}`);
@@ -278,6 +294,7 @@ export class HOWWebSocket {
   };
 
   onClose = async () => {
+    this.epoch++;
     this.isOpen = false;
     this.isTimeSynced = false;
     this.isTokenSent = false;

@@ -1,6 +1,0 @@
-{
-  "base_sha": "b54d54e646fb15e46b644fd792c6cdbc7bceab08",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/public_subscriptions.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/public_subscriptions.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/public_subscriptions.rs\n@@ -165,7 +165,7 @@\n         let id = state.message_id.get();\n         state.message_id.set(id + 1.0);\n         // The source reads/slices the live array after resolving the callees and id++.\n-        let channels = channels.slice(i, i + 100.0)?;\n+        let channels = match channels.slice(i, i + 100.0) { Ok(channels) => channels, Err(_) => return Ok(()) };\n         let frame = SubscriptionFrame {\n             id,\n             method: \"subscribe\",\n",
-  "expected_named_assertion": "CRYPTOCOM-SUBSCRIPTIONS-NATIVE-RETURN frames-index-throw"
-}

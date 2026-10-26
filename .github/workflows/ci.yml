@@ -5,7 +5,7 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: [master, feat/rust-rewrite]
   pull_request:
   workflow_dispatch: # manual re-run (e.g. validation after a sync)
 
@@ -21,12 +21,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: yarn
-      - run: yarn install --frozen-lockfile --network-timeout 600000
-      - run: yarn check:licenses
-      - run: yarn typecheck
-      - run: yarn lint
-      - run: yarn test
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - run: corepack yarn -s node --test .github/tests/*.test.cjs
+      - run: corepack yarn check:licenses
+      - run: corepack yarn typecheck
+      - run: corepack yarn lint
+      - run: corepack yarn test
 
 
   # Open source (MIT): scan every new commit for secrets. Known test fixtures
@@ -64,6 +70,24 @@ jobs:
             range="${PR_BASE}..${PR_HEAD}"
           elif [ "$EVENT" = "push" ] && [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
             range="${PUSH_BEFORE}..${PUSH_AFTER}"
+          elif [ "$EVENT" = "push" ]; then
+            range="origin/master..${PUSH_AFTER:-HEAD}"
+            if git show-ref --verify --quiet refs/remotes/origin/feat/rust-rewrite; then
+              # Landing history is the baseline for branches descended from it.
+              # The common ancestor preserves unique commits on older branches.
+              if landing_base="$(git merge-base origin/feat/rust-rewrite "${PUSH_AFTER:-HEAD}")"; then
+                landing_only="$(git rev-list -1 "$landing_base" --not origin/master)"
+                if [ -n "$landing_only" ]; then
+                  range="${landing_base}..${PUSH_AFTER:-HEAD}"
+                fi
+              else
+                merge_base_status=$?
+                if [ "$merge_base_status" -ne 1 ]; then exit "$merge_base_status"; fi
+              fi
+            else
+              landing_ref_status=$?
+              if [ "$landing_ref_status" -ne 1 ]; then exit "$landing_ref_status"; fi
+            fi
           else
             range="origin/master..${PUSH_AFTER:-HEAD}"
           fi

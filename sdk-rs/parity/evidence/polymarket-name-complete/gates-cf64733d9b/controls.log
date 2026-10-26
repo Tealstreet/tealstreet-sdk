@@ -1,9 +1,0 @@
-baseline: exit 0
-native-return-mutant: exit 101
-native-return-restored: exit 0
-source-return-mutant: exit 101
-source-return-restored: exit 0
-native-hidden-read-mutant: exit 101
-native-hidden-read-restored: exit 0
-source-hidden-read-mutant: exit 101
-source-hidden-read-restored: exit 0

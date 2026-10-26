@@ -1,0 +1,17 @@
+[package]
+name = "safe-cex-venue-woo"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+safe-cex-engine = { workspace = true, features = ["order-locks", "managed-sockets"] }
+safe-cex-crypto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }

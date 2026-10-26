@@ -19,6 +19,26 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 - **CCXT WS reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/hyperliquid.ts
 - **HIP-3 data flow report**: `docs/HIP3_API_CAPABILITIES_MATRIX.md` (local, detailed WS/REST coverage)
 
+## Rust public-feed ownership
+
+The Rust perpetual engine uses one account socket for private and public topics.
+`PublicFeedPolicy::Disabled` and `Shared` retain private subscriptions, account
+reconciliation and pings, while skipping public mids/contexts, books and candles
+on initial connection and reconnect. Public subscription commands are intercepted
+by the engine for both policies; unsolicited public payloads on the private socket
+are ignored. Shared ticker input updates native state without replacing local
+market metadata or account settings. Shared quote changes invoke native account
+revaluation so UPNL and available margin follow provider prices.
+
+## Rust margin settings and standalone spot orders
+
+HIP-3 assets get no `activeAssetData` subscription (channel limit), so the Rust
+engine's startup settings seed is what leverage/margin writes start from. Assets
+with `onlyIsolated` or `marginMode: strictIsolated | noCross` seed isolated, and
+every seed caps leverage at the market maximum. Cross on such an asset is refused
+before signing. The standalone `hyperliquidspot` engine ignores `orderUpdates`, so
+it reads `frontendOpenOrders` at startup, on each order refresh and every 10 s.
+
 ## File Structure
 
 ### Core Perpetual Futures
@@ -52,6 +72,11 @@ This directory contains both the Hyperliquid perpetual futures and spot exchange
 | `hyperliquidspot.rateLimiter.ts` | Spot rate limiter.                                                                     |
 | `hyperliquidspot.ws-public.ts`   | Spot public WebSocket.                                                                 |
 | `hyperliquidspot.ws-private.ts`  | Spot private WebSocket.                                                                |
+
+Spot private subscriptions use current `spotState`, `userFills`, notifications
+and non-funding ledger updates. `activeAssetData` supports perpetuals only;
+legacy balance response parsing remains for compatibility. Spot fill callbacks
+preserve execution `tid` as `id` and native `oid` as `orderId` for chasers.
 
 ### Other
 
@@ -364,6 +389,24 @@ Passing `null` or omitting the argument removes the existing schedule by
 omitting `action.time` from the signed L1 action; never serialize `time: null`.
 The request uses the normal monotonic nonce, vault-aware phantom-agent
 signature, `/exchange` transport, and propagates transport/upstream errors.
+
+Rust perpetuals expose the same method through the native `scheduleCancel`
+capability (wire flag 25); the spot adapter refuses it. SDK and direct host ingress
+reject unsafe numbers before JSON can turn them into a clear. Native admission
+and dispatch both recheck the five-second deadline using the synchronized host
+clock. Controls share the existing 334 ms FIFO, signer nonce and vault-aware
+signer with ordinary writes, without requiring a catalogue or builder check.
+Nonce sharing remains bounded to one native process or WASM module.
+
+Native completion requires a 2xx `status: ok` object response with `type: default`
+and absent/null data or an empty `statuses` list. This conservative control ACK
+shape is inferred from the existing SDK control response, not a live captured
+schedule ACK. An explicit native `err` string below HTTP 500 (except 408) proves
+rejection; transport loss, 408, 5xx and malformed ACKs remain uncertain. Both
+native and worker/host interruption paths preserve that uncertainty, perform no
+retry and never claim account/order reads prove the switch is armed. Preflight
+and signing refusals remain `notSent`. Native success resolves the SDK's void
+promise without mutating orders, settings or a local scheduling flag.
 
 Lifecycle ownership is deliberately explicit. Safe-cex does not auto-arm,
 refresh, or clear this switch during startup/disposal, and there is no implicit
@@ -809,7 +852,29 @@ The alias lands on **`base` and `prettySymbol`**; `symbol` and `id` keep the ven
 
 **The quote is NOT always USDC — read `universe[].tokens[1]`.** `tokens` is `[baseIndex, quoteIndex]` into the top-level `tokens` table. A live probe on 2026-07-27 found 299 USDC pairs but also **11 USDH, 5 USDT0, and 1 USDE**. Hardcoding `USDC` in the display symbol produced **five duplicate symbols** (`HYPE/USDC` three times — the real one plus `HYPE/USDH` and `HYPE/USDT0`), and because `store.marketsBySymbol` is symbol-keyed, the duplicates silently clobbered each other and made markets unreachable. Reading the real quote token yields 284 live pairs with **zero** collisions. Skip any pair whose base or quote token is missing from the table.
 
-**The asset-context join is by `coin`, NOT positional.** This is the single most dangerous difference from the perp path. `metaAndAssetCtxs` returns `assetCtxs[i]` aligned with `universe[i]`, so the perp code indexes positionally. `spotMetaAndAssetCtxs` does **not**: a live probe on 2026-07-27 returned **316 universe entries against 707 asset contexts**, out of universe order. A positional join mismatched **245 of 316 pairs** — i.e. it silently prices most spot markets off an unrelated asset, with no error. Join on `SpotAssetCtx.coin`. Locked by `__tests__/audit-regressions/hyperliquid.spot-markets-merge.test.ts`.
+**The asset-context join is by `coin`, NOT positional.** This is the single most dangerous difference from the perp path. `metaAndAssetCtxs` returns `assetCtxs[i]` aligned with `universe[i]`, so the perp code indexes positionally. `spotMetaAndAssetCtxs` does **not**: a live probe on 2026-07-27 returned **316 universe entries against 707 asset contexts**, out of universe order. A positional join mismatched **245 of 316 pairs** — i.e. it silently prices most spot markets off an unrelated asset, with no error. Join on `SpotAssetCtx.coin`. Locked by `__tests__/audit-regressions/hyperliquid.spot-markets-merge.test.ts`. The standalone spot adapter also accepts the official documented coinless format, strictly when the entire contexts array omits `coin` and its length equals the universe. Mixed named/unnamed or differently sized arrays never use positional fallback.
+
+### Rust standalone spot product
+
+`hyperliquidspot` selects `Hyperliquid::new_spot` in the existing Rust crate.
+Combined spot/perpetual accounts are the `hyperliquid` engine with
+`enable_spot_markets` (below).
+Native spot asset IDs are `10000 + universe.index`, with eight-minus-size
+price decimals and fixed 1x/cross settings. Both token indices determine the
+display symbol and actual quote: `HYPE/USDC` and `HYPE/USDH` must stay distinct.
+USD valuation prefers direct USDC prices, otherwise converting through at most
+three market hops; unpriced holdings retain raw amounts with zero notional.
+Raw token currencies and USD coin
+valuation travel in the balance frame; zero derivative positions are represented
+by settings. Private tapes are documented inputs, not live funded-account proof.
+
+Spot book subscriptions use full precision plus documented `nSigFigs` 2–5;
+the old 1/6 subscriptions could close the upstream connection. Both TS and
+Rust retain finest-to-coarsest book aggregation. Placement returns string IDs
+for resting and immediately filled acknowledgements; `waitingForTrigger`
+contributes no invented ID. Native cancel/amend race and stale-balance guards
+are independently tested. Inherited empty history capabilities remain branded.
+See `docs/plans/RUST_SPOT_PRODUCTS.md` for review and gate evidence.
 
 Other spot invariants worth keeping:
 
@@ -818,6 +883,43 @@ Other spot invariants worth keeping:
 - **Pairs with a null `midPx`, or with no matching asset context at all, are skipped** (`if (!sourceTicker?.midPx) continue`) rather than published as unpriceable markets. The no-context case is the likelier one given the 316-universe-vs-707-contexts shape.
 - **Spot loading is best-effort**, bounded by `SPOT_MARKETS_LOAD_TIMEOUT_MS` and swallowing its own errors. A slow or failing spot call must never delay or break perp startup.
 - `getSpotCollateralMarkPrice()` now prefers the real `{COIN}/USDC` spot ticker and falls back to the perp ticker, fixing spot-only tokens that previously contributed **0 notional** to a unified-account balance. Note this only helps accounts that opted into spot — with the toggle off no spot tickers exist, so the 0-notional gap remains for them. The field preference within a ticker is deliberately unchanged (`mark -> last -> index`), because this balance path is NOT gated by `enableSpotMarkets` and re-ordering would re-value collateral for users who never opted in.
+
+### Rust merged spot markets (`enable_spot_markets`)
+
+The perp engine's `spot_markets` mode mirrors `fetchSpotMarketsAndTickers`;
+the standalone `spot` mode is unchanged. Every per-order decision reads
+`market.is_spot`, never the venue mode.
+
+- **Discovery**: `spotMetaAndAssetCtxs` runs alongside the perp read. Its
+  result is held until the perp and HIP-3 catalogue is published, so spot lists
+  after both, as in TS. The Unit alias goes on `base`/`pretty_symbol` only.
+  Spot tickers carry no oracle or funding. A failed read logs a warning and
+  retries on the discovery backoff (key `@spot`); perps never wait on it.
+- **Settings and streams**: spot pairs seed 1x cross and get no
+  `activeAssetData`. `setLeverage`/`setMarginType` on a spot pair are no-ops.
+  `spotState` is subscribed and REST-refreshed whenever spot holdings are
+  tracked (`tracks_spot_holdings`: unified/portfolio or spot enabled).
+- **Balance**: standard accounts keep perp-only totals; holdings publish as
+  coin balances valued by the TS `getSpotCollateralMarkPrice` ladder, written
+  only when the valuation changes.
+- **Orders and fills**: spot rows from `frontendOpenOrders`/`orderUpdates` are
+  kept. Cancels use the spot asset id (10000 + index). A spot fill emits a fill
+  event and refreshes holdings, never a position.
+- **Trading**: 8 - szDecimals price decimals; never reduce-only; base price
+  last, mid, mark, index.
+
+- **Underlying token disclosure**: each merged spot pair publishes its venue
+  token name and full name in the typed `UNDERLYING_TOKENS` frame section; the
+  bridge applies them as TS's `info.hlTokenName`/`hlTokenFullName`, which the
+  web Margin "Underlying Token" row reads (e.g. `UBTC (Unit Bitcoin)` behind
+  `BTC/USDC`). This is a risk disclosure for a wrapped asset behind a familiar
+  name; keep it whenever the display alias exists.
+- Until the spot catalogue is committed, spot open-order rows are skipped
+  rather than invalidating the snapshot, so a failing spot read never hides
+  perp orders; standard accounts never value spot as collateral.
+
+Gated by `sdk-rs/venues/hyperliquid/tests/spot_markets.rs` and the
+`hyperliquid-spot` private replay (`rust:private-tape-hyperliquid --spot`).
 
 ### Case-Insensitive Lookup
 
@@ -999,6 +1101,11 @@ Uses the singleton `HyperliquidCrossCache`:
 - Does NOT use `sessionStorage` for fills (would persist across page refresh, skipping fills)
 - `sessionStorage` IS used for pre-placement and pending order caches
 - Fill snapshots (`isSnapshot: true`) are processed for realized PnL tracking but do not emit fill events
+
+Rust FILLS revision 2 preserves `tid` as the execution event `id` for perp,
+merged spot and spot-only accounts, with `oid` retained separately as `orderId`.
+Live financial conventions and the existing snapshot/deduplication rules stay
+the same.
 
 ### Realized PnL Tracking
 
@@ -1194,6 +1301,10 @@ Four properties, every one of them measured, and each silently wrong if assumed:
   degenerate to one call. The **2000-row ceiling is a retention limit, not a page size** —
   there is no cursor past it, so unlike every other private read on this venue, order
   history is NOT address-queryable-complete.
+  Rust emits `history.incomplete` with the actual query command before returning
+  this retained history, so the host flags the owning array and routes its
+  warning only to that caller. Transition collapse, time/limit filtering and
+  strict history failures retain their existing behavior.
 - **`sz` is REMAINING, `origSz` is original.** A `filled` row carries `sz: "0.0"`; a
   cancelled one carries `sz === origSz`. Reading `sz` as the amount reports every completed
   order as size zero.
@@ -1430,3 +1541,11 @@ another client. Frames with a cloid but no record still get `clientOrderId`
 stamped, so the web's exact match works for them once REST/WS delivers.
 
 **Cancel** still goes by oid; `cancelByCloid` exists but nothing needs it yet.
+
+Rust unified/portfolio startup caches a native spot collateral snapshot when a
+nonstable conversion quote or the initial core exposure baseline is unavailable.
+It retains the prior USD aggregate; cold private accounts publish no synthetic
+zero balance. Valid pending live snapshots fence older REST reads immediately.
+A real live/shared/context quote or the first core snapshot rechecks that native
+collateral and derives wallet principal using current proven position PnL.
+Ordinary successful private snapshots keep the existing valuation cadence.

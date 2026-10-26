@@ -140,6 +140,14 @@ chaser-owned orderIds for O(1) membership, then re-scanning
 per matched order. Now: single pass over chasers builds an
 `orderId → ActiveChaser` map; per matched order is O(1).
 
+Frame mode sends native orders in binary frames and `activeChasers` in derived
+store payloads. The main exchange reuses `chaserOrderUpdates` after the first
+frame, so either arrival order restores the same chaser tags without forwarding
+another orders array. It commits changed tags through `addOrUpdateOrders`,
+with a reentrancy guard, so update-ID observers see derived-only tag changes.
+Unchanged metadata and ticker-only notifications do not mutate orders. Fresh
+native snapshots must not erase tags while the matching chase remains active.
+
 ### `DisplayedPositionsPostprocessor` skips idle algo lookups
 
 The displayed-position pass always enriches real positions, but

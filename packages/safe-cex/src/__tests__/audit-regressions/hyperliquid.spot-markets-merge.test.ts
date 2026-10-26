@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { SPOT_ASSET_INDEX_OFFSET } from '../../exchanges/hyperliquid/hyperliquid.constants';
-import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, OrderSide, OrderType } from '../../types';
 
@@ -341,6 +341,8 @@ describe('hyperliquid spot markets merged into the perp container', () => {
     // directly is tautological: every `reduce_only:` call site could be
     // reverted to the pre-fix bug and a helper-level test would still pass.
     const exchange = createExchange();
+    // Builder approval is an account fact, unrelated to the spot wire flags.
+    (exchange as any)._builderFeeApproved = false;
 
     exchange.store.update({
       markets: [

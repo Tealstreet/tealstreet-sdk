@@ -1,6 +1,0 @@
-{
-  "base_sha": "b54d54e646fb15e46b644fd792c6cdbc7bceab08",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/public_subscriptions.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/public_subscriptions.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/public_subscriptions.rs\n@@ -245,7 +245,7 @@\n     depth: Option<f64>,\n     transport: &T,\n ) -> Result<(), T::Error> {\n-    let channel = \"book.\"\n+    let channel = \"wrong.\"\n         .encode_utf16()\n         .chain(symbol.iter().copied())\n         .chain(\".\".encode_utf16())\n",
-  "expected_named_assertion": "CRYPTOCOM-SUBSCRIPTIONS-NATIVE-STATE book-default"
-}

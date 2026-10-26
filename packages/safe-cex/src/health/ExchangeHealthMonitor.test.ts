@@ -361,3 +361,63 @@ describe('ExchangeHealthMonitor', () => {
     });
   });
 });
+
+describe('typed classification', () => {
+  it('uses the error kind instead of matching text', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    expect(monitor.processMessage('something new happened', true, { kind: 'authInvalid' })).toBe('auth_invalid');
+    expect(monitor.processMessage('invalid api key', true, { outcome: 'unknown' })).toBe('auth_invalid');
+    expect(monitor.processMessage('unmatched', true, { kind: 'rateLimited' })).toBe('rate_limit');
+    // A catch-all kind never hides a text-detected auth failure.
+    expect(monitor.processMessage('invalid api key', true, { kind: 'rejected' })).toBe('auth_invalid');
+    expect(monitor.processMessage('something unmatched', true, { kind: 'rejected' })).toBe('order_rejected');
+  });
+});
+
+
+describe('coded native health', () => {
+  it('uses the code despite changed or misleading auth wording', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    const event = (code: string, message: string) => ({ code, message, level: 'warn' as const, fields: {} });
+    expect(monitor.processEvent(event('auth.rejected', 'new credential refusal'))).toBe('auth_invalid');
+    expect(monitor.processEvent(event('request.failed', 'invalid api key'))).toBe('unknown');
+    expect(monitor.processEvent(event('rate_limited', 'unauthorized'))).toBe('rate_limit');
+    expect(monitor.getErrorCount('auth_invalid')).toBe(1);
+    expect(monitor.getLastError()?.code).toBe('rate_limited');
+    expect(monitor.getState().status).toBe('error');
+    monitor.dispose();
+  });
+
+  it('keeps typed auth subcategories and ignores routine diagnostic text', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    expect(monitor.processEvent({ code: 'auth.rejected', message: '', level: 'error', fields: {} },
+      { kind: 'authExpired' })).toBe('auth_expired');
+    expect(monitor.processEvent({ code: 'auth.rejected', message: 'invalid api key', level: 'error', fields: {} },
+      { kind: 'authPermission' })).toBe('auth_permissions');
+    monitor.reset();
+    expect(monitor.processEvent({ code: 'startup.progress', message: 'invalid api key', level: 'info', fields: {} })).toBeNull();
+    expect(monitor.processEvent({ code: 'ws.closed', message: 'closed', level: 'debug', fields: {} })).toBe('network');
+    expect(monitor.isHealthy()).toBe(true);
+    monitor.dispose();
+  });
+
+  it('copies authoritative counters without counting reports twice or inferring hidden messages', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    const health = { wsOpened: 3, wsClosed: 2, reconnects: 2, authFailures: 1, httpFailures: 4,
+      rateLimited: 2, snapshotsDiscarded: 5, rowsSkipped: 7, lastPrivateMessage: 123 };
+    monitor.processEvent({ code: 'auth.rejected', message: 'refused', level: 'error', fields: {} });
+    monitor.processHealth(health);
+    monitor.processHealth(health);
+    health.rowsSkipped = 99;
+    const state = monitor.getState();
+    expect(state.engineHealth).toEqual({ ...health, rowsSkipped: 7 });
+    state.engineHealth!.wsOpened = 99;
+    expect(monitor.getState().engineHealth?.wsOpened).toBe(3);
+    expect(monitor.getErrorCount('auth_invalid')).toBe(1);
+    monitor.processHealth(undefined);
+    expect(monitor.getState().engineHealth?.rowsSkipped).toBe(7);
+    monitor.reset();
+    expect(monitor.getState().engineHealth).toBeUndefined();
+    monitor.dispose();
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 import { ENDPOINTS } from '../../exchanges/phemex/phemex.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType, PositionMode, PositionSide } from '../../types';
@@ -20,6 +20,110 @@ const createAccountResponse = (currency: 'USDT' | 'USDC', balance: string, used:
 });
 
 describe('Phemex positions and balance audit regression', () => {
+  it.each([
+    [20, 30],
+    [-20, -30],
+    [20, -30],
+    [-20, 30],
+  ])('keeps REST and WS balances equivalent with USDT/USDC UPnL %s/%s', async (usdtPnl, usdcPnl) => {
+    const store = new DefaultStore();
+    store.update({
+      markets: [
+        { id: 'BTCUSDT', symbol: 'BTCUSDT', quote: 'USDT', info: { settleCurrency: 'USDT' } },
+        { id: 'ETHUSDC', symbol: 'ETHUSDC', quote: 'USDC', info: { settleCurrency: 'USDC' } },
+      ],
+      tickers: [
+        { symbol: 'BTCUSDT', last: 100 },
+        { symbol: 'ETHUSDC', last: 200 },
+      ],
+    } as any);
+    const exchange = new PhemexExchange(
+      'phemex',
+      {
+        key: 'test',
+        secret: 'test',
+        extra: { tickInterval: Infinity },
+      } as any,
+      store,
+    );
+    const rows = [
+      { symbol: 'BTCUSDT', currency: 'USDT', size: '2', avgEntryPriceRp: String(100 - usdtPnl / 2) },
+      { symbol: 'ETHUSDC', currency: 'USDC', size: '3', avgEntryPriceRp: String(200 - usdcPnl / 3) },
+    ].map((row) => ({
+      ...row,
+      side: 'Buy',
+      posSide: 'Long',
+      posMode: 'Hedged',
+      leverageRr: '10',
+      liquidationPriceRp: '0',
+    }));
+    let usdtBalance = 1000;
+    let failUsdc = false;
+    exchange.xhr = {
+      get: vi.fn((_endpoint: string, { params: { currency } }: { params: { currency: 'USDT' | 'USDC' } }) => {
+        if (currency === 'USDC' && failUsdc) return Promise.reject(new Error('USDC unavailable'));
+        return Promise.resolve(
+          createAccountResponse(
+            currency,
+            String(currency === 'USDT' ? usdtBalance : 200),
+            currency === 'USDT' ? '100' : '20',
+            rows.filter((row) => row.currency === currency),
+          ),
+        );
+      }),
+    } as any;
+    vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined as any);
+    const expected = {
+      total: 1200 - usdtPnl - usdcPnl,
+      free: 1080,
+      used: 120,
+      upnl: usdtPnl + usdcPnl,
+      currencies: {
+        USDT: { total: 1000 - usdtPnl, free: 900, used: 100, upnl: usdtPnl },
+        USDC: { total: 200 - usdcPnl, free: 180, used: 20, upnl: usdcPnl },
+      },
+    };
+    try {
+      const snapshot = await exchange.fetchPositionsAndBalance();
+      expect(snapshot.balance).toMatchObject(expected);
+      expect(
+        exchange.privateWebsocket.commitAccountSnapshot(
+          exchange.privateWebsocket.accountStateRevision,
+          snapshot.balance,
+          snapshot.positions,
+        ),
+      ).toBe(true);
+      exchange.privateWebsocket.onMessage({
+        data: JSON.stringify({
+          positions_p: rows,
+          accounts_p: [
+            { currency: 'USDT', accountBalanceRv: '1000', totalUsedBalanceRv: '100' },
+            { currency: 'USDC', accountBalanceRv: '200', totalUsedBalanceRv: '20' },
+          ],
+        }),
+      } as MessageEvent);
+      expect(store.balance).toMatchObject(expected);
+      // A new authoritative read after a push must not change the convention.
+      await exchange.tick();
+      expect(store.balance).toMatchObject(expected);
+      usdtBalance = 1100;
+      failUsdc = true;
+      await exchange.tick();
+      expect(store.balance).toMatchObject({
+        ...expected,
+        total: expected.total + 100,
+        free: expected.free + 100,
+        currencies: {
+          USDT: { ...expected.currencies.USDT, total: 1100 - usdtPnl, free: 1000 },
+          USDC: expected.currencies.USDC,
+        },
+      });
+      expect(store.positions.map((position) => position.contracts).sort()).toEqual([2, 3]);
+    } finally {
+      exchange.dispose();
+    }
+  });
+
   it('maps one-way Buy positions from lowercase side and ignores zero-size rows', () => {
     const store = new DefaultStore();
     store.update({
@@ -221,13 +325,13 @@ describe('Phemex positions and balance audit regression', () => {
       { symbol: 'BTCUSDT', contracts: 2 },
     ]);
     expect(store.balance).toMatchObject({
-      total: 150,
+      total: 100,
       used: 15,
       free: 135,
       upnl: 50,
       currencies: {
-        USDT: { total: 100, used: 10, free: 90 },
-        USDC: { total: 50, used: 5, free: 45 },
+        USDT: { total: 80, used: 10, free: 90 },
+        USDC: { total: 20, used: 5, free: 45 },
       },
     });
   });
@@ -302,11 +406,11 @@ describe('Phemex positions and balance audit regression', () => {
       { symbol: 'BTCUSDT', contracts: 2 },
     ]);
     expect(store.balance).toMatchObject({
-      total: 150,
+      total: 130,
       used: 15,
       free: 135,
       currencies: {
-        USDT: { total: 100, used: 10, free: 90 },
+        USDT: { total: 80, used: 10, free: 90 },
         USDC: { total: 50, used: 5, free: 45 },
       },
     });

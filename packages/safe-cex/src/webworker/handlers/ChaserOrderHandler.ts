@@ -14,7 +14,17 @@ export class ChaserOrderHandler extends BaseHandler {
           ...options,
           accountName: options.accountName || this._accountName,
         };
-        chaserOrderManagerInstance.add(new ChaserOrderInstance(this._exchange, optionsWithAccount));
+        let instance: ChaserOrderInstance;
+        try {
+          // Creation reads native account state; an engine that is not ready must
+          // refuse the chase visibly rather than escape the worker message handler.
+          instance = new ChaserOrderInstance(this._exchange, optionsWithAccount);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          this._exchange.emitter.emit('error', `Chase for ${options.symbol} was not started: ${reason}`);
+          break;
+        }
+        chaserOrderManagerInstance.add(instance);
         break;
       case 'chaser:terminate':
         const id = payload.data;

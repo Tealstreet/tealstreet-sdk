@@ -230,6 +230,9 @@ export class TwapInstance {
           LogSeverity.Error,
         );
       }
+      // terminate() can run while the placement above is awaiting a reply.
+      // Its continuation must not schedule another slice on the old exchange.
+      if ([TwapStatus.Completed].includes(this.state.status)) return false;
       ordersExecuted++;
     }
 

@@ -1,0 +1,23 @@
+{
+  "instId": "CRML-USDT-SWAP",
+  "instType": "SWAP",
+  "ctType": "linear",
+  "ctVal": "1",
+  "ctValCcy": "CRML",
+  "settleCcy": "USDT",
+  "baseCcy": "",
+  "quoteCcy": "",
+  "uly": "CRML-USDT",
+  "instFamily": "CRML-USDT",
+  "state": "preopen",
+  "lotSz": "1",
+  "tickSz": "0.0001",
+  "minSz": "1",
+  "lever": "20",
+  "maxIcebergSz": "",
+  "maxLmtSz": "100000000",
+  "maxMktSz": "20000",
+  "maxStopSz": "20000",
+  "maxTriggerSz": "",
+  "maxTwapSz": ""
+}

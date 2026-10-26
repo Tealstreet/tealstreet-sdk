@@ -2,7 +2,7 @@
  * Exchange Health Monitor
  *
  * Monitors exchange error/log emits and detects common issues
- * using fuzzy pattern matching. Stores recent error context
+ * using stable engine codes (legacy TS messages use patterns). Stores recent error context
  * and exposes health state.
  *
  * Usage:
@@ -11,6 +11,10 @@
  * - Monitor ongoing health in CLI recorders and web app
  */
 
+import type { EngineEvent, EngineHealth } from '@tealstreet/safe-cex-wasm/host';
+import type { ClassifiedError } from '../commandOutcome';
+
+import { exchangeErrorCategory } from '../commandOutcome';
 import {
   DEFAULT_ERROR_PATTERNS,
   EXCHANGE_SPECIFIC_PATTERNS,
@@ -22,8 +26,20 @@ import {
 
 export type HealthStatus = 'healthy' | 'degraded' | 'error';
 
+/** Kinds precise enough to override text classification. */
+const SPECIFIC_KINDS: ReadonlySet<string> = new Set([
+  'authInvalid',
+  'authExpired',
+  'authPermission',
+  'rateLimited',
+  'venueUnavailable',
+  'network',
+  'timeout',
+]);
+
 export interface ErrorEntry {
   category: ErrorCategory;
+  code?: string;
   message: string;
   timestamp: number;
   severity: ErrorSeverity;
@@ -35,6 +51,8 @@ export interface HealthState {
   recentErrors: ErrorEntry[];
   errorCounts: Partial<Record<ErrorCategory, number>>;
   lastUpdated: number;
+  /** Authoritative engine counters, including events hidden by the minimum log level. */
+  engineHealth?: EngineHealth;
 }
 
 export interface ExchangeHealthMonitorOptions {
@@ -78,12 +96,19 @@ export class ExchangeHealthMonitor {
    * Process an error or log message and update health state
    * @param message - The message to analyze
    * @param isError - Whether this came from an 'error' event (vs 'log')
+   * @param classified - The 'error' event's typed classification; its kind wins over text
    * @returns The detected category, or null if no pattern matched
    */
-  processMessage(message: string, isError: boolean = false): ErrorCategory | null {
+  processMessage(message: string, isError: boolean = false, classified?: ClassifiedError): ErrorCategory | null {
     if (!message || typeof message !== 'string') {
       return null;
     }
+
+    // Specific kinds win; catch-all kinds (rejected, invalidInput, internal, unsupported)
+    // defer to text patterns, which know venue auth/permission codes the engine leaves generic.
+    const typed = exchangeErrorCategory(classified);
+    const specific = typed && classified?.kind && SPECIFIC_KINDS.has(classified.kind);
+    if (typed && specific) return this.recordTyped(typed, message);
 
     const lowerMessage = message.toLowerCase();
 
@@ -100,6 +125,8 @@ export class ExchangeHealthMonitor {
       }
     }
 
+    if (typed) return this.recordTyped(typed, message);
+
     // If it's explicitly an error but no pattern matched, record as unknown
     if (isError) {
       this.recordError('unknown', message, 'warning');
@@ -109,12 +136,63 @@ export class ExchangeHealthMonitor {
     return null;
   }
 
+  /** Classify native events without inspecting message wording. */
+  processEvent(event: EngineEvent, classified?: ClassifiedError): ErrorCategory | null {
+    const typed = exchangeErrorCategory(classified);
+    let category: ErrorCategory;
+    switch (event.code) {
+      case 'auth.rejected':
+        category = typed === 'auth_expired' || typed === 'auth_permissions' ? typed : 'auth_invalid';
+        break;
+      case 'rate_limited':
+      case 'request.paused':
+        category = 'rate_limit';
+        break;
+      case 'ws.closed':
+      case 'ws.reconnect':
+      case 'ws.disconnected':
+      case 'stream.unavailable':
+      case 'http.failed':
+        category = 'network';
+        break;
+      case 'order.rejected':
+      case 'child_leg.failed':
+        category = typed ?? 'order_rejected';
+        break;
+      default:
+        if (event.level !== 'warn' && event.level !== 'error') return null;
+        category = typed ?? 'unknown';
+    }
+    const severity = category.startsWith('auth_') ? 'critical'
+      : event.level === 'warn' || event.level === 'error' ? 'warning' : 'info';
+    this.recordError(category, event.message, severity, event.code);
+    return category;
+  }
+
+  /**
+   * Refresh from exchange.getHealth(). Never derive lifetime counters from
+   * emitted events: minimum-level filtering and engine auth dedupe hide some.
+   * Event history/category counts describe reports observed by this monitor.
+   */
+  processHealth(health: EngineHealth | undefined): void {
+    if (!health) return;
+    this.state.engineHealth = { ...health };
+    this.state.lastUpdated = Date.now();
+  }
+
+  private recordTyped(category: ErrorCategory, message: string): ErrorCategory {
+    const severity = this.patterns.find((pattern) => pattern.category === category)?.severity ?? 'warning';
+    this.recordError(category, message, severity);
+    return category;
+  }
+
   /**
    * Record an error and update health state
    */
-  private recordError(category: ErrorCategory, message: string, severity: ErrorSeverity): void {
+  private recordError(category: ErrorCategory, message: string, severity: ErrorSeverity, code?: string): void {
     const entry: ErrorEntry = {
       category,
+      ...(code === undefined ? {} : { code }),
       message,
       timestamp: Date.now(),
       severity,
@@ -171,6 +249,7 @@ export class ExchangeHealthMonitor {
   getState(): HealthState {
     return {
       ...this.state,
+      ...(this.state.engineHealth ? { engineHealth: { ...this.state.engineHealth } } : {}),
       recentErrors: [...this.state.recentErrors],
       errorCounts: { ...this.state.errorCounts },
     };

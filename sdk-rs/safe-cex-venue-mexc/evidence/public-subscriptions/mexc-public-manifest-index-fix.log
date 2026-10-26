@@ -1,1 +1,0 @@
-Removed six non-indexed record-field rs paths; their containing real record types remain mapped. No checker change or exemption.

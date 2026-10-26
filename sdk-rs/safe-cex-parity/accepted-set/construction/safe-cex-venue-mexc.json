@@ -1,8 +1,0 @@
-{
-  "safe_cex_venue_mexc::ws_public::Subscription": {
-    "traits": [
-      "core::clone::Clone"
-    ],
-    "reason": "Reviewed ws_public.rs::Subscription: derived Clone copies method String and optional owned JSON param as reusable subscription-frame/key data. It does not clone a live socket/handler registration or grant one-use authorization; new data retains exactly the same fields and later owned JSON mutation is separate See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
-  }
-}

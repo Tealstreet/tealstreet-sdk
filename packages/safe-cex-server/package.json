@@ -12,13 +12,15 @@
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/core-lib.eslintcache",
     "test": "run-s test-unit",
     "test-ci": "vitest run",
+    "test-wasm": "cross-env SAFE_CEX_WASM_TESTS=1 vitest run",
     "test-unit": "vitest run",
     "test-unit-watch": "vitest watch --ui",
     "typecheck": "node ../../scripts/tsc-ts6.mjs --project ./tsconfig.json --noEmit",
     "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --project ./tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@tealstreet/safe-cex": "*"
+    "@tealstreet/safe-cex": "*",
+    "@tealstreet/safe-cex-wasm": "*"
   },
   "devDependencies": {
     "@ianvs/prettier-plugin-sort-imports": "^4.7.1",

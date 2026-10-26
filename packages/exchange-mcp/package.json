@@ -23,6 +23,7 @@
   "files": [
     "dist/index.js",
     "dist/wasm/poseidon_crypto.wasm",
+    "dist/wasm/rust",
     "dist/THIRD_PARTY_LICENSES.md"
   ],
   "publishConfig": {
@@ -34,10 +35,11 @@
   "scripts": {
     "build": "tsup && node scripts/third-party-licenses.mjs",
     "start": "node dist/index.js",
-    "smoke": "node scripts/smoke.mjs && node dist/poseidon-probe.js",
+    "smoke": "node scripts/smoke.mjs && node dist/poseidon-probe.js && node scripts/rust-smoke.mjs",
     "lint": "eslint . --ext .ts --cache --cache-location ../../.cache/eslint/exchange-mcp.eslintcache",
     "test": "vitest run",
     "test-ci": "vitest run",
+    "test-wasm": "SAFE_CEX_WASM_TESTS=1 vitest run .wasm.test.ts --maxWorkers=2",
     "typecheck": "node ../../scripts/tsc-ts6.mjs --noEmit",
     "typecheck:ts7": "node ../../scripts/tsc-ts7.mjs --noEmit"
   },
@@ -46,6 +48,7 @@
     "@tealstreet/cli-core": "*",
     "@tealstreet/poseidon-crypto": "*",
     "@tealstreet/safe-cex": "*",
+    "@tealstreet/safe-cex-wasm": "*",
     "@tealstreet/script-api-core": "*",
     "@types/node": "^22.15.3",
     "tsup": "^9.0.0",

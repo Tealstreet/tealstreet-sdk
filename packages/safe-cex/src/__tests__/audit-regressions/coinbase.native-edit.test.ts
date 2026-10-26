@@ -2,8 +2,8 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
-import { ENDPOINTS, LIST_ORDERS_RESPONSE, ORDER_EVENT } from '../../exchanges/coinbase/coinbase.types';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
+import { ENDPOINTS, LIST_ORDERS_RESPONSE, ORDER_EVENT } from '../reference/coinbase/coinbase.types';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
 

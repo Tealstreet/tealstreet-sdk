@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
-import { ENDPOINTS } from '../../exchanges/apexomni/apexomni.types';
+import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
+import { ENDPOINTS } from '../reference/apexomni/apexomni.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
@@ -154,6 +154,9 @@ describe('ApeX Omni remaining audit regressions', () => {
       side: OrderSide.Buy,
       price: 100,
       amount: 2,
+      status: OrderStatus.Open,
+      filled: 0,
+      remaining: 2,
       reduceOnly: false,
       info: { id: 'parent' },
     } as any;
@@ -206,6 +209,9 @@ describe('ApeX Omni remaining audit regressions', () => {
       side: OrderSide.Buy,
       price: 100,
       amount: 2,
+      status: OrderStatus.Open,
+      filled: 0,
+      remaining: 2,
       reduceOnly: false,
       info: { id: 'parent' },
     } as any;

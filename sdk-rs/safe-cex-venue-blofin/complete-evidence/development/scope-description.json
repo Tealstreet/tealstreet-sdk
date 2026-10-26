@@ -1,5 +1,0 @@
-{
-  "scope": "dirty development logs, no final SHA coverage claim",
-  "knownCommittedTestLog": "blofin-complete-tests7.log measured at58b26d64bd7f7f59df7528a1d0a0a2d4b9eb12b9;7tests/60cases pass",
-  "others": "production/source/oracle in progress; errors retained, no mutation discrimination claim"
-}

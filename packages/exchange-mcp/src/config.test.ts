@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createAPI } from '@tealstreet/safe-cex/src/exchanges/bybit/bybit.api';
+import { createAPI } from '@tealstreet/safe-cex/src/__tests__/reference/bybit/bybit.api';
 
 import { readConfig } from './config';
 
@@ -45,22 +45,37 @@ describe('readConfig', () => {
     expect(readConfig(signerEnv).options.enableOptionMarkets).toBe(false);
   });
 
-  it('turns options on for an exchange that trades only options, with or without EXCHANGE_OPTIONS', () => {
-    expect(readConfig({ EXCHANGE: 'binanceoptions' }).options.enableOptionMarkets).toBe(true);
-    expect(readConfig({ EXCHANGE: 'binanceoptions', EXCHANGE_OPTIONS: 'true' }).options.enableOptionMarkets).toBe(true);
-  });
+  it.each(['binanceoptions', 'txflow', 'hyrotrader'])(
+    'refuses OUT beta accounts before construction: %s',
+    (exchange) => {
+      expect(() => readConfig({ EXCHANGE: exchange })).toThrowError(
+        expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }),
+      );
+    },
+  );
 
   it('turns inverse on only when asked', () => {
     expect(readConfig({ ...signerEnv, EXCHANGE_INVERSE: 'true' }).options.enableInverseMarkets).toBe(true);
     expect(readConfig(signerEnv).options.enableInverseMarkets).toBe(false);
   });
 
-  it('turns polling off', () => {
-    expect(readConfig(signerEnv).options.extra?.tickInterval).toBe(Number.POSITIVE_INFINITY);
+  it('opts into Rust explicitly without changing the default when unset', () => {
+    expect(readConfig({ ...signerEnv, EXCHANGE_ENGINE: 'rust' }).options.engine).toBe('rust');
+    expect(readConfig(signerEnv).options.engine).toBeUndefined();
+  });
+
+  it('accepts Bitunix Rust futures while leaving the default engine unset', () => {
+    const config = readConfig({ EXCHANGE: 'bitunix', EXCHANGE_ENGINE: 'rust' });
+    expect(config.exchange).toBe('bitunix');
+    expect(config.options.engine).toBe('rust');
+    expect(config.options.enableInverseMarkets).toBe(false);
+    expect(config.options.enableOptionMarkets).toBe(false);
+    expect(readConfig({ EXCHANGE: 'bitunix' }).options.engine).toBeUndefined();
   });
 
   it.each([
-    [{ EXCHANGE: 'nope' }, 'EXCHANGE must be one of'],
+    [{ EXCHANGE: 'nope' }, 'unsupported in this build'],
+    [{ ...signerEnv, EXCHANGE_ENGINE: 'typo' }, 'EXCHANGE_ENGINE must be rust'],
     [{ ...signerEnv, EXCHANGE_SIGNER_SIGNATURE: '' }, 'must be set together'],
     [{ ...signerEnv, EXCHANGE_API_SECRET: 'secret' }, 'set one'],
     [{ EXCHANGE: 'bybit', EXCHANGE_TESTNET: 'yes' }, 'EXCHANGE_TESTNET'],
@@ -69,7 +84,7 @@ describe('readConfig', () => {
     [{ EXCHANGE: 'bybit', EXCHANGE_INVERSE: '1' }, 'EXCHANGE_INVERSE must be true or false'],
     [{ EXCHANGE: 'bybitinverse', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on bybitinverse'],
     [{ EXCHANGE: 'bybitdemo', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on bybitdemo'],
-    [{ EXCHANGE: 'hyrotrader', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on hyrotrader'],
+    [{ EXCHANGE: 'hyrotrader', EXCHANGE_INVERSE: 'true' }, 'unsupported in this build'],
   ])('refuses %j', (env, message) => {
     expect(() => readConfig(env)).toThrow(message);
   });

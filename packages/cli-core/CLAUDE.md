@@ -44,6 +44,14 @@ every brand; `brand.flags` only decides which spelling help shows.
 
 ## Preprocess pipeline (`src/preprocess/`)
 
+Native exchanges expose an optional `syncAccountState()` read seam. Connected
+commands call it before selecting orders/positions or sizing. Account-dependent
+preprocess constants, loops and conditions synchronize before reading the store;
+conditions repeat that read per check. This is a local native-state snapshot,
+not network refresh. Session management and ticker-only predicates stay usable
+without a private snapshot. Read failures follow the normal visible command
+error path rather than placing against a stale mirror.
+
 Every command string runs through `preprocessCommand` before dispatch:
 
 1. **`expandRepeats`** — `repeat N (...)` blocks expand recursively
@@ -256,6 +264,13 @@ Three consequences worth knowing before debugging one:
   throws synchronously, and a synchronous throw inside `.map` would reject the
   whole batch — the opposite of the "a single bad slice doesn't stop the rest"
   behaviour the comment above it promises.
+
+Rust Bybit discovery carries typed instrument labels through flush frames into
+the same `Market.info` fields read by `prepareCliOrder`. The native product
+semantics integration gate exercises that real preflight after buffer transfer:
+equity, ETF, commodity and FX refuse; empty/innovation crypto pass; absent and
+new venue labels retain their unknown classification. No additional venue read
+or agreement signing occurs during preflight.
 
 ## Order sizing: "linear" does NOT imply 1 contract = 1 base coin
 
@@ -627,3 +642,23 @@ a venue lists — reproduced in a test as an entire bracket placed on `SUSDT`
 instead of `BTCUSDT`. Note the reproduction needs a TICKER, not just a market:
 `validateSymbol` checks `store.tickers`, which is why the default fixture hid
 this.
+
+## Structured command failures
+
+`executeCommand` preserves actual thrown `Error` attribution as optional
+`ExecuteResult.errorDetails`, using safe-cex's `src/commandOutcome` allowlist.
+The worker router forwards it alongside the existing error string and
+`errorReported` flag. Interrupted native writes may carry caller client IDs and
+`outcome: 'unknown'`; known partial venue rejections retain accepted order IDs
+without becoming unknown outcomes. Neither serialization nor timeout authorizes
+a retry or reconstructs missing native-generated IDs.
+The outer executor always prints a thrown failure as the command's result, even
+when safe-cex already emitted it as an exchange `'error'`: that listener filters
+suppressed categories, shows auth failures once per account and dedupes repeats,
+so it cannot guarantee the user sees a re-run rejection. The worker router skips
+its own extra `exec-log` because the executor line already reached the stream.
+
+This outer-executor contract covers errors that propagate from awaited order
+calls. Commands which aggregate or log errors internally (global close, swarm,
+and fire-and-forget nuke) keep their existing result semantics; the outer
+executor cannot recover metadata those command implementations have discarded.

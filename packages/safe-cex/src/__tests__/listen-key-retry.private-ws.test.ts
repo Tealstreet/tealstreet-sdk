@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BingxPrivateWebsocket } from '../exchanges/bingx/bingx.ws-private';
-import { BitruePrivateWebsocket } from '../exchanges/bitrue/bitrue.ws-private';
+import { BingxPrivateWebsocket } from './reference/bingx/bingx.ws-private';
+import { BitruePrivateWebsocket } from './reference/bitrue/bitrue.ws-private';
 
 // The browser often reports "online" before the link works. A listen-key fetch
 // that fails then used to leave the private socket dead until a full rebuild.

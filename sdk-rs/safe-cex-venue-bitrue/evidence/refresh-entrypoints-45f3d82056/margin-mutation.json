@@ -1,6 +1,0 @@
-{
-  "base_sha": "45f3d82056db724775dead3b9acb37ad2809d39e",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/refresh_entrypoints.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/refresh_entrypoints.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/refresh_entrypoints.rs\n@@ -44,7 +44,7 @@\n     _symbol: S,\n     emit_and_log_error: impl FnOnce(&str) -> Result<R, E>,\n ) -> Result<(), MarginTypeFailure<E>> {\n-    let msg = \"Cannot change Margin Type on Tealstreet as API does not support it. Change it on bitrue.com\";\n+    let msg = \"Cannot change Margin Type on Tealstreet as API does not support it. Change it on bitrue.com!\";\n     emit_and_log_error(msg).map_err(MarginTypeFailure::Emission)?;\n     Err(MarginTypeFailure::Unsupported(ExchangeError::new(msg)))\n }\n",
-  "expected_named_assertion": "BITRUE-REFRESH-NATIVE-RESULT margin case0 false"
-}

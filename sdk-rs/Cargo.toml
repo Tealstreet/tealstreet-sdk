@@ -1,130 +1,69 @@
 [workspace]
 resolver = "2"
-exclude = ["parity"]
 members = [
-    "safe-cex-webworker",
-    "safe-cex-types",
-    "safe-cex-num",
-    "safe-cex-store",
+    "crypto",
+    "engine",
+    "hosts/native",
+    "hosts/wasm",
+    "registry",
+    # Restored verbatim from master for the monorepo candle-server image
+    # (`-p safe-cex-candle-cache`); CI builds these three on their own.
     "safe-cex-candle-cache",
-    "safe-cex-transport",
-    "safe-cex-crypto",
-    "safe-cex-exchange",
-    "safe-cex",
-    "safe-cex-ffi",
-    "safe-cex-parity",
-    "safe-cex-registry",
-    "safe-cex-venue-bybit",
-    "safe-cex-venue-binance",
-    "safe-cex-venue-okx",
-    "safe-cex-venue-bitget",
-    "safe-cex-venue-blofin",
-    "safe-cex-venue-bitunix",
-    "safe-cex-venue-hyperliquid",
-    "safe-cex-venue-lighter",
-    "safe-cex-lighter-sdk",
-    "safe-cex-venue-paradex",
-    "safe-cex-venue-backpack",
-    "safe-cex-venue-polymarket",
-    "safe-cex-venue-grvt",
-    "safe-cex-venue-apexomni",
-    "safe-cex-venue-orderly",
-    "safe-cex-venue-woo",
-    "safe-cex-venue-coinbase",
-    "safe-cex-venue-asterdex",
-    "safe-cex-venue-kucoin",
-    "safe-cex-venue-mexc",
-    "safe-cex-venue-weex",
-    "safe-cex-venue-cryptocom",
-    "safe-cex-venue-kraken",
-    "safe-cex-venue-bitrue",
-    "safe-cex-venue-bingx",
-    "safe-cex-venue-phemex",
-    "safe-cex-venue-breakoutprop",
-    "safe-cex-venue-txflow",
+    "safe-cex-num",
+    "safe-cex-types",
+    "venues/*",
+]
+# A bare `cargo build|test` never unifies the candle-cache serde_json features
+# into the port; those crates build only with `-p`.
+default-members = [
+    "crypto",
+    "engine",
+    "hosts/native",
+    "hosts/wasm",
+    "registry",
+    "venues/*",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 publish = false
-# License remains unset until the overseer resolves public/licensing decision D4.
 
 [workspace.dependencies]
-safe-cex-venue-breakoutprop = { path = "safe-cex-venue-breakoutprop" }
-safe-cex-venue-hyperliquid = { path = "safe-cex-venue-hyperliquid" }
-# Exact regex pin is deliberate: cargo update cannot take security patches; bump this requirement explicitly.
-regex = "=1.13.1"
-# Shared signing primitives for transport and venue authentication.
+# The restored candle-cache crates only; never an engine or venue dependency.
+safe-cex-types = { path = "safe-cex-types" }
+safe-cex-num = { path = "safe-cex-num" }
+ryu-js = "1"
+ts-rs = "12.0.1"
+syn = { version = "3.0.7", features = ["full", "visit"] }
 hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
-# ECMAScript Number-to-String for raw JSON signing diagnostics.
-ryu-js = "1"
-# Serialization — keep shared versions aligned with llt/Cargo.toml.
 serde = { version = "1", features = ["derive"] }
-# Shared frames require the same serde_json version/features in infra/tradetunnel.
-serde_json = { version = "=1.0.152", features = ["float_roundtrip", "preserve_order", "arbitrary_precision"] }
-
-# Type generation
-ts-rs = "12.0.1"
-
-# Parity extraction and manifest tooling
-syn = { version = "3.0.7", features = ["full", "visit"] }
-toml = "1.1.8"
-
-# Host bindings (opt in from the appropriate target in safe-cex-ffi).
-napi = "3.14.2"
-napi-derive = "3.6.12"
-napi-build = "2.6.0"
+serde_json = { version = "=1.0.152", features = ["float_roundtrip", "raw_value"] }
 wasm-bindgen = "0.2.129"
-
-# Native (non-wasm) host I/O, opted into via each crate's `native` feature.
-# One TLS stack: rustls on the ring provider already in the graph, never aws-lc.
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "http2"] }
-tokio = "1.53.2"
-tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
-rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-native-certs = "0.8.4"
-futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+js-sys = "0.3.106"
 
 # Internal
-safe-cex-types = { path = "safe-cex-types" }
-safe-cex-num = { path = "safe-cex-num" }
-safe-cex-store = { path = "safe-cex-store" }
-safe-cex-transport = { path = "safe-cex-transport" }
-safe-cex-crypto = { path = "safe-cex-crypto" }
-safe-cex-exchange = { path = "safe-cex-exchange" }
-safe-cex-registry = { path = "safe-cex-registry" }
-safe-cex-venue-apexomni = { path = "safe-cex-venue-apexomni" }
-safe-cex-venue-asterdex = { path = "safe-cex-venue-asterdex" }
-safe-cex-venue-orderly = { path = "safe-cex-venue-orderly" }
-safe-cex-venue-kucoin = { path = "safe-cex-venue-kucoin" }
-safe-cex-venue-mexc = { path = "safe-cex-venue-mexc" }
-safe-cex-venue-backpack = { path = "safe-cex-venue-backpack" }
-safe-cex-venue-binance = { path = "safe-cex-venue-binance" }
-safe-cex-venue-bingx = { path = "safe-cex-venue-bingx" }
-safe-cex-venue-bitget = { path = "safe-cex-venue-bitget" }
-safe-cex-venue-bitrue = { path = "safe-cex-venue-bitrue" }
-safe-cex-venue-bitunix = { path = "safe-cex-venue-bitunix" }
-safe-cex-venue-blofin = { path = "safe-cex-venue-blofin" }
-safe-cex-venue-bybit = { path = "safe-cex-venue-bybit" }
-safe-cex-venue-coinbase = { path = "safe-cex-venue-coinbase" }
-safe-cex-venue-cryptocom = { path = "safe-cex-venue-cryptocom" }
-safe-cex-venue-paradex = { path = "safe-cex-venue-paradex" }
-safe-cex-venue-phemex = { path = "safe-cex-venue-phemex" }
-safe-cex-venue-okx = { path = "safe-cex-venue-okx" }
-safe-cex-venue-kraken = { path = "safe-cex-venue-kraken" }
-safe-cex-venue-lighter = { path = "safe-cex-venue-lighter" }
-safe-cex-venue-grvt = { path = "safe-cex-venue-grvt" }
-safe-cex-venue-polymarket = { path = "safe-cex-venue-polymarket" }
-safe-cex-venue-txflow = { path = "safe-cex-venue-txflow" }
-safe-cex-venue-woo = { path = "safe-cex-venue-woo" }
-safe-cex-venue-weex = { path = "safe-cex-venue-weex" }
-safe-cex-candle-cache = { path = "safe-cex-candle-cache" }
-safe-cex = { path = "safe-cex" }
-safe-cex-ffi = { path = "safe-cex-ffi" }
-safe-cex-parity = { path = "safe-cex-parity" }
+safe-cex-crypto = { path = "crypto" }
+safe-cex-engine = { path = "engine" }
+safe-cex-venues = { path = "registry", default-features = false }
+safe-cex-venue-binance = { path = "venues/binance" }
+safe-cex-venue-bitrue = { path = "venues/bitrue" }
+safe-cex-venue-grvt = { path = "venues/grvt" }
+safe-cex-venue-hyperliquid = { path = "venues/hyperliquid" }
+safe-cex-venue-blofin = { path = "venues/blofin" }
+safe-cex-venue-mexc = { path = "venues/mexc" }
+safe-cex-venue-bingx = { path = "venues/bingx" }
+safe-cex-venue-bitunix = { path = "venues/bitunix" }
+safe-cex-venue-bybit = { path = "venues/bybit" }
+safe-cex-venue-cryptocom = { path = "venues/cryptocom" }
+safe-cex-venue-okx = { path = "venues/okx" }
+safe-cex-venue-kucoin = { path = "venues/kucoin" }
+safe-cex-venue-weex = { path = "venues/weex" }
+safe-cex-venue-phemex = { path = "venues/phemex" }
+safe-cex-venue-woo = { path = "venues/woo" }
+safe-cex-native = { path = "hosts/native" }
 
 # P5a Goldilocks/Poseidon2 and ECgFp5 primitives, verified against Go WASM.
 poseidon-hash = "=0.1.4"
@@ -132,17 +71,15 @@ goldilocks-crypto = "=0.1.2"
 # Browser entropy backend required by transitive rand users (signing APIs are explicit/deterministic).
 getrandom = { version = "=0.2.17", features = ["js"] }
 
-# P5a EIP-712/secp256k1 and JavaScript-compatible MessagePack.
+# EIP-712/secp256k1.
 alloy-dyn-abi = { version = "=1.7.3", features = ["eip712"] }
-alloy-signer = { version = "=2.5.0", features = ["eip712"] }
-alloy-signer-local = { version = "=2.5.0", default-features = false, features = ["eip712"] }
-rmp-serde = "=1.3.1"
+alloy-signer = { version = "=2.5.0" }
+alloy-signer-local = { version = "=2.5.0", default-features = false }
 
 # P5a Ed25519 and Starknet/SNIP-12 primitives; no provider/client dependency.
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
 p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
 starknet-crypto = { version = "=0.8.1", default-features = false, features = ["std"] }
-starknet-core = { version = "=0.16.0", default-features = false, features = ["std"] }
 
 # P5a zkLink Rescue/MuSig fork; plonk is required, multicore deliberately disabled.
 franklin-crypto = { git = "https://github.com/zkLinkProtocol/franklin-crypto.git", rev = "6ba7708bd0db5142fc55800addcf211d30e65cfa", default-features = false, features = ["plonk"] }
@@ -158,140 +95,107 @@ getrandom_04 = { package = "getrandom", version = "=0.4.3", features = ["wasm_js
 alloy-primitives = "=1.7.3"
 
 [workspace.lints.rust]
-# Keep plain cargo clippy strict even when CI supplies no extra flags.
 warnings = "deny"
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 
-# Three of clippy's default lints fight this crate's reason for existing. The
-# port mirrors `packages/safe-cex` function by function and line by line where
-# possible, so these fire on faithfulness rather than on defects:
-#
-# - too_many_arguments: a ported signature reproduces the TypeScript parameter
-#   list (8-13 args). Bundling them into structs would hide the source arity
-#   that the parity manifest maps against.
-# - type_complexity: ported host/callback types are the source's inline shapes;
-#   a `type` alias moves the shape away from the row that maps it.
-# - collapsible_if: `if let Some(tp) = tp { if !is_tp {` is the source's nested
-#   `if (tp) { if (!isTp) {`. A let-chain is behaviour-identical but erases the
-#   1:1 line correspondence.
-#
-# The mechanical lints (clone_on_copy, redundant_closure, needless_question_mark,
-# chunks_exact) are real defects and are fixed in code rather than allowed.
-#
-# Two that an earlier version of this comment claimed were in that group are NOT:
-# needless_borrow is allowed below, and arc_with_non_send_sync has four per-site
-# allows, two of them in production (safe-cex-transport/src/tealstreet.rs's
-# TransportProvider::rest and ::private_proxy, where the trait itself declares
-# `Option<Arc<dyn ...>>` so the Arc is the signature, not a choice). Decided
-# 2026-10-14 after `cargo clippy --workspace --all-targets` found 76 errors,
-# 54 of them in these three classes, and the Rust SDK workflow had never once
-# been green.
-too_many_arguments = "allow"
-type_complexity = "allow"
-collapsible_if = "allow"
-# collapsible_match is the same argument one level out: a `match` arm whose body
-# is a single `if` ports a `case 'every': if (!result) return false;` switch arm.
-# Clippy wants the test lifted into a match GUARD, which merges the arm's
-# selector with its body and loses the 1:1 arm/case correspondence.
-collapsible_match = "allow"
-
-# Measured 2026-10-14: `cargo clippy --workspace --all-targets` reports 539 sites,
-# 475 of them in `src/` and 325 in safe-cex-venue-hyperliquid alone. They are not
-# defects — they are what a statement-for-statement transliteration of TypeScript
-# looks like, and the workflow has never once been green, so `clippy::all = deny`
-# has never actually held. Each lint below is allowed for a stated reason; the
-# correctness lints in the group stay denied.
-#
-# - blocks_in_conditions: the source puts work inside `if (...)`, including IIFEs.
-# - needless_return / let_and_return: the source's explicit `return x` and
-#   `const x = ...; return x` are preserved so a row maps to a source line.
-# - get_first: `args[0]` in the source becomes `.get(0)`, kept uniform with
-#   `.get(1)`, `.get(2)` beside it rather than special-casing the first index.
-# - cloned_ref_to_slice_refs: cloning mirrors JavaScript's pass-by-value
-#   argument semantics, which the port reproduces deliberately.
-# - needless_borrow: an explicit `&` keeps call sites reading like the source's
-#   argument list across generic host boundaries.
-#
-# NOT allowed, deliberately: await_holding_refcell_ref (a real panic risk that
-# contradicts the exchange-core "no RefCell borrow crosses a callback" contract),
-# unnecessary_unwrap, useless_conversion, manual_noop_waker and the rest of the
-# group. Fix those at the site.
-blocks_in_conditions = "allow"
-needless_return = "allow"
-let_and_return = "allow"
-get_first = "allow"
-cloned_ref_to_slice_refs = "allow"
-needless_borrow = "allow"
-
-# needless_range_loop is a CARDINALITY GUARD here, not a style issue. The parity
-# tests pair a fixed literal bound with a census assertion —
-# `assert_eq!(cases.len(), 5, "...census"); for index in 0..5 { &cases[index] }` —
-# so a truncated oracle corpus PANICS instead of quietly iterating fewer cases.
-# Rewriting those as iterators is precisely the false green the venue audits
-# record actually happening: in safe-cex-venue-orderly, "clearing all 512
-# resolver rows or dropping one compiled and passed the original target".
-# safe-cex-venue-hyperliquid/CLAUDE.md states the rule directly — "fixed native
-# walks remain mandatory when source-count guards are bypassed" and
-# "source-count assertions do not replace fixed native index coverage".
-#
-# Measured 2026-10-14, so the scope of this allow is not overstated: 172 sites,
-# of which 142 are that guarded shape and about 46 are not. 46 have a
-# NON-LITERAL bound (`0..rows.len()`), where no census is even expressible, and
-# ten of those are production: safe-cex-store/src/{orderbook,store}.rs,
-# safe-cex-venue-bingx/src/{exchange,placement}.rs,
-# safe-cex-crypto/src/starknet.rs and
-# safe-cex-venue-lighter/src/sdk_key_management.rs. The guard argument does not
-# cover those; they are ordinary index loops this workspace allow merely
-# tolerates, and converting one is fair game for whoever is next in the file.
-# A per-site allow at 142 sites is not the alternative.
-needless_range_loop = "allow"
-
-# result_large_err (19 sites across six woo modules, 1 in coinbase) and
-# large_enum_variant (6 sites, all in woo's v3_ws_private) are both consequences
-# of the SAME modelling rule, which the port is not free to change: one Rust
-# type per TypeScript wire shape, with the variant's fields inline so a serde
-# attribute sits on the field the source names.
-#
-# - result_large_err wants the error boxed. These error enums carry the venue's
-#   own decoded error RESPONSE, because the thing the source throws is that
-#   response. Boxing it changes the error type every `?` in those modules
-#   propagates, across a slice whose lane is mid-port.
-# - large_enum_variant wants the big variant boxed. `WooV3WsExecutionReport`'s
-#   Fill arm is 555 bytes against Reject's 72 because a fill report genuinely
-#   carries that many venue fields. Boxing it means `Fill(Box<FillStruct>)`,
-#   i.e. lifting the inline variant fields into a separate struct and moving
-#   every `deserialize_with` and `rename` with them - a restructure of a
-#   parity-mapped decoder, not a local fix.
-#
-# Both are size/layout lints with no correctness consequence, so they are
-# allowed rather than left to keep `clippy::all = deny` from ever holding.
-# Worth revisiting per-crate once woo's rows land; that is a deliberate change
-# to a wire model, not cleanup.
-#
-# The allow is for the parity-mapped WIRE and error enums specifically. Where a
-# variant belongs to a LOCAL enum with few construction sites, boxing is the
-# right fix and was taken: safe-cex-webworker's `ChaserCancel::Full` and
-# `GatewayTickerData` are boxed in code rather than allowed. Prefer boxing
-# whenever the type is not a one-to-one map of a TypeScript wire shape.
-result_large_err = "allow"
-large_enum_variant = "allow"
-
-# redundant_allocation fires on `Rc<&'static str>`, which thirteen venue test
-# fixtures use as a stand-in for a JavaScript timer or socket HANDLE. The Rc is
-# there for its POINTER, not its payload: every assertion over them is
-# Rc::ptr_eq, because the contract under test is that stale cleanup cannot
-# remove a replacement (safe-cex-exchange/CLAUDE.md, "Socket timer and owned-task
-# slots carry guards created before pinning. Each release checks its unique slot
-# identity"). Clippy's suggested bare &'static str collapses that to string
-# equality, under which two handles both labelled "replacement-socket" satisfy
-# the identity assertions vacuously - the exact false green the fixtures exist
-# to catch. Production code still should not hold an `Rc<Box<T>>`; that is now
-# on review rather than on the compiler.
-redundant_allocation = "allow"
-
-# Full debuginfo for ~45 crates' test binaries exhausts the CI runner's disk
-# (`No space left on device` building woo tests). Line tables keep backtraces.
 [profile.dev]
 debug = "line-tables-only"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+
+# Optimize final dispatch for throughput; venue crates retain size profiles.
+[profile.release.package.safe-cex-wasm]
+opt-level = 3
+
+# Size-optimized so the combined shipped wasm stays within its ceiling.
+[profile.release.package.safe-cex-venue-bitunix]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-binance]
+opt-level = "z"
+
+# Keep Bybit family code compact; CI gates public CPU/memory and full raw outputs.
+[profile.release.package.safe-cex-venue-bybit]
+opt-level = "z"
+
+# CI gates the steady public decoder throughput for this size profile.
+[profile.release.package.safe-cex-venue-bingx]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-weex]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-phemex]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-orderly]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-bitrue]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-paradex]
+opt-level = "z"
+
+# Bitget's streamed ticker decoder is CPU-bound; keep its hot loops optimized
+# for throughput while the aggregate WASM build optimizes other crates for size.
+[profile.release.package.safe-cex-venue-bitget]
+opt-level = 3
+
+[profile.release.package.safe-cex-engine]
+opt-level = 3
+
+# CI gates GRVT ticker throughput within the unchanged standalone budget.
+[profile.release.package.safe-cex-venue-grvt]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-coinbase]
+opt-level = "z"
+
+# Per-family size profiles; retain only after public timing and complete raw proof.
+[profile.release.package.safe-cex-venue-apexomni]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-asterdex]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-backpack]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-blofin]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-breakoutprop]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-cryptocom]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-hyperliquid]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-kraken]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-lighter]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-mexc]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-okx]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-polymarket]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-txflow]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-woo]
+opt-level = "z"

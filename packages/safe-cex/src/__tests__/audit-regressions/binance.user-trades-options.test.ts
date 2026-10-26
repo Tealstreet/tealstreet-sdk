@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildUserTradesParams, mapBinanceUserTrade } from '../../exchanges/binance/binance.utils';
+import { buildUserTradesParams, mapBinanceUserTrade } from '../reference/binance/binance.utils';
 
 // Row captured verbatim from GET /fapi/v1/userTrades on a live account
 // (2026-08). Note every numeric arrives as a decimal string.

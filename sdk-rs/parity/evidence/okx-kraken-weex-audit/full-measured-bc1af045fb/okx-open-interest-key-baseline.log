@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"id":"okx-open-interest-key","units":[55296],"openInterest":19,"scope":"actual handler; explicit Store callback"}]}

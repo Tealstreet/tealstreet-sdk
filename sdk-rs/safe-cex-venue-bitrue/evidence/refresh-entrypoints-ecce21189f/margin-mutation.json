@@ -1,6 +1,0 @@
-{
-  "base_sha": "ecce21189f234cd2d6727e7b11c0f855b8ecf331",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/refresh_entrypoints.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/refresh_entrypoints.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/refresh_entrypoints.rs\n@@ -38,7 +38,7 @@\n     emit_and_log_error: impl FnOnce(&str) -> Result<R, E>,\n     construct_error: impl FnOnce(&str) -> Result<E, E>,\n ) -> std::future::Ready<Result<(), E>> {\n-    let msg = \"Cannot change Margin Type on Tealstreet as API does not support it. Change it on bitrue.com\";\n+    let msg = \"Cannot change Margin Type on Tealstreet as API does not support it. Change it on bitrue.com!\";\n     let result = emit_and_log_error(msg).and_then(|_| {\n         let error = construct_error(msg)?;\n         Err(error)\n",
-  "expected_named_assertion": "BITRUE-REFRESH-NATIVE-BEFORE-POLL margin case0 false"
-}

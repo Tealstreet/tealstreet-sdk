@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PolymarketAPI } from '../../exchanges/polymarket/polymarket.api';
-import { ENDPOINTS } from '../../exchanges/polymarket/polymarket.constants';
+import { PolymarketAPI } from '../reference/polymarket/polymarket.api';
+import { ENDPOINTS } from '../reference/polymarket/polymarket.constants';
 
 const credentials = { apiKey: 'api-key', secret: 'c2VjcmV0', passphrase: 'pass' };
 
@@ -100,13 +100,84 @@ describe('Polymarket official REST contracts', () => {
     });
   });
 
+  it('clamps Gamma pages to 100 and uses opaque keyset cursors without transmitting offset', async () => {
+    const api = createApi();
+    const first = Array.from({ length: 100 }, (_, index) => ({ id: String(index) }));
+    const next = 'opaque/after+cursor=';
+    const get = vi.fn()
+      .mockResolvedValueOnce({ data: { markets: first, next_cursor: next } })
+      .mockResolvedValueOnce({ data: { markets: [{ id: 'last' }] } });
+    (api as any).gammaXhr = { get };
+    await expect(api.getGammaMarkets({ limit: 500, offset: 0 })).resolves.toHaveLength(101);
+    expect(get).toHaveBeenNthCalledWith(1, '/markets/keyset', { params: { limit: 100 } });
+    expect(get).toHaveBeenNthCalledWith(2, '/markets/keyset', { params: { limit: 100, after_cursor: next } });
+  });
+
+  it('serializes explicit Gamma slug filters as repeated parameters and preserves them across cursors', async () => {
+    const api = createApi();
+    const serializer = (api as any).gammaXhr.defaults.paramsSerializer.serialize;
+    expect(serializer({ active: true, closed: false, slug: ['cafe-open', 'election'], limit: 100 }))
+      .toBe('active=true&closed=false&slug=cafe-open&slug=election&limit=100');
+    const slugs = ['cafe-open', 'election'];
+    const get = vi.fn()
+      .mockResolvedValueOnce({ data: { markets: [{ id: 'one' }], next_cursor: 'next' } })
+      .mockResolvedValueOnce({ data: { markets: [{ id: 'two' }] } });
+    (api as any).gammaXhr = { get };
+    await expect(api.getGammaMarkets({ active: true, closed: false, slug: slugs })).resolves.toHaveLength(2);
+    expect(get).toHaveBeenNthCalledWith(1, '/markets/keyset', { params: { active: true, closed: false, slug: slugs, limit: 100 } });
+    expect(get).toHaveBeenNthCalledWith(2, '/markets/keyset', { params: { active: true, closed: false, slug: slugs, limit: 100, after_cursor: 'next' } });
+  });
+
+  it('rejects invalid explicit Gamma slug scopes before any request', async () => {
+    const api = createApi();
+    const get = vi.fn();
+    (api as any).gammaXhr = { get };
+    for (const slug of [[], [''], [' '], ['cafe', 'cafe'], [1], 'cafe', Array.from({ length: 101 }, (_, i) => String(i))]) {
+      await expect(api.getGammaMarkets({ slug: slug as string[] })).rejects.toThrow(/slug filter/);
+    }
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('never returns an incomplete prefix after a malformed Gamma page, missing cursor or failed read', async () => {
+    const first = Array.from({ length: 100 }, (_, index) => ({ id: String(index) }));
+    for (const malformed of [
+      {}, { markets: null }, { markets: {} }, { markets: [null] }, { markets: [[]] }, { markets: first },
+      { markets: [...first, { id: 'overflow' }] },
+      { markets: [], next_cursor: '' }, { markets: [], next_cursor: null },
+    ]) {
+      const api = createApi();
+      const get = vi.fn()
+        .mockResolvedValueOnce({ data: { markets: first, next_cursor: 'page-two' } })
+        .mockResolvedValueOnce({ data: malformed });
+      (api as any).gammaXhr = { get };
+      await expect(api.getGammaMarkets()).rejects.toThrow(/Gamma/);
+    }
+    const api = createApi();
+    (api as any).gammaXhr = { get: vi.fn()
+      .mockResolvedValueOnce({ data: { markets: first, next_cursor: 'page-two' } })
+      .mockRejectedValueOnce(new Error('read failed')) };
+    await expect(api.getGammaMarkets()).rejects.toThrow('read failed');
+  });
+
+  it('rejects cursor cycles and unsupported pagination arguments before looping or issuing requests', async () => {
+    const api = createApi();
+    const get = vi.fn().mockResolvedValue({ data: { markets: [{ id: 'one' }], next_cursor: 'same-cursor' } });
+    (api as any).gammaXhr = { get };
+    await expect(api.getGammaMarkets()).rejects.toThrow(/repeated.*cursor/);
+    expect(get).toHaveBeenCalledTimes(2);
+    get.mockClear();
+    await expect(api.getGammaMarkets({ offset: 100 })).rejects.toThrow(/offset/);
+    for (const limit of [0, -1, 1.5, NaN, Infinity]) await expect(api.getGammaMarkets({ limit })).rejects.toThrow(/limit/);
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('paginates Gamma and Data API collections with their documented limits', async () => {
     const api = createApi();
-    const firstGammaPage = Array.from({ length: 500 }, (_, index) => ({ id: `${index}` }));
+    const firstGammaPage = Array.from({ length: 100 }, (_, index) => ({ id: `${index}` }));
     const gammaGet = vi
       .fn()
-      .mockResolvedValueOnce({ data: firstGammaPage })
-      .mockResolvedValueOnce({ data: [{ id: 'last' }] });
+      .mockResolvedValueOnce({ data: { markets: firstGammaPage, next_cursor: 'next-page' } })
+      .mockResolvedValueOnce({ data: { markets: [{ id: 'last' }] } });
     const firstPositionsPage = Array.from({ length: 500 }, (_, index) => ({ asset: `${index}` }));
     const dataGet = vi
       .fn()
@@ -115,9 +186,9 @@ describe('Polymarket official REST contracts', () => {
     (api as any).gammaXhr = { get: gammaGet };
     (api as any).dataXhr = { get: dataGet };
 
-    await expect(api.getGammaMarkets({ active: true, closed: false })).resolves.toHaveLength(501);
-    expect(gammaGet).toHaveBeenNthCalledWith(2, '/markets', {
-      params: { active: true, closed: false, limit: 500, offset: 500 },
+    await expect(api.getGammaMarkets({ active: true, closed: false })).resolves.toHaveLength(101);
+    expect(gammaGet).toHaveBeenNthCalledWith(2, '/markets/keyset', {
+      params: { active: true, closed: false, limit: 100, after_cursor: 'next-page' },
     });
 
     await expect(

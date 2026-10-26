@@ -2,9 +2,9 @@ import type { ExchangeOptions, RemoteSigner } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
-import { CoinbasePrivateWebsocket } from '../../exchanges/coinbase/coinbase.ws-private';
-import { BASE_WS_URL } from '../../exchanges/coinbase/coinbase.types';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
+import { CoinbasePrivateWebsocket } from '../reference/coinbase/coinbase.ws-private';
+import { BASE_WS_URL } from '../reference/coinbase/coinbase.types';
 import { DefaultStore } from '../../store/store.base';
 
 const exchanges: CoinbaseExchange[] = [];

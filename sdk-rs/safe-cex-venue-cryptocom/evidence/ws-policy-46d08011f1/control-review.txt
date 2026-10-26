@@ -1,1 +1,0 @@
-Native sub-agent /root/review_auth_witness verified the fixed8 expected control pairs fromgates.json andraw logs. Eachmutant101failedactual namednativeassert, eachrestored0/1passed/0failed; no survivorsamong8. Floorendsindex7public/ping. Numeric comparisons aredecodednativef64, notreencodedbytes. Reviewer ran no Cargo.

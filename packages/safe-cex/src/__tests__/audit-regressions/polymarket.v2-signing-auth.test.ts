@@ -6,13 +6,13 @@ import {
   EIP712_ORDER_TYPES,
   POLYMARKET_CONFIG,
   SignatureType,
-} from '../../exchanges/polymarket/polymarket.constants';
+} from '../reference/polymarket/polymarket.constants';
 import {
   buildL2Headers,
   createSignedOrder,
   generateHmacSignature,
   signApiKeyDerivationMessage,
-} from '../../exchanges/polymarket/polymarket.signing';
+} from '../reference/polymarket/polymarket.signing';
 
 const PRIVATE_KEY = `0x${'11'.repeat(32)}`;
 const ZERO_BYTES32 = `0x${'00'.repeat(32)}`;

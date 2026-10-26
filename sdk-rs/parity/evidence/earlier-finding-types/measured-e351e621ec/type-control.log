@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "<worktree>/sdk-rs/parity/evidence/earlier-finding-types/verify.py", line 10, in <module>
-    assert Counter(x['primary_type'] for x in old)=={'behavior':6,'explanation':8,'documentation':1},'EARLIER-TYPES historical primary types changed'
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: EARLIER-TYPES historical primary types changed

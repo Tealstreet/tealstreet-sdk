@@ -5,6 +5,12 @@ that follow a target price (typically chasing the bid/ask). One
 `ChaserOrderInstance` per active chase; lifecycle managed by
 `chaserOrderManagerInstance` (singleton).
 
+Creation synchronizes the exchange's current native account state before
+capturing its starting position. A pending frame flush must not make the chase
+target start from a stale position; unavailable native state fails before any
+placement. TS exchanges keep their ordinary local store read through a no-op
+Base seam.
+
 Completed chasers are not history rows. Every internal completion path routes
 through `cleanupInstance`, which detaches listeners, cancels remaining IDs, and
 splices the instance from the singleton. The postprocessor also excludes a
@@ -159,8 +165,10 @@ is not the Chaser limit-order loop.
 
 `tryPlaceOrders` mints a client order id (`exchange.mintClientOrderId`; none on
 venues that refuse caller ids, which keep the old behaviour). A throw that may
-still have placed the order (`utils/unknownSendOutcome.isUnknownOutcome`: no
-venue answer, a 5xx, Binance -1007) is looked up by that id at 1/2/4/8s:
+still have placed the order (`utils/unknownSendOutcome.isUnknownOutcome`: a
+Rust `ExchangeError` with `outcome: 'unknown'`; for unclassified errors, no
+venue answer, a 5xx, Binance -1007) is looked up by that id at 1/2/4/8s. A Rust
+`outcome` of `notSent` or `rejected` is definitive and never looked up:
 
 - found **open** → the chase adopts it;
 - found **filled** or **cancelled** (a post-only reject) → its fill is counted,

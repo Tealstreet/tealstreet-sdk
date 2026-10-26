@@ -1,0 +1,71 @@
+[package]
+name = "safe-cex-engine"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+# Only counter-nonce families link send-time reservation and release repair.
+dispatch-nonce = []
+# Trusted signer-address setup and address-bound dispatch claims.
+address-nonce = ["dispatch-nonce", "sign-meta"]
+# Whole-plan HTTP admission is linked only by adopting venue families.
+http-plans = []
+# Adopters explicitly include parallel Mutation prepare/sign/release custody.
+http-mutation-barriers = ["http-plans"]
+# Streamed serial Plans are linked only by adopting families.
+serial-plans = ["http-plans"]
+# Venue-condition waits for Preflights and serial Plans, linked only by adopters.
+condition-waits = ["serial-plans"]
+# One venue-declared FIFO, release-paced REST domain (Hyperliquid, Coinbase); adopters only.
+release-domains = ["serial-plans"]
+# The caller wait bounds a parked WriteAfterReads Preflight; adopters only.
+write-preflight-wait = ["http-plans"]
+# Session-bound managed requests (venue session headers just in time); only
+# adopting venues link it.
+session-bearer = []
+# Temporary migration boundary; remove after all legacy socket families adopt.
+managed-sockets = []
+# Opt-in native receive, initial-payload and stability timing.
+socket-native-timing = ["managed-sockets"]
+order-locks = []
+# Read-only signing-task metadata for hosted signing; only Kraken and Paradex link it.
+sign-meta = []
+# Engine-issued repair cancel/replace authority; only Phemex and Backpack link it.
+repair-mutations = ["order-locks", "http-plans"]
+# Per-symbol settings publication and write fences for adopting venue families.
+metadata-freshness = []
+# Prediction venues opt in; other standalone builds omit metadata storage and frames.
+prediction = []
+# Polling venues and native hosts opt into the polling configuration decoder.
+polling-control = []
+
+command-tracking = []
+# Hyperliquid signed account-wide dead-man switch decoder.
+command-schedule-cancel = []
+book-deltas = []
+command-order-book = []
+command-asterdex = ["command-order-book"]
+command-apexomni = []
+command-polymarket = ["command-order-book"]
+command-kucoinspot = []
+# Bitunix opts in; other single-venue WASM builds omit the versioned-envelope selector.
+any-field-envelope = []
+# Bybit opts in through its dependency so unrelated single-venue WASM builds
+# omit option-query deserialization and semantic frame storage/writers.
+# Public Command variants and unsupported-IV guards remain available everywhere.
+command-options = []
+product-semantics = []
+# Hyperliquid opts in: the token behind a wrapped spot pair (UBTC behind BTC/USDC).
+underlying-tokens = []
+# Venue crates' tests drive private request helpers through ProbeVenue.
+test-support = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

@@ -36,6 +36,7 @@ vi.mock('./accessToken', () => ({
   getProxyToken: vi.fn(() => Promise.resolve('mock-token')),
   // Read by configureHOW, which the Tealstreet transport pulls in at import.
   isTokenExpired: vi.fn(() => false),
+  bindProxyTokenLookup: () => () => Promise.resolve('mock-token'),
 }));
 
 vi.mock('./utils/axiosErrorEnhancer', () => ({

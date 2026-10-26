@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitPublicWebsocket } from '../../exchanges/bybit/bybit.ws-public';
+import { BybitPublicWebsocket } from '../reference/bybit/bybit.ws-public';
 
 const OHLCV_NO_DATA_TIMEOUT_MS = 25_000;
 

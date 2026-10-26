@@ -3,6 +3,8 @@ import type { Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { exchangeRegistry } from '@tealstreet/safe-cex/src/exchanges/registry';
+import { RustEngineExchange } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
+import { adoptEngineCapabilities } from '@tealstreet/safe-cex/src/__tests__/fixtures/engineCapabilities';
 import { DefaultStore } from '@tealstreet/safe-cex/src/store/store.base';
 
 import { supportedTools, tools } from './tools';
@@ -10,10 +12,12 @@ import { supportedTools, tools } from './tools';
 const live: any[] = [];
 afterEach(() => live.splice(0).forEach((e) => e.dispose?.()));
 
-const construct = async (name: 'bybit' | 'binancepm' | 'binanceoptions') => {
+const construct = async (name: 'bybit' | 'binancepm', options = false) => {
   const Exchange = await exchangeRegistry[name]();
   const exchange = new Exchange(name, { key: 'k', secret: 's', publicDataOnly: true }, new DefaultStore());
   live.push(exchange);
+  // Server tool discovery runs after loading the engine capability record.
+  adoptEngineCapabilities(exchange as RustEngineExchange, { options });
   return exchange as unknown as Exchange;
 };
 
@@ -40,13 +44,19 @@ describe('option tools', () => {
   const names = (exchange: Exchange, options: boolean) => supportedTools(exchange, { options }).map((t) => t.name);
 
   it('lists option tools only when the server runs with options on', async () => {
-    const bybit = await construct('bybit');
+    const bybit = await construct('bybit', true);
     expect(names(bybit, true)).toEqual(expect.arrayContaining(OPTION_TOOLS));
     for (const name of OPTION_TOOLS) expect(names(bybit, false)).not.toContain(name);
   });
 
-  it('lists them on an options-only exchange with options on, as readConfig sets it', async () => {
-    expect(names(await construct('binanceoptions'), true)).toEqual(expect.arrayContaining(OPTION_TOOLS));
+  it('refuses disabled options-only venues before runtime loading', async () => {
+    await expect(exchangeRegistry.binanceoptions()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
+  });
+
+  it('does not advertise cold Rust option methods without native support', async () => {
+    const cold = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    live.push(cold);
+    for (const name of OPTION_TOOLS) expect(names(cold, true)).not.toContain(name);
   });
 
   it('lists none on a venue without option methods, even with options on', async () => {
@@ -193,3 +203,20 @@ describe('order tools', () => {
     expect(cancelOrders).toHaveBeenCalledWith([order('2', 'ETHUSDT')]);
   });
 });
+
+it.each(['get_order_history', 'get_fills', 'get_closed_pnl', 'get_income'])(
+  '%s preserves the incomplete marker while adding UTC fields',
+  async (name) => {
+    const rows = Object.defineProperty([{ timestamp: 1 }], 'incomplete', { value: true });
+    const exchange = {
+      fetchHistoricalOrders: async () => rows,
+      fetchHistoricalFills: async () => rows,
+      fetchClosedPnl: async () => rows,
+      fetchIncomeHistory: async () => rows,
+    };
+    const result = await run(name, exchange, {});
+    expect(result).toHaveProperty('incomplete', true);
+    expect(Object.getOwnPropertyDescriptor(result, 'incomplete')?.enumerable).toBe(false);
+    expect(rows).toEqual([{ timestamp: 1 }]);
+  },
+);

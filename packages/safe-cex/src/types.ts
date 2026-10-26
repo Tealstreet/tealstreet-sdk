@@ -1,5 +1,8 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeErrorKind } from './commandOutcome';
+import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
 import type { TransportProvider } from './transport/types';
 import type { ChaserOrigin } from './webworker/chaserOrder/ChaserOrderOptions';
 import type { TwapInstance } from './webworker/twap/TwapInstance';
@@ -64,6 +67,9 @@ export type ExchangeOptions = {
   readonly key: string;
   readonly secret: string;
   readonly passphrase?: string;
+  /** Rust local-provider setup only; consumed before generic options are retained.
+   * Stable IDs are caller-assigned, never derived from credential material. */
+  readonly localSigner?: LocalSignerMetadata;
 
   readonly secondary_key?: string;
   readonly secondary_secret?: string;
@@ -88,6 +94,20 @@ export type ExchangeOptions = {
   // GRVT authentication (Ethereum address for order signing, must be tagged to API key)
   readonly grvtSignerAddress?: string;
   readonly grvtTradingAccountId?: string;
+
+  /** Polymarket CLOB V2; `key` is the local signing wallet's private key. */
+  readonly polymarket?: {
+    /** Discover only these Gamma market slugs; omitted means the full universe. */
+    readonly marketSlugs?: string[];
+    /** Supply all three L2 credentials together, or derive them with L1 auth. */
+    readonly apiKey?: string;
+    readonly apiSecret?: string;
+    readonly apiPassphrase?: string;
+    /** EOA, proxy, Safe, or ERC-1271 deposit wallet signing. Defaults to EOA. */
+    readonly signerType?: 0 | 1 | 2 | 3;
+    /** Deposit wallet/maker address; required for non-EOA signature types. */
+    readonly funderAddress?: string;
+  };
 
   readonly starkPrivateKey?: string;
   readonly vault?: string;
@@ -120,7 +140,11 @@ export type ExchangeOptions = {
   /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
   readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
+  /** Retained input compatibility; this build always uses Rust for beta venues. */
+  readonly engine?: 'rust';
   readonly privateOnly?: boolean;
+  /** Rust live public-feed ownership. Shared ports must be explicitly transferred to workers. */
+  readonly publicFeed?: RustPublicFeedPolicy;
   readonly tealstreetProxy?: boolean;
   // tunnel (http over websocket)
   readonly tealstreetTunnel?: boolean;
@@ -140,6 +164,8 @@ export type ExchangeOptions = {
   readonly extra?: {
     /** `Infinity` turns periodic REST polling off, for callers that fetch on demand. */
     tickInterval?: number;
+    /** Rust command waiting deadline in ms (default 120000); expiry never retries or cancels a write. */
+    rustCommandTimeoutMs?: number;
     recvWindow?: number;
     // Optional AsterDEX REST API version override.
     asterdexApiVersion?: 'v1' | 'v3';
@@ -258,6 +284,8 @@ export type ExchangeOptions = {
 export interface ValidateAccountResult {
   error: string;
   balance?: Balance;
+  /** Typed reason when the engine classified the failure (Rust venues), e.g. 'authInvalid'. */
+  kind?: ExchangeErrorKind;
 }
 
 export interface ExchangeAccountConfig {

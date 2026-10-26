@@ -26,7 +26,7 @@ describe('UiStateHandler', () => {
     mockStore = {
       fetchedLeverage: {},
       positions: [],
-      update: vi.fn(),
+      update: vi.fn((changes) => Object.assign(mockStore, changes)),
       updatePositions: vi.fn(),
     };
 
@@ -244,6 +244,7 @@ describe('UiStateHandler', () => {
           // Should have updated twice: once to mark fetching, once to remove marker
           expect(mockStore.update).toHaveBeenCalledTimes(2);
         });
+        expect(mockStore.fetchedLeverage).not.toHaveProperty('BTCUSDT');
       });
 
       it('should handle fetch error gracefully', async () => {
@@ -260,6 +261,7 @@ describe('UiStateHandler', () => {
           // Should have updated twice: once to mark fetching, once to remove marker on error
           expect(mockStore.update).toHaveBeenCalledTimes(2);
         });
+        expect(mockStore.fetchedLeverage).not.toHaveProperty('BTCUSDT');
       });
     });
 

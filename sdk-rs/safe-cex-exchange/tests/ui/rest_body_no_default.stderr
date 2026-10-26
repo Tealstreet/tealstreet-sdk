@@ -1,5 +1,0 @@
-error[E0277]: the trait bound `RestBody: std::default::Default` is not satisfied
- --> tests/ui/rest_body_no_default.rs:2:43
-  |
-2 |     let _: safe_cex_transport::RestBody = Default::default();
-  |                                           ^^^^^^^^^^^^^^^^^^ the trait `std::default::Default` is not implemented for `RestBody`

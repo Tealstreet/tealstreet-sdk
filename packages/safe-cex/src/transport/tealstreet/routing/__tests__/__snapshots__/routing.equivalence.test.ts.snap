@@ -2849,6 +2849,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -2859,6 +2863,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -2870,6 +2875,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -2880,6 +2889,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -2891,6 +2901,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -2901,6 +2915,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -2912,6 +2927,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -2922,6 +2941,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -2933,6 +2953,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -2943,6 +2967,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -2954,6 +2979,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -2964,6 +2993,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -2975,6 +3005,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -2985,6 +3019,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -2996,6 +3031,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3006,6 +3045,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3017,6 +3057,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3027,6 +3071,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3038,6 +3083,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3048,6 +3097,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3059,6 +3109,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3069,6 +3123,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3080,6 +3135,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3090,6 +3149,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3111,6 +3171,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3132,6 +3193,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3153,6 +3215,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3174,6 +3237,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3195,6 +3259,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3216,6 +3281,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3237,6 +3303,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3258,6 +3325,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3279,6 +3347,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3300,6 +3369,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3321,6 +3391,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3342,6 +3413,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3355,6 +3427,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3365,6 +3441,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3376,6 +3453,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3386,6 +3467,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3397,6 +3479,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3407,6 +3493,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3418,6 +3505,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3428,6 +3519,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3439,6 +3531,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3449,6 +3545,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3460,6 +3557,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3470,6 +3571,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3481,6 +3583,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3491,6 +3597,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3502,6 +3609,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3512,6 +3623,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3523,6 +3635,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3533,6 +3649,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3544,6 +3661,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3554,6 +3675,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3565,6 +3687,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3575,6 +3701,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3586,6 +3713,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3596,6 +3727,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3617,6 +3749,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3638,6 +3771,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3659,6 +3793,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3680,6 +3815,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3701,6 +3837,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3722,6 +3859,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3743,6 +3881,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3764,6 +3903,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3785,6 +3925,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3806,6 +3947,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3827,6 +3969,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3848,6 +3991,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3861,6 +4005,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3871,6 +4019,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3882,6 +4031,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3892,6 +4045,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3903,6 +4057,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3913,6 +4071,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3924,6 +4083,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3934,6 +4097,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3945,6 +4109,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3955,6 +4123,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3966,6 +4135,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3976,6 +4149,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -3987,6 +4161,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -3997,6 +4175,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4008,6 +4187,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -4018,6 +4201,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4029,6 +4213,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -4039,6 +4227,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4050,6 +4239,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -4060,6 +4253,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4071,6 +4265,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -4081,6 +4279,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4092,6 +4291,10 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPrivate": {
         "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+        "ignoredMessages": [
+          "pong",
+        ],
+        "initialSilentConnects": 1,
         "relay": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
         "tunnelled": false,
       },
@@ -4102,6 +4305,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4123,6 +4327,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4144,6 +4349,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4165,6 +4371,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4186,6 +4393,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4207,6 +4415,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4228,6 +4437,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4249,6 +4459,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4270,6 +4481,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4291,6 +4503,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4312,6 +4525,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4333,6 +4547,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },
@@ -4354,6 +4569,7 @@ exports[`routing table / resolver (Epic 1 net) > resolved packet-path matrix (go
       },
       "wsPublic": {
         "fallback": "wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public",
+        "initialSilentConnects": 1,
         "tunnelled": false,
       },
     },

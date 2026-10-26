@@ -5,10 +5,22 @@ import {
   getTickIntervalMultiplier,
   getTickIntervalMultipliersForTests,
   setTickIntervalMultipliers,
+  subscribeTickIntervalMultipliers,
 } from './tickIntervalOverride';
 
 describe('tick interval override', () => {
   beforeEach(() => setTickIntervalMultipliers(undefined));
+
+  it('notifies engine pollers after updates and removes disposed listeners', () => {
+    const observed: number[] = [];
+    const stop = subscribeTickIntervalMultipliers(() => observed.push(getTickIntervalMultiplier('breakoutprop')));
+    setTickIntervalMultipliers({ '*': 4 });
+    setTickIntervalMultipliers({ '*': 4, breakoutprop: 2 });
+    setTickIntervalMultipliers(undefined);
+    stop();
+    setTickIntervalMultipliers({ '*': 3 });
+    expect(observed).toEqual([4, 2, 1]);
+  });
 
   it('returns 1 for an exchange with nothing set, so callers can multiply unconditionally', () => {
     expect(getTickIntervalMultiplier('bybit')).toBe(1);

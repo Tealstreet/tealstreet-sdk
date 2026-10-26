@@ -1,13 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
+
+import { describe, expect, it, vi } from 'vitest';
 import { WebSocketServer } from 'ws';
 
 import { ReconnectingWebSocket } from '../../../../../thirdparty/reconnecting-websocket/src/ReconnectingWebsocket';
+import { unitTransportGuard } from '../../../config/test/transportGuard';
 import { getExchangeMetadata } from '../../exchangeMetadata';
 import { BaseWebSocket } from '../../exchanges/base.ws';
-import { signWeexMessage } from '../../exchanges/weex/weex.api';
-import { WeexExchange } from '../../exchanges/weex/weex.exchange';
-import { BASE_WS_URL } from '../../exchanges/weex/weex.types';
+import { signWeexMessage } from '../reference/weex/weex.api';
+import { WeexExchange } from '../reference/weex/weex.exchange';
+import { BASE_WS_URL } from '../reference/weex/weex.types';
 import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
 
@@ -202,7 +204,9 @@ describe('audit regression: WEEX private websocket authentication', () => {
     const websocket = exchange.privateWebsocket;
     const createWebsocket = vi.fn().mockReturnValue({ addEventListener: vi.fn() });
     vi.spyOn(websocket, 'createWebsocket').mockImplementation(createWebsocket as any);
-    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValueOnce(1_700_000_000_001).mockReturnValueOnce(1_700_000_000_002);
+    vi.spyOn(virtualClock, 'getCurrentTimeMs')
+      .mockReturnValueOnce(1_700_000_000_001)
+      .mockReturnValueOnce(1_700_000_000_002);
 
     websocket.connectAndSubscribe();
     const headerProvider = createWebsocket.mock.calls[0][2].headers as () => Record<string, string>;
@@ -270,7 +274,7 @@ describe('audit regression: WEEX private websocket authentication', () => {
     expect(logs).not.toContain('test-passphrase');
   });
 
-  it('prefers Node 22\'s synchronous ESM-capable resolver for required headers', () => {
+  it("prefers Node 22's synchronous ESM-capable resolver for required headers", () => {
     const exchange = createExchange();
     const getBuiltinModule = vi.spyOn(process, 'getBuiltinModule');
     const websocket = new BaseWebSocket(exchange);
@@ -366,7 +370,8 @@ describe('audit regression: WEEX private websocket authentication', () => {
   });
 
   it('uses BaseWebSocket dispatch to send refreshed WEEX private headers on reconnect', async () => {
-    const server = new WebSocketServer({ port: 0 });
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    let revokeLoopback: (() => void) | undefined;
     const previousPrivateUrl = BASE_WS_URL.private.livenet;
     const capturedHeaders: Array<Record<string, string | undefined>> = [];
     let resolveSecondConnection: (() => void) | undefined;
@@ -381,6 +386,7 @@ describe('audit regression: WEEX private websocket authentication', () => {
       });
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('WEEX test server did not bind a TCP port');
+      revokeLoopback = unitTransportGuard.allowLoopbackPort(address.port);
       BASE_WS_URL.private.livenet = `ws://127.0.0.1:${address.port}/v3/ws/private`;
 
       server.on('connection', (connection, request) => {
@@ -399,7 +405,9 @@ describe('audit regression: WEEX private websocket authentication', () => {
 
       const exchange = createExchange();
       vi.spyOn(exchange, 'fetchAndSetPrivateSnapshot').mockResolvedValue(undefined as never);
-      vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValueOnce(1_700_000_000_001).mockReturnValueOnce(1_700_000_000_002);
+      vi.spyOn(virtualClock, 'getCurrentTimeMs')
+        .mockReturnValueOnce(1_700_000_000_001)
+        .mockReturnValueOnce(1_700_000_000_002);
       exchange.privateWebsocket.connectAndSubscribe();
       expect((exchange.privateWebsocket.ws as any)._options).toEqual(
         expect.objectContaining({ headers: expect.any(Function), WebSocket: expect.any(Function) }),
@@ -436,6 +444,7 @@ describe('audit regression: WEEX private websocket authentication', () => {
       exchange.privateWebsocket.ws = undefined;
       exchange.privateWebsocket.dispose();
     } finally {
+      revokeLoopback?.();
       BASE_WS_URL.private.livenet = previousPrivateUrl;
       server.clients.forEach((client) => client.terminate());
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

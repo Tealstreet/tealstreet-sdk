@@ -2,8 +2,8 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
-import { ORDER_STATS_TOPIC } from '../../exchanges/okx/okx.ws-business';
+import { OKXExchange } from '../reference/okx/okx.exchange';
+import { ORDER_STATS_TOPIC } from '../reference/okx/okx.ws-business';
 import { DefaultStore } from '../../store/store.base';
 
 const options: ExchangeOptions = {

@@ -2,6 +2,7 @@ import type { ExchangeName, ExchangeOptions, PayloadSigner } from '@tealstreet/s
 
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { getRegisteredExchangeNames } from '@tealstreet/safe-cex/src/exchanges/registry';
+import { assertBetaVenue } from '@tealstreet/safe-cex/src/exchanges/rust/betaVenues';
 
 export type ServerConfig = {
   exchange: ExchangeName;
@@ -26,13 +27,19 @@ const optional = (env: NodeJS.ProcessEnv, name: string): string | undefined => e
 export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
   const exchange = optional(env, 'EXCHANGE');
   const names = getRegisteredExchangeNames();
-  if (!exchange || !names.includes(exchange as ExchangeName)) {
+  if (!exchange) {
     throw new Error(`EXCHANGE must be one of: ${names.join(', ')}`);
   }
+  assertBetaVenue(exchange);
 
   const testnet = optional(env, 'EXCHANGE_TESTNET');
   if (testnet !== undefined && testnet !== 'true' && testnet !== 'false') {
     throw new Error('EXCHANGE_TESTNET must be true or false');
+  }
+
+  const engine = optional(env, 'EXCHANGE_ENGINE');
+  if (engine !== undefined && engine !== 'rust') {
+    throw new Error('EXCHANGE_ENGINE must be rust (or unset for the venue default)');
   }
 
   const metadata = getExchangeMetadata(exchange as ExchangeName);
@@ -59,6 +66,7 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
   return {
     exchange: exchange as ExchangeName,
     options: {
+      ...(engine ? { engine } : {}),
       key: optional(env, 'EXCHANGE_API_KEY') ?? '',
       secret: secret ?? '',
       passphrase: optional(env, 'EXCHANGE_API_PASSPHRASE'),
@@ -66,8 +74,6 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
       enableOptionMarkets: options,
       enableInverseMarkets: inverse,
       payloadSigner: header && placeholder ? proxySigner(header, placeholder) : undefined,
-      // Tools fetch on demand, so the adapter's background polling would only add signed requests.
-      extra: { tickInterval: Number.POSITIVE_INFINITY },
       tuning: { consoleLogging: false },
     },
   };

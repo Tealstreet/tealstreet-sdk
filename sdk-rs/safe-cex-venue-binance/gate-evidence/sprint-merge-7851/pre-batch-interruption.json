@@ -1,7 +1,0 @@
-{
-  "source_sha": "9edcdc5f9f5d22a9d2c7711ef00c1a39d4b117d2",
-  "reason": "User required batch merge dcb88b8e64efc8da8ed831388c9adaec2609b77f before final gates",
-  "workspace_build_exit": 0,
-  "workspace_clippy_exit": null,
-  "orchestrator_exit": 130
-}

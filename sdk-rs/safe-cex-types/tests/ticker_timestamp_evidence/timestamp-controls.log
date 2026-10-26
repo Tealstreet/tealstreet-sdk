@@ -1,6 +1,0 @@
-field-swap compiled 101: TICKER-TIMESTAMP native clock identity
-signed-zero compiled 101: TICKER-TIMESTAMP native clock identity
-RESTORED 1/1
-patch-drop compiled 101: TICKER-TIMESTAMP Store numeric patch identity
-alias-drop compiled 101: TICKER-TIMESTAMP Store numeric patch identity
-STORE RESTORED 1/1

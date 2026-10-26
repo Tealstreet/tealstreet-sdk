@@ -1,6 +1,0 @@
-{
-  "gate_sha": "25fac957e51c375ea8c127c81e1e3cd75c0d601f",
-  "cargo_exit": null,
-  "orchestrator_exit": 130,
-  "reason": "Stopped initial targeted compilation to complete scalar wire compatibility and native/source matrix before the restored gate. No passing result claimed."
-}

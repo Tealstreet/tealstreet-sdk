@@ -1,0 +1,28 @@
+[package]
+name = "safe-cex-venue-kraken"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+private-adoption-originals = []
+
+[[test]]
+name = "dispatch_signer_adoption"
+required-features = ["private-adoption-originals"]
+
+[dependencies]
+safe-cex-engine = { workspace = true, features = ["order-locks", "dispatch-nonce", "socket-native-timing"] }
+safe-cex-crypto = { workspace = true, features = ["hmac-sha512"] }
+serde.workspace = true
+serde_json.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+base64.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }

@@ -15,12 +15,13 @@ import { DefaultStore } from '../store/store.base';
 
 const loaderMock = vi.fn();
 const startMock = vi.fn();
+const onMock = vi.fn();
 
 class FakeExchange {
   store: DefaultStore;
   isDisposed = false;
   start = startMock;
-  on = vi.fn();
+  on = onMock;
   disablePublicWebsockets = vi.fn();
 
   // Mirrors the real signature: the worker hands its own store to the exchange,
@@ -109,7 +110,7 @@ describe('ExchangeWorker startup phase tagging', () => {
     await expect(worker.start()).resolves.toBe(false);
 
     expect(phaseOf(messages)).toBe('startup');
-    expect(errorPayloads(messages)[0].data[0]).toContain('Unknown exchange');
+    expect(errorPayloads(messages)[0].data[0]).toContain('not-a-venue is unsupported in this build');
   });
 
   it('does not tag a successful startup', async () => {
@@ -121,4 +122,24 @@ describe('ExchangeWorker startup phase tagging', () => {
 
     expect(errorPayloads(messages)).toHaveLength(0);
   });
+});
+
+it('forwards coded diagnostics and legacy metadata only from the current worker generation', async () => {
+  loaderMock.mockResolvedValue(FakeExchange);
+  startMock.mockResolvedValue(undefined);
+  onMock.mockClear();
+  const { messages, worker } = createWorker();
+  await worker.start();
+  const event = { code: 'auth.rejected', level: 'error', message: 'new refusal', fields: { source: 'private' } };
+  const listener = onMock.mock.calls.find(([name]) => name === 'engine-event')?.[1];
+  expect(listener).toBeTypeOf('function');
+  listener(event);
+  expect(messages.filter((message) => message.op === 'engine-event')).toEqual([{ op: 'engine-event', data: [event] }]);
+  const errorListener = onMock.mock.calls.find(([name]) => name === 'error')![1];
+  errorListener(event.message, { engineEvent: event });
+  expect(errorPayloads(messages).at(-1).data).toEqual([event.message, { engineEvent: event }]);
+  // A restart invalidates callbacks held by the old exchange.
+  await worker.start();
+  listener(event);
+  expect(messages.filter((message) => message.op === 'engine-event')).toHaveLength(1);
 });

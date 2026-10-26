@@ -13,9 +13,7 @@ out/
 *.bun-build
 .DS_Store
 *.log
-# ...except the port's committed gate evidence. 2,963 tracked `.log` files under
-# `sdk-rs/` are cited by the parity audits, and `*.log` above would make them
-# unstageable HERE while the monorepo tracks them — so the mirror's sdk-rs tree
-# could never equal master's, the slices could never converge, and every export
-# would retry the same files forever.
-!sdk-rs/**/*.log
+sdk-rs/target/
+sdk-rs/hosts/wasm/pkg/
+sdk-rs/harness/tapes/
+sdk-rs/harness/out/

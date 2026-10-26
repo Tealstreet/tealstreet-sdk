@@ -138,3 +138,83 @@ describe('buildFoldedPositionRecords — a failed income read is not an empty ac
     expect(result.records[0].fundingAttributed).toBe(true);
   });
 });
+
+// Match the host's coverage marker, which is deliberately absent from enumeration/JSON.
+const incompleteRows = <T>(rows: T[]): T[] & { readonly incomplete?: boolean } =>
+  Object.defineProperty(rows, 'incomplete', { value: true, enumerable: false });
+
+describe('buildFoldedPositionRecords — incomplete history cannot claim complete records', () => {
+  it.each([false, true])('rejects incomplete account-wide fills, empty=%s', async (empty) => {
+    const fills = incompleteRows(empty ? [] : roundTrip('BTCUSDT'));
+    expect(Object.keys(fills)).not.toContain('incomplete');
+    await expect(
+      buildFoldedPositionRecords({ fetchHistoricalFills: async () => fills }, options()),
+    ).rejects.toThrow(/fills history is incomplete/);
+  });
+
+  it('rejects an incomplete later symbol instead of returning the earlier complete round trip', async () => {
+    const fetchHistoricalFills = vi.fn(async ({ symbol }: { symbol?: string }) => {
+      const fills = roundTrip(symbol ?? 'BTCUSDT');
+      return symbol === 'ETHUSDT' ? incompleteRows(fills) : fills;
+    });
+    await expect(
+      buildFoldedPositionRecords(
+        {
+          fetchHistoricalFills,
+          fetchIncomeHistoryRange: async () => [{ symbol: 'BTCUSDT' }, { symbol: 'ETHUSDT' }],
+        },
+        options({ symbolScoped: true }),
+      ),
+    ).rejects.toThrow(/fills history is incomplete/);
+    expect(fetchHistoricalFills.mock.calls.map((call) => call[0].symbol)).toEqual(['BTCUSDT', 'ETHUSDT']);
+  });
+
+  it.each([false, true])('refuses symbol discovery from incomplete income, empty=%s', async (empty) => {
+    const fetchHistoricalFills = vi.fn(async () => roundTrip('BTCUSDT'));
+    await expect(
+      buildFoldedPositionRecords(
+        {
+          fetchHistoricalFills,
+          fetchIncomeHistoryRange: async () => incompleteRows(empty ? [] : [{ symbol: 'BTCUSDT' }]),
+        },
+        options({ symbolScoped: true }),
+      ),
+    ).rejects.toThrow(/symbol-scoped/);
+    expect(fetchHistoricalFills).not.toHaveBeenCalled();
+  });
+
+  it('discards all funding from incomplete income while retaining complete account-wide fills', async () => {
+    const result = await buildFoldedPositionRecords(
+      {
+        fetchHistoricalFills: async () => roundTrip('BTCUSDT'),
+        fetchIncomeHistoryRange: async () =>
+          incompleteRows([
+            { symbol: 'BTCUSDT', category: 'funding', timestamp: FROM + 90_000, income: -0.5 },
+          ]),
+      },
+      options(),
+    );
+    expect(result.totalFills).toBe(2);
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].realizedPnl).toBe(10);
+    expect(result.records[0].fundingAttributed).toBe(false);
+    expect(result.records[0].funding).not.toBe(-0.5);
+  });
+
+  it('accepts explicit complete markers on fills and income', async () => {
+    const result = await buildFoldedPositionRecords(
+      {
+        fetchHistoricalFills: async () => Object.assign(roundTrip('BTCUSDT'), { incomplete: false }),
+        fetchIncomeHistoryRange: async () =>
+          Object.assign(
+            [{ symbol: 'BTCUSDT', category: 'funding', timestamp: FROM + 90_000, income: -0.5 }],
+            { incomplete: false },
+          ),
+      },
+      options({ symbolScoped: true }),
+    );
+    expect(result.totalFills).toBe(2);
+    expect(result.records[0].funding).toBe(-0.5);
+    expect(result.records[0].fundingAttributed).toBe(true);
+  });
+});

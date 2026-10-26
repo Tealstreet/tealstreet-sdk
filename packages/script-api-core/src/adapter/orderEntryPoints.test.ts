@@ -71,7 +71,8 @@ const isVenueImplementation = (file: string): boolean =>
   // Under the Rust engine the TS venue adapters move to a test-only oracle here.
   file.startsWith('packages/safe-cex/src/__tests__/reference/');
 
-const isTest = (file: string): boolean => /\.(test|cy)\.tsx?$/.test(file);
+// Frozen venue adapters under __tests__ are replay fixtures, never runtime entry points.
+const isTest = (file: string): boolean => file.includes('/__tests__/') || /\.(test|cy)\.tsx?$/.test(file);
 
 /**
  * Everything that may send an order, and why it is allowed to.
@@ -178,6 +179,12 @@ describe('the set of order entry points is closed', () => {
       ).toBe(true);
     }
   }, 30_000);
+
+  it('test references are excluded while production sources stay in scope', () => {
+    expect(isTest('packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts')).toBe(true);
+    expect(isTest('packages/safe-cex/src/exchanges/rust/rust.exchange.ts')).toBe(false);
+    expect(isTest('packages/script-api-core/src/proxy/InProcessProxy.ts')).toBe(false);
+  });
 
   it('the detector matches a call and ignores a declaration or a mention', () => {
     expect(PLACES_AN_ORDER.test(withoutComments('// calls exchange.placeOrder() on retry'))).toBe(false);

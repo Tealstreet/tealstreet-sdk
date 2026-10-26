@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
-import { ENDPOINTS } from '../../exchanges/woo/woo.types';
+import { WOOXExchange } from '../reference/woo/woo.exchange';
+import { ENDPOINTS } from '../reference/woo/woo.types';
 import { DefaultStore } from '../../store/store.base';
 import {
   MarginType,
@@ -70,7 +70,7 @@ describe('WooX remaining July audit regressions', () => {
 
     expect(post).toHaveBeenCalledWith(
       ENDPOINTS.ALGO_ORDER,
-      expect.objectContaining({ algoType: 'STOP', triggerPrice: 90, quantity: 1 }),
+      expect.objectContaining({ algoType: 'STOP', triggerPrice: '90', quantity: '1' }),
     );
     expect(ids).toEqual(['101', '102']);
   });

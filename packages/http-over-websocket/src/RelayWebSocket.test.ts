@@ -1,7 +1,7 @@
-import { AddressInfo } from 'node:net';
+import { AddressInfo, createServer, type Socket } from 'node:net';
 
 import { WebSocketServer, WebSocket as WsClient } from 'ws';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { configureHOW } from './config';
 import { buildRelayUrl, isRelayUrl, parseRelayUrl, RELAY_QUERY_PARAM, RelayWebSocket } from './RelayWebSocket';
@@ -132,6 +132,26 @@ describe('RelayWebSocket', () => {
     expect(events.filter((e) => e === 'close')).toHaveLength(1);
   });
 
+  it('authenticates with the token lookup bound at construction', async () => {
+    let context = 'account-a';
+    configureHOW({
+      getProxyToken: async () => context,
+      bindProxyToken: () => {
+        const bound = context;
+        return async () => bound;
+      },
+    });
+    try {
+      const ws = new RelayWebSocket(relayUrlFor(tunnel.url, 'wss://stream.bybit.com/v5/private'));
+      context = 'account-b';
+      await waitFor(() => tunnel.seen.length > 0);
+      expect(JSON.parse(tunnel.seen[0])).toMatchObject({ type: 'rpc.auth', token: 'account-a' });
+      ws.close();
+    } finally {
+      configureHOW({ bindProxyToken: undefined });
+    }
+  });
+
   it('reports error + close and never open when the tunnel refuses the upstream', async () => {
     const ws = new RelayWebSocket(relayUrlFor(tunnel.url, 'wss://stream.bybit.com/v5/public/linear'));
     const { events, messages } = collect(ws);
@@ -164,5 +184,35 @@ describe('RelayWebSocket', () => {
     expect(events).not.toContain('open');
     // Nothing was ever sent to the tunnel.
     expect(tunnel.seen).toEqual([]);
+  });
+});
+
+describe('relay handshake timeout', () => {
+  it('closes a socket whose upgrade never completes without an uncaught ws abort error', async () => {
+    // A TCP server that accepts and never answers the HTTP upgrade.
+    const held: Socket[] = [];
+    const server = createServer((socket) => held.push(socket));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown) => uncaught.push(error);
+    process.on('uncaughtException', onUncaught);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const ws = new RelayWebSocket(relayUrlFor(`ws://127.0.0.1:${port}/tunnel`, 'wss://stream.bybit.com/v5/private'));
+      const { events } = collect(ws);
+      await new Promise((resolve) => setImmediate(resolve));
+      vi.advanceTimersByTime(15_000);
+      expect(ws.readyState).toBe(RelayWebSocket.CLOSED);
+      // ws emits its abort error on the next tick; give it several.
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+      expect(uncaught).toEqual([]);
+      expect(events).toEqual(['error', 'close']);
+    } finally {
+      vi.useRealTimers();
+      process.off('uncaughtException', onUncaught);
+      for (const socket of held) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

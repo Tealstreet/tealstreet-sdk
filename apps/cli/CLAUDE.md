@@ -93,6 +93,13 @@ local `build.sh disrupt` of the tagged commit.
 
 ## Runtime
 
+`src/rust-engine.ts` initializes the Rust browser artifact from a Bun embedded
+asset; standalone binaries need no workspace or extracted WASM file. Build
+`corepack yarn -s rust:build-wasm` from the repository root before source runs
+or CLI compilation. The `*.wasm.test.ts` consumer tests (selected with
+`SAFE_CEX_WASM_TESTS=1`) prove saved-account native state and an isolated
+compiled binary. They do not prove live routing or authenticated connectivity.
+
 **Bun** (not Node.js). Compiled to standalone binaries via `bun build --compile`. Cross-platform: darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.
 
 **Windows shipped 2026-09-27 and is deliberately partial.** `bun build --compile --target=bun-windows-x64` works off an unmodified tree, so the build was never the obstacle — the POSIX assumptions around it were. Two of them survive:
@@ -517,6 +524,11 @@ name}` footer segment auto-runs the named script ~1×/sec
   relies on `processSingleCommand` throwing on that shape so `retry`,
   `set ec`, blocking waits, and capture writeback all see failures.
   Do not collapse returned failures back into plain `{ handled: true }`.
+  `command-outcome.ts` restores allowlisted `errorDetails` (including client IDs,
+  unknown outcomes and partial accepted IDs) before the REPL throws. Its retry
+  loop stops on unknown outcomes or accepted partial members; it must never
+  reissue the whole write in those cases. Fully rejected operations retain the
+  explicit retry count and the already-reported flag.
 - **`FilePreprocessStore` (`src/preprocess-store.ts`).** Subclasses
   `MemoryPreprocessStore` from `cli-core` to persist vars/aliases to
   `~/.tealstreet/vars.json` + `~/.tealstreet/aliases.json` after every

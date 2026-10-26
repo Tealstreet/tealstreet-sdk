@@ -1,4 +1,7 @@
+import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
+import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/wire';
 import type { Axios, AxiosInstance } from 'axios';
+import type { TinyEmitter } from 'tiny-emitter';
 import type { PositionRecord } from '../journal/position.types';
 import type { Store } from '../store/store.interface';
 import type { EnhancedAxiosError } from '../utils/axiosErrorEnhancer';
@@ -10,12 +13,14 @@ import createHmac from 'create-hmac';
 import uniq from 'lodash/uniq';
 import { nanoid } from 'nanoid';
 import { forEachSeries, mapSeries } from 'p-iteration';
-import { TinyEmitter } from 'tiny-emitter';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
+import { classifiedError, deserializeCommandError, exchangeErrorTags } from '../commandOutcome';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
+import { chaserOrderUpdates } from '../webworker/postProcessors/ChaserOrderEnrichmentPostprocessor';
 import { buildFoldedPositionRecords } from '../journal/buildRecords';
+import { withHistoryCompleteness } from '../historyCompleteness';
 import {
   AccountGreeks,
   Candle,
@@ -47,6 +52,7 @@ import {
   PublicTrade,
   RemoteSignerRequest,
   RemoteSignerResponse,
+  StoreData,
   Ticker,
   Timeframe,
   UpdateOrderOpts,
@@ -55,9 +61,8 @@ import {
 import { formatErrorForSentry } from '../utils/axiosErrorEnhancer';
 import { readHttpFailureContext, recordHttpFailure } from '../utils/httpFailureContext';
 import { adjust } from '../utils/safe-math';
-import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
 import { getTickIntervalMultiplier } from '../utils/tickIntervalOverride';
-import { tryParseJson } from '../utils/tryParseJson';
+import { signHttpCapture } from '../utils/signHttpCapture';
 import { BaseWebSocket } from './base.ws';
 import {
   clientOrderIdShapeMessage,
@@ -73,6 +78,9 @@ import {
 import { ExternalPublicDataProvider } from './external-public-data';
 import { reportException } from '../telemetry';
 import { InProcessPublicDataProvider } from './in-process-public-data';
+import { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import { FrameApplier, FrameApplyError } from '../store/frameApplier';
+import { ExchangeEmitter } from './exchangeEmitter';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -130,6 +138,60 @@ export const summarizeSocketDiagnostics = <K extends 'public' | 'private'>(
     Record<`${K}ReconnectPaused`, boolean>;
 };
 
+interface SocketHealthSource extends SocketDiagnosticsSource {
+  isInitialized: boolean;
+  isHealthy: boolean;
+  lastMessageTimestamp?: number;
+  isRecoveryComplete?: boolean;
+}
+
+interface PublicDataSource {
+  isInitialized: boolean;
+  isHealthy: boolean;
+  lastMessageTimestamp?: number;
+}
+
+/**
+ * The store's `socketHealth` from an exchange's sockets. A gateway provider
+ * feeds public data without a socket of its own and still counts as a source.
+ */
+export const summarizeSocketHealth = (
+  publicSockets: readonly SocketHealthSource[],
+  privateSockets: readonly SocketHealthSource[],
+  gatewayProvider?: PublicDataSource,
+): NonNullable<StoreData['socketHealth']> => {
+  const initializedPublicSockets = publicSockets.filter((s) => s.isInitialized);
+  const initializedGatewayProvider = gatewayProvider?.isInitialized ? gatewayProvider : undefined;
+  const hasInitializedPublicSource = initializedPublicSockets.length > 0 || !!initializedGatewayProvider;
+  const publicHealthy =
+    !hasInitializedPublicSource ||
+    initializedPublicSockets.some((s) => s.isHealthy) ||
+    initializedGatewayProvider?.isHealthy === true;
+  const publicTimestamps = initializedPublicSockets.map((s) => s.lastMessageTimestamp || 0);
+  if (initializedGatewayProvider) {
+    publicTimestamps.push(initializedGatewayProvider.lastMessageTimestamp || 0);
+  }
+  const publicLastMessage = publicTimestamps.length > 0 ? Math.max(...publicTimestamps) || undefined : undefined;
+
+  const initializedPrivateSockets = privateSockets.filter((s) => s.isInitialized);
+  const privateHealthy =
+    privateSockets.every((socket) => socket.isRecoveryComplete !== false) &&
+    (initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy));
+  const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
+  const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
+
+  return {
+    publicHealthy,
+    privateHealthy,
+    publicInitialized: hasInitializedPublicSource,
+    privateInitialized: initializedPrivateSockets.length > 0,
+    publicLastMessage,
+    privateLastMessage,
+    ...summarizeSocketDiagnostics(publicSockets, 'public'),
+    ...summarizeSocketDiagnostics(privateSockets, 'private'),
+  };
+};
+
 // 7 doublings caps a 500ms tick at 60s; the streak stops growing there so a
 // long outage can't push recovery latency past a minute.
 const AUTH_FAILURE_MAX_STREAK = 7;
@@ -153,6 +215,8 @@ export type BaseCapabilityMethod =
   | 'fetchIncomeHistoryRange'
   | 'fetchHistoricalOrders'
   | 'placeOrder'
+  | 'fetchOrders'
+  | 'fetchPositions'
   | 'start'
   | 'fetchOptionChain'
   | 'fetchOptionExpiries'
@@ -172,7 +236,7 @@ export const markBaseCapabilityFallback = <T extends object>(method: BaseCapabil
   return fn;
 };
 
-export const isBaseCapabilityFallback = (value: unknown, method: BaseCapabilityMethod): boolean =>
+const isBaseCapabilityFallback = (value: unknown, method: BaseCapabilityMethod): boolean =>
   typeof value === 'function' && (value as BrandedCapabilityFallback)[baseCapabilityFallback] === method;
 
 /**
@@ -189,7 +253,7 @@ export const isBaseCapabilityFallback = (value: unknown, method: BaseCapabilityM
  * is that the body, once comments are stripped, is exactly that one statement and nothing
  * else.
  */
-export const isEmptyStubCapability = (value: unknown): boolean => {
+const isEmptyStubCapability = (value: unknown): boolean => {
   if (typeof value !== 'function') return false;
 
   const source = Function.prototype.toString
@@ -217,15 +281,118 @@ export const isEmptyStubCapability = (value: unknown): boolean => {
  * implementation is an empty stub? This is the question a capability flag should be checked
  * against; `isBaseCapabilityFallback` alone answers only half of it.
  */
-export const isInertCapability = (value: unknown, method: BaseCapabilityMethod): boolean =>
+const isInertCapability = (value: unknown, method: BaseCapabilityMethod): boolean =>
   isBaseCapabilityFallback(value, method) || isEmptyStubCapability(value);
 
+/** The method behind each capability; a capability is present when its method does something. */
+export const CAPABILITY_METHODS = {
+  startup: 'start',
+  trading: 'placeOrder',
+  openOrders: 'fetchOrders',
+  positions: 'fetchPositions',
+  fillHistory: 'fetchHistoricalFills',
+  orderHistory: 'fetchHistoricalOrders',
+  incomeHistory: 'fetchIncomeHistory',
+  incomeRange: 'fetchIncomeHistoryRange',
+  closedPnl: 'fetchClosedPnl',
+  optionChain: 'fetchOptionChain',
+  optionExpiries: 'fetchOptionExpiries',
+  accountGreeks: 'fetchAccountGreeks',
+} as const satisfies Record<string, BaseCapabilityMethod>;
+
+/** What this venue can answer. The only supported way to ask; never inspect the methods. */
+export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean>;
+
+export type EngineSnapshot = {
+  frame: ArrayBuffer;
+  fetchedLeverage: Record<string, FetchedLeverage>;
+};
+
+/** Methods a main-thread Rust mirror forwards whole to its worker's engine. */
+export const WORKER_FORWARDED_METHODS = [
+  'refreshMarkets',
+  'placeOrder',
+  'placeOrders',
+  'placeOrderWithClientOrderId',
+  'updateOrder',
+  'cancelOrders',
+  'cancelSymbolOrders',
+  'cancelAllOrders',
+  'findOrderByClientOrderId',
+  'nuke',
+  'nukePositions',
+  'nukeOrders',
+  'fetchPublicTrades',
+  'fetchOHLCV',
+  'fetchHistoricalFills',
+  'fetchHistoricalOrders',
+  'fetchIncomeHistory',
+  'fetchIncomeHistoryRange',
+] as const;
+
+export type WorkerForwardedMethod = (typeof WORKER_FORWARDED_METHODS)[number];
+
+/**
+ * Methods only some exchanges define (Rust capability-adopted ones), forwarded
+ * by name; the worker rejects them where its exchange lacks the method.
+ */
+export const WORKER_OPTIONAL_METHODS = [
+  'fetchHistoricalPositions',
+  'changeAccountTier',
+  'fetchAccountTier',
+  'fetchEngineCapabilities',
+  // Rust native account reads; a main-thread mirror asks the worker's engine.
+  'fetchPositions',
+  'fetchBalance',
+  'fetchPositionMode',
+] as const;
+
+const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
+  'refreshMarkets',
+  'fetchPositions',
+  'fetchBalance',
+  'fetchPositionMode',
+  'findOrderByClientOrderId',
+  'fetchPublicTrades',
+  'fetchOHLCV',
+  'fetchHistoricalFills',
+  'fetchHistoricalOrders',
+  'fetchIncomeHistory',
+  'fetchIncomeHistoryRange',
+  'fetchHistoricalPositions',
+  'fetchAccountTier',
+  'fetchEngineCapabilities',
+]);
+
+/** Worker RPCs that dispatch venue writes: an interrupted one has an unknown outcome. */
+export const WORKER_WRITE_METHODS: ReadonlySet<string> = new Set<string>([
+  'setLeverage',
+  'scheduleCancel',
+  'changePositionMode',
+  'changeMarginType',
+  ...[...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].filter((method) => !WORKER_READ_METHODS.has(method)),
+]);
+
+/** Caller client order IDs a worker placement RPC carries, for an interrupted write's outcome. */
+export const workerCallClientOrderIds = (method: unknown, args: unknown): string[] | undefined => {
+  if (!Array.isArray(args)) return undefined;
+  let orders: unknown[] = [];
+  if (method === 'placeOrders' && Array.isArray(args[0])) orders = args[0];
+  else if (method === 'placeOrder' || method === 'placeOrderWithClientOrderId') orders = [args[0]];
+  const ids = orders
+    .map((order) => (order as { clientOrderId?: unknown } | null | undefined)?.clientOrderId)
+    .filter((id): id is string => typeof id === 'string');
+  return ids.length ? ids : undefined;
+};
+
 export type CallableMethodsInWorker =
+  | WorkerForwardedMethod
   | 'setLeverage'
   | 'scheduleCancel'
   | 'changePositionMode'
   | 'changeMarginType'
   | 'fetchAndSetPrivateSnapshot'
+  | 'fetchEngineSnapshot'
   | 'reconnect'
   | 'recoverAfterOffline'
   | 'fetchOHLCV'
@@ -261,6 +428,10 @@ export interface Exchange {
 
   get name(): ExchangeName;
   get isOnline(): boolean;
+  /** What this venue can answer. Rust venues know theirs once the engine exists. */
+  get capabilities(): ExchangeCapabilities;
+  /** `capabilities`, once the venue can know them (Rust creates its engine, without starting it). */
+  loadCapabilities: () => Promise<ExchangeCapabilities>;
   /**
    * Returns true if this exchange is running in public-data-only mode.
    */
@@ -291,6 +462,7 @@ export interface Exchange {
   validateAccount: () => Promise<ValidateAccountResult>;
   fetchPositions: (symbols?: string[]) => Promise<Position[]>;
   fetchOrders: (symbols?: string[]) => Promise<Order[]>;
+  syncAccountState: () => void;
   start: () => Promise<void>;
   nuke: (tries?: number) => Promise<void>;
   nukePositions: (tries?: number) => Promise<void>;
@@ -311,10 +483,12 @@ export interface Exchange {
   scheduleCancel: (time?: number | null) => Promise<void>;
   fetchOHLCV: (opts: OHLCVOptions) => Promise<Candle[]>;
   fetchHistoricalFills: (opts: ExecutionsOptions) => Promise<Execution[]>;
+  refreshMarkets: () => Promise<{ added: Market[]; removed: Market[] }>;
   fetchMarkets?: () => Promise<Market[]>;
   fetchTickers?: () => Promise<Ticker[]>;
   fetchSymbolMaxLeverage?: (symbol: string) => Promise<number>;
   fetchLeverageForSymbol: (symbol: string) => Promise<FetchedLeverage | null>;
+  fetchEngineSnapshot: () => Promise<EngineSnapshot>;
   updateSymbolMetadata: (symbol: string) => Promise<void>;
   fetchClosedPnl: (opts: HistoricalTradeOptions) => Promise<ClosedPnlEntry[]>;
   fetchIncomeHistory: (opts?: IncomeHistoryOptions) => Promise<IncomeRecord[]>;
@@ -376,7 +550,7 @@ export class BaseExchange implements Exchange {
   _exchangeName: ExchangeName;
   store: Store;
   options: ExchangeOptions;
-  emitter: TinyEmitter = new TinyEmitter();
+  emitter: ExchangeEmitter;
 
   publicWebsocket?: BaseWebSocket<any>;
   publicWebsocketSecondary?: BaseWebSocket<any>;
@@ -410,6 +584,7 @@ export class BaseExchange implements Exchange {
   private _lastHttpFailure?: HttpFailureRecord;
   private remoteSignerAvailabilityCleanups = new Set<() => void>();
   private readonly unsubscribeFromStore: () => void;
+  private applyingWorkerChaserTags = false;
 
   on: TinyEmitter['on'];
   once: TinyEmitter['once'];
@@ -449,6 +624,7 @@ export class BaseExchange implements Exchange {
     this._exchangeName = exchangeName;
     this.options = opts;
     this.store = store;
+    this.emitter = new ExchangeEmitter(exchangeName);
     this._activeTickerSymbols = normalizeSymbols(opts.tuning?.activeTickerSymbols || []);
 
     this.on = this.emitter.on.bind(this.emitter);
@@ -456,6 +632,20 @@ export class BaseExchange implements Exchange {
     this.off = this.emitter.off.bind(this.emitter);
 
     this.unsubscribeFromStore = this.store.subscribe((data) => {
+      // Frames carry native orders; chaser tags arrive independently with the
+      // worker's derived fields. Reapply on either notification order.
+      if (this.workerFrameApplier && !this.applyingWorkerChaserTags) {
+        const orders = chaserOrderUpdates(data);
+        if (orders.length) {
+          this.applyingWorkerChaserTags = true;
+          try {
+            this.store.addOrUpdateOrders(orders.map(({ order, extra }) => ({ ...order, extra })));
+          } finally {
+            this.applyingWorkerChaserTags = false;
+          }
+          return;
+        }
+      }
       this.emitter.emit('update', data);
     });
   }
@@ -549,6 +739,12 @@ export class BaseExchange implements Exchange {
     this._authFailureStreak = 0;
   }
 
+  /** Native adapters aggregate fixed signer/scope streaks under the same Base cap. */
+  protected setAuthFailureStreak(streak: number): number {
+    if (!Number.isFinite(streak)) throw new RangeError('Authentication streak must be finite');
+    return (this._authFailureStreak = Math.max(0, Math.min(AUTH_FAILURE_MAX_STREAK, Math.trunc(streak))));
+  }
+
   /** Test/diagnostic accessor — not part of the consumer contract. */
   get authFailureStreak() {
     return this._authFailureStreak;
@@ -560,6 +756,17 @@ export class BaseExchange implements Exchange {
    */
   get isPublicDataOnly(): boolean {
     return this.options.publicDataOnly === true || !this.canSign;
+  }
+
+  loadCapabilities = async (): Promise<ExchangeCapabilities> => this.capabilities;
+
+  get capabilities(): ExchangeCapabilities {
+    const answers = {} as ExchangeCapabilities;
+    for (const [capability, method] of Object.entries(CAPABILITY_METHODS) as Array<
+      [keyof ExchangeCapabilities, BaseCapabilityMethod]
+    >)
+      answers[capability] = !isInertCapability(this[method], method);
+    return answers;
   }
 
   /**
@@ -751,6 +958,9 @@ export class BaseExchange implements Exchange {
     return [];
   };
 
+  /** Synchronize an in-process native account mirror before a store-based decision. No network refresh. */
+  syncAccountState = (): void => {};
+
   fetchMarkets = async (): Promise<Market[]> => {
     await Promise.reject(new Error('Not implemented'));
     return [];
@@ -785,11 +995,12 @@ export class BaseExchange implements Exchange {
     return { added, removed };
   };
 
-  log = (message: string, severity: LogSeverity = LogSeverity.Info) => {
+  log = (message: string, severity: LogSeverity = LogSeverity.Info, engineEvent?: EngineEvent) => {
     if (this.options.tuning?.consoleLogging !== false) {
       console.log(message, severity);
     }
-    this.emitter.emit('log', `[${this.name}] ${message}`, severity);
+    if (engineEvent) this.emitter.emit('log', `[${this.name}] ${message}`, severity, engineEvent);
+    else this.emitter.emit('log', `[${this.name}] ${message}`, severity);
   };
 
   start = markBaseCapabilityFallback('start', async () => {
@@ -888,7 +1099,11 @@ export class BaseExchange implements Exchange {
    * venues' fetchOrders return the store on failure. Venues with a single-order
    * endpoint override it. Never writes the store.
    */
-  findOrderByClientOrderId = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> => {
+  findOrderByClientOrderId = (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> =>
+    this.findOrderFromOpenOrders(symbol, clientOrderId);
+
+  /** The lookup from open orders alone: a miss is never definitive. */
+  protected findOrderFromOpenOrders = async (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> => {
     const notFound: ClientOrderLookup = { found: false, definitive: false };
     // A venue that refuses caller IDs never sent one; some (Hyperliquid) also write the store while fetching.
     if (!this.clientOrderIdRule) return notFound;
@@ -976,7 +1191,9 @@ export class BaseExchange implements Exchange {
     }
   };
 
-  cancelAllOrders = async () => {
+  cancelAllOrders = () => this.cancelEachOrderSymbol();
+
+  protected cancelEachOrderSymbol = async () => {
     const symbols = uniq(this.store.orders.map((order) => order.symbol));
 
     await forEachSeries(symbols, async (symbol) => {
@@ -1054,7 +1271,7 @@ export class BaseExchange implements Exchange {
     opts: { account: string; from?: number; to?: number },
     config: { symbolScoped?: boolean } = {},
   ): Promise<PositionRecord[]> => {
-    if (isInertCapability(this.fetchHistoricalFills, 'fetchHistoricalFills')) {
+    if (!this.capabilities.fillHistory) {
       throw new Error(`${this.constructor.name}: no fills axis, cannot fold journal records`);
     }
 
@@ -1075,7 +1292,7 @@ export class BaseExchange implements Exchange {
   // Branded so support can be detected. `typeof exchange.fetchIncomeHistory` is TRUE
   // on every venue because this field always exists — any consumer duck-typing on that
   // silently treats all 11 exchanges as supported and then renders an empty ledger.
-  // Use `isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchIncomeHistory')`.
+  // Read `exchange.capabilities.incomeHistory`.
   fetchIncomeHistory = markBaseCapabilityFallback(
     'fetchIncomeHistory',
     async (_opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
@@ -1412,6 +1629,88 @@ export class BaseExchange implements Exchange {
     };
   }
 
+  private workerFrameApplier?: FrameApplier;
+
+  /** Engine-backed venues take the record a snapshot frame carries; others have none. */
+  protected adoptEngineCapabilities(_capabilities: EngineCapabilities): void {}
+  private workerFrameRecoveryPending = false;
+
+  fetchEngineSnapshot = async (): Promise<EngineSnapshot> => {
+    throw new Error('Engine snapshots are unavailable for this exchange');
+  };
+
+  protected dispatchFrameEvent(callback: () => void) {
+    try {
+      callback();
+    } catch (error) {
+      console.error('Engine frame listener failed', error);
+    }
+  }
+
+  /**
+   * Main thread: apply one Rust engine frame from the worker (`op: 'frame'`)
+   * to this store and emit its books, candles and fills as the worker's
+   * object messages are emitted, so subscribers cannot tell the difference.
+   */
+  applyWorkerFrame(buffer: ArrayBuffer) {
+    this.applyWorkerFrameBuffer(buffer, true);
+  }
+
+  private applyWorkerFrameBuffer(buffer: ArrayBuffer, recover: boolean) {
+    this.workerFrameApplier ??= new FrameApplier(this.store);
+    let frame: Frame | undefined;
+    let needsSnapshot = false;
+    try {
+      frame = new Frame(buffer);
+    } catch (error) {
+      this.workerFrameApplier.invalidateMarketIdentity();
+      needsSnapshot = true;
+      console.error('Invalid engine frame', error);
+    }
+    if (frame) {
+      try {
+        const capabilities = frame.capabilities();
+        if (capabilities) this.adoptEngineCapabilities(capabilities);
+      } catch (error) {
+        console.error('Engine capabilities section failed', error);
+      }
+      try {
+        this.workerFrameApplier.apply(frame);
+      } catch (error) {
+        needsSnapshot = error instanceof FrameApplyError;
+        console.error('Engine frame apply failed', error);
+      }
+      const deliver = <T>(read: () => T[], event: string) => {
+        let rows: T[];
+        try {
+          rows = read();
+        } catch (error) {
+          needsSnapshot = true;
+          console.error('Engine frame section failed', error);
+          return;
+        }
+        for (const row of rows) this.dispatchFrameEvent(() => this.emitter.emit(event, row));
+      };
+      deliver(() => this.workerFrameApplier!.books(frame!), 'listenOrderBook');
+      deliver(() => this.workerFrameApplier!.candles(frame!), 'listenOHLCV');
+      deliver(() => this.workerFrameApplier!.fills(frame!), 'fill');
+    }
+    if (!needsSnapshot || !recover || this.workerFrameRecoveryPending || this.isDisposed) return;
+    this.workerFrameRecoveryPending = true;
+    void Promise.resolve()
+      .then(async () => {
+        const snapshot = await (this as Exchange).callMethodInWorker('fetchEngineSnapshot');
+        if (!this.isDisposed) {
+          this.applyWorkerFrameBuffer(snapshot.frame, false);
+          this.dispatchFrameEvent(() => this.workerFrameApplier!.applyLeverageSnapshot(snapshot.fetchedLeverage));
+        }
+      })
+      .catch((error) => console.error('Engine frame recovery failed', error))
+      .finally(() => {
+        this.workerFrameRecoveryPending = false;
+      });
+  }
+
   listenOrderBookWebworker(s: string, c: (o: OrderBook) => void) {
     const subId = nanoid();
     this.emitter.emit('subscribeOrderBook', { symbol: s, subId });
@@ -1476,44 +1775,45 @@ export class BaseExchange implements Exchange {
     });
   };
 
+  protected workerCommandTimeoutMs = (_method: CallableMethodsInWorker) => 5000;
+
+  protected workerCommandTimeoutError = (_method: CallableMethodsInWorker, _args: unknown[]): Error =>
+    new Error('Timeout callMethodInWorker');
+
   callMethodInWorker = async <M extends CallableMethodsInWorker>(
     method: M,
     ...args: Parameters<this[M]>
   ): Promise<ReturnType<this[M]>> => {
     const requestId = nanoid();
-    this.emitter.emit('callMethod', { method, args, requestId });
 
     return new Promise<ReturnType<this[M]>>((resolve, reject) => {
       const timeout = setTimeout(() => {
         // Timeout path must also remove the listener, otherwise every timed-out
         // call leaks a handleDone closure permanently attached to the emitter.
         this.emitter.off('callMethod:done', handleDone);
-        reject(new Error('Timeout callMethodInWorker'));
-      }, 5000);
+        reject(this.workerCommandTimeoutError(method, args));
+      }, this.workerCommandTimeoutMs(method));
       const handleDone = (event: any) => {
         if (event.requestId === requestId) {
           clearTimeout(timeout);
           this.emitter.off('callMethod:done', handleDone);
           if (event.success) {
-            resolve(event.result);
-            this.afterMethodCalledInWorker(event.result, method, ...args);
+            const result = withHistoryCompleteness(event.result, event.completeness);
+            resolve(result);
+            this.afterMethodCalledInWorker(result, method, ...args);
           } else {
-            // Reconstruct error from serialized format
-            let err: Error;
-            if (typeof event.result === 'object' && event.result !== null) {
-              err = new Error(event.result.message || 'Unknown error');
-              if (event.result.name) err.name = event.result.name;
-              if (event.result.stack) err.stack = event.result.stack;
-              // Restore custom properties like 'code' from exchange errors
-              if (event.result.code !== undefined) (err as any).code = event.result.code;
-            } else {
-              err = new Error(event.result || 'Unknown error');
-            }
-            reject(err);
+            reject(deserializeCommandError(event.result));
           }
         }
       };
       this.emitter.on('callMethod:done', handleDone);
+      try {
+        this.emitter.dispatch('callMethod', { method, args, requestId });
+      } catch (error) {
+        clearTimeout(timeout);
+        this.emitter.off('callMethod:done', handleDone);
+        reject(error);
+      }
     });
   };
 
@@ -1677,7 +1977,7 @@ export class BaseExchange implements Exchange {
         : {};
     const legacyExtraData = Object.fromEntries(
       Object.entries(structuredExtraData).filter(
-        ([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog',
+        ([key]) => key !== 'sentryTags' && key !== 'sentryExtra' && key !== 'suppressConsoleLog' && key !== 'engineEvent',
       ),
     );
 
@@ -1750,6 +2050,12 @@ export class BaseExchange implements Exchange {
       this._lastHttpFailure = undefined;
     }
 
+    // Typed engine errors (kind/outcome/venueCode) as closed-set tags; explicit tags still win.
+    const typedTags = {
+      ...exchangeErrorTags(err),
+      ...(structuredExtraData.engineEvent ? { event_code: structuredExtraData.engineEvent.code } : {}),
+    };
+
     // Detect if we're in a web worker
     const isWebWorker = typeof self !== 'undefined' && typeof window === 'undefined';
 
@@ -1765,6 +2071,7 @@ export class BaseExchange implements Exchange {
             module: 'Exchange',
             severity: 'error',
             ...sentryContext,
+            ...typedTags,
             ...sentryTags,
             ...correlationTags,
           },
@@ -1776,10 +2083,13 @@ export class BaseExchange implements Exchange {
             },
             ...sentryContext,
             ...sentryExtra,
+            ...(structuredExtraData.engineEvent ? { engineEvent: structuredExtraData.engineEvent } : {}),
           },
         },
         // Pass enhanced error context for better toast messages
         enhancedContext: enhancedError?.context,
+        engineEvent: structuredExtraData.engineEvent,
+        classified: classifiedError(err),
         suppressConsoleLog,
       });
     } else {
@@ -1791,6 +2101,7 @@ export class BaseExchange implements Exchange {
             module: 'Exchange',
             severity: 'error',
             ...sentryContext,
+            ...typedTags,
             ...sentryTags,
             ...correlationTags,
           },
@@ -1802,6 +2113,7 @@ export class BaseExchange implements Exchange {
             },
             ...sentryContext,
             ...sentryExtra,
+            ...(structuredExtraData.engineEvent ? { engineEvent: structuredExtraData.engineEvent } : {}),
           },
         });
       }
@@ -1810,6 +2122,9 @@ export class BaseExchange implements Exchange {
       const enhancedError = typeof err === 'object' && err !== null ? (err as EnhancedAxiosError) : null;
       this.emitter.emit('error', formattedMsg, {
         enhancedContext: enhancedError?.context,
+        // Typed engine errors: kind/outcome/venueCode, so listeners need not match text.
+        engineEvent: structuredExtraData.engineEvent,
+        classified: classifiedError(err),
         suppressConsoleLog,
       });
     }
@@ -1984,42 +2299,9 @@ export class BaseExchange implements Exchange {
    * true via the no-source branch below, so stale public data could not go red.
    */
   private syncSocketHealthToStoreInternal = () => {
-    const publicSockets = this.getPublicSockets();
-    const privateSockets = this.getPrivateSockets();
-
-    const initializedPublicSockets = publicSockets.filter((s) => s.isInitialized);
-    const gatewayProvider = this.externalPublicDataProvider;
-    const initializedGatewayProvider = gatewayProvider?.isInitialized ? gatewayProvider : undefined;
-    const hasInitializedPublicSource = initializedPublicSockets.length > 0 || !!initializedGatewayProvider;
-    const publicHealthy =
-      !hasInitializedPublicSource ||
-      initializedPublicSockets.some((s) => s.isHealthy) ||
-      initializedGatewayProvider?.isHealthy === true;
-    const publicInitialized = hasInitializedPublicSource;
-    const publicTimestamps = initializedPublicSockets.map((s) => s.lastMessageTimestamp || 0);
-    if (initializedGatewayProvider) {
-      publicTimestamps.push(initializedGatewayProvider.lastMessageTimestamp || 0);
-    }
-    const publicLastMessage = publicTimestamps.length > 0 ? Math.max(...publicTimestamps) || undefined : undefined;
-
-    const initializedPrivateSockets = privateSockets.filter((s) => s.isInitialized);
-    const privateHealthy =
-      privateSockets.every((socket) => socket.isRecoveryComplete !== false) &&
-      (initializedPrivateSockets.length === 0 || initializedPrivateSockets.some((s) => s.isHealthy));
-    const privateInitialized = initializedPrivateSockets.length > 0;
-    const privateTimestamps = initializedPrivateSockets.map((s) => s.lastMessageTimestamp || 0);
-    const privateLastMessage = privateTimestamps.length > 0 ? Math.max(...privateTimestamps) || undefined : undefined;
-
-    this.store.updateSocketHealth({
-      publicHealthy,
-      privateHealthy,
-      publicInitialized,
-      privateInitialized,
-      publicLastMessage,
-      privateLastMessage,
-      ...summarizeSocketDiagnostics(publicSockets, 'public'),
-      ...summarizeSocketDiagnostics(privateSockets, 'private'),
-    });
+    this.store.updateSocketHealth(
+      summarizeSocketHealth(this.getPublicSockets(), this.getPrivateSockets(), this.externalPublicDataProvider),
+    );
   };
 
   public fetchLastLogsFromWebsockets = (): string[] => {
@@ -2037,39 +2319,7 @@ export class BaseExchange implements Exchange {
       return { id: request.id, error: 'Exchange does not have xhr for signing' };
     }
 
-    let captured: any = null;
-
-    // Use per-request adapter to avoid corrupting xhr.defaults.adapter
-    // (other requests on the same xhr instance would get the capture adapter during the await)
-    await xhr.request({
-      method: request.config!.method,
-      url: request.config!.url,
-      baseURL: request.config!.baseURL,
-      params: tryParseJson(request.config!.params),
-      data: tryParseJson(request.config!.data),
-      headers: request.config!.headers,
-      // Nothing leaves the browser here — the adapter below short-circuits with
-      // a synthetic 200. Interceptors still run, so telemetry must be able to
-      // tell this apart from a real request. See `utils/signingCapture.ts`.
-      [SIGNING_CAPTURE_FLAG]: true,
-      adapter: (config: any) => {
-        captured = config;
-        return Promise.resolve({ data: null, status: 200, statusText: 'OK', headers: {}, config });
-      },
-    });
-
-    const headers: Record<string, string> = {};
-    if (captured?.headers?.toJSON) {
-      for (const [k, v] of Object.entries(captured.headers.toJSON(true))) {
-        if (v != null) headers[k] = String(v);
-      }
-    } else if (captured?.headers) {
-      for (const [k, v] of Object.entries(captured.headers)) {
-        if (v != null) headers[k] = String(v);
-      }
-    }
-
-    return { id: request.id, config: { headers, url: captured?.url, params: captured?.params, data: captured?.data } };
+    return signHttpCapture(xhr, request);
   };
 
   /**

@@ -11,6 +11,12 @@ generated format, so broker attribution carried by the ID survives. It returns
 but plain Limit/Market; Paradex also refuses `close`), an order above the
 market's max size, or an unknown market.
 
+The Rust wrapper applies the same caller-ID preflight as each TS adapter.
+Binance, Binance PM and Phemex preserve the rules and broker-attributed mint
+formats below; caller IDs reach the engine unchanged. An invalid order anywhere
+in a batch prevents the entire batch from reaching the engine. Lighter rejects
+caller IDs before any engine command.
+
 | Venue                        | Caller rule              | Minted              | Attribution          | Where the ID lands on a mapped `Order`                    |
 | ---------------------------- | ------------------------ | ------------------- | -------------------- | --------------------------------------------------------- |
 | Binance                      | `[.A-Z:/a-z0-9_-]{1,36}` | `x-s3vFFRQp…`       | in the ID            | `info.clientOrderId` (REST), `info.c` (WS)                |
@@ -28,7 +34,7 @@ market's max size, or an unknown market.
 | WEEX                         | `[.A-Z:/a-z0-9_-]{1,36}` | `ts…`               | none                 | `info.clientOrderId` †                                    |
 | Coinbase (+spot)             | `\S+`                    | `tealstreet-…`      | none                 | `parentId`, `info.client_order_id`                        |
 | ApeX Omni                    | `\S+`                    | `ts…`               | body `brokerId`      | `info.clientOrderId` / `info.clientId`                    |
-| Bitunix                      | `\S+`                    | `ts…`               | none                 | `info.clientId`                                           |
+| Bitunix                      | `\S+`                    | `ts…`               | none                 | **`Order.clientOrderId`**, `info.clientId`                |
 | Paradex                      | `.{1,64}`, not `close`   | `ts_…`              | header               | `info.client_id`                                          |
 | Orderly family               | `(?!-).{1,36}`           | `ts…`               | body `broker_id`     | `info.client_order_id` / `info.clientOrderId` †           |
 | WOO                          | positive safe integer    | 15-digit number     | body `broker_id`     | `info.client_order_id` (v1) / `info.clientOrderId` (v3) † |
@@ -36,6 +42,7 @@ market's max size, or an unknown market.
 | Backpack                     | uint32                   | 9-digit number      | header               | **dropped** — mapper keeps no `info`                      |
 | GRVT                         | decimal, < 2^63          | 9-digit number      | builder fee          | **`Order.id`**                                            |
 | Hyperliquid (+spot)          | `0x` + 32 lowercase hex  | random `0x…`        | builder fee          | **`Order.clientOrderId`** (WS and REST)                   |
+| TxFlow (testnet)             | 1–64 UTF-8 bytes, no `0x` prefix | `ts_…` | none configured | `Order.clientOrderId` (WS and REST) |
 
 Hyperliquid is the one venue that honors (and mints for) every shape it places,
 stops and brackets included; only a trailing stop, which it does not support,

@@ -361,7 +361,9 @@ describe('DefaultStore', () => {
 
       store.addOrUpdateOrdersFull([reopened]);
       store.addOrder(reopened);
-      expect(store.orders.filter((o) => o.id === 'a')).toEqual([expect.objectContaining({ status: OrderStatus.Closed })]);
+      expect(store.orders.filter((o) => o.id === 'a')).toEqual([
+        expect.objectContaining({ status: OrderStatus.Closed }),
+      ]);
     });
 
     it('drops a reopening row when the closed order has already left the store', () => {
@@ -374,7 +376,10 @@ describe('DefaultStore', () => {
 
     it('still accepts the terminal row itself, other orders, and the id again after a minute', () => {
       store.markOrdersTerminal([{ id: 'a' }], OrderStatus.Closed);
-      store.addOrUpdateOrders([createOrder({ id: 'a', status: OrderStatus.Closed, filled: 1 }), createOrder({ id: 'c' })]);
+      store.addOrUpdateOrders([
+        createOrder({ id: 'a', status: OrderStatus.Closed, filled: 1 }),
+        createOrder({ id: 'c' }),
+      ]);
       expect(store.orders.find((o) => o.id === 'a')?.filled).toBe(1);
       expect(store.orders.some((o) => o.id === 'c')).toBe(true);
 
@@ -865,5 +870,18 @@ describe('defaultStore', () => {
     expect(defaultStore).toHaveProperty('options');
     expect(defaultStore).toHaveProperty('updateIds');
     expect(defaultStore).toHaveProperty('socketHealth');
+  });
+});
+
+describe('wire midpoint continuity', () => {
+  it('updates and clears midpoint on stable worker ticker replacements', () => {
+    const store = new DefaultStore();
+    store.update({ tickers: [createTicker({ midPrice: 100 })] });
+    const retained = store.tickers[0];
+    store.update({ tickers: [createTicker({ midPrice: 101 })] }, true);
+    expect(store.tickers[0]).toBe(retained);
+    expect(retained.midPrice).toBe(101);
+    store.update({ tickers: [createTicker()] }, true);
+    expect('midPrice' in retained).toBe(false);
   });
 });

@@ -1,4 +1,7 @@
-import { CallableMethodsInWorker } from '../../exchanges/base';
+import { serializeCommandError } from '../../commandOutcome';
+import { historyCompletenessOf } from '../../historyCompleteness';
+import { CallableMethodsInWorker, WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
+import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 import { ThrottleManager } from './ThrottleManager';
@@ -18,12 +21,28 @@ export class CallMethodHandler extends BaseHandler {
     );
   }
 
+  private replySuccess = (requestId: string, result: unknown) => {
+    const completeness = historyCompletenessOf(result);
+    this._ctx.postMessage({
+      op: 'callMethod:done',
+      data: { requestId, result, success: true, ...(completeness ? { completeness } : {}) },
+    });
+  };
+
   handleCallMethod = async (requestId: string, method: CallableMethodsInWorker, args: any[]) => {
     let result: any = null;
     if (logging) {
       console.log('Calling method', method);
     }
     try {
+      if ([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].includes(method as never)) {
+        const call = (this._exchange as unknown as Record<string, unknown>)[method];
+        if (typeof call !== 'function') throw new Error(`${this._exchange.name} does not support ${method}`);
+        result = await (call as (...callArgs: unknown[]) => Promise<unknown>)(...args);
+        if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
+        this.replySuccess(requestId, result);
+        return;
+      }
       switch (method) {
         case 'setLeverage':
           result = await this._exchange.setLeverage(...(args as Parameters<typeof this._exchange.setLeverage>));
@@ -49,6 +68,9 @@ export class CallMethodHandler extends BaseHandler {
           break;
         case 'fetchAndSetPrivateSnapshot':
           result = await this._exchange.fetchAndSetPrivateSnapshot();
+          break;
+        case 'fetchEngineSnapshot':
+          result = await this._exchange.fetchEngineSnapshot();
           break;
         case 'reconnect':
           this._exchange.reconnect();
@@ -103,22 +125,10 @@ export class CallMethodHandler extends BaseHandler {
       if (logging) {
         console.log('Method called', method, result);
       }
-      this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, result, success: true } });
+      this.replySuccess(requestId, result);
     } catch (e: any) {
       console.error('Error calling method', e);
-      // Serialize error with all properties including custom ones like 'code'
-      const serializedError =
-        e instanceof Error
-          ? {
-              message: e.message,
-              name: e.name,
-              stack: e.stack,
-              // Preserve custom properties like 'code' from exchange errors
-              ...('code' in e && { code: (e as Error & { code: unknown }).code }),
-            }
-          : {
-              message: String(e),
-            };
+      const serializedError = serializeCommandError(e);
       this._ctx.postMessage({
         op: 'callMethod:done',
         data: { requestId, success: false, result: serializedError },

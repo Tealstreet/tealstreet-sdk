@@ -12,6 +12,7 @@ import type { ExchangeName, ExchangeOptions, PublicExchangeOptions } from './typ
 
 import { getExchangeMetadata } from './exchangeMetadata';
 import { exchangeRegistry, getRegisteredExchangeNames } from './exchanges/registry';
+import { assertBetaAccount, assertBetaVenue } from './exchanges/rust/betaVenues';
 import { DefaultStore } from './store/store.base';
 import { getTransport } from './transport/registry';
 import { virtualClock } from './utils/virtualClock';
@@ -23,6 +24,20 @@ export {
   isExchangeSupportedOnMobile,
 } from './exchangeMetadata';
 
+export { serializeCommandError, deserializeCommandError, exchangeErrorCategory } from './commandOutcome';
+export type { SerializedCommandError, CommandOutcome, ExchangeErrorKind } from './commandOutcome';
+export { historyCompletenessOf, withHistoryCompleteness, copyHistoryCompleteness } from './historyCompleteness';
+export type { HistoryCompleteness, HistoricalRows } from './historyCompleteness';
+
+export { ExchangeError, builderAuthorizationOf } from '@tealstreet/safe-cex-wasm/host';
+export type { BuilderAuthorizationDetail } from '@tealstreet/safe-cex-wasm/host';
+
+export { RustPublicFeedProvider } from './exchanges/rust/publicFeed';
+export type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
+
+export { createEngineTransport, resolveEngineRoutingPlan } from './transport/engine';
+export type { EngineRoutingPlan } from './transport/engine';
+
 // Cache for loaded exchange classes
 const exchangeCache = new Map<ExchangeName, typeof BaseExchange>();
 
@@ -31,6 +46,7 @@ const exchangeCache = new Map<ExchangeName, typeof BaseExchange>();
  * Returns cached class if already loaded
  */
 async function loadExchange(name: ExchangeName): Promise<typeof BaseExchange> {
+  assertBetaVenue(name);
   // Return cached if already loaded
   const cached = exchangeCache.get(name);
   if (cached) return cached;
@@ -70,11 +86,12 @@ export const createExchange = async (
   options: ExchangeOptions,
   store?: Store,
 ): Promise<BaseExchange> => {
-  // Start the virtual clock to synchronize with exchange servers
-  virtualClock.start();
-
+  assertBetaAccount(exchangeName, options);
   const Exchange = await loadExchange(exchangeName);
-  return new Exchange(exchangeName, options, store || new DefaultStore());
+  // Rejected venues never start the clock, load WASM or construct transports.
+  const exchange = new Exchange(exchangeName, { ...options, engine: 'rust' }, store || new DefaultStore());
+  virtualClock.start();
+  return exchange;
 };
 
 export const buildPublicExchangeOptions = (
@@ -179,6 +196,7 @@ export const createPublicExchange = async (
   options?: Partial<Omit<PublicExchangeOptions, 'publicDataOnly'>>,
   store?: Store,
 ): Promise<BaseExchange> => {
+  assertBetaVenue(exchangeName);
   return createExchange(exchangeName, buildPublicExchangeOptions(exchangeName, options), store);
 };
 
