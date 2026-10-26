@@ -403,7 +403,9 @@ impl LocalSigner {
                 && let Some(signing) = identity.signing_opt().filter(|key| !key.0.is_empty())
             {
                 // A declared Schnorr key is refused at setup, never reduced,
-                // with the same rule its sign and public-key arms apply.
+                // with the same rule its sign and public-key arms apply. Only
+                // `schnorr` builds can sign one, so only they pay for the check.
+                #[cfg(feature = "schnorr")]
                 if algorithm == Algorithm::SchnorrDigest
                     && !signer
                         .keys
@@ -744,6 +746,7 @@ pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
             algorithm: Algorithm::StarkDigest,
             ..
         } => crate::starknet::is_public_key(value),
+        #[cfg(feature = "schnorr")]
         Operation::PublicKey {
             algorithm: Algorithm::SchnorrDigest,
             ..
@@ -1278,6 +1281,7 @@ mod tests {
 
     /// R6: trusted setup refuses a declared Schnorr key the arms would refuse
     /// (refused, never reduced), and accepts a canonical one.
+    #[cfg(feature = "schnorr")]
     #[test]
     fn schnorr_setup_refuses_noncanonical_declared_keys() {
         use goldilocks_crypto::ScalarField;
