@@ -9518,6 +9518,23 @@ failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
 identity options. This slice retains those rows and all checker rules; completion
 of the custody audit does not claim inventory zero or a new endpoint migration.
 
+
+### Shared hosted operation foundation
+
+The opt-in structured-operation provider/peer uses immutable per-slot negotiated
+bindings and closed native family codecs. Legacy v1 signing contexts and routes
+stay unchanged. Missing business ownership, unknown recipes, replay, deadline or
+clock-revision changes refuse without a fallback. Peer validation failures are
+sanitized NotSent refusals, not credential latch evidence. Late work cannot
+publish a signature or HTTP request, and cancellation grants no joined-resource
+acknowledgement. The 64-entry per-account bound refuses new work rather than
+forgetting replay decisions before the codec freshness horizon.
+
+Kraken's advisory SignRequest context retains the exact wire path instead of the
+stripped signing path; the native preimage builder still strips /derivatives at
+the same cryptographic boundary. HTTP bytes, financial fields and native MACs are
+unchanged. This foundation does not enable hosted Kraken or alter nonce issuers.
+
 ### Explicit authentication on serial calls
 
 SerialCall declares Preflight or Session authentication. Existing adopters use
