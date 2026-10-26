@@ -1,22 +1,12 @@
 use super::*;
-use crate::sign::oracle::Signed;
 use crate::test_config::Options;
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::request_context::{Claim, HttpAction, Prepared, RoutingIntent, Scope};
 use safe_cex_engine::test_support::ProbeVenue;
-use safe_cex_engine::{Action, HttpRequest, Method, ReadCredentials};
+use safe_cex_engine::{Action, HttpRequest, Method};
+/// Primary plus a read identity; the fixture's strings live in test support.
 fn options() -> Options {
-    Options {
-        key: Some("primary-key".into()),
-        secret: Some("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=".into()),
-        read_credentials: Some(ReadCredentials {
-            key: "read-key".into(),
-            secret: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=".into(),
-            passphrase: Some("read-pass".into()),
-        }),
-
-        ..Options::default()
-    }
+    crate::test_config::with_read_identity()
 }
 
 /// One signed request on a Background leg, keyed by the declared role.
@@ -135,21 +125,8 @@ fn secondary_get_keeps_primary_mutations() {
                 } else {
                     "primary-key"
                 };
-                let opts = options();
-                let secret = if request.method == Method::Get {
-                    opts.read_credentials.as_ref().unwrap().secret.as_str()
-                } else {
-                    opts.secret.as_deref().unwrap()
-                };
-                let credentials = sign::oracle::LegacyCredentials {
-                    key: expected.into(),
-                    secret: secret.into(),
-                };
-                assert!(request.url.ends_with(&sign::Query::new().signed(
-                    &credentials,
-                    1700000000000.0,
-                    recv_window
-                )));
+                // The exact signed payload; the HMAC bytes themselves are
+                // proved through the provider in tests/signing_vectors.rs.
                 let (payload, signature) = request
                     .url
                     .split_once('?')
@@ -157,18 +134,18 @@ fn secondary_get_keeps_primary_mutations() {
                     .1
                     .rsplit_once("&signature=")
                     .unwrap();
-                let expected_payload = format!(
-                    "timestamp=1700000000000&recvWindow={}",
-                    recv_window.unwrap_or(20000.0)
+                assert_eq!(
+                    payload,
+                    format!(
+                        "timestamp=1700000000000&recvWindow={}",
+                        recv_window.unwrap_or(20000.0)
+                    )
                 );
-                assert_eq!(payload, expected_payload);
+                // Signed with the selected role's own material: the read
+                // identity's for a read, Primary's for a mutation.
                 assert_eq!(
                     signature,
-                    safe_cex_crypto::hmac_sha256(
-                        secret.as_bytes(),
-                        expected_payload.as_bytes(),
-                        safe_cex_crypto::Encoding::Hex
-                    )
+                    crate::test_config::fixture_signature(request.method == Method::Get, payload)
                 );
                 assert!(
                     request
@@ -247,8 +224,7 @@ fn declared_role_selects_key_and_egress_for_any_method() {
 
 #[test]
 fn invalid_secondary_identity_stops_startup_before_io() {
-    let mut opts = options();
-    opts.read_credentials.as_mut().unwrap().secret.clear();
+    let opts = crate::test_config::without_read_signing(options());
     let mut engine = crate::test_config::engine(opts);
     engine.start(1700000000000.0);
     assert!(
