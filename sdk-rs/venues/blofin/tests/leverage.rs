@@ -260,37 +260,52 @@ fn exact_read_deadline_is_a_typed_timeout() {
     late_success_is_inert(&mut h, request, 20_002.0);
 }
 
-/// Every signed read selects the same identity, so the settings reads refuse
-/// with the native text before any work, and leverage never gets that far.
-fn refuses_every_signed_read(h: &mut Harness, text: &str) {
+/// A Primary without a passphrase ref refuses at startup, before discovery,
+/// so no signed read or leverage lookup ever starts.
+#[test]
+fn a_selected_identity_without_a_passphrase_ref_refuses_at_startup() {
+    let (signer, mut identities) = safe_cex_crypto::signer::LocalSigner::from_json(
+        concat!(
+            r#"{"primary":{"key":"key","sec"#,
+            r#"ret":"x","passphrase":"pass"}}"#
+        )
+        .into(),
+    )
+    .unwrap();
+    identities.primary.as_mut().unwrap().passphrase = None;
+    let mut e = safe_cex_engine::test_support::seeded_engine(safe_cex_venue_blofin::Blofin::new(
+        safe_cex_venue_blofin::Options {
+            identities: identities.clone(),
+            ..Default::default()
+        },
+    ));
+    e.set_signer(Some(std::sync::Arc::new(signer))).unwrap();
+    e.set_identities(identities).unwrap();
+    e.start(0.0);
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 0.0);
     assert!(
-        !h.pending.iter().any(|r| r.url.contains("/account/")),
-        "no signed request"
-    );
-    assert!(
-        h.actions
+        !actions
             .iter()
-            .any(|a| matches!(a, Action::Notice(_)) && format!("{a:?}").contains(text)),
-        "the settings read refusal is visible with the native text"
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
     );
-    lookup(h);
-    assert_eq!(result(h).unwrap_err(), "BloFin margin mode is not loaded");
-    assert!(
-        !h.actions
-            .iter()
-            .any(|a| matches!(a, Action::ManagedHttp(_) | Action::Sign { .. }))
-    );
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { error })
+            if error.message == "BloFin requires a passphrase"
+    )));
 }
 
+/// Presence comes from identities: with none, the venue is keyless and runs no
+/// private work at all (no settings read, socket, signature or refusal).
 #[test]
-fn a_selected_identity_without_a_passphrase_ref_refuses_natively_before_any_work() {
-    // Trusted setup omits the ref wherever native `headers` would refuse.
-    let mut h = Harness::with_identities(|ids| ids.primary.as_mut().unwrap().passphrase = None);
-    refuses_every_signed_read(&mut h, "BloFin requires a passphrase");
-}
-
-#[test]
-fn no_selectable_identity_refuses_with_the_native_credentials_text() {
+fn no_identity_runs_no_private_work() {
     let mut h = Harness::with_identities(|ids| *ids = Default::default());
-    refuses_every_signed_read(&mut h, "BloFin requires API credentials");
+    assert!(!h.pending.iter().any(|r| r.url.contains("/account/")));
+    assert!(!h.actions.iter().any(|a| match a {
+        Action::Sign { .. } => true,
+        Action::WsConnect { url, .. } => url.ends_with("/private"),
+        _ => false,
+    }));
+    lookup(&mut h);
+    assert_eq!(result(&h).unwrap_err(), "BloFin margin mode is not loaded");
 }

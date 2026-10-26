@@ -98,6 +98,28 @@ fn public_and_keyless_accounts_install_nothing() {
     }
 }
 
+/// BloFin's venue holds no raw read material, so an invalid read key is refused
+/// here, by the shared construction gate, before any venue or provider exists.
+#[test]
+fn an_invalid_read_key_is_refused_at_construction() {
+    let options: EngineOptions = serde_json::from_value(json!({
+        "key": "primary-key",
+        "secret": "primary-secret",
+        "passphrase": "primary-pass",
+        "readCredentials": { "key": "secondary-key", "secret": "" },
+    }))
+    .unwrap();
+    assert!(
+        build(
+            "blofin",
+            options,
+            Some(safe_cex_engine::test_support::seeded_entropy(5)),
+            Capture,
+        )
+        .is_err()
+    );
+}
+
 #[test]
 fn passphrase_refs_mirror_native_eligibility() {
     let read = |passphrase: Option<&str>| {
