@@ -440,6 +440,9 @@ Reviewed by fe7lgm (core) and zs5e83 (consumer).
 - `LocalSigner` never presents or interpolates a policy-declared asymmetric
   ref, whichever identity names it. Ordinary credential and MAC material are
   unchanged.
+- Boundary: that provider refusal is `LocalSigner`'s. A hosted or injected
+  provider relies on the engine check, which covers only a credential-absent
+  primary's signing ref; any other refusal is that provider's own policy.
 - Pinned in `sdk-rs/engine/tests/scalar_only_authority.rs`: the genuine
   WriteAfterReads serial-plan flow (engine address setup, sealed identity,
   `select_with_nonce(HYPERLIQUID_AGENT)`, PublicAddress plus Secp256k1Digest,
