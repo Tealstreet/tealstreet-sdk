@@ -1361,7 +1361,7 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
         },
     );
     let actions = e.drain_plain().collect::<Vec<_>>();
-    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:81, error}) if error.message.contains("uncertain"))));
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:81, error}) if error.message.contains("uncertain") && error.outcome == Some(safe_cex_engine::Outcome::NotSent))));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     reply(&mut e, &fresh, 200, OPEN);
     command(
@@ -1486,6 +1486,15 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
 
 #[test]
 fn beta_slow_reconcile_joins_reasks_and_only_a_clean_retry_releases() {
+    slow_reconcile(false);
+}
+
+#[test]
+fn beta_slow_fresh_read_releases_after_three_engine_reasks() {
+    slow_reconcile(true);
+}
+
+fn slow_reconcile(held_completes_cleanly: bool) {
     let (mut e, _) = ready();
     let collect = |e: &mut safe_cex_engine::Engine<Kraken>| e.drain_plain().collect::<Vec<_>>();
     let read = |actions: &[Action]| {
@@ -1571,6 +1580,24 @@ fn beta_slow_reconcile_joins_reasks_and_only_a_clean_retry_releases() {
                 .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("openorders"))),
             "a re-ask must join the original read: {out:?}"
         );
+    }
+    if held_completes_cleanly {
+        place(&mut e, NOW + 7050., 181);
+        refused(&collect(&mut e));
+        respond(&mut e, NOW + 7100., &held, 200, OPEN);
+        let completed = collect(&mut e);
+        assert!(
+            !completed.iter().any(|a| matches!(a,
+            Action::Http(r) if r.url.ends_with("openorders"))),
+            "the original clean read must not owe a spurious successor: {completed:?}"
+        );
+        place(&mut e, NOW + 7200., 182);
+        assert!(
+            collect(&mut e).iter().any(|a| matches!(a,
+            Action::Http(r) if r.url.ends_with("sendorder"))),
+            "the original held read releases the fence"
+        );
+        return;
     }
     // Failure preserves the fence; a later engine wake supplies another read.
     respond(&mut e, NOW + 7100., &held, 503, "<html>");
