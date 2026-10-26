@@ -774,13 +774,12 @@ fn full_status_array_is_correlated_before_a_mixed_refusal() {
     assert_eq!(error.message, "rejected row");
     assert_eq!(error.kind, Some(ErrorKind::Rejected));
     assert_eq!(
-        error.outcome, None,
-        "native mixed acceptance is not wholly rejected"
+        error.outcome,
+        Some(Outcome::Unknown),
+        "mixed acceptance is not wholly rejected"
     );
-    assert!(
-        e.store().order("900").is_none(),
-        "native early-error reducer does not publish the accepted row"
-    );
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["900"]);
+    assert!(e.store().order("900").is_some());
     no_trade(&actions);
 }
 
@@ -999,8 +998,9 @@ fn native_mixed_refusal_scans_accepted_rows_after_the_first_error() {
     let error = result[0].as_ref().unwrap_err();
     assert_eq!(error.message, "first rejected");
     assert_eq!(error.kind, Some(ErrorKind::Rejected));
-    assert_eq!(error.outcome, None);
-    assert!(e.store().order("901").is_none());
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["901"]);
+    assert!(e.store().order("901").is_some());
     no_trade(&a);
 }
 

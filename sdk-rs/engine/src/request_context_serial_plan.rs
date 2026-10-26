@@ -12,6 +12,7 @@ pub(super) const JOURNAL_ATTEMPTS: usize = 2;
 
 pub(super) struct Serial {
     pub(super) refusals_complete: bool,
+    /// The current call, its `pacing` already resolved: `None` is unpaced.
     call: SerialCall,
     #[cfg(feature = "session-bearer")]
     pub(super) session_seed: Option<(u64, u64)>,
@@ -106,6 +107,10 @@ impl Serial {
         (self.call.operation, retry_policy(self.call), credential)
     }
 
+    pub(super) fn pacing(&self) -> Option<crate::request_context::Pacing> {
+        self.call.pacing
+    }
+
     /// Whether `next` signs: a Read only under the read role.
     fn signs(&self, next: SerialCall, write: &Option<Credential>) -> bool {
         if next.auth == CallAuth::Session {
@@ -144,6 +149,31 @@ fn validate_call(call: SerialCall) -> Result<(), Error> {
         return Err(Error::Invalid);
     }
     Ok(())
+}
+
+impl crate::engine::IoCore {
+    /// The call with the pacing its legs carry: its own, else the root's.
+    /// Domain members resolve through the domain; any other call, including a
+    /// Read in a Mutations domain, stays unpaced and names only zero-gap groups.
+    fn resolve_serial_pacing(
+        &self,
+        root: Option<crate::request_context::Pacing>,
+        call: SerialCall,
+    ) -> Result<SerialCall, Error> {
+        #[cfg(feature = "release-domains")]
+        if self.domain_member(call.operation).is_some() {
+            let pacing = self.domain_pacing(call.operation, call.pacing.or(root))?;
+            return Ok(SerialCall { pacing, ..call });
+        }
+        #[cfg(feature = "release-domains")]
+        let root = root.filter(|root| !self.domain_paces(Some(*root)));
+        let pacing = call.pacing.or(root);
+        if pacing.is_some_and(|pacing| pacing.minimum_gap_ms != 0.) {
+            return Err(Error::Invalid);
+        }
+        self.http_pacing.validate_zero(pacing)?;
+        Ok(SerialCall { pacing, ..call })
+    }
 }
 
 impl<P> Cx<'_, P> {
@@ -209,6 +239,7 @@ impl<P> Cx<'_, P> {
             }
             self.io.core.http_pacing.validate_zero(pacing)?;
         }
+        let first = self.io.core.resolve_serial_pacing(pacing, first)?;
         let schedule = Schedule::from_single_call(CallTerms {
             wait_ms: 0,
             timeout_ms: first.timeout_ms,
@@ -394,6 +425,10 @@ impl crate::engine::CoreCx<'_> {
             .as_ref()
             .expect("checked serial Plan")
             .signs(next, &body.policy.credential);
+        let next = self
+            .io
+            .core
+            .resolve_serial_pacing(body.policy.pacing, next)?;
         if !self.io.core.next_id.available(1 + 3 * attempts)
             || (signed && !self.io.core.signing.available_ids(attempts))
         {

@@ -2116,6 +2116,7 @@ fn serial(step: &Step) -> SerialCall {
         },
         timeout_ms: CALL_MS,
         attempts: 1,
+        pacing: None,
     }
 }
 
