@@ -93,7 +93,16 @@ impl Kraken {
         } else {
             self.public.feed
         } {
-            cx.stop_socket_feed(feed);
+            if !private && error == SocketError::Capacity {
+                if cx.socket_epoch(feed).is_some() {
+                    cx.retire_socket(
+                        feed,
+                        safe_cex_engine::socket_lifecycle::RetireReason::Closed,
+                    );
+                }
+            } else {
+                cx.stop_socket_feed(feed);
+            }
         }
         cx.notice(
             Level::Error,

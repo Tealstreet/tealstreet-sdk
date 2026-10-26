@@ -253,3 +253,24 @@ unopened and retains every original symbol/JSON assertion. The native suite is
 not declared green until this corrected setup passes. An additional real HTTP
 token result at idle equality must release zero subscription frames and retire
 the epoch through the shared one-shot final fence.
+
+## Public capacity correction
+
+The source reviewer identified permanent stopping on transient public Capacity.
+The correction uses shared Closed retirement and native backoff only for public
+Capacity, leaving permanent encoder/private outcomes fail closed. A bounded
+observer around the real Futures/Spot venues creates genuine valid-key proposal
+and continuation credit pressure. Kraken has no production continuation consumer;
+the fixture carries a live Background read Context as opaque native Pending,
+never as a new HTTP request or financial continuation. All 512 retired wakes are
+replayed before and after recovery and must remain inert.
+
+Frame-byte pressure uses actual native codec batches, each padded with legal JSON
+whitespace below the per-frame cap; parsing independently proves identical JSON.
+Repairing 80 genuine retained book interests fills the shared queued-byte budget.
+This is controlled encoder pressure, not a claim that native emits that padding.
+The fixture proves once-only invalidation/close/backoff, retained ticker/book/OHLC
+replay and actual private sibling publication. Initial fixture mistakes (assuming
+an invalidated book stayed exposed, comparing Spot display symbols to wire aliases,
+and hitting permanent InvalidCoverage instead of queue Capacity) are retained
+separately and never counted as source regression REDs.
