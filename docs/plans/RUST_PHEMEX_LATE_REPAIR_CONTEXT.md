@@ -1,0 +1,212 @@
+# Phemex late cancel repair: final four legacy request sites
+
+Status: source and trusted-fixture carry CLEAR at 510eb5a1b6e, composed on actual tip 74a0ba44d38 including repair fixes #2181. Native 346/0/0, strict clippy and fmt pass; the affected fixture controls pass again after their setup extraction. Publication proceeds under the overseer’s instruction with the two genuine test-only macro false positives retained in the test inventory until checker-precision #2185 removes them. The unchanged fixture source is now automatically composed on c715b902069; the combined measurement below is pinned to its actual measured 74a0 tree. Original runtime base is 49a5b54f362 (includes repair core 8f5f9a2f957); the native audit below remains pinned to 035948b564a. This consumer includes Phemex runtime adoption, repair-mutations Cargo activation, the exact four request-site removals and one orphan credential-site decrement. No generic engine, host, crypto, budget or CI change is included. Reviewer: claude-fe7lgm (core/API and custody), with claude-dazzy3 as alternate. Bitget history PR #2170 stays on its separate branch.
+
+## Scope and prerequisite
+
+Migrate Phemex cancel_late -> late_next -> dispatch(None, ...) to engine-issued CancelOnly repair authority. Remove exactly four fingerprints / four occurrences; Phemex request inventory then reaches zero. Preserve ordinary command Plans, all read roots, signer recipes, socket lifecycle, financial reducers and native cancel grouping.
+
+| File on 035948 | Fingerprint | Count | Existing expression |
+| --- | --- | ---: | --- |
+| venues/phemex/src/lib.rs:326 | fc8a5b682da002c9a8b697b45ebe204db49576e4cd13a275d46a52c7e13f01e6 | 1 | cx.request_streamed_body in the orphaned legacy request helper |
+| venues/phemex/src/lib.rs:328 | 34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc | 1 | cx.request in that helper |
+| venues/phemex/src/lib.rs:331 | 6cf35cca09778b64b2c0236671ce5549e5aa10a38a919d5d30317ddcfc43d219 | 1 | cx.sign_http in that helper |
+| venues/phemex/src/trading.rs:1313 | e6f9b79a027f31adbd5a2b4c25669770848c36a0b761835a87f5783a961f4790 | 1 | self.request in late-only dispatch |
+
+Independent context_fingerprints production analysis equals the exact 035948 manifest for both files (inventory.json). The streamed branch has no remaining live late-repair caller; delete the entire helper rather than retain a fallback. Other venue inventories remain incoming-exact.
+
+Shared authority is the landed design docs/plans/RUST_REPAIR_MUTATION_AUTHORITY.md. Concrete reviewed API pin is #2151 d46fc393cb64c67204ce858129fbca0f7151d991, tree 6c002769ff411cc9f484fe1d2d668dab7ef050bc; actual #2151 landing was independently checked as 8f5f9a2f95701ad40fcef19e3738423b587c4f98 during this audit. Before source, plain-merge the actual landing tip and check its engine API rather than assuming this plan's base contains repair-mutations. fe7 owns every core change; this consumer does not edit engine.
+
+## Native behavior that remains the contract
+
+1. Unknown placements enter account.reconcile with a client ID and discovery generation. An order already visible when cancel-all dispatches is covered by that command's immediate cancel steps; only absent owed client-ID generations are added to the late-cancel latch (account.rs:1430-1463).
+2. Both orders_cancel_all callers are synchronous inside trade_command: the empty immediate-job branch (trading.rs:1164) after begin_preflight and before done_empty_plan, and the nonempty branch (:1226) after successful admit_serial_plan. The genuine command entry is Bound at each; later Plan/timer/ready callbacks cannot mint.
+3. Unknown placement reads wait for actual raw signing expiry + 5000, plus the existing pause/placing gates. A private-stream observation may reveal the owed order earlier and causes immediate repair. Do not add a receipt deadline, entitlement age limit, aggregate root clock or new wait before a valid stream observation.
+4. cancel_landed accepts only the same symbol, an owed client ID, no parent_id, and Open/Updating for cancellation. Positive fills retain the manual-position diagnostic. Duplicate observations consume no second cancellation. Later placements/generations outside the recorded cancel-all set remain unrelated.
+5. cancel_plan normalizes and deduplicates native IDs, resolves cached order/native symbol/position side using the existing precedence, and builds stable first-seen groups by native symbol plus position side. Chunks are 10. A one-ID GROUP uses /g-orders/cancel; a multi-ID GROUP uses /g-orders, even when its final chunk has one ID. Preserve encoded query order/bytes and no body.
+6. There is one active late-cancel request across the venue. Groups run FIFO. The next independent group runs after success or failure, with no automatic resend. Origins are absent from native grouping: compatible members from two cancel-all commands share the same native request, rather than being split by entitlement.
+7. Native dispatch marks before rows Canceling, advances account order revision and then sends. Preserve these optimistic effects only AFTER repair admission succeeds. Failed ACK cleanup restores only still-matching Canceling rows under the existing amount/fill/revision guards; never overwrite newer stream state.
+8. Successful cancel updates the same accepted/finalized rows and warning, then account refresh and the next FIFO group. Failed cancel emits CHILD_LEG_FAILED with native manual-cancel wording, refreshes, and continues the next independent group. Repair never emits CommandDone/CommandFailed, reopens the old command or changes its journal.
+9. A native bulk object may acknowledge the whole requested batch while giving final row status for its representative only; array replies prove individual IDs. Preserve that documented codec rule. For malformed/partial/duplicate ACKs retain each proven accepted ID and mark the rest Unknown; never manufacture an all-accepted fact.
+10. Complete, current, postdating reconciliation removes only lost/cancel generations it covers. Incomplete, failed, stale or superseded reads do not prove absence. A child observation, unrelated client ID or a newer placement cannot discharge the old entitlement.
+
+## Consumer authority and execution
+
+Keep a venue-owned entitlement table separate from transient reconciliation entries. Each owed (symbol, client ID, generation) maps to one engine-issued Entitlement and Subject; native Reconcile.cancel entries retain or reference those exact subjects. Repeated cancel-all must reuse already-covered subjects, not remint the same unresolved placement into a second grant. A new cancel-all mints only uncovered owed subjects, then records their latch. No owed subjects means no mint.
+
+At each genuine Bound cancel-all entry, call mint_command_repair(&preflight, Vec<Subject>) after native gates and successful admission. In the nonempty case serial Plan admission stays first. In the empty-physical-job case mint the nonempty owed set before done_empty_plan. Primary comes from the admitted WriteAfterReads Preflight; do not reselect from discovery, borrow a read key or manufacture a command.
+
+A mint Capacity refusal follows the approved additive CommandError plus one Warn from the core; the original Plan's slots, journal and terminal remain unchanged. Keep native owed diagnostics, but never store spendable authority on a refused mint. Other refusal variants are explicit control/source gates; no raw-send fallback, synthetic entitlement or silent remint at discovery is permitted.
+
+Discovery still uses native account/stream reducers to publish the exact order first. Native cancel_plan builds the existing ordered groups/chunks. For each queued cancel step retain its original Subject and Entitlement references and exact native-ID binding. Call admit_repair_cancel(&[(&entitlement, &subject, Binding { order_id, symbol, side })]) outside any command entry. Binding.symbol is the Store's native-normalized SDK symbol; side is the adapter's existing Merged/Long/Short key. URL/query still use native_symbol as today. Never mix those two symbol representations.
+
+The core atomically checks <=10 subjects, common engine/installed Primary, command origins, symbol/side, Store client-to-native membership and unspent lifecycle. Cross-origin groups use one joint root. One invalid member refuses the group without spending anything; preserve the native manual-cancel diagnostic and FIFO cleanup, with no automatic retry or alternate authority path. Pin the exact refusal/latch outcome rather than inventing a successful repair.
+
+After Ok((RepairRoot, Context)), retain that exact pair and the native before/revision state. Mark Canceling/account_write only now, and use request_signed_managed(context, None, DELETE, native URL, None, existing dispatch_signing::Http recipe, Repair pending). The signer identity must own context.credential's installed Primary reference; source review checks identity/ref equality. No change to HMAC, expiry, Content-Type or key-material custody. Remove legacy dispatch and request helpers once this is their last caller.
+
+On response, first match the exact active RepairRoot/Context and use validate_http_context only as a live-issuance check; it is NOT an exact-DATA validator. Purely decode the native cancel ACK once, preserving representative-object versus array semantics and explicit accepted IDs, without Store/counter/publication effects. Record the definitive/partial/unproven outcome through http_write_fact (or reviewed http_write_result), whose exact delivery check must succeed, then validate_http_write_effects before applying the native Store effects; finish_http_context retires the leg. Factor the existing combined decoder/effect reducer within this venue only, with financial/wire assertions unchanged. Keep exact typed provider/local/physical-timeout cause on the failure path. Released 408/5xx/integrity may seal in the engine without venue DATA; never decode, resend or grant a new root from those bytes. If the concrete Repair owner does not support these shared fact/effect gates, report that API gap to fe7; do not invent validate_http_delivery or treat liveness alone as DATA.
+
+Engine RepairNotice::Settled is the ONE cleanup/FIFO event for every admitted root, including preparation refusal and engine-owned unproven sealing. Match exact RepairRoot issuer/id, remove active work once, preserve accepted effects, restore only matching refused/unproven optimistic rows, emit the native warning or manual-cancel error once, and run native account refresh plus the next FIFO group from this reconciliation Cx. A response callback may stage decoded native details but must not independently advance the same queue. Do not wait for a later user command. Unknown cancel uses the core's reconcile-only behavior; it does not fabricate a Place uncertain scope or reuse the original placement's signing expiry as a new cancel fence.
+
+The core's per-call bound is 20,000 ms / Never and covers preparation, signing, queue and physical release/response. Native hosts already default physical HTTP to 20,000 ms, so CALLERS must state the extra pre-release coverage. There is no aggregate root/entitlement wall-clock bound and no native retry. Original sealed commands remain isolated even after receipt expiry or numeric ID reuse.
+
+## Lifecycle proof: reviewed fit and loaded-orders proof pin
+
+Fe7 cleared the concrete Repair fact/effect gates at actual 8f5f9a2f957; no shared seam is missing. Liveness is validate_http_context, exact DATA is checked by http_write_fact/http_write_result through journal_owner and root-step intent, Store effects require validate_http_write_effects, and finish_http_context retires the leg.
+
+Keep the venue-owned entitlement table separate from native reconciliation removal. Unspent terminal subjects use retire_repair_subject(&entitlement, key, Retire::Terminal) only after Store publishes Closed/Canceled. Spent subjects remain until exact root settlement and later terminal/definitive resolution permits retirement. Empty repair_subjects is not proof that spent Unknown resolved.
+
+Per fe7's lifecycle disposition: begin_orders_snapshot at genuine open-order Read issuance and carry its token with that Read. Inside exact accepted DATA, BEFORE finish_http_context, call commit_repair_snapshot(read, [token], |current| merge(current, parsed)). The pure merge is existing accept_write_order behavior over current rows, so newer stream rows remain authoritative; this commit IS publication and REPLACES the individual upserts. It is not an extra no-op commit after publication. Native account metadata bookkeeping stays synchronized with the accepted rows and existing revision guards.
+
+If commit returns None, retain native incremental publication for the delivered response and DO NOT retire any subject. Phemex never advances the selective snapshot fence, so the stale-token rejection is a defensive core branch that this consumer does not exercise. Retirement is safe through actual Store absence plus CompleteRead began > minted; failure callbacks obtain no receipt or response publication. This branch provides no legacy transport or admission fallback. After a successful commit, retire only absent subjects of read.symbol whose generations that complete read covers, before the Read retires. Incomplete/pre-mint/stale/other-symbol proof never retires.
+
+Loaded-orders source proof: the ONLY grant-mint call sites are CancelSymbolOrders' orders_cancel_all paths. Its planning gate at trading.rs:1009 requires account.orders_ready(); account.rs:220 requires authenticated && snapshot && open. account.snapshot becomes true only at account.rs:1317 AFTER either safe_snapshot set_orders(staged) (:1307) or unsafe snapshot set_orders(current.clone()) (:1315). Both set Store.loaded.orders true. No late entitlement can therefore originate before that full-load gate. An early unknown-placement reconciliation without cancel-all has NO entitlement, and must retain native incremental publication rather than call the loading commit seam.
+
+Implementation guards the proof: use the receipt commit only for relevant held repair subjects when Store.loaded.orders is already true; otherwise use native incremental publication and no retirement. Do not add an admission wait or new full-load requirement to ordinary early reconciliation. Pin actual cold-start/early reconciliation leaving loaded.orders false, then a genuine full snapshot -> unknown placement -> cancel-all -> reconciliation showing it remains true. If any real path disproves the mint/full-load invariant, stop and return to fe7 for a non-loading commit variant; this venue does not add one.
+
+Disclose and pin the reviewed publication deltas: Store orders_revision advances once per committed read instead of once per accepted row, and commit sets changes.orders even if its complete merged rows are unchanged. Keep the separate account.order_revision and revision-dependent cancel rollback logically correct (changed versus unchanged); test concurrent newer stream/fill updates and both empty/one/many-row reads. CALLERS must name per-read publication and unchanged full-load semantics. No empty commit is invented solely to obtain authority.
+
+Additional lifecycle controls: an other-symbol subject is not retired by this symbol's receipt; a token begun before mint returns Stale; mixed accepted/refused/Unknown roots retain exact membership and never remint; terminal and complete-read retirement release grant capacity only for proven subjects.
+
+Root settlement and Retire::Terminal/CompleteRead preserve the core's fixed-engine ownership: identities/signer are frozen after start; the concrete core has no install-generation or engine teardown API. Do not implement the obsolete draft counter/teardown promises or an account epoch reset the host does not expose.
+
+## Original controls to freeze before runtime changes
+
+Add one focused target, tests/late_repair_context.rs. Drive genuine Unknown placement -> admitted cancel-all -> native order observation. Provider/route tests must use actual Prepare/Bind/Claim/release; do not forge a Context, entitlement, receipt or root. Keep existing tests/trading.rs and dispatch-signing vectors unchanged.
+
+| Control | Original / source requirement |
+| --- | --- |
+| Managed late repair | Genuine late DELETE waits for actual route preparation; zero Action::Http or legacy Sign before Prepare/Bind/Claim. Intended original assertion RED on 035948. |
+| Admission before optimism | Exhaust real owner/repair capacity; no Canceling publication, account revision effect or raw repair HTTP when root refuses. Original RED from native unmanaged dispatch. |
+| Exact source identity | Primary+Secondary host signs repair only with Primary; Secondary-only/public-only cannot mint writes; real recipe/URL/query proof. Native positive plus source gate. |
+| Both mint sites | Empty immediate job but owed unknown placement, and nonempty immediate cancel Plan; mint after genuine admission, preserve original done[]/IDs. No owed set mints nothing. |
+| Mint refusal isolation | Saturated mint after successful Plan admission adds one diagnostic/Warn, retains Plan result/journal/credits, and authorizes no later send. Pin exact text and terminal count. |
+| Native group bytes | Cross-origin same-side subjects share one request; Long/Short stable FIFO; 10+1 in one group uses /g-orders for BOTH chunks; singleton group uses /g-orders/cancel. Preserve duplicate-ID normalization. |
+| Any-age stream observation | Genuine owed old placement seen on private stream repairs immediately before post-expiry read; repeat observation sends nothing. No arbitrary age cutoff. |
+| Post-expiry discovery | Actual signing raw expiry+5000 controls read time; pre-expiry timer inert; unrelated/child/new-generation rows untouched; fills keep manual-position warning. |
+| Exact ACK effects | Representative bulk object, complete array, mixed/duplicate/missing rows; accepted IDs stay ordered/proven, unproved members Unknown. Guard newer revisions/fills during response. |
+| One cleanup and FIFO | Success, rejection, Network, physical timeout, provider refusal, released 408/5xx/integrity all clear active root once; next independent group advances without a user command; no resend. |
+| Liveness and stale delivery | Preparation held through 20s equality, late bytes and replayed old IDs cannot publish or settle next root; no aggregate entitlement timeout. |
+| Subject lifecycle | Complete postdating accepted read retires absent covered generation; stale/incomplete/pre-mint/failed read does not; terminal row retires its own subject; spent Unknown never remints. Uses the reviewed lifecycle publication plus loaded-orders proof above. |
+| Original command isolation | Done/expired/reused-ID cancel-all never receives repair terminal, progress or changed evidence; fresh command entry survives cleanup; foreground/repair conflicts remain enforced. |
+| Credits | Saturation refuses atomically; terminal/preparation failure/physical timeout free exact leg/root credits; 255 live peers survive; repeated groups return full capacity. |
+
+Native working references: transport_timeout_cancel_all_goes_out_now_and_cancels_the_late_landing_after_expiry; failed_late_cancel_is_reported_as_an_error; late_landing_seen_on_the_private_stream_is_canceled_immediately; late_cancels_in_two_groups_are_sequenced_without_false_errors; placement_lost_after_cancel_all_is_not_canceled_by_it; existing complete-read, signed-expiry, partial-cancel and newer-stream tests. Re-run originals on the unchanged base and record genuine assertion RED/GREEN counts, not an expected tally.
+
+## Implementation, measurements and landing gates
+
+Expected consumer scope: Phemex account.rs (subject/lifecycle bindings), trading.rs (mint and managed repair reducer), lib.rs/Pending callback plumbing, Phemex Cargo repair-mutations activation, one new test target, docs and four exact request-map deletions. No generic engine change; any missing API is reported to fe7/overseer rather than added here. Remove orphan legacy Request/Pending branches only where every caller is proven migrated; preserve shared command cancel decoder and financial behavior.
+
+First source commit: measure Phemex family AND local combined on the same actual composed landing tip before/after with unchanged harness, Rust/bindgen/Binaryen and jobs4. Enabling repair-mutations makes the core reachable, so no zero-byte or prior-Phemex number is inherited. Estimate is unmeasured; credit only measured bytes, use the then-current Phemex/combined caps, and refer unexpected growth to the overseer. CI records family bytes; it does not record combined. If any generic engine source change becomes necessary, stop consumer scope and obtain owner review plus paired Bybit/Bitget/combined on that separate core change.
+
+Sequence: plan/API review -> originals freeze and execution on unchanged native base -> consumer source -> exact source/custody review -> full native Phemex/strict clippy/fmt/bans/ratchets and exact map4->0 -> current composed family/combined evidence -> one frozen push/one PR run -> full CI and source CLEAR -> READY -> auditor exact-tree GO -> guarded head-matched owner merge. Do not contaminate #2170 or its run, raise any budget, alter CPU sampling or publish source under this plan-only step.
+
+## Frozen originals on actual core landing composition
+
+Fe7 CARRY CLEAR on reviewed plan95146369771844bc67757a6035c7e167df60a03c3c93294e0476da6cf220b89d authorized originals. The original target is added on49a5b54f36232d1c926f4280141d92060db18e2b (actual repair core8f5f9a2f957 plus Hyperliquid originals). The Phemex runtime/Cargo and request inventory are unchanged from that base. No source adoption is claimed.
+
+Executed cargo test --locked -p safe-cex-venue-phemex --test late_repair_context:
+Corrected run: 19 tests, 4 intended ASSERTION RED, 15 GREEN, 0 ignored. The completed run has no compile/helper failure. The initial d545b3d7ff5 run was 17 tests: 4 RED and 13 GREEN.
+
+| Intended RED | Genuine observed assertion |
+| --- | --- |
+| late_repair_waits_for_a_real_primary_preparation | Native emits unmanaged Action::Http before any genuine Primary Prepare. |
+| held_repair_preparation_has_its_own_twenty_second_bound | Native has no repair preparation deadline at dispatch plus20000. |
+| unclaimed_repair_ack_cannot_publish_or_finish_a_root | Native accepts the actual unclaimed request ID and changes Canceling to Canceled. |
+| repair_admission_refusal_has_no_optimistic_cancel_or_io_and_preserves_peers | Real account commands exhaust registry credits; native late dispatch still changes Open to Canceling. |
+
+The initial 13 native GREENs pin empty/nonempty original cancel-all results, duplicate stream observations, cross-command same-side grouping, native10+1 bulk path, independent FIFO after Network loss, mixed ACK accepted/refused row effects, filled-order manual diagnostics, actual signing-expiry+5000 discovery with Primary, complete versus incomplete generation release, pre-snapshot reconciliation staying unloaded, and empty/one/many-row read preservation of loaded Store and stream rows. Clocks advance monotonically; fixture credentials are synthetic. Native and source release helpers use real LocalSigner plus host Prepare/Bind/Claim; no opaque owner/Context/entitlement/receipt is forged.
+
+The suffix assertions after the four RED stops remain unexecuted until source. They are not additional original passes. Source-stage controls still to add: mint capacity result/journal isolation, typed provider/Internal refusal and physical timeout, stale completion/old-root peer isolation, exact other-symbol/pre-mint receipt retirement, revision-parity during concurrent stream updates, bound credit reuse, and direct native/JS parity. Core controls do not replace these venue integration gates.
+
+Source must make all 19 corrected originals GREEN without changing their assertion bodies. Additional source-stage controls are additive and separately reviewed. Original execution logs and hashes stay outside the repository; no test output or profile artifact is committed.
+
+## F1-F4 originals correction ledger
+
+F1 saturation is pinned by command 1127 returning exactly "Engine request capacity reached", kind Internal, outcome None, one failure terminal and no Warn. The 127 held Read root/leg pairs plus two native account legs fill 256 Contexts; the refusing command produces no preparation or physical I/O and all peers remain live. Its post-admission-refusal suffix also requires Open (not Canceling), no DELETE and no later automatic DELETE from a repeated observation. The cause/count passed on the unchanged native base; the suffix is a source-stage guarantee after the original RED. The repeat observation runs after releasing a genuine peer so continued saturation cannot make it pass vacuously.
+
+F2 coverage is explicit; none of the following is attributed to the initial 13 GREENs. Both additive originals and the strengthened Primary Read checks pass in the corrected 15 GREENs:
+
+| Control row | Exact subcase | Stage |
+| --- | --- | --- |
+| Exact source identity | Secondary-only host cannot mint/send a repair write | Source-stage: secondary_only_host_cannot_mint_or_send_late_repair |
+| Exact source identity | Public-only host cannot mint/send a repair write | Source-stage: public_only_host_cannot_mint_or_send_late_repair |
+| Post-expiry discovery | Native timer at raw expiry+4999 sends no reconciliation read; expiry+5000 does | Executed additive native original: native_pre_expiry_reconcile_timer_is_inert_then_the_read_signs_primary |
+| Post-expiry discovery | Reconciliation READ itself signs with Primary, not merely its later DELETE | Executed by strengthened discover helper in the corrected run |
+| Post-expiry discovery | Parent/child row is never a late-repair subject | Source-stage: child_order_observation_cannot_spend_parent_repair_subject |
+| Post-expiry discovery | Newer-generation same-client row cannot spend or retire the prior subject | Source-stage: newer_same_client_generation_cannot_spend_prior_entitlement |
+| Any-age stream observation | A valid observation well after expiry+5000 while its Read reply is pending sends repair immediately | Executed additive native original: native_owed_order_seen_after_expiry_repairs_before_the_read_reply |
+| Both mint sites | No-owed cancel-all spends no entitlement/grant capacity | Source-stage: no_owed_cancel_all_mints_nothing_and_spends_no_grant |
+| Original command isolation | Expired and numerically reused command ID receives no repair terminal | Source-stage: expired_reused_command_id_is_isolated_from_late_repair |
+| Original command isolation | Foreground/repair scope conflict remains enforced | Source-stage: foreground_repair_conflict_preserves_both_owners |
+
+F3 updates the Status and the README's four-cell row; no separating blank is inserted before the own row. F4 states the prepared request ID is the same identity used at Bind and asserts that equality after the held request is actually released. As before, assertions beyond an original RED stop remain unexecuted until source.
+
+Corrected execution keeps all four original RED stops: unmanaged HTTP before Prepare (line 455), missing 20-second preparation timer (line 523), unclaimed ACK publishing Canceled (line 484), and optimistic Canceling after proved capacity refusal (line 857). The any-age native control maintains its real private socket with pong frames while leaving the reconciliation Read unanswered; socket idle expiry is not used as repair evidence.
+
+Source-stage additive control: refused_repair_admission_emits_one_manual_cancel_error requires exactly one Error containing "could not cancel late-landing" and "native-a" on the refused observation, and none on the repeat after a genuine peer release. The 19 reviewed original assertion bodies remain unchanged.
+
+## Source freeze and separate core prerequisite
+
+The local consumer migrates all four request holdouts without editing generic engine code. Its 19 reviewed originals remain a byte-exact full-file prefix; five additive source-stage controls cover the manual admission-refusal diagnostic, no empty grants, Secondary-only/public-only refusal, and typed provider preparation failure. The shared fixture now registers the genuine LocalSigner-issued identities after its signer, as production trusted setup does. Re-execute the unchanged native runtime with only this fixture registration to retain the original 4 RED / 15 GREEN baseline.
+
+Blocked native contract: tests/trading.rs::open_order_read_started_before_a_later_failure_cannot_settle_it must keep its body byte-exact and send the late DELETE immediately while command 133's unrelated-ID CancelSymbolOrders call remains active. The old core refuses this CancelOnly repair on symbol overlap. Per the overseer's #2181 ruling, a repair cancel and foreground cancel-all on the same symbol do not lock-conflict, with no send-time capture of cancel-all IDs. Explicit-ID CancelOrders still conflicts on the same ID; repair-vs-repair, foreground-vs-foreground and every placing/amend overlap retain their existing rules. No consumer deferral, re-queue, early terminal, lock bypass or engine edit is introduced. Landing waits for the core PR and this native control passing unchanged.
+
+Orphan helper removal also deletes one Phemex lib.rs read_credentials lexical reference; prune that single credential inventory count. Shared read Slots, every other credential site, and the signing/socket inventories remain unchanged.
+
+## Source review corrections to 18d2fe91cae
+
+Patch provenance: source-review.patch SHA256 b569cffcba441123a924f7090b8f8566bcefdf180cc4ad4ec9776de60e02d3d2 covers git diff -- sdk-rs only. The full source commit additionally changes README, CALLERS and this plan. tests/dispatch_signing.rs changes only its matcher from retired Pending::Trade to Pending::Repair; the vectors and their assertions remain unchanged. tests/trading.rs and the 19 frozen original bodies remain unchanged.
+
+F1 remains a separate fe7 core prerequisite: synchronous managed-send refusal must settle an admitted Repair root after its last leg retires, with NotSent facts. The additive synchronous_repair_send_refusal_settles_restores_and_advances_fifo_once control uses real command mint/admission and an invalid unsigned header to force request_signed_managed to return Invalid synchronously. It requires one Settled, restored first-order status, one manual-cancel diagnostic and the next genuine FIFO preparation. No local settlement or re-queue is introduced.
+
+F2 retains nonzero envelope codes and decoded row code/bizError/Rejected causes in the native batch classifier, keeping typed results. Missing or mismatched rows remain unproven. The additive documented_repair_refusals_keep_envelope_and_row_causes control pins both envelope and row 11001 to Rejected. F3 routes a post-admission Primary ownership mismatch into typed AuthInvalid/NotSent failure through the same settlement path. F4 restores native account_refresh after refused repair admission. F5 emits one manual-cancel diagnostic for non-Capacity mint refusal; Capacity keeps the core's existing diagnostic/Warn. F6 asserts the two dead Repair response arms are unreachable after the early dispatch.
+
+F8: retry reads may now issue before the old Read context retires. This temporarily needs one additional Context at the capacity edge, retaining the exact DATA needed by snapshot publication; admission refusal still follows native read-failure handling.
+
+## Core #2181 consumer review
+
+The overseer accepts native parity for a newer cancel-all racing an in-flight
+repair: the losing repair's definitive native refusal settles Rejected and
+emits the existing manual-cancel error. There is no gone/Satisfied row in the
+Phemex classifier and no new absence proof or mapping is authorized. Core head
+8e527df19e3 records this in CALLERS and adds
+a_newer_cancel_all_race_settles_the_repair_as_native_rejected. The existing
+Phemex documented envelope/row refusal control separately pins typed Rejected.
+Required consumer proof is the unchanged synchronous send-refusal/FIFO control
+and unchanged open_order_read_started_before_a_later_failure_cannot_settle_it
+on the composed core/consumer tree. Review execution and source clearance are
+separate from the engine PR's CI and its actual landing.
+
+## Landed-core composition and fixture validation
+
+Repair fixes #2181 landed as 7cbef1fc55a. The plain merge into 4acd7727f9d
+contains actual tip 74a0ba44d38. Every SDK path merges automatically; only README
+and CALLERS retain incoming text plus this slice once. The Phemex subtree at
+that merge equals reviewed 95a5c3c81b6, and native trading.rs equals original
+2fac5e37fbbe. The full native suite passes 346 tests with no failures or ignored
+tests, including both previously blocked controls unchanged. Strict clippy and
+fmt pass. The review target was deleted.
+
+The signing ratchet rejects new fixture material in production source files,
+even under cfg(test). Commit 510eb5a1b6e places only the genuine LocalSigner
+factory in tests/support/repair_signer.rs, loaded through a cfg(test)-only path
+module. The synthetic key/material and identities are unchanged; neither the
+non-test production prefix nor either unit assertion body changes. The support
+module does not declare this factory, so integration tests do not load it.
+Both affected unit controls, strict clippy and fmt pass again; that target was
+also deleted. There is no signing-map exemption or production credential holder.
+
+The remaining request-test ratchet entries are conservative macro false
+positives: nested matches! observes HttpAction::Prepare { request, .. } and reads
+request.method/url. These are handed to 19pt8s's checker-precision work, with
+the exact two payloads and unchanged regression bodies. This consumer will
+compose that landing before publication; it adds no inventory allowance or
+macro-hiding workaround. CI supplies the family-size record, and a local
+combined measurement on the composed source is required before READY.
+
+## Publication and checker precision
+
+The overseer authorized publication before #2185 lands, retaining the outer and inner guarded `matches!` fingerprints d996a1201d82585408ab3816574bb362ae0635e43f62835bb12419e12772d37b and 7223d1e3ef2a11618fc585328d3d2c10b9cbc6197b7767d7c1e0726404e424d5 in the test inventory. They inspect `HttpAction::Prepare { request, .. }` fields in the unchanged synchronous-refusal regression; neither is a request or terminal authority. No test-body rewrite, checker exemption or production legacy site is added. The current shrink-only checker reports the test-inventory growth until #2185’s exact proof removes both rows; this is disclosed rather than hidden.
+
+The source/trusted-fixture tree 510eb5a1b6e on actual 74a0ba44d38 measures 14,080,905 combined bytes (web = node), leaving 74,871 under 14,155,776. Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132, jobs 4, default flags and the unchanged shipping harness were used. SHA256 c3025f90a8cbc0728f189bd13e77736e8499ba38604151568d890458556420e7. The build target was deleted. This is a local combined record; CI supplies the family record. READY will use a current-tip composed combined measurement or an explicit carry disposition.

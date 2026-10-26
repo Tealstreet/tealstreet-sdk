@@ -125,7 +125,7 @@ impl Venue for Probe {
         release: safe_cex_engine::SigningRelease,
     ) {
         if let safe_cex_engine::SigningTarget::Http { request, pending } = &target
-            && matches!(pending, Pending::Trade(_) | Pending::PlannedTrade(_))
+            && matches!(pending, Pending::Repair(_) | Pending::PlannedTrade(_))
         {
             self.releases.lock().unwrap().push((*request, release));
         }
