@@ -13,8 +13,10 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // allowance over the opt-s 1,330,120 cap; #2219 signing encodings: CI 1,385,845 rounded up to the KiB.
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
 // Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
-// Kraken hosted signing 1,399,777, then #2219 signing encodings: CI 1,400,771 rounded up to KiB.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_481_728, bitgetusdc: 1_481_728, bybit: 1_445_888, asterdex: 1_386_496, kraken: 1_400_832, krakenspot: 1_400_832 });
+// #2219 shared signing encodings: CI 1,445,978, 1413 KiB by overseer ruling.
+// Kraken composed CI: 1,399,905, then #2219 signing encodings 1,400,974, rounded up to KiB under the
+// standing venue allowance.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_481_728, bitgetusdc: 1_481_728, bybit: 1_446_912, asterdex: 1_386_496, kraken: 1_401_856, krakenspot: 1_401_856 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
