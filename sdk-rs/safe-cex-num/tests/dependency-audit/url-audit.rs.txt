@@ -1,0 +1,14 @@
+#[test]
+fn extract_domain_matches_node_with_icu_proposal() {
+ let script = r#"
+ const hosts=['EXAMPLE.COM','bücher.example','faß.de','例え.テスト','ab\u00adcd.com','\uFEFFexample.com','[::1]','127.1','0x7f000001','example。com','xn--bcher-kva.example','a_b.example','Σ.example','ς.example','K.example','ＡＢＣ.com'];
+ const urls=['/relative','file:///tmp/x','mailto:foo@example.com','custom://EXAMPLE.COM/a','http://2130706433/','http://[::ffff:192.0.2.1]/','https://user:pass@EXAMPLE.com:8443/a','https://a\u200db.com/','http://%65xample.com/'];
+ for(const h of hosts) for(const scheme of ['https','http','wss']) urls.push(`${scheme}://${h}:443/a?q=x`);
+ console.log(JSON.stringify(urls.map(input=>{try{return {input,expected:new URL(input).hostname}}catch{return {input,expected:null}}})));
+ "#;
+ let out=std::process::Command::new("node").args(["-e",script]).output().unwrap();
+ assert!(out.status.success());
+ let rows:Vec<serde_json::Value>=serde_json::from_slice(&out.stdout).unwrap();
+ for r in &rows {assert_eq!(safe_cex_transport::tunnel_endpoints::extract_domain_from_url(r["input"].as_str().unwrap()),r["expected"].as_str().map(str::to_owned),"{r}");}
+ eprintln!("{} live Node URL cases passed",rows.len());
+}

@@ -9,7 +9,7 @@ import {
   OrderTimeInForce,
   OrderType,
 } from '../../types';
-import { CoinbaseStarbaseProtocolError } from '../../exchanges/coinbase/coinbase.starbase';
+import { CoinbaseStarbaseProtocolError } from '../reference/coinbase/coinbase.starbase';
 import {
   assessCoinbaseStarbaseBalanceParity,
   assessCoinbaseStarbasePositionParity,
@@ -33,7 +33,7 @@ import {
   decodeCoinbaseStarbaseTradePage,
   normalizeCoinbaseStarbaseOrder,
   normalizeCoinbaseStarbaseTrade,
-} from '../../exchanges/coinbase/coinbase.starbase-private';
+} from '../reference/coinbase/coinbase.starbase-private';
 import {
   STARBASE_ACCOUNT_SUMMARY_FIXTURE,
   STARBASE_ETH_HISTORY_ORDER_FIXTURE,

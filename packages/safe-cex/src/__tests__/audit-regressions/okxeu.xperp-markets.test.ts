@@ -3,7 +3,7 @@ import type { ExchangeOptions, Market, Ticker } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS } from '../../exchanges/okx/okx.types';
-import { OKXEUExchange } from '../../exchanges/okx/okxeu.exchange';
+import { OKXEUExchange } from '../reference/okx/okxeu.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const options: ExchangeOptions = {

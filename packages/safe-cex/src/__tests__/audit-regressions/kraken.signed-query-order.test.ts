@@ -2,7 +2,7 @@ import type { ExchangeOptions } from '../../types';
 
 import { describe, expect, it } from 'vitest';
 
-import { createAPI } from '../../exchanges/kraken/kraken.api';
+import { createAPI } from '../reference/kraken/kraken.api';
 
 /**
  * The signed query and the SENT query must be the same string.

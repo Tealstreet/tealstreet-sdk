@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExchangeName, Market } from '../../types';
 import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/host';
 
-import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
 import { mapBitunixClosedPosition } from '../../exchanges/bitunix/bitunix.income';
 import { mapBlofinClosedPosition } from '../../exchanges/blofin/blofin.income';
 import { mapBybitClosedPnl } from '../../exchanges/bybit/bybit.closed-pnl';

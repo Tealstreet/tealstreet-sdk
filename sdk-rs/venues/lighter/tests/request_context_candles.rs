@@ -22,8 +22,8 @@ fn started(options: Options) -> (Engine<Lighter>, TimerId) {
         })
         .unwrap();
     reply_at(&mut engine, NOW, &metadata, 200, META);
-    let poll = engine
-        .drain_actions()
+    let poll = support::finish_startup_tickers(&mut engine, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms == NOW + 2_000. => Some(timer),
             _ => None,

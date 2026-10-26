@@ -1,0 +1,210 @@
+error[E0277]: the trait bound `serde_json::Value: JsNumberOutput` is not satisfied
+  --> tests/numeric_ingress_ui/generic_value.rs:15:27
+   |
+15 |     let _ = js_from_str::<Envelope<serde_json::Value>>(r#"{"data":1e400}"#);
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `JsNumberOutput` is not implemented for `serde_json::Value`
+   |
+   = help: the following other types implement trait `JsNumberOutput`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+           and $N others
+note: required for `Envelope<serde_json::Value>` to implement `JsNumberOutput`
+  --> tests/numeric_ingress_ui/generic_value.rs:7:56
+   |
+ 7 | impl<T: safe_cex_num::numeric_ingress::JsNumberOutput> safe_cex_num::numeric_ingress::JsNumberOutput
+   |         ---------------------------------------------  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |         |
+   |         unsatisfied trait bound introduced here
+ 8 |     for Envelope<T>
+   |         ^^^^^^^^^^^
+note: required by a bound in `js_from_str`
+  --> src/numeric_ingress.rs
+   |
+   | pub fn js_from_str<T: DeserializeOwned + Serialize + JsNumberOutput>(
+   |                                                      ^^^^^^^^^^^^^^ required by this bound in `js_from_str`
+
+error[E0277]: the trait bound `serde_json::Value: JsNumberOutput` is not satisfied
+  --> tests/numeric_ingress_ui/generic_value.rs:19:73
+   |
+19 |     safe_cex_num::numeric_ingress::JsNumberOutput::check_number_output(&value);
+   |     ------------------------------------------------------------------  ^^^^^ the trait `JsNumberOutput` is not implemented for `serde_json::Value`
+   |     |
+   |     required by a bound introduced by this call
+   |
+   = help: the following other types implement trait `JsNumberOutput`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+           and $N others
+   = note: required for `&serde_json::Value` to implement `JsNumberOutput`
+
+error[E0277]: the trait bound `serde_json::Value: JsNumberOutput` is not satisfied
+  --> tests/numeric_ingress_ui/generic_value.rs:23:72
+   |
+23 |     safe_cex_num::numeric_ingress::JsNumberOutput::check_number_output(value);
+   |     ------------------------------------------------------------------ ^^^^^ the trait `JsNumberOutput` is not implemented for `serde_json::Value`
+   |     |
+   |     required by a bound introduced by this call
+   |
+   = help: the following other types implement trait `JsNumberOutput`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+           and $N others
+   = note: required for `(f64, serde_json::Value)` to implement `JsNumberOutput`
+
+error[E0277]: the trait bound `serde_json::Value: JsNumberOutput` is not satisfied
+  --> tests/numeric_ingress_ui/generic_value.rs:28:16
+   |
+28 |     eligible::<safe_cex_types::object_map::JsObjectMap<serde_json::Value>>();
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `JsNumberOutput` is not implemented for `serde_json::Value`
+   |
+   = help: the following other types implement trait `JsNumberOutput`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+           and $N others
+   = note: required for `JsObjectMap<serde_json::Value>` to implement `JsNumberOutput`
+note: required by a bound in `eligible`
+  --> tests/numeric_ingress_ui/generic_value.rs:27:20
+   |
+27 |     fn eligible<T: safe_cex_num::numeric_ingress::JsNumberOutput>() {}
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `eligible`
+
+error[E0277]: the trait bound `serde_json::Value: JsNumberOutput` is not satisfied
+  --> tests/numeric_ingress_ui/generic_value.rs:29:16
+   |
+29 |     eligible::<indexmap::IndexMap<String, serde_json::Value>>();
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `JsNumberOutput` is not implemented for `serde_json::Value`
+   |
+   = help: the following other types implement trait `JsNumberOutput`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+           and $N others
+   = note: required for `IndexMap<std::string::String, serde_json::Value>` to implement `JsNumberOutput`
+note: required by a bound in `eligible`
+  --> tests/numeric_ingress_ui/generic_value.rs:27:20
+   |
+27 |     fn eligible<T: safe_cex_num::numeric_ingress::JsNumberOutput>() {}
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `eligible`
+
+error[E0277]: the trait bound `serde_json::Value: JsNumberOutput` is not satisfied
+  --> tests/numeric_ingress_ui/generic_value.rs:30:16
+   |
+30 |     eligible::<indexmap::IndexMap<serde_json::Value, f64>>();
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `JsNumberOutput` is not implemented for `serde_json::Value`
+   |
+   = help: the following other types implement trait `JsNumberOutput`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+           and $N others
+   = note: required for `IndexMap<serde_json::Value, f64>` to implement `JsNumberOutput`
+note: required by a bound in `eligible`
+  --> tests/numeric_ingress_ui/generic_value.rs:27:20
+   |
+27 |     fn eligible<T: safe_cex_num::numeric_ingress::JsNumberOutput>() {}
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `eligible`
+
+error[E0277]: the trait bound `serde_json::Value: JsNumberOutput` is not satisfied
+  --> tests/numeric_ingress_ui/generic_value.rs:31:16
+   |
+31 |     eligible::<(f64, f64, serde_json::Value)>();
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `JsNumberOutput` is not implemented for `serde_json::Value`
+   |
+   = help: the following other types implement trait `JsNumberOutput`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+           and $N others
+   = note: required for `(f64, f64, serde_json::Value)` to implement `JsNumberOutput`
+note: required by a bound in `eligible`
+  --> tests/numeric_ingress_ui/generic_value.rs:27:20
+   |
+27 |     fn eligible<T: safe_cex_num::numeric_ingress::JsNumberOutput>() {}
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `eligible`
+
+error[E0277]: the trait bound `serde_json::Value: JsNumberOutput` is not satisfied
+  --> tests/numeric_ingress_ui/generic_value.rs:32:16
+   |
+32 |     eligible::<(f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, serde_json::Value)>();
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `JsNumberOutput` is not implemented for `serde_json::Value`
+   |
+   = help: the following other types implement trait `JsNumberOutput`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+           and $N others
+   = note: required for `(f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, serde_json::Value)` to implement `JsNumberOutput`
+note: required by a bound in `eligible`
+  --> tests/numeric_ingress_ui/generic_value.rs:27:20
+   |
+27 |     fn eligible<T: safe_cex_num::numeric_ingress::JsNumberOutput>() {}
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `eligible`
+
+error[E0277]: the trait bound `serde_json::Value: JsNumberOutput` is not satisfied
+  --> tests/numeric_ingress_ui/generic_value.rs:33:16
+   |
+33 |     eligible::<Box<[serde_json::Value]>>();
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^ the trait `JsNumberOutput` is not implemented for `serde_json::Value`
+   |
+   = help: the following other types implement trait `JsNumberOutput`:
+             &T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+           and $N others
+   = note: required for `[serde_json::Value]` to implement `JsNumberOutput`
+   = note: 1 redundant requirement hidden
+   = note: required for `Box<[serde_json::Value]>` to implement `JsNumberOutput`
+note: required by a bound in `eligible`
+  --> tests/numeric_ingress_ui/generic_value.rs:27:20
+   |
+27 |     fn eligible<T: safe_cex_num::numeric_ingress::JsNumberOutput>() {}
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `eligible`

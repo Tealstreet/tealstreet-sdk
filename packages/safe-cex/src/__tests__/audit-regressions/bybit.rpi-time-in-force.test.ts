@@ -7,7 +7,7 @@ import {
 import {
   ORDER_TIME_IN_FORCE as SPOT_TIME_IN_FORCE,
   ORDER_TIME_IN_FORCE_OUTBOUND as SPOT_TIME_IN_FORCE_OUTBOUND,
-} from '../../exchanges/bybit/bybitspot.types';
+} from '../reference/bybit/bybitspot.types';
 import { OrderTimeInForce } from '../../types';
 
 describe('Bybit RPI order mapping', () => {

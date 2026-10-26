@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HyperliquidSpotExchange } from '../../exchanges/hyperliquid/hyperliquidspot.exchange';
+import { HyperliquidSpotExchange } from '../reference/hyperliquid/hyperliquidspot.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide } from '../../types';
 

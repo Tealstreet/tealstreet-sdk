@@ -22,7 +22,7 @@ import {
   getAsterBuilderApprovalFeeRate,
   resolveAsterBuilderFeeConfig,
 } from '../../exchanges/asterdex/asterdex.builder-fee';
-import { AsterDEXExchange } from '../../exchanges/asterdex/asterdex.exchange';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 import { asterDEXVirtualClock } from '../../exchanges/asterdex/asterdex.virtualClock';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';

@@ -281,7 +281,9 @@ export function createRemoteSignerProvider(options: RemoteSignerProviderOptions)
     const reference = Array.isArray(sign.payload) && sign.payload.length === 1 ? Array.from(sign.payload)[0] : undefined;
     if (!record(reference) || reference.kind !== 'result' || reference.index !== 0 || reference.encoding !== 'hex') throw refused();
     if (!Array.isArray(digest.payload) || digest.payload.length < 1 || digest.payload.length > MAX_PARTS) throw refused();
-    const key = credentials.get(entry.identity.credential)!.bytes;
+    const material = credentials.get(entry.identity.credential);
+    if (!material) throw refused();
+    const key = material.bytes;
     let total = key.length;
     const parts = Array.from(digest.payload, (part) => {
       let bytes: number[];
