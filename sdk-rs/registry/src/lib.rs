@@ -1051,7 +1051,7 @@ fn payload_signing_rules(
     // digest-only delegate is never constructed.
     if venue == "paradex" {
         return Err(VenueError::new(
-            "Rust paradex hosted signing is unavailable; configure the account's local Stark key or remove payloadSigner",
+            "Rust paradex delegated signing is unsupported in this build; configure the account's local Stark key or remove payloadSigner",
         )
         .kind(ErrorKind::Unsupported)
         .outcome(safe_cex_engine::Outcome::NotSent));

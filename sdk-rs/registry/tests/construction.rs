@@ -558,7 +558,7 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     assert_eq!(
         error.message,
-        "Rust paradex hosted signing is unavailable; configure the account's local Stark key or remove payloadSigner"
+        "Rust paradex delegated signing is unsupported in this build; configure the account's local Stark key or remove payloadSigner"
     );
     construct("paradex", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
     construct("binance", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
