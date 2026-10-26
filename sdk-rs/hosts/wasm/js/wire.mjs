@@ -66,8 +66,8 @@ const CAPABILITY_ENUMS = [
   ['leverageQuery', ['settings', 'onRead', 'onMetadata', 'onReadAndMetadata']],
   ['maxLeverage', ['market', 'query', 'rails', 'unsupported']],
   ['quantityUnits', QUANTITY_UNITS],
-  ['positionHistory', ['unsupported', 'fillsAccount', 'fillsSymbol', 'bybit', 'okx', 'blofin', 'wooOrders']],
-  ['closedPositionFormat', ['unsupported', 'bybit', 'okx', 'blofin']],
+  ['positionHistory', ['unsupported', 'fillsAccount', 'fillsSymbol', 'bybit', 'okx', 'blofin', 'wooOrders', 'bitunix']],
+  ['closedPositionFormat', ['unsupported', 'bybit', 'okx', 'blofin', 'bitunix']],
   ['fillHistoryTime', ['asProvided', 'secondsOrMilliseconds', 'nonnegativeSecondsOrMilliseconds']],
 ];
 export const LOADED_FLAG = { BALANCE: 1, ORDERS: 2, MARKETS: 4, TICKERS: 8, POSITIONS: 16 };

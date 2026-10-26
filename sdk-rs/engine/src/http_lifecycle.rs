@@ -5542,6 +5542,8 @@ mod tests {
         };
         let (mut engine, _) = start(Probe::default());
         engine.io.core.order_locks = crate::order_locks::OrderLocks::fencing_placements(true);
+        // A read dispatched before the write: its answer cannot vouch for the placement.
+        let stale = engine.io.core.order_locks.token();
         // A released managed placement that seals Unknown (a lost 503 answer).
         seal_uncertain(
             &mut engine,
@@ -5579,15 +5581,69 @@ mod tests {
                 .is_ok(),
             "a cancel is still admitted"
         );
+        locks.reconciled(Some("BTCUSDT"), stale);
+        assert_eq!(
+            locks.acquire(&place(11, "BTCUSDT"), &engine.store, false),
+            Err(crate::order_locks::Refusal::Uncertain(11)),
+            "a stale read does not release the fence"
+        );
         // A fresh read for the symbol, after the write, releases the fence.
         let token = locks.token();
         locks.reconciled(Some("BTCUSDT"), token);
         assert!(!locks.uncertain("BTCUSDT"));
         assert!(
             locks
-                .acquire(&place(11, "BTCUSDT"), &engine.store, false)
+                .acquire(&place(12, "BTCUSDT"), &engine.store, false)
                 .is_ok()
         );
+    }
+
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_fenced_symbol_re_asks_its_reconcile_with_bounded_backoff_until_released() {
+        let place = Command::PlaceOrders {
+            command: 7,
+            orders: vec![
+                serde_json::from_str(
+                    r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":1}"#,
+                )
+                .unwrap(),
+            ],
+        };
+        let (mut engine, _) = start(Probe::default());
+        engine.io.core.order_locks = crate::order_locks::OrderLocks::fencing_placements(true);
+        seal_uncertain(&mut engine, &place, 6., VenueError::new("lost"));
+        let btc = Some(vec!["BTCUSDT".to_owned()]);
+        assert_eq!(engine.venue.reconciles, vec![btc.clone()], "asked at once");
+        // Each reconcile read fails; the engine re-asks 1 s, 2 s, 4 s ... capped at 30 s.
+        let mut at = 6.;
+        let mut gaps = Vec::new();
+        for _ in 0..8 {
+            let (timer, due) = engine.reconcile_timer.expect("a re-ask is armed");
+            gaps.push(due - at);
+            at = due;
+            engine.handle(at, Event::TimerFired { timer });
+        }
+        assert_eq!(
+            gaps,
+            [
+                1_000., 2_000., 4_000., 8_000., 16_000., 30_000., 30_000., 30_000.
+            ]
+        );
+        assert_eq!(engine.venue.reconciles.len(), 9);
+        assert!(engine.venue.reconciles.iter().all(|scope| *scope == btc));
+        // A fresh read releases the fence and the re-asks stop.
+        let token = engine.io.core.order_locks.token();
+        engine
+            .io
+            .core
+            .order_locks
+            .reconciled(Some("BTCUSDT"), token);
+        let (timer, due) = engine.reconcile_timer.expect("the last re-ask is armed");
+        engine.handle(due, Event::TimerFired { timer });
+        assert_eq!(engine.venue.reconciles.len(), 9, "no re-ask after release");
+        assert!(engine.reconcile_timer.is_none());
+        assert!(engine.io.core.fence_reread.is_none());
     }
 
     #[cfg(feature = "order-locks")]
