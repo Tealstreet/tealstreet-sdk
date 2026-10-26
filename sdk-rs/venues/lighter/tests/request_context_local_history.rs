@@ -3,8 +3,8 @@ use safe_cex_engine::book::Book;
 use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::{
-    Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, HttpRequest, Method, Notice,
-    Query, Response, SocketId, TimerId, Venue, VenueError,
+    Action, Capabilities, Command, Cx, Engine, ErrorKind, Event, Notice, Query, Response, SocketId,
+    TimerId, Venue, VenueError,
 };
 use safe_cex_venue_lighter::{Lighter, Options, Pending};
 const NOW: f64 = 1_700_000_000_000.;
@@ -111,7 +111,7 @@ fn engine(branch: Local, robinhood: bool, testnet: bool) -> Engine<Probe> {
             testnet,
             robinhood,
             public_data_only: !private,
-            secret: private.then(|| "fixture-uninitialized-material".into()),
+            remote_signer: private,
             api_key_index: private.then(|| "0".into()),
             ..Default::default()
         }),
@@ -394,8 +394,7 @@ fn duplicate_id_cannot_consume_a_retained_peer() {
     }
 }
 #[test]
-fn saturated_remote_public_trades_keeps_legacy_native_bytes_and_no_unused_root() {
-    let mut after = Vec::new();
+fn saturated_remote_public_trades_refuses_before_preparation() {
     for robinhood in [false, true] {
         for testnet in [false, true] {
             let mut e = engine(Local::Empty, robinhood, testnet);
@@ -411,57 +410,12 @@ fn saturated_remote_public_trades_keeps_legacy_native_bytes_and_no_unused_root()
                     limit: Some(999),
                 },
             );
-            assert_eq!(actions.len(), 1);
-            let Action::Http(HttpRequest {
-                id,
-                method,
-                url,
-                headers,
-                body,
-                ..
-            }) = &actions[0]
-            else {
-                panic!("remote path stays legacy until its own migration")
-            };
-            assert_eq!(*method, Method::Get);
-            assert!(headers.is_empty());
-            assert_eq!(*body, None);
-            let host = match (robinhood, testnet) {
-                (false, false) => "https://mainnet.zklighter.elliot.ai",
-                (false, true) => "https://testnet-api.lighter.xyz",
-                (true, false) => "https://api.rh.lighter.xyz",
-                (true, true) => "https://api.rh-testnet.lighter.xyz",
-            };
-            assert_eq!(
-                url,
-                &format!(
-                    "{host}/api/v1/trades?limit=100&market_type=perp&market_id=1&sort_by=timestamp&sort_dir=desc&aggregate=false"
-                )
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_)))
             );
-            e.handle(
-                NOW,
-                Event::HttpResponse {
-                    request: *id,
-                    response: Response {
-                        status: 200,
-                        headers: "",
-                        body: r#"{"code":200,"trades":[],"next_cursor":null}"#,
-                    },
-                },
-            );
-            assert_eq!(
-                one(&e.drain_actions().collect::<Vec<_>>(), 800).unwrap(),
-                "[]"
-            );
-            after.push(ask(&mut e, NOW, 801, Local::Empty));
+            assert_eq!(actions.iter().filter(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 800, error }) if error.kind == Some(ErrorKind::Internal))).count(), 1);
         }
-    }
-    for actions in after {
-        refused(
-            &actions,
-            801,
-            ErrorKind::Internal,
-            "Engine request capacity reached",
-        );
     }
 }

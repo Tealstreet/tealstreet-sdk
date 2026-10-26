@@ -1064,8 +1064,11 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
   assert.equal(bridge.closedPositionFormat, 'blofin');
   assert.equal(bridge.fillHistoryTime, 'nonnegativeSecondsOrMilliseconds');
   assert.equal(bridge.quantityUnits, 'base');
-  assert.throws(() => capabilities(0, 7 << 20), /unknown capability positionHistory/);
-  assert.throws(() => capabilities(0, 4 << 24), /unknown capability closedPositionFormat/);
+  const bitunix = capabilities(0, (7 << 20) | (4 << 24));
+  assert.equal(bitunix.positionHistory, 'bitunix');
+  assert.equal(bitunix.closedPositionFormat, 'bitunix');
+  assert.throws(() => capabilities(0, 8 << 20), /unknown capability positionHistory/);
+  assert.throws(() => capabilities(0, 5 << 24), /unknown capability closedPositionFormat/);
   assert.throws(() => capabilities(0, 3 << 28), /unknown capability fillHistoryTime/);
   assert.throws(() => capabilities(0, 4 << 8), /unknown capability leverageQuery/);
   assert.throws(() => capabilities(0, 9), /unknown capability account/);
