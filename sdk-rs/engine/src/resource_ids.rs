@@ -97,6 +97,7 @@ pub(crate) fn action_ids_safe(mut action: &crate::Action) -> bool {
             | Action::WsClose { socket } => safe(socket.0),
             Action::Http(request) => safe(request.id.0),
             Action::Sign { attempt, .. } => safe(attempt.0),
+            Action::RetireAddressSetup { task, .. } => safe(task.0),
             Action::SignPayload { request, .. } => safe(request.0),
             Action::SetTimer { timer, .. } | Action::ClearTimer { timer } => safe(timer.0),
             Action::SignedOutbound { attempt, outbound } => {
