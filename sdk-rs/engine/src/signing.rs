@@ -947,7 +947,6 @@ pub trait Signer: ProviderBounds {
     ) -> Option<Box<dyn OwnedSetupExecution>> {
         None
     }
-
 }
 pub type Provider = Arc<dyn Signer>;
 
