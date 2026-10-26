@@ -790,6 +790,44 @@ fn an_unknown_placement_stays_fenced_until_a_fresh_complete_order_read() {
 }
 
 #[test]
+fn engine_reasks_join_a_slow_primary_reconciliation_read() {
+    let mut h = seeded();
+    command(&mut h, place(750, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 750).outcome, Some(Outcome::Unknown));
+    let first = h.take("orders-pending?");
+    let sealed_at = h.now;
+    for at in [sealed_at + 1_000., sealed_at + 3_000.] {
+        let timer = h
+            .actions
+            .iter()
+            .rev()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+                _ => None,
+            })
+            .expect("actual engine reconciliation re-ask timer");
+        event(&mut h, at, Event::TimerFired { timer });
+        assert_eq!(
+            count(&h, "orders-pending?"),
+            0,
+            "join the held Primary read"
+        );
+    }
+    h.now = sealed_at + 3_100.;
+    answer(&mut h, &first, 200, r#"{"code":"0","data":[]}"#);
+    for path in ["orders-tpsl-pending", "orders-algo-pending"] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    command(&mut h, place(751, 1.0));
+    assert_eq!(
+        count(&h, "batch-orders"),
+        1,
+        "the original slow census releases"
+    );
+}
+
+#[test]
 fn a_late_or_duplicate_response_after_a_terminal_changes_nothing() {
     let mut h = seeded();
     let intents = command(&mut h, place(7, 1.0));
