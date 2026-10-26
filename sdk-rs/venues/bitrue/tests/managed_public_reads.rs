@@ -5,29 +5,30 @@ use support::Options;
 
 const SYMBOL: &str = "E-BTC-USDT";
 const TRADE: &str = r#"{"side":"buy","price":60000,"vol":1,"amount":60000}"#;
+fn drain(e: &mut Engine<Bitrue>, now: f64) -> std::vec::IntoIter<Action> {
+    safe_cex_engine::test_support::prepared_actions(e, now).into_iter()
+}
 fn boot() -> (Engine<Bitrue>, SocketId) {
     let mut e = support::engine(Options {
         public_data_only: true,
         ..Options::default()
     });
     e.start(0.);
-    let request = e
-        .drain_actions()
+    let request = drain(&mut e, 0.)
         .find_map(|a| match a {
             Action::Http(r) => Some(r.id),
             _ => None,
         })
         .unwrap();
     e.handle(1., Event::HttpResponse { request, response: Response { status: 200, headers: "", body: r#"[{"symbol":"E-BTC-USDT","pricePrecision":2,"multiplier":0.001,"minOrderVolume":1,"maxMarketVolume":1000,"status":1}]"# } });
-    let socket = e
-        .drain_actions()
+    let socket = drain(&mut e, 1.)
         .find_map(|a| match a {
             Action::WsConnect { socket, .. } => Some(socket),
             _ => None,
         })
         .unwrap();
     e.handle(2., Event::WsOpened { socket });
-    e.drain_actions().for_each(drop);
+    drain(&mut e, 2.).for_each(drop);
     (e, socket)
 }
 fn trades(e: &mut Engine<Bitrue>, now: f64, command: u32) {
@@ -91,16 +92,16 @@ fn deadline(actions: &[Action], at: f64) -> TimerId {
 fn late_ws_reply_cannot_publish_success_before_the_timer_is_delivered() {
     let (mut e, socket) = boot();
     trades(&mut e, 2., 71);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = drain(&mut e, 2.).collect::<Vec<_>>();
     let cb = request(&actions);
     let timer = deadline(&actions, 5002.);
     reply(&mut e, socket, 5003., &cb);
     assert!(
-        terminal(&e.drain_actions().collect::<Vec<_>>()).is_empty(),
+        terminal(&drain(&mut e, 5003.).collect::<Vec<_>>()).is_empty(),
         "expired response cannot consume logical timeout authority"
     );
     e.handle(5003., Event::TimerFired { timer });
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = drain(&mut e, 5003.).collect::<Vec<_>>();
     assert_eq!(terminal(&actions), vec![(71, false)]);
     assert!(
         actions
@@ -108,28 +109,28 @@ fn late_ws_reply_cannot_publish_success_before_the_timer_is_delivered() {
             .any(|a| matches!(a, Action::WsClose { socket: closed } if *closed == socket))
     );
     reply(&mut e, socket, 5004., &cb);
-    assert!(terminal(&e.drain_actions().collect::<Vec<_>>()).is_empty());
+    assert!(terminal(&drain(&mut e, 5004.).collect::<Vec<_>>()).is_empty());
 }
 #[test]
 fn expired_fifo_reply_cannot_dispatch_the_next_queued_owner() {
     let (mut e, socket) = boot();
     trades(&mut e, 2., 72);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = drain(&mut e, 2.).collect::<Vec<_>>();
     let cb = request(&actions);
     let timer = deadline(&actions, 5002.);
     trades(&mut e, 3., 73);
-    let queued = e.drain_actions().collect::<Vec<_>>();
+    let queued = drain(&mut e, 3.).collect::<Vec<_>>();
     deadline(&queued, 5003.);
     assert!(!queued.iter().any(|a| matches!(a, Action::WsSend { .. })));
     reply(&mut e, socket, 5004., &cb);
-    let late = e.drain_actions().collect::<Vec<_>>();
+    let late = drain(&mut e, 5004.).collect::<Vec<_>>();
     assert!(terminal(&late).is_empty());
     assert!(
         !late.iter().any(|a| matches!(a, Action::WsSend { .. })),
         "expired first owner cannot advance the FIFO onto another expired owner"
     );
     e.handle(5004., Event::TimerFired { timer });
-    let mut done = terminal(&e.drain_actions().collect::<Vec<_>>());
+    let mut done = terminal(&drain(&mut e, 5004.).collect::<Vec<_>>());
     done.sort_unstable();
     assert_eq!(done, vec![(72, false), (73, false)]);
 }
@@ -137,30 +138,30 @@ fn expired_fifo_reply_cannot_dispatch_the_next_queued_owner() {
 fn fifo_correlation_duplicate_and_id_reuse_keep_independent_completions() {
     let (mut e, socket) = boot();
     trades(&mut e, 2., 74);
-    let first = request(&e.drain_actions().collect::<Vec<_>>());
+    let first = request(&drain(&mut e, 2.).collect::<Vec<_>>());
     trades(&mut e, 3., 75);
-    e.drain_actions().for_each(drop);
+    drain(&mut e, 3.).for_each(drop);
     reply(&mut e, socket, 4., "wrong");
-    assert!(terminal(&e.drain_actions().collect::<Vec<_>>()).is_empty());
+    assert!(terminal(&drain(&mut e, 4.).collect::<Vec<_>>()).is_empty());
     reply(&mut e, socket, 5., &first);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = drain(&mut e, 5.).collect::<Vec<_>>();
     assert_eq!(terminal(&actions), vec![(74, true)]);
     let second = request(&actions);
     reply(&mut e, socket, 6., &first);
-    assert!(terminal(&e.drain_actions().collect::<Vec<_>>()).is_empty());
+    assert!(terminal(&drain(&mut e, 6.).collect::<Vec<_>>()).is_empty());
     reply(&mut e, socket, 7., &second);
     assert_eq!(
-        terminal(&e.drain_actions().collect::<Vec<_>>()),
+        terminal(&drain(&mut e, 7.).collect::<Vec<_>>()),
         vec![(75, true)]
     );
     trades(&mut e, 8., 74);
-    let reused = request(&e.drain_actions().collect::<Vec<_>>());
+    let reused = request(&drain(&mut e, 8.).collect::<Vec<_>>());
     assert_ne!(reused, first);
     reply(&mut e, socket, 9., &first);
-    assert!(terminal(&e.drain_actions().collect::<Vec<_>>()).is_empty());
+    assert!(terminal(&drain(&mut e, 9.).collect::<Vec<_>>()).is_empty());
     reply(&mut e, socket, 10., &reused);
     assert_eq!(
-        terminal(&e.drain_actions().collect::<Vec<_>>()),
+        terminal(&drain(&mut e, 10.).collect::<Vec<_>>()),
         vec![(74, true)]
     );
 }
@@ -182,11 +183,11 @@ fn candles(e: &mut Engine<Bitrue>, now: f64, command: u32) {
 fn unrelated_admission_after_expiry_cannot_erase_the_original_timer_owner() {
     let (mut e, _) = boot();
     trades(&mut e, 2., 76);
-    let timer = deadline(&e.drain_actions().collect::<Vec<_>>(), 5002.);
+    let timer = deadline(&drain(&mut e, 2.).collect::<Vec<_>>(), 5002.);
     trades(&mut e, 5003., 77);
-    e.drain_actions().for_each(drop);
+    drain(&mut e, 5003.).for_each(drop);
     e.handle(5003., Event::TimerFired { timer });
-    let mut done = terminal(&e.drain_actions().collect::<Vec<_>>());
+    let mut done = terminal(&drain(&mut e, 5003.).collect::<Vec<_>>());
     done.sort_unstable();
     assert_eq!(
         done,
@@ -198,9 +199,9 @@ fn unrelated_admission_after_expiry_cannot_erase_the_original_timer_owner() {
 fn repeated_id_after_expiry_cannot_steal_the_delayed_timer_completion() {
     let (mut e, _) = boot();
     trades(&mut e, 2., 78);
-    let timer = deadline(&e.drain_actions().collect::<Vec<_>>(), 5002.);
+    let timer = deadline(&drain(&mut e, 2.).collect::<Vec<_>>(), 5002.);
     trades(&mut e, 5003., 78);
-    let repeated = e.drain_actions().collect::<Vec<_>>();
+    let repeated = drain(&mut e, 5003.).collect::<Vec<_>>();
     assert!(terminal(&repeated).is_empty());
     assert!(!repeated.iter().any(|action| matches!(
         action,
@@ -208,9 +209,9 @@ fn repeated_id_after_expiry_cannot_steal_the_delayed_timer_completion() {
     )));
     assert!(repeated.iter().any(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::COMMAND_DUPLICATE)));
     trades(&mut e, 5003., 79);
-    e.drain_actions().for_each(drop);
+    drain(&mut e, 5003.).for_each(drop);
     e.handle(5003., Event::TimerFired { timer });
-    let mut done = terminal(&e.drain_actions().collect::<Vec<_>>());
+    let mut done = terminal(&drain(&mut e, 5003.).collect::<Vec<_>>());
     done.sort_unstable();
     assert_eq!(done, vec![(78, false), (79, false)]);
 }
@@ -218,7 +219,7 @@ fn repeated_id_after_expiry_cannot_steal_the_delayed_timer_completion() {
 fn exact_deadline_candle_reply_waits_for_native_timeout_cleanup() {
     let (mut e, socket) = boot();
     candles(&mut e, 2., 80);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = drain(&mut e, 2.).collect::<Vec<_>>();
     let timer = deadline(&actions, 5002.);
     let cb = request(&actions);
     let text = format!(
@@ -231,10 +232,10 @@ fn exact_deadline_candle_reply_waits_for_native_timeout_cleanup() {
             text: &text,
         },
     );
-    assert!(terminal(&e.drain_actions().collect::<Vec<_>>()).is_empty());
+    assert!(terminal(&drain(&mut e, 5002.).collect::<Vec<_>>()).is_empty());
     e.handle(5002., Event::TimerFired { timer });
     assert_eq!(
-        terminal(&e.drain_actions().collect::<Vec<_>>()),
+        terminal(&drain(&mut e, 5002.).collect::<Vec<_>>()),
         vec![(80, false)]
     );
 }
@@ -242,13 +243,13 @@ fn exact_deadline_candle_reply_waits_for_native_timeout_cleanup() {
 fn first_timeout_still_fails_live_siblings_on_both_channels() {
     let (mut e, socket) = boot();
     trades(&mut e, 2., 81);
-    let timer = deadline(&e.drain_actions().collect::<Vec<_>>(), 5002.);
+    let timer = deadline(&drain(&mut e, 2.).collect::<Vec<_>>(), 5002.);
     trades(&mut e, 3., 82);
-    e.drain_actions().for_each(drop);
+    drain(&mut e, 3.).for_each(drop);
     candles(&mut e, 4., 83);
-    e.drain_actions().for_each(drop);
+    drain(&mut e, 4.).for_each(drop);
     e.handle(5002., Event::TimerFired { timer });
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = drain(&mut e, 5002.).collect::<Vec<_>>();
     let mut done = terminal(&actions);
     done.sort_unstable();
     assert_eq!(done, vec![(81, false), (82, false), (83, false)]);
@@ -262,18 +263,18 @@ fn first_timeout_still_fails_live_siblings_on_both_channels() {
 fn empty_correlation_and_capacity_refusal_keep_native_compatibility() {
     let (mut e, socket) = boot();
     trades(&mut e, 2., 84);
-    e.drain_actions().for_each(drop);
+    drain(&mut e, 2.).for_each(drop);
     reply(&mut e, socket, 3., "");
     assert_eq!(
-        terminal(&e.drain_actions().collect::<Vec<_>>()),
+        terminal(&drain(&mut e, 3.).collect::<Vec<_>>()),
         vec![(84, true)]
     );
     for command in 100..132 {
         trades(&mut e, 4., command);
-        e.drain_actions().for_each(drop);
+        drain(&mut e, 4.).for_each(drop);
     }
     trades(&mut e, 4., 132);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = drain(&mut e, 4.).collect::<Vec<_>>();
     assert_eq!(terminal(&actions), vec![(132, false)]);
     assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
 }
@@ -286,9 +287,9 @@ fn rejected_or_malformed_candle_head_fails_once_then_dispatches_next_owner() {
     ] {
         let (mut e, socket) = boot();
         candles(&mut e, 2., 85);
-        let first = request(&e.drain_actions().collect::<Vec<_>>());
+        let first = request(&drain(&mut e, 2.).collect::<Vec<_>>());
         candles(&mut e, 3., 86);
-        e.drain_actions().for_each(drop);
+        drain(&mut e, 3.).for_each(drop);
         let text = format!(
             r#"{{"event_rep":"rep","channel":"market_e_btcusdt_kline_1min","cb_id":"{first}",{first_data}}}"#
         );
@@ -299,7 +300,7 @@ fn rejected_or_malformed_candle_head_fails_once_then_dispatches_next_owner() {
                 text: &text,
             },
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = drain(&mut e, 4.).collect::<Vec<_>>();
         assert_eq!(terminal(&actions), vec![(85, false)]);
         let next = request(&actions);
         assert_ne!(next, first);
@@ -314,7 +315,7 @@ fn rejected_or_malformed_candle_head_fails_once_then_dispatches_next_owner() {
             },
         );
         assert_eq!(
-            terminal(&e.drain_actions().collect::<Vec<_>>()),
+            terminal(&drain(&mut e, 5.).collect::<Vec<_>>()),
             vec![(86, true)]
         );
     }
@@ -334,7 +335,7 @@ fn repeated_preflight_refusals_release_the_original_entry_without_io() {
                 },
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = drain(&mut e, 3.).collect::<Vec<_>>();
         assert_eq!(terminal(&actions), vec![(200, false)]);
         assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.legacy_text() == "Unknown Bitrue market")));
         assert!(!actions.iter().any(|a| matches!(
