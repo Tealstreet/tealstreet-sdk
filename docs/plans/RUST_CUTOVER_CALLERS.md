@@ -9961,6 +9961,7 @@ The Unknown starts an active-orders read at once. The fence clears on the first
 complete orders snapshot requested after the write: a read already in flight
 when the write went out, a failed read, or a snapshot with an unmappable row
 does not clear it. If a read was in flight, another follows as soon as it
-settles, so the fence normally lasts about one orders round trip; after a failed
-read it lasts until the next orders read (the engine's reconcile re-ask).
+settles, and a failed read is followed at once by a fresh one, so the fence
+normally lasts about one orders round trip. The engine's reconcile re-asks
+(1 s doubling to 30 s) join an outstanding read rather than restarting it.
 

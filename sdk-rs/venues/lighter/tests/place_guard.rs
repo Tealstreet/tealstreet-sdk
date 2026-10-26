@@ -256,6 +256,43 @@ fn an_orders_read_issued_before_the_unknown_write_does_not_release_it() {
     assert_place_admitted(&mut e, &mut t, at, 9);
 }
 
+// The engine re-asks reconcile_uncertain at 1, 2 and 4 s while fenced. A re-ask must
+// join the outstanding post-write read (owing at most one more), never restart it or
+// raise a release floor, so a read slower than the backoff still releases on arrival.
+#[test]
+fn reconcile_re_asks_join_a_slow_post_write_read_that_still_releases() {
+    let (mut e, mut t) = ready_eth();
+    let out = unknown_placement(&mut e, &mut t);
+    let reads = orders_reads(&out);
+    assert_eq!(
+        reads.len(),
+        1,
+        "one post-write orders read: {:?}",
+        http(&out)
+    );
+    // Re-asks at +1, +2 and +4 s while that read stays unanswered.
+    let mut during = Vec::new();
+    for at in [NOW + 1_000., NOW + 2_000., NOW + 4_000., NOW + 4_500.] {
+        during.extend(orders_reads(&advance(&mut e, &mut t, at)));
+    }
+    assert!(
+        during.is_empty(),
+        "no re-ask restarts or duplicates the in-flight read: {:?}",
+        during.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    let at = NOW + 4_500.;
+    assert_place_refused(&mut e, &mut t, at, 8);
+    // The slow read lands clean: the fence releases on its completion.
+    reply_at(&mut e, at, &reads[0], 200, OPEN);
+    let after = orders_reads(&drain_at(&mut e, &mut t, at));
+    assert!(
+        after.len() <= 1,
+        "at most the one owed read follows: {:?}",
+        after.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    assert_place_admitted(&mut e, &mut t, at, 9);
+}
+
 #[test]
 fn a_failed_orders_read_keeps_the_fence_until_a_later_clean_read() {
     let (mut e, mut t) = ready_eth();
@@ -263,20 +300,14 @@ fn a_failed_orders_read_keeps_the_fence_until_a_later_clean_read() {
     for read in &orders_reads(&out) {
         reply(&mut e, read, 503, r#"{"code":500,"message":"unavailable"}"#);
     }
-    drain(&mut e, &mut t);
+    // The failure settles the read and a fresh post-write read follows at once;
+    // the failed one released nothing.
+    let fresh = orders_reads(&drain(&mut e, &mut t));
+    assert_eq!(fresh.len(), 1, "one fresh orders read follows the failure");
     assert_place_refused(&mut e, &mut t, NOW, 8);
-    // No venue retry loop: the next post-write orders read releases it. Here
-    // that read comes at +20 s; the engine's reconcile re-ask (1 s backoff,
-    // final #2279) will usually come first.
-    assert!(orders_reads(&advance(&mut e, &mut t, NOW + 19_500.)).is_empty());
-    let at = NOW + 20_000.;
-    let fresh = orders_reads(&advance(&mut e, &mut t, at));
-    assert!(!fresh.is_empty(), "a later orders read follows the failure");
-    for read in &fresh {
-        reply_at(&mut e, at, read, 200, OPEN);
-    }
-    drain_at(&mut e, &mut t, at);
-    assert_place_admitted(&mut e, &mut t, at, 9);
+    reply(&mut e, &fresh[0], 200, OPEN);
+    drain(&mut e, &mut t);
+    assert_place_admitted(&mut e, &mut t, NOW, 9);
 }
 
 #[test]
