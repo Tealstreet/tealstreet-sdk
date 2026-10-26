@@ -792,16 +792,10 @@ impl KrakenSpot {
                 }
                 Kind::Orders { .. } => self.account.orders_flight = false,
                 Kind::Token { epoch } => {
-                    if cx.socket_epoch(epoch.feed()) == Some(epoch)
-                        && self.account.connection.socket == Some(epoch.socket())
-                    {
-                        if let Some(feed) = self.account.connection.feed {
-                            cx.retire_socket(
-                                feed,
-                                safe_cex_engine::socket_lifecycle::RetireReason::Closed,
-                            );
-                        }
-                    }
+                    cx.retire_socket(
+                        epoch.feed(),
+                        safe_cex_engine::socket_lifecycle::RetireReason::Closed,
+                    );
                 }
                 Kind::Trade(_) => unreachable!("trade failures return below"),
             }

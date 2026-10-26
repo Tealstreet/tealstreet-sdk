@@ -358,3 +358,16 @@ fn a_token_result_at_idle_equality_releases_no_subscription_frames() {
         "one-shot final release must retire an expired epoch"
     );
 }
+
+#[test]
+fn unrelated_spot_control_fields_do_not_narrow_native_envelope_decoding() {
+    for public in [true, false] {
+        let mut h = spot(public, PublicFeedPolicy::Direct);
+        let socket = h.open();
+        let opened = h.now;
+        h.advance(opened + 44_999.);
+        h.message(socket, r#"{"method":1}"#);
+        h.advance(opened + 45_000.);
+        assert!(!h.closed.contains(&socket));
+    }
+}

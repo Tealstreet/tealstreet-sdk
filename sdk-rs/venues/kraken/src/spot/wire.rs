@@ -99,8 +99,6 @@ pub struct RestTicker {
 #[derive(Deserialize)]
 pub struct Ws<'a> {
     #[serde(default, borrow)]
-    pub method: Cow<'a, str>,
-    #[serde(default, borrow)]
     pub channel: Cow<'a, str>,
     #[serde(default, rename = "type", borrow)]
     pub kind: Cow<'a, str>,

@@ -169,8 +169,19 @@ impl KrakenSpot {
             return Control::Other;
         }
         match serde_json::from_str::<Ws<'_>>(text) {
-            Ok(msg) if msg.method == "pong" => Control::Pong,
-            Ok(_) => Control::Traffic,
+            Ok(_) => {
+                #[derive(serde::Deserialize)]
+                struct Pong<'a> {
+                    method: Option<&'a str>,
+                }
+                if serde_json::from_str::<Pong<'_>>(text)
+                    .is_ok_and(|frame| frame.method == Some("pong"))
+                {
+                    Control::Pong
+                } else {
+                    Control::Traffic
+                }
+            }
             Err(_) => Control::Other,
         }
     }
