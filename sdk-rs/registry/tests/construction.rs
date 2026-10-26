@@ -545,7 +545,7 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
                 )
             } else {
                 format!(
-                    "Rust {venue} does not support payloadSigner; remote signing for this venue is not supported in this build yet. Remove payloadSigner and configure local signing credentials."
+                    "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
                 )
             };
             assert_eq!(error.message, expected);

@@ -73,7 +73,7 @@ it('unadopted private venues refuse a payload signer before any I/O', () =>
   startRejects(
     'coinbase',
     { key: 'key', payloadSigner: (async () => ({ signature: '' })) as unknown as ExchangeOptions['payloadSigner'] },
-    'Rust coinbase does not support payloadSigner',
+    'Rust coinbase delegated signing is unsupported in this build',
   ));
 
 it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo'] as const)(
@@ -182,7 +182,7 @@ it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lig
         payloadSigner: async () => { signatures++; return { signature: 'unexpected' }; },
       }, new DefaultStore());
       running.push(exchange);
-      const message = `Rust ${name} does not support payloadSigner; remote signing for this venue is not supported in this build yet. Remove payloadSigner and configure local signing credentials.`;
+      const message = `Rust ${name} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
       await expect(exchange.start()).rejects.toMatchObject({ message, kind: 'unsupported', outcome: 'notSent' });
       await expect(exchange.validateAccount()).resolves.toMatchObject({ kind: 'unsupported', error: message });
     }

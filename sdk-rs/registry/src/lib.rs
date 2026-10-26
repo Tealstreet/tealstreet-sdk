@@ -1081,7 +1081,7 @@ fn payload_signing_rules(
         format!("Rust {venue} payloadSigner requires a configured injected signing provider")
     } else {
         format!(
-            "Rust {venue} does not support payloadSigner; remote signing for this venue is not supported in this build yet. Remove payloadSigner and configure local signing credentials."
+            "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
         )
     };
     Err(VenueError::new(message)
