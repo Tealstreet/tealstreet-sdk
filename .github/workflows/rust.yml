@@ -380,6 +380,15 @@ jobs:
             sdk-rs/hosts/wasm/pkg/ci-replay/
           retention-days: 3
           if-no-files-found: error
+      - name: Prove the shared operation channel through actual Kraken WASM engines
+        if: matrix.family == 'kraken'
+        env:
+          CARGO_BUILD_JOBS: 4
+        run: |
+          (cd sdk-rs && cargo build --locked -p safe-cex-wasm --no-default-features --features hosted-operation-proof --target wasm32-unknown-unknown)
+          wasm-bindgen --target nodejs --out-dir "$RUNNER_TEMP/hosted-operation-proof" sdk-rs/target/wasm32-unknown-unknown/debug/safe_cex_wasm.wasm
+          printf '{"type":"commonjs"}\n' > "$RUNNER_TEMP/hosted-operation-proof/package.json"
+          HOSTED_OPERATION_WASM="$RUNNER_TEMP/hosted-operation-proof/safe_cex_wasm.js" node --test --test-timeout=10000 sdk-rs/hosts/wasm/js/hosted-operation.integration.mjs
 
   combined:
     name: Rust / combined consumers

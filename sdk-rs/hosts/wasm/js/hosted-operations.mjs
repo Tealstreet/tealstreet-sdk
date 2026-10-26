@@ -115,7 +115,7 @@ export function createOperationProvider(options) {
   let serial = 0;
   const pending = new Set();
   return async (work,context) => {
-    let correlation;
+    let correlation,registered=false;
     try {
       const m = snapshot(context?.meta); meta(m); receipt(work.receipt);
       if (!context.signal || context.signal.aborted || !capabilities.slots.includes(m.slot) || pending.size >= CAPACITY) throw refused();
@@ -129,7 +129,7 @@ export function createOperationProvider(options) {
       request(req); codecCheck(codec,req,now(),'origin',work);
       correlation = options.id ? options.id() : `operation-${++serial}`;
       if (!id(correlation) || pending.has(correlation)) throw refused();
-      pending.add(correlation);
+      pending.add(correlation);registered=true;
       const frame = encode({id:correlation,type:'op',v:2,exchangeName:options.exchangeName,accountName:options.accountName,request:req});
       const response = decode(await send(frame,{signal:context.signal}));
       alive(now(),deadlineMs,context.signal);
@@ -141,7 +141,7 @@ export function createOperationProvider(options) {
       alive(now(),deadlineMs,context.signal);
       return response.result;
     } catch { throw refused(); }
-    finally { if (correlation !== undefined) pending.delete(correlation); }
+    finally { if (registered) pending.delete(correlation); }
   };
 }
 

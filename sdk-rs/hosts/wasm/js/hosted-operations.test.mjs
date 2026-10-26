@@ -5,7 +5,7 @@ import { createOperationPeer, createOperationProvider } from './hosted-operation
 const binding = {account:'account', network:'mainnet', stableSubject:'owned-subject', expectedCredential:'public-account', generation:'generation', metadata:null};
 const work = {receipt:{stampMs:1000,nonce:'9007199254740993'},operations:[],context:{}};
 const meta = {task:7,owner:{kind:'managed',request:3,generation:1},deadlineMs:4000,slot:'primary',role:{kind:'read',scope:'account'}};
-function pair({execute, now=()=>1000, send, revision=()=> 'peer-clock'}={}) {
+function pair({execute, now=()=>1000, send, id, revision=()=> 'peer-clock'}={}) {
  let calls=0,serial=0;
  const codec={
   recipes:['kraken.futures.http/1'],
@@ -16,7 +16,7 @@ function pair({execute, now=()=>1000, send, revision=()=> 'peer-clock'}={}) {
   execute:async (request,context)=>{calls++; return execute ? execute(request,context) : {values:[Array.from(new TextEncoder().encode('public-account')),Array(32).fill(1),Array(64).fill(2)],receipt:request.receipt};},
  };
  const peer=createOperationPeer({bindings:{primary:binding},exchangeName:'kraken',accountName:'fixture',codec,now,revision});
- const provider=createOperationProvider({bindings:{primary:binding},exchangeName:'kraken',accountName:'fixture',codec,now,revision:()=> 'origin-clock',capabilities:{v:2,recipes:codec.recipes,slots:['primary']},send:send??((frame,context)=>peer.handle(frame,context)),id:()=> `id-${++serial}`});
+ const provider=createOperationProvider({bindings:{primary:binding},exchangeName:'kraken',accountName:'fixture',codec,now,revision:()=> 'origin-clock',capabilities:{v:2,recipes:codec.recipes,slots:['primary']},send:send??((frame,context)=>peer.handle(frame,context)),id:id??(()=> `id-${++serial}`)});
  return {provider,peer,calls:()=>calls};
 }
 const context=()=>({signal:new AbortController().signal,meta});
@@ -105,4 +105,11 @@ test('family codec owns an eleven-value batch and checks the peer clock at execu
  const provider=createOperationProvider({...options,capabilities:peer.capabilities,send:(f,c)=>peer.handle(f,c)});
  const result=await provider({...work,receipt:r},{...context(),meta:{...meta,role:{kind:'mutation'}}});
  assert.equal(result.values.length,11);assert.equal(checked,1);
+});
+
+test('duplicate correlation refusal cannot remove another live provider owner',async()=>{
+ let release,sent=0,frame;const p=pair({id:()=> 'fixed',send:f=>{sent++;frame=f;return new Promise(r=>{release=r;});}});
+ const first=p.provider(work,context());first.catch(()=>{});await new Promise(r=>setImmediate(r));
+ for(let i=0;i<2;i++)await assert.rejects(p.provider(work,{...context(),meta:{...meta,task:8+i}}));
+ assert.equal(sent,1);release(await p.peer.handle(frame));await first;
 });
