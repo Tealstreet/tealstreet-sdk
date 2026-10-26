@@ -4,6 +4,7 @@ use crate::wire::*;
 use crate::{BitunixFutures, Feed, Pending, REST};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::execution::{Arithmetic, Cursor, ExecutionRounding};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
@@ -247,7 +248,7 @@ fn position_key(symbol: &str, side: PositionSide) -> String {
 
 impl BitunixFutures {
     pub(crate) fn private_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() {
+        if !self.slots.has_primary() {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);
             cx.store.set_orders(vec![]);
@@ -287,48 +288,49 @@ impl BitunixFutures {
         body: Option<String>,
         pending: Pending,
     ) {
-        let read_credentials = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get)
-            .map(|read| sign::Credentials {
-                key: read.key.clone(),
-                secret: read.secret.clone(),
-            });
-        let Some(c) = read_credentials.as_ref().or(self.credentials.as_ref()) else {
+        // By role, not method: a GET inside a trading job signs Primary.
+        let role = match &pending {
+            Pending::Private(read) => CredentialRole::Read {
+                scope: Some(match read.axis {
+                    Axis::Balance => safe_cex_engine::AccountReadScope::Balance,
+                    Axis::Positions => safe_cex_engine::AccountReadScope::Positions,
+                    Axis::Orders | Axis::Tpsl => safe_cex_engine::AccountReadScope::Orders,
+                }),
+            },
+            Pending::SymbolSettings { .. } => CredentialRole::Read {
+                scope: Some(safe_cex_engine::AccountReadScope::Settings),
+            },
+            Pending::Trade(_) => CredentialRole::Mutation,
+            _ => CredentialRole::Read { scope: None },
+        };
+        let Ok((selection, identity)) = self.slots.select(role) else {
             self.fail_private(cx, pending, "Bitunix credentials required");
             return;
         };
-        let mut headers = match sign::headers(
-            |bytes| cx.fill_signing_entropy(bytes),
-            c,
-            &params,
-            body.as_deref().unwrap_or(""),
-            cx.now,
-        ) {
-            Ok(h) => h,
-            Err(e) => {
-                self.fail_private(cx, pending, &e);
-                return;
-            }
-        };
-        headers.extend(self.headers());
+        let identity = identity.clone();
+        let testnet = self.options.testnet;
+        let headers = if testnet {
+            sign::dispatch::TESTNET_HEADERS
+        } else {
+            sign::dispatch::HEADERS
+        }
+        .iter()
+        .map(|(name, value)| (*name, (*value).to_owned()))
+        .collect();
         let query = params.query();
         let url = format!(
             "{REST}{path}{}{}",
             if query.is_empty() { "" } else { "?" },
             query
         );
-        let scope = match &pending {
-            Pending::Private(read) => Some(match read.axis {
-                Axis::Balance => safe_cex_engine::AccountReadScope::Balance,
-                Axis::Positions => safe_cex_engine::AccountReadScope::Positions,
-                Axis::Orders | Axis::Tpsl => safe_cex_engine::AccountReadScope::Orders,
-            }),
-            Pending::SymbolSettings { .. } => Some(safe_cex_engine::AccountReadScope::Settings),
-            _ => None,
-        };
+        let recipe = sign::dispatch::Http::new(
+            identity,
+            method,
+            url.clone(),
+            params.signing(),
+            body.clone(),
+            testnet,
+        );
         let id = if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance)
             || matches!(&pending, Pending::History(_))
         {
@@ -336,17 +338,7 @@ impl BitunixFutures {
         } else {
             cx.request(method, url, headers, body, pending)
         };
-        if let Some(scope) = scope {
-            cx.tag_account_read(
-                id,
-                if read_credentials.is_some() {
-                    safe_cex_engine::CredentialSlot::Secondary
-                } else {
-                    safe_cex_engine::CredentialSlot::Primary
-                },
-                scope,
-            );
-        }
+        selection.sign(cx, id, Box::new(recipe));
     }
     pub(crate) fn read_axis(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
         self.read_axis_for(cx, axis, None);
@@ -357,7 +349,7 @@ impl BitunixFutures {
         axis: Axis,
         after: Option<u32>,
     ) {
-        if self.credentials.is_none() {
+        if !self.slots.has_primary() {
             return;
         }
         if self
@@ -491,7 +483,7 @@ impl BitunixFutures {
     /// Like TS listenOHLCV: read a symbol's leverage and margin mode once,
     /// so a flat symbol reports its real settings instead of defaults.
     pub(crate) fn read_symbol_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
-        if self.credentials.is_none()
+        if !self.slots.has_primary()
             || cx.store.market(symbol).is_none()
             || self
                 .account
@@ -563,7 +555,7 @@ impl BitunixFutures {
                 let _ = cx.fail_context(&context, crate::error::malformed(error, false));
             }
             Pending::Trade(request) => {
-                let kind = if self.credentials.is_none() {
+                let kind = if !self.slots.has_primary() {
                     safe_cex_engine::ErrorKind::AuthInvalid
                 } else {
                     safe_cex_engine::ErrorKind::Internal
@@ -581,41 +573,12 @@ impl BitunixFutures {
         }
     }
     pub(crate) fn login(&self, cx: &mut Cx<'_, Pending>, socket: safe_cex_engine::SocketId) {
-        let Some(c) = &self.credentials else {
-            return;
-        };
-        match safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_signing_entropy(bytes)) {
-            Ok(nonce) => {
-                let timestamp =
-                    safe_cex_engine::num::format(safe_cex_engine::time::wire_stamp_ms(cx.now));
-                let trimmed = sign::Credentials {
-                    key: c.key.trim().into(),
-                    secret: c.secret.trim().into(),
-                };
-                let sign = sign::signature(&trimmed, &nonce, &timestamp, "", "");
-                #[derive(serde::Serialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Login<'a> {
-                    api_key: &'a str,
-                    timestamp: &'a str,
-                    nonce: &'a str,
-                    sign: &'a str,
-                }
-                let args = [Login {
-                    api_key: c.key.trim(),
-                    timestamp: &timestamp,
-                    nonce: &nonce,
-                    sign: &sign,
-                }];
-                cx.send(
-                    socket,
-                    format!(
-                        r#"{{"op":"login","args":{}}}"#,
-                        serde_json::to_string(&args).unwrap()
-                    ),
-                );
-            }
-            Err(e) => cx.notice(Level::Error, code::STREAM_UNAVAILABLE, e),
+        if let Ok((_, identity)) = self.slots.select(CredentialRole::SessionAuth) {
+            cx.send_signed(
+                socket,
+                String::new(),
+                Box::new(sign::dispatch::WsLogin::new(identity.clone())),
+            );
         }
     }
     pub(crate) fn position_answered(&mut self, cx: &mut Cx<'_, Pending>, read: &Read) {

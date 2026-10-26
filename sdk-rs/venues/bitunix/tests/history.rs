@@ -714,13 +714,11 @@ fn signing_preparation_refusal_stays_strict_after_accepted_rows() {
     };
     let refused = Arc::new(AtomicBool::new(false));
     let control = refused.clone();
-    let mut e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
-            key: Some("replay-key".into()),
-            secret: Some("replay-secret".into()),
-            ..Default::default()
-        }),
-    );
+    let mut e = support::engine(support::Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        ..Default::default()
+    });
     e.set_signing_entropy(Box::new(move |bytes| {
         if control.load(Ordering::SeqCst) {
             Err("signing source unavailable".into())

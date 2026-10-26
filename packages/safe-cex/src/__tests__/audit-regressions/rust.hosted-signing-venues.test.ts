@@ -131,14 +131,15 @@ describe('hosted Coinbase and Orderly accounts sign as they did on master', () =
     }
   });
 
+  // Unmigrated control family: MEXC (moved from Bitunix by #2190).
   it('names without a kept TS venue keep the engine answers', async () => {
-    const engine = new RustEngineExchange('bitunix', { key: 'k', secret: 's' }, new DefaultStore());
-    await expect(engine.signHttpRequest(request('bitunix', 'https://fapi.bitunix.com', '/api/v1/futures/trade/place_order'))).resolves.toEqual({
+    const engine = new RustEngineExchange('mexc', { key: 'k', secret: 's' }, new DefaultStore());
+    await expect(engine.signHttpRequest(request('mexc', 'https://contract.mexc.com', '/api/v1/private/order/create'))).resolves.toEqual({
       id: 'sign-1',
       error: 'Exchange does not have xhr for signing',
     });
     await expect(
-      engine.signWsAuth({ id: 'ws-1', type: 'ws-auth', exchangeName: 'bitunix', wsAuth: { toSign: 'x', outputFormat: 'hex' } }),
+      engine.signWsAuth({ id: 'ws-1', type: 'ws-auth', exchangeName: 'mexc', wsAuth: { toSign: 'x', outputFormat: 'hex' } }),
     ).resolves.toEqual({ id: 'ws-1', wsAuthSignature: createHmac('sha256', 's').update('x').digest('hex') });
     engine.dispose();
   });

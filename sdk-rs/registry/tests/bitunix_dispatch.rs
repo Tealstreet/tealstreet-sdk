@@ -278,14 +278,18 @@ fn public_data_only_with_identities_signs_nothing() {
     assert!(!frames.iter().any(|f| f.contains(r#""op":"login""#)));
 }
 
+/// Raw keys never travel beside setup identities to the venue.
 #[test]
-fn raw_engine_option_keys_are_refused() {
-    let options: EngineOptions =
-        serde_json::from_str(r#"{"key":"raw-key","secret":"raw-material"}"#).unwrap();
-    let error = build(
+fn raw_engine_option_keys_beside_identities_are_refused() {
+    let (provider, identities) = setup(Some(identity(PRIMARY_KEY, PRIMARY_MATERIAL)), None);
+    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    options.signing = Some(identities);
+    options.key = Some("must-not-reach-venue".into());
+    let error = build_with_signer(
         "bitunix",
         options,
         Some(safe_cex_engine::test_support::seeded_entropy(5)),
+        Some(std::sync::Arc::new(provider)),
         Drive,
     )
     .map(|_| ())
@@ -295,6 +299,41 @@ fn raw_engine_option_keys_are_refused() {
         error.message,
         "Bitunix credentials belong in signer setup, not engine options"
     );
+}
+
+/// Legacy raw input converges on the trusted provider path, never inline signing.
+#[test]
+fn legacy_raw_keys_sign_through_the_provider() {
+    let options: EngineOptions = serde_json::from_str(&format!(
+        r#"{{"key":"{PRIMARY_KEY}","secret":"{PRIMARY_MATERIAL}"}}"#
+    ))
+    .unwrap();
+    let (requests, _, _) = build(
+        "bitunix",
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(5)),
+        Drive,
+    )
+    .unwrap();
+    assert_signed(private_read(&requests), PRIMARY_KEY, PRIMARY_MATERIAL);
+}
+
+/// Every engine signing provider is required once an identity is set.
+#[test]
+fn identities_without_a_provider_are_refused() {
+    let (_, identities) = setup(Some(identity(PRIMARY_KEY, PRIMARY_MATERIAL)), None);
+    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    options.signing = Some(identities);
+    let error = build_with_signer(
+        "bitunix",
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(5)),
+        None,
+        Drive,
+    )
+    .map(|_| ())
+    .expect_err("a provider is required");
+    assert_eq!(error.message, "Engine signing provider is required");
 }
 
 /// dazzy3 P1: a provider refusal sends no write and fails it NotSent.
@@ -312,17 +351,28 @@ fn a_provider_refusal_sends_no_write_and_fails_it_not_sent() {
     assert_eq!(failures[0].outcome, Some(safe_cex_engine::Outcome::NotSent));
 }
 
-/// dazzy3 P2: whitespace-only signing material refuses startup.
+/// dazzy3 P2: whitespace-only signing material is absent, as with no
+/// credentials: nothing is ever signed with an empty key.
 #[test]
-fn whitespace_only_signing_material_refuses_startup() {
-    let refused = LocalSigner::from_setup_with_policy(
+fn whitespace_only_signing_material_signs_nothing() {
+    let Ok((provider, identities)) = LocalSigner::from_setup_with_policy(
         LocalSetup {
             primary: Some(identity(PRIMARY_KEY, " \t\n")),
             secondary: None,
         },
         signer_setup_policy("bitunix"),
-    )
-    .map_err(|_| ())
-    .and_then(|(provider, identities)| try_drive(provider, identities, false).map_err(|_| ()));
-    assert!(refused.is_err(), "an empty signing key must not start");
+    ) else {
+        return;
+    };
+    let Ok((requests, frames, _)) = try_drive(provider, identities, false) else {
+        return;
+    };
+    assert!(
+        requests.iter().all(|r| !r
+            .headers
+            .iter()
+            .any(|(h, _)| h.eq_ignore_ascii_case("sign"))),
+        "never signed with an empty key"
+    );
+    assert!(!frames.iter().any(|f| f.contains(r#""op":"login""#)));
 }

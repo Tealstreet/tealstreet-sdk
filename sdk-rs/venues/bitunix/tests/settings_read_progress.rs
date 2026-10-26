@@ -7,18 +7,16 @@ use safe_cex_engine::{
 use support::*;
 const SETTINGS: &str = r#"{"code":0,"data":{"leverage":50,"marginMode":"CROSS"}}"#;
 fn ready(secondary: bool) -> (TestEngine, SocketId) {
-    let e = safe_cex_engine::test_support::seeded_engine(
-        safe_cex_venue_bitunix::BitunixFutures::new(safe_cex_venue_bitunix::Options {
-            key: Some("replay-key".into()),
-            secret: Some("replay-secret".into()),
-            read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
-                key: "read-key".into(),
-                secret: "read-secret".into(),
-                passphrase: None,
-            }),
-            ..Default::default()
+    let e = support::engine(support::Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
+            key: "read-key".into(),
+            secret: "read-secret".into(),
+            passphrase: None,
         }),
-    );
+        ..Default::default()
+    });
     let (mut e, socket) = startup_with_engine(e);
     let mut markets = e.store().markets().to_vec();
     let mut eth = markets[0].clone();
