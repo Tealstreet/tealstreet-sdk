@@ -130,6 +130,19 @@ struct SetupRunOwner<V: Venue, T: Transport> {
     cleanup: Option<std::pin::Pin<Box<safe_cex_engine::AddressSetupCleanup>>>,
 }
 #[cfg(feature = "address-nonce")]
+impl<V: Venue, T: Transport> std::ops::Deref for SetupRunOwner<V, T> {
+    type Target = Host<V, T>;
+    fn deref(&self) -> &Self::Target {
+        self.host.as_ref().expect("setup host owner is live")
+    }
+}
+#[cfg(feature = "address-nonce")]
+impl<V: Venue, T: Transport> std::ops::DerefMut for SetupRunOwner<V, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.host.as_mut().expect("setup host owner is live")
+    }
+}
+#[cfg(feature = "address-nonce")]
 impl<V: Venue, T: Transport> Drop for SetupRunOwner<V, T> {
     fn drop(&mut self) {
         let cleanup = self.cleanup.take().or_else(|| {

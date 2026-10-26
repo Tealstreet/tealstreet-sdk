@@ -9504,3 +9504,9 @@ NotSent refusal while public work starts. Hosted/asynchronous callers must finis
 the explicit pre-start result and actual-cleanup join before invoking start;
 unfinished work is still retired and refused at that boundary. No host support,
 nonce permission, retry or peer activation is inferred by these automatic calls.
+
+In address-nonce builds the frame-server account actor retains the same independent
+cleanup owner as native Host. Normal shutdown waits for actual setup cleanup;
+cleanup/task failures return a sanitized server error. Aborted actors retain the
+original cleanup in the live runtime and grant no retirement or replacement
+acknowledgement. Runtime teardown remains no join.

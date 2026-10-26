@@ -85,10 +85,15 @@ struct AccountAccess {
 
 /// Call `add_account` and `serve` inside a tokio `LocalSet`. Each engine remains
 /// single-threaded, including venues whose pending jobs are not `Send`.
+#[cfg(feature = "address-nonce")]
+type AccountResult = io::Result<()>;
+#[cfg(not(feature = "address-nonce"))]
+type AccountResult = ();
+
 pub struct FrameServer {
     config: ServerConfig,
     accounts: HashMap<String, AccountAccess>,
-    tasks: Vec<JoinHandle<()>>,
+    tasks: Vec<JoinHandle<AccountResult>>,
     shutdown: watch::Sender<bool>,
 }
 
@@ -253,8 +258,20 @@ impl FrameServer {
         };
         self.shutdown.send_replace(true);
         while connections.join_next().await.is_some() {}
+        #[cfg(feature = "address-nonce")]
+        let mut result = result;
         for task in self.tasks.drain(..) {
+            #[cfg(not(feature = "address-nonce"))]
             let _ = task.await;
+            #[cfg(feature = "address-nonce")]
+            match task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) if result.is_ok() => result = Err(error),
+                Err(_) if result.is_ok() => {
+                    result = Err(io::Error::other("Account task failed during shutdown"));
+                }
+                _ => {}
+            }
         }
         result
     }
@@ -322,6 +339,9 @@ struct Pending {
     original: u32,
 }
 struct Account<V: Venue, T: Transport> {
+    #[cfg(feature = "address-nonce")]
+    host: crate::SetupRunOwner<V, T>,
+    #[cfg(not(feature = "address-nonce"))]
     host: Host<V, T>,
     config: ServerConfig,
     peers: HashMap<u64, Peer>,
@@ -337,6 +357,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
     fn new(mut host: Host<V, T>, config: ServerConfig) -> Self {
         host.engine.set_book_deltas(true);
         Self {
+            #[cfg(feature = "address-nonce")]
+            host: crate::SetupRunOwner {
+                host: Some(host),
+                cleanup: None,
+            },
+            #[cfg(not(feature = "address-nonce"))]
             host,
             config,
             peers: HashMap::new(),
@@ -352,6 +378,37 @@ impl<V: Venue, T: Transport> Account<V, T> {
         mut self,
         mut inbox: mpsc::Receiver<Control>,
         mut shutdown: watch::Receiver<bool>,
+    ) -> AccountResult {
+        #[cfg(not(feature = "address-nonce"))]
+        self.drive(&mut inbox, &mut shutdown).await;
+        #[cfg(feature = "address-nonce")]
+        {
+            use futures_util::FutureExt;
+            let result = std::panic::AssertUnwindSafe(self.drive(&mut inbox, &mut shutdown))
+                .catch_unwind()
+                .await;
+            self.host.stop();
+            let cleanup = self
+                .host
+                .host
+                .as_mut()
+                .unwrap()
+                .engine
+                .take_address_setup_cleanup();
+            self.host.cleanup = Some(Box::pin(cleanup));
+            let cleanup = self.host.cleanup.as_mut().unwrap().await;
+            self.host.cleanup = None;
+            if let Err(panic) = result {
+                std::panic::resume_unwind(panic);
+            }
+            cleanup.map_err(|_| io::Error::other("Address setup cleanup failed"))
+        }
+    }
+
+    async fn drive(
+        &mut self,
+        inbox: &mut mpsc::Receiver<Control>,
+        shutdown: &mut watch::Receiver<bool>,
     ) {
         self.host.turn(|host| {
             let now = (host.clock)();
