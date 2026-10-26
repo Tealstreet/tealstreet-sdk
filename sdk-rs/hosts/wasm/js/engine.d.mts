@@ -31,6 +31,8 @@ export class WasmEngine implements WasmEngineLike {
   httpEnd(request: number, now: number): string;
   httpFailed(request: number, error: string, now: number): string;
   signingPending(attempt: number): boolean;
+  /** Present only in builds with the sign-meta feature. */
+  signMeta?(attempt: number): string | undefined;
   httpPreparationPending(preparation: string): boolean;
   httpPrepared(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed(preparation: string, code: string, now: number): string;

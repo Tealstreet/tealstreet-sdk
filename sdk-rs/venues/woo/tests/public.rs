@@ -40,9 +40,9 @@ fn initial_sockets_have_explicit_roles_and_unmodified_venue_urls_on_both_environ
             ..Default::default()
         }));
         e.start(0.0);
-        let r = requests(&mut e).remove(0);
+        let r = prepared_seed_requests(&mut e, 0.).remove(0);
         response(&mut e, &r, 10.0, MARKETS);
-        let mut early = e.drain_actions().collect::<Vec<_>>();
+        let mut early = prepared_seed_actions(&mut e, 10.);
         let ticker = early
             .iter()
             .find_map(|a| match a {
@@ -159,9 +159,9 @@ fn nullable_index_keeps_missing_value_without_rejecting_the_seed() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(
         &mut e,
         &r,
@@ -332,7 +332,7 @@ fn pre_seed_book_subscription_survives_until_socket_open() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     e.handle(
         1.0,
         Event::Command(Command::SubscribeOrderBook {
@@ -340,7 +340,7 @@ fn pre_seed_book_subscription_survives_until_socket_open() {
         }),
     );
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(&mut e, &r, 20.0, TICKERS);
     let s = e
         .drain_actions()
@@ -519,9 +519,9 @@ fn funding_waits_sixty_seconds_and_failed_reads_preserve_seed() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(&mut e, &r, 20.0, TICKERS);
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
@@ -536,7 +536,7 @@ fn funding_waits_sixty_seconds_and_failed_reads_preserve_seed() {
         })
         .unwrap();
     e.handle(60020.0, Event::TimerFired { timer });
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 60020.).remove(0);
     response(
         &mut e,
         &r,
@@ -549,7 +549,7 @@ fn funding_waits_sixty_seconds_and_failed_reads_preserve_seed() {
 fn failed_market_page_cannot_poison_price_caps_after_retry() {
     let mut e = safe_cex_engine::test_support::seeded_engine(Woo::new(Options::default()));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(
         &mut e,
         &r,
@@ -570,7 +570,7 @@ fn failed_market_page_cannot_poison_price_caps_after_retry() {
         })
         .unwrap();
     e.handle(1010.0, Event::TimerFired { timer });
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 1010.).remove(0);
     response(
         &mut e,
         &r,
@@ -689,7 +689,7 @@ fn malformed_market_and_ticker_rows_are_skipped_at_startup() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(
         &mut e,
         &r,
@@ -701,7 +701,7 @@ fn malformed_market_and_ticker_rows_are_skipped_at_startup() {
     );
     assert_eq!(e.store().markets().len(), 2);
     assert!(e.store().market("ETHUSDT").is_none());
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(
         &mut e,
         &r,
@@ -739,9 +739,9 @@ fn ticker_without_open_keeps_last_price_with_zero_percentage() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 10.).remove(0);
     response(
         &mut e,
         &r,
