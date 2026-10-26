@@ -159,3 +159,17 @@ MACs. Trusted raw setup carries and consumes optional passphrases for both
 slots; malformed JSON keeps the shared sanitized setup error. Scope remains
 signing/private Reads. The separate local trading draft is unpublished and
 depends on the assigned pacing core changes.
+
+## Beta scope and final composition
+
+MEXC is outside the initial Rust beta. The maintainer authorized completion of
+this reviewed signing/read slice; the unpublished trading work stays parked.
+Rust run40293313516 completed the correctness set, including engine feature
+modes and MEXC replay. CI records the MEXC family at1080911bytes. Required
+coverage is red solely because it aggregates the explicitly accepted6805 bans
+row; CPU certification does not block this slice.
+
+The automatic merge of actual88401368165 carries incoming request-checker and
+CPU-reporting changes without modifying the reviewed MEXC/runtime inputs. The
+updated full bans check again reports only the authorized6805 mismatch. Auditor
+GO is required for this composition; no baseline/checker exception is added.
