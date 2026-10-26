@@ -116,7 +116,15 @@ fn refused(actions: &[Action], command: u32) {
     ));
 }
 
-fn unknown_then_stale_then_fresh(spot: bool, contaminated: bool) {
+#[derive(Clone, Copy)]
+enum ReconcileReply {
+    Clean,
+    Duplicate,
+    Malformed,
+    Lost,
+}
+
+fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
     let (mut engine, old_read) = boot(spot);
     let first = place(&mut engine, 2_000.0, 101, spot);
     let first = write(&first);
@@ -149,16 +157,33 @@ fn unknown_then_stale_then_fresh(spot: bool, contaminated: bool) {
         })
         .expect("one owed fresh read after the pre-write snapshot completes");
     assert_ne!(old_read.id, fresh.id);
-    refused(&place(&mut engine, 3_300.0, 103, spot), 103);
+    let retry = place(&mut engine, 3_800.0, 103, spot);
+    refused(&retry, 103);
+    assert!(!retry.iter().any(|action|
+        matches!(action, Action::Http(request) if support::kind(request) == "frontendOpenOrders")
+    ), "a backoff re-ask must join the running fresh read");
 
     let coin = if spot { "@1" } else { "BTC" };
     let row = format!(
         r#"{{"coin":"{coin}","oid":7,"side":"B","limitPx":"1","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}}"#
     );
-    let (fresh, clean_at, retry_at) = if contaminated {
-        response(&mut engine, 3_400.0, &fresh, &format!("[{row},{row}]"));
+    let (fresh, clean_at, retry_at) = if !matches!(reply, ReconcileReply::Clean) {
+        match reply {
+            ReconcileReply::Duplicate => {
+                response(&mut engine, 4_000.0, &fresh, &format!("[{row},{row}]"));
+            }
+            ReconcileReply::Malformed => response(&mut engine, 4_000.0, &fresh, r#"[{"oid":7}]"#),
+            ReconcileReply::Lost => engine.handle(
+                4_000.0,
+                Event::HttpFailed {
+                    request: fresh.id,
+                    error: "reconcile response lost",
+                },
+            ),
+            ReconcileReply::Clean => unreachable!(),
+        }
         let mut actions: Vec<_> = engine.drain_actions().collect();
-        let retry = place(&mut engine, 3_800.0, 105, spot);
+        let retry = place(&mut engine, 6_500.0, 105, spot);
         refused(&retry, 105);
         actions.extend(retry);
         let next = actions
@@ -169,18 +194,20 @@ fn unknown_then_stale_then_fresh(spot: bool, contaminated: bool) {
                 }
                 _ => None,
             })
-            .expect("engine re-asks after a contaminated snapshot");
+            .expect("engine re-asks after an unproven reconciliation");
         assert_ne!(fresh.id, next.id);
-        (next, 3_900.0, 4_300.0)
+        (next, 6_600.0, 7_000.0)
     } else {
-        (fresh, 3_400.0, 3_800.0)
+        (fresh, 4_000.0, 4_400.0)
     };
     response(&mut engine, clean_at, &fresh, &format!("[{row}]"));
     assert!(
         engine.store().order("7").is_some(),
         "publish before releasing"
     );
-    engine.drain_actions().for_each(drop);
+    assert!(!engine.drain_actions().any(|action|
+        matches!(action, Action::Http(request) if support::kind(&request) == "frontendOpenOrders")
+    ), "the successful fresh read must not inherit an extra owed read from a re-ask");
     let retry = place(&mut engine, retry_at, 104, spot);
     write(&retry);
     assert!(!retry.iter().any(|action| matches!(
@@ -223,17 +250,31 @@ fn repeated_reconcile_hooks_join_one_real_open_orders_read() {
 
 #[test]
 fn perps_unknown_placement_is_fenced_until_a_fresh_complete_read() {
-    unknown_then_stale_then_fresh(false, false);
+    unknown_then_stale_then_fresh(false, ReconcileReply::Clean);
 }
 
 #[test]
 fn spot_unknown_placement_is_fenced_until_a_fresh_complete_read() {
-    unknown_then_stale_then_fresh(true, false);
+    unknown_then_stale_then_fresh(true, ReconcileReply::Clean);
 }
 
 #[test]
 fn duplicate_rows_cannot_release_perps_or_spot_uncertainty() {
     for spot in [false, true] {
-        unknown_then_stale_then_fresh(spot, true);
+        unknown_then_stale_then_fresh(spot, ReconcileReply::Duplicate);
+    }
+}
+
+#[test]
+fn malformed_rows_cannot_release_perps_or_spot_uncertainty() {
+    for spot in [false, true] {
+        unknown_then_stale_then_fresh(spot, ReconcileReply::Malformed);
+    }
+}
+
+#[test]
+fn failed_reconciliation_is_reasked_without_replaying_the_write() {
+    for spot in [false, true] {
+        unknown_then_stale_then_fresh(spot, ReconcileReply::Lost);
     }
 }

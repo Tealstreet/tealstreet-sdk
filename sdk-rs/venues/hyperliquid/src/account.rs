@@ -570,7 +570,9 @@ impl Hyperliquid {
         dexes.dedup();
         for dex in dexes {
             if self.account.inflight.contains(&format!("orders:{dex}")) {
-                self.account.orders_refresh_due.insert(dex);
+                if !cx.reconcile_reask() {
+                    self.account.orders_refresh_due.insert(dex);
+                }
             } else {
                 self.refresh_orders_scope(cx, &dex);
             }
