@@ -13,6 +13,11 @@ register('binance', 'BINANCE', modes(
   endpoints('https://demo-fapi.binance.com', 'wss://demo-fstream.binance.com'),
   endpoints('https://fapi.binance.com', 'wss://fstream.binance.com'),
 ));
+// Spot testnet keys are separate from futures demo keys, so Spot has its own env family.
+register('binancespot', 'BINANCESPOT', modes(
+  endpoints('https://testnet.binance.vision', 'wss://stream.testnet.binance.vision wss://ws-api.testnet.binance.vision'),
+  endpoints('https://api.binance.com', 'wss://stream.binance.com:9443 wss://ws-api.binance.com'),
+));
 for (const name of ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo']) {
   const testnet = endpoints('https://api-testnet.bybit.com', 'wss://stream-testnet.bybit.com');
   const demo = endpoints('https://api-demo.bybit.com', 'wss://stream.bybit.com wss://stream-demo.bybit.com');
@@ -247,7 +252,7 @@ export const liveSmokeProfile = (name, requestedMode, env = process.env) => {
     venue: name, mode, availableModes, options, secrets,
     // Bitrue rejects non-GTC; Polymarket's engine does not send postOnly yet.
     postOnly: !['bitrue', 'polymarket'].includes(name),
-    leverage: ['bybitspot', 'coinbasespot', 'hyperliquidspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
+    leverage: ['binancespot', 'bybitspot', 'coinbasespot', 'hyperliquidspot', 'polymarket'].includes(name) ? 'fixed' : 'supported',
     secretValues: Object.values(secrets), credentialEnv,
     endpoints: { http: [...endpointSet.http], ws: [...endpointSet.ws] },
     allowUrl, canonicalizeUrl, validateRequest, validateSocket, validateSocketMessage,
