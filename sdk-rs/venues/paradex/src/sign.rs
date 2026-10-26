@@ -253,8 +253,9 @@ impl Credentials {
         price: Option<&str>,
         id: Option<&str>,
     ) -> Result<OrderSignature, String> {
-        let (definition, values) = order_values(now_ms, market, side, order_type, size, price, id)?;
-        let signature = self.signature(definition, &values)?;
+        let (definition, values, len) =
+            order_values(now_ms, market, side, order_type, size, price, id)?;
+        let signature = self.signature(definition, &values[..len])?;
         Ok(OrderSignature {
             signature,
             signature_timestamp: now_ms,
@@ -285,7 +286,7 @@ pub(crate) fn order_values(
     size: &str,
     price: Option<&str>,
     id: Option<&str>,
-) -> Result<(&'static str, Vec<Felt>), String> {
+) -> Result<(&'static str, [Felt; 7], usize), String> {
     let side = match side {
         "BUY" => Felt::ONE,
         "SELL" => Felt::TWO,
@@ -297,21 +298,28 @@ pub(crate) fn order_values(
     } else {
         quantum(price.expect("price is present"))?
     };
-    let mut values = vec![
+    let mut values = [
         Felt::from(now_ms),
         word(market)?,
         side,
         word(order_type)?,
         felt(&size)?,
         felt(&price)?,
+        Felt::ZERO,
     ];
-    let definition = if let Some(id) = id {
-        values.push(word(id)?);
-        "ModifyOrder(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt,id:felt)"
+    let (definition, len) = if let Some(id) = id {
+        values[6] = word(id)?;
+        (
+            "ModifyOrder(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt,id:felt)",
+            7,
+        )
     } else {
-        "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)"
+        (
+            "Order(timestamp:felt,market:felt,side:felt,orderType:felt,size:felt,price:felt)",
+            6,
+        )
     };
-    Ok((definition, values))
+    Ok((definition, values, len))
 }
 
 /// The Paradex StarkNet typed-data message hash over `values`.
