@@ -9939,3 +9939,20 @@ command (managed, single-Context or legacy `cx.request`) fences them and queues
 their reconcile; any other end drops the mark. Amend roots are marked too, so an
 Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
 same-ID amend fence stays as is.
+
+### Kraken and KrakenSpot uncertain-placement opt-in
+
+Both products opt into the shared Phase B placement/amend fence. An Unknown
+terminal keeps accepted IDs and refuses a later overlapping placement or amend
+NotSent until a complete, clean open-orders read publishes and calls
+`orders_reconciled`. Cancel by ID remains admitted; store-composed cancel-all
+keeps the shared uncertainty guard. A pre-mark read cannot release a newer mark.
+
+The account hook joins a running read for the same Unknown-terminal generation.
+A new Unknown terminal owes a follow-up behind an older read; engine backoff
+re-asks do not restart a fresh read or perpetually owe another one. Failed or
+malformed reads leave the fence in place until a clean retry. This is local-key
+beta safety; it does not enable hosted signing. Native engine controls prove
+retry/amend refusal, stale/fresh release, held reads across three engine re-asks,
+503 recovery and rejected-row refusal. Browser readiness remains a separate
+JS/WASM host gate.

@@ -1008,6 +1008,9 @@ impl Kraken {
                     if job.effective || job.amend_canceled || !job.ids.is_empty() {
                         error.outcome = Some(Outcome::Unknown);
                     }
+                    if error.outcome == Some(Outcome::Unknown) {
+                        self.account.uncertain_writes += 1;
+                    }
                     cx.fail(job.command, error);
                 }
             }
