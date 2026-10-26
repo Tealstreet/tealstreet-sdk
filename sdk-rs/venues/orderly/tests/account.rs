@@ -1,6 +1,5 @@
 mod support;
 use safe_cex_engine::{Action, Event, SocketId};
-use safe_cex_venue_orderly::Orderly;
 use support::*;
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -81,6 +80,8 @@ fn bootstrap_signed_headers_and_dual_margin_positions() {
         e.store().orders()[0].client_order_id.as_deref(),
         Some("caller-42")
     );
+    // The provider signs at release: the stamp is the release clock (here the
+    // helper's 1000), and the textsign starts with that same stamp.
     for r in requests(&mut e) {
         assert!(
             r.headers
@@ -90,13 +91,18 @@ fn bootstrap_signed_headers_and_dual_margin_positions() {
         assert!(
             r.headers
                 .iter()
-                .any(|(k, v)| *k == "orderly-textsign" && v.starts_with("2000GET/v1/"))
+                .any(|(k, v)| *k == "orderly-timestamp" && v == "1000")
+        );
+        assert!(
+            r.headers
+                .iter()
+                .any(|(k, v)| *k == "orderly-textsign" && v.starts_with("1000GET/v1/"))
         );
     }
 }
 #[test]
 fn subscribes_only_after_successful_auth_and_paces_failure() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options()));
+    let mut e = engine(options());
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
     reply(
@@ -365,7 +371,7 @@ fn root_terminal_before_any_children_blocks_a_held_startup_snapshot() {
 fn only_definitive_account_validation_rejection_deactivates() {
     use safe_cex_engine::Notice;
     for status in [401, 403, 408, 429, 503] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options()));
+        let mut e = engine(options());
         e.start(1000.0);
         let mut output = vec![];
         for _ in 0..4 {
@@ -400,7 +406,7 @@ fn only_definitive_account_validation_rejection_deactivates() {
 }
 
 fn private_connecting() -> (Driver, SocketId, Clock) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Orderly::new(options()));
+    let mut e = engine(options());
     let mut clock = Clock::new(1000.0);
     e.start(1000.0);
     for _ in 0..10 {
@@ -745,8 +751,9 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    // Signed reads are released through the provider's dispatch.
+    let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(engine, now + 91_000.0)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
