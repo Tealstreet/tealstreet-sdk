@@ -238,3 +238,33 @@ fn a_failed_census_is_re_asked_and_the_fresh_one_releases() {
         h.done
     );
 }
+
+/// 8x5tm1 re-ask hazard: engine re-asks while a slow (>1 s) census is out join
+/// it rather than replacing it, and that census still releases.
+#[test]
+fn engine_re_asks_join_a_slow_census_that_still_releases() {
+    let mut h = Harness::classic();
+    unknown_placement(&mut h);
+    let census = |h: &Harness| -> Vec<_> {
+        h.requests
+            .iter()
+            .filter(|r| r.url.contains("/orders-pending"))
+            .map(|r| r.id)
+            .collect()
+    };
+    let out = census(&h);
+    assert!(!out.is_empty(), "the reconcile census");
+    for delay in [1_000.0, 2_000.0, 4_000.0] {
+        h.timer_after(delay);
+    }
+    assert_eq!(census(&h), out, "re-asks join the census still out");
+    h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
+    place(&mut h, 55);
+    assert!(
+        h.requests
+            .iter()
+            .any(|r| r.url.contains("/batch-place-order")),
+        "the slow census releases: {:?}",
+        h.done
+    );
+}
