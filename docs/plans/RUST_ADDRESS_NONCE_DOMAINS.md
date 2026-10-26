@@ -290,11 +290,22 @@ dispatch-nonce; the source adoption will move their enclosing feature guard to
 address-nonce without weakening the assertions. They do not simulate successful
 pre-start attestation or address-bound Prepare/Sign/Bind/Claim.
 
-Feature-off controls retain unavailable dispatcher claims and the ordinary
-Identity wire shape. These are behavior controls, NOT a byte-growth proof.
+Existing dispatch-nonce-OFF controls retain unavailable dispatcher claims and
+the ordinary Identity wire shape. The proposed address-nonce feature does not
+exist at this checkpoint. These are behavior controls, NOT a byte-growth proof.
 The fixed-budget paired WASM equality gate below is still mandatory at source.
 Existing native/dispatcher originals, carrier/provider lifecycle controls and
 all consumer financial/wire assertions remain separate required evidence.
+
+Qualified local source is `8b0d46b6565ce0917fb3a8271ff11751e9dbe2c0`, plain
+merged with actual `817a488c9d21444b223c8f99a33dc6d09ace31e3`. The scoped target
+executes14 tests with dispatch-nonce enabled:11 passing controls and3 intended
+assertion failures (unverified stable-id/serialized address mint and missing-key
+classification). With dispatch-nonce disabled, all11 controls pass. Neither
+mode ignores tests or counts a compile/setup failure as RED. Both strict scoped
+Clippy modes, fmt and diff-check pass. A first strict run found only a redundant
+helper return binding; the forward fix preserves every test body/assertion.
+Each owned qualification target was removed after its mode completed.
 
 ## Scope, zero-growth and publication gates
 
