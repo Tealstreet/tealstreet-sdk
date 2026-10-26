@@ -11,7 +11,6 @@ mod identity;
 mod managed;
 mod paths;
 mod rate;
-mod sign;
 mod socket_codec;
 mod trading;
 mod wire;
@@ -212,7 +211,6 @@ pub struct WeexFutures {
     settings_auth: safe_cex_engine::MergedScopeAuth,
     trading: trading::State,
     history: history::State,
-    credentials: sign::Credentials,
     /// Configured keys, built once. GET reads use the read key, even without a primary.
     slots: Slots<safe_cex_engine::signing::Identity>,
     /// Trusted caller-assigned primary stableId; never derived from key material.
@@ -269,13 +267,9 @@ impl WeexFutures {
             .as_ref()
             .is_some_and(|read| !complete(read));
         let identity = primary.as_ref().and_then(|p| p.stable_id.clone());
-        let credentials = sign::Credentials {
-            primary: primary.filter(complete),
-            read: options.read_credentials.filter(complete),
-        };
         let slots = Slots::new(
-            credentials.primary.clone(),
-            credentials.read.clone(),
+            primary.filter(complete),
+            options.read_credentials.filter(complete),
             SlotPolicy::default(),
         );
         Self {
@@ -288,7 +282,6 @@ impl WeexFutures {
             settings_auth: Default::default(),
             trading: trading::State::default(),
             history: history::State::default(),
-            credentials,
             slots,
             identity,
             incomplete_credentials,
