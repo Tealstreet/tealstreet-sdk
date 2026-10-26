@@ -1060,11 +1060,22 @@ fn released_unproven_write_cleanup_precedes_immediate_cancel_all() {
             .parse::<f64>()
             .unwrap()
             * 1000.;
-        assert!(
-            next.iter()
-                .any(|action| matches!(action, Action::SetTimer{at_ms,..} if *at_ms==expiry+5000.))
-        );
-        assert!(next.iter().any(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.message.contains("caller-a"))));
+        let owed: Vec<_> = failure
+            .iter()
+            .filter_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == expiry + 5000. => Some(*timer),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(owed.len(), 1);
+        assert!(!next.iter().any(|action| matches!(action,
+            Action::SetTimer { at_ms, .. } if *at_ms == expiry + 5000.
+        )));
+        assert!(!next.iter().any(|action| matches!(action,
+            Action::ClearTimer { timer } if *timer == owed[0]
+        )));
+        assert!(!failure.iter().any(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.message.contains("caller-a"))));
+        assert_eq!(next.iter().filter(|action| matches!(action, Action::Notice(Notice::Event(event)) if event.message.contains("caller-a"))).count(), 1);
         assert!(terminal(&next, 850).is_empty());
         assert!(
             requests(&next)
@@ -1141,18 +1152,22 @@ fn unsupported_trading_keeps_native_thirty_two_job_precedence() {
     );
 }
 #[test]
-fn retired_place_settles_from_a_non_command_callback_once() {
+fn retired_place_settles_from_the_immediate_reconcile_hook_once() {
     let (mut e, socket) = started();
     let output = at(&mut e, NOW + 10., Event::Command(placement(870)));
     let output = release(&mut e, NOW + 10., output);
     let request = wire(&output, "g-orders/create");
     let failed = reply(&mut e, NOW + 11., &request, 408, "{}");
     assert_eq!(terminal(&failed, 870).len(), 1);
+    assert_eq!(
+        terminal(&failed, 870)[0].as_ref().unwrap_err().outcome,
+        Some(Outcome::Unknown)
+    );
     assert!(
         e.store()
             .orders()
             .iter()
-            .any(|order| order.status == OrderStatus::Creating)
+            .all(|order| order.status != OrderStatus::Creating)
     );
     let settled = at(
         &mut e,
@@ -1172,11 +1187,20 @@ fn retired_place_settles_from_a_non_command_callback_once() {
         .parse::<f64>()
         .unwrap()
         * 1000.;
-    assert!(
-        settled
-            .iter()
-            .any(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==expiry+5000.))
-    );
+    let owed: Vec<_> = failed
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == expiry + 5000. => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(owed.len(), 1);
+    assert!(!settled.iter().any(|a| matches!(a,
+        Action::SetTimer { at_ms, .. } if *at_ms == expiry + 5000.
+    )));
+    assert!(!settled.iter().any(|a| matches!(a,
+        Action::ClearTimer { timer } if *timer == owed[0]
+    )));
     assert!(terminal(&settled, 870).is_empty());
     let again = at(
         &mut e,
@@ -1191,6 +1215,9 @@ fn retired_place_settles_from_a_non_command_callback_once() {
             .iter()
             .any(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==expiry+5000.))
     );
+    assert!(!again.iter().any(|a| matches!(a,
+        Action::ClearTimer { timer } if *timer == owed[0]
+    )));
     assert!(terminal(&again, 870).is_empty());
 }
 #[test]

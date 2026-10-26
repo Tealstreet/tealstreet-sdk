@@ -259,6 +259,76 @@ impl Harness {
 }
 
 #[test]
+fn an_unknown_placement_requires_a_fresh_order_read_before_retrying() {
+    let mut h = Harness::ready_with_orders(r#"{"code":0,"data":[]}"#);
+    for at in [3000., 5000., 7000.] {
+        h.fire_at(at);
+        if h.requests.iter().any(|r| r.url.contains(POSITIONS)) {
+            h.respond(POSITIONS, 200, POSITION);
+        }
+        if h.requests.iter().any(|r| r.url.contains(BALANCE)) {
+            h.respond(BALANCE, 200, BALANCES);
+        }
+    }
+    let stale = h.take(ORDERS);
+    let place = |command| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol":"BTCUSDT", "type":"limit", "side":"buy",
+                "amount":0.01, "price":60000
+            }))
+            .unwrap(),
+        ],
+    };
+    h.now += 1.;
+    h.event(Event::Command(place(700)));
+    let first = h.take("/openApi/swap/v2/trade/order");
+    h.reply(first.id, 503, "Service Unavailable");
+    assert!(
+        h.failures
+            .iter()
+            .any(|(id, error)| *id == 700
+                && error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+    );
+    let refused = |h: &mut Harness, id| {
+        h.now += 1.;
+        h.event(Event::Command(place(id)));
+        assert!(
+            h.requests.iter().all(
+                |r| r.method != Method::Post || !r.url.contains("/openApi/swap/v2/trade/order")
+            ),
+            "no retry POST while uncertain"
+        );
+        assert!(h.failures.iter().any(|(command, error)| *command == id
+            && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+            && error.message.contains("uncertain")));
+    };
+    refused(&mut h, 701);
+    let fresh = h.take(ORDERS);
+    assert_ne!(fresh.id, stale.id);
+    for at in [7001. + 1000., 7001. + 3000.] {
+        h.fire_at(at);
+        assert!(
+            h.requests.iter().all(|r| !r.url.contains(ORDERS)),
+            "engine re-asks join the held fresh Primary read"
+        );
+    }
+    h.reply(stale.id, 200, r#"{"code":0,"data":[]}"#);
+    refused(&mut h, 702);
+    h.reply(fresh.id, 200, r#"{"code":0,"data":[]}"#);
+    h.now += 1.;
+    h.event(Event::Command(place(703)));
+    assert_eq!(
+        h.requests
+            .iter()
+            .filter(|r| r.method == Method::Post && r.url.contains("/openApi/swap/v2/trade/order"))
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn private_startup_preserves_big_ids_unsigned_key_and_primary_balance() {
     let mut h = Harness::new();
     let key = h.take(KEY);

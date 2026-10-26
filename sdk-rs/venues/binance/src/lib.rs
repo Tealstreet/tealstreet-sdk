@@ -1281,6 +1281,14 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    // An Unknown placement fences its symbol until a fresh, clean open-orders
+    // snapshot (`reconcile_orders`) proves what landed.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_orders(cx);
+    }
     fn unproven_http_evidence(
         &self,
         pending: &Pending,
