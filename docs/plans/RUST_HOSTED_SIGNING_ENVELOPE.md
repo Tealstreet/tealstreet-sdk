@@ -425,7 +425,8 @@ Both sides reject unknown fields, unsafe ids, illegal owner/role/slot pairs,
 noncanonical nonce strings and changed receipt presence. UTF-8 JSON is bounded
 at 1 MiB. The decoder rejects duplicate keys before accepting a request. Peer
 state is bounded to 64 decisions and active jobs per authenticated account,
-retaining tombstones until the original deadline without evicting live jobs.
+retaining tombstones through the maximum of the original deadline and the
+codec freshness horizon, without evicting live jobs.
 Replay keys canonicalize receipt field presence, so key order or a fresh outer
 id cannot authorize a second signing. Validation refusals return only the closed
 invalidRequest code; post-provider refusals return refused, without signed or

@@ -87,7 +87,7 @@ function config(options) {
   if (!record(bindings) || Object.keys(bindings).length === 0 || Object.keys(bindings).some(k => !['primary','secondary'].includes(k))) throw refused();
   for (const value of Object.values(bindings)) binding(value);
   if (!id(options.exchangeName) || typeof options.accountName !== 'string' || encoder.encode(options.accountName).length > 4096
-    || typeof options.codec?.recipe !== 'function' || !Array.isArray(options.codec.recipes)
+    || typeof options.codec?.recipe !== 'function' || typeof options.codec?.replayUntil !== 'function' || !Array.isArray(options.codec.recipes)
     || options.codec.recipes.length === 0 || options.codec.recipes.length > 32 || !options.codec.recipes.every(id)
     || new Set(options.codec.recipes).size !== options.codec.recipes.length) throw refused();
   return bindings;
@@ -151,7 +151,7 @@ export function createOperationPeer(options) {
   const decisions = new Map(), ids = new Map(), active = new Set();
   let disposed = false;
   function cleanup(at) {
-    for (const [key,value] of decisions) if (at >= value.deadline && !value.pending) {decisions.delete(key);ids.delete(value.id);}
+    for (const [key,value] of decisions) if (at > value.retainUntil && !value.pending) {decisions.delete(key);ids.delete(value.id);}
   }
   return {
     capabilities: freeze({v:2,recipes:[...codec.recipes],slots:Object.keys(bindings)}),
@@ -171,12 +171,14 @@ export function createOperationPeer(options) {
         const key = encode([req.attemptId,['stampMs','expiryMs','nonce'].map(k => own(req.receipt,k) ? [k,req.receipt[k]] : [k])]);
         if (decisions.has(key) || ids.has(d.id) || decisions.size >= CAPACITY || active.size >= CAPACITY) throw refused();
         codecCheck(codec,req,now(),'peer');
+        const replayUntil = synchronous(codec.replayUntil(req));
+        if (!time(replayUntil) || replayUntil < at) throw refused();
         const epoch = revision();
         if (!id(epoch)) throw refused();
         controller = new AbortController();
         const cancel = () => controller.abort();
         if (signal) signal.addEventListener('abort',cancel,{once:true});
-        entry = {deadline:req.deadlineMs,id:d.id,pending:true};
+        entry = {retainUntil:Math.max(req.deadlineMs,replayUntil),id:d.id,pending:true};
         decisions.set(key,entry);ids.set(d.id,key);active.add(controller);
         try {
           // Read the peer clock at signing, after all admission work.

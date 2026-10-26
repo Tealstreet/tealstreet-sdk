@@ -12,6 +12,8 @@ export interface OperationRequest {
 }
 export interface OperationCodec {
  readonly recipes:readonly string[];
+ /** Last raw time at which this signed timestamp could be admitted. */
+ replayUntil(request:OperationRequest):number;
  recipe(descriptor:OperationRequest['descriptor']):string|undefined;
  describe(work:SignRequest,context:{meta:unknown;binding:OperationBinding;deadlineMs:number}):OperationRequest['descriptor'];
  validate(request:OperationRequest,context:{now:number;deadlineMs:number;side:'origin'|'peer';work?:SignRequest}):void;

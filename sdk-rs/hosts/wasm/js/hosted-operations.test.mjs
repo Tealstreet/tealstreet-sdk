@@ -8,7 +8,7 @@ const meta = {task:7,owner:{kind:'managed',request:3,generation:1},deadlineMs:40
 function pair({execute, now=()=>1000, send, id, revision=()=> 'peer-clock'}={}) {
  let calls=0,serial=0;
  const codec={
-  recipes:['kraken.futures.http/1'],
+  recipes:['kraken.futures.http/1'],replayUntil:()=>6000,
   describe:()=>({kind:'kraken.futures.http',path:'/derivatives/api/v3/accounts'}),
   recipe:d=>d.kind==='kraken.futures.http' ? 'kraken.futures.http/1' : undefined,
   validate:()=>{},
@@ -96,7 +96,7 @@ test('reordering receipt keys cannot bypass replay custody',async()=>{
 });
 test('family codec owns an eleven-value batch and checks the peer clock at execution',async()=>{
  const r={stampMs:1000,expiryMs:2000};let checked=0;
- const codec={recipes:['paradex.orderBatch/1'],recipe:()=> 'paradex.orderBatch/1',describe:()=>({kind:'paradex.orderBatch',items:Array(10).fill({})}),validate:()=>{},
+ const codec={replayUntil:()=>31000,recipes:['paradex.orderBatch/1'],recipe:()=> 'paradex.orderBatch/1',describe:()=>({kind:'paradex.orderBatch',items:Array(10).fill({})}),validate:()=>{},
   execute:async(req,c)=>{await Promise.resolve();assert.equal(c.check(),1000);checked++;return {receipt:req.receipt,values:[Array(14).fill(1),...Array.from({length:10},()=>Array(64).fill(2))]};},
   verify:value=>{assert.equal(value.values.length,11);for(const signature of value.values.slice(1))assert.equal(signature.length,64);},
  };
@@ -112,4 +112,12 @@ test('duplicate correlation refusal cannot remove another live provider owner',a
  const first=p.provider(work,context());first.catch(()=>{});await new Promise(r=>setImmediate(r));
  for(let i=0;i<2;i++)await assert.rejects(p.provider(work,{...context(),meta:{...meta,task:8+i}}));
  assert.equal(sent,1);release(await p.peer.handle(frame));await first;
+});
+
+test('fresh deadline after original expiry cannot re-sign a still-fresh receipt',async()=>{
+ let time=1000;const p=pair({now:()=>time});
+ await p.provider(work,{...context(),meta:{...meta,deadlineMs:1500}});
+ time=1600;
+ await assert.rejects(p.provider(work,{...context(),meta:{...meta,deadlineMs:3500}}));
+ assert.equal(p.calls(),1);
 });

@@ -9385,7 +9385,7 @@ clock-revision changes refuse without a fallback. Peer validation failures are
 sanitized NotSent refusals, not credential latch evidence. Late work cannot
 publish a signature or HTTP request, and cancellation grants no joined-resource
 acknowledgement. The 64-entry per-account bound refuses new work rather than
-forgetting unexpired replay decisions.
+forgetting replay decisions before the codec freshness horizon.
 
 Kraken's advisory SignRequest context retains the exact wire path instead of the
 stripped signing path; the native preimage builder still strips /derivatives at

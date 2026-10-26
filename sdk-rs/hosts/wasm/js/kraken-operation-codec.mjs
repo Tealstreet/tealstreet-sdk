@@ -26,6 +26,7 @@ export function createKrakenOperationCodec({wasm,identity,executor,spot=false,te
   }
   return Object.freeze({
     recipes:Object.freeze([`${family}/1`]),
+    replayUntil(req) {return req.descriptor.stampMs+5000;},
     recipe(descriptor) {return descriptor.kind === family ? `${family}/1` : undefined;},
     describe(work,{binding:b}) {
       closedWork(work);
