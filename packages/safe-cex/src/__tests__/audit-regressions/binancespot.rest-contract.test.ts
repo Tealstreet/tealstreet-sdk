@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { BinanceSpotExchange } from '../../exchanges/binance/binancespot.exchange';
+import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binancespot.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';

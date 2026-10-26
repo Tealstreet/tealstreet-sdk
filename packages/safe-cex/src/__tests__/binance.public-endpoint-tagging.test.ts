@@ -2,11 +2,11 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 import { describe, expect, it } from 'vitest';
 
-import { createAPI, createPublicAPI } from '../exchanges/binance/binance.api';
+import { createAPI, createPublicAPI } from './reference/binance/binance.api';
 import { ENDPOINTS } from '../exchanges/binance/binance.types';
-import { createAPI as createInverseAPI, createPublicAPI as createInversePublicAPI } from '../exchanges/binance/binanceinverse.api';
+import { createAPI as createInverseAPI, createPublicAPI as createInversePublicAPI } from './reference/binance/binanceinverse.api';
 import { ENDPOINTS as INVERSE_ENDPOINTS } from '../exchanges/binance/binanceinverse.types';
-import { createPAPI, createPublicAPI as createPmPublicAPI } from '../exchanges/binance/binancepm.api';
+import { createPAPI, createPublicAPI as createPmPublicAPI } from './reference/binance/binancepm.api';
 import { ENDPOINTS as PM_ENDPOINTS } from '../exchanges/binance/binancepm.types';
 
 /**

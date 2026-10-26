@@ -2,9 +2,9 @@ import type { Axios } from 'axios';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
-import { ParadexRequestSigner } from '../../exchanges/paradex/paradex.sdk';
-import { ENDPOINTS } from '../../exchanges/paradex/paradex.types';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
+import { ParadexRequestSigner } from '../reference/paradex/paradex.sdk';
+import { ENDPOINTS } from '../reference/paradex/paradex.types';
 import { DefaultStore } from '../../store/store.base';
 import { Market, Order, OrderSide, OrderStatus, OrderType } from '../../types';
 

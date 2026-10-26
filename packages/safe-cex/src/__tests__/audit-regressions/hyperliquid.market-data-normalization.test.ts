@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 import { DefaultStore } from '../../store/store.base';
 import type { AssetCtx, Meta } from '../../exchanges/hyperliquid/hyperliquid.types';
 

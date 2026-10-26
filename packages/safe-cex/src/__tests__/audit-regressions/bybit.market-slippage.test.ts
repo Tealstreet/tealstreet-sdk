@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { getBybitMarketSlippageParams } from '../../exchanges/bybit/bybit.order-params';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { BybitDemoExchange } from '../../exchanges/bybit/bybitdemo.exchange';
-import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
-import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
+import { BybitDemoExchange } from '../reference/bybit/bybitdemo.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
+import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
 import { OrderSide, OrderType, PositionMode } from '../../types';
 
 const marketOrder = (maxSlippagePct: number) => ({

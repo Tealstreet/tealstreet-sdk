@@ -10,7 +10,8 @@ export default [
   },
   ...frontendConfig,
   {
-    files: ['src/exchanges/**/*.ts'],
+    // The moved TS replay oracle keeps the adapter rule it was written under.
+    files: ['src/exchanges/**/*.ts', 'src/__tests__/reference/**/*.ts'],
     plugins: {
       'safe-cex': safeCexPlugin,
     },
