@@ -12,7 +12,9 @@ fn notify(e: &mut TestEngine, socket: SocketId, at: f64) -> Vec<Action> {
             text: r#"{"ch":"balance","data":{"available":"1"}}"#,
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn timer_at(actions: &[Action], at: f64) -> TimerId {
     actions
@@ -25,7 +27,9 @@ fn timer_at(actions: &[Action], at: f64) -> TimerId {
 }
 fn fire(e: &mut TestEngine, timer: TimerId, at: f64) -> Vec<Action> {
     e.handle(at, Event::TimerFired { timer });
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn balance(actions: &[Action]) -> Option<HttpRequest> {
     actions.iter().find_map(|a| match a {
@@ -50,7 +54,9 @@ fn answer(e: &mut TestEngine, id: RequestId, at: f64, body: &str) -> Vec<Action>
             },
         },
     );
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn first_retry(actions: &[Action], now: f64) -> (TimerId, f64) {
     actions
@@ -145,7 +151,9 @@ fn lost_read_replacement_and_late_callbacks_keep_the_new_balance_read_owned() {
                     error: "late old read failure",
                 },
             );
-            e.drain_actions().collect()
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect()
         } else {
             answer(&mut e, old.id, 11200.0, FRESH)
         };
@@ -195,7 +203,9 @@ fn accepted_mode_ack_fences_old_balance_while_refused_or_unproved_writes_do_not(
                     error: "lost mode ACK",
                 },
             );
-            e.drain_actions().collect()
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect()
         } else {
             answer(
                 &mut e,
@@ -301,7 +311,9 @@ fn private_reconnect_coalesces_against_a_current_balance_read() {
     let (mut e, socket) = startup();
     let old = begin(&mut e, socket);
     e.handle(1200.0, Event::WsClosed { socket, code: 1006 });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let (timer, at) = actions
         .iter()
         .find_map(|a| match a {
@@ -325,7 +337,9 @@ fn private_reconnect_coalesces_against_a_current_balance_read() {
             socket: replacement,
         },
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         balance(&actions).is_none(),
         "reconnect refresh must retain slow current balance serial"
