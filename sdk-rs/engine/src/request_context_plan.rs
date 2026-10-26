@@ -304,12 +304,23 @@ fn project_deadline(raw_now: f64, span_ms: u64) -> Result<f64, Error> {
 #[path = "request_context_plan_tests.rs"]
 mod tests;
 
+/// Authentication declared for one serial call; never inferred from its recipe.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CallAuth {
+    /// The Preflight's write credential or its separately declared read role.
+    #[default]
+    Preflight,
+    /// The root's exact live login Session, with no provider signing authority.
+    Session,
+}
+
 /// One call of a streamed serial Plan. It is admitted only from the previous
 /// call's exact DATA custody, or its delayed-continuation callback.
 #[cfg(feature = "serial-plans")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SerialCall {
-    /// Read or Mutation, under the Plan's admitted credential.
+    pub auth: CallAuth,
+    /// Read or Mutation, authenticated by this call's declared `auth`.
     pub operation: super::Operation,
     /// The per-call bound: `now + timeout_ms`. The root has no wall-clock.
     pub timeout_ms: u32,
