@@ -100,7 +100,6 @@ pub struct Account {
     settings_revision: u64,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
-    reconcile_orders_revision: Option<u64>,
     positions_in_flight: Option<u64>,
     balance_in_flight: Option<u64>,
     mode_guard: StaleGuard,
@@ -569,14 +568,10 @@ impl Account {
     /// The snapshot that clears an uncertain-write fence is Primary-signed, so a
     /// read key can never be the read that proves the trading account's orders.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
-        if self.orders_in_flight.is_some()
-            && self.orders_in_flight == self.reconcile_orders_revision
-            && self.orders_in_flight == Some(self.orders_revision)
-        {
+        if cx.reconcile_reask() && self.orders_in_flight.is_some() {
             return;
         }
         self.bump_orders();
-        self.reconcile_orders_revision = Some(self.orders_revision);
         self.start_order_read(cx, credentials, Some(PrimaryReason::PostUnknownOrderRead));
     }
     /// A fence needs a new owner even if an older snapshot is still pending.

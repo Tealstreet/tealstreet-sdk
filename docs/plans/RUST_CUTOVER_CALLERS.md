@@ -9976,6 +9976,11 @@ Primary reconciliation read when the engine re-asks. Its four-step managed
 control is assertion-RED on #2279 Phase A and green on #2288 Phase B, which marks
 Unknown write facts independently of guard_pending_placements. This change
 does not enable that guard. A stale pre-mark read cannot release the fence.
+BingX keeps its default cancel-all fence for beta: an Unknown create can land
+after its native DELETE, and there is no automatic late-landing cancellation.
+Cancel-all is refused NotSent until a fresh read, rather than reporting an
+all-cancelled result while an unseen order can still appear. Phemex retains its
+opt-out because its existing late-landing cancellation covers that race.
 
 All three venues pin a slow held read across the engine's first two re-asks:
 the same census still publishes and releases, without restarting its floor or
