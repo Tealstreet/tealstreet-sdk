@@ -9901,6 +9901,14 @@ steps. The existing $100 notional cap, post-only placement, empty-account
 preconditions and independent cleanup readback remain unchanged. This enables
 only the credentialed test harness; production order sizing is unchanged.
 
+### Isolated WASM construction feature guard
+
+The construction guard checks every declared venue through its actual family
+alias and transitive local Cargo features. Setup mappings declare their required
+bootstrap features; AsterDEX additionally requires address setup and signing
+metadata. Combined default features cannot satisfy an isolated family's check.
+Negative controls pin missing features and reject unknown setup mappings.
+
 ## Lighter public beta data
 
 Market snapshots seed last price and start ticker hydration before socket Open.
