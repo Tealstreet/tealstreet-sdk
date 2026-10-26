@@ -124,7 +124,7 @@ fn fills_preserve_large_ids_filters_seconds_and_fee_details() {
     assert!(
         signed
             .1
-            .starts_with("1000GET/v1/trades?symbol=PERP_BTC_USDC&")
+            .starts_with("2000GET/v1/trades?symbol=PERP_BTC_USDC&")
     );
     let outside = FILL
         .replace("9007199254740993", "9007199254740994")

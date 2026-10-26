@@ -81,7 +81,7 @@ fn bootstrap_signed_headers_and_dual_margin_positions() {
         Some("caller-42")
     );
     // The provider signs at release: the stamp is the release clock (here the
-    // helper's 1000), and the textsign starts with that same stamp.
+    // fixtures' 2000), and the textsign starts with that same stamp.
     for r in requests(&mut e) {
         assert!(
             r.headers
@@ -91,12 +91,12 @@ fn bootstrap_signed_headers_and_dual_margin_positions() {
         assert!(
             r.headers
                 .iter()
-                .any(|(k, v)| *k == "orderly-timestamp" && v == "1000")
+                .any(|(k, v)| *k == "orderly-timestamp" && v == "2000")
         );
         assert!(
             r.headers
                 .iter()
-                .any(|(k, v)| *k == "orderly-textsign" && v.starts_with("1000GET/v1/"))
+                .any(|(k, v)| *k == "orderly-textsign" && v.starts_with("2000GET/v1/"))
         );
     }
 }

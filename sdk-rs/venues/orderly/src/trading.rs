@@ -1330,7 +1330,7 @@ impl Orderly {
                         .and_then(|plan| first_slot(cx, &plan).map(|slot| (plan, slot)))
                 } else {
                     let policy = SerialPolicy {
-                        credential,
+                        credential: Some(credential),
                         pacing: None,
                         refusals_complete: false,
                     };
@@ -1587,17 +1587,8 @@ impl Orderly {
         if !ours {
             return;
         }
-        let mut active = self.trading.active.take().expect("active job");
-        if let Some((_, waiting)) = active.parked.take() {
-            self.trading
-                .detached
-                .push((waiting, active.job.scopes.clone()));
-        }
-        let error = VenueError::new(
-            "Orderly protective state is unconfirmed; no subsequent write was sent",
-        )
-        .outcome(Outcome::Unknown);
-        self.end(cx, active, None, error);
+        let active = self.trading.active.take().expect("active job");
+        self.unconfirmed(cx, active, None, None);
     }
     /// The engine retired a trading owner itself: forget it, keep the call in
     /// flight for restoration, and name the queued Preflight to wake.
@@ -1655,6 +1646,9 @@ impl Orderly {
             return;
         }
         active.flight = None;
+        if let Effect::Verify(waiting) = request.step.effect {
+            return self.unconfirmed(cx, active, None, Some(waiting));
+        }
         let write = !request.is_read();
         if !write {
             error.outcome = None;
@@ -1779,6 +1773,27 @@ impl Orderly {
                 self.end(cx, active, Some((&request.slot, &request.context)), error);
             }
         }
+    }
+    /// An accepted pair whose legs cannot be confirmed: the Plan inherits
+    /// uncertainty (Unknown, accepted IDs kept) and the scope stays fenced.
+    fn unconfirmed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut active: Active,
+        current: Option<(&Slot, &Context)>,
+        waiting: Option<Waiting>,
+    ) {
+        if let Some(waiting) = waiting.or_else(|| active.parked.take().map(|(_, w)| w)) {
+            self.trading
+                .detached
+                .push((waiting, active.job.scopes.clone()));
+        }
+        if let Some(plan) = &active.plan {
+            let _ = cx.inherit_plan_uncertainty(plan);
+        }
+        self.account_after_uncertain_write(cx);
+        let error = VenueError::new("Orderly protective state is unconfirmed; no subsequent write was sent").outcome(Outcome::Unknown);
+        self.end(cx, active, current, error);
     }
     /// The open-algo snapshot of the pair's symbol, read under the Plan.
     fn verify_step(&self, cx: &Cx<'_, Pending>, step: &Step, waiting: &Waiting) -> Option<Step> {
@@ -2166,14 +2181,11 @@ impl Orderly {
                     }
                 }
             }
-            Err(e) if matches!(request.step.effect, Effect::Verify(_)) => {
-                if let Effect::Verify(waiting) = request.step.effect.clone() {
-                    self.trading
-                        .detached
-                        .push((waiting, active.job.scopes.clone()));
-                }
-                let error = VenueError::new(e).outcome(Outcome::Unknown);
-                self.end(cx, active, current, error);
+            Err(_) if matches!(request.step.effect, Effect::Verify(_)) => {
+                let Effect::Verify(waiting) = request.step.effect.clone() else {
+                    unreachable!()
+                };
+                self.unconfirmed(cx, active, current, Some(waiting));
             }
             Err(e) if unknown_ack => {
                 let _ = cx.http_write_unproven(&request.context, e.clone());
