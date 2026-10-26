@@ -1145,3 +1145,140 @@ fn a_signature_code_on_an_unproven_status_is_never_resent() {
         "an unproven write stays Unknown: {failed:?}"
     );
 }
+
+/// OKX's census runs each page under its own context. A mark made mid-census
+/// restarts it at once, so pages sent before the mark never report a release;
+/// the census also releases only marks its first page saw (`order_read_epoch`).
+#[test]
+fn a_census_begun_before_a_mark_cannot_release_it_from_a_later_page() {
+    use support::{FixtureOptions, MARKET, TICKER, envelope, is_get, take_http};
+    let eth = |row: &str| row.replace("BTC", "ETH");
+    let mut e = support::engine(FixtureOptions {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..FixtureOptions::default()
+    });
+    e.start(0.0);
+    let a = take_http(&mut prepared(&mut e, 0.0));
+    reply(
+        &mut e,
+        &a,
+        &envelope(&format!("{MARKET},{}", eth(MARKET))),
+        1.0,
+    );
+    let mut out = prepared(&mut e, 1.0);
+    let a = take_http(&mut out);
+    reply(
+        &mut e,
+        &a,
+        &envelope(&format!("{TICKER},{}", eth(TICKER))),
+        2.0,
+    );
+    out.extend(prepared(&mut e, 2.0));
+    let a = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap()
+        .clone();
+    reply(
+        &mut e,
+        &a,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.0,
+    );
+    // Answer every account read; with `hold`, keep the first open-orders page in flight.
+    let drain = |e: &mut Engine<Okx>, first: Vec<Action>, at, hold: bool| {
+        let (mut held, mut pending) = (None, first);
+        while let Some(a) = pending.pop() {
+            let Action::Http(r) = &a else { continue };
+            if hold && held.is_none() && r.url.contains("/trade/orders-pending") {
+                held = Some(a);
+                continue;
+            }
+            let body = if r.url.contains("account-position-risk") {
+                envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+            } else {
+                envelope("")
+            };
+            reply(e, &a, &body, at);
+            pending.extend(prepared(e, at));
+        }
+        held
+    };
+    let first = prepared(&mut e, 3.0);
+    drain(&mut e, first, 4.0, false);
+    let place = |e: &mut Engine<Okx>, command, symbol: &str, at| {
+        e.handle(
+            at,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![
+                    serde_json::from_str(&format!(
+                        r#"{{"symbol":"{symbol}","type":"market","side":"buy","amount":1}}"#
+                    ))
+                    .unwrap(),
+                ],
+            }),
+        );
+        prepared(e, at)
+    };
+    let answer = |e: &mut Engine<Okx>, sent: &[Action], status, body: &str, at| {
+        let Action::Http(write) = post(sent) else {
+            unreachable!()
+        };
+        e.handle(
+            at,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    };
+    // A lost BTC placement seals Unknown; its reconcile starts a census at once.
+    let sent = place(&mut e, OWNER, "BTCUSDT", 5.);
+    answer(&mut e, &sent, 503, r#"{"code":"1","msg":"busy"}"#, 6.);
+    let census = prepared(&mut e, 6.);
+    let held = drain(&mut e, census, 6.5, true).expect("the census's first page is in flight");
+    // A lost ETH placement mid-census seals Unknown too; its reconcile restarts
+    // the census at once, so the running one (its first page sent before the
+    // ETH write) can no longer report.
+    let sent = place(&mut e, OWNER + 1, "ETHUSDT", 7.);
+    answer(&mut e, &sent, 503, r#"{"code":"1","msg":"busy"}"#, 8.);
+    let restarted = prepared(&mut e, 8.);
+    let fresh = restarted
+        .iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders-pending")))
+        .cloned()
+        .expect("the census restarts");
+    // The stale census's pages answer clean and release nothing.
+    let mut page = Some(held);
+    while let Some(request) = page {
+        reply(&mut e, &request, &envelope(""), 9.);
+        page = prepared(&mut e, 9.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")));
+    }
+    let retry = |e: &mut Engine<Okx>, command, symbol, at| {
+        place(e, command, symbol, at)
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Post))
+    };
+    assert!(
+        !retry(&mut e, OWNER + 2, "ETHUSDT", 10.),
+        "a census begun before the ETH write released it"
+    );
+    // The restarted census, every page sent after both writes, releases both.
+    let mut page = Some(fresh);
+    while let Some(request) = page {
+        reply(&mut e, &request, &envelope(""), 11.);
+        page = prepared(&mut e, 11.)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(r) if r.url.contains("-pending")));
+    }
+    assert!(retry(&mut e, OWNER + 3, "ETHUSDT", 12.));
+}
