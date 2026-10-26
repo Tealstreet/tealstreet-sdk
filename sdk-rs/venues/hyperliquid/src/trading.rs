@@ -972,16 +972,14 @@ impl Hyperliquid {
             .collect::<Vec<_>>();
         let accepted = statuses.iter().any(|status| match status {
             Status::Error { error } => {
-                idempotent_cancel
-                    && matches!(&request.effect, Effect::Cancel(_))
-                    && only_terminal_cancel(error)
+                idempotent_cancel && kind == "cancel" && only_terminal_cancel(error)
             }
             _ => true,
         });
         let batch_error = if !errors.is_empty()
             && !(idempotent_cancel
                 && matches!(&request.effect, Effect::Cancel(_))
-                && errors.iter().all(|error| only_terminal_cancel(error)))
+                && errors.iter().all(|e| only_terminal_cancel(e)))
         {
             Some(
                 VenueError::new(errors.join(", "))
