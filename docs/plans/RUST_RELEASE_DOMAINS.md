@@ -54,8 +54,14 @@ pub enum DomainMembers { AllRest, Mutations }
 
 ### 2. FIFO, enforced at Bind
 
-- Members enter the domain queue in issuance order: the order of
-  `request_managed` / `request_signed_managed` / Plan-call issuance.
+- **The one linearization point** is the engine accepting a managed request:
+  the successful `request_managed` / `request_signed_managed` call that
+  registers the physical attempt. Plan and serial calls register at that same
+  point.
+  - Context creation, `plan_leg_context` and call reservation do NOT enter the
+    queue, so a leg that is never queued cannot block later native-order work.
+  - A Stale re-prepare keeps the same physical entry and its place.
+  - A real resend is a new physical member and joins at the tail.
 - A member that finishes preparation **holds its packet and permit** instead of
   emitting `Bind`, using the same seam that barrier group members
   (`pump_mutation_group`) and parked bearers use. It emits `Bind` only once it is
@@ -168,7 +174,10 @@ All use a registered 334 ms domain group.
       that delay and no more;
     - a fast DATA cannot pull the next release before the floor;
     - a slow DATA does not add a second gap.
-12. **GREEN controls:**
+12. **Linearization point.** Create Context/leg A without queueing it, then
+    queue B, then queue A: Bind and release order is B, then A. A leg that is
+    never queued blocks nothing, and a Stale re-prepare keeps its entry.
+13. **GREEN controls:**
    - with the feature on and no declaration, nothing is held, stamped or paced;
    - with the feature off, serial nonzero pacing is still `Invalid`.
 
@@ -177,15 +186,16 @@ and the 256 bound, Hyperliquid's builder prerequisites.
 
 ## Open questions for review
 
-- (a) **Head advance on re-prepare.** Does a Stale re-prepare keep the head
-  (blocking the queue until it re-signs, as native's sign-at-dispatch
-  effectively does), or yield to the next prepared member? I propose keeping it,
-  for FIFO.
-- (b) **Hyperliquid scope.** Is `Mutations` the right member set, or does its
-  native 334 ms also bind something non-trading? My reading of `trading.rs` says
-  writes only.
-- (c) **Seam.** Is reusing the barrier-member held-packet path for a held Bind
-  acceptable (uufub4), or should the domain have its own hold beside it?
+- (a) **Head on re-prepare. RESOLVED** (Hyperliquid consumer review). A Stale
+  re-prepare keeps the SAME domain entry and head, spends no floor or nonce,
+  and re-prepares within its original deadline.
+- (b) **Hyperliquid scope. RESOLVED.** `Mutations` is correct: native
+  `pump_trades` applies 334 ms only to actual /exchange writes (Place, Cancel,
+  Leverage, ScheduleCancel), and builder, info, account and history reads don't
+  advance `write_at`.
+- (c) **Seam. OPEN for uufub4.** Reusing the hold/assembly helpers is fine for
+  consumer fit, but no barrier or group semantics and no second queue authority
+  may be imported. uufub4 owns the exact core seam.
 
 ## Sizes and checks
 
