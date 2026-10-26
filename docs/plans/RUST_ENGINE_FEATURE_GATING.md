@@ -143,6 +143,37 @@ declaration shape.
 - A declaration defaulting to `true` would force edits on about 25 non-adopters
   and protect no future venue by default.
 
+## Phase 2 measured: http-mutation-barriers
+
+Measured on BloFin W2's exact composition (closed #2179, head 1a176871f8b; OFF tree
+174f6a4c90c), combined shipped bytes: barriers OFF 13,994,169; W2 ON 14,381,721
+(+387,552); W2 plus the gate 14,058,690 (+64,521). The gate recovers 323,031 (83%).
+
+The ON/OFF raw delta (+455,924) was almost entirely `Engine<V>` group machinery
+monomorphized into all 29 venues: `claim_http_group`, `prepare_mutation_group`,
+`mutation_group_members`, `announce_mutation_group`, `prepare_group_commit`,
+`current_group` and about 50K of per-venue `sort_unstable_by_key`. The gated
+residual (+69.9K raw) is 25.4K non-generic barrier core, 19.1K BloFin's own code,
+and barrier branches inside common generic functions, which can take an inline
+`V::` check later.
+
+Mechanism, the same shape as Phase 1:
+
+- `Venue::http_mutation_barriers()` is an unconditional `where Self: Sized`
+  default (`false`).
+- `Engine<V>` returns early at the three group entry points:
+  `pump_mutation_group`, `http_group_pending` (false) and `claim_http_group`
+  (`Error::Invalid`).
+- Group admission refuses first, in the shared `admit_plan_owned`, through an
+  `IoCore` copy written only by `Engine::new`. An undeclared venue therefore
+  cannot admit a group its compiled-out pump would never drive, and spends no
+  ID, action or plan context; this is pinned by a control.
+
+Ruling (ddi2il): the engine gate lands on its own, and no venue enables barriers.
+BloFin W2 stays closed: +64.5K combined to restore parallel hedged leverage, a
+rare operation, isn't worth it, and the serial join is safer. Any future barrier
+adopter declares `http_mutation_barriers()` with a declaration test in its own PR.
+
 ## Behaviour and verification gates
 
 - Adopters keep identical behaviour: the declaration folds to `true` and every
