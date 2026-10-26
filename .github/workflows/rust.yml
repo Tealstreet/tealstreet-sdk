@@ -367,6 +367,9 @@ jobs:
         env:
           RUST_TEST_FAMILY: ${{ matrix.family }}
         run: corepack yarn rust:test-families
+      - name: MEXC missing command-feature negative control
+        if: matrix.family == 'mexc'
+        run: corepack yarn -s node sdk-rs/harness/capability-feature-control.mjs
       - name: Retain sealed same-run family build
         uses: actions/upload-artifact@v7
         with:
@@ -645,9 +648,6 @@ jobs:
             corepack yarn "rust:private-tape-$venue"
             corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --books ''
           done
-      - name: MEXC missing command-feature negative control
-        if: matrix.venue == 'mexc'
-        run: corepack yarn -s node sdk-rs/harness/capability-feature-control.mjs
       - name: Hyperliquid Spot compiled native account and trading contracts
         if: matrix.venue == 'hyperliquidspot'
         run: corepack yarn rust:test-hyperliquidspot-parity

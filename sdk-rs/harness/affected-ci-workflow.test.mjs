@@ -28,6 +28,7 @@ function check(text) {
   assert.match(gate, /ci-wasm\.mjs --venue.*--verify/);
   assert.match(gate, /name: Credentialed lifecycle runner \(scripted transport only\)\n        if: matrix.venue == 'binance'\n        run: corepack yarn rust:test-live-smoke/);
   assert.doesNotMatch(gate, /rust:build-wasm|rust:test-harness/);
+  assert.doesNotMatch(gate, /capability-feature-control/);
   const families = job(text, 'families');
   assert.match(families, /if: needs.selection.outputs.sizeRequired == 'true'/);
   assert.match(families, /family: \$\{\{ fromJSON\(needs.selection.outputs.families\) \}\}/);
@@ -36,6 +37,9 @@ function check(text) {
   assert.doesNotMatch(families, /cargo clippy --manifest-path/);
   assert.match(families, /name: wasm-family-\$\{\{ matrix.family \}\}/);
   assert.match(families, /if-no-files-found: error/);
+  assert.match(families, /name: MEXC missing command-feature negative control\n        if: matrix.family == 'mexc'\n        run: corepack yarn -s node sdk-rs\/harness\/capability-feature-control\.mjs/);
+  assert(families.indexOf('uses: ./.github/actions/install-binaryen') < families.indexOf('capability-feature-control.mjs'));
+  assert(families.indexOf('cargo install wasm-bindgen-cli') < families.indexOf('capability-feature-control.mjs'));
   assert.match(job(text, 'wasm'), /if: needs.selection.outputs.nativeFull == 'true'/);
   assert.match(job(text, 'combined'), /if: needs.selection.outputs.combinedRequired == 'true'/);
   assert.match(job(text, 'combined'), /CHANGED_INTEGRATION_TESTS: \$\{\{ needs.selection.outputs.integrationTests \}\}/);
