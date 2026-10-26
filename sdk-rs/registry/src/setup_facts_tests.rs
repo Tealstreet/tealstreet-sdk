@@ -22,7 +22,7 @@ fn raw_trusted_setup_preserves_missing_empty_blank_and_nonblank_keys() {
         }),
         secondary: None,
     };
-    for (input, presence, login, installed) in [
+    for (input, presence, login, credential_installed) in [
         ("{}", KeyPresence::Absent, None, false),
         (r#"{"secret":"scalar"}"#, KeyPresence::Absent, None, false),
         (
@@ -61,7 +61,12 @@ fn raw_trusted_setup_preserves_missing_empty_blank_and_nonblank_keys() {
         let facts = options.setup_facts.expect("trusted setup records facts");
         assert_eq!(facts.primary_key(), presence);
         assert_eq!(facts.primary_login(), login);
-        assert_eq!(identities.primary.is_some(), installed);
+        assert_eq!(
+            identities.primary.as_ref().is_some_and(|identity| {
+                identity.credential == safe_cex_engine::signing::KeyRef("primary.credential".into())
+            }),
+            credential_installed
+        );
         assert!(options.key.is_none());
         assert!(options.secret.is_none());
     }
