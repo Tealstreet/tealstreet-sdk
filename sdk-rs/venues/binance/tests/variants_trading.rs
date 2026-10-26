@@ -713,3 +713,56 @@ fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
         assert_eq!(ids, expected, "variant={variant:?} body={body}");
     }
 }
+
+const SIGNATURE_REJECTED: &str =
+    r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#;
+
+#[test]
+fn a_signature_rejected_write_is_re_signed_and_resent_once() {
+    let mut h = ready(Variant::Spot);
+    place(
+        &mut h,
+        vec![order(Variant::Spot, r#""clientOrderId":"caller_1""#)],
+    );
+    let first = h.take("/api/v3/order");
+    h.now += 5.0;
+    h.reply(first.id, 400, "", SIGNATURE_REJECTED);
+    let second = h.take("/api/v3/order");
+    assert!(h.requests.is_empty(), "exactly one resend");
+    assert_ne!(second.id, first.id);
+    assert!(h.done.is_empty(), "the resend decides the outcome");
+    assert!(second.url.contains("newClientOrderId=caller_1"));
+    assert_ne!(
+        second.url, first.url,
+        "the resend is re-signed at its own timestamp"
+    );
+    h.reply(second.id, 200, "", r#"{"orderId":123}"#);
+    assert_eq!(
+        h.done.last().unwrap().1.as_ref().unwrap(),
+        r#"["caller_1"]"#
+    );
+}
+
+#[test]
+fn a_second_signature_rejection_fails_without_a_third_send() {
+    let mut h = ready(Variant::Spot);
+    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    let first = h.take("/api/v3/order");
+    h.reply(first.id, 400, "", SIGNATURE_REJECTED);
+    let second = h.take("/api/v3/order");
+    h.reply(second.id, 400, "", SIGNATURE_REJECTED);
+    assert!(h.requests.is_empty(), "no third send");
+    let (_, error) = h.failures.last().expect("the write fails");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+}
+
+#[test]
+fn other_write_refusals_are_never_resent() {
+    let mut h = ready(Variant::Spot);
+    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    let first = h.take("/api/v3/order");
+    h.reply(first.id, 400, "", r#"{"code":-2010,"msg":"rejected"}"#);
+    assert!(h.requests.is_empty());
+    assert!(h.done.last().unwrap().1.is_err());
+}
