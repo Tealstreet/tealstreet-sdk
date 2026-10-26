@@ -2,6 +2,7 @@
 mod account;
 mod account_wire;
 mod depth_query;
+mod depth_snapshot;
 /// Opaque canonical recipes signed by the injected dispatch provider.
 #[path = "sign/dispatch.rs"]
 pub mod dispatch_signing;
@@ -11,6 +12,7 @@ mod managed;
 mod paths;
 mod rate;
 mod sign;
+mod socket_codec;
 mod trading;
 mod wire;
 use safe_cex_engine::ErrorKind;
@@ -21,9 +23,11 @@ use safe_cex_engine::history::ReadCompletion;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Market, Ticker};
-use safe_cex_engine::request_context::{Context, Operation, Owner, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{
+    Context, Egress, Operation, Owner, Policy, RetryPolicy, Scope,
+};
 use safe_cex_engine::selected_read::{ReadRole, SelectedRead};
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+
 use safe_cex_engine::{
     Command, CommandId, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId,
     Venue,
@@ -53,7 +57,7 @@ pub struct Pending {
 }
 enum Task {
     BookQuery(depth_query::Request),
-    Markets(Vec<Market>),
+    Markets(Catalogue),
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -61,11 +65,12 @@ enum Task {
     Identity {
         context: safe_cex_engine::request_context::Context,
     },
-    Daily,
-    BookTickers,
+    Daily(Option<Context>),
+    BookTickers(Option<Context>),
     Depth {
         symbol: String,
         generation: u32,
+        context: Option<Context>,
     },
     Candles(CandleQuery),
     Leverage {
@@ -73,6 +78,37 @@ enum Task {
         revision: u64,
         context: safe_cex_engine::request_context::Context,
     },
+}
+#[derive(Default)]
+struct Catalogue {
+    rows: Vec<Market>,
+    context: Option<Context>,
+}
+impl Task {
+    fn is_seed(&self) -> bool {
+        matches!(
+            self,
+            Self::Markets(..) | Self::Daily(_) | Self::BookTickers(_)
+        )
+    }
+    fn seed_context(&self) -> Option<&Context> {
+        match self {
+            Self::Markets(request) => request.context.as_ref(),
+            Self::Daily(context) | Self::BookTickers(context) => context.as_ref(),
+            _ => None,
+        }
+    }
+    fn set_seed_context(&mut self, issued: Context) {
+        match self {
+            Self::Markets(request) => request.context = Some(issued),
+            Self::Daily(context) | Self::BookTickers(context) => *context = Some(issued),
+            _ => unreachable!("public seed context"),
+        }
+    }
+    fn retire_seed(&self, cx: &mut Cx<'_, Pending>) -> bool {
+        self.seed_context()
+            .is_some_and(|context| cx.finish_http_context(context).is_ok())
+    }
 }
 struct CandleQuery {
     completion: ReadCompletion,
@@ -109,36 +145,20 @@ struct DeferredGet {
     path: String,
     query: String,
     task: Task,
-    stream: Option<ArrayAt>,
-}
-/// Both sockets keep the old watchdog shape: 30s silence, 5s PING, 1s-16s backoff.
-fn socket_supervisor() -> Supervisor {
-    Supervisor::new(Config {
-        connect_timeout_ms: 30_000.0,
-        idle_timeout_ms: 30_000.0,
-        ping_interval_ms: Some(5_000.0),
-        backoff_base_ms: 1_000.0,
-        backoff_cap_ms: 16_000.0,
-        ..Config::default()
-    })
 }
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
-    supervisor: Supervisor,
     next_id: u32,
     operations: VecDeque<f64>,
-    topics: HashSet<String>,
 }
 impl Default for Connection {
     fn default() -> Self {
         Self {
             socket: None,
             open: false,
-            supervisor: socket_supervisor(),
             next_id: 1,
             operations: VecDeque::new(),
-            topics: HashSet::new(),
         }
     }
 }
@@ -161,6 +181,7 @@ struct BookState {
     last: Option<u64>,
     generation: u32,
     fetching: bool,
+    context: Option<Context>,
     buffer: Vec<Delta>,
     retry: Option<TimerId>,
     failures: u32,
@@ -173,6 +194,7 @@ impl BookState {
             last: None,
             generation: 0,
             fetching: false,
+            context: None,
             buffer: Vec::new(),
             retry: None,
             failures: 0,
@@ -181,6 +203,7 @@ impl BookState {
 }
 pub struct WeexFutures {
     public: Connection,
+    sockets: socket_codec::State,
     active_symbols: HashSet<String>,
     deferred_gets: Vec<DeferredGet>,
     account: account::State,
@@ -257,6 +280,7 @@ impl WeexFutures {
         );
         Self {
             public: Connection::default(),
+            sockets: socket_codec::State::default(),
             active_symbols: HashSet::new(),
             deferred_gets: Vec::new(),
             account: account::State::new(),
@@ -279,14 +303,10 @@ impl WeexFutures {
             seed_generation: 0,
         }
     }
-    fn get(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        path: &str,
-        query: &str,
-        task: Task,
-        stream: Option<ArrayAt>,
-    ) {
+    fn get(&mut self, cx: &mut Cx<'_, Pending>, path: &str, query: &str, task: Task) {
+        if task.is_seed() && !cx.now.is_finite() {
+            return;
+        }
         if cx.now < self.paused_until {
             let timer = cx.set_timer(self.paused_until - cx.now);
             self.deferred_gets.push(DeferredGet {
@@ -295,7 +315,6 @@ impl WeexFutures {
                 path: path.into(),
                 query: query.into(),
                 task,
-                stream,
             });
             return;
         }
@@ -308,17 +327,52 @@ impl WeexFutures {
                 format!("?{query}")
             }
         );
-        let pending = Pending {
+        let mut pending = Pending {
             task,
             invalid: false,
             skipped: Vec::new(),
             seed_generation: self.seed_generation,
         };
-        if let Some(at) = stream {
-            cx.request_streamed(Method::Get, url, vec![], at, pending);
-        } else {
-            cx.request(Method::Get, url, vec![], None, pending);
+        if pending.task.is_seed() {
+            let context = match cx.http_context_with_egress(
+                Scope::Background,
+                Policy {
+                    operation: Operation::Read,
+                    credential: None,
+                    timeout_ms: 20_000,
+                    pacing: None,
+                    retry: RetryPolicy::Never,
+                },
+                Egress::Primary,
+            ) {
+                Ok(context) => context,
+                Err(error) => {
+                    self.on_request_failed(cx, pending, &error.to_string());
+                    return;
+                }
+            };
+            pending.task.set_seed_context(context);
         }
+        if let Some(context) = pending.task.seed_context().cloned() {
+            let at = if matches!(pending.task, Task::Markets(..)) {
+                ArrayAt::Field("symbols")
+            } else {
+                ArrayAt::Root
+            };
+            match cx.request_managed(context, None, Method::Get, url, None, pending) {
+                Ok(id) => cx.stream_response(id, at),
+                Err((pending, error)) => self.on_request_failed(cx, pending, &error.to_string()),
+            }
+        } else {
+            unreachable!("only public seeds use get");
+        }
+    }
+    fn seed_delivered(&self, cx: &Cx<'_, Pending>, p: &Pending) -> bool {
+        p.task
+            .seed_context()
+            .is_some_and(|context| cx.validate_background_read_http_delivery(context).is_ok())
+            && (!matches!(p.task, Task::Daily(_) | Task::BookTickers(_))
+                || p.seed_generation == self.seed_generation)
     }
     fn candle_query(
         cx: &mut Cx<'_, Pending>,
@@ -374,7 +428,6 @@ impl WeexFutures {
                 path: path.into(),
                 query: query.into(),
                 task: Task::Candles(request),
-                stream: Some(ArrayAt::Root),
             });
             return;
         }
@@ -525,82 +578,13 @@ impl WeexFutures {
         }
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.public.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(paths::PUBLIC_WS)
-                    .channel(safe_cex_engine::SocketChannel::Public),
-            ),
-        );
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public.supervisor.connecting(cx);
-        }
-    }
-    fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.public.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => return false,
-            Tick::Reconnect => {
-                self.connect_public(cx);
-                let symbols: Vec<_> = self.books.keys().cloned().collect();
-                for s in symbols {
-                    self.snapshot(cx, &s);
-                }
-            }
-            Tick::Ping => {
-                if let Some(socket) = self.public.socket {
-                    let id = self.public.next_id;
-                    self.public.next_id += 1;
-                    cx.send(socket, format!(r#"{{"method":"PING","id":{id}}}"#));
-                }
-            }
-            Tick::TimedOut(_) => {
-                if let Some(s) = self.public.socket {
-                    cx.close(s);
-                    self.on_close(cx, s, 1006);
-                }
-            }
-            Tick::Handled => (),
-        }
-        true
-    }
-    fn subscription(&mut self, cx: &mut Cx<'_, Pending>, method: &str, topics: &[String]) {
-        if !self.public.open {
+        if cx.public_feed_policy() != PublicFeedPolicy::Direct {
             return;
         }
-        while self
-            .public
-            .operations
-            .front()
-            .is_some_and(|t| cx.now - t >= 3_600_000.0)
+        if let Some(feed) = self.sockets.public
+            && let Ok(epoch) = cx.connect_socket(feed, paths::PUBLIC_WS)
         {
-            self.public.operations.pop_front();
-        }
-        for lot in topics.chunks(50) {
-            if self.public.operations.len() >= 240 {
-                cx.notice(
-                    safe_cex_engine::Level::Warn,
-                    code::SUBSCRIPTION_REJECTED,
-                    "WEEX subscription operation limit reached",
-                );
-                return;
-            }
-            self.public.operations.push_back(cx.now);
-            self.public.next_id += 1;
-            let params = serde_json::to_string(lot).expect("topic strings");
-            cx.send(
-                self.public.socket.unwrap(),
-                format!(
-                    r#"{{"method":"{method}","params":{params},"id":{}}}"#,
-                    self.public.next_id - 1
-                ),
-            );
-            for topic in lot {
-                if method == "SUBSCRIBE" {
-                    self.public.topics.insert(topic.clone());
-                } else {
-                    self.public.topics.remove(topic);
-                }
-            }
+            self.public.socket = Some(epoch.socket());
         }
     }
     fn reconcile_topics(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -627,48 +611,14 @@ impl WeexFutures {
                 .take(capacity)
                 .map(|m| format!("{}@ticker", m.symbol)),
         );
-        let remove: Vec<_> = self
-            .public
-            .topics
-            .iter()
-            .filter(|s| !desired.contains(s))
-            .cloned()
-            .collect();
-        let add: Vec<_> = desired
-            .into_iter()
-            .filter(|s| !self.public.topics.contains(s))
-            .collect();
-        self.subscription(cx, "UNSUBSCRIBE", &remove);
-        self.subscription(cx, "SUBSCRIBE", &add);
+        self.update_public_interests(cx, desired);
     }
-    fn snapshot(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
-        let Some(state) = self.books.get_mut(symbol) else {
-            return;
-        };
-        if state.fetching {
-            return;
-        }
-        if cx.now < self.paused_until {
-            state.retry = Some(cx.set_timer(self.paused_until - cx.now));
-            return;
-        }
-        state.fetching = true;
-        self.next_generation += 1;
-        state.generation = self.next_generation;
-        let generation = state.generation;
-        self.get(
-            cx,
-            paths::DEPTH,
-            &format!("limit=200&symbol={symbol}"),
-            Task::Depth {
-                symbol: symbol.into(),
-                generation,
-            },
-            None,
-        );
-    }
+
     fn book_failed(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         if let Some(b) = self.books.get_mut(symbol) {
+            if let Some(context) = b.context.take() {
+                let _ = cx.finish_http_context(&context);
+            }
             self.next_generation += 1;
             b.generation = self.next_generation;
             if let Some(t) = b.retry.take() {
@@ -715,6 +665,23 @@ impl WeexFutures {
         cx.book_changed(&symbol);
     }
     fn fail(&mut self, cx: &mut Cx<'_, Pending>, task: Task, error: &str) {
+        if let Task::Depth {
+            symbol,
+            generation,
+            context,
+        } = task
+        {
+            self.depth_failed(cx, &symbol, generation, context, error);
+            return;
+        }
+        if task.is_seed() {
+            if task.seed_context().is_some() && !task.retire_seed(cx) {
+                return;
+            }
+            if !cx.now.is_finite() {
+                return;
+            }
+        }
         if let Task::Identity { context, .. } = &task {
             Self::identity_failed(cx, context, error);
             return;
@@ -726,28 +693,20 @@ impl WeexFutures {
         );
         match task {
             Task::Identity { .. } | Task::BookQuery(_) | Task::Candles(_) => unreachable!(),
-            Task::Daily | Task::BookTickers => {
+            Task::Daily(_) | Task::BookTickers(_) => {
                 self.seed.failed = true;
                 self.discovery.failed(cx, true);
                 // Markets are loaded; account state does not depend on tickers.
                 self.start_account(cx);
             }
-            Task::Depth { symbol, generation } => {
-                if self
-                    .books
-                    .get(&symbol)
-                    .is_some_and(|b| b.generation == generation)
-                {
-                    self.book_failed(cx, &symbol);
-                }
-            }
+            Task::Depth { .. } => unreachable!("Depth failure is contextual"),
             Task::Leverage { context, .. } => managed::reject(cx, &context, error),
             Task::Account(r) => self.account_failed(cx, r, error),
             Task::Trade(r) => {
                 self.trade_failed(cx, r, trading::unknown(error).kind(ErrorKind::Network))
             }
             Task::History(r) => self.history_failed(cx, r, error),
-            Task::Markets(_) => {
+            Task::Markets(..) => {
                 self.discovery.failed(cx, false);
             }
         }
@@ -788,6 +747,25 @@ fn interval(i: Interval, stream: bool) -> bool {
     matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
+    fn on_socket_event(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.socket_event(cx, event)
+    }
+    fn encode_socket_interests(
+        &self,
+        _: &safe_cex_engine::store::Store,
+        feed: safe_cex_engine::socket_lifecycle::FeedId,
+        subscribe: bool,
+        items: &[safe_cex_engine::socket_lifecycle::Interest],
+        emit: &mut dyn FnMut(
+            safe_cex_engine::socket_lifecycle::EncodedBatch,
+        ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
+    ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        self.encode_interests(feed, subscribe, items, emit)
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
@@ -820,13 +798,10 @@ impl Venue for WeexFutures {
             );
             return;
         }
-        self.get(
-            cx,
-            paths::INFO,
-            "",
-            Task::Markets(Vec::new()),
-            Some(ArrayAt::Field("symbols")),
-        );
+        if !self.register_feeds(cx) {
+            return;
+        }
+        self.get(cx, paths::INFO, "", Task::Markets(Catalogue::default()));
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account_open(cx, socket) {
@@ -836,9 +811,7 @@ impl Venue for WeexFutures {
             return;
         }
         self.public.open = true;
-        self.public.supervisor.opened(cx);
         self.public.operations.clear();
-        self.public.topics.clear();
         self.reconcile_topics(cx);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
@@ -848,7 +821,6 @@ impl Venue for WeexFutures {
         if self.public.socket != Some(socket) {
             return;
         }
-        self.public.supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<Envelope<'_>>(text) else {
             return;
         };
@@ -928,8 +900,10 @@ impl Venue for WeexFutures {
         }
         self.public.socket = None;
         self.public.open = false;
-        self.public.supervisor.retry(cx);
         for b in self.books.values_mut() {
+            if let Some(context) = b.context.take() {
+                let _ = cx.finish_http_context(&context);
+            }
             b.last = None;
             b.fetching = false;
             self.next_generation += 1;
@@ -938,12 +912,15 @@ impl Venue for WeexFutures {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, p: &mut Pending, item: &str) {
+        if p.task.is_seed() && !self.seed_delivered(cx, p) {
+            return;
+        }
         if let Task::Candles(request) = &p.task
             && !request.delivered(cx)
         {
             return;
         }
-        if matches!(p.task, Task::Daily | Task::BookTickers)
+        if matches!(p.task, Task::Daily(_) | Task::BookTickers(_))
             && p.seed_generation != self.seed_generation
         {
             return;
@@ -954,9 +931,9 @@ impl Venue for WeexFutures {
         let ok = match &mut p.task {
             Task::Account(r) => self.account_item(cx, r, item),
             Task::History(r) => self.history_item(cx, r, item),
-            Task::Markets(rows) => {
+            Task::Markets(request) => {
                 match serde_json::from_str::<Symbol<'_>>(item).map(Symbol::market) {
-                    Ok(Some(market)) if market.precision.is_tradable() => rows.push(market),
+                    Ok(Some(market)) if market.precision.is_tradable() => request.rows.push(market),
                     Ok(None) => {}
                     _ => {
                         p.skipped.push(row_symbol(item));
@@ -965,7 +942,7 @@ impl Venue for WeexFutures {
                 }
                 true
             }
-            Task::Daily => {
+            Task::Daily(_) => {
                 let row = serde_json::from_str::<Daily<'_>>(item).ok();
                 match row.as_ref().and_then(|r| Some((r, r.ticker(&r.symbol)?))) {
                     Some((r, mut t)) => {
@@ -989,7 +966,7 @@ impl Venue for WeexFutures {
                 }
                 true
             }
-            Task::BookTickers => {
+            Task::BookTickers(_) => {
                 match serde_json::from_str::<BookTicker<'_>>(item) {
                     Ok(r) => {
                         if let Some(i) = cx.store.market_index(&r.symbol) {
@@ -1026,6 +1003,19 @@ impl Venue for WeexFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, response: Response<'_>) {
+        if let Task::Depth {
+            symbol,
+            generation,
+            context,
+        } = p.task
+        {
+            self.depth_response(cx, &symbol, generation, context, response);
+            return;
+        }
+        if p.task.is_seed() && !self.seed_delivered(cx, &p) {
+            p.task.retire_seed(cx);
+            return;
+        }
         if let Task::Candles(mut request) = p.task {
             if !request.delivered(cx) {
                 request.retire_leg(cx);
@@ -1091,7 +1081,7 @@ impl Venue for WeexFutures {
             return;
         }
 
-        if matches!(p.task, Task::Daily | Task::BookTickers)
+        if matches!(p.task, Task::Daily(_) | Task::BookTickers(_))
             && p.seed_generation != self.seed_generation
         {
             return;
@@ -1129,8 +1119,8 @@ impl Venue for WeexFutures {
         }
         if !p.skipped.is_empty() {
             let kind = match p.task {
-                Task::Markets(_) => "market",
-                Task::Daily => "24h ticker",
+                Task::Markets(..) => "market",
+                Task::Daily(_) => "24h ticker",
                 _ => "book ticker",
             };
             cx.notice(
@@ -1156,7 +1146,7 @@ impl Venue for WeexFutures {
             Task::Trade(r) => self.trade_response(cx, r, response),
             Task::History(r) => self.history_response(cx, r, response),
             Task::Markets(markets) => {
-                if markets.is_empty() {
+                if markets.rows.is_empty() {
                     let error = if p.skipped.is_empty() {
                         "empty market catalogue"
                     } else {
@@ -1165,8 +1155,7 @@ impl Venue for WeexFutures {
                     self.fail(cx, Task::Markets(markets), error);
                     return;
                 }
-                self.discovery.succeeded(cx, &false);
-                cx.store.set_markets(markets);
+                cx.store.set_markets(markets.rows);
                 self.seed = Seed {
                     rows: cx
                         .store
@@ -1181,19 +1170,18 @@ impl Venue for WeexFutures {
                     reported: vec![0; cx.store.markets().len()],
                     ..Seed::default()
                 };
-                self.get(cx, paths::DAILY, "", Task::Daily, Some(ArrayAt::Root));
-                self.get(
-                    cx,
-                    paths::BOOK_TICKERS,
-                    "",
-                    Task::BookTickers,
-                    Some(ArrayAt::Root),
-                );
+                if let Some(context) = markets.context {
+                    let _ = cx.finish_http_context(&context);
+                }
+                self.discovery.succeeded(cx, &false);
+                self.get(cx, paths::DAILY, "", Task::Daily(None));
+                self.get(cx, paths::BOOK_TICKERS, "", Task::BookTickers(None));
             }
-            task @ (Task::Daily | Task::BookTickers) => {
-                self.seed.finished |= if matches!(task, Task::Daily) { 1 } else { 2 };
+            task @ (Task::Daily(_) | Task::BookTickers(_)) => {
+                self.seed.finished |= if matches!(task, Task::Daily(_)) { 1 } else { 2 };
                 if self.seed.finished == 3 && !self.seed.failed {
                     if !self.seed.reported.iter().any(|mask| mask & 1 != 0) {
+                        task.retire_seed(cx);
                         self.discovery.failed(cx, true);
                         self.start_account(cx);
                         return;
@@ -1205,43 +1193,16 @@ impl Venue for WeexFutures {
                         .filter_map(|(t, &mask)| (mask & 1 != 0).then_some(t))
                         .collect();
                     cx.store.set_tickers(rows);
+                    task.retire_seed(cx);
                     self.discovery.succeeded(cx, &true);
                     self.connect_public(cx);
                     // After the ticker seed so account rows map against seeded prices.
                     self.start_account(cx);
+                } else {
+                    task.retire_seed(cx);
                 }
             }
-            Task::Depth { symbol, generation } => {
-                let Some(b) = self.books.get_mut(&symbol) else {
-                    return;
-                };
-                if b.generation != generation {
-                    return;
-                }
-                let Ok(row) = serde_json::from_str::<Depth>(response.body) else {
-                    self.book_failed(cx, &symbol);
-                    return;
-                };
-                b.book.clear();
-                for (side, levels) in [(BookSide::Bids, row.bids), (BookSide::Asks, row.asks)] {
-                    for Level(p, a) in levels {
-                        if p > 0.0 && a >= 0.0 {
-                            b.book.apply(side, p, a);
-                        }
-                    }
-                }
-                b.last = Some(row.last_update_id);
-                b.fetching = false;
-                for delta in std::mem::take(&mut b.buffer) {
-                    if !apply(b, &delta) {
-                        self.book_failed(cx, &symbol);
-                        return;
-                    }
-                }
-                b.failures = 0;
-                cx.book_changed(&symbol);
-                self.reconcile_topics(cx);
-            }
+            Task::Depth { .. } => unreachable!("Depth response is contextual"),
         }
     }
     fn on_stream_error(&mut self, cx: &mut Cx<'_, Pending>, p: Pending, response: Response<'_>) {
@@ -1337,17 +1298,21 @@ impl Venue for WeexFutures {
             return;
         }
 
-        if matches!(p.task, Task::Daily | Task::BookTickers)
+        if matches!(p.task, Task::Daily(_) | Task::BookTickers(_))
             && p.seed_generation != self.seed_generation
         {
+            p.task.retire_seed(cx);
             return;
         }
         self.fail(cx, p.task, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.interest_timer(cx, timer) {
+            return;
+        }
         if let Some(i) = self.deferred_gets.iter().position(|r| r.timer == timer) {
             let r = self.deferred_gets.swap_remove(i);
-            if matches!(r.task, Task::Daily | Task::BookTickers)
+            if matches!(r.task, Task::Daily(_) | Task::BookTickers(_))
                 && r.seed_generation != self.seed_generation
             {
                 return;
@@ -1357,7 +1322,7 @@ impl Venue for WeexFutures {
                     self.send_candle_query(cx, &r.path, &r.query, request);
                 }
                 Task::BookQuery(request) => self.send_book_query(cx, request, r.query),
-                task => self.get(cx, &r.path, &r.query, task, r.stream),
+                task => self.get(cx, &r.path, &r.query, task),
             }
             return;
         }
@@ -1365,6 +1330,9 @@ impl Venue for WeexFutures {
             return;
         }
         if let Some(tickers) = self.discovery.on_timer(timer) {
+            if !cx.now.is_finite() {
+                return;
+            }
             if !tickers {
                 self.start(cx);
             } else {
@@ -1383,16 +1351,10 @@ impl Venue for WeexFutures {
                     reported: vec![0; cx.store.markets().len()],
                     ..Seed::default()
                 };
-                self.get(cx, paths::DAILY, "", Task::Daily, Some(ArrayAt::Root));
-                self.get(
-                    cx,
-                    paths::BOOK_TICKERS,
-                    "",
-                    Task::BookTickers,
-                    Some(ArrayAt::Root),
-                );
+                self.get(cx, paths::DAILY, "", Task::Daily(None));
+                self.get(cx, paths::BOOK_TICKERS, "", Task::BookTickers(None));
             }
-        } else if !self.public_timer(cx, timer) {
+        } else {
             let symbol = self.books.iter_mut().find_map(|(s, b)| {
                 (b.retry == Some(timer)).then(|| {
                     b.retry = None;
@@ -1429,6 +1391,9 @@ impl Venue for WeexFutures {
             }
             Command::Query { command, query } => self.history_query(cx, command, query),
             Command::SubscribeOrderBook { symbol } => {
+                if !cx.now.is_finite() {
+                    return;
+                }
                 if let Some(b) = self.books.get_mut(&symbol) {
                     b.users += 1;
                     return;
@@ -1451,10 +1416,13 @@ impl Venue for WeexFutures {
                         return;
                     }
                 }
-                if let Some(b) = self.books.remove(&symbol)
-                    && let Some(t) = b.retry
-                {
-                    cx.clear_timer(t);
+                if let Some(b) = self.books.remove(&symbol) {
+                    if let Some(t) = b.retry {
+                        cx.clear_timer(t);
+                    }
+                    if let Some(context) = b.context {
+                        let _ = cx.finish_http_context(&context);
+                    }
                 }
                 self.reconcile_topics(cx);
             }

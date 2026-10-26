@@ -1,3 +1,4 @@
+mod trusted;
 // Payload shapes: docs.blofin.com, instruments, tickers and WS order book.
 use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
 use safe_cex_venue_blofin::{Blofin, Options};
@@ -28,10 +29,10 @@ fn reply(engine: &mut Engine<Blofin>, id: RequestId, body: &str) {
     );
 }
 fn seeded() -> (Engine<Blofin>, SocketId) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
+    let mut engine = trusted::trusted_engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     engine.start(0.0);
     let id = request(&mut engine);
     reply(&mut engine, id, INSTRUMENT);
@@ -98,7 +99,7 @@ fn full_depth_snapshot_update_gap_and_recovery() {
 }
 #[test]
 fn http_200_api_error_does_not_load_markets() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options::default()));
+    let mut e = trusted::trusted_engine(Options::default());
     e.start(0.0);
     let id = request(&mut e);
     reply(
@@ -319,10 +320,10 @@ fn all_market_subscriptions_fit_4096_bytes() {
         .map(|i| row.replace("BTC-USDT", &format!("COIN{i}-USDT")))
         .collect::<Vec<_>>()
         .join(",");
-    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
+    let mut e = trusted::trusted_engine(Options {
         public_data_only: true,
         ..Options::default()
-    }));
+    });
     e.start(0.0);
     let id = request(&mut e);
     reply(&mut e, id, &format!("{{\"code\":\"0\",\"data\":[{rows}]}}"));
@@ -388,12 +389,12 @@ fn full_top_five_preserves_deeper_prices_and_thin_or_empty_sides_clear_them() {
 
 #[test]
 fn null_ticker_row_is_reported_without_hiding_other_symbols_or_halting_private_startup() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
+    let mut engine = trusted::trusted_engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),
         ..Options::default()
-    }));
+    });
     engine.start(0.0);
     let id = request(&mut engine);
     reply(&mut engine, id, INSTRUMENT);

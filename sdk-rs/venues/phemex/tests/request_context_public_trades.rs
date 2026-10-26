@@ -1,7 +1,7 @@
 //! Unsigned public-trades custody and unchanged signed-read compatibility.
 mod support;
 use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision};
-use safe_cex_engine::request_context::{Error, HttpAction, Prepared, RoutingIntent};
+use safe_cex_engine::request_context::{Claim, Error, HttpAction, Prepared, RoutingIntent};
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Notice, Query, RequestRoute, Response,
     VenueError,
@@ -425,8 +425,60 @@ fn native_signed_read_selection_and_lookup_primary_are_preserved() {
         (2., public(), "fixture-secondary", None),
         (4., lookup(), "fixture-primary", Some(RequestRoute::Primary)),
     ] {
-        let request = released(&mut e, NOW + offset, OWNER, query);
-        assert_eq!(request.route, route);
+        ask(&mut e, NOW + offset, OWNER, query);
+        let initial: Vec<_> = e.drain_actions().collect();
+        let preparation = initial
+            .iter()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match action.as_ref() {
+                    HttpAction::Prepare {
+                        preparation,
+                        intent,
+                        ..
+                    } => {
+                        assert_eq!(
+                            *intent,
+                            if route == Some(RequestRoute::Primary) {
+                                RoutingIntent::Primary
+                            } else {
+                                RoutingIntent::Secondary
+                            }
+                        );
+                        Some(*preparation)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        e.http_prepared(
+            NOW + offset,
+            preparation,
+            Prepared {
+                id: preparation.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let next: Vec<_> = e.drain_actions().collect();
+        let request = next
+            .into_iter()
+            .find_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Bind {
+                        permit, request, ..
+                    } => {
+                        assert!(matches!(
+                            e.claim_http(NOW + offset, permit),
+                            Ok(Claim::Released(_))
+                        ));
+                        Some(request)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(request.route, None);
         assert!(
             request
                 .headers

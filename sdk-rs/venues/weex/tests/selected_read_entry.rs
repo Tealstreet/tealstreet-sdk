@@ -13,13 +13,12 @@ fn engine(secondary: bool) -> Engine<Venue> {
 
 const NOW: f64 = 1_000.;
 fn identity(name: &str) -> Identity {
-    Identity {
-        credential: KeyRef(format!("opaque:{name}:credential")),
-        signing: KeyRef(format!("opaque:{name}:signing")),
-        passphrase: Some(KeyRef(format!("opaque:{name}:passphrase"))),
-        stable_id: Some("native-primary-account".into()),
-        extra: Default::default(),
-    }
+    Identity::new(
+        KeyRef(format!("opaque:{name}:credential")),
+        Some(KeyRef(format!("opaque:{name}:signing"))),
+    )
+    .with_passphrase(Some(KeyRef(format!("opaque:{name}:passphrase"))))
+    .with_stable_id(Some("native-primary-account".into()))
 }
 fn ask(e: &mut Engine<Venue>, command: u32) -> Vec<Action> {
     e.handle(NOW, Event::Command(Command::FetchAccount { command }));

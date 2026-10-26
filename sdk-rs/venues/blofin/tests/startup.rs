@@ -1,3 +1,4 @@
+mod trusted;
 use safe_cex_engine::{Action, Engine, Event, Notice, RequestId, Response};
 use safe_cex_venue_blofin::{Blofin, Options};
 
@@ -37,12 +38,12 @@ fn retry(e: &mut Engine<Blofin>) -> RequestId {
 }
 #[test]
 fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
-    let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
+    let mut e = trusted::trusted_engine(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("pass".into()),
         ..Options::default()
-    }));
+    });
     e.start(0.);
     let request = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
         .into_iter()

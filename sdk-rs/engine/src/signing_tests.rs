@@ -1759,13 +1759,10 @@ impl crate::signing::Signer for Declares {
 fn capability_identities() -> crate::signing::Identities {
     let key = |name: &str| crate::signing::KeyRef(name.into());
     crate::signing::Identities {
-        primary: Some(crate::signing::Identity {
-            credential: key("api"),
-            signing: key("hmac"),
-            passphrase: None,
-            stable_id: None,
-            extra: [(crate::signing::ExtraKey::ZklinkSeed, key("seed"))].into(),
-        }),
+        primary: Some(
+            crate::signing::Identity::new(key("api"), Some(key("hmac")))
+                .with_extra([(crate::signing::ExtraKey::ZklinkSeed, key("seed"))].into()),
+        ),
         secondary: None,
     }
 }
@@ -1877,6 +1874,32 @@ fn capability_admission_fails_closed_for_missing_refs_and_undeclared_hosts() {
     started.start(1000.);
     assert!(started.set_identities(capability_identities()).is_err());
     assert!(started.set_host_algorithms(Some(vec![HmacSha256])).is_err());
+}
+
+/// D4: an absent signing ref refuses admission as MissingKey; a missing extra
+/// ref stays a malformed InvalidRequest in either need order.
+#[test]
+fn capability_admission_refuses_an_absent_signing_ref_as_missing_key() {
+    use crate::CredentialSlot::Primary;
+    let key = |name: &str| crate::signing::KeyRef(name.into());
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine
+        .set_identities(crate::signing::Identities {
+            primary: Some(crate::signing::Identity::new(key("api"), None)),
+            secondary: None,
+        })
+        .unwrap();
+    assert_eq!(
+        can_sign_with(&mut engine, Primary, &AMEND_NEEDS[..1]),
+        Err(SignError::MissingKey)
+    );
+    let reversed = [AMEND_NEEDS[1], AMEND_NEEDS[0]];
+    for needs in [&AMEND_NEEDS[..], &reversed[..]] {
+        assert_eq!(
+            can_sign_with(&mut engine, Primary, needs),
+            Err(SignError::InvalidRequest)
+        );
+    }
 }
 
 /// Admitted everything, then lost capability after its first signature.
@@ -2028,15 +2051,13 @@ fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
         }),
         ..Default::default()
     });
-    let identity = |extra: bool| Identity {
-        credential: KeyRef("credential".into()),
-        signing: KeyRef("signing".into()),
-        passphrase: None,
-        stable_id: None,
-        extra: extra
-            .then(|| (ExtraKey::L1Wallet, KeyRef("wallet".into())))
-            .into_iter()
-            .collect(),
+    let identity = |extra: bool| {
+        Identity::new(KeyRef("credential".into()), Some(KeyRef("signing".into()))).with_extra(
+            extra
+                .then(|| (ExtraKey::L1Wallet, KeyRef("wallet".into())))
+                .into_iter()
+                .collect(),
+        )
     };
     // The role's one algorithm is the L1 digest signature.
     assert_eq!(ExtraKey::L1Wallet.algorithm(), Algorithm::Secp256k1Digest);
@@ -2101,12 +2122,8 @@ fn latched(actions: impl Iterator<Item = Action>) -> bool {
 /// refusal on a primary ref latches signing for the account.
 #[test]
 fn only_a_primary_ref_refusal_latches_while_a_secondary_exists() {
-    let identity = |credential: &str, signing: &str| crate::signing::Identity {
-        credential: KeyRef(credential.into()),
-        signing: KeyRef(signing.into()),
-        passphrase: None,
-        stable_id: None,
-        extra: Default::default(),
+    let identity = |credential: &str, signing: &str| {
+        crate::signing::Identity::new(KeyRef(credential.into()), Some(KeyRef(signing.into())))
     };
     let refused = |key: &'static str| {
         let mut engine = crate::test_support::seeded_engine(TestVenue {
@@ -2213,6 +2230,102 @@ fn a_socket_login_missing_its_key_latches_and_blocks_its_role() {
         SocketId(0),
         "the role never reconnects"
     );
+    assert!(
+        !engine
+            .drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+}
+
+/// C4s: a credential-only identity's socket login takes its key through
+/// `signing_ref()`; the absent ref latches like any missing key: one visible
+/// failure, `start` fails, and the private role never reconnects.
+#[test]
+fn c4s_a_credential_only_socket_login_latches_through_signing_ref() {
+    struct IdentityStep(crate::signing::Identity);
+    impl crate::SignStep for IdentityStep {
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            cx: &crate::DispatchContext<'_>,
+        ) -> Result<SignRequest, SignError> {
+            let key = self.0.signing_ref()?.clone();
+            Ok(SignRequest {
+                receipt: crate::signing::SignReceipt {
+                    stamp_ms: Some(cx.stamp_ms()),
+                    expiry_ms: Some(cx.stamp_ms() + 5000.),
+                    ..Default::default()
+                },
+                context: Default::default(),
+                operations: vec![crate::signing::Operation::Sign {
+                    algorithm: crate::signing::Algorithm::HmacSha256,
+                    key,
+                    payload: vec![crate::signing::PayloadPart::Bytes {
+                        bytes: b"login".to_vec(),
+                    }],
+                }],
+            })
+        }
+        fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
+            unreachable!("an absent signing ref never completes")
+        }
+        fn freshness_ms(&self) -> f64 {
+            5000.
+        }
+    }
+    let identity = crate::signing::Identity::new(KeyRef("primary.credential".into()), None);
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine
+        .set_identities(crate::signing::Identities {
+            primary: Some(identity.clone()),
+            secondary: None,
+        })
+        .unwrap();
+    engine.startup_watch_at = Some(2000.);
+    let private =
+        || crate::SocketSpec::new("wss://venue.test/private").channel(SocketChannel::Private);
+    let mut cx = Cx {
+        now: 1000.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let socket = cx.connect(private());
+    cx.send_signed(socket, "auth".into(), Box::new(IdentityStep(identity)));
+    engine.prepare_dispatch(1000.);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let config_invalid = actions
+        .iter()
+        .filter(|action| {
+            matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
+                if *code == log_code::CONFIG_INVALID)
+        })
+        .count();
+    assert_eq!(config_invalid, 1, "{actions:?}");
+    let startup_failed: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::StartupFailed { error }) => Some(error.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(startup_failed, vec![SignError::MissingKey.venue_error()]);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::WsSend { .. })),
+        "refused before provider work or send: {actions:?}"
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+    let mut cx = Cx {
+        now: 1001.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    assert_eq!(cx.connect(private()), SocketId(0), "no second connection");
     assert!(
         !engine
             .drain_actions()

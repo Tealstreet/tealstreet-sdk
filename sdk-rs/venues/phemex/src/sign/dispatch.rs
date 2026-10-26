@@ -118,7 +118,8 @@ impl SignStep for Http {
             self.body.as_deref().unwrap_or("")
         );
         let work = hmac_sha256_work(
-            &self.identity,
+            &self.identity.credential,
+            self.identity.signing_ref()?,
             vec![PayloadPart::Bytes {
                 bytes: payload.into_bytes(),
             }],
@@ -192,7 +193,8 @@ impl SignStep for WsAuth {
         }
         let prepared = Prepared::at(dispatch)?;
         let work = hmac_sha256_work(
-            &self.identity,
+            &self.identity.credential,
+            self.identity.signing_ref()?,
             vec![
                 PayloadPart::Credential {
                     key: self.identity.credential.clone(),

@@ -725,7 +725,7 @@ fn entry_and_algo_child_receipts_precede_each_write_and_use_sdk_symbol() {
             &envelope(&format!(r#"{{"ordId":"{i}","algoId":"{i}","sCode":"0"}}"#)),
             6.0 + i as f64,
         );
-        out = actions(&mut e);
+        out = prepared(&mut e, 6.0 + i as f64);
     }
     assert_eq!(ids.len(), 3);
 }
@@ -1502,19 +1502,23 @@ fn trading_failures_are_classified_without_changing_their_text() {
         ),
         (
             r#"{"code":"0","msg":"","data":[{"ordId":"","sCode":"50004","sMsg":"timeout"}]}"#,
-            None,
+            // An unproven acknowledgement is the engine's fixed Internal/Unknown.
+            Some(ErrorKind::Internal),
             Some(Outcome::Unknown),
             None,
         ),
         (
             r#"{"code":"1","msg":"","data":[{"ordId":"","sCode":"50026","sMsg":"System error"}]}"#,
-            Some(ErrorKind::Rejected),
+            // A non-51xxx row proves no refusal (dazzy3, #2117 Option B): Unknown,
+            // which stops the chain and reconciles, rather than a definitive kind.
             None,
+            Some(Outcome::Unknown),
             Some("50026"),
         ),
         (
             r#"{"code":"50013","msg":"Systems are busy","data":[]}"#,
-            Some(ErrorKind::Rejected),
+            // Busy proves nothing: Unknown, with no refusal kind.
+            None,
             Some(Outcome::Unknown),
             Some("50013"),
         ),

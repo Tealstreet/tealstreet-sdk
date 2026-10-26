@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle } from './cpu-ci.mjs';
+import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle, restorePairedRawOutputs } from './cpu-ci.mjs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { GATE_SUITES, expectedGateCases } from './ci-gate-suites.mjs';
 
 const dispositions = (decision) => [{ key: 'a'.repeat(64), decision,
@@ -13,6 +16,20 @@ const plan = () => ({ schema: 1, runId: 1, checkoutSha: 'c'.repeat(40), suites: 
     })),
   })) });
 const job = (extra = {}) => ({ id: 3, run_attempt: 1, status: 'completed', conclusion: 'success', ...extra });
+
+test('paired raw restoration preserves bytes at original paths and refuses escapes before writing', t => {
+  const root = realpathSync(mkdtempSync(resolve(tmpdir(), 'paired-raw-restoration-')));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const target = resolve(root, 'sdk-rs/harness/out/bitget-10/ts.json');
+  const evidence = { report: { artifacts: [{ path: target }] }, raw: [{ bytes: '{"fixture":1}\n' }] };
+  restorePairedRawOutputs(root, evidence);
+  assert.equal(readFileSync(target, 'utf8'), evidence.raw[0].bytes);
+  for (const path of ['/tmp/forbidden-paired-output', '../outside']) {
+    const invalid = structuredClone(evidence); invalid.report.artifacts[0].path = path;
+    assert.throws(() => restorePairedRawOutputs(root, invalid), /escapes/);
+    assert.equal(readFileSync(target, 'utf8'), evidence.raw[0].bytes);
+  }
+});
 
 test('a first PASS needs no second and cannot silently gain another timing sample', () => {
   assert.equal(requireSecondState(dispositions('first'), []), false);

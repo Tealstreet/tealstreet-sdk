@@ -292,7 +292,45 @@ fn duplicate(actions: &[Action], owner: u32) {
 fn dispatch_at(e: &mut TestEngine, now: f64, owner: u32, read: Query) -> HttpRequest {
     let actions = query(e, now, owner, read);
     assert!(terminal(&actions, owner).is_empty());
-    assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(_))));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let preparation = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("native signed read awaits a real route");
+    e.http_prepared(
+        now,
+        preparation,
+        safe_cex_engine::request_context::Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    e.prepare_dispatch(now);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = actions
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind {
+                    permit, request, ..
+                } => {
+                    assert!(matches!(
+                        e.claim_http(now, permit),
+                        Ok(safe_cex_engine::request_context::Claim::Released(_))
+                    ));
+                    Some(Action::Http(request))
+                }
+                _ => None,
+            },
+            action => Some(action),
+        })
+        .collect();
     actions
         .into_iter()
         .find_map(|a| match a {
@@ -378,7 +416,7 @@ fn repeated_local_admission_does_not_accumulate_owners_or_block_native_paths() {
     assert!(e.http_preparation_pending(peer));
 }
 #[test]
-fn valid_signed_legacy_and_managed_public_dispatch_keep_native_wire() {
+fn signed_and_unsigned_managed_dispatch_keep_native_wire() {
     for (private, read, path) in [
         (
             true,

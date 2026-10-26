@@ -485,6 +485,13 @@ impl Dispatch {
         p.route_ready = true;
         Ok(())
     }
+    /// A prepared task's HTTP request and absolute deadline.
+    #[cfg(feature = "sign-meta")]
+    pub(crate) fn prepared_task(&self, id: RequestId) -> Option<(RequestId, f64)> {
+        let pending = self.pending.get(&id).filter(|p| p.prepared_at.is_some())?;
+        Some((pending.request_id()?, pending.deadline))
+    }
+
     pub fn signature_pending(&self, id: RequestId) -> bool {
         self.pending
             .get(&id)
@@ -565,11 +572,16 @@ impl Dispatch {
             let work = match p.step.prepare(&mut p.outbound, &invocation) {
                 Ok(work) => work,
                 Err(error) => {
-                    // A login refused before naming refs uses the primary.
+                    // A login refused before naming refs uses the primary, as does
+                    // any refusal while the primary has no signing ref.
                     if error == SignError::MissingKey {
                         let login =
                             matches!(p.outbound, Action::WsSend { .. } | Action::WsConnect { .. });
-                        self.credential_refused = Some(login || identities.secondary.is_none());
+                        self.credential_refused = Some(
+                            login
+                                || identities.secondary.is_none()
+                                || identities.primary_lacks_signing(),
+                        );
                     }
                     return Err(error);
                 }
@@ -620,11 +632,16 @@ impl Dispatch {
             let work = match p.step.prepare(&mut p.outbound, context) {
                 Ok(work) => work,
                 Err(error) => {
-                    // A login refused before naming refs uses the primary.
+                    // A login refused before naming refs uses the primary, as does
+                    // any refusal while the primary has no signing ref.
                     if error == SignError::MissingKey {
                         let login =
                             matches!(p.outbound, Action::WsSend { .. } | Action::WsConnect { .. });
-                        self.credential_refused = Some(login || identities.secondary.is_none());
+                        self.credential_refused = Some(
+                            login
+                                || identities.secondary.is_none()
+                                || identities.primary_lacks_signing(),
+                        );
                     }
                     return Err(error);
                 }

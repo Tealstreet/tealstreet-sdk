@@ -59,13 +59,10 @@ struct Fixture {
     detach_timer: Option<TimerId>,
 }
 fn key(publish: bool) -> WorkKey {
-    let identity = Identity {
-        credential: KeyRef("ref:configured".into()),
-        signing: KeyRef("ref:signer".into()),
-        passphrase: None,
-        stable_id: None,
-        extra: Default::default(),
-    };
+    let identity = Identity::new(
+        KeyRef("ref:configured".into()),
+        Some(KeyRef("ref:signer".into())),
+    );
     WorkKey {
         symbol: "BTC".into(),
         subject: CredentialSubject::ConfiguredPrimary(identity.clone()),

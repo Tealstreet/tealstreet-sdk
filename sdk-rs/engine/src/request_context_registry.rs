@@ -237,6 +237,9 @@ pub(super) struct ContextRegistry {
     /// They hold the Plan, its slots and journal; no command observes them.
     #[cfg(feature = "http-plans")]
     physical: PhysicalOwners,
+    /// Repair roots' journal owners, keyed by root generation.
+    #[cfg(feature = "repair-mutations")]
+    repairs: PhysicalOwners,
     #[cfg(all(feature = "http-plans", any(test, feature = "test-support")))]
     plan_scan_visits: std::cell::Cell<usize>,
     /// Order-read epoch at each live owner's first released Read: one logical
@@ -830,6 +833,7 @@ impl ContextRegistry {
             || matches!(context.owner(), Owner::Session { generation }
                 if !self.sessions.live(generation))
             || (matches!(context.owner(), Owner::Execution { .. }) && !self.execution_live(context))
+            || self.repair_revoked(context.owner())
         {
             return Err(Error::Revoked);
         }
@@ -847,6 +851,8 @@ impl ContextRegistry {
                 .filter(|owner| owner.generation == generation),
             #[cfg(feature = "http-plans")]
             Owner::Execution { generation } => self.physical.get(&generation),
+            #[cfg(feature = "repair-mutations")]
+            Owner::Repair { generation } => self.repairs.get(&generation),
             _ => None,
         }
     }
@@ -859,6 +865,8 @@ impl ContextRegistry {
                 .filter(|owner| owner.generation == generation),
             #[cfg(feature = "http-plans")]
             Owner::Execution { generation } => self.physical.get_mut(&generation),
+            #[cfg(feature = "repair-mutations")]
+            Owner::Repair { generation } => self.repairs.get_mut(&generation),
             _ => None,
         }
     }
@@ -873,12 +881,22 @@ impl ContextRegistry {
         false
     }
 
+    /// An owner with a write journal besides a command: a Plan-backed
+    /// execution's physical owner, or a repair root.
+    #[inline(always)]
+    fn journal_owner(&self, owner: Owner) -> bool {
+        #[cfg(feature = "repair-mutations")]
+        if let Owner::Repair { generation } = owner {
+            return self.repairs.contains_key(&generation);
+        }
+        self.physical_owner(owner)
+    }
+
     fn command_mut(&mut self, context: &Context) -> Result<&mut CommandOwner, Error> {
         if !context.issued_by(&self.issuer) {
             return Err(Error::Revoked);
         }
-        if !matches!(context.owner(), Owner::Command { .. })
-            && !self.physical_owner(context.owner())
+        if !matches!(context.owner(), Owner::Command { .. }) && !self.journal_owner(context.owner())
         {
             return Err(Error::Invalid);
         }
@@ -1081,8 +1099,7 @@ impl ContextRegistry {
     }
 
     pub(super) fn latest_write(&self, context: &Context) -> Result<Option<RequestId>, Error> {
-        if !matches!(context.owner(), Owner::Command { .. })
-            && !self.physical_owner(context.owner())
+        if !matches!(context.owner(), Owner::Command { .. }) && !self.journal_owner(context.owner())
         {
             return Err(Error::Invalid);
         }
@@ -1627,10 +1644,13 @@ impl<P> Cx<'_, P> {
             Owner::Background { .. } => Scope::Background,
             Owner::Session { .. } => return Err(Error::Invalid),
             Owner::Execution { .. } => Scope::Execution,
+            #[cfg(feature = "repair-mutations")]
+            Owner::Repair { .. } => return Err(Error::Invalid),
         };
         self.make_http_context(scope, policy, Some(parent), None)
     }
 
+    #[inline]
     fn make_http_context(
         &mut self,
         scope: Scope,
@@ -1638,32 +1658,7 @@ impl<P> Cx<'_, P> {
         parent: Option<&Context>,
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
-        #[cfg(feature = "http-plans")]
-        if self.io.core.http_preflight_ready.is_some() {
-            return Err(Error::Revoked);
-        }
-        if !self.io.entry_context_allowed(scope) {
-            return Err(Error::Revoked);
-        }
-        // A tracked caller-wait root stays plain Read: refused before any spend.
-        if policy.operation == Operation::Mutation
-            && matches!(scope, Scope::Command(id) if self.io.core.request_contexts.tracked(id))
-        {
-            return Err(Error::Invalid);
-        }
-        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        let context = self
-            .io
-            .core
-            .request_contexts
-            .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
-        #[cfg(feature = "order-locks")]
-        if context.operation() == Operation::Mutation
-            && let Owner::Command { id, .. } = context.owner()
-        {
-            self.io.core.order_locks.manage(id);
-        }
-        Ok(context)
+        self.core().make_http_context(scope, policy, parent, egress)
     }
 
     /// Validate context provenance and retry policy without extending its bound.
@@ -1848,15 +1843,13 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    #[inline]
     pub fn fail_context(
         &mut self,
         context: &Context,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
-        let Owner::Command { id, .. } = context.owner() else {
-            return Err(Error::Invalid);
-        };
-        self.finish_command(id, Err(error.into()), Some(context))
+        self.core().fail_context(context, error)
     }
 
     /// A physical timer carries its original attempt token. A logical Context
@@ -1961,11 +1954,7 @@ impl<P> Cx<'_, P> {
             return Err(Error::Revoked);
         }
         if !matches!(context.owner(), Owner::Command { .. })
-            && !self
-                .io
-                .core
-                .request_contexts
-                .physical_owner(context.owner())
+            && !self.io.core.request_contexts.journal_owner(context.owner())
         {
             return Err(Error::Invalid);
         }
@@ -2016,63 +2005,29 @@ impl<P> Cx<'_, P> {
             body: "",
         };
         let delivery = self.current_write_delivery(context)?;
-        Ok(crate::classify::fact(
+        #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+        let status_exempt = self.io.core.http_status_exempt == Some(delivery.attempt.request);
+        #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
+        let status_exempt = false;
+        Ok(crate::classify::fact_for_delivery(
             table,
             self.write_intent(context)?,
             crate::classify::Released::Response(&response),
             native,
             message,
+            status_exempt,
         )
         .for_attempt(delivery.attempt.request))
     }
 
-    /// Record the delivered write attempt's native answer. Refusals exist only
-    /// as classifier facts; a whole `RefusedResend` refusal returns the only
-    /// grant a resend accepts (one per logical leg).
+    #[inline]
     pub fn http_write_fact(
         &mut self,
         context: &Context,
         fact: crate::classify::WriteFact,
         reports: Option<RejectionReports>,
     ) -> Result<Option<ResendGrant>, Error> {
-        let delivery = self.current_write_delivery(context)?;
-        if !fact.belongs_to(delivery.attempt.request) {
-            return Err(Error::Revoked);
-        }
-        let resendable = fact.resendable();
-        let absent = matches!(&fact, crate::classify::WriteFact::Failed { fact, .. }
-            if fact.verdict() == crate::classify::Verdict::Satisfied(crate::classify::SatisfiedIntent::Cancel));
-        let result = match fact.into_result() {
-            // A placement acknowledgement must name what it placed.
-            WriteResult::Accepted { order_ids }
-                if order_ids.is_empty()
-                    && self.write_intent(context)? == crate::classify::Intent::Place =>
-            {
-                WriteResult::Failed(
-                    VenueError::new("Placement acknowledgement has no native order ID")
-                        .kind(crate::ErrorKind::Internal)
-                        .outcome(crate::Outcome::Unknown),
-                )
-            }
-            result => result,
-        };
-        // Accepted facts carry no rejection reports.
-        let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
-        self.record_write(&delivery, result, reports)?;
-        if absent {
-            self.fence_absent_orders(context);
-        }
-        // Session writes get one attempt per operation: no resend grant.
-        if !resendable || matches!(context.owner(), Owner::Session { .. }) {
-            return Ok(None);
-        }
-        match self.io.core.request_contexts.grant_resend(&delivery) {
-            Ok(()) => Ok(Some(ResendGrant {
-                attempt: delivery.attempt.request,
-            })),
-            Err(Error::RetryForbidden) => Ok(None),
-            Err(error) => Err(error),
-        }
+        self.core().http_write_fact(context, fact, reports)
     }
 
     /// Classify and record one whole native failure for the delivered attempt.
@@ -2142,57 +2097,14 @@ impl<P> Cx<'_, P> {
         Ok(result)
     }
 
-    /// A Satisfied(Cancel) answer is success without a store transition: fence
-    /// the command's symbols and ask the venue for exactly one fresh order read.
+    #[inline]
     fn fence_absent_orders(&mut self, context: &Context) {
-        #[cfg(feature = "order-locks")]
-        {
-            let command = match context.owner() {
-                Owner::Command { id, .. } => Some(id),
-                _ => None,
-            };
-            let scope =
-                command.and_then(|id| self.io.core.order_locks.reconcile_scope(id).flatten());
-            self.io.core.order_locks.fence(scope.as_deref());
-            // A held placing scope would make a read now unable to clear the
-            // fence; finish queues it instead.
-            if !command.is_some_and(|id| self.io.core.order_locks.defer_absent(id)) {
-                self.io.queue_reconcile(scope, self.now);
-            }
-        }
-        #[cfg(not(feature = "order-locks"))]
-        let _ = context;
+        self.core().fence_absent_orders(context)
     }
 
-    /// The intent the engine recorded for this leg's logical command.
-    /// Background (session) writes classify as placements; a command owner
-    /// created outside dispatch has no trusted intent.
+    #[inline]
     fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
-        // Session writes (listen keys, logins) change account state, not orders.
-        if matches!(context.owner(), Owner::Session { .. }) {
-            return Ok(crate::classify::Intent::Setting);
-        }
-        if !matches!(context.owner(), Owner::Command { .. })
-            && !self
-                .io
-                .core
-                .request_contexts
-                .physical_owner(context.owner())
-        {
-            return Ok(crate::classify::Intent::Place);
-        }
-        let owner = self
-            .io
-            .core
-            .request_contexts
-            .owner_entry(context.owner())
-            .ok_or(Error::Revoked)?;
-        let leg = owner
-            .leg_intents
-            .iter()
-            .find(|(leg, _)| *leg == context.leg())
-            .map(|(_, intent)| *intent);
-        leg.or(owner.intent).ok_or(Error::State)
+        self.core_ref().write_intent(context)
     }
 
     /// Narrow one leg's intent, before its first attempt, where the command
@@ -2260,29 +2172,19 @@ impl<P> Cx<'_, P> {
         context.retry(RetryEvidence::DefinitiveRefusal, self.now)
     }
 
+    #[inline]
     fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
-        if delivery.context != *context || !context.issued_by(&self.io.core.request_contexts.issuer)
-        {
-            return Err(Error::Revoked);
-        }
-        Ok(delivery.clone())
+        self.core_ref().current_write_delivery(context)
     }
 
+    #[inline]
     fn record_write(
         &mut self,
         delivery: &Delivery,
         result: WriteResult,
         reports: Option<RejectionReports>,
     ) -> Result<(), Error> {
-        match reports {
-            Some(reports) => self
-                .io
-                .core
-                .request_contexts
-                .result_with_reports(delivery, result, reports),
-            None => self.io.core.request_contexts.result(delivery, result),
-        }
+        self.core().record_write(delivery, result, reports)
     }
 
     /// Retire a fully completed logical read/page join or write leg. Do not call
@@ -2300,6 +2202,189 @@ impl<P> Cx<'_, P> {
             .contexts
             .remove(&context.leg());
         Ok(())
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    fn make_http_context(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        parent: Option<&Context>,
+        egress: Option<Egress>,
+    ) -> Result<Context, Error> {
+        #[cfg(feature = "http-plans")]
+        if self.io.core.http_preflight_ready.is_some() {
+            return Err(Error::Revoked);
+        }
+        if !self.io.entry_context_allowed(scope) {
+            return Err(Error::Revoked);
+        }
+        // A tracked caller-wait root stays plain Read: refused before any spend.
+        if policy.operation == Operation::Mutation
+            && matches!(scope, Scope::Command(id) if self.io.core.request_contexts.tracked(id))
+        {
+            return Err(Error::Invalid);
+        }
+        let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
+        let context = self
+            .io
+            .core
+            .request_contexts
+            .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
+        #[cfg(feature = "order-locks")]
+        if context.operation() == Operation::Mutation
+            && let Owner::Command { id, .. } = context.owner()
+        {
+            self.io.core.order_locks.manage(id);
+        }
+        Ok(context)
+    }
+
+    pub fn fail_context(
+        &mut self,
+        context: &Context,
+        error: impl Into<VenueError>,
+    ) -> Result<(), Error> {
+        let Owner::Command { id, .. } = context.owner() else {
+            return Err(Error::Invalid);
+        };
+        self.finish_command(id, Err(error.into()), Some(context))
+    }
+
+    /// Record the delivered write attempt's native answer. Refusals exist only
+    /// as classifier facts; a whole `RefusedResend` refusal returns the only
+    /// grant a resend accepts (one per logical leg).
+    pub fn http_write_fact(
+        &mut self,
+        context: &Context,
+        fact: crate::classify::WriteFact,
+        reports: Option<RejectionReports>,
+    ) -> Result<Option<ResendGrant>, Error> {
+        let delivery = self.current_write_delivery(context)?;
+        if !fact.belongs_to(delivery.attempt.request) {
+            return Err(Error::Revoked);
+        }
+        let resendable = fact.resendable();
+        let absent = matches!(&fact, crate::classify::WriteFact::Failed { fact, .. }
+            if fact.verdict() == crate::classify::Verdict::Satisfied(crate::classify::SatisfiedIntent::Cancel));
+        let result = match fact.into_result() {
+            // A placement acknowledgement must name what it placed.
+            WriteResult::Accepted { order_ids }
+                if order_ids.is_empty()
+                    && self.write_intent(context)? == crate::classify::Intent::Place =>
+            {
+                WriteResult::Failed(
+                    VenueError::new("Placement acknowledgement has no native order ID")
+                        .kind(crate::ErrorKind::Internal)
+                        .outcome(crate::Outcome::Unknown),
+                )
+            }
+            result => result,
+        };
+        // Accepted facts carry no rejection reports.
+        let reports = reports.filter(|_| !matches!(result, WriteResult::Accepted { .. }));
+        self.record_write(&delivery, result, reports)?;
+        if absent {
+            self.fence_absent_orders(context);
+        }
+        // Session writes get one attempt per operation: no resend grant.
+        if !resendable || matches!(context.owner(), Owner::Session { .. }) {
+            return Ok(None);
+        }
+        match self.io.core.request_contexts.grant_resend(&delivery) {
+            Ok(()) => Ok(Some(ResendGrant {
+                attempt: delivery.attempt.request,
+            })),
+            Err(Error::RetryForbidden) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// A Satisfied(Cancel) answer is success without a store transition: fence
+    /// the command's symbols and ask the venue for exactly one fresh order read.
+    fn fence_absent_orders(&mut self, context: &Context) {
+        #[cfg(feature = "order-locks")]
+        {
+            let command = match context.owner() {
+                Owner::Command { id, .. } => Some(id),
+                _ => None,
+            };
+            let scope =
+                command.and_then(|id| self.io.core.order_locks.reconcile_scope(id).flatten());
+            self.io.core.order_locks.fence(scope.as_deref());
+            // A held placing scope would make a read now unable to clear the
+            // fence; finish queues it instead.
+            if !command.is_some_and(|id| self.io.core.order_locks.defer_absent(id)) {
+                self.io.queue_reconcile(scope, self.now);
+            }
+        }
+        #[cfg(not(feature = "order-locks"))]
+        let _ = context;
+    }
+
+    #[inline]
+    fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
+        self.core_ref().write_intent(context)
+    }
+
+    #[inline]
+    fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
+        self.core_ref().current_write_delivery(context)
+    }
+
+    fn record_write(
+        &mut self,
+        delivery: &Delivery,
+        result: WriteResult,
+        reports: Option<RejectionReports>,
+    ) -> Result<(), Error> {
+        match reports {
+            Some(reports) => self
+                .io
+                .core
+                .request_contexts
+                .result_with_reports(delivery, result, reports),
+            None => self.io.core.request_contexts.result(delivery, result),
+        }
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    /// The intent the engine recorded for this leg's logical command.
+    /// Background (session) writes classify as placements; a command owner
+    /// created outside dispatch has no trusted intent.
+    fn write_intent(&self, context: &Context) -> Result<crate::classify::Intent, Error> {
+        // Session writes (listen keys, logins) change account state, not orders.
+        if matches!(context.owner(), Owner::Session { .. }) {
+            return Ok(crate::classify::Intent::Setting);
+        }
+        if !matches!(context.owner(), Owner::Command { .. })
+            && !self.io.core.request_contexts.journal_owner(context.owner())
+        {
+            return Ok(crate::classify::Intent::Place);
+        }
+        let owner = self
+            .io
+            .core
+            .request_contexts
+            .owner_entry(context.owner())
+            .ok_or(Error::Revoked)?;
+        let leg = owner
+            .leg_intents
+            .iter()
+            .find(|(leg, _)| *leg == context.leg())
+            .map(|(_, intent)| *intent);
+        leg.or(owner.intent).ok_or(Error::State)
+    }
+
+    fn current_write_delivery(&self, context: &Context) -> Result<Delivery, Error> {
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::State)?;
+        if delivery.context != *context || !context.issued_by(&self.io.core.request_contexts.issuer)
+        {
+            return Err(Error::Revoked);
+        }
+        Ok(delivery.clone())
     }
 }
 
@@ -3536,13 +3621,13 @@ mod write_tests {
             let narrowed = cx.http_write_leg_intent(&context, leg);
             assert_eq!(narrowed.is_ok(), allowed, "{commanded:?} -> {leg:?}");
             if allowed {
-                assert_eq!(cx.write_intent(&context), Ok(leg));
+                assert_eq!(cx.core_ref().write_intent(&context), Ok(leg));
                 assert_eq!(
                     cx.http_write_leg_intent(&context, leg),
                     Err(Error::Duplicate)
                 );
             } else {
-                assert_eq!(cx.write_intent(&context), Ok(commanded));
+                assert_eq!(cx.core_ref().write_intent(&context), Ok(commanded));
             }
         }
         // The command's own intent is a no-op; nothing narrows after a send.
@@ -3572,7 +3657,7 @@ mod write_tests {
             cx.http_write_leg_intent(&context, Intent::Cancel),
             Err(Error::State)
         );
-        assert_eq!(cx.write_intent(&context), Ok(Intent::Place));
+        assert_eq!(cx.core_ref().write_intent(&context), Ok(Intent::Place));
 
         // The one declared amend-cancel exception: only an amend's leg, once,
         // before any attempt; any other command refuses it.
@@ -3607,7 +3692,7 @@ mod write_tests {
                 "{commanded:?}"
             );
             let expected = if allowed { Intent::Cancel } else { commanded };
-            assert_eq!(cx.write_intent(&context), Ok(expected));
+            assert_eq!(cx.core_ref().write_intent(&context), Ok(expected));
         }
     }
 
@@ -4247,5 +4332,20 @@ mod write_tests {
             .unwrap();
         assert_eq!(registry.commands.len(), 1);
         assert_eq!(registry.contexts.len(), 1);
+    }
+}
+
+#[cfg(feature = "repair-mutations")]
+#[path = "request_context_repair.rs"]
+mod repair_owner;
+
+impl ContextRegistry {
+    #[inline(always)]
+    fn repair_revoked(&self, _owner: Owner) -> bool {
+        #[cfg(feature = "repair-mutations")]
+        if let Owner::Repair { generation } = _owner {
+            return !self.repairs.contains_key(&generation);
+        }
+        false
     }
 }

@@ -3,6 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use safe_cex_engine::Level;
+use safe_cex_engine::classify::{Native, NativeCode, WriteFact};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -19,7 +20,38 @@ const CLOCK_INTERVAL_MS: f64 = 300_000.0;
 /// One `/time` attempt's own bound, as the host timeout it replaces.
 const CLOCK_TIMEOUT_MS: u32 = 5_000;
 const CLOCK_ADMISSION_RETRY_MS: f64 = 1_000.0;
+/// A parked -1021 resend waits at most this long for the resync (four 5 s
+/// attempts plus slack); the engine then seals the write as not resent.
+const RESYNC_BOUND_MS: u32 = 25_000;
 const READ_TIMEOUT_MS: u32 = 20_000;
+
+/// A command read's root, carried by its native continuation.
+fn root_of(pending: &Pending) -> Option<Context> {
+    match pending {
+        Pending::DepthRead { context } | Pending::Klines { context, .. } => Some(context.clone()),
+        Pending::Account(crate::account::Request::Info { root }) => Some(root.clone()),
+        Pending::History(history) => Some(history.root().clone()),
+        Pending::Trade(trade) => trade.root.clone(),
+        _ => None,
+    }
+}
+
+/// The caller's original Read root for a command that reads remotely.
+pub(crate) fn command_read_root(cx: &mut Cx<'_, Pending>) -> Option<Context> {
+    match cx.command_wait() {
+        Some(safe_cex_engine::CommandWait::Remaining(_)) => {
+            cx.admit_caller_read_root(None, None).ok()
+        }
+        Some(safe_cex_engine::CommandWait::Expired) => {
+            let _ = cx.reject_expired_command(Operation::Read);
+            None
+        }
+        None => {
+            let _ = cx.reject_unstamped_command(Operation::Read);
+            None
+        }
+    }
+}
 
 /// Unsigned public reads: the engine owns the bound and retry eligibility.
 pub(crate) fn public_read_policy() -> Policy {
@@ -42,6 +74,11 @@ pub struct RequestState {
     clock_admission: Option<(TimerId, u8)>,
     retries: HashMap<TimerId, Box<SignedRequest>>,
     awaiting_clock: VecDeque<Box<SignedRequest>>,
+    /// -1021 writes parked on the clock resync; resent when the plan wakes.
+    resyncing: Vec<(
+        safe_cex_engine::request_context::ConditionWait,
+        Box<SignedRequest>,
+    )>,
 }
 
 pub struct SignedRequest {
@@ -58,8 +95,11 @@ pub struct SignedRequest {
     role: CredentialRole,
     /// Engine authority of a dispatched listenKey session write.
     context: Option<Context>,
-    /// Engine custody of a managed public read: the command's own Context, or
-    /// a Background one retired before its native callback.
+    /// A command read's root, carried by its native continuation.
+    root: Option<Context>,
+    /// The physical read Context: the root itself for a one-request public
+    /// command, a leg under it, or a Background one. Retired before the
+    /// native callback unless it is the root.
     read: Option<Context>,
 }
 
@@ -128,21 +168,41 @@ impl SignedRequest {
             )
     }
 
-    fn command_read(&self) -> bool {
-        matches!(
-            self.pending,
-            Pending::DepthRead { .. } | Pending::Klines { .. }
-        )
+    /// Signed reads the engine releases; writes, STP and listenKey keep the
+    /// native path until their slice.
+    fn managed_signed(&self) -> bool {
+        !self.public && self.method == Method::Get && !self.listen_key() && !self.plan_write()
     }
 
-    /// Retire a Background read before its native callback; a command read
+    fn plan_write(&self) -> bool {
+        matches!(&self.pending, Pending::Trade(trade) if trade.plan().is_some())
+    }
+
+    /// Retire a leg or Background read before its native callback; a root
     /// settles through its own terminal.
     fn settle(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(context) = self.read.take()
-            && !self.command_read()
+            && self.root.as_ref() != Some(&context)
         {
             let _ = cx.finish_http_context(&context);
         }
+    }
+
+    /// Engine permission for one more attempt under the original bound. A leg
+    /// retires and the next dispatch mints a fresh one under the root.
+    fn resend_permit(&mut self, cx: &mut Cx<'_, Pending>) -> Result<(), VenueError> {
+        let Some(read) = self.read.take() else {
+            return Ok(());
+        };
+        if self.root.is_some() && self.root.as_ref() != Some(&read) {
+            let _ = cx.finish_http_context(&read);
+            return Ok(());
+        }
+        let granted = cx.http_retry_context(&read, RetryEvidence::ReadFailure);
+        self.read = Some(granted.as_ref().map_or(read, Clone::clone));
+        granted
+            .map(|_| ())
+            .map_err(|error| error.read_venue_error())
     }
 
     fn retryable_status(&self, status: u16) -> bool {
@@ -196,21 +256,11 @@ impl AsterDex {
         pending: Pending,
         stream: Option<ArrayAt>,
     ) {
-        // History reads keep the native public path until their own slice.
-        let read = match &pending {
-            Pending::DepthRead { context } | Pending::Klines { context, .. } => {
-                Some(Ok(context.clone()))
-            }
-            Pending::History(_) => None,
-            _ => Some(cx.http_context(Scope::Background, public_read_policy())),
-        };
-        let read = match read.transpose() {
-            Ok(read) => read,
-            Err(error) => {
-                self.on_read_failed(cx, pending, error.read_venue_error());
-                return;
-            }
-        };
+        let root = root_of(&pending);
+        // A one-request public command reads under its own root.
+        let read = root
+            .clone()
+            .filter(|_| matches!(pending, Pending::DepthRead { .. } | Pending::Klines { .. }));
         let request = Box::new(SignedRequest {
             method: Method::Get,
             path: path.into(),
@@ -224,6 +274,7 @@ impl AsterDex {
             public: true,
             role: CredentialRole::Read { scope: None },
             context: None,
+            root,
             read,
         });
         self.dispatch_signed(cx, request);
@@ -240,6 +291,7 @@ impl AsterDex {
         pending: Pending,
         stream: Option<ArrayAt>,
     ) -> bool {
+        let root = root_of(&pending);
         let request = Box::new(SignedRequest {
             method,
             path: path.into(),
@@ -253,52 +305,100 @@ impl AsterDex {
             public: false,
             role,
             context: None,
+            root,
             read: None,
         });
-        let stale = self
-            .requests
-            .last_sync_success
-            .is_none_or(|last| cx.now - last >= CLOCK_INTERVAL_MS);
-        if self.requests.clock_running || stale {
+        // A plan leg can only be issued in plan custody, so a write mints it
+        // now; it is released, and signed, after any clock wait.
+        let mut request = request;
+        if let Pending::Trade(trade) = &request.pending
+            && let Some((plan, slot)) = trade.plan()
+        {
+            match cx.plan_leg_context_with_intent(plan, slot, trade.intent()) {
+                Ok(leg) => request.read = Some(leg),
+                Err(error) => {
+                    self.on_request_failed(cx, request.pending, &error.venue_error().message);
+                    return false;
+                }
+            }
+        }
+        // A plan write releases in its custody; its job waited for the clock
+        // at entry, and the periodic refresh keeps it current between steps.
+        if request.plan_write() || self.clock_fresh(cx.now) {
+            self.dispatch_signed(cx, request)
+        } else {
             self.requests.awaiting_clock.push_back(request);
             self.begin_clock(cx);
             true
-        } else {
-            self.dispatch_signed(cx, request)
         }
     }
 
-    fn dispatch_signed(&mut self, cx: &mut Cx<'_, Pending>, request: Box<SignedRequest>) -> bool {
-        if let Some(read) = request.read.clone() {
+    /// A woken plan resends its -1021 write as the next serial call, re-signed.
+    pub(crate) fn on_resync_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        let Some(index) = self
+            .requests
+            .resyncing
+            .iter()
+            .position(|(_, parked)| matches!(&parked.pending, Pending::Trade(trade) if trade.plan().is_some_and(|(own, _)| own.owner() == plan.owner())))
+        else {
+            return;
+        };
+        let (_, mut request) = self.requests.resyncing.remove(index);
+        let slot = cx
+            .plan_slots(plan)
+            .ok()
+            .and_then(|slots| slots.into_iter().next());
+        let leg = match (&mut request.pending, slot) {
+            (Pending::Trade(trade), Some(slot)) => {
+                let intent = trade.intent();
+                trade.resume(plan.clone(), slot.clone());
+                cx.plan_leg_context_with_intent(plan, &slot, intent)
+            }
+            _ => Err(safe_cex_engine::request_context::Error::State),
+        };
+        match leg {
+            Ok(leg) => {
+                request.read = Some(leg);
+                self.dispatch_signed(cx, request);
+            }
+            Err(error) => {
+                let _ = cx.fail_plan(plan, error.venue_error());
+            }
+        }
+    }
+
+    /// An expired resync wait drops its parked write; the engine seals it.
+    pub(crate) fn on_resync_expired(&mut self, plan: &safe_cex_engine::request_context::Plan) {
+        self.requests.resyncing.retain(|(_, parked)| {
+            !matches!(&parked.pending, Pending::Trade(trade) if trade.plan().is_some_and(|(own, _)| own.owner() == plan.owner()))
+        });
+    }
+
+    pub(crate) fn clock_fresh(&self, now: f64) -> bool {
+        !self.requests.clock_running
+            && self
+                .requests
+                .last_sync_success
+                .is_some_and(|last| now - last < CLOCK_INTERVAL_MS)
+    }
+
+    pub(crate) fn await_clock(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.begin_clock(cx);
+    }
+
+    fn dispatch_signed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Box<SignedRequest>,
+    ) -> bool {
+        if request.public {
             let path = &request.path;
             let url = format!("{}{path}", self.urls.rest);
-            let stream = request.stream;
-            match cx.request_managed(read, None, Method::Get, url, None, Pending::Signed(request)) {
-                Ok(id) => {
-                    if let Some(at) = stream {
-                        cx.stream_response(id, at);
-                    }
-                }
-                Err((Pending::Signed(mut unsent), error)) => {
-                    unsent.settle(cx);
-                    let error = error.read_venue_error();
-                    self.on_read_failed(cx, unsent.pending, error);
-                }
-                Err(_) => unreachable!("a refused read returns its own continuation"),
-            }
-            return true;
-        }
-        if request.public {
-            let url = format!("{}{}", self.urls.rest, request.path);
-            match request.stream {
-                Some(at) => {
-                    cx.request_streamed(Method::Get, url, Vec::new(), at, Pending::Signed(request));
-                }
-                None => {
-                    cx.request(Method::Get, url, Vec::new(), None, Pending::Signed(request));
-                }
-            }
-            return true;
+            return self.release_read(cx, request, url, public_read_policy(), None);
         }
         let Ok((selection, slot)) = self.credentials.select(request.role) else {
             self.on_request_failed(cx, request.pending, "Missing required Aster credentials");
@@ -318,6 +418,7 @@ impl AsterDex {
         let recipe = match recipe {
             Ok(recipe) => recipe,
             Err(error) => {
+                request.settle(cx);
                 self.on_request_failed(cx, request.pending, &error);
                 return false;
             }
@@ -325,6 +426,16 @@ impl AsterDex {
         // The recipe writes the signed query and API-key header at dispatch.
         let path = &request.path;
         let url = format!("{}{path}", self.urls.rest);
+        if request.plan_write() {
+            return self.release_write(cx, request, url, Box::new(recipe));
+        }
+        if request.managed_signed() {
+            let policy = Policy {
+                credential: Some(selection.credential(slot.identity.credential.clone())),
+                ..public_read_policy()
+            };
+            return self.release_read(cx, request, url, policy, Some(Box::new(recipe)));
+        }
         if request.listen_key() {
             // The reducer ignores a closed stream's create or keepalive, and
             // sending it would rotate the current stream's session.
@@ -334,15 +445,203 @@ impl AsterDex {
             let credential = selection.credential(slot.identity.credential.clone());
             return self.listen_key_session_write(cx, request, url, credential, recipe);
         }
-        let headers = Vec::new();
-        let method = request.method;
-        let stream = request.stream;
-        let id = match stream {
-            Some(at) => cx.request_streamed(method, url, headers, at, Pending::Signed(request)),
-            None => cx.request(method, url, headers, None, Pending::Signed(request)),
+        // Every signed request is a managed read, a plan write or a listenKey
+        // session write; nothing else has a release path.
+        self.on_request_failed(
+            cx,
+            request.pending,
+            "Aster signed request has no managed path",
+        );
+        false
+    }
+
+    /// Release one plan write under its leg (minted at dequeue, in plan
+    /// custody) or its granted resend Context. Signing happens at release.
+    fn release_write(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        unsent: Box<SignedRequest>,
+        url: String,
+        recipe: Box<dyn safe_cex_engine::SignStep>,
+    ) -> bool {
+        let leg = unsent.read.clone().expect("minted at dequeue");
+        let method = unsent.method;
+        match cx.request_signed_managed(
+            leg,
+            None,
+            method,
+            url,
+            None,
+            recipe,
+            Pending::Signed(unsent),
+        ) {
+            Ok(_) => true,
+            Err((Pending::Signed(unsent), error)) => {
+                self.on_request_failed(cx, unsent.pending, &error.venue_error().message);
+                false
+            }
+            Err(_) => unreachable!("a refused write returns its own continuation"),
+        }
+    }
+
+    /// A plan write's reply. Only an eligible V1 -1022 or first -1021 is
+    /// classified here, for its engine-granted resend; every other fact is
+    /// reported by the trade codec.
+    fn on_plan_reply(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Box<SignedRequest>,
+        response: Result<Response<'_>, &str>,
+    ) {
+        let leg = request.read.clone();
+        let mut reported = false;
+        if let (Ok(reply), Some(leg)) = (&response, &leg) {
+            let error = serde_json::from_str::<ErrorBody>(reply.body).ok();
+            let code = error
+                .as_ref()
+                .and_then(|error| error.code.as_ref()?.value());
+            let message = error
+                .as_ref()
+                .map_or("", |error| error.msg.as_str())
+                .to_owned();
+            let signature = code == Some(-1022.0)
+                && request.version == Version::V1
+                && !request.signature_retried;
+            let timestamp = code == Some(-1021.0)
+                && message.contains("Timestamp")
+                && !request.timestamp_retried;
+            if signature {
+                reported = true;
+                let native = Native {
+                    code: NativeCode::Int(-1022),
+                    message: &message,
+                };
+                let grant = cx
+                    .classify_write(
+                        leg,
+                        &crate::trading::ASTER_RESEND,
+                        Some(&native),
+                        message.clone(),
+                    )
+                    .and_then(|fact| {
+                        cx.http_write_fact(
+                            leg,
+                            WriteFact::Failed {
+                                fact,
+                                known_effects: false,
+                            },
+                            None,
+                        )
+                    });
+                if let Ok(Some(grant)) = grant
+                    && let Pending::Trade(trade) = &request.pending
+                    && let Some((plan, slot)) = trade.plan()
+                    && let Ok(next) = cx.plan_resend_context(plan, slot, leg, grant)
+                {
+                    request.read = Some(next);
+                    request.reset();
+                    request.signature_retried = true;
+                    self.dispatch_signed(cx, request);
+                    return;
+                }
+            }
+            // -1021: refuse this call, park the plan on the clock resync, and
+            // resend the same frozen request as the next serial call.
+            if timestamp {
+                reported = true;
+                let native = Native {
+                    code: NativeCode::Int(-1021),
+                    message: &message,
+                };
+                let refused = cx
+                    .classify_write(leg, &crate::trading::ASTER, Some(&native), message.clone())
+                    .and_then(|fact| {
+                        cx.http_write_fact(
+                            leg,
+                            WriteFact::Failed {
+                                fact,
+                                known_effects: false,
+                            },
+                            None,
+                        )
+                    });
+                if refused.is_ok()
+                    && let Pending::Trade(trade) = &request.pending
+                    && let Some((plan, slot)) = trade.plan()
+                    && let Ok(wait) = cx.serial_plan_condition_wait(
+                        plan,
+                        slot,
+                        leg,
+                        crate::trading::serial(),
+                        Some(RESYNC_BOUND_MS),
+                    )
+                {
+                    request.read = None;
+                    request.reset();
+                    request.timestamp_retried = true;
+                    self.requests.resyncing.push((wait, request));
+                    self.begin_clock(cx);
+                    return;
+                }
+            }
+        }
+        if let Pending::Trade(trade) = request.pending {
+            self.on_trade_response(cx, trade, response, leg.as_ref(), reported);
+        }
+    }
+
+    /// Release one read attempt under its Context: a granted resend keeps
+    /// its Context, a command read mints a leg under its root, and anything
+    /// else is a Background read. Signing, when present, happens at release.
+    fn release_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut unsent: Box<SignedRequest>,
+        url: String,
+        policy: Policy,
+        recipe: Option<Box<dyn safe_cex_engine::SignStep>>,
+    ) -> bool {
+        let read = match (unsent.read.clone(), &unsent.root) {
+            (Some(read), _) => Ok(read),
+            (None, Some(root)) => cx.http_leg_context(root, policy),
+            (None, None) => cx.http_context(Scope::Background, policy),
         };
-        selection.sign(cx, id, Box::new(recipe));
-        true
+        let read = match read {
+            Ok(read) => read,
+            Err(error) => {
+                self.on_read_failed(cx, unsent.pending, error.read_venue_error());
+                return false;
+            }
+        };
+        unsent.read = Some(read.clone());
+        let method = unsent.method;
+        let stream = unsent.stream;
+        let queued = match recipe {
+            Some(recipe) => cx.request_signed_managed(
+                read,
+                None,
+                method,
+                url,
+                None,
+                recipe,
+                Pending::Signed(unsent),
+            ),
+            None => cx.request_managed(read, None, method, url, None, Pending::Signed(unsent)),
+        };
+        match queued {
+            Ok(id) => {
+                if let Some(at) = stream {
+                    cx.stream_response(id, at);
+                }
+                true
+            }
+            Err((Pending::Signed(mut unsent), error)) => {
+                unsent.settle(cx);
+                self.on_read_failed(cx, unsent.pending, error.read_venue_error());
+                false
+            }
+            Err(_) => unreachable!("a refused read returns its own continuation"),
+        }
     }
 
     /// One session operation per physical listenKey create or keepalive.
@@ -431,11 +730,14 @@ impl AsterDex {
             // Repeat-safe: an unproven write does not block the next operation.
             let _ = cx.finish_http_context(&context);
         }
+        if request.plan_write() {
+            self.on_plan_reply(cx, request, response);
+            return;
+        }
         if let (Some(read), Ok(_)) = (&request.read, &response) {
-            let delivered = if request.command_read() {
-                cx.validate_read_http_delivery(read, read)
-            } else {
-                cx.validate_background_read_http_delivery(read)
+            let delivered = match &request.root {
+                Some(root) => cx.validate_read_http_delivery(root, read),
+                None => cx.validate_background_read_http_delivery(read),
             };
             if let Err(error) = delivered {
                 request.settle(cx);
@@ -461,7 +763,9 @@ impl AsterDex {
             {
                 request.signature_retried = true;
                 request.reset();
-                self.dispatch_signed(cx, request);
+                if let Some(request) = self.granted(cx, request) {
+                    self.dispatch_signed(cx, request);
+                }
                 return;
             }
             if !request.public
@@ -471,8 +775,10 @@ impl AsterDex {
             {
                 request.timestamp_retried = true;
                 request.reset();
-                self.requests.awaiting_clock.push_back(request);
-                self.begin_clock(cx);
+                if let Some(request) = self.granted(cx, request) {
+                    self.requests.awaiting_clock.push_back(request);
+                    self.begin_clock(cx);
+                }
                 return;
             }
             if discovery
@@ -523,6 +829,10 @@ impl AsterDex {
         mut request: Box<SignedRequest>,
         error: VenueError,
     ) {
+        if request.plan_write() {
+            self.on_plan_reply(cx, request, Err(&error.message));
+            return;
+        }
         if request.read.is_none() {
             self.on_signed_response(cx, request, Err(&error.message));
             return;
@@ -538,21 +848,27 @@ impl AsterDex {
         self.on_read_failed(cx, request.pending, error);
     }
 
-    /// The engine grants a managed read's resend under its original bound; the
-    /// native 1/2/3 s delay stays.
-    fn retry_read(&mut self, cx: &mut Cx<'_, Pending>, mut request: Box<SignedRequest>) {
-        if let Some(read) = request.read.take() {
-            match cx.http_retry_context(&read, RetryEvidence::ReadFailure) {
-                Ok(read) => request.read = Some(read),
-                Err(error) => {
-                    request.read = Some(read);
-                    request.settle(cx);
-                    self.on_read_failed(cx, request.pending, error.read_venue_error());
-                    return;
-                }
+    /// The native 1/2/3 s delay stays; the engine grants the resend.
+    fn retry_read(&mut self, cx: &mut Cx<'_, Pending>, request: Box<SignedRequest>) {
+        if let Some(request) = self.granted(cx, request) {
+            self.schedule_retry(cx, request);
+        }
+    }
+
+    /// A resend the engine refuses fails with its typed cause instead.
+    fn granted(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Box<SignedRequest>,
+    ) -> Option<Box<SignedRequest>> {
+        match request.resend_permit(cx) {
+            Ok(()) => Some(request),
+            Err(error) => {
+                request.settle(cx);
+                self.on_read_failed(cx, request.pending, error);
+                None
             }
         }
-        self.schedule_retry(cx, request);
     }
 
     pub(crate) fn on_signed_stream_error(
@@ -677,6 +993,10 @@ impl AsterDex {
         let queued = std::mem::take(&mut self.requests.awaiting_clock);
         for unsent in queued {
             self.dispatch_signed(cx, unsent);
+        }
+        self.wake_parked_trades(cx);
+        for (wait, _) in &self.requests.resyncing {
+            let _ = cx.release_condition_wait(wait);
         }
         if self.requests.startup_pending {
             self.requests.startup_pending = false;
@@ -931,25 +1251,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn ambiguous_writes_never_retry() {
-        for method in [Method::Post, Method::Put, Method::Delete] {
-            for network in [false, true] {
-                let mut h = Harness::new(method, false);
-                let request = h.requests.remove(0);
-                if network {
-                    h.fail(request);
-                } else {
-                    h.reply(request, 503, "upstream timeout");
-                }
-                assert!(h.requests.is_empty());
-                assert!(h.timers.is_empty());
-                assert_eq!(h.done.len(), 1);
-                assert!(h.done[0].is_err());
-            }
-        }
-    }
-
+    // Writes are trade plans: their no-resend rules live in tests/trade_plan_context.rs.
     #[test]
     fn read_retries_three_times_with_linear_delays_and_fresh_signatures() {
         let mut h = Harness::new(Method::Get, false);
@@ -981,7 +1283,7 @@ mod tests {
     #[test]
     fn v1_signature_rejection_resends_once_but_v3_never_does() {
         for v3 in [false, true] {
-            let mut h = Harness::new(Method::Post, v3);
+            let mut h = Harness::new(Method::Get, v3);
             let request = h.requests.remove(0);
             h.reply(
                 request,
@@ -1006,7 +1308,7 @@ mod tests {
 
     #[test]
     fn timestamp_rejection_resyncs_with_alternate_version_and_resends_once() {
-        let mut h = Harness::new(Method::Post, false);
+        let mut h = Harness::new(Method::Get, false);
         let request = h.requests.remove(0);
         h.reply(
             request,
@@ -1032,18 +1334,13 @@ mod tests {
 
     #[test]
     fn read_credentials_are_used_only_for_get_requests() {
-        for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
-            let mut h = Harness::new(method, false);
-            let request = h.requests.remove(0);
-            let expected = if method == Method::Get {
-                "read-key"
-            } else {
-                "primary-key"
-            };
-            assert_eq!(request.headers, vec![("X-MBX-APIKEY", expected.into())]);
-            assert!(request.body.is_none());
-            assert_eq!(request.timeout_ms, None);
-        }
+        // Signed writes are trade plans, signed with the primary key there.
+        let mut h = Harness::new(Method::Get, false);
+        let request = h.requests.remove(0);
+        assert_eq!(request.headers, vec![("X-MBX-APIKEY", "read-key".into())]);
+        assert!(request.body.is_none());
+        // A read carries its managed bound.
+        assert_eq!(request.timeout_ms, Some(READ_TIMEOUT_MS));
     }
 
     #[test]
@@ -1062,6 +1359,7 @@ mod tests {
             public: false,
             role: CredentialRole::Mutation,
             context: None,
+            root: None,
             read: None,
         };
         let klines = || Pending::MarketBrackets {
@@ -1080,7 +1378,7 @@ mod tests {
     #[test]
     fn clock_exhausts_direct_versions_before_public_cors_and_only_then_releases_writes() {
         for v3 in [false, true] {
-            let mut h = Harness::new(Method::Post, v3);
+            let mut h = Harness::new(Method::Get, v3);
             let request = h.requests.remove(0);
             h.reply(request, 400, r#"{"code":-1021,"msg":"Timestamp rejected"}"#);
             for attempt in 0..4 {
@@ -1120,7 +1418,7 @@ mod tests {
     #[test]
     fn time_response_updates_shared_protocol_clock_before_draining_v1_and_v3() {
         for v3 in [false, true] {
-            let mut h = Harness::new(Method::Post, v3);
+            let mut h = Harness::new(Method::Get, v3);
             let request = h.requests.remove(0);
             h.reply(request, 400, r#"{"code":-1021,"msg":"Timestamp rejected"}"#);
             let clock = h.requests.remove(0);
@@ -1136,7 +1434,12 @@ mod tests {
                 h.engine.venue().inner.requests.last_sync_success,
                 Some(h.now)
             );
-            assert_eq!(h.timers.last().unwrap().1, CLOCK_INTERVAL_MS);
+            // The drained read arms its own bound after the clock's refresh.
+            assert!(
+                h.timers
+                    .iter()
+                    .any(|(_, delay)| *delay == CLOCK_INTERVAL_MS)
+            );
             assert_eq!(
                 h.requests.len(),
                 1,
@@ -1162,7 +1465,7 @@ mod tests {
 
     #[test]
     fn later_clock_observation_replaces_the_offset_without_moving_raw_sync_age() {
-        let mut h = Harness::new(Method::Post, false);
+        let mut h = Harness::new(Method::Get, false);
         let request = h.requests.remove(0);
         h.reply(request, 400, r#"{"code":-1021,"msg":"Timestamp rejected"}"#);
         let clock = h.requests.remove(0);
@@ -1188,7 +1491,7 @@ mod tests {
 
     #[test]
     fn failed_periodic_clock_sync_retains_the_last_successful_offset() {
-        let mut h = Harness::new(Method::Post, false);
+        let mut h = Harness::new(Method::Get, false);
         let request = h.requests.remove(0);
         h.reply(request, 400, r#"{"code":-1021,"msg":"Timestamp rejected"}"#);
         let clock = h.requests.remove(0);

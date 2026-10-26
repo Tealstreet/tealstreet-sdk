@@ -90,7 +90,7 @@ impl AccountState {
 
 pub enum Request {
     Info {
-        command: u32,
+        root: safe_cex_engine::request_context::Context,
     },
     ListenKey {
         epoch: u64,
@@ -357,7 +357,10 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
 }
 
 impl AsterDex {
-    pub(crate) fn fetch_account_info(&mut self, cx: &mut Cx<'_, Pending>, command: u32) {
+    pub(crate) fn fetch_account_info(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(root) = crate::command_read_root(cx) else {
+            return;
+        };
         let path = if self.version == crate::sign::Version::V1 {
             "/fapi/v4/account".into()
         } else {
@@ -369,7 +372,7 @@ impl AsterDex {
             Method::Get,
             &path,
             Query::new(),
-            Pending::Account(Request::Info { command }),
+            Pending::Account(Request::Info { root }),
         );
     }
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -689,7 +692,7 @@ impl AsterDex {
         let body = response.as_ref().map_or("", |r| r.body);
         let valid = error.is_none();
         match request {
-            Request::Info { command } => {
+            Request::Info { root } => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase")]
                 struct Info {
@@ -732,9 +735,9 @@ impl AsterDex {
                                 .map_err(|e| VenueError::new(e.to_string()))
                         })
                 };
-                match result {
-                    Ok(data) => cx.done(command, data),
-                    Err(error) => cx.fail(command, error),
+                let _ = match result {
+                    Ok(data) => cx.done_context(&root, data),
+                    Err(error) => cx.fail_context(&root, error),
                 };
             }
             Request::ListenKey { epoch } => {

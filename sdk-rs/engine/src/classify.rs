@@ -193,11 +193,21 @@ pub fn verdict(
     released: Released<'_>,
     native: Option<&Native<'_>>,
 ) -> Verdict {
+    verdict_for_delivery(table, intent, released, native, false)
+}
+
+fn verdict_for_delivery(
+    table: &CodeTable,
+    intent: Intent,
+    released: Released<'_>,
+    native: Option<&Native<'_>>,
+    status_exempt: bool,
+) -> Verdict {
     let response = match released {
         Released::Transport => return Verdict::Unknown(Some(ErrorKind::Network)),
         Released::Response(response) => response,
     };
-    if let Some(verdict) = unproven_status(response) {
+    if !status_exempt && let Some(verdict) = unproven_status(response) {
         return verdict;
     }
     // A code-less envelope that matches no message row is no native evidence.
@@ -311,7 +321,18 @@ pub fn fact(
     native: Option<&Native<'_>>,
     message: impl Into<String>,
 ) -> Fact {
-    let verdict = verdict(table, intent, released, native);
+    fact_for_delivery(table, intent, released, native, message, false)
+}
+
+pub(crate) fn fact_for_delivery(
+    table: &CodeTable,
+    intent: Intent,
+    released: Released<'_>,
+    native: Option<&Native<'_>>,
+    message: impl Into<String>,
+    status_exempt: bool,
+) -> Fact {
+    let verdict = verdict_for_delivery(table, intent, released, native, status_exempt);
     Fact {
         verdict,
         error: error(verdict, intent, released, native, message),

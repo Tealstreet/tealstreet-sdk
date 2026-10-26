@@ -3,7 +3,7 @@ use safe_cex_engine::{Action, Command, Event, Notice, Query};
 use support::*;
 fn query(h: &mut Harness, query: Query) {
     h.ws("pong");
-    h.e.handle(1.0, Event::Command(Command::Query { command: 7, query }));
+    h.handle(1.0, Event::Command(Command::Query { command: 7, query }));
     h.collect_at(1.0);
 }
 fn result(h: &Harness) -> Result<serde_json::Value, String> {

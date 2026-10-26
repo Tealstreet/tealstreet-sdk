@@ -420,7 +420,7 @@ fn cached_nonpositive_and_nonfinite_leverage_keep_native_error() {
     }
 }
 #[test]
-fn keyless_public_trades_remain_on_the_native_remote_path() {
+fn keyless_public_trades_remain_a_remote_read() {
     let mut engine = engine(Local::Keyless, false);
     engine.handle(
         NOW,
@@ -432,15 +432,15 @@ fn keyless_public_trades_remain_on_the_native_remote_path() {
             },
         }),
     );
-    let output: Vec<_> = engine.drain_actions().collect();
+    // A managed read under the command's root, released through preparation.
+    let output = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
     assert_eq!(output.iter().filter(|a| matches!(a, Action::Http(request) if request.url.contains("/trades?") && request.url.contains("limit=2"))).count(), 1);
     assert!(!output.iter().any(|a| matches!(
         a,
-        Action::ManagedHttp(_)
-            | Action::Notice(
-                Notice::CommandDone { command: OWNER, .. }
-                    | Notice::CommandFailed { command: OWNER, .. }
-            )
+        Action::Notice(
+            Notice::CommandDone { command: OWNER, .. }
+                | Notice::CommandFailed { command: OWNER, .. }
+        )
     )));
 }
 

@@ -5,7 +5,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::credential_selection::{
-    CredentialRole, CredentialUnavailable, SlotPolicy, Slots,
+    CredentialRole, CredentialUnavailable, PrimaryReason, SlotPolicy, Slots,
 };
 use safe_cex_engine::execution::{
     Arithmetic, CumulativePrice, Cursor, ExecutionRounding, Rejection, Report,
@@ -13,7 +13,8 @@ use safe_cex_engine::execution::{
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::selected_read::{
-    AdmittedRead, LocalRefusal, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
+    AdmittedRead, BackgroundReadError, LocalRefusal, ReadPolicy, ReadRequest, ReadRole,
+    SelectedRead,
 };
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::startup::rate_limit_pause_ms;
@@ -99,6 +100,8 @@ pub(crate) struct Account {
     startup_started: bool,
     session_started: f64,
     orders_seeded: bool,
+    /// A reconcile snapshot was requested while another was in flight.
+    reconcile_owed: bool,
     reporting_started: f64,
     startup_executions: VecDeque<Execution>,
     account_busy: bool,
@@ -219,8 +222,21 @@ pub enum Request {
         rows: SnapshotBuilder<String, Order>,
         sources: HashMap<String, Source>,
         revision: u64,
+        /// A Primary-signed reconcile snapshot: only it may clear an order fence.
+        reconcile: bool,
         failed: bool,
     },
+}
+impl Request {
+    fn reconciles(&self) -> bool {
+        matches!(
+            self,
+            Self::Orders {
+                reconcile: true,
+                ..
+            }
+        )
+    }
 }
 impl Blofin {
     fn seed_execution_prefix(
@@ -235,6 +251,66 @@ impl Blofin {
             Ok(false) => {}
             Err(error) => cx.notice(Level::Error, code::VALUATION_UNAVAILABLE, format!("BloFin execution price unavailable for order {id}: {error}; retained proven execution baseline")),
         }
+    }
+    /// The signed-GET selection every private read shares, with its native
+    /// refusal text. A configured Secondary serves GETs beside a Primary; the
+    /// refusal inspects the same immutable Slots that SelectedRead selects from.
+    pub(crate) fn read_selection(
+        &self,
+    ) -> (Result<SelectedRead, CredentialUnavailable>, &'static str) {
+        self.read_selection_for(ReadRole::Read { scope: None })
+    }
+    fn read_selection_for(
+        &self,
+        role: ReadRole,
+    ) -> (Result<SelectedRead, CredentialUnavailable>, &'static str) {
+        let slots = self.credential_slots();
+        let credential = match role {
+            ReadRole::Read { scope } => CredentialRole::Read { scope },
+            ReadRole::Primary { reason, scope } => CredentialRole::PrimaryRead { reason, scope },
+        };
+        let refusal = match slots.select(credential) {
+            Ok((_, identity)) if identity.passphrase.is_some() => None,
+            Ok(_) => Some("BloFin requires a passphrase"),
+            Err(_) => Some("BloFin requires API credentials"),
+        };
+        let selected = match refusal {
+            Some(_) => Err(CredentialUnavailable::Missing),
+            None => SelectedRead::select(&slots, role),
+        };
+        (
+            selected,
+            refusal.unwrap_or("BloFin requires API credentials"),
+        )
+    }
+    fn credential_slots(&self) -> Slots<safe_cex_engine::signing::Identity> {
+        let identities = &self.options.identities;
+        Slots::new(
+            identities
+                .primary
+                .clone()
+                .filter(|_| !self.options.public_data_only),
+            identities.secondary.clone(),
+            SlotPolicy {
+                secondary_requires_primary: true,
+            },
+        )
+    }
+    /// The trading job's credential for `role`: Primary for writes, and for
+    /// the Verify GET the same Secondary-else-Primary selection reads use.
+    pub(crate) fn trade_identity(
+        &self,
+        role: CredentialRole,
+    ) -> Option<(
+        safe_cex_engine::request_context::Credential,
+        safe_cex_engine::signing::Identity,
+    )> {
+        let slots = self.credential_slots();
+        let (selection, identity) = slots.select(role).ok()?;
+        Some((
+            selection.credential(identity.credential.clone()),
+            identity.clone(),
+        ))
     }
     pub(crate) fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
         let Some(market) = cx.store.market(&symbol) else {
@@ -260,30 +336,7 @@ impl Blofin {
                 "cross"
             }
         );
-        // A configured Secondary serves this GET beside a Primary. The refusal
-        // inspects the same immutable Slots that SelectedRead then selects from,
-        // a deterministic repeat; native refusal text and precedence are unchanged.
-        let identities = &self.options.identities;
-        let slots = Slots::new(
-            identities
-                .primary
-                .clone()
-                .filter(|_| !self.options.public_data_only),
-            identities.secondary.clone(),
-            SlotPolicy {
-                secondary_requires_primary: true,
-            },
-        );
-        let refusal = match slots.select(CredentialRole::Read { scope: None }) {
-            Ok((_, identity)) if identity.passphrase.is_some() => None,
-            Ok(_) => Some("BloFin requires a passphrase"),
-            Err(_) => Some("BloFin requires API credentials"),
-        };
-        let selected = match refusal {
-            Some(_) => Err(CredentialUnavailable::Missing),
-            None => SelectedRead::select(&slots, ReadRole::Read { scope: None }),
-        };
-        let message = refusal.unwrap_or("BloFin requires API credentials");
+        let (selected, message) = self.read_selection();
         let Ok(read) = SelectedRead::command(
             cx,
             selected,
@@ -463,52 +516,9 @@ impl Blofin {
             && self.options.key.as_ref().is_some_and(|s| !s.is_empty())
             && self.options.secret.as_ref().is_some_and(|s| !s.is_empty())
     }
-    pub(crate) fn headers(
-        &self,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
-        path: &str,
-        method: Method,
-        now: f64,
-        body: &str,
-    ) -> Result<Vec<(&'static str, String)>, String> {
-        if !self.signed() {
-            return Err("BloFin requires API credentials".into());
-        }
-        let read = self
-            .options
-            .read_credentials
-            .as_ref()
-            .filter(|_| method == Method::Get);
-        let pass = self
-            .options
-            .passphrase
-            .as_deref()
-            .map(|primary| {
-                read.and_then(|r| r.passphrase.as_deref())
-                    .unwrap_or(primary)
-            })
-            .filter(|s| !s.is_empty())
-            .ok_or("BloFin requires a passphrase")?;
-        let secret = read.map_or(self.options.secret.as_deref().unwrap(), |r| {
-            r.secret.as_str()
-        });
-        let nonce = safe_cex_crypto::uuid::uuid_with_entropy(fill)?;
-        let timestamp = num::format(safe_cex_engine::time::wire_stamp_ms(now));
-        Ok(vec![
-            (
-                "ACCESS-KEY",
-                read.map_or_else(|| self.options.key.clone().unwrap(), |r| r.key.clone()),
-            ),
-            (
-                "ACCESS-SIGN",
-                sign::signature(secret, path, method.as_str(), &timestamp, &nonce, body),
-            ),
-            ("ACCESS-NONCE", nonce),
-            ("ACCESS-TIMESTAMP", timestamp),
-            ("ACCESS-PASSPHRASE", pass.to_owned()),
-            ("Content-Type", "application/json".into()),
-        ])
-    }
+    /// One Background read per account leg, signed by the #2084 recipe; the
+    /// native revision checks stay the join. A refused selection, admission or
+    /// queue settles the leg through `account_failed` before any send.
     fn private_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -516,34 +526,57 @@ impl Blofin {
         request: Request,
         stream: bool,
     ) {
-        match self.headers(
-            |bytes| cx.fill_signing_entropy(bytes),
-            path,
-            Method::Get,
-            cx.now,
-            "",
-        ) {
-            Ok(headers) => {
-                let pending = Pending::Account(request);
-                if stream {
-                    cx.request_streamed(
-                        Method::Get,
-                        format!("{}{path}", self.host()),
-                        headers,
-                        ArrayAt::EnvelopeField("data"),
-                        pending,
-                    );
-                } else {
-                    cx.request(
-                        Method::Get,
-                        format!("{}{path}", self.host()),
-                        headers,
-                        None,
-                        pending,
-                    );
-                }
+        // The snapshot that may clear an order fence reads as the trading account.
+        let role = if request.reconciles() {
+            ReadRole::Primary {
+                reason: PrimaryReason::PostUnknownOrderRead,
+                scope: None,
             }
-            Err(e) => self.account_failed(cx, request, &e),
+        } else {
+            ReadRole::Read { scope: None }
+        };
+        let (selected, message) = self.read_selection_for(role);
+        let read = match SelectedRead::background(
+            cx,
+            selected,
+            ReadPolicy {
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(read) => read,
+            Err(BackgroundReadError::Selection(_)) => {
+                return self.account_failed(cx, request, message);
+            }
+            Err(BackgroundReadError::Admission(error)) => {
+                let error = error.read_venue_error().message;
+                return self.account_failed(cx, request, &error);
+            }
+        };
+        let testnet = self.options.testnet;
+        let path = path.to_owned();
+        if let Err((Pending::Account(_, request), error)) = read.queue(
+            cx,
+            ReadRequest {
+                method: Method::Get,
+                url: format!("{}{path}", self.host()),
+                body: None,
+                stream: stream.then_some(ArrayAt::EnvelopeField("data")),
+            },
+            |identity| {
+                Box::new(crate::dispatch_signing::Http::new(
+                    identity.clone(),
+                    testnet,
+                    Method::Get,
+                    path,
+                    None,
+                ))
+            },
+            |read| Pending::Account(read, request),
+        ) {
+            let error = error.read_venue_error().message;
+            self.account_failed(cx, request, &error);
         }
     }
     pub(crate) fn private_start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -750,11 +783,18 @@ impl Blofin {
             true,
         );
     }
+    /// A Primary order snapshot that may clear an order fence; owed when
+    /// another snapshot is in flight.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.reconcile_owed = true;
+        self.refresh_orders(cx, 1);
+    }
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>, attempt: u32) {
         if self.account.orders_busy || !self.signed() {
             return;
         }
         self.account.orders_busy = true;
+        let reconcile = std::mem::take(&mut self.account.reconcile_owed);
         self.orders_page(
             cx,
             Request::Orders {
@@ -767,6 +807,7 @@ impl Blofin {
                 rows: SnapshotBuilder::default(),
                 sources: HashMap::new(),
                 revision: self.account.orders_revision,
+                reconcile,
                 failed: false,
             },
         );
@@ -1464,6 +1505,7 @@ impl Blofin {
                 rows,
                 mut sources,
                 revision,
+                reconcile,
                 failed: false,
             } => {
                 if page_rows > 0 {
@@ -1480,6 +1522,7 @@ impl Blofin {
                                 rows,
                                 sources,
                                 revision,
+                                reconcile,
                                 failed: true,
                             },
                             "BloFin pending order pagination did not advance",
@@ -1498,6 +1541,7 @@ impl Blofin {
                             rows,
                             sources,
                             revision,
+                            reconcile,
                             failed: false,
                         },
                     );
@@ -1514,6 +1558,7 @@ impl Blofin {
                             rows,
                             sources,
                             revision,
+                            reconcile,
                             failed: false,
                         },
                     );
@@ -1651,12 +1696,22 @@ impl Blofin {
                         rows.extend(kept);
                         self.account.sources = sources;
                         cx.store.set_orders(rows);
-                        // A rejected row may be an uncertain placement; it proves nothing.
-                        if clean {
+                        // A rejected row may be an uncertain placement; it proves
+                        // nothing. Only a Primary reconcile snapshot clears a fence.
+                        if clean && reconcile {
                             cx.orders_reconciled(None);
+                        } else if reconcile {
+                            self.account.reconcile_owed = true;
                         }
-                    } else if self.account.retry.is_none() {
-                        self.account.retry = Some((cx.set_timer(1_000.0), 1));
+                    } else {
+                        self.account.reconcile_owed |= reconcile;
+                        if self.account.retry.is_none() {
+                            self.account.retry = Some((cx.set_timer(1_000.0), 1));
+                        }
+                    }
+                    // A reconcile requested behind this snapshot runs now.
+                    if !reconcile && self.account.reconcile_owed && self.account.retry.is_none() {
+                        self.refresh_orders(cx, 1);
                     }
                 }
             }
@@ -1680,8 +1735,11 @@ impl Blofin {
         error: &str,
     ) {
         match request {
-            Request::Orders { attempt, .. } => {
+            Request::Orders {
+                attempt, reconcile, ..
+            } => {
                 self.account.orders_busy = false;
+                self.account.reconcile_owed |= reconcile;
                 if attempt < 3 && self.account.auth_failures == 0 {
                     self.account.retry =
                         Some((cx.set_timer(1000.0 * f64::from(attempt)), attempt + 1));

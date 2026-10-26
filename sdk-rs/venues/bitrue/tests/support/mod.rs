@@ -29,13 +29,10 @@ impl Options {
             .as_ref()
             .is_some_and(|r| r.validate().is_err())
         {
-            Some(Identity {
-                credential: KeyRef(String::new()),
-                signing: KeyRef(String::new()),
-                passphrase: None,
-                stable_id: None,
-                extra: Default::default(),
-            })
+            Some(Identity::new(
+                KeyRef(String::new()),
+                Some(KeyRef(String::new())),
+            ))
         } else {
             identities.secondary.clone()
         };

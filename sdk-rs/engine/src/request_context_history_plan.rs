@@ -18,56 +18,19 @@ pub(crate) struct PreparedHistoryTerminal {
 }
 
 impl<P> Cx<'_, P> {
+    #[inline]
     pub(crate) fn read_history_expiry_is_current(&self, plan: &Plan) -> Result<bool, Error> {
-        if self
-            .io
-            .core
-            .http_plan_expiring
-            .as_ref()
-            .is_some_and(|current| current.same_plan(plan))
-        {
-            self.io.core.request_contexts.validate_plan_seal_origin(
-                plan,
-                self.now,
-                self.io.core.http_delivery.as_ref(),
-            )?;
-            return Ok(true);
-        }
-        Ok(false)
+        self.core_ref().read_history_expiry_is_current(plan)
     }
+    #[inline]
     pub(crate) fn validate_read_history_data(
         &self,
         plan: &Plan,
         slot: &Slot,
         context: &Context,
     ) -> Result<Attempt, Error> {
-        if self.io.core.http_owner_poison
-            || self.io.core.http_plan_poison
-            || self.io.core.http_plan_expiring.is_some()
-        {
-            return Err(Error::Revoked);
-        }
-        self.validate_plan_delivery(plan, context)?;
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .validate_plan(plan, self.now)?;
-        if !body.history_bound
-            || body.policy.operation != Operation::Read
-            || body.receipt_cap.is_none()
-            || !matches!(plan.owner(), Owner::Command { .. })
-        {
-            return Err(Error::Invalid);
-        }
-        let index = body.schedule.ordinal(slot)?;
-        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
-        if !body.entries[index].call.as_ref().is_some_and(|call| {
-            call.context.same_issuer(context) && call.context == *context && call.matches(delivery)
-        }) {
-            return Err(Error::Revoked);
-        }
-        Ok(delivery.attempt)
+        self.core_ref()
+            .validate_read_history_data(plan, slot, context)
     }
     pub(crate) fn prepare_read_history_page(
         &mut self,
@@ -90,27 +53,9 @@ impl<P> Cx<'_, P> {
         assert!(!self.io.core.http_owner_poison && !self.io.core.http_plan_poison);
         self.io.core.http_owner_poison = true;
     }
+    #[inline]
     fn settle_read_history_page(&mut self, plan: &Plan, slot: &Slot, context: &Context) {
-        self.io
-            .core
-            .request_contexts
-            .contexts
-            .remove(&context.leg());
-        let body = self
-            .io
-            .core
-            .request_contexts
-            .plan_body_mut(plan)
-            .expect("prepared history Plan");
-        let index = body.schedule.ordinal(slot).expect("prepared history Slot");
-        body.schedule
-            .settle(slot)
-            .expect("prepared active history Slot");
-        body.entries[index].call = None;
-        body.entries[index].credit = Credit::Released;
-        body.handoff = self.io.core.http_delivery.clone();
-        body.refresh_availability(self.now);
-        self.rearm_plan(plan);
+        self.core().settle_read_history_page(plan, slot, context)
     }
     pub(crate) fn commit_read_history_page(&mut self, prepared: PreparedHistoryPage) {
         self.io.commit_read_history_cleanup(prepared.cleanup);
@@ -219,6 +164,110 @@ impl<P> Cx<'_, P> {
         self.commit_plan_terminal(&prepared.plan, result, prepared.seal)
             .expect("prepared history terminal");
         self.io.core.http_owner_poison = false;
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
+    pub(crate) fn read_history_expiry_is_current(&self, plan: &Plan) -> Result<bool, Error> {
+        self.core_ref().read_history_expiry_is_current(plan)
+    }
+
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    #[inline]
+    pub(crate) fn validate_read_history_data(
+        &self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Attempt, Error> {
+        self.core_ref()
+            .validate_read_history_data(plan, slot, context)
+    }
+
+    fn settle_read_history_page(&mut self, plan: &Plan, slot: &Slot, context: &Context) {
+        self.io
+            .core
+            .request_contexts
+            .contexts
+            .remove(&context.leg());
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .plan_body_mut(plan)
+            .expect("prepared history Plan");
+        let index = body.schedule.ordinal(slot).expect("prepared history Slot");
+        body.schedule
+            .settle(slot)
+            .expect("prepared active history Slot");
+        body.entries[index].call = None;
+        body.entries[index].credit = Credit::Released;
+        body.handoff = self.io.core.http_delivery.clone();
+        body.refresh_availability(self.now);
+        self.rearm_plan(plan);
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(crate) fn read_history_expiry_is_current(&self, plan: &Plan) -> Result<bool, Error> {
+        if self
+            .io
+            .core
+            .http_plan_expiring
+            .as_ref()
+            .is_some_and(|current| current.same_plan(plan))
+        {
+            self.io.core.request_contexts.validate_plan_seal_origin(
+                plan,
+                self.now,
+                self.io.core.http_delivery.as_ref(),
+            )?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    // Only some feature combinations call this.
+    #[cfg_attr(feature = "http-plans", allow(dead_code))]
+    pub(crate) fn validate_read_history_data(
+        &self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+    ) -> Result<Attempt, Error> {
+        if self.io.core.http_owner_poison
+            || self.io.core.http_plan_poison
+            || self.io.core.http_plan_expiring.is_some()
+        {
+            return Err(Error::Revoked);
+        }
+        self.validate_plan_delivery(plan, context)?;
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if !body.history_bound
+            || body.policy.operation != Operation::Read
+            || body.receipt_cap.is_none()
+            || !matches!(plan.owner(), Owner::Command { .. })
+        {
+            return Err(Error::Invalid);
+        }
+        let index = body.schedule.ordinal(slot)?;
+        let delivery = self.io.core.http_delivery.as_ref().ok_or(Error::Revoked)?;
+        if !body.entries[index].call.as_ref().is_some_and(|call| {
+            call.context.same_issuer(context) && call.context == *context && call.matches(delivery)
+        }) {
+            return Err(Error::Revoked);
+        }
+        Ok(delivery.attempt)
     }
 }
 

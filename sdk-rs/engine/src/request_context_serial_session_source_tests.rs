@@ -1,0 +1,226 @@
+// Source-stage controls extend the reviewed originals without weakening them.
+mod source_controls {
+    use super::*;
+
+    #[test]
+    fn floor_is_the_released_revision_not_the_current_cache() {
+        let mut e = start(false, 2);
+        let first = prep(&drain(&mut e));
+        let packet = release(&mut e, first, 0.);
+        e.venue.revision = 2;
+        reply(&mut e, first, 1., 200, r#"{"code":1000}"#);
+        assert_eq!(e.venue.selected, vec![Ok(())]);
+        let second = prep(&drain(&mut e));
+        let retried = release(&mut e, second, 2.);
+        assert_eq!(retried.body, packet.body);
+        assert!(
+            retried
+                .headers
+                .iter()
+                .any(|(k, v)| *k == "Authorization" && v == "token-2")
+        );
+    }
+
+    #[test]
+    fn native_codec_statuses_never_consult_the_exemption_hook() {
+        for status in [200, 201, 400, 401, 403, 404, 429] {
+            let mut e = start(false, 1);
+            let first = prep(&drain(&mut e));
+            release(&mut e, first, 0.);
+            reply(&mut e, first, 1., status, r#"{"code":0}"#);
+            assert_eq!(e.venue.exempt_calls.get(), 0, "status {status}");
+        }
+    }
+
+    #[test]
+    fn every_unproven_status_consults_the_full_body_before_evidence() {
+        for status in [408, 500, 502, 503, 504, 599] {
+            let mut e = start(false, 2);
+            auth(&mut e, status);
+            assert_eq!(e.venue.exempt_calls.get(), 1, "status {status}");
+            assert_eq!(e.venue.selected, vec![Ok(())]);
+            assert_eq!(e.venue.unproven.get(), 0);
+        }
+    }
+
+    #[test]
+    fn read_two_attempts_remain_generic_retry_never() {
+        let mut e = start(true, 2);
+        assert_eq!(e.venue.admitted, Some(Ok(())));
+        let plan = e.venue.plan.clone().unwrap();
+        let slot = e.venue.slot.clone().unwrap();
+        let context = e.venue.context.clone().unwrap();
+        let before = e.io.core.next_id;
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        assert_eq!(
+            cx.plan_retry_context(
+                &plan,
+                &slot,
+                &context,
+                crate::request_context::RetryEvidence::ReadFailure
+            ),
+            Err(Error::RetryForbidden)
+        );
+        assert_eq!(cx.io.core.next_id, before);
+    }
+
+    #[test]
+    fn released_read_integrity_failure_is_not_an_immediate_network_retry() {
+        let mut e = start(true, 1);
+        e.venue.immediate = true;
+        let first = prep(&drain(&mut e));
+        release(&mut e, first, 0.);
+        e.handle(
+            1.,
+            Event::HttpStart {
+                request: first.attempt().request,
+                status: 200,
+                headers: "",
+            },
+        );
+        e.handle(
+            1.,
+            Event::HttpChunk {
+                request: first.attempt().request,
+                data: &[0xff],
+            },
+        );
+        e.handle(
+            1.,
+            Event::HttpEnd {
+                request: first.attempt().request,
+            },
+        );
+        let actions = drain(&mut e);
+        assert!(e.venue.selected.iter().all(Result::is_err));
+        no_http(&actions);
+        failed(&actions);
+    }
+    #[test]
+    fn prior_serial_ids_survive_a_parked_resend_expiry() {
+        let mut e = start(false, 1);
+        e.venue.continue_after_success = true;
+        let first = prep(&drain(&mut e));
+        release(&mut e, first, 0.);
+        reply(&mut e, first, 1., 200, r#"{"code":0}"#);
+        let next = prep(&drain(&mut e));
+        release(&mut e, next, 2.);
+        reply(&mut e, next, 3., 200, r#"{"code":1000}"#);
+        let resend = prep(&drain(&mut e));
+        assert!(bind(&mut e, resend, 4.).is_none());
+        let timer = e.venue.park_timer.unwrap();
+        e.handle(20_004., Event::TimerFired { timer });
+        let actions = drain(&mut e);
+        assert_eq!(failed(&actions).outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(
+            failed(&actions).partial.as_ref().unwrap().order_ids,
+            ["id-1"]
+        );
+        assert_eq!(
+            e.venue.preparation_errors.last().unwrap().outcome,
+            Some(crate::Outcome::NotSent)
+        );
+    }
+    #[test]
+    fn foreign_slot_refuses_without_selecting_or_spending() {
+        let foreign = start(false, 2);
+        let mut e = start(false, 2);
+        e.venue.slot_override = foreign.venue.slot.clone();
+        let (_, _, actions) = auth(&mut e, 200);
+        assert!(e.venue.selected[0].is_err());
+        assert!(e.venue.unchanged[0]);
+        no_http(&actions);
+    }
+
+    #[test]
+    fn a_real_grant_from_another_command_cannot_select_a_resend() {
+        let mut e = start(false, 2);
+        e.venue.capture_grant = true;
+        auth(&mut e, 200);
+        assert!(e.venue.grant_override.is_some());
+        e.handle_command(
+            2.,
+            Command::PlaceOrders {
+                command: 8,
+                orders: vec![
+                    serde_json::from_str(
+                        r#"{"symbol":"BTCUSD","type":"limit","side":"buy","amount":1,"price":1}"#,
+                    )
+                    .unwrap(),
+                ],
+            },
+            None,
+        )
+        .unwrap();
+        let second = prep(&drain(&mut e));
+        release(&mut e, second, 2.);
+        reply(&mut e, second, 3., 200, r#"{"code":1000}"#);
+        let actions = drain(&mut e);
+        assert_eq!(e.venue.selected, vec![Err(Error::Revoked)]);
+        assert!(e.venue.unchanged[0]);
+        no_http(&actions);
+    }
+
+    #[test]
+    fn a_read_failure_continuation_is_a_new_call_not_auth_attempt_two() {
+        let mut e = start(true, 2);
+        e.venue.immediate = true;
+        let old = e.venue.context.clone().unwrap();
+        let first = prep(&drain(&mut e));
+        release(&mut e, first, 0.);
+        e.handle(
+            1.,
+            Event::HttpFailed {
+                request: first.attempt().request,
+                error: "network",
+            },
+        );
+        let actions = drain(&mut e);
+        assert_eq!(e.venue.selected, vec![Ok(())]);
+        assert_ne!(e.venue.context.as_ref().unwrap().leg(), old.leg());
+        assert_ne!(prep(&actions).attempt().request, first.attempt().request);
+    }
+    #[test]
+    fn unbound_read_two_is_admissible_but_cannot_select_auth_attempt_two() {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            read: true,
+            unbound: true,
+            attempts: 2,
+            exempt: true,
+            ..Default::default()
+        });
+        e.start(0.);
+        e.handle_command(
+            0.,
+            Command::PlaceOrders {
+                command: 7,
+                orders: vec![
+                    serde_json::from_str(
+                        r#"{"symbol":"BTCUSD","type":"limit","side":"buy","amount":1,"price":1}"#,
+                    )
+                    .unwrap(),
+                ],
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(e.venue.admitted, Some(Ok(())));
+        let first = prep(&drain(&mut e));
+        let packet = release(&mut e, first, 0.);
+        assert!(
+            !packet
+                .headers
+                .iter()
+                .any(|(name, _)| *name == "Authorization")
+        );
+        reply(&mut e, first, 1., 200, r#"{"code":1000}"#);
+        let actions = drain(&mut e);
+        assert_eq!(e.venue.selected, vec![Err(Error::Invalid)]);
+        assert!(e.venue.unchanged[0]);
+        no_http(&actions);
+    }
+}

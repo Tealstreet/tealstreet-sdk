@@ -1,43 +1,150 @@
-//! Preflighted command jobs. A lost write response is never retried.
+//! Trading command jobs: each command owns a Preflight root and one streamed
+//! serial Plan. A lost write response is never retried.
 use super::*;
+use safe_cex_engine::classify::{
+    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict,
+    WriteFact, decode_int,
+};
+use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{ErrorKind, Outcome, VenueError};
+use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
+use safe_cex_engine::request_context::{
+    HttpOwnerRetirement, Plan, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData,
+};
+use safe_cex_engine::{CommandWait, ErrorKind, Outcome, VenueError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 const BROKER: &str = "b3cdedc0a20880ba";
+/// Each call's own bound; the streamed Plan has no whole-job deadline.
+const CALL_MS: u32 = 20_000;
+
+/// BloFin's documented error codes (docs.blofin.com, "Errors", read
+/// 2026-10-26). Cited refusals are pre-execution; anything unlisted proves
+/// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
+/// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
+const CODES: CodeTable = CodeTable {
+    rows: &[
+        // "Bad Request" and "Invalid signature" body codes.
+        refused(Key::Int(400), ErrorKind::InvalidInput),
+        refused(Key::Int(401), ErrorKind::AuthInvalid),
+        // Request parameter validation.
+        refused(Key::Range(152001, 152015), ErrorKind::InvalidInput),
+        refused(Key::Int(152420), ErrorKind::InvalidInput),
+        refused(Key::Int(152423), ErrorKind::InvalidInput),
+        // Order, price and size rules.
+        refused(Key::Int(542), ErrorKind::Rejected),
+        refused(Key::Int(102002), ErrorKind::Rejected),
+        refused(Key::Int(102014), ErrorKind::Rejected),
+        refused(Key::Int(102015), ErrorKind::Rejected),
+        refused(Key::Int(102022), ErrorKind::Rejected),
+        refused(Key::Range(102037, 102055), ErrorKind::Rejected),
+        refused(Key::Int(102064), ErrorKind::Rejected),
+        refused(Key::Int(102065), ErrorKind::Rejected),
+        refused(Key::Int(102089), ErrorKind::Rejected),
+        refused(Key::Int(102167), ErrorKind::Rejected),
+        // Native: Multi-Position mode refuses the whole placement.
+        refused(Key::Int(102143), ErrorKind::Unsupported),
+        // Balance and margin.
+        refused(Key::Int(103003), ErrorKind::Rejected),
+        refused(Key::Int(150004), ErrorKind::Rejected),
+        // Duplicate client order ID.
+        refused(Key::Int(150003), ErrorKind::InvalidInput),
+        refused(Key::Int(152030), ErrorKind::InvalidInput),
+        // Leverage and margin-mode settings blocked.
+        refused(Key::Int(110006), ErrorKind::Rejected),
+        refused(Key::Int(110019), ErrorKind::Rejected),
+        // Authentication.
+        refused(Key::Int(152401), ErrorKind::AuthInvalid),
+        refused(Key::Int(152402), ErrorKind::AuthExpired),
+        refused(Key::Int(152406), ErrorKind::AuthPermission),
+        refused(Key::Int(152408), ErrorKind::AuthInvalid),
+        refused(Key::Int(152409), ErrorKind::AuthInvalid),
+        // Internal error: proves nothing.
+        Row {
+            key: Key::Int(103013),
+            verdict: Verdict::Unknown(Some(ErrorKind::Internal)),
+            only: None,
+        },
+        // "The order has been canceled" and "Cancel failed: does not exist".
+        gone(1000),
+        gone(102068),
+    ],
+    success: &[Key::Int(0)],
+    unlisted: Verdict::Unknown(None),
+    status: &[
+        // "Network Firewall Restrictions" and "Rate Limits".
+        (403, Verdict::Refused(ErrorKind::AuthPermission)),
+        (429, Verdict::Refused(ErrorKind::RateLimited)),
+    ],
+};
+
+const fn refused(key: Key, kind: ErrorKind) -> Row {
+    Row {
+        key,
+        verdict: Verdict::Refused(kind),
+        only: None,
+    }
+}
+
+const fn gone(code: i64) -> Row {
+    Row {
+        key: Key::Int(code),
+        verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+        only: Some(Intent::Cancel),
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Trading {
     acknowledged: HashMap<String, Target>,
-    queue: VecDeque<Command>,
-    busy: bool,
-    pause: Option<(TimerId, Job)>,
-    joined: Option<Joined>,
+    /// Commands behind the active job, each a Preflight parked with no I/O.
+    queue: VecDeque<Queued>,
+    active: Option<Active>,
+    /// A job whose Plan the engine sealed itself: restore its Store rows and
+    /// reconcile at the next callback that holds Cx.
+    retired: Option<Job>,
 }
-struct Joined {
+struct Queued {
+    preflight: Preflight,
+    command: Command,
+    /// The caller's wait, when it set one.
+    deadline: Option<f64>,
+}
+struct Active {
+    preflight: Preflight,
+    plan: Option<Plan>,
     job: Job,
-    remaining: u8,
-    error: Option<VenueError>,
-    /// A leg took effect, so the other leg's refusal cannot mean nothing happened.
-    succeeded: bool,
 }
 pub struct Request {
-    job: Job,
+    command: CommandId,
+    slot: Slot,
+    context: Context,
     step: Step,
-    joined: bool,
+}
+/// Where the active job is driven from: entry custody, the current call's
+/// DATA, or a Plan-ready callback holding the next slot.
+enum At<'a> {
+    Entry,
+    Data(&'a Slot, &'a Context),
+    Ready(Slot),
 }
 struct Job {
     command: CommandId,
+    intent: Intent,
     steps: VecDeque<Step>,
     ids: Vec<String>,
-    creating: Vec<Order>,
-    affected: Vec<String>,
+    /// Store rows issued so far, restored on every terminal.
+    creating: Vec<String>,
+    canceling: Vec<String>,
     replacement_targets: Vec<Target>,
     commit: Commit,
-    /// A step took effect, so a later rejection cannot mean nothing happened.
-    effective: bool,
+    /// The hedged leverage legs: a failure refreshes the account, as native's join did.
+    join: bool,
 }
 struct Step {
     receipts: Vec<OrderIdentityReceipt>,
+    /// Creating rows this placement call adds.
+    orders: Vec<Order>,
     path: &'static str,
     body: String,
     effect: Effect,
@@ -258,16 +365,33 @@ fn positive(value: f64, label: &str) -> Result<(), String> {
     }
 }
 impl Job {
-    fn new(command: CommandId) -> Self {
+    fn new(command: CommandId, intent: Intent) -> Self {
         Self {
             command,
+            intent,
             steps: VecDeque::new(),
             ids: vec![],
             creating: vec![],
-            affected: vec![],
+            canceling: vec![],
             replacement_targets: vec![],
             commit: Commit::None,
-            effective: false,
+            join: false,
+        }
+    }
+}
+impl Step {
+    fn read(&self) -> bool {
+        matches!(self.effect, Effect::Verify(_))
+    }
+    fn is_place(&self) -> bool {
+        matches!(self.effect, Effect::Place { .. })
+    }
+    fn intent(&self) -> Intent {
+        match self.effect {
+            Effect::Place { .. } => Intent::Place,
+            Effect::Cancel(_) => Intent::Cancel,
+            Effect::Verify(_) => Intent::Read,
+            Effect::Setting => Intent::Setting,
         }
     }
 }
@@ -636,6 +760,7 @@ impl Blofin {
             for target in job.replacement_targets.iter().filter(|t| t.family == 0) {
                 job.steps.push_back(Step {
                     receipts: Vec::new(),
+                    orders: Vec::new(),
                     path: "/api/v1/trade/order-detail",
                     body: String::new(),
                     effect: Effect::Verify(target.clone()),
@@ -645,6 +770,7 @@ impl Blofin {
         }
         let mut normal = Vec::new();
         let mut normal_receipts = Vec::new();
+        let mut normal_orders = Vec::new();
         let mut special = Vec::new();
         for (family, p, order) in rows {
             let receipt = OrderIdentityReceipt {
@@ -652,12 +778,12 @@ impl Blofin {
                 kind: OrderIdentityKind::ClientOrderId,
                 identity: p.client_order_id.clone(),
             };
-            job.creating.push(order);
             if family == 0 {
                 normal.push(p);
                 normal_receipts.push(receipt);
+                normal_orders.push(order);
             } else {
-                special.push((family, p, receipt));
+                special.push((family, p, receipt, order));
             }
         }
         // Keep caller order while respecting BloFin's homogeneous-batch rule.
@@ -671,9 +797,11 @@ impl Blofin {
                 .count();
             let batch = &normal[start..start + count];
             let receipts = normal_receipts[start..start + count].to_vec();
+            let orders = normal_orders[start..start + count].to_vec();
             start += count;
             job.steps.push_back(Step {
                 receipts,
+                orders,
                 path: "/api/v1/trade/batch-orders",
                 body: serde_json::to_string(batch).unwrap(),
                 effect: Effect::Place {
@@ -684,9 +812,10 @@ impl Blofin {
                 delay: 350.0,
             });
         }
-        for (family, payload, receipt) in special {
+        for (family, payload, receipt, order) in special {
             job.steps.push_back(Step {
                 receipts: vec![receipt],
+                orders: vec![order],
                 path: if family == 1 {
                     "/api/v1/trade/order-tpsl"
                 } else {
@@ -791,10 +920,9 @@ impl Blofin {
                         algo_id: (family == 2).then_some(t.id.as_str()),
                     })
                     .collect();
-                job.affected
-                    .extend(batch.iter().flat_map(|t| t.store_ids.clone()));
                 job.steps.push_back(Step {
                     receipts: Vec::new(),
+                    orders: Vec::new(),
                     path: match family {
                         0 => "/api/v1/trade/cancel-batch-orders",
                         1 => "/api/v1/trade/cancel-tpsl",
@@ -908,20 +1036,61 @@ impl Blofin {
         self.placement(cx, &raw, source)
     }
     pub(crate) fn trading_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        // The owed refresh allocates I/O, so it waits until this command has
+        // used its own admission.
+        let retired = self.restore_retired(cx);
+        self.enter_trade(cx, command);
+        if let Some(join) = retired {
+            self.refresh_retired(cx, join);
+        }
+    }
+    /// Root first: the Preflight exists before validation, so every refusal is
+    /// its own NotSent terminal. A command behind a live job parks in FIFO order.
+    fn enter_trade(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         self.trading.acknowledged.retain(|id, _| {
             !cx.store
                 .orders()
                 .iter()
                 .any(|o| o.id == *id || o.parent_id.as_ref() == Some(id))
         });
-        let (id, plan) = self.plan_trade(cx, command.clone());
-        match plan {
-            Ok(_) => {
-                self.trading.queue.push_back(command);
-                self.trade_next(cx);
+        let policy = PreflightPolicy {
+            purpose: PreflightPurpose::WriteAfterReads,
+            read_credential: self
+                .trade_identity(CredentialRole::Read { scope: None })
+                .map(|(credential, _)| credential),
+            write_credential: self
+                .trade_identity(CredentialRole::Mutation)
+                .map(|(credential, _)| credential),
+        };
+        // A parked command keeps its caller's wait; it is checked at its wake.
+        let deadline = match cx.command_wait() {
+            Some(CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Mutation);
+                return;
             }
-            Err(e) => cx.fail(id, not_sent(e).kind(ErrorKind::InvalidInput)),
+            Some(CommandWait::Remaining(ms)) => Some(cx.now + f64::from(ms)),
+            None => None,
+        };
+        let Ok(preflight) = cx.begin_preflight(policy) else {
+            return;
+        };
+        if let (_, Err(error)) = self.plan_trade(cx, command.clone()) {
+            let _ = cx.fail_preflight(&preflight, not_sent(error).kind(ErrorKind::InvalidInput));
+            return;
         }
+        if self.trading.active.is_some() || !self.trading.queue.is_empty() {
+            if let Err(reason) = cx.park_preflight(&preflight) {
+                let _ = cx.fail_preflight(&preflight, not_sent(reason.venue_error().message));
+                return;
+            }
+            self.trading.queue.push_back(Queued {
+                preflight,
+                command,
+                deadline,
+            });
+            return;
+        }
+        self.start_job(cx, preflight, command);
     }
     fn plan_trade(
         &self,
@@ -945,7 +1114,13 @@ impl Blofin {
             if !self.account.mode_loaded || self.account.margin.is_none() {
                 return Err("BloFin account settings are not loaded".into());
             }
-            let mut job = Job::new(command_id);
+            let intent = match &command {
+                Command::PlaceOrders { .. } => Intent::Place,
+                Command::AmendOrder { .. } => Intent::Amend,
+                Command::CancelOrders { .. } | Command::CancelSymbolOrders { .. } => Intent::Cancel,
+                _ => Intent::Setting,
+            };
+            let mut job = Job::new(command_id, intent);
             match command {
                 Command::PlaceOrders { orders, .. } => {
                     if self.trading.acknowledged.len() >= 4096 {
@@ -1111,9 +1286,11 @@ impl Blofin {
                     } else {
                         vec![None]
                     };
+                    job.join = sides.len() == 2;
                     for side in sides {
                         job.steps.push_back(Step {
                             receipts: Vec::new(),
+                            orders: Vec::new(),
                             path: "/api/v1/account/set-leverage",
                             body: serde_json::to_string(&Leverage {
                                 inst_id: &market.id,
@@ -1136,6 +1313,7 @@ impl Blofin {
                     };
                     job.steps.push_back(Step {
                         receipts: Vec::new(),
+                        orders: Vec::new(),
                         path: "/api/v1/account/set-margin-mode",
                         body: format!("{{\"marginMode\":\"{}\"}}", margin(mode)),
                         effect: Effect::Setting,
@@ -1146,6 +1324,7 @@ impl Blofin {
                 Command::SetPositionMode { hedged, .. } => {
                     job.steps.push_back(Step {
                         receipts: Vec::new(),
+                        orders: Vec::new(),
                         path: "/api/v1/account/set-position-mode",
                         body: format!(
                             "{{\"positionMode\":\"{}\"}}",
@@ -1166,163 +1345,152 @@ impl Blofin {
         })();
         (command_id, plan)
     }
-    fn trade_next(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.trading.busy {
-            return;
+    /// Plans against the current Store, then admits the first call.
+    fn start_job(&mut self, cx: &mut Cx<'_, Pending>, preflight: Preflight, command: Command) {
+        let job = match self.plan_trade(cx, command).1 {
+            Ok(job) => job,
+            Err(error) => {
+                let _ =
+                    cx.fail_preflight(&preflight, not_sent(error).kind(ErrorKind::InvalidInput));
+                return self.next_job(cx);
+            }
+        };
+        if matches!(job.commit, Commit::Margin(_))
+            && (cx.store.positions().iter().any(|p| p.contracts > 0.0)
+                || cx
+                    .store
+                    .orders()
+                    .iter()
+                    .any(|o| o.status == OrderStatus::Open))
+        {
+            cx.notice(
+                Level::Error,
+                code::SETTING_CAUTION,
+                "Changing margin type with open positions / orders is allowed but can cause unexpected behavior. Symbols with open positions will remain synced to previous mode until position is closed.",
+            );
         }
-        if let Some(command) = self.trading.queue.pop_front() {
-            let (id, plan) = self.plan_trade(cx, command);
-            let job = match plan {
-                Ok(job) => job,
-                Err(e) => {
-                    cx.fail(id, not_sent(e).kind(ErrorKind::InvalidInput));
-                    self.trade_next(cx);
-                    return;
-                }
-            };
-            if matches!(job.commit, Commit::Margin(_))
-                && (cx.store.positions().iter().any(|p| p.contracts > 0.0)
-                    || cx
-                        .store
-                        .orders()
-                        .iter()
-                        .any(|o| o.status == OrderStatus::Open))
-            {
-                cx.notice(
-                    Level::Error,
-                    code::SETTING_CAUTION,
-                    "Changing margin type with open positions / orders is allowed but can cause unexpected behavior. Symbols with open positions will remain synced to previous mode until position is closed.",
-                );
-            }
-            self.trading.busy = true;
-            self.account.orders_revision += 1;
-            for order in &job.creating {
-                cx.store.upsert_order(order.clone());
-            }
-            for id in &job.affected {
-                cx.store.set_order_status(id, OrderStatus::Canceling);
-            }
-            self.trade_step(cx, job);
+        if job.steps.is_empty() {
+            let _ = cx.done_empty_plan(&preflight, "[]".into());
+            return self.next_job(cx);
         }
+        let active = Active {
+            preflight,
+            plan: None,
+            job,
+        };
+        self.drive(cx, active, At::Entry);
     }
-    fn trade_step(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job) {
-        if matches!(&job.commit, Commit::Leverage { .. }) && job.steps.len() == 2 {
-            let mut prepared = Vec::new();
-            while let Some(step) = job.steps.pop_front() {
-                match self.headers(
-                    |bytes| cx.fill_signing_entropy(bytes),
-                    step.path,
-                    Method::Post,
-                    cx.now,
-                    &step.body,
-                ) {
-                    Ok(headers) => prepared.push((step, headers)),
-                    Err(e) => {
-                        self.trade_failed(
-                            cx,
-                            Request {
-                                job,
-                                step,
-                                joined: false,
-                            },
-                            not_sent(e),
-                        );
-                        return;
-                    }
-                }
-            }
-            let command = job.command;
-            self.trading.joined = Some(Joined {
-                job,
-                remaining: 2,
-                error: None,
-                succeeded: false,
-            });
-            for (step, headers) in prepared {
-                cx.request(
-                    Method::Post,
-                    format!("{}{}", self.host(), step.path),
-                    headers,
-                    Some(step.body.clone()),
-                    Pending::Trade(Request {
-                        job: Job::new(command),
-                        step,
-                        joined: true,
-                    }),
-                );
-            }
-            return;
-        }
-        let Some(step) = job.steps.pop_front() else {
-            self.cleanup_job(cx, &job);
-            match &job.commit {
-                Commit::None => {}
-                Commit::Leverage { symbol, leverage } => {
-                    self.account.settings_revision += 1;
-                    self.account.positions_revision += 1;
-                    cx.store.update_setting(symbol, |s| {
-                        s.leverage = *leverage;
-                        s.buy_leverage = Some(*leverage);
-                        s.sell_leverage = Some(*leverage);
-                    });
-                    cx.store.update_positions(|p| {
-                        if p.symbol == *symbol {
-                            p.leverage = *leverage;
-                        }
-                    });
-                }
-                Commit::Margin(mode) => {
-                    self.account.settings_revision += 1;
-                    self.account.positions_revision += 1;
-                    self.account.margin = Some(*mode);
-                    let symbols = cx
-                        .store
-                        .markets()
-                        .iter()
-                        .map(|m| m.symbol.clone())
-                        .collect::<Vec<_>>();
-                    for symbol in symbols {
-                        if !cx
-                            .store
-                            .positions()
-                            .iter()
-                            .any(|p| p.symbol == symbol && p.contracts > 0.0)
-                        {
-                            cx.store
-                                .update_setting(&symbol, |s| s.margin_type = Some(*mode));
-                        }
-                    }
-                    self.refresh_account(cx);
-                }
-                Commit::Mode(hedged) => {
-                    self.account.settings_revision += 1;
-                    self.account.positions_revision += 1;
-                    cx.store.set_hedged(*hedged);
-                }
-            }
-            cx.done(job.command, serde_json::to_string(&job.ids).unwrap());
-            self.trading.busy = false;
-            self.trade_next(cx);
-            return;
+    /// Advances the active job from `at`: abort on execution progress, admit
+    /// or continue the next call, or settle.
+    fn drive(&mut self, cx: &mut Cx<'_, Pending>, mut active: Active, at: At<'_>) {
+        let current = match &at {
+            At::Data(slot, context) => Some((*slot, *context)),
+            _ => None,
+        };
+        let Some(step) = active.job.steps.pop_front() else {
+            return self.finish(cx, active, current);
         };
         if matches!(step.effect, Effect::Place { .. } | Effect::Verify(_))
-            && job.replacement_targets.iter().any(|target| {
+            && active.job.replacement_targets.iter().any(|target| {
                 self.filled_native(&target.id) > target.filled_native
                     || cx.store.order(&target.id).is_some_and(|o| {
                         o.status == OrderStatus::Closed || o.filled > target.filled
                     })
             })
         {
-            self.trade_failed(
+            let error = VenueError::new("BloFin replacement aborted after execution progress");
+            return self.end(cx, active, current, error);
+        }
+        let next = serial(&step);
+        let slot = match at {
+            At::Entry => {
+                let Some((credential, _)) = self.trade_identity(CredentialRole::Mutation) else {
+                    return self.end(
+                        cx,
+                        active,
+                        None,
+                        not_sent("BloFin requires API credentials"),
+                    );
+                };
+                let policy = SerialPolicy {
+                    credential,
+                    pacing: None,
+                    refusals_complete: true,
+                };
+                match cx.admit_serial_plan(&active.preflight, next, policy) {
+                    Ok((plan, slot)) => {
+                        active.plan = Some(plan);
+                        slot
+                    }
+                    Err(reason) => {
+                        let error = not_sent(reason.venue_error().message);
+                        return self.end(cx, active, None, error);
+                    }
+                }
+            }
+            At::Data(slot, context) => {
+                let plan = active.plan.clone().expect("live Plan");
+                match cx.continue_serial_plan(&plan, slot, context, next) {
+                    Ok(slot) => slot,
+                    Err(reason) => {
+                        let error = VenueError::new(reason.venue_error().message);
+                        return self.end(cx, active, current, error);
+                    }
+                }
+            }
+            At::Ready(slot) => slot,
+        };
+        self.issue(cx, active, slot, step);
+    }
+    /// Queues one Plan call, applying native optimistic status after admission
+    /// and before release.
+    fn issue(&mut self, cx: &mut Cx<'_, Pending>, mut active: Active, slot: Slot, step: Step) {
+        let plan = active.plan.clone().expect("admitted Plan");
+        let narrowed = matches!(
+            (active.job.intent, step.intent()),
+            (Intent::Place, Intent::Cancel) | (Intent::Amend, Intent::Place)
+        );
+        let context = if narrowed {
+            cx.plan_leg_context_with_intent(&plan, &slot, step.intent())
+        } else {
+            cx.plan_leg_context(&plan, &slot)
+        };
+        let context = match context {
+            Ok(context) => context,
+            Err(reason) => {
+                let error = VenueError::new(reason.venue_error().message);
+                return self.end(cx, active, None, error);
+            }
+        };
+        let role = if step.read() {
+            CredentialRole::Read { scope: None }
+        } else {
+            CredentialRole::Mutation
+        };
+        let Some((_, identity)) = self.trade_identity(role) else {
+            return self.end(
                 cx,
-                Request {
-                    job,
-                    step,
-                    joined: false,
-                },
-                "BloFin replacement aborted after execution progress".into(),
+                active,
+                None,
+                not_sent("BloFin requires API credentials"),
             );
-            return;
+        };
+        match &step.effect {
+            Effect::Place { .. } => {
+                self.account.orders_revision += 1;
+                for order in &step.orders {
+                    cx.store.upsert_order(order.clone());
+                    active.job.creating.push(order.id.clone());
+                }
+            }
+            Effect::Cancel(targets) => {
+                self.account.orders_revision += 1;
+                for id in targets.iter().flat_map(|t| &t.store_ids) {
+                    cx.store.set_order_status(id, OrderStatus::Canceling);
+                    active.job.canceling.push(id.clone());
+                }
+            }
+            Effect::Verify(_) | Effect::Setting => {}
         }
         let (method, path) = if let Effect::Verify(target) = &step.effect {
             (
@@ -1335,44 +1503,41 @@ impl Blofin {
         } else {
             (Method::Post, step.path.to_owned())
         };
-        let headers = match self.headers(
-            |bytes| cx.fill_signing_entropy(bytes),
-            &path,
+        let body = (method == Method::Post).then(|| step.body.clone());
+        let recipe = crate::dispatch_signing::Http::new(
+            identity,
+            self.options.testnet,
             method,
-            cx.now,
-            &step.body,
-        ) {
-            Ok(h) => h,
-            Err(e) => {
-                self.trade_failed(
-                    cx,
-                    Request {
-                        job,
-                        step,
-                        joined: false,
-                    },
-                    not_sent(e),
-                );
-                return;
-            }
-        };
-        cx.command_progress(job.command, step.receipts.clone());
-        cx.request(
-            method,
-            format!("{}{}", self.host(), path),
-            headers,
-            (method == Method::Post).then(|| step.body.clone()),
-            Pending::Trade(Request {
-                job,
-                step,
-                joined: false,
-            }),
+            path.clone(),
+            body.clone(),
         );
+        cx.command_progress(active.job.command, step.receipts.clone());
+        let url = format!("{}{}", self.host(), path);
+        let request = Request {
+            command: active.job.command,
+            slot,
+            context: context.clone(),
+            step,
+        };
+        self.trading.active = Some(active);
+        if let Err((pending, reason)) = cx.request_signed_managed(
+            context,
+            None,
+            method,
+            url,
+            body,
+            Box::new(recipe),
+            Pending::Trade(Box::new(request)),
+        ) && let Pending::Trade(request) = pending
+        {
+            self.trade_call_failed(cx, *request, reason.venue_error(), false);
+        }
     }
+    /// Restores the job's optimistic rows: Creating removed, Canceling reopened.
     fn cleanup_job(&mut self, cx: &mut Cx<'_, Pending>, job: &Job) {
-        let ids: Vec<_> = job.creating.iter().map(|o| o.id.as_str()).collect();
+        let ids: Vec<_> = job.creating.iter().map(String::as_str).collect();
         cx.store.remove_orders(&ids);
-        for id in &job.affected {
+        for id in &job.canceling {
             if cx
                 .store
                 .order(id)
@@ -1382,43 +1547,254 @@ impl Blofin {
             }
         }
     }
-    pub(crate) fn trade_failed(
+    /// Fails the job under its owner (the journal projects the outcome), then
+    /// wakes the next queued command.
+    fn end(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        active: Active,
+        current: Option<(&Slot, &Context)>,
+        error: VenueError,
+    ) {
+        self.cleanup_job(cx, &active.job);
+        match &active.plan {
+            None => {
+                let failed = cx.fail_preflight(&active.preflight, error);
+                debug_assert!(failed.is_ok(), "Preflight terminal stranded");
+            }
+            Some(plan) => {
+                if let Some((slot, context)) = current {
+                    let finished = cx.finish_plan_call(plan, slot, context);
+                    debug_assert!(finished.is_ok(), "Plan call seal stranded");
+                }
+                let failed = cx.fail_plan(plan, error);
+                debug_assert!(failed.is_ok(), "Plan terminal stranded");
+                if active.job.join {
+                    self.refresh_account(cx);
+                }
+            }
+        }
+        self.next_job(cx);
+    }
+    fn finish(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        active: Active,
+        current: Option<(&Slot, &Context)>,
+    ) {
+        self.cleanup_job(cx, &active.job);
+        let plan = active.plan.as_ref().expect("a job with calls has a Plan");
+        if let Some((slot, context)) = current {
+            let finished = cx.finish_plan_call(plan, slot, context);
+            debug_assert!(finished.is_ok(), "Plan call seal stranded");
+        }
+        let ids = serde_json::to_string(&active.job.ids).expect("order ids");
+        if cx.done_plan(plan, ids).is_ok() {
+            self.commit(cx, &active.job.commit);
+        } else {
+            let failed = cx.fail_plan(plan, VenueError::new("BloFin job ended without its call"));
+            debug_assert!(failed.is_ok(), "Plan terminal stranded");
+        }
+        self.next_job(cx);
+    }
+    /// Commit effects apply only after a successful terminal.
+    fn commit(&mut self, cx: &mut Cx<'_, Pending>, commit: &Commit) {
+        match commit {
+            Commit::None => {}
+            Commit::Leverage { symbol, leverage } => {
+                self.account.settings_revision += 1;
+                self.account.positions_revision += 1;
+                cx.store.update_setting(symbol, |s| {
+                    s.leverage = *leverage;
+                    s.buy_leverage = Some(*leverage);
+                    s.sell_leverage = Some(*leverage);
+                });
+                cx.store.update_positions(|p| {
+                    if p.symbol == *symbol {
+                        p.leverage = *leverage;
+                    }
+                });
+            }
+            Commit::Margin(mode) => {
+                self.account.settings_revision += 1;
+                self.account.positions_revision += 1;
+                self.account.margin = Some(*mode);
+                let symbols = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .map(|m| m.symbol.clone())
+                    .collect::<Vec<_>>();
+                for symbol in symbols {
+                    if !cx
+                        .store
+                        .positions()
+                        .iter()
+                        .any(|p| p.symbol == symbol && p.contracts > 0.0)
+                    {
+                        cx.store
+                            .update_setting(&symbol, |s| s.margin_type = Some(*mode));
+                    }
+                }
+                self.refresh_account(cx);
+            }
+            Commit::Mode(hedged) => {
+                self.account.settings_revision += 1;
+                self.account.positions_revision += 1;
+                cx.store.set_hedged(*hedged);
+            }
+        }
+    }
+    /// The active job ended: wake the oldest queued Preflight (FIFO).
+    fn next_job(&mut self, cx: &mut Cx<'_, Pending>) {
+        while self.trading.active.is_none()
+            && let Some(queued) = self.trading.queue.front()
+        {
+            let Err(reason) = cx.request_preflight_ready(&queued.preflight) else {
+                return;
+            };
+            // A front that cannot wake must not stall the FIFO.
+            let queued = self.trading.queue.pop_front().expect("queued front");
+            let _ = cx.fail_preflight(&queued.preflight, not_sent(reason.venue_error().message));
+        }
+    }
+    pub(crate) fn trading_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &Preflight,
+    ) {
+        let front = self.trading.active.is_none()
+            && self
+                .trading
+                .queue
+                .front()
+                .is_some_and(|queued| queued.preflight.owner() == preflight.owner());
+        if !front {
+            // Woken out of turn: park again, still in FIFO order.
+            let _ = cx.park_preflight(preflight);
+            return;
+        }
+        let queued = self.trading.queue.pop_front().expect("queued front");
+        if queued.deadline.is_some_and(|deadline| cx.now >= deadline) {
+            let error = safe_cex_engine::request_context::Error::TimedOut
+                .venue_error()
+                .outcome(Outcome::NotSent);
+            let _ = cx.fail_preflight(&queued.preflight, error);
+            return self.next_job(cx);
+        }
+        self.start_job(cx, queued.preflight, queued.command);
+    }
+    /// A native pause ended: issue the next call on the slot it handed back.
+    pub(crate) fn trading_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
+        let Some(active) = self.trading.active.take() else {
+            return;
+        };
+        let slot = active
+            .plan
+            .as_ref()
+            .filter(|own| own.owner() == plan.owner())
+            .and_then(|_| cx.plan_slots(plan).ok())
+            .and_then(|slots| slots.into_iter().next());
+        match slot {
+            Some(slot) => self.drive(cx, active, At::Ready(slot)),
+            None => self.trading.active = Some(active),
+        }
+    }
+    /// The engine retired a trading owner itself: forget it, keep an active
+    /// job for restoration, and name the queued Preflight to wake.
+    pub(crate) fn trading_retired(&mut self, owner: &HttpOwnerRetirement) -> Option<Preflight> {
+        self.trading
+            .queue
+            .retain(|queued| !owner.matches_preflight(&queued.preflight));
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|active| owner.matches_preflight(&active.preflight))
+        {
+            let active = self.trading.active.take().expect("retired job");
+            self.trading.retired = Some(active.job);
+        }
+        if self.trading.active.is_some() {
+            return None;
+        }
+        self.trading
+            .queue
+            .front()
+            .map(|queued| queued.preflight.clone())
+    }
+    /// Native restore and reconcile for a job the engine sealed as Unknown.
+    pub(crate) fn settle_retired_trade(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(join) = self.restore_retired(cx) {
+            self.refresh_retired(cx, join);
+        }
+    }
+    /// The I/O-free half of the settle. `Some(join)` when a refresh is owed.
+    fn restore_retired(&mut self, cx: &mut Cx<'_, Pending>) -> Option<bool> {
+        let job = self.trading.retired.take()?;
+        self.cleanup_job(cx, &job);
+        self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
+        Some(job.join)
+    }
+    /// A half-applied hedged join refreshes the account, as native's join did.
+    fn refresh_retired(&mut self, cx: &mut Cx<'_, Pending>, join: bool) {
+        self.reconcile_orders(cx);
+        if join {
+            self.refresh_account(cx);
+        }
+    }
+    /// A call failed before or after release; a released write is Unknown.
+    pub(crate) fn trade_call_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         mut error: VenueError,
+        released: bool,
     ) {
-        if matches!(request.step.effect, Effect::Place { .. }) {
-            self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
-        }
-        if request.joined {
-            self.finish_join(cx, Some(error));
+        let Some(active) = self.trading.active.take() else {
             return;
+        };
+        let Some(plan) = active
+            .plan
+            .clone()
+            .filter(|_| active.job.command == request.command)
+        else {
+            self.trading.active = Some(active);
+            return;
+        };
+        if !request.step.read() {
+            if released {
+                error.outcome = Some(Outcome::Unknown);
+                if request.step.is_place() {
+                    self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
+                }
+            }
+            let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
         }
-        // A later refusal after a step took effect cannot mean nothing happened.
-        if request.job.effective
-            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
-        {
-            error.outcome = None;
-        }
-        self.cleanup_job(cx, &request.job);
-        cx.fail(request.job.command, error);
-        self.trading.busy = false;
-        self.trade_next(cx);
+        self.end(cx, active, None, error);
     }
     pub(crate) fn trade_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        mut request: Request,
+        request: Request,
         response: Response<'_>,
     ) {
-        if !(200..300).contains(&response.status) {
-            let error = http_failure(response.status, response.body);
-            self.trade_failed(cx, request, error);
+        let Some(mut active) = self.trading.active.take() else {
+            return;
+        };
+        let delivered = active.job.command == request.command
+            && active
+                .plan
+                .as_ref()
+                .is_some_and(|plan| cx.validate_plan_delivery(plan, &request.context).is_ok());
+        if !delivered {
+            self.trading.active = Some(active);
             return;
         }
+        let current = Some((&request.slot, &request.context));
         if let Effect::Verify(target) = &request.step.effect {
-            let verified = check(&response).is_ok()
+            let verified = (200..300).contains(&response.status)
+                && check(&response).is_ok()
                 && serde_json::from_str::<Data<OneOrMany<OrderDetail<'_>>>>(response.body)
                     .ok()
                     .is_some_and(|reply| {
@@ -1438,107 +1814,210 @@ impl Blofin {
                                 })
                         })
                     });
-            if !verified {
-                self.trade_failed(
-                    cx,
-                    request,
-                    "BloFin replacement final order verification failed".into(),
-                );
+            return if verified {
+                self.drive(cx, active, At::Data(&request.slot, &request.context))
             } else {
-                self.trade_step(cx, request.job);
-            }
-            return;
+                let error = VenueError::new("BloFin replacement final order verification failed");
+                self.end(cx, active, current, error)
+            };
         }
-        let reply = match serde_json::from_str::<Reply<'_>>(response.body) {
-            Ok(r) => r,
-            Err(e) => {
-                self.trade_failed(cx, request, unknown(e.to_string()));
-                return;
+        if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
+            if request.step.is_place() {
+                self.account.orders_revision = self.account.orders_revision.wrapping_add(1);
+            }
+            return self.end(cx, active, current, error);
+        }
+        // The step's write fact is recorded; a native pause follows only an
+        // accepted call with more to send.
+        let delay = request.step.delay as u32;
+        if delay > 0
+            && let Some(next) = active.job.steps.front()
+        {
+            let plan = active.plan.clone().expect("live Plan");
+            let next = serial(next);
+            return match cx.continue_serial_plan_after(
+                &plan,
+                &request.slot,
+                &request.context,
+                delay,
+                next,
+            ) {
+                Ok(()) => self.trading.active = Some(active),
+                Err(reason) => {
+                    let error = VenueError::new(reason.venue_error().message);
+                    self.end(cx, active, current, error)
+                }
+            };
+        }
+        self.drive(cx, active, At::Data(&request.slot, &request.context))
+    }
+    /// Decodes one write answer, records its journal fact exactly once and
+    /// applies native Store effects. `Err` ends the job.
+    fn write_answer(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        job: &mut Job,
+        request: &Request,
+        response: &Response<'_>,
+    ) -> Result<(), VenueError> {
+        let context = &request.context;
+        let parsed = serde_json::from_str::<Reply<'_>>(response.body);
+        if !(200..300).contains(&response.status) {
+            let native = parsed
+                .as_ref()
+                .ok()
+                .filter(|reply| !reply.code.is_empty())
+                .map(|reply| native(&reply.code, &reply.msg));
+            let error = http_failure(response.status, response.body);
+            record_failed(cx, context, native, &error.message);
+            return Err(error);
+        }
+        let reply = match parsed {
+            Ok(reply) => reply,
+            Err(error) => {
+                let message = error.to_string();
+                let _ = cx.http_write_unproven(context, message.clone());
+                return Err(unknown(message));
             }
         };
         let rows = reply.data.map(ResultRows::rows).unwrap_or_default();
-        let mut error = None;
-        // Unproven acknowledgements are unknown.
-        let mut unproven = false;
         match &request.step.effect {
             Effect::Place {
                 family,
                 count,
                 inst_id,
             } => {
-                // Multi-Position mode refuses the whole placement, rows or not.
                 let multi_position = reply.code == MULTI_POSITION_CODE
                     || rows.iter().any(|row| row.code == MULTI_POSITION_CODE);
-                if reply.code != "0" || rows.len() != *count {
-                    unproven |= rows.len() != *count && reply.code != MULTI_POSITION_CODE;
-                    error = Some(format!("BloFin placement {}: {}", reply.code, reply.msg));
+                let message = if multi_position {
+                    MULTI_POSITION_MESSAGE.to_owned()
+                } else {
+                    format!("BloFin placement {}: {}", reply.code, reply.msg)
+                };
+                if rows.len() != *count {
+                    if reply.code != "0" && rows.is_empty() {
+                        record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
+                        return Err(VenueError::new(message));
+                    }
+                    let _ = cx.http_write_unproven(context, message.clone());
+                    return Err(unknown(message));
                 }
+                let mut items = Vec::with_capacity(rows.len());
                 let mut seen = HashSet::new();
-                for row in rows {
+                let mut error = None;
+                let mut unproven = false;
+                for row in &rows {
                     let id = match family {
-                        0 => row.order_id,
-                        1 => row.tpsl_id,
-                        _ => row.algo_id,
+                        0 => &row.order_id,
+                        1 => &row.tpsl_id,
+                        _ => &row.algo_id,
                     };
-                    let message = row.msg.trim().to_ascii_lowercase();
-                    // Only a non-zero row code refuses; an unexpected success message is unproven.
+                    let text = row.msg.trim().to_ascii_lowercase();
+                    // Only a non-zero row code refuses; a cancel-only "gone" code
+                    // or an unexpected success message proves nothing here.
                     let refused = !row.code.is_empty() && row.code != "0";
-                    let odd = !matches!(message.as_str(), "" | "success" | "order placed");
-                    if id.is_empty() || !seen.insert(id.to_string()) || refused || odd {
-                        unproven |= !refused;
+                    let gone = matches!(&*row.code, "1000" | "102068");
+                    let odd = !matches!(text.as_str(), "" | "success" | "order placed");
+                    if refused && !gone {
+                        items.push(BatchItem::Native(native(&row.code, &row.msg)));
+                        error = Some(format!("BloFin placement rejected: {}", row.msg));
+                    } else if refused || id.is_empty() || !seen.insert(id.to_string()) || odd {
+                        unproven = true;
                         error = Some(format!("BloFin placement rejected: {}", row.msg));
                     } else {
-                        let id = id.into_owned();
-                        if cx.store.order(&id).is_none() {
-                            self.trading.acknowledged.insert(
-                                id.clone(),
-                                Target {
-                                    id: id.clone(),
-                                    inst_id: inst_id.clone(),
-                                    family: *family,
-                                    store_ids: vec![],
-                                    filled: 0.0,
-                                    filled_native: 0.0,
-                                },
-                            );
-                        }
-                        request.job.ids.push(id);
+                        items.push(BatchItem::Accepted(id));
                     }
                 }
+                let accepted: Vec<String> = items
+                    .iter()
+                    .filter_map(|item| match item {
+                        BatchItem::Accepted(id) => Some((*id).to_owned()),
+                        BatchItem::Native(_) => None,
+                    })
+                    .collect();
+                let refused = items.len() != accepted.len();
+                // A failed envelope over all-accepted rows is a contradiction.
+                unproven |= reply.code != "0" && !refused;
                 if multi_position {
-                    error = Some(MULTI_POSITION_MESSAGE.into());
+                    error = Some(MULTI_POSITION_MESSAGE.to_owned());
+                }
+                if unproven {
+                    let message = error.clone().unwrap_or_else(|| message.clone());
+                    let _ = cx.http_write_unproven(context, message);
+                } else {
+                    let message = error.clone().unwrap_or_default();
+                    let _ = cx.http_write_batch(context, &CODES, *count, &items, message, None);
+                }
+                for id in accepted {
+                    if cx.store.order(&id).is_none() {
+                        self.trading.acknowledged.insert(
+                            id.clone(),
+                            Target {
+                                id: id.clone(),
+                                inst_id: inst_id.clone(),
+                                family: *family,
+                                store_ids: vec![],
+                                filled: 0.0,
+                                filled_native: 0.0,
+                            },
+                        );
+                    }
+                    job.ids.push(id);
+                }
+                let error = error.or_else(|| unproven.then_some(message));
+                match error {
+                    Some(error) if unproven => Err(unknown(error)),
+                    Some(error) => Err(VenueError::new(error)),
+                    None => Ok(()),
                 }
             }
             Effect::Cancel(targets) => {
-                let mut seen = HashSet::new();
-                if rows.len() != targets.len() {
-                    unproven = true;
-                    error = Some("BloFin cancellation response count mismatch".into());
+                if reply.code != "0" && rows.is_empty() {
+                    let message = format!("BloFin cancellation rejected: {}", reply.msg);
+                    record_failed(cx, context, Some(native(&reply.code, &reply.msg)), &message);
+                    return Err(VenueError::new(message));
                 }
-                for row in rows {
-                    let found = targets.iter().find(|t| match t.family {
+                let mut matched: Vec<Option<&ResultRow<'_>>> = vec![None; targets.len()];
+                let mut unproven = rows.len() != targets.len();
+                let mut error =
+                    unproven.then(|| "BloFin cancellation response count mismatch".to_owned());
+                for row in &rows {
+                    let found = targets.iter().position(|t| match t.family {
                         0 => row.order_id == t.id,
                         1 => row.tpsl_id == t.id || row.algo_id == t.id,
                         _ => row.algo_id == t.id,
                     });
-                    let Some(target) = found else {
-                        unproven = true;
-                        error = Some("BloFin cancellation returned an unrelated identity".into());
+                    match found {
+                        None => {
+                            unproven = true;
+                            error =
+                                Some("BloFin cancellation returned an unrelated identity".into());
+                        }
+                        Some(index) if matched[index].is_some() => {
+                            unproven = true;
+                            error =
+                                Some("BloFin cancellation returned duplicate identities".into());
+                        }
+                        Some(index) => matched[index] = Some(row),
+                    }
+                }
+                let mut items = Vec::with_capacity(targets.len());
+                for (target, row) in targets.iter().zip(&matched) {
+                    let Some(row) = row else {
                         continue;
                     };
-                    if !seen.insert(target.id.clone()) {
-                        unproven = true;
-                        error = Some("BloFin cancellation returned duplicate identities".into());
-                        continue;
-                    }
-                    let gone = row.code == "1000"
-                        || row
-                            .msg
-                            .contains("filled, triggered, canceled or does not exist");
-                    if gone && !request.job.replacement_targets.is_empty() {
+                    // Code-only: the "does not exist" text is 102068's own message.
+                    let gone = matches!(&*row.code, "1000" | "102068");
+                    let accepted = reply.code == "0" && (row.code.is_empty() || row.code == "0");
+                    if gone && !job.replacement_targets.is_empty() {
                         error = Some("BloFin replacement requires a confirmed cancellation".into());
                     }
-                    if gone || (reply.code == "0" && (row.code.is_empty() || row.code == "0")) {
+                    if accepted {
+                        items.push(BatchItem::Accepted(&target.id));
+                    } else {
+                        items.push(BatchItem::Native(native(&row.code, &row.msg)));
+                    }
+                    if gone || accepted {
                         self.trading.acknowledged.remove(&target.id);
                         self.account.orders_revision += 1;
                         if target.family != 1 {
@@ -1572,81 +2051,36 @@ impl Blofin {
                         error = Some(format!("BloFin cancellation rejected: {}", row.msg));
                     }
                 }
-            }
-            Effect::Verify(_) => unreachable!(),
-            Effect::Setting => {
-                if reply.code != "0" || rows.iter().any(|r| !r.code.is_empty() && r.code != "0") {
-                    error = Some(format!("BloFin setting rejected: {}", reply.msg));
+                if unproven {
+                    let message = error.clone().unwrap_or_default();
+                    let _ = cx.http_write_unproven(context, message);
+                } else {
+                    let message = error.clone().unwrap_or_default();
+                    let _ =
+                        cx.http_write_batch(context, &CODES, targets.len(), &items, message, None);
+                }
+                match error {
+                    Some(error) if unproven => Err(unknown(error)),
+                    Some(error) => Err(VenueError::new(error)),
+                    None => Ok(()),
                 }
             }
-        }
-        if let Some(e) = error {
-            // BloFin row and setting codes are undocumented, so explicit refusals stay
-            // unclassified; unproven acknowledgements are unknown.
-            let outcome = unproven.then_some(Outcome::Unknown);
-            let mut error = VenueError::new(e);
-            error.outcome = outcome;
-            self.trade_failed(cx, request, error);
-            return;
-        }
-        request.job.effective = true;
-        if request.joined {
-            self.finish_join(cx, None);
-            return;
-        }
-        if request.step.delay > 0.0 && !request.job.steps.is_empty() {
-            self.trading.pause = Some((cx.set_timer(request.step.delay), request.job));
-        } else {
-            self.trade_step(cx, request.job);
-        }
-    }
-    fn finish_join(&mut self, cx: &mut Cx<'_, Pending>, error: Option<VenueError>) {
-        let Some(joined) = &mut self.trading.joined else {
-            return;
-        };
-        if let Some(mut error) = error {
-            // Any unproven leg keeps the joined command unknown.
-            if joined
-                .error
-                .as_ref()
-                .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
-            {
-                error.outcome = Some(Outcome::Unknown);
+            Effect::Setting => {
+                let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
+                if reply.code != "0" || refused.is_some() {
+                    let message = format!("BloFin setting rejected: {}", reply.msg);
+                    let evidence = match refused {
+                        Some(row) if reply.code == "0" => native(&row.code, &row.msg),
+                        _ => native(&reply.code, &reply.msg),
+                    };
+                    record_failed(cx, context, Some(evidence), &message);
+                    return Err(VenueError::new(message));
+                }
+                let accepted = WriteFact::Accepted { order_ids: vec![] };
+                let _ = cx.http_write_fact(context, accepted, None);
+                Ok(())
             }
-            joined.error = Some(error);
-        } else {
-            joined.succeeded = true;
-        }
-        joined.remaining -= 1;
-        if joined.remaining != 0 {
-            return;
-        }
-        let joined = self.trading.joined.take().unwrap();
-        if let Some(mut error) = joined.error {
-            if joined.succeeded && error.outcome == Some(Outcome::Rejected) {
-                error.outcome = None;
-            }
-            self.cleanup_job(cx, &joined.job);
-            cx.fail(joined.job.command, error);
-            self.trading.busy = false;
-            self.refresh_account(cx);
-            self.trade_next(cx);
-        } else {
-            self.trade_step(cx, joined.job);
-        }
-    }
-    pub(crate) fn trading_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        if self
-            .trading
-            .pause
-            .as_ref()
-            .is_some_and(|(t, _)| *t == timer)
-        {
-            let (_, job) = self.trading.pause.take().unwrap();
-            self.trade_step(cx, job);
-            true
-        } else {
-            false
+            Effect::Verify(_) => unreachable!("Verify is a Read call"),
         }
     }
 }
@@ -1655,32 +2089,155 @@ impl Blofin {
 const MULTI_POSITION_CODE: &str = "102143";
 const MULTI_POSITION_MESSAGE: &str = "BloFin Multi-Position mode is not supported in Tealstreet yet. Turn off Multi-Position mode on BloFin, then retry from Tealstreet.";
 
-/// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
+/// A non-2xx answer's native text. Its outcome and kind are the journal's,
+/// from the recorded fact (`CODES`).
 fn http_failure(status: u16, body: &str) -> VenueError {
-    let message = format!("BloFin HTTP {status}: {body}");
-    match status {
-        408 | 500.. => unknown(message),
-        401 => VenueError::new(message)
-            .kind(ErrorKind::AuthInvalid)
-            .outcome(Outcome::Rejected),
-        403 => VenueError::new(message)
-            .kind(ErrorKind::AuthPermission)
-            .outcome(Outcome::Rejected),
-        429 => VenueError::new(message)
-            .kind(ErrorKind::RateLimited)
-            .outcome(Outcome::Rejected),
-        _ => VenueError::new(message)
-            .kind(ErrorKind::Rejected)
-            .outcome(Outcome::Rejected),
-    }
+    VenueError::new(format!("BloFin HTTP {status}: {body}"))
 }
 
 /// The write may have executed; reconcile before resending.
-pub(crate) fn unknown(message: impl Into<String>) -> VenueError {
+fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
 /// Refused before any request was sent.
 fn not_sent(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::NotSent)
+}
+
+/// One call of the job's streamed Plan; BloFin never resends a write.
+fn serial(step: &Step) -> SerialCall {
+    SerialCall {
+        operation: if step.read() {
+            Operation::Read
+        } else {
+            Operation::Mutation
+        },
+        timeout_ms: CALL_MS,
+        attempts: 1,
+    }
+}
+
+/// BloFin codes are decimal strings; a non-integer stays text evidence.
+fn native<'a>(code: &'a str, message: &'a str) -> Native<'a> {
+    Native {
+        code: decode_int(code).map_or(NativeCode::Text(code), NativeCode::Int),
+        message,
+    }
+}
+
+/// Records one whole failed answer for the delivered write.
+fn record_failed(
+    cx: &mut Cx<'_, Pending>,
+    context: &Context,
+    native: Option<Native<'_>>,
+    message: &str,
+) {
+    match cx.classify_write(context, &CODES, native.as_ref(), message.to_owned()) {
+        Ok(fact) => {
+            let failed = WriteFact::Failed {
+                fact,
+                known_effects: false,
+            };
+            let _ = cx.http_write_fact(context, failed, None);
+        }
+        // A released write never ends factless.
+        Err(_) => {
+            let _ = cx.http_write_unproven(context, message.to_owned());
+        }
+    }
+}
+
+/// Bounded correlation for a released write: its endpoint. BloFin has no late
+/// reconcile codec; the order snapshot reconciles.
+pub(crate) fn trade_reconciliation(
+    request: &Request,
+) -> Result<ReconciliationData, safe_cex_engine::request_context::Error> {
+    ReconciliationData::new(request.step.path.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn verdict(code: &str, intent: Intent) -> Verdict {
+        CODES.verdict(&native(code, ""), intent)
+    }
+
+    #[test]
+    fn the_code_table_holds_the_shared_invariants() {
+        safe_cex_engine::classify::assert_table(&CODES);
+    }
+
+    #[test]
+    fn cited_codes_refuse_and_unlisted_codes_prove_nothing() {
+        for code in [
+            "152001", "152015", "102015", "102037", "102055", "103003", "110019",
+        ] {
+            assert!(verdict(code, Intent::Place).is_refusal(), "{code}");
+        }
+        assert_eq!(
+            verdict("152401", Intent::Setting),
+            Verdict::Refused(ErrorKind::AuthInvalid)
+        );
+        for code in ["102036", "102056", "152016", "999999", "1", "2"] {
+            assert_eq!(
+                verdict(code, Intent::Place),
+                Verdict::Unknown(None),
+                "{code}"
+            );
+        }
+        assert_eq!(
+            verdict("103013", Intent::Cancel),
+            Verdict::Unknown(Some(ErrorKind::Internal))
+        );
+    }
+
+    #[test]
+    fn gone_is_satisfied_only_for_a_cancel() {
+        for code in ["1000", "102068"] {
+            assert_eq!(
+                verdict(code, Intent::Cancel),
+                Verdict::Satisfied(SatisfiedIntent::Cancel)
+            );
+            for intent in [Intent::Place, Intent::Amend, Intent::Setting] {
+                assert_eq!(verdict(code, intent), Verdict::Unknown(None), "{code}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_exact_row_lies_inside_a_range_of_its_scope() {
+        // So first-match order can never decide a verdict (assert_table also
+        // refuses overlap; this states the reason the table relies on).
+        for row in CODES.rows {
+            let Key::Int(code) = row.key else { continue };
+            for other in CODES.rows {
+                if let Key::Range(low, high) = other.key {
+                    assert!(
+                        row.only != other.only || !(low..=high).contains(&code),
+                        "{code} inside {low}-{high}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn exact_rows_beside_ranges_keep_their_own_kinds() {
+        // 102064 sits just past the 102037-102055 range; 102143 is the native
+        // Multi-Position refusal, typed Unsupported rather than the range's kind.
+        assert_eq!(
+            verdict("102064", Intent::Place),
+            Verdict::Refused(ErrorKind::Rejected)
+        );
+        assert_eq!(
+            verdict("102143", Intent::Place),
+            Verdict::Refused(ErrorKind::Unsupported)
+        );
+        assert_eq!(
+            verdict("152420", Intent::Place),
+            Verdict::Refused(ErrorKind::InvalidInput)
+        );
+    }
 }
