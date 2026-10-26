@@ -11,6 +11,8 @@ nonce-drain = []
 default = ["venues"]
 http-plans = ["safe-cex-engine/http-plans"]
 http-mutation-barriers = ["http-plans", "safe-cex-engine/http-mutation-barriers"]
+# Read-only signing-task metadata for hosted signing; explicit, no family rows.
+sign-meta = ["safe-cex-engine/sign-meta"]
 # Construct any registered venue by name (`FrameServer::add_venue`).
 # BloFin (in the default venue set) releases its hedged leverage as a barrier group.
 venues = ["dep:safe-cex-venues", "safe-cex-venues/default", "http-mutation-barriers"]
