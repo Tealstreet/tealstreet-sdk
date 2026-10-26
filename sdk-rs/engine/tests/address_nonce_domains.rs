@@ -66,8 +66,7 @@ fn reserve(
         action,
         Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
     )));
-    let observed = results.lock().unwrap().clone();
-    observed
+    results.lock().unwrap().clone()
 }
 
 fn values(domain: &'static NonceDomain, agent: &str, now: f64, count: usize) -> Vec<u64> {
