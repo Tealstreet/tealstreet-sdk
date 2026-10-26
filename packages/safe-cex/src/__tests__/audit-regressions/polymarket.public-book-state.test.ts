@@ -2,7 +2,7 @@ import type { Market, OrderBook, Ticker } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PolymarketExchange } from '../../exchanges/polymarket/polymarket.exchange';
+import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const cleanup: Array<() => void> = [];

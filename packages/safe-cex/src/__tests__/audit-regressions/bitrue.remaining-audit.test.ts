@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitrueExchange } from '../../exchanges/bitrue/bitrue.exchange';
-import { ENDPOINTS } from '../../exchanges/bitrue/bitrue.types';
+import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
+import { ENDPOINTS } from '../reference/bitrue/bitrue.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
 

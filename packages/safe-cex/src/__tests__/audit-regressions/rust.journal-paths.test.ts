@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ExchangeName, Market } from '../../types';
 
-import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';

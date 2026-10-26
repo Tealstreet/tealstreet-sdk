@@ -38,11 +38,13 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // ceiling), AsterDEX 1,420,478 (1388 KiB), Bybit 1,448,312 (1415 KiB) and Kraken 1,407,904
 // (1375 KiB), each a <=2 KiB shared-code raise. CI on b666a1a9a54 (with the re-ask flag):
 // Kraken 1,408,110, rounded up to 1376 KiB (overseer: push the CI number now).
+// AsterDEX status-table classification (#2270) composed on the tip with the #2279 fence engine:
+// 1,423,639 measured locally, rounded up to 1391 KiB under the standing venue allowance.
 // #2288 (engine fence without a lock scope, Phase B): CI Bitget 1,487,624 (1453 KiB; the
 // overseer raised the P1 fence ceiling to 1456 KiB), Bybit 1,452,004 (1418 KiB), AsterDEX
 // 1,422,195 (1389 KiB) and Kraken 1,409,432 (1377 KiB), within the overseer's P1 fence ruling
 // (at most +4 KiB over the pre-fence tip).
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_487_872, bitgetusdc: 1_487_872, bybit: 1_452_032, asterdex: 1_422_336, kraken: 1_410_048, krakenspot: 1_410_048 });
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_487_872, bitgetusdc: 1_487_872, bybit: 1_452_032, asterdex: 1_424_384, kraken: 1_410_048, krakenspot: 1_410_048 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {

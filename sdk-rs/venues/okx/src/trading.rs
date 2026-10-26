@@ -18,12 +18,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 const BROKER: &str = "e847386590ce4dBC";
 
-/// Every write is one call with its own 20 s bound and no resend.
+/// Every write is one call with its own 20 s bound; only a 50113 signature
+/// refusal, which executed nothing, is re-signed and sent once more.
 const SERIAL: SerialCall = SerialCall {
     auth: safe_cex_engine::request_context::plan::CallAuth::Preflight,
     operation: Operation::Mutation,
     timeout_ms: 20_000,
-    attempts: 1,
+    attempts: 2,
     pacing: None,
 };
 
@@ -49,7 +50,11 @@ pub(crate) const CODES: CodeTable = CodeTable {
         refused(50104, ErrorKind::AuthInvalid),
         refused(50105, ErrorKind::AuthInvalid),
         refused(50111, ErrorKind::AuthInvalid),
-        refused(50113, ErrorKind::AuthInvalid),
+        Row {
+            key: Key::Int(50113),
+            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+            only: None,
+        },
         refused(50114, ErrorKind::AuthInvalid),
         refused(50119, ErrorKind::AuthInvalid),
         refused(50030, ErrorKind::AuthPermission),
@@ -938,6 +943,21 @@ impl Okx {
         };
         let step = job.steps.front().expect("issued step");
         cx.command_progress(command, step.receipts.clone());
+        self.release(cx, command, slot, context);
+    }
+
+    /// Signs and releases the job's front step on `context`.
+    fn release(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        slot: Slot,
+        context: Context,
+    ) {
+        let Some(job) = self.trading.jobs.get(&command) else {
+            return;
+        };
+        let step = job.steps.front().expect("issued step");
         let recipe =
             sign::Http::new(self.credentials.clone(), step.path.into()).demo(self.options.testnet);
         let url = format!("{}{}", self.rest(), step.path);
@@ -1285,15 +1305,32 @@ impl Okx {
         let evidence = code
             .filter(|code| !code.is_empty())
             .map(|code| native(code, &message));
-        let verdict = cx
-            .http_write_failure(
-                &request.context,
-                &CODES,
-                evidence.as_ref(),
-                message.clone(),
-                None,
-            )
-            .map(|(verdict, _)| verdict);
+        let failure = cx.http_write_failure(
+            &request.context,
+            &CODES,
+            evidence.as_ref(),
+            message.clone(),
+            None,
+        );
+        let (verdict, grant) = match failure {
+            Ok((verdict, grant)) => (Ok(verdict), grant),
+            Err(error) => (Err(error), None),
+        };
+        // One re-signed resend of a 50113 refusal; the journal refuses a second.
+        if let Some(grant) = grant {
+            let plan = self
+                .trading
+                .jobs
+                .get(&request.command)
+                .and_then(|job| job.plan.clone());
+            if let Some(plan) = plan
+                && let Ok(context) =
+                    cx.plan_resend_context(&plan, &request.slot, &request.context, grant)
+            {
+                self.release(cx, request.command, request.slot, context);
+                return;
+            }
+        }
         let error = rejection(message, code, status);
         if matches!(verdict, Ok(Verdict::Refused(_) | Verdict::RefusedResend(_))) {
             self.end(cx, request.command, Some(&request), error, false);
@@ -1571,7 +1608,10 @@ mod code_table_tests {
         assert_eq!(verdict("51008"), Verdict::Refused(ErrorKind::Rejected));
         assert_eq!(verdict("51999"), Verdict::Refused(ErrorKind::Rejected));
         assert_eq!(verdict("50011"), Verdict::Refused(ErrorKind::RateLimited));
-        assert_eq!(verdict("50113"), Verdict::Refused(ErrorKind::AuthInvalid));
+        assert_eq!(
+            verdict("50113"),
+            Verdict::RefusedResend(ErrorKind::AuthInvalid)
+        );
         for unproven in ["50001", "50004", "50013", "50026", "52000", "59999"] {
             assert_eq!(verdict(unproven), Verdict::Unknown(None), "{unproven}");
         }

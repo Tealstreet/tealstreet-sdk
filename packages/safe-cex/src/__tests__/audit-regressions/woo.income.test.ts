@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildWooIncomeParams, mapWooIncomeRecord, wooIncomeIdentity } from '../../exchanges/woo/woo.income';
+import { buildWooIncomeParams, mapWooIncomeRecord, wooIncomeIdentity } from '../reference/woo/woo.income';
 
 const aggregate = { id: 1786603865910, type: 'REALIZED_PNL', token: 'USDT', amount: 3.5, timestamp: 1786603865910 };
 
