@@ -29,7 +29,7 @@ fn boot(robinhood: bool, testnet: bool) -> (Engine<Lighter>, TimerId, SocketId) 
         })
         .unwrap();
     reply_at(&mut engine, NOW, &request, 200, META);
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions = support::finish_startup_tickers(&mut engine, NOW);
     let poll = timer(&actions, NOW + 2_000.);
     let socket = actions
         .iter()

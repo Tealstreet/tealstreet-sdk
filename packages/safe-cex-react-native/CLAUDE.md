@@ -14,7 +14,7 @@ The host supplies an already initialized module or a native bridge implementing
 `WasmEngineModule`; a failed initialization can retry on a new account, while
 concurrent accounts share successful module initialization. The barrel and
 adapter class import without WebAssembly/TextEncoder/TextDecoder globals; the
-native-registry subprocess proves both Coinbase aliases select the real Rust
+native-registry subprocess proves the Binance futures/spot aliases select the real Rust
 class before restoring those globals and loading an actual catalog. Actual
 frame I/O requires the host's TextEncoder/TextDecoder implementations. Do not reinitialize
 wasm-bindgen memory while accounts are alive. The real-module WASM test proves

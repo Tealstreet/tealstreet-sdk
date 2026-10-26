@@ -116,6 +116,7 @@ pub struct MarketMeta {
     pub margin_mode: u8,
     pub initial_margin_fraction: f64,
     pub maintenance_margin_fraction: f64,
+    pub initial_last_price: f64,
 }
 struct Connection {
     socket: Option<SocketId>,
@@ -553,7 +554,7 @@ impl Lighter {
             {
                 t.ask = v;
             }
-            if let Some(v) = stats.open_interest {
+            if let Some(v) = stats.open_interest.or(stats.open_interest_usd) {
                 t.open_interest = v;
             }
             if let Some(v) = stats.current_funding_rate.or(stats.funding_rate) {
@@ -642,6 +643,10 @@ impl Lighter {
             state.book.clear();
             state.waiting = depth.nonce.is_none();
         }
+        let amount_scale = self
+            .metadata
+            .get(symbol)
+            .map(|m| 10_f64.powi(m.size_decimals as i32));
         for (side, levels) in [(BookSide::Bids, &depth.bids), (BookSide::Asks, &depth.asks)] {
             if snapshot {
                 let mut pairs: Vec<(f64, f64)> = levels
@@ -663,11 +668,20 @@ impl Lighter {
                     }
                 }
                 pairs.truncate(count);
+                if let Some(scale) = amount_scale {
+                    for (_, amount) in &mut pairs {
+                        let lots = *amount * scale;
+                        if lots.is_finite() {
+                            *amount = lots.round() / scale;
+                        }
+                    }
+                }
                 state.book.load_sorted_owned(side, pairs);
             } else {
                 for level in levels {
                     let (p, n) = level.pair();
                     if p > 0.0 && n >= 0.0 {
+                        // Deltas replace the complete native size; only snapshots add sizes.
                         state.book.apply(side, p, n);
                     }
                 }
@@ -1019,6 +1033,12 @@ impl Venue for Lighter {
             cx.book_changed(symbol);
         }
         self.public.supervisor.retry(cx);
+        let symbols: Vec<_> = self.books.keys().cloned().collect();
+        for symbol in symbols {
+            if self.books[&symbol].subscribers > 0 {
+                self.depth_seed(cx, &symbol);
+            }
+        }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
@@ -1091,6 +1111,7 @@ impl Venue for Lighter {
                         metadata.insert(
                             symbol.clone(),
                             MarketMeta {
+                                initial_last_price: m.last_trade_price.unwrap_or(0.0),
                                 size_decimals: size,
                                 price_decimals: price,
                                 min_quote: m.min_quote_amount,
@@ -1184,7 +1205,7 @@ impl Venue for Lighter {
                             {
                                 ticker.ask = v;
                             }
-                            if let Some(v) = stats.open_interest {
+                            if let Some(v) = stats.open_interest.or(stats.open_interest_usd) {
                                 ticker.open_interest = v;
                             }
                             if let Some(v) = stats.current_funding_rate.or(stats.funding_rate) {
@@ -1304,12 +1325,14 @@ impl Venue for Lighter {
                         .map(|m| Ticker {
                             id: m.id.clone(),
                             symbol: m.symbol.clone(),
+                            last: self.metadata[&m.symbol].initial_last_price,
                             ..Ticker::default()
                         })
                         .collect(),
                 );
                 cx.store.set_markets(rows);
                 let _ = cx.finish_http_context(&context);
+                self.ticker_seed(cx);
                 self.account_start(cx);
                 self.connect(cx);
                 self.poll = Some(cx.set_timer(2_000.0));

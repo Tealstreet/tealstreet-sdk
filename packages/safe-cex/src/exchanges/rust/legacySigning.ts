@@ -6,10 +6,12 @@ import qs from 'qs';
 
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { signHttpCapture } from '../../utils/signHttpCapture';
+import { uuid } from '../../utils/uuid';
 import { createAsterDEXV1RequestInterceptor, isAsterDEXPublicEndpoint } from '../asterdex/asterdex.signing';
 import { createBinanceRequestInterceptor, isBinancePublicSigningRequest } from '../binance/binance.signing';
 import { finishBitgetRequest, prepareBitgetRequest } from '../bitget/bitget.signing';
 import { BROKER_ID as BITGET_BROKER_ID } from '../bitget/bitget.types';
+import { finishBitunixRequest, isBitunixUnsignedRequest, prepareBitunixRequest } from '../bitunix/bitunix.signing';
 import { createBybitRequestInterceptor, isBybitUnsignedSigningRequest } from '../bybit/bybit.signing';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../bybit/bybit.site';
 import { BROKER_ID, RECV_WINDOW } from '../bybit/bybit.types';
@@ -35,13 +37,15 @@ export const signHostedHttp = async (
   const aster = name === 'asterdex';
   const okx = OKX.has(name);
   const bitget = BITGET.has(name);
-  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !aster)
+  const bitunix = name === 'bitunix';
+  if (!BINANCE.has(name) && !BYBIT.has(name) && !okx && !bitget && !bitunix && !aster)
     return { id: request.id, error: 'Hosted HTTP signing is not supported for this venue yet' };
   const binance = BINANCE.has(name);
   // The legacy Bitget interceptor signs every request once credentials exist.
   const unsigned = binance ? isBinancePublicSigningRequest(name, request.config.url)
     : okx ? isOkxUnsignedSigningRequest(request.config.url)
     : aster ? isAsterDEXPublicEndpoint(request.config.url)
+      : bitunix ? isBitunixUnsignedRequest(request.config.url)
       : !bitget && isBybitUnsignedSigningRequest(request.config.method?.toLowerCase() ?? 'get', request.config.url);
   const needsCredential = primaryComplete && !unsigned;
   const credential = needsCredential ? (await host.hostedSigning({ kind: 'credential' })).credential : undefined;
@@ -83,6 +87,8 @@ export const signHostedHttp = async (
     } : bitget ? {
       'X-CHANNEL-API-CODE': BITGET_BROKER_ID,
       'Content-Type': 'application/json',
+    } : bitunix ? {
+      ...(options.testnet ? { 'x-simulated-trading': 1 } : {}),
     } : binance ? {
       'X-MBX-APIKEY': credential,
       'Content-Type': 'application/json, charset=utf-8',
@@ -112,6 +118,13 @@ export const signHostedHttp = async (
     const passphrase = output.headers?.find(([key]) => key.toLowerCase() === 'access-passphrase')?.[1];
     if (output.credential !== credential || !output.signature || !passphrase) throw new Error('Signing identity changed');
     return finishBitgetRequest(prepared, credential, output.signature, passphrase);
+  } : bitunix ? async (config) => {
+    if (isBitunixUnsignedRequest(config.url) || !credential) return config;
+    // The preimage carries the presented key, so the engine signs exactly it.
+    const prepared = prepareBitunixRequest(config, credential, now(), uuid());
+    const output = await host.hostedSigning({ kind: 'http', payload: prepared.payload, ...clock! });
+    if (output.credential !== credential || !output.signature) throw new Error('Signing identity changed');
+    return finishBitunixRequest(prepared, credential, output.signature);
   } : binance
     ? createBinanceRequestInterceptor(signingOptions, name, now)
     : createBybitRequestInterceptor(signingOptions, name, now, siteHeaders));
@@ -124,7 +137,8 @@ export const signHostedWsAuth = async (
 ): Promise<RemoteSignerResponse> => {
   const { toSign, outputFormat } = request.wsAuth ?? {};
   if (!toSign || !outputFormat) return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
-  if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64')
+  if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64'
+    && outputFormat !== 'bitunix-double-sha256')
     return { id: request.id, error: 'Unsupported WS auth output format' };
   const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
   if (!output.signature) throw new Error('Signing result is unavailable');
