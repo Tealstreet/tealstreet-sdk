@@ -9809,3 +9809,15 @@ orders are still refused, exactly as TypeScript refuses them.
 ### Binance request refusals: typed command terminals
 
 Binance's local pre-admission refusals (unsupported commands, Spot derivative settings, stop-limit amend, keyless trading, invalid plans, bad candle intervals or ranges) are now each the command's own typed engine terminal, with native text, kind and NotSent, and no I/O ([RUST_BINANCE_REQUEST_REFUSALS.md](RUST_BINANCE_REQUEST_REFUSALS.md)). An unsupported candle interval is now typed `Unsupported`; it was a bare message.
+
+### Orderly O1: provider-signed account reads, history and socket auth
+
+Orderly's private reads and its socket auth now sign through an installed Ed25519 provider; the venue holds only identity refs ([RUST_ORDERLY_PROVIDER_READS.md](RUST_ORDERLY_PROVIDER_READS.md)). Trading still signs locally with the seed until O2.
+- **Headers and frame.** Unchanged in names, order and bytes. Each stamp is the request's release time, which is native's own instant whenever nothing was queued.
+- **Account reads.** Bounded Background reads (20 s each). A delivery from a superseded read changes nothing. A failed or refused read is reported and retried exactly as a native failed read is, including the 5 s startup retry. A refused signature is never silent.
+- **History (better than TypeScript).**
+  - The caller's wait bounds the whole walk, including the funding spacing delays. An expired walk fails with the shared typed refusal instead of sending late pages.
+  - A lost page keeps its `Network` kind; it was `Internal`.
+  - A signing refusal fails the query outright, even after accepted pages, as before.
+- **Socket auth.** A provider refusal sends no frame and closes the socket. Without a Primary identity the socket closes without signing.
+- **Interim (until O2).** A protective placement that an account snapshot confirms completes one tick after that snapshot, rather than inside it. The result is unchanged.

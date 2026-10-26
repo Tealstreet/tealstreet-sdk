@@ -66,7 +66,7 @@ kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
 bybit = ["dep:safe-cex-venue-bybit", "dispatch-signing"]
 hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 okx = ["dep:safe-cex-venue-okx", "dispatch-signing"]
-orderly = ["dep:safe-cex-venue-orderly"]
+orderly = ["dep:safe-cex-venue-orderly", "dispatch-signing", "safe-cex-crypto/ed25519"]
 
 [dependencies]
 serde_json = { workspace = true, optional = true }
