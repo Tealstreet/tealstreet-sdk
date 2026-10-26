@@ -1050,3 +1050,123 @@ fn beta_unproven_status_never_grants_a_signature_resend() {
         );
     }
 }
+
+#[test]
+fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
+    let (mut e, _, _) = ready(false);
+    let place = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>, command| {
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![opts("limit", 99.)],
+            }),
+        );
+    };
+    let mut other = opts("limit", 49.);
+    other.symbol = "ETH/USD".into();
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 80,
+            orders: vec![other],
+        }),
+    );
+    let prior = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("AddOrder"))
+        .unwrap();
+    e.handle(
+        NOW,
+        Event::HttpResponse {
+            request: prior.id,
+            response: safe_cex_engine::Response {
+                status: 503,
+                headers: "",
+                body: "<html>",
+            },
+        },
+    );
+    let old = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("OpenOrders"))
+        .unwrap();
+    place(&mut e, 81);
+    let unknown = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("AddOrder"))
+        .unwrap();
+    e.handle(
+        NOW,
+        Event::HttpResponse {
+            request: unknown.id,
+            response: safe_cex_engine::Response {
+                status: 503,
+                headers: "",
+                body: "<html>",
+            },
+        },
+    );
+    let sealed = e.drain_plain().collect::<Vec<_>>();
+    assert!(sealed.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 81, error })
+            if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+    assert!(
+        !sealed
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("OpenOrders")))
+    );
+    let refused =
+        |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>, input, id| {
+            e.handle(NOW, Event::Command(input));
+            let actions = e.drain_plain().collect::<Vec<_>>();
+            assert!(
+                !actions.iter().any(
+                    |a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)
+                ),
+                "an uncertain placement must not admit another write: {actions:?}"
+            );
+            assert!(
+                actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command, error })
+                if *command == id && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.message.contains("uncertain"))),
+                "{actions:?}"
+            );
+        };
+    refused(
+        &mut e,
+        Command::PlaceOrders {
+            command: 82,
+            orders: vec![opts("limit", 99.)],
+        },
+        82,
+    );
+    refused(
+        &mut e,
+        Command::AmendOrder {
+            command: 83,
+            id: "O-100".into(),
+            amount: Some(3.),
+            price: Some(98.),
+        },
+        83,
+    );
+    reply(&mut e, &old, r#"{"error":[],"result":{"open":{}}}"#);
+    let fresh = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("OpenOrders"))
+        .unwrap();
+    assert_ne!(old.id, fresh.id);
+    refused(
+        &mut e,
+        Command::PlaceOrders {
+            command: 84,
+            orders: vec![opts("limit", 99.)],
+        },
+        84,
+    );
+    reply(&mut e, &fresh, r#"{"error":[],"result":{"open":{}}}"#);
+    place(&mut e, 85);
+    assert!(requests(&mut e).iter().any(|r| r.url.ends_with("AddOrder")));
+}

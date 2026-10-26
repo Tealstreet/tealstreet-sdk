@@ -1400,3 +1400,84 @@ fn beta_mixed_cancel_keeps_confirmed_ids_and_unknown() {
     assert!(e.store().order("a").is_none());
     assert!(e.store().order("b").is_some());
 }
+
+#[test]
+fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
+    let (mut e, _) = ready();
+    let mut other = limit();
+    other.symbol = "PF_ETHUSD".into();
+    place(&mut e, vec![other]);
+    let prior = http(&mut e, "sendorder");
+    reply(&mut e, &prior, 503, "<html>");
+    let old = http(&mut e, "openorders");
+    inject(&mut e, "amend-target", OrderType::Limit, None);
+
+    place(&mut e, vec![limit()]);
+    let unknown = http(&mut e, "sendorder");
+    reply(&mut e, &unknown, 503, "<html>");
+    let sealed = e.drain_plain().collect::<Vec<_>>();
+    assert!(sealed.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 7, error })
+            if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+    assert!(
+        !sealed
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("openorders")))
+    );
+
+    let refused = |e: &mut Engine<Kraken>, input: Command, id| {
+        command(e, input);
+        let actions = e.drain_plain().collect::<Vec<_>>();
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+            "an uncertain placement must not admit another write: {actions:?}"
+        );
+        assert!(
+            actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command, error })
+                if *command == id && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.message.contains("uncertain"))),
+            "{actions:?}"
+        );
+    };
+    refused(
+        &mut e,
+        Command::PlaceOrders {
+            command: 81,
+            orders: vec![limit()],
+        },
+        81,
+    );
+    refused(
+        &mut e,
+        Command::AmendOrder {
+            command: 82,
+            id: "amend-target".into(),
+            amount: Some(0.2),
+            price: Some(98.),
+        },
+        82,
+    );
+    reply(&mut e, &old, 200, OPEN);
+    let fresh = http(&mut e, "openorders");
+    assert_ne!(old.id, fresh.id);
+    refused(
+        &mut e,
+        Command::PlaceOrders {
+            command: 83,
+            orders: vec![limit()],
+        },
+        83,
+    );
+    reply(&mut e, &fresh, 200, OPEN);
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 84,
+            orders: vec![limit()],
+        },
+    );
+    http(&mut e, "sendorder");
+}
