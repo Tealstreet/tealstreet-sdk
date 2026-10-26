@@ -45,7 +45,8 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        let mut funding = Vec::new();
+        for action in support::prepared_seed_actions(&mut self.engine, self.now) {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
@@ -56,8 +57,21 @@ impl Harness {
                 } => self.public.push(socket),
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } => self.closed.push(socket),
+                Action::Http(request) if request.url.ends_with("/v1/public/funding_rates") => {
+                    funding.push(request.id);
+                }
                 _ => (),
             }
+        }
+        for request in funding {
+            self.engine.handle(
+                self.now,
+                Event::HttpFailed {
+                    request,
+                    error: "scripted funding outage during socket supervision",
+                },
+            );
+            self.collect();
         }
     }
     fn event(&mut self, event: Event<'_>) {
