@@ -15,7 +15,6 @@ use safe_cex_engine::selected_read::{
 };
 use safe_cex_engine::{Cx, ErrorKind, Method, Outcome, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use serde_json::value::RawValue;
 const TRADES: &str = "/api/v1/futures/trade/get_history_trades";
 const ORDERS: &str = "/api/v1/futures/trade/get_history_orders";
@@ -98,20 +97,21 @@ fn positions_stall_message(reason: Stall) -> String {
 const POSITION_PAGES: u32 = 100;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PositionIdentity {
-    #[serde(default)]
-    mtime: Option<Value>,
-    #[serde(default)]
-    ctime: Option<Value>,
-    #[serde(default)]
-    position_id: Option<Value>,
+struct PositionIdentity<'a> {
+    #[serde(default, borrow)]
+    mtime: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    ctime: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    position_id: Option<&'a RawValue>,
 }
-/// JS `String(value)` for the scalar row fields TS reads.
-fn js_string(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
+/// JS `String(value)` for a scalar row field; `None` for JSON null.
+fn js_string(value: &RawValue) -> Option<String> {
+    let text = value.get();
+    if text == "null" {
+        return None;
     }
+    Some(serde_json::from_str::<String>(text).unwrap_or_else(|_| text.to_owned()))
 }
 /// JS `parseInt(text, 10)`; `None` is NaN.
 fn js_parse_int(text: &str) -> Option<f64> {
@@ -131,13 +131,10 @@ fn position_identity(item: &str) -> (Option<f64>, String) {
     };
     let time = row
         .mtime
-        .filter(|v| !v.is_null())
-        .or(row.ctime.filter(|v| !v.is_null()))
-        .map_or(Some(0.0), |v| js_parse_int(&js_string(&v)));
-    let id = row
-        .position_id
-        .filter(|v| !v.is_null())
-        .map_or_else(String::new, |v| js_string(&v));
+        .and_then(js_string)
+        .or_else(|| row.ctime.and_then(js_string))
+        .map_or(Some(0.0), |text| js_parse_int(&text));
+    let id = row.position_id.and_then(js_string).unwrap_or_default();
     (time, id)
 }
 impl Request {
