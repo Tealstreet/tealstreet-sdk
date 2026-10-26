@@ -251,6 +251,9 @@ struct ProductState {
 }
 
 pub struct BybitLinear {
+    /// A Bybit Brazil (`BRA_BTL`) account: REST writes publish their own order
+    /// rows, as on Demo, until its proxied private WS is venue-validated.
+    brazil_site: bool,
     signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     recv_window: Option<u32>,
     category: Category,
@@ -524,6 +527,7 @@ impl BybitLinear {
             read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
             environment_probe_origin,
+            brazil_site: options.bybit_site_id.as_deref() == Some("BRA_BTL"),
             environment_probe_attempted: false,
             environment_probe: None,
             public: Connection::new(),

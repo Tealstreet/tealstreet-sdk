@@ -220,7 +220,7 @@ pub(crate) struct Lot {
 
 impl BybitLinear {
     fn local_order_lifecycle(&self) -> bool {
-        self.variant == crate::Variant::Demo || self.variant.is_hyro()
+        self.variant == crate::Variant::Demo || self.variant.is_hyro() || self.brazil_site
     }
 
     fn variant_control(&self, command: &Command) -> Option<(CommandId, Result<(), String>)> {

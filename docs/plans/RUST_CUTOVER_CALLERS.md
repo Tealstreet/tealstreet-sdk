@@ -9746,6 +9746,10 @@ a CloudFront host stays an auth kind. Native codes and a venue's own declared
 Bitget, Bitunix) keeps a CDN page as auth. Move the check ahead of the status
 rows if such a venue is ever fronted by CloudFront.
 
+### Bitunix account read classification (P1 #33)
+
+A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
+
 ## Rust-only beta SDK admission
 
 SDK web/native registries, saved-account/public factories and worker startup
