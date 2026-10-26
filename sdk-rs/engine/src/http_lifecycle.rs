@@ -604,12 +604,7 @@ impl<P> Cx<'_, P> {
         // After admission, so a refused binding fails an owning Plan like any
         // other issue refusal.
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
-        let forbids_recipe = self
-            .io
-            .core
-            .request_contexts
-            .keyless_session(context.owner())
-            .is_some()
+        let forbids_recipe = self.io.core.request_contexts.session_call(context.owner())
             && !matches!(&recipe, ManagedRecipe::Unsigned(_));
         #[cfg(not(all(feature = "serial-plans", feature = "session-bearer")))]
         let forbids_recipe = false;
@@ -725,7 +720,9 @@ impl<P> Cx<'_, P> {
     ) -> Result<Option<u64>, Error> {
         let registry = &self.io.core.request_contexts;
         #[cfg(feature = "serial-plans")]
-        if let Some(root) = registry.validate_keyless_session(context.owner())? {
+        if let Some(root) =
+            registry.validate_keyless_session(context.owner(), &self.io.core.identities)?
+        {
             let actual = bearer.ok_or(Error::Revoked)?;
             if registry.validate_session(actual)? != root {
                 return Err(Error::Revoked);
@@ -2967,6 +2964,8 @@ mod tests {
     include!("request_context_serial_session_tests.rs");
     #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
     include!("request_context_keyless_serial_tests.rs");
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    include!("request_context_serial_call_auth_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
     #[cfg(feature = "sign-meta")]
