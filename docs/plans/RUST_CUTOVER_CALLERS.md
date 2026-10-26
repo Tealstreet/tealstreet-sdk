@@ -9959,3 +9959,5 @@ Cancel by ID remains available. The perps and Spot four-step controls were RED
 at the retry assertion before Phase B and now execute through stale-read
 refusal, fresh Store publication and a successful retry. Duplicate rows keep
 the fence standing. This slice adds no venue retry loop or write resend.
+Multi-DEX reads release symbol-scoped marks only; an unknown-ID amend is refused
+NotSent before dispatch and cannot create an all-symbol mark on this venue.

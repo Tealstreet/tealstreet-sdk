@@ -145,6 +145,15 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
     ));
 
     refused(&place(&mut engine, 2_800.0, 102, spot), 102);
+    let symbol = if spot { "HFUN/USDC" } else { "BTC-PERP" };
+    engine.handle(
+        2_850.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 106,
+            symbol: symbol.into(),
+        }),
+    );
+    refused(&engine.drain_actions().collect::<Vec<_>>(), 106);
     response(&mut engine, 2_900.0, &old_read, "[]");
     let actions: Vec<_> = engine.drain_actions().collect();
     let fresh = actions
@@ -167,7 +176,7 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
     let row = format!(
         r#"{{"coin":"{coin}","oid":7,"side":"B","limitPx":"1","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}}"#
     );
-    let (fresh, clean_at, retry_at) = if !matches!(reply, ReconcileReply::Clean) {
+    let (fresh, clean_at) = if !matches!(reply, ReconcileReply::Clean) {
         match reply {
             ReconcileReply::Duplicate => {
                 response(&mut engine, 4_000.0, &fresh, &format!("[{row},{row}]"));
@@ -196,9 +205,9 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
             })
             .expect("engine re-asks after an unproven reconciliation");
         assert_ne!(fresh.id, next.id);
-        (next, 6_600.0, 7_000.0)
+        (next, 6_600.0)
     } else {
-        (fresh, 4_000.0, 4_400.0)
+        (fresh, 4_000.0)
     };
     response(&mut engine, clean_at, &fresh, &format!("[{row}]"));
     assert!(
@@ -208,7 +217,25 @@ fn unknown_then_stale_then_fresh(spot: bool, reply: ReconcileReply) {
     assert!(!engine.drain_actions().any(|action|
         matches!(action, Action::Http(request) if support::kind(&request) == "frontendOpenOrders")
     ), "the successful fresh read must not inherit an extra owed read from a re-ask");
-    let retry = place(&mut engine, retry_at, 104, spot);
+    engine.handle(
+        clean_at + 400.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 107,
+            symbol: symbol.into(),
+        }),
+    );
+    let cancel: Vec<_> = engine.drain_actions().collect();
+    let cancel = write(&cancel);
+    let payload: serde_json::Value = serde_json::from_str(cancel.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["action"]["type"], "cancel");
+    response(
+        &mut engine,
+        clean_at + 401.0,
+        cancel,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    engine.drain_actions().for_each(drop);
+    let retry = place(&mut engine, clean_at + 800.0, 104, spot);
     write(&retry);
     assert!(!retry.iter().any(|action| matches!(
         action,
