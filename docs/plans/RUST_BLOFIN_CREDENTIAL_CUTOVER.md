@@ -63,19 +63,27 @@ investigation.
 
 ## Decisions for review
 
-- **D1, login signing failure.** Today a nonce-entropy failure in `private_open`
-  emits `STREAM_UNAVAILABLE`, closes the socket and runs `private_close`, so the
-  supervisor reconnects. Under `send_signed`, a provider refusal or an entropy
-  failure surfaces through the engine's staged-signing failure path. The RED pins
-  native's visible behaviour: one `STREAM_UNAVAILABLE`, the socket closed,
-  reconnect scheduled, no login frame sent. Source routes the engine's failure to
-  the same native handling. If the engine's socket-signing failure cannot reach
-  the venue, that's raised before source rather than worked around.
-- **D2, the sign-module ban.** `check-signing.py` exempts unmigrated families'
-  `sign` modules. Whether BloFin joins the migrated set (its `sign` directory
-  scanned, with frozen test-oracle sites) is a reviewer call. This plan proposes
-  joining, with `sign/dispatch.rs`'s HMAC work references frozen as the
-  migrated families' are.
+- **D1, login signing failure (dazzy3: (a), pending 4yjlw0).** A legacy socket's
+  `send_signed` failure takes `Engine::sign_failed`'s WsSend arm. A provider
+  refusal latches the socket's signing role (`signing_latch.socket_failed`). The
+  engine then calls `cx.close(socket)` and `venue.on_close(socket, 1006)`, and
+  BloFin's `private_close` reconnects. So "socket closed, reconnect scheduled, no
+  login frame" holds with no venue change.
+  - What changes: native's `STREAM_UNAVAILABLE` notice is no longer emitted for
+    a login signing failure. `on_close(1006)` can't tell a signing failure from
+    an ordinary abnormal close, and the venue adds no heuristic (such as "a close
+    before the login ACK means signing failed"). CALLERS records the dropped
+    notice as a disclosed change. If 4yjlw0 rules the notice caller-visible, the
+    alternative (b) is a typed socket-signing-failure callback from the
+    signing/engine owner, raised before source.
+  - The latch is pinned. A provider refusal (for example a missing key) latches
+    the role, so the private login doesn't retry in a tight loop after the
+    reconnect. An entropy failure is not a provider refusal: the socket
+    reconnects and the login retries.
+- **D2, the sign-module ban (dazzy3: join).** BloFin joins `check-signing.py`'s
+  migrated set: its `sign` directory is scanned, and `sign/dispatch.rs`'s HMAC
+  work references are frozen as the migrated families' are. Leaving it exempt
+  after the cutover would hide a regression.
 
 ## Original controls (RED first)
 
@@ -84,8 +92,10 @@ investigation.
   number timestamp.
 - With a Secondary configured, the login signs with the PRIMARY identity, as
   native does.
-- A login signing refusal (provider or entropy) gives exactly one
-  `STREAM_UNAVAILABLE`, the socket closed, a reconnect and no frame (D1).
+- A login signing failure closes the socket with no login frame, and
+  `private_close` schedules the reconnect (D1 (a)). A provider refusal latches
+  the role, so there is no further login attempt and no tight loop. An entropy
+  failure reconnects and the login retries.
 - An explicit empty Secondary passphrase still refuses startup before discovery
   or entropy, with the same text, kind, notice and `StartupFailed`.
 - `signed()` presence, the passphrase refusal and the "read-only API key" text
@@ -105,5 +115,7 @@ registry.
 
 BloFin scoped tests, clippy `-D warnings`, fmt, `check-bans.sh`, the credential
 and signing inventories at 0 for BloFin, and one local composed combined
-measurement on the current tip (over +30K goes to the overseer). Then one frozen
+measurement on the current tip (over +30K goes to the overseer). No feature
+is added, so a shrink is expected (`sign.rs` and the raw fields go), and the
+measured delta is stated. Then one frozen
 CI run, READY and an exact-tree GO.
