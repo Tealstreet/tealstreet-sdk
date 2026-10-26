@@ -176,7 +176,6 @@ mod enabled {
         owner: Option<Box<dyn OwnedSetupExecution>>,
         result: Option<Result<[u8; 20], SignError>>,
         joined: bool,
-        join_failed: bool,
         retiring: bool,
         token: Option<Arc<SetupRetirement>>,
     }
@@ -413,7 +412,6 @@ mod enabled {
                     owner,
                     result: None,
                     joined: false,
-                    join_failed: false,
                     retiring: false,
                     token: None,
                 });
@@ -459,11 +457,12 @@ mod enabled {
                     {
                         task.result = Some(valid_result(&task.work, result));
                     }
-                    if !task.joined && !task.join_failed {
-                        match owner.poll_joined(cx) {
-                            Poll::Ready(Ok(())) => task.joined = true,
-                            Poll::Ready(Err(_)) => task.join_failed = true,
-                            Poll::Pending => {}
+                    if !task.joined
+                        && let Poll::Ready(result) = owner.poll_joined(cx)
+                    {
+                        task.joined = true;
+                        if let Err(error) = result {
+                            task.result = Some(Err(error));
                         }
                     }
                 }
