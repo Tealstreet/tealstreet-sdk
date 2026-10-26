@@ -53,7 +53,9 @@ pub(super) fn reserve(declared: bool) -> Result<Storage, Error> {
     Ok((queue, held))
 }
 
+// One out-of-line copy: every generic caller carries only a call.
 impl IoCore {
+    #[inline(never)]
     pub(super) fn domain_member(&self, operation: Operation) -> Option<Pacing> {
         let domain = self.release_domain?;
         match domain.members {
@@ -64,6 +66,7 @@ impl IoCore {
 
     /// The pacing a member Context carries: the domain's own. A member naming
     /// any other pacing would bypass or split the domain, so it is refused.
+    #[inline(never)]
     pub(super) fn domain_pacing(
         &self,
         operation: Operation,
@@ -81,6 +84,7 @@ impl IoCore {
     /// already carry the domain pacing from whichever path built its Context,
     /// must not be an atomic group member (a group releases together, so it
     /// cannot take one FIFO turn per member), and must fit the queue.
+    #[inline(never)]
     pub(super) fn domain_admits(
         &self,
         operation: Operation,
@@ -102,6 +106,7 @@ impl IoCore {
     /// The one linearization point: an accepted physical request joins the
     /// tail only as a domain member; a non-member naming the group is unpaced
     /// by the FIFO, as `domain_admits` already treats it.
+    #[inline(never)]
     pub(super) fn domain_accept(
         &mut self,
         request: RequestId,
@@ -119,6 +124,7 @@ impl IoCore {
 
     /// A prepared member binds only as the domain head; any other holds its
     /// latest Bind until the members ahead of it are released or gone.
+    #[inline(never)]
     pub(super) fn domain_bind(&mut self, request: RequestId, bind: Action) -> Option<Action> {
         if !self.domain_queue.contains(&request) || self.domain_queue.front() == Some(&request) {
             return Some(bind);
@@ -140,6 +146,7 @@ impl IoCore {
 
     /// The member was released or reached any terminal: it leaves the queue,
     /// and a held next head binds.
+    #[inline(never)]
     pub(super) fn domain_advance(&mut self, request: RequestId) {
         let Some(index) = self
             .domain_queue
