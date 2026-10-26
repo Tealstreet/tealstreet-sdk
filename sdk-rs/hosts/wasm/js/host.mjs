@@ -22,6 +22,44 @@ function signingReceipt(value) {
   return { ...(stampMs === undefined ? {} : { stampMs }), ...(expiryMs === undefined ? {} : { expiryMs }), ...(nonce === undefined ? {} : { nonce }) };
 }
 
+function signingMetaKeys(value, keys) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function checkedSigningMeta(json, task) {
+  if (typeof json !== 'string' || json.length > 1_048_576) return undefined;
+  let meta;
+  try { meta = JSON.parse(json); } catch { return undefined; }
+  const id = (value) => Number.isSafeInteger(value) && value >= 0;
+  if (!signingMetaKeys(meta, ['task', 'owner', 'deadlineMs', 'slot', 'role'])
+    || !id(meta.task) || meta.task !== task || !Number.isFinite(meta.deadlineMs) || meta.deadlineMs < 0
+    || (meta.slot !== 'primary' && meta.slot !== 'secondary')) return undefined;
+  const owner = meta.owner;
+  if (!owner || !id(owner.generation)) return undefined;
+  if (owner.kind === 'managed') {
+    if (!signingMetaKeys(owner, ['kind', 'request', 'generation']) || !id(owner.request)) return undefined;
+  } else if (owner.kind !== 'session' || !signingMetaKeys(owner, ['kind', 'generation'])) return undefined;
+  const role = meta.role;
+  if (!role) return undefined;
+  let retainedRole;
+  if (role.kind === 'read' || role.kind === 'primaryRead') {
+    if (!signingMetaKeys(role, role.kind === 'read' ? ['kind', 'scope'] : ['kind', 'reason', 'scope'])
+      || (role.scope !== null && !['account', 'balance', 'orders', 'positions', 'settings'].includes(role.scope))) return undefined;
+    if (role.kind === 'primaryRead'
+      && !['clientOrderLookup', 'postUnknownOrderRead', 'degradedRead', 'catalog', 'history'].includes(role.reason)) return undefined;
+    retainedRole = { kind: role.kind, ...(role.kind === 'primaryRead' ? { reason: role.reason } : {}), scope: role.scope };
+  } else {
+    if (!['mutation', 'sessionAuth'].includes(role.kind) || !signingMetaKeys(role, ['kind'])) return undefined;
+    retainedRole = { kind: role.kind };
+  }
+  if ((owner.kind === 'session') !== (role.kind === 'sessionAuth')
+    || (meta.slot === 'secondary' && role.kind !== 'read')) return undefined;
+  return Object.freeze({ task: meta.task,
+    owner: Object.freeze({ kind: owner.kind, ...(owner.kind === 'managed' ? { request: owner.request } : {}), generation: owner.generation }),
+    deadlineMs: meta.deadlineMs, slot: meta.slot, role: Object.freeze(retainedRole) });
+}
+
 function checkedSigningResult(expected, count, result) {
   const receipt = signingReceipt(result?.receipt);
   const rawValues = result?.values;
@@ -760,8 +798,14 @@ export class EngineHost {
     this.assertHttpHandoffIdle();
     if (this.engine.signingPending && !this.invoke(this.engine.signingPending, action.attempt)) return;
     const id = action.attempt;
+    let meta;
+    try {
+      const readMeta = this.engine.signMeta;
+      if (typeof readMeta === 'function') meta = checkedSigningMeta(this.invoke(readMeta, id), id);
+    } catch { /* An ordinary export failure leaves the legacy context intact. */ }
+    if (this.disposed) return;
     const pending = this.primitiveSigning(action.work, action.timeoutMs,
-      this.signer && ((context) => this.signer(action.work, context)), (result, code) => {
+      this.signer && ((context) => this.signer(action.work, meta ? { ...context, meta } : context)), (result, code) => {
         if (this.primitiveSignings.get(id) !== pending || this.disposed) return;
         this.primitiveSignings.delete(id);
         if (code) this.run(this.invoke(this.engine.signFailed, id, code, this.transport.now()));

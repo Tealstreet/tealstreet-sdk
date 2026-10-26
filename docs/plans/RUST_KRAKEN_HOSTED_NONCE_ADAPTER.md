@@ -148,3 +148,24 @@ The invalid-descriptor, ordinary-error and fatal-trap suffixes are not claimed
 executed past the missing-query assertion. Existing signer/nonce working-control
 logs remain 20 GREENs against unchanged production host code. Syntax and diff
 checks pass; this checkpoint changes only these originals and plan text.
+
+## Host metadata source checkpoint
+
+Socket timing #2177 landed at f016c77dc5b, clearing the one-PR sequencing gate.
+The shared EngineHost now queries the landed engine export once at live sign
+Action delivery and forwards only the copied, deeply frozen business metadata.
+Closed keys/enums, safe integer ids, exact task equality and finite nonnegative
+raw deadlines are validated. Impossible owner/role/slot combinations refuse
+metadata too. Ordinary export or parse errors preserve the exact legacy context;
+WASM RuntimeError and RangeError retain fatal cleanup before any new pending
+entry, timer or callback. Missing metadata never grants a v2 capability.
+
+The 51 reviewed originals now execute GREEN, including their formerly gated
+suffixes. Four additional cross-field originals are RED against the immutable
+pre-source host and GREEN with this source, making 55 metadata controls. The
+same target is promoted to sign-meta.test.mjs for ordinary host CI; existing
+signer/nonce controls remain 20 GREEN. Declaration type-checking passes. This
+is not the full envelope or actual Kraken peer/nonce proof. Setup metadata and
+the owned execution/retirement transport join the shared module only with their
+separate genuine engine API and capability support; they do not fall back to
+business ownership. F1/F2, actual WASM/peer proof and activation remain gates.

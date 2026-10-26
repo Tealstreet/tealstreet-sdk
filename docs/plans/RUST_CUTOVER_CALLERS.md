@@ -9190,3 +9190,19 @@ and sibling liveness. The injected Ready Capacity is a boundary control, not
 proof of normal pressure reachability. Any normally reachable fail-closed row
 goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
 supervision constants are unchanged; no generic coexistence/recovery seam.
+
+
+## Hosted signing ownership metadata
+
+EngineHost reads signMeta once for a current Action::Sign before the provider
+microtask. A provider may receive a deeply frozen meta beside its AbortSignal;
+the engine supplies task, genuine owner, raw absolute deadline, slot and role.
+This is local ownership metadata, not peer capability or a caller-selected ref.
+Legacy engines and invalid/ordinary-failing exports retain exactly {signal}.
+WASM traps and RangeError remain fatal with no callback or pending revival.
+The closed parser also drops impossible Session/role and Secondary/role pairs.
+These rules are pinned by 55 host controls; they change no request, retry,
+financial outcome or authentication latch. Negotiated v2 refuses missing
+ownership before transport; no route, timeout or method fabricates metadata.
+Setup ownership remains a distinct reviewed extension with its own negotiated
+owned-execution and retirement support, not a SessionAuth substitute.
