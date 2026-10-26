@@ -242,7 +242,7 @@ impl BitunixFutures {
             );
             return;
         }
-        if self.credentials.is_none() {
+        if !self.slots.has_primary() {
             let Ok(context) = cx.admit_http_command(local_read_policy()) else {
                 return;
             };
@@ -639,7 +639,7 @@ impl BitunixFutures {
     }
     pub(crate) fn history_sign_failed(&self, cx: &mut Cx<'_, Pending>, read: Request, error: &str) {
         cx.notice(Level::Warn, code::REQUEST_FAILED, error);
-        let kind = if self.credentials.is_none() {
+        let kind = if !self.slots.has_primary() {
             ErrorKind::AuthInvalid
         } else {
             ErrorKind::Internal

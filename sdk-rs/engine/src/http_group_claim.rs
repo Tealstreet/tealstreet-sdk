@@ -52,10 +52,16 @@ impl<V: Venue> Engine<V> {
     }
 
     pub fn http_group_pending(&self, permit: &GroupPermit) -> bool {
+        if !V::http_mutation_barriers() {
+            return false;
+        }
         !self.failed() && self.current_group(permit).is_ok()
     }
 
     pub fn claim_http_group(&mut self, now: f64, permit: GroupPermit) -> Result<GroupClaim, Error> {
+        if !V::http_mutation_barriers() {
+            return Err(Error::Invalid);
+        }
         self.assert_live();
         // Validate complete membership before any expiry or failure callback.
         self.current_group(&permit)?;
