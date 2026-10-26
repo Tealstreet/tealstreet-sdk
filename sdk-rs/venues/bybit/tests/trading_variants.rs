@@ -55,6 +55,16 @@ fn ready(variant: Variant) -> Harness {
         support::TICKERS.to_owned()
     };
     h.respond("/v5/market/tickers", 200, &tickers);
+    // Managed public feeds accept no traffic on an unopened socket.
+    let public: Vec<_> = h
+        .sockets
+        .iter()
+        .filter(|(_, url)| url.contains("/v5/public"))
+        .map(|(socket, _)| *socket)
+        .collect();
+    for socket in public {
+        h.event(Event::WsOpened { socket });
+    }
     if variant.is_hyro() {
         let socket = h.socket("/v5/private").unwrap();
         h.event(Event::WsOpened { socket });
@@ -82,7 +92,17 @@ fn ready(variant: Variant) -> Harness {
         h.respond("/v5/position/list", 200, EMPTY);
         h.respond("/v5/account/wallet-balance", 200, WALLET);
         assert!(h.engine.store().loaded().orders);
-    } else if variant == Variant::Demo {
+    } else {
+        // Managed sockets deliver nothing on an unopened socket; Bybit's own auth ACK then
+        // marks the private session live, as in a real session.
+        let socket = h.socket("/v5/private").unwrap();
+        h.event(Event::WsOpened { socket });
+        h.message(
+            "/v5/private",
+            r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"cejreaspqfh3sjdnldmg-p"}"#,
+        );
+    }
+    if variant == Variant::Demo {
         while h.has_request("/v5/order/realtime") {
             h.respond("/v5/order/realtime", 200, EMPTY);
         }
