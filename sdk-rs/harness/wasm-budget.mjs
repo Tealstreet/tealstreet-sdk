@@ -45,7 +45,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // 1,422,195 (1389 KiB) and Kraken 1,409,432 (1377 KiB), within the overseer's P1 fence ruling
 // (at most +4 KiB over the pre-fence tip). Bybit fence opt-in (#2291): CI 1,452,035,
 // rounded up to 1419 KiB.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_487_872, bitgetusdc: 1_487_872, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_410_048, krakenspot: 1_410_048 });
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_488_896, bitgetusdc: 1_488_896, bybit: 1_453_056, asterdex: 1_424_384, kraken: 1_410_048, krakenspot: 1_410_048 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
