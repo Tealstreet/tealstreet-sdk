@@ -38,6 +38,10 @@ impl<const D: u8> Venue for Fifo<D> {
                 },
                 members: DomainMembers::AllRest,
             }),
+            3 => Some(ReleaseDomain {
+                pacing: GROUP,
+                members: DomainMembers::Mutations,
+            }),
             _ => None,
         }
     }
@@ -289,4 +293,153 @@ fn a_venue_without_a_domain_binds_and_releases_at_once() {
     let a = prepare(&mut e, a, 0.);
     assert!(matches!(e.claim_http(0., a[0].1), Ok(Claim::Released(_))));
     assert!(matches!(e.claim_http(1., b[0].1), Ok(Claim::Released(_))));
+}
+
+fn write_preflight<const D: u8>(
+    engine: &mut Engine<Fifo<D>>,
+    command: u32,
+) -> crate::request_context::Preflight {
+    Cx {
+        now: 0.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    }
+    .issue_preflight(
+        command,
+        crate::request_context::PreflightPolicy {
+            purpose: crate::request_context::PreflightPurpose::WriteAfterReads,
+            read_credential: None,
+            write_credential: Some(credential()),
+        },
+    )
+    .unwrap()
+}
+
+fn credential() -> crate::request_context::Credential {
+    crate::request_context::Credential {
+        slot: crate::CredentialSlot::Primary,
+        reference: crate::signing::KeyRef("domain".into()),
+    }
+}
+
+fn serial_leg<const D: u8>(engine: &mut Engine<Fifo<D>>) -> Context {
+    let preflight = write_preflight(engine, 7);
+    let mut cx = Cx {
+        now: 0.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    };
+    let (plan, slot) = cx
+        .admit_serial_plan(
+            &preflight,
+            crate::request_context::plan::SerialCall {
+                operation: Operation::Mutation,
+                timeout_ms: 20_000,
+                attempts: 1,
+            },
+            crate::request_context::plan::SerialPolicy {
+                credential: credential(),
+                pacing: None,
+                refusals_complete: false,
+            },
+        )
+        .expect("a serial Plan joins the domain");
+    cx.plan_leg_context(&plan, &slot).unwrap()
+}
+
+#[test]
+fn a_mutations_domain_paces_writes_and_leaves_reads_unpaced() {
+    let mut e = engine::<3>();
+    let read = Cx {
+        now: 0.,
+        store: &mut e.store,
+        io: &mut e.io,
+    }
+    .http_context(Scope::Background, read(None))
+    .unwrap();
+    assert_eq!(read.pacing(), None, "a read is not a member");
+    assert_eq!(serial_leg(&mut e).pacing(), Some(GROUP), "a write is");
+}
+
+#[test]
+fn an_all_rest_domain_stamps_reads_and_writes() {
+    let mut e = engine::<1>();
+    let read = Cx {
+        now: 0.,
+        store: &mut e.store,
+        io: &mut e.io,
+    }
+    .http_context(Scope::Background, read(None))
+    .unwrap();
+    assert_eq!(read.pacing(), Some(GROUP));
+    assert_eq!(serial_leg(&mut e).pacing(), Some(GROUP));
+}
+
+#[cfg(feature = "http-mutation-barriers")]
+#[test]
+fn a_barrier_plan_with_omitted_pacing_is_still_refused_in_a_domain() {
+    use crate::request_context::plan::{CallBound, MutationBarrierBound, RetryWindow, StepBound};
+    let mut e = engine::<3>();
+    let preflight = write_preflight(&mut e, 7);
+    let call = || CallBound {
+        timeout_ms: 20_000,
+        attempts: 1,
+        retry_window: RetryWindow::FreshAttempt,
+        after_refusal: &[],
+    };
+    let calls = [call(), call()];
+    let steps = [StepBound {
+        wait_ms: 0,
+        calls: &calls,
+    }];
+    let refused = Cx {
+        now: 0.,
+        store: &mut e.store,
+        io: &mut e.io,
+    }
+    .admit_plan_with_barriers(
+        &preflight,
+        &steps,
+        crate::request_context::PlanPolicy {
+            independent_calls: false,
+            operation: Operation::Mutation,
+            credential: Some(credential()),
+            pacing: None,
+            retry: RetryPolicy::Never,
+        },
+        &[MutationBarrierBound { step: 0 }],
+    );
+    assert_eq!(refused.err(), Some(crate::request_context::Error::Invalid));
+}
+
+#[test]
+fn a_non_head_member_terminal_removes_only_itself() {
+    let mut e = engine::<1>();
+    let tokens: Vec<_> = (0..3)
+        .map(|n| {
+            let context = context(&mut e, 0.);
+            queue(&mut e, context, n, 0.)
+        })
+        .collect();
+    assert!(prepare(&mut e, tokens[2], 0.).is_empty(), "C holds");
+    // B fails while A is still the head: only B leaves.
+    e.http_preparation_failed(
+        1.,
+        tokens[1],
+        crate::request_context::Error::Invalid,
+        VenueError::new("refused"),
+    );
+    assert!(
+        binds(&mut e).is_empty(),
+        "A, the head, has not prepared yet"
+    );
+    let a = prepare(&mut e, tokens[0], 1.);
+    assert_eq!(a.len(), 1);
+    assert!(matches!(e.claim_http(1., a[0].1), Ok(Claim::Released(_))));
+    let next = binds(&mut e);
+    assert_eq!(
+        next.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        [id(tokens[2])],
+        "C is next after A; B is gone"
+    );
 }

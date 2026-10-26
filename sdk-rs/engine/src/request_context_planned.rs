@@ -422,6 +422,15 @@ impl<P> Cx<'_, P> {
                 terminals,
                 barriers,
             } = declaration;
+            // Effective domain pacing first, so barrier validation sees it.
+            #[cfg(feature = "release-domains")]
+            let policy = PlanPolicy {
+                pacing: self
+                    .io
+                    .core
+                    .domain_pacing(policy.operation, policy.pacing)?,
+                ..policy
+            };
             let prepared = PreparedAdmission {
                 schedule: Schedule::from_steps(steps),
                 terminals: terminal_ordinals(steps, &policy, terminals),
@@ -1132,6 +1141,17 @@ impl<P> Cx<'_, P> {
             },
             |serial| serial.terms(&body.policy.credential),
         );
+        // A domain Plan's calls are members by their own operation: a Read call
+        // in a Mutations domain is not paced.
+        #[cfg(feature = "release-domains")]
+        let pacing = match self.io.core.release_domain {
+            Some(domain) if body.policy.pacing == Some(domain.pacing) => {
+                self.io.core.domain_pacing(operation, None)?
+            }
+            _ => body.policy.pacing,
+        };
+        #[cfg(all(feature = "serial-plans", not(feature = "release-domains")))]
+        let pacing = body.policy.pacing;
         #[cfg(feature = "serial-plans")]
         let mut context = Context::new(
             plan.owner(),
@@ -1140,7 +1160,7 @@ impl<P> Cx<'_, P> {
             credential,
             self.now,
             window.deadline(),
-            body.policy.pacing,
+            pacing,
         )?
         .with_retry(retry)?;
         #[cfg(not(feature = "serial-plans"))]

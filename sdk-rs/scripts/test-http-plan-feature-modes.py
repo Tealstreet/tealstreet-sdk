@@ -38,6 +38,9 @@ def modes():
     # Condition waits imply serial-plans; no family enables them before adoption.
     grouped[('condition-waits', 'http-plans', 'order-locks', 'serial-plans', 'test-support')] = [
         'condition wait control']
+    # No family declares a release domain before adoption; its tests run here.
+    grouped[('http-mutation-barriers', 'http-plans', 'release-domains', 'serial-plans', 'test-support')] = [
+        'release domain control']
     # No family links session-bearer yet; its tests run only here.
     grouped[('http-mutation-barriers', 'http-plans', 'session-bearer', 'test-support')] = [
         'session-bearer control']

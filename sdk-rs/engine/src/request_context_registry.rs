@@ -2228,6 +2228,14 @@ impl crate::engine::CoreCx<'_> {
         {
             return Err(Error::Invalid);
         }
+        #[cfg(feature = "release-domains")]
+        let policy = Policy {
+            pacing: self
+                .io
+                .core
+                .domain_pacing(policy.operation, policy.pacing)?,
+            ..policy
+        };
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = self
             .io

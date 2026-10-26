@@ -925,6 +925,9 @@ struct PendingHttp<P> {
 
 #[path = "read_root_expiry.rs"]
 mod read_root_expiry;
+#[cfg(feature = "release-domains")]
+#[path = "release_domain.rs"]
+mod release_domain;
 #[cfg(feature = "repair-mutations")]
 #[path = "repair_core.rs"]
 mod repair_core;
@@ -1606,6 +1609,14 @@ struct IoCore {
     /// Preallocated to owner capacity so tracking never allocates.
     read_roots: Vec<(f64, CommandId, u64, TimerId)>,
     read_roots_expiring: bool,
+    /// The venue's FIFO release domain, its accepted members in order, and
+    /// the Bind each non-head member holds.
+    #[cfg(feature = "release-domains")]
+    release_domain: Option<crate::request_context::ReleaseDomain>,
+    #[cfg(feature = "release-domains")]
+    domain_queue: std::collections::VecDeque<RequestId>,
+    #[cfg(feature = "release-domains")]
+    domain_held: Vec<(RequestId, Action)>,
     /// Action capacity right after the sweep's reservation, for tests.
     #[cfg(test)]
     read_root_sweep_capacity: Option<usize>,
@@ -1737,6 +1748,12 @@ impl Default for IoCore {
             execution_timer: None,
             read_roots: Vec::with_capacity(256),
             read_roots_expiring: false,
+            #[cfg(feature = "release-domains")]
+            release_domain: None,
+            #[cfg(feature = "release-domains")]
+            domain_queue: std::collections::VecDeque::new(),
+            #[cfg(feature = "release-domains")]
+            domain_held: Vec::new(),
             #[cfg(test)]
             read_root_sweep_capacity: None,
             public_feed_policy: PublicFeedPolicy::Direct,
@@ -3564,6 +3581,14 @@ impl<V: Venue> Engine<V> {
         )
         .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
         let http_release = V::http_release();
+        #[cfg(feature = "release-domains")]
+        let release_domain = V::http_release_domain();
+        #[cfg(feature = "release-domains")]
+        if let Some(domain) = release_domain {
+            release_domain::validate(domain, venue.http_pacing()).map_err(|_| {
+                VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
+            })?;
+        }
         Ok(Self {
             venue,
             http_release,
@@ -3572,6 +3597,8 @@ impl<V: Venue> Engine<V> {
                 core: IoCore {
                     entropy: Some(entropy),
                     http_pacing,
+                    #[cfg(feature = "release-domains")]
+                    release_domain,
                     nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
                     #[cfg(feature = "dispatch-nonce")]
                     nonce_enabled: V::dispatch_nonce(),

@@ -134,13 +134,25 @@ impl<P> Cx<'_, P> {
         }
         validate_call(first)?;
         let (intent, _) = self.preflight_plan_origin(preflight)?;
-        if policy
-            .pacing
-            .is_some_and(|pacing| pacing.minimum_gap_ms != 0.)
-        {
-            return Err(Error::Invalid);
+        // A domain member is paced by its domain; any other serial Plan stays unpaced.
+        #[cfg(feature = "release-domains")]
+        let pacing = self
+            .io
+            .core
+            .domain_pacing(Operation::Mutation, policy.pacing)?;
+        #[cfg(not(feature = "release-domains"))]
+        let pacing = policy.pacing;
+        #[cfg(feature = "release-domains")]
+        let in_domain =
+            pacing.is_some() && pacing == self.io.core.release_domain.map(|domain| domain.pacing);
+        #[cfg(not(feature = "release-domains"))]
+        let in_domain = false;
+        if !in_domain {
+            if pacing.is_some_and(|pacing| pacing.minimum_gap_ms != 0.) {
+                return Err(Error::Invalid);
+            }
+            self.io.core.http_pacing.validate_zero(pacing)?;
         }
-        self.io.core.http_pacing.validate_zero(policy.pacing)?;
         let schedule = Schedule::from_single_call(CallTerms {
             wait_ms: 0,
             timeout_ms: first.timeout_ms,
@@ -155,7 +167,7 @@ impl<P> Cx<'_, P> {
                     independent_calls: false,
                     operation: Operation::Mutation,
                     credential: Some(policy.credential),
-                    pacing: policy.pacing,
+                    pacing,
                     retry: retry_policy(first),
                 },
                 terminals: Ok(Vec::new()),

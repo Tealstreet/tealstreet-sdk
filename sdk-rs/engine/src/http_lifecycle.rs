@@ -958,6 +958,10 @@ impl<P> Cx<'_, P> {
         )
         .expect("validated physical HTTP window");
         let preparation = lifecycle.preparation();
+        #[cfg(feature = "release-domains")]
+        self.io
+            .core
+            .domain_accept(request, lifecycle.context().pacing());
         self.io.core.managed_http.insert(
             request,
             Managed {
@@ -1282,6 +1286,8 @@ impl crate::engine::CoreIo<'_> {
         cancel: Option<Action>,
     ) -> Option<Managed> {
         let managed = self.core.managed_http.remove(&request)?;
+        #[cfg(feature = "release-domains")]
+        self.core.domain_advance(request);
         #[cfg(feature = "session-bearer")]
         self.core
             .bearer_parked
@@ -1463,14 +1469,18 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 }
-                self.io
-                    .core
-                    .actions
-                    .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
-                        preparation: token,
-                        permit,
-                        request,
-                    })));
+                let bind = Action::ManagedHttp(Box::new(HttpAction::Bind {
+                    preparation: token,
+                    permit,
+                    request,
+                }));
+                #[cfg(feature = "release-domains")]
+                let bind = self.io.core.domain_bind(token.attempt().request, bind);
+                #[cfg(not(feature = "release-domains"))]
+                let bind = Some(bind);
+                if let Some(bind) = bind {
+                    self.io.core.actions.push(bind);
+                }
             }
             Err(Error::State) => {} // Duplicate readiness cannot replace an issued permit.
             Err(error) => self.http_preparation_failed(
@@ -1733,14 +1743,18 @@ impl<V: Venue> Engine<V> {
                     self.pump_mutation_group(now, request);
                     return;
                 }
-                self.io
-                    .core
-                    .actions
-                    .push(Action::ManagedHttp(Box::new(HttpAction::Bind {
-                        preparation: token,
-                        permit,
-                        request: packet,
-                    })));
+                let bind = Action::ManagedHttp(Box::new(HttpAction::Bind {
+                    preparation: token,
+                    permit,
+                    request: packet,
+                }));
+                #[cfg(feature = "release-domains")]
+                let bind = self.io.core.domain_bind(request, bind);
+                #[cfg(not(feature = "release-domains"))]
+                let bind = Some(bind);
+                if let Some(bind) = bind {
+                    self.io.core.actions.push(bind);
+                }
             }
             (result, mut outbound) => {
                 if let Some(action) = outbound.as_mut() {
@@ -2246,6 +2260,10 @@ impl<V: Venue> Engine<V> {
             #[cfg(not(feature = "dispatch-nonce"))]
             let message = "HTTP request was not released";
             self.http_preparation_failed(now, preparation, error, VenueError::new(message));
+        }
+        #[cfg(feature = "release-domains")]
+        if matches!(result, Ok(Claim::Released(_))) {
+            self.io.core.domain_advance(request);
         }
         result
     }
