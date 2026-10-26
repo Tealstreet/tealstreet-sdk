@@ -495,3 +495,5 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Bitget history Read funnel | Source CLEAR; correctness green; direct overseer landing GO | Before changing history caller bounds, paging, promotion, retry custody or selected identity. | [RUST_BITGET_HISTORY_READ_FUNNEL.md](RUST_BITGET_HISTORY_READ_FUNNEL.md) |
 
 | Phemex late cancel repair: final four | Source CLEAR; correctness green; direct overseer landing GO | Before retiring Phemex’s four commandless late-cancel request holdouts. | [RUST_PHEMEX_LATE_REPAIR_CONTEXT.md](RUST_PHEMEX_LATE_REPAIR_CONTEXT.md) |
+
+| Keyless Session serial Plans | Plan and originals; source held | Before admitting a credential-free Session-authenticated serial root or changing SerialPolicy credential optionality. | [RUST_KEYLESS_SERIAL_SESSION.md](RUST_KEYLESS_SERIAL_SESSION.md) |
