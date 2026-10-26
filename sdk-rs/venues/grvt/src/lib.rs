@@ -5,6 +5,8 @@ mod depth_query;
 mod history;
 mod identity;
 #[cfg(test)]
+mod installed;
+#[cfg(test)]
 mod preparation_delegation_tests;
 pub mod provider;
 mod sign;
