@@ -132,7 +132,7 @@ impl Http {
             method,
             url,
             body,
-            canonical,
+            path,
             form,
             false,
             freshness_ms,
@@ -201,34 +201,7 @@ impl Http {
         self.body.as_deref()
     }
     fn work(&self, nonce: u64, stamp_ms: f64) -> Result<(Option<String>, SignRequest), SignError> {
-        let nonce_text = nonce.to_string();
-        let body = if self.spot {
-            Some(format!(
-                "{}{}nonce={nonce_text}",
-                self.form,
-                if self.form.is_empty() { "" } else { "&" }
-            ))
-        } else {
-            self.body.clone()
-        };
-        let hash_input = if self.spot {
-            format!("{nonce_text}{}", body.as_deref().unwrap())
-        } else {
-            format!("{}{nonce_text}{}", self.form, self.path)
-        };
-        let receipt = SignReceipt {
-            stamp_ms: Some(stamp_ms),
-            nonce: Some(nonce),
-            ..Default::default()
-        };
-        let mut work = hash_work(
-            &self.identity.credential,
-            self.identity.signing_ref()?,
-            hash_input.into_bytes(),
-            self.spot.then_some(self.path.as_bytes()),
-            receipt,
-        );
-        work.context = Context {
+        let context = Context {
             venue: if self.spot { "krakenspot" } else { "kraken" }.into(),
             method: self.method.as_str().into(),
             host: self
@@ -239,8 +212,19 @@ impl Http {
                 .into(),
             path: self.path.clone(),
         };
-        Ok((body, work))
+        build_http_work(
+            &self.identity,
+            context,
+            &self.form,
+            self.spot,
+            SignReceipt {
+                stamp_ms: Some(stamp_ms),
+                nonce: Some(nonce),
+                ..Default::default()
+            },
+        )
     }
+
     fn attest(&self, request: &HttpRequest, body: Option<&str>) -> Result<(), SignError> {
         if request.method != self.method
             || request.url != self.url
@@ -334,6 +318,45 @@ impl SignStep for Http {
         self.freshness_ms
     }
 }
+pub(super) fn build_http_work(
+    identity: &Identity,
+    context: Context,
+    form: &str,
+    spot: bool,
+    receipt: SignReceipt,
+) -> Result<(Option<String>, SignRequest), SignError> {
+    let nonce_text = receipt.nonce.ok_or(SignError::InvalidRequest)?.to_string();
+    let body = if spot {
+        Some(format!(
+            "{}{}nonce={nonce_text}",
+            form,
+            if form.is_empty() { "" } else { "&" }
+        ))
+    } else {
+        (context.method != "GET").then(|| form.to_owned())
+    };
+    let input = if spot {
+        format!("{nonce_text}{}", body.as_deref().unwrap())
+    } else {
+        format!(
+            "{form}{nonce_text}{}",
+            context
+                .path
+                .strip_prefix("/derivatives")
+                .unwrap_or(&context.path)
+        )
+    };
+    let mut work = hash_work(
+        &identity.credential,
+        identity.signing_ref()?,
+        input.into_bytes(),
+        spot.then_some(context.path.as_bytes()),
+        receipt,
+    );
+    work.context = context;
+    Ok((body, work))
+}
+
 fn hash_work(
     credential: &KeyRef,
     signing: &KeyRef,

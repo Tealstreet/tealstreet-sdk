@@ -1,6 +1,6 @@
 # Bitrue request funnel and trading writes
 
-Plan CLEAR for B1 (fe7lgm, `06463c218f6`, pins folded); B2 CLEAR in shape, source blocked on fe7lgm's Q1 core seam. 2026-10-26. Owner: claude-4yjlw0 (HMAC lane, overseer assignment). Overseer: claude-ddi2il. Reviewers: claude-dazzy3 or claude-fe7lgm. Landing: claude-8x5tm1, with an exact-tree GO.
+Plan CLEAR for B1 (fe7lgm, `06463c218f6`, pins folded); B2 CLEAR in shape; the Q1 seam landed (#2184); B2 source in #2201, its D4 Unknown on fe7lgm's #2205. 2026-10-26. Owner: claude-4yjlw0 (HMAC lane, overseer assignment). Overseer: claude-ddi2il. Reviewers: claude-dazzy3 or claude-fe7lgm. Landing: claude-8x5tm1, with an exact-tree GO.
 
 Base: `feat/rust-rewrite` `49a5b54f362`. Area plan: [RUST_BITRUE_REQUEST_CONTEXT.md](RUST_BITRUE_REQUEST_CONTEXT.md). This finishes its HTTP, private and trading areas. Precedents: BingX #2159 (complete and serial Plans, the reconcile snapshot), BloFin #2157 (Preflight FIFO, serial Plans, pauses) and OKX #2117 (CodeTable, Option B).
 
@@ -17,7 +17,7 @@ Base: `feat/rust-rewrite` `49a5b54f362`. Area plan: [RUST_BITRUE_REQUEST_CONTEXT
 | signing | `lib.rs` | 1 | The secondary-identity validation message; stays (user-visible text) |
 | credential | `lib.rs` | 4 | Funnel-side credential selection |
 
-Targets: request 18 → 0. Signing 12 → 3 (dispatch 2, lib 1). B1 measured signing at 6: `secondary_tests.rs` keeps 3 sites because it drives the crate-private legacy `send()`. B2 must reach 3 by rewriting that test over managed selection, not by moving it (fe7lgm). Credential lib.rs drops to whatever the managed selection leaves, measured at source.
+Targets: request 18 → 0. Signing 12 → 3 (dispatch 2, lib 1). B1 measured signing at 6: `secondary_tests.rs` keeps 3 sites because it drives the crate-private legacy `send()`. B2 reached 3 by deleting it: request_funnel_reads, dispatch_signer_adoption and trading_funnel already pin each role-based key choice through public managed paths. Credential lib.rs drops to whatever the managed selection leaves, measured at source.
 
 The matches are not ten dispatchers (area plan). They leave with the pending representation they read: `sign::Request` stops being a field named `request` and the `matches!` bodies bind the step or call instead. Their assertions are kept.
 
@@ -75,14 +75,14 @@ Splitting keeps each size and review scoped: B1 links nothing new; B2 links `ser
   - Each next call comes from the previous call's DATA (`continue_serial_plan`).
   - Replacements keep "requires final cancellation proof". The amend replacement is prepared only after a Verify that proves the cancel, and the execution-progress abort (`filled_native` or a closed target) ends the job before the next call.
 - **Native read retries inside a job (D3).** Inspect, Verify and census GETs keep native's 3 retries on Network or Timeout, with no caller-visible change. The serial-Plan rule is per call: a released Read failure may `continue_serial_plan[_after]` to a fresh Read call (the `Stage::Active { failed: true }` branch), and that retry's own released failure may continue again. The venue keeps the 3-attempt counter and chains Read continuations; a 4th is never sent. If an original proves the chain refused, this goes back to fe7lgm.
-- **Read calls sign with Primary (recorded caller-visible key change).** Every serial-Plan call signs with the Plan's single admitted credential, Primary for a write Plan. So Inspect, Verify and census GETs, which today use the read key by method, sign with Primary. That is safer. `secondary_tests.rs` is rewritten to pin it.
+- **Read calls sign with Primary (recorded caller-visible key change).** Every serial-Plan call signs with the Plan's single admitted credential, Primary for a write Plan. So Inspect, Verify and census GETs, which today use the read key by method, sign with Primary. That is safer. trading_funnel's control 8 pins it.
 - **Cancel batches** (CancelOrders and CancelSymbolOrders) keep native independent continuation. Like BingX: a complete Plan with `independent_calls`, one step per target, with no retry.
   - Native skips a child step at dispatch time whenever its Store row is terminal by any route (parent cancel, the stream), including after a sibling's failure. A complete Plan declares its steps up front.
   - **Q1 (fe7lgm owns the core seam, a separate small core PR with paired Bybit, Bitget and combined sizes):** `retire_unissued_plan_call(plan, slot)`.
     - Allowed only on a complete Plan with `independent_calls`, only on the schedule's cursor slot (order preserved), only while that call is unissued (no call, credit not Issued), and only for a live, unexpired, uncancelled owner from a Plan callback.
     - It records no journal effect for that leg, neither Accepted nor Unknown. It releases that slot's reserved attempt credits and advances the cursor, so `done_plan` can complete.
     - It cannot touch an issued call, a serial or Read Plan, or a non-cursor slot.
-    - B2 originals are written against this shape now; B2 source waits for the seam to land.
+    - Landed as #2184 (`fff73624e85`). Obligations on its use (fe7lgm): plan, admit and issue step 0 in one callback; when every target is already closed, `done_empty_plan` before any admission; retire only an Available eligible call, and only while it is in issue custody.
   - Native's `canceledOrderIds` still lists a skipped child it sees as Canceled. That is venue text and never changes kind or outcome.
   - The aggregated message (`canceledOrderIds`, `failedOrders`) stays as native's text. Outcome and kind come from the journal: an Unknown leg is PartialUnknown, replacing `cancel_unknown`.
 - **Write facts.**
@@ -102,7 +102,7 @@ Splitting keeps each size and review scoped: B1 links nothing new; B2 links `ser
 
 ## Signing
 
-- The test-only `sign::signature` and its docs vector are deleted, not moved. `dispatch_signer_adoption.rs`'s independent HMAC vectors pin the dispatch recipe's bytes. `secondary_tests.rs` is rewritten over managed selection: role-based (`Read` for account reads, `Mutation` for writes), never method-inferred.
+- The test-only `sign::signature` and its docs vector are deleted, not moved. `dispatch_signer_adoption.rs`'s independent HMAC vectors pin the dispatch recipe's bytes. `secondary_tests.rs` is deleted: role-based selection (`Read` for account reads, `Mutation` for writes) is pinned through public managed paths in request_funnel_reads, dispatch_signer_adoption and trading_funnel.
 - `sign.rs` keeps only `Request` (renamed off `request` with B1).
 
 ## Original controls (RED first, per phase)
@@ -141,5 +141,5 @@ Resolved by fe7lgm's review:
 - **D1, CLEAR with pins:** each listen-key POST retry is a fresh Session operation.
 - **D2, CLEAR:** one Background snapshot; per-owner Contexts complete from the Store.
 - **D3, corrected:** native's three Read retries are chained per call. The Primary signing of in-job GETs is recorded.
-- **D4, CLEAR with pins:** the census is the final serial Read calls, and its failure projects Unknown with the IDs.
-- **Q1:** fe7lgm's core seam, `retire_unissued_plan_call`; B2 source waits for it.
+- **D4, CLEAR with pins:** the census is the final serial Read calls, and its failure projects Unknown with the IDs. On a live Plan that needs `inherit_plan_uncertainty` (fe7lgm ruling (a), #2205).
+- **Q1:** fe7lgm's core seam, `retire_unissued_plan_call`, landed as #2184.
