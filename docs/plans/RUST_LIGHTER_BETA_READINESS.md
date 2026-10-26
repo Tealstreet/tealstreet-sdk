@@ -53,6 +53,13 @@ startup-counter class, with none outside it. Its construction-test failure was
 the tip-wide missing Lighter mapping, fixed separately by #2286 and composed
 here without changing Lighter runtime or assertions.
 
+The accepted CI bootstrap differences are now exact tape-and-path declarations
+with a TS-zero/finite-Rust value guard. Only checkpoint-zero volume, quoteVolume
+and percentage qualify. Raw reports retain FAIL; the correctness verifier accepts
+the declared improvement. Other checkpoints, fields, tapes or venues still fail.
+The two private tapes retain their separate pre-existing fill/order declarations;
+their eleven differences each are not part of the public bootstrap class.
+
 ## Remaining beta blocker
 
 Grouped limit entry with TP/SL must use one type-28 OTO/OTOCO transaction and one
@@ -63,5 +70,6 @@ no replay. Lock every child ID. Definitive pre-execution 21104 may reseed once;
 Kuhwxi owns its financial tests and review before credentialed smoke.
 
 Reviewer: dazzy3. No engine, crypto, registry, budget or inventory edit is planned
-for the public-data slice. The final JS/WASM build must replay the retained live
+for the public-data slice. The bounded replay-expectation follow-up also requires
+an exact-tree auditor GO. The final JS/WASM build must replay the retained live
 tape and pass a fresh live-public run before claiming beta readiness.

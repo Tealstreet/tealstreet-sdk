@@ -9929,3 +9929,6 @@ daily volume, quote volume and percentage. TypeScript's REST fallback drops
 those fields. The overseer accepts this more complete bootstrap in readiness
 comparison; the raw replay still reports these differences without relaxed
 tolerances. Prices, books and later checkpoints must agree.
+The CI verifier declares only exact recorded bootstrap paths with TS zero and
+finite Rust values. Later checkpoints and other fields remain strict; existing
+private fill/order baseline declarations remain separate and unchanged.
