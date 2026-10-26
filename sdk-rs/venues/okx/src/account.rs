@@ -2286,11 +2286,14 @@ mod key_refusal_tests {
                 code: NativeCode::Int(code),
                 message: "native",
             };
-            assert_eq!(
-                crate::trading::CODES.verdict(&native, Intent::Place),
-                Verdict::Refused(kind),
-                "{code}"
-            );
+            let verdict = crate::trading::CODES.verdict(&native, Intent::Place);
+            // 50113 (a rejected signature) is the one key refusal re-signed once.
+            let expected = if code == 50113 {
+                Verdict::RefusedResend(kind)
+            } else {
+                Verdict::Refused(kind)
+            };
+            assert_eq!(verdict, expected, "{code}");
         }
     }
 }

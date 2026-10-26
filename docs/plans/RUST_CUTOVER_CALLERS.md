@@ -9997,3 +9997,15 @@ features. Not run: master's TypeScript-oracle tests (they need an isolated TS
 install), the candle-cache `fix_audit` and `monthly_behavior` targets and two
 lib tests, which load the TypeScript compiler over TS venue sources, and one `safe-cex-types` audit of a crate the port deleted. No port
 crate may depend on these three.
+
+### One re-signed resend of a write signature rejection
+
+A write refused for its signature executed nothing, so it is re-signed and sent
+once more, writes included (TS 9db593a2338 parity). Binance `-1022` and OKX
+`50113` are `RefusedResend(AuthInvalid)` rows. Binance write legs use
+`RetryPolicy::DefinitiveRefusal` and resend through `http_resend_context`; OKX
+serial writes declare `attempts: 2` and resend through `plan_resend_context`.
+The journal refuses a second resend, so a second rejection fails as
+`AuthInvalid`/`Rejected` with no third send. Every other refusal is still never
+resent. Kraken spot already re-signs a trade once on `EAPI:Invalid signature`
+(`spot/account.rs` `private_response`), and Bitunix `10007` landed in #2207.
