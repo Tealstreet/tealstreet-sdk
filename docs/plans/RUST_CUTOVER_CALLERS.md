@@ -3539,6 +3539,42 @@ each one Background read.
 - **Unchanged.** Query bytes, results, row mapping and account Store effects. No
   new frame or result schema.
 
+### BloFin credential cutover: socket login on dispatch, raw options retired
+
+The private socket login now signs through the dispatch provider (a `WsLogin`
+recipe) with the Primary identity, as every private REST request already did.
+BloFin's options carry only opaque identities; the raw key, secret, passphrase
+and read credentials are gone from the venue
+([RUST_BLOFIN_CREDENTIAL_CUTOVER.md](RUST_BLOFIN_CREDENTIAL_CUTOVER.md)).
+- **Login frame.** Unchanged: the same fields in the same order, with a numeric
+  timestamp, the same `/users/self/verify` HMAC and the Primary key even when a
+  read key is configured.
+- **Login signing failure (better than TypeScript).** No frame is sent and the
+  socket closes.
+  - An entropy failure reconnects and logs in again.
+  - A provider refusal (an installed credential that cannot sign) latches the
+    private role, so the socket never reconnects and there's no retry loop. It
+    reports once through the engine's credential notice and `StartupFailed`.
+  - Native's `STREAM_UNAVAILABLE` notice for a login signing failure is dropped:
+    the engine's own signals already report it.
+- **Presence comes from identities.** Without a usable Primary identity the
+  venue is keyless and runs no private work at all: no settings read, private
+  socket, signature or refusal notice.
+- **Passphrases (better than TypeScript).** A missing passphrase now refuses at
+  startup, before discovery or any signed request, rather than after
+  discovery. A Primary without one fails with "BloFin requires a passphrase". A
+  read key whose own passphrase is explicitly empty, with no inherited one,
+  fails with "Secondary read credentials require a passphrase". Both are
+  `InvalidInput`, `config.invalid` and `StartupFailed`. The Primary is checked
+  first, because a read key inherits its passphrase.
+- **Read keys.** An invalid read key is refused at construction by the
+  registry's shared read-key gate, before the venue exists. Native refused it at
+  startup.
+- **Inventories.** BloFin's credential-selection sites go 5 → 0 and its legacy
+  signing sites 11 → 0. Its `sign/` directory joins the migrated signing ban,
+  with the two dispatch HMAC work references frozen as other migrated families'
+  are.
+
 ### BloFin trading writes: Preflight roots and one serial Plan per job (W1)
 
 Every BloFin trading command (place, cancel, cancel-all, amend, leverage, margin
@@ -9222,3 +9258,52 @@ financial outcome or authentication latch. Negotiated v2 refuses missing
 ownership before transport; no route, timeout or method fabricates metadata.
 Setup ownership remains a distinct reviewed extension with its own negotiated
 owned-execution and retirement support, not a SessionAuth substitute.
+
+
+### WOO unsigned public seed observations
+
+Markets, Tickers and Funding use independent unsigned Background Read contexts
+with Primary egress, native unspecified route and a NEW20s/Never per-call bound.
+Rows, diagnostics and Store publication require current DATA. Exact retirement
+precedes catalogue followups, keyed Backoff, account startup/refresh, public
+connect and funding cadence effects. No latest-kind gate or signing migration.
+Owned precommit recovery is limited to Capacity/TimedOut, or Invalid with
+Network/Timeout/Internal; other finite refusals warn only. Released failure
+keeps Markets/Tickers keyed recovery and Funding warning-only. Each finite
+Funding dispatch attempt retains exactly one60s cadence rearm even if refused.
+Nonfinite venue callbacks retire only their returned request, without venue
+work or diagnostics. The inherited engine startup watchdog may independently
+emit its exact startup.incomplete notice at positive infinity; the control pins
+that separately from exact once-only physical timer/preparation cleanup.
+Native no-newwork controls now distinguish that cleanup from new dispatch.
+
+Startup seed fixtures complete real preparation/binding/claim at their original
+observation clocks through a seed-only collector. The shared raw requests()
+helper and private/candle/book collectors remain unchanged. No blanket timer
+flush, fabricated request/context or financial-clock supersession is used.
+
+The socket-only supervision fixture explicitly fails each released Funding
+observation at its original cadence clock, so the real returned cleanup removes
+its deadline before the next minute. It does not filter timers. The positional
+trading fixture only changes its0/10 seed release collector. Original financial
+payloads, assertions and clocks stay intact; all264 family controls pass locally.
+
+### Bitget history original Read custody
+
+History fills, orders, income and unsigned PublicTrades retain one genuine Read
+root and the original caller receipt across detection, promotion, windows, pages
+and native retry waits. Every physical page uses a fresh managed child, bounded
+by both the original receipt and 20 seconds from dequeue, including preparation,
+signing and queueing. Equality expires before response admission in either event
+order. Typed integrity, provider and local refusals fail with their original
+cause and consume no transport retry. Native response compatibility, including
+40085 on HTTP 408/5xx, still uses actual response bodies. Native three retries
+and strict incomplete failure remain; no prefix success or INCOMPLETE marker is
+introduced. Expiry removes only this owner’s parked work. The unrelated account
+completion remains the one Bitget legacy request site.
+
+Bitget malformed/non-UTF8 streamed envelopes keep native250/500/750ms response
+retries after exact delivery validation. They are distinct from typed Internal
+engine failures delivered through on_http_failed, which remain strict (including
+a non-streamed response body the engine cannot decode). No retry is authorized
+by error-message text.

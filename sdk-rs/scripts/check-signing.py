@@ -2,7 +2,7 @@
 """Freeze legacy credential/signing sites while families migrate to dispatch.
 
 The hash is of one stripped source line (not its line number), so ordinary
-refactors cannot silently introduce another secret holder. Legacy sign modules are reviewed during their migration. Migrated Binance, Bybit, BingX, AsterDEX, OKX, Bitget and Phemex
+refactors cannot silently introduce another secret holder. Legacy sign modules are reviewed during their migration. Migrated Binance, Bybit, BingX, AsterDEX, OKX, Bitget, Phemex and BloFin
 include their sign modules in this ban: only frozen test-oracle sites remain;
 production primitive work uses the provider. Test-only sites are frozen too.
 """
@@ -94,7 +94,7 @@ def sites():
     proven, tests_proven = proven_crates(), proven_crates(production=False)
     for path in sorted((ROOT / 'venues').glob('*/src/**/*.rs')):
         relative = path.relative_to(ROOT / 'venues')
-        if relative.parts[0] not in {'asterdex', 'binance', 'bingx', 'bybit', 'okx', 'bitget', 'phemex', 'bitrue'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
+        if relative.parts[0] not in {'asterdex', 'binance', 'bingx', 'bybit', 'okx', 'bitget', 'phemex', 'bitrue', 'blofin'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
             continue
         source = path.read_text()
         production = not (path.name == 'tests.rs' or path.name.endswith(('_tests.rs', '_test.rs'))

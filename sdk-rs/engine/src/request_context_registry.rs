@@ -25,6 +25,10 @@ pub(super) mod session;
 #[path = "plan_receipt_cap_tests.rs"]
 mod receipt_cap_tests;
 
+#[cfg(all(test, feature = "write-preflight-wait"))]
+#[path = "write_preflight_wait_tests.rs"]
+mod write_preflight_wait_tests;
+
 #[cfg(all(test, feature = "http-plans"))]
 #[path = "request_context_preflight_tests.rs"]
 mod preflight_tests;
