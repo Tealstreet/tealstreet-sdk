@@ -166,3 +166,25 @@ and ratchets. Four-artifact paired sizes on the composed tip: Kraken, Bybit,
 Bitget and combined, each reported as measured (no assumed zero).
 Consumer adoption (Kraken managed signing, Paradex moving off `SignPayload`)
 and the v2 host channel are separate PRs.
+
+## SignKind carrier cutover
+
+`SignMeta` is now `{ task, deadline_ms, kind: SignKind }`, a direct cutover from
+`SignOwner` plus top-level `slot`/`role`. `SignKind` makes invalid combinations
+unrepresentable:
+
+- `Managed { request, generation, slot, role }` and `Session { generation, slot,
+  role }` carry a business role;
+- `Setup { generation, operation: SetupOperation::PublicAddress, slot }` carries
+  no role.
+
+The types stay in the whole-module `sign-meta` gate, so no variant set depends
+on another feature. Business JSON is byte-identical: golden wire tests were
+committed on the old shape first and kept their exact expected strings through
+the cutover. Setup serializes as `{task, owner:{kind:'setup',generation},
+deadlineMs, setup:{operation:'publicAddress',slot}}`, with no top-level slot or
+role.
+
+The engine never constructs `Setup` here. uufub4's address-nonce PR adds the one
+`cfg(address-nonce)` accessor branch reading its genuine setup task table; until
+then, hosts keep refusing owner kind `setup`.
