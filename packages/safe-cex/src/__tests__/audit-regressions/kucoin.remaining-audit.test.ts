@@ -2,8 +2,8 @@ import type { Axios } from 'axios';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
-import { ENDPOINTS } from '../../exchanges/kucoin/kucoin.types';
+import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
+import { ENDPOINTS } from '../reference/kucoin/kucoin.types';
 import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () =>

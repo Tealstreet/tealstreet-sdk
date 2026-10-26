@@ -422,6 +422,14 @@ Execution history follows the same conversion rule (`qty = nativeQty * contractS
 
 BloFin's public `Order.filled` remains base quantity. `Order.extra.filledInPlacementUnits` preserves the same cumulative native-contract value accepted by `PlaceOrderOpts.amount`, so chaser remainder arithmetic does not mix base quantity with placement units.
 
+### Book snapshots
+
+`books5` replaces the price range covered by its top levels, preserving only
+levels deeper than that range. Replacing the first N array entries loses sorted
+price order and can duplicate a price after the top of book moves. The Rust
+engine uses the same merge and requires matching `prevSeqId` for full-book
+updates; a gap clears sequence state and requests a fresh snapshot.
+
 ### Order Book Amount Conversion
 
 Order book amounts from WS are contract counts. Keep them in native contracts in `blofin.ws-public.ts`; web orderbook/DOM grouping utilities convert to base or quote exactly once using `contractSize`.
@@ -580,6 +588,9 @@ an auth failure — they are real rejections but not credential problems.
   generated `clientOrderId` values (truncated to 32 chars)
 - Only the payload `brokerId` field is gated to production or
   `tealstreetProxy`; the client-order-ID prefix is always applied
+- The Rust bridge passes this environment/proxy decision as `brokerAttribution`;
+  native callers set `Options.broker_attribution` for the same policy. It applies
+  to normal, trigger and protective placements, including replacements.
 - Format: `clientOrderId = "${BROKER_ID}${uuid}".slice(0, 32)`
 
 ## Tealstreet Proxy
@@ -752,3 +763,106 @@ Notable cross-references for leverage handling:
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clientOrderId`, rule `^[A-Za-z0-9]{1,32}$`, on `placeOrder` and on each regular order of `placeOrders`. Replaces the generated `BROKER_ID…` ID; no prefix is composed.
+
+## Rust engine account safety
+
+The Rust venue lives at `sdk-rs/venues/blofin`. It retains each large REST
+response's status envelope while streaming its data rows, so a non-zero API
+code or a failed page cannot commit as an empty authoritative snapshot.
+Snapshot revisions prevent older REST data from overwriting newer socket events.
+
+Two defensive corrections to the TS behavior are recorded in the replay gate:
+malformed successful mode reads do not silently initialize cross/one-way mode,
+and an empty position push clears used margin and unrealized PnL. Per-market
+settings retain leverage and margin when positions close. Cumulative fills keep
+quantity and traded-value watermarks for 500 orders, including terminal rows.
+Startup execution reporting waits for the first complete pending-order census;
+up to 500 early cumulative socket observations wait for that execution baseline.
+A complete REST prefix can prove a buffered suffix even when newer socket state
+prevents that REST snapshot from replacing the order store. Each proven suffix
+uses the difference in cumulative traded value, preserving its execution price.
+A native `createTime` at or after private startup proves that a newly filled
+order has no pre-session prefix and may report immediately. For older or unknown
+orders, an unprovable startup prefix is a quiet baseline; missing historical
+quote value also waits for a known value before reporting further suffixes.
+Reporting starts after this baseline, so later REST polls cannot consume live
+socket executions. An existing order absent from the census has no proven
+prefix even if its first socket update arrives after readiness: it seeds a
+baseline instead of replaying historical executions. An unprovable prefix
+updated after reporting readiness, or any suffix with missing cumulative quote
+value, emits an order-specific error so an unresolved live execution gap is
+visible. These boundaries deliberately avoid inventing quantities or prices from
+cumulative rows; they do not promise recovery of executions whose prefix is
+unknown. Once a new cumulative quote baseline is known, later proven suffixes
+continue normally without replaying the unresolved gap. Invalid live cumulative
+quotes retain the last proven prefix, including in startup buffering and bounded
+queue eviction, so a later valid quote can recover the complete proven interval.
+An invalid pre-session quote instead advances a quiet historical quantity floor
+with unknown quote basis, preventing later rows from replaying that history.
+
+Rust private startup is gated on the margin-mode and position-mode reads. Until
+each loads, any failure (429, 5xx, transport, non-JSON, malformed row, unknown
+code, a read raced by a settings write) retries that read through
+`startup::Backoff` (1 s doubling to 30 s, forever); a 418/429 waits at least its
+`Retry-After`, else 60 s (BloFin's one-minute limit window), and holds the other
+waiting settings read too. The 10 s tick no longer re-reads them. Only documented key refusals end startup with one
+`StartupFailed`: 152401/152408 (`AuthInvalid`), 152402 (`AuthExpired`), 152406
+(`AuthPermission`), and 152409 after one re-signed resend; 152405/152407/152410
+(timestamp/nonce) and 152404 stay transient. Before the account loads, a socket
+login refused with one of those codes fails startup too; BloFin's generic
+`60009 Login failed` closes and reconnects with backoff, now immediately rather
+than at the auth deadline. A rejection clears the settings retries and the tick
+and retires the private socket; a refused trading key also emits `Deactivate`.
+A missing passphrase or invalid read-only credentials fail startup with
+`InvalidInput`.
+
+Rust commands preflight an entire batch before I/O. Cancel responses must cover
+exactly the requested native identities even when the top-level code is zero;
+per-row failures are never swallowed. Cancel-replace keeps attached trigger
+references and execution prices and gives each replacement a new client ID.
+Positive partial protection sizes that round to zero are rejected, and only an
+explicit zero selects full-position semantics. Unsupported time-in-force shapes
+are rejected. Split sizes conserve native lot units. These defensive corrections
+to legacy TS behavior are listed in the Rust gate and commit messages.
+
+Rust fills queries walk cursors past newer records when necessary: BloFin can
+ignore the requested time window on fills history. They return actual executions
+only; the TS fallback that treats order-total history as executions is not used.
+Income walks fail rather than silently returning a partial ledger after a failed
+page or an exhausted pagination bound. Query JSON shapes match the engine's
+Binance history surface, including seconds for execution timestamps and
+milliseconds for order/income/public-trade timestamps.
+
+Rust closed-position history retains its rows at the 100-page cap and emits
+`history.incomplete` with the actual request command before completion, allowing
+the host to mark the owning result incomplete and notify only that caller.
+
+Terminal order rows remain until reconciliation, and cancel-all selects only open
+orders in both TS and Rust. Rust additionally keeps terminal socket states
+monotonic and rejects amending or merging terminal protection, preventing late
+frames or retained canceled legs from creating new orders.
+
+Rust startup can publish a partial valid catalogue while public metadata retries.
+A REST account scope containing an unmappable nonzero SWAP position or working
+SWAP order is rejected visibly and retains the previous scope; it must not
+publish a successful empty account. Zero unknown positions and explicitly
+non-SWAP products remain outside the owned scope. Full per-row retention is
+planned separately from this temporary whole-scope safety guard.
+
+Closed Rust symbols restore their margin setting to the confirmed account default
+on both REST and socket full snapshots (including explicit zero rows). Live
+positions keep their own margin mode; closing one must not make the next opening
+order inherit that old mode. Leverage remains cached across the close.
+
+The Rust login timestamp is a JSON integer, and its exact decimal text is used
+in the WS signature. BloFin's documented TPSL/algo examples contain null unused
+protection fields: Rust treats these as absent, likewise nullable client IDs,
+attachments and position leverage/liquidation metadata. Required quantities and
+identities are not defaulted from null. A malformed socket row is logged while
+valid siblings continue; malformed positions retain that symbol's known legs
+and account totals. A row without a usable position identity preserves the whole
+snapshot. Required-field corruption in REST private snapshots remains atomic.
+Initial ticker rows are independent: malformed rows are reported and skipped so
+other tickers and private startup can progress. The captured public tape currently
+has no null values, so null-quantity tests describe defensive behavior rather than
+claiming a captured exchange payload.

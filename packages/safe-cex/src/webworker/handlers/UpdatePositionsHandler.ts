@@ -1,4 +1,6 @@
 import isEqual from 'lodash/isEqual';
+
+import { serializeCommandError } from '../../commandOutcome';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 
@@ -61,7 +63,15 @@ export class UpdatePositionsHandler extends BaseHandler {
     } catch (e) {
       console.error('Error updating positions', e);
       this._lastFailedRequest = now;
-      this._ctx.postMessage({ op: 'updatePositions:done', data: { requestId, success: false, reason: String(e) } });
+      this._ctx.postMessage({
+        op: 'updatePositions:done',
+        data: {
+          requestId,
+          success: false,
+          reason: String(e),
+          ...(e instanceof Error && { errorDetails: serializeCommandError(e) }),
+        },
+      });
     } finally {
       if (validSymbols) {
         validSymbols.forEach((symbol) => this._requestsInProgress.delete(symbol));

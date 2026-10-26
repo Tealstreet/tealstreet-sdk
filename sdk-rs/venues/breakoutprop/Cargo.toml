@@ -1,0 +1,18 @@
+[package]
+name = "safe-cex-venue-breakoutprop"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+safe-cex-engine = { workspace = true, features = ["order-locks", "polling-control"] }
+safe-cex-crypto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time = { version = "0.3", default-features = false, features = ["parsing", "formatting"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }

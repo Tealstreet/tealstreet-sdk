@@ -1,7 +1,0 @@
-blofin.exchange.ts: 66 declarations, zero drift
-blofin.ws-private.ts: 14 declarations, zero drift
-Blofin census: {'ported': 40, 'divergent': 85} stopped at7 files
-invention: safe-cex-venue-blofin/src/position_adapter.rs::BlofinPositionAdapterDeps: public item has no manifest rs or exemption
-invention: safe-cex-venue-blofin/src/position_adapter.rs::map_blofin_position_history: public item has no manifest rs or exemption
-invention: safe-cex-venue-blofin/src/position_adapter.rs::num: public item has no manifest rs or exemption
-Scoped existing Rust-parity binary exit 1

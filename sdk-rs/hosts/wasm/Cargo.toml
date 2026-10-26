@@ -1,0 +1,94 @@
+[package]
+name = "safe-cex-wasm"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+hosted-operation-proof = ["kraken", "safe-cex-engine/test-support"]
+address-nonce = ["safe-cex-engine/address-nonce", "safe-cex-venues/address-nonce", "sign-meta"]
+http-mutation-barriers = ["safe-cex-engine/http-mutation-barriers"]
+# Read-only signing-task metadata for hosted signing (Kraken and Paradex).
+sign-meta = ["safe-cex-engine/sign-meta"]
+# Additive provider bootstrap; at least one venue feature is still required.
+dispatch-signing = ["safe-cex-venues/dispatch-signing"]
+bitunix = ["safe-cex-venues/bitunix", "text-ingress", "dispatch-signing"]
+# Paradex streams binary SBE; its JSON control messages use the stable text entry.
+text-ingress = []
+grvt = ["safe-cex-venues/grvt", "text-ingress"]
+polymarket = ["safe-cex-venues/polymarket", "text-ingress", "safe-cex-engine/command-polymarket"]
+coinbase = ["safe-cex-venues/coinbase", "text-ingress"]
+# Polling-only builds isolate the startup subscription decoder.
+cold-subscriptions = []
+breakoutprop = ["safe-cex-venues/breakoutprop", "text-ingress", "cold-subscriptions"]
+paradex = ["safe-cex-venues/paradex", "sign-meta"]
+apexomni = ["safe-cex-venues/apexomni", "text-ingress", "safe-cex-engine/command-apexomni", "dispatch-signing"]
+txflow = ["safe-cex-venues/txflow", "text-ingress"]
+kraken = ["safe-cex-venues/kraken", "text-ingress", "sign-meta"]
+asterdex = ["safe-cex-venues/asterdex", "text-ingress", "safe-cex-engine/command-asterdex", "dispatch-signing", "address-nonce"]
+lighter = ["safe-cex-venues/lighter", "text-ingress", "dispatch-signing"]
+woo = ["safe-cex-venues/woo", "text-ingress"]
+bitrue = ["safe-cex-venues/bitrue", "text-ingress", "dispatch-signing"]
+bitget = ["safe-cex-venues/bitget", "text-ingress", "dispatch-signing"]
+backpack = ["safe-cex-venues/backpack", "text-ingress"]
+blofin = ["safe-cex-venues/blofin", "text-ingress"]
+mexc = ["safe-cex-venues/mexc", "text-ingress", "dispatch-signing"]
+bingx = ["safe-cex-venues/bingx", "text-ingress", "dispatch-signing"]
+weex = ["safe-cex-venues/weex", "text-ingress", "dispatch-signing"]
+phemex = ["safe-cex-venues/phemex", "text-ingress", "dispatch-signing"]
+default = [
+    "bitunix",
+    "breakoutprop",
+    "grvt",
+    "polymarket",
+    "coinbase",
+    "paradex",
+    "apexomni",
+    "txflow",
+    "kraken",
+    "asterdex",
+    "lighter",
+    "woo",
+    "bitrue",
+    "binance",
+    "kucoin",
+    "kucoinspot",
+    "bybit",
+    "hyperliquid",
+    "okx",
+    "cryptocom",
+    "weex",
+    "bingx",
+    "mexc",
+    "blofin",
+    "backpack",
+    "bitget",
+    "orderly",
+    "phemex",
+]
+cryptocom = ["safe-cex-venues/cryptocom", "text-ingress", "dispatch-signing"]
+binance = ["safe-cex-venues/binance", "text-ingress", "dispatch-signing"]
+kucoin = ["safe-cex-venues/kucoin", "text-ingress"]
+kucoinspot = ["safe-cex-venues/kucoinspot", "text-ingress", "safe-cex-engine/command-kucoinspot"]
+bybit = ["safe-cex-venues/bybit", "text-ingress", "dispatch-signing"]
+hyperliquid = ["safe-cex-venues/hyperliquid", "text-ingress"]
+okx = ["safe-cex-venues/okx", "text-ingress", "dispatch-signing"]
+orderly = ["safe-cex-venues/orderly", "text-ingress"]
+
+[dependencies]
+zeroize.workspace = true
+safe-cex-engine = { workspace = true, features = ["polling-control"] }
+safe-cex-venues.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wasm-bindgen.workspace = true
+js-sys.workspace = true
+
+[lints]
+workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom.workspace = true

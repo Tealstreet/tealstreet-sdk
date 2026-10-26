@@ -1,8 +1,0 @@
-{
-  "command": [
-    "node",
-    "sdk-rs/safe-cex-venue-polymarket/tests/auth_init_oracle.cjs"
-  ],
-  "exit": 0,
-  "uncommitted_development": true
-}

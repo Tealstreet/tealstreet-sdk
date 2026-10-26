@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"id":"kraken-spot-balance-prefix","verb":"post","endpoint":"/0/private/Balance","scope":"source prefix only; native async body inspected"}]}

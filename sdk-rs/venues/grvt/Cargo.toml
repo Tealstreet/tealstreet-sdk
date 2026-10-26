@@ -1,0 +1,28 @@
+[package]
+name = "safe-cex-venue-grvt"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+private-adoption-originals = []
+
+[[test]]
+name = "request_context_write_funnel"
+required-features = ["private-adoption-originals"]
+
+[dependencies]
+safe-cex-engine = { workspace = true, features = ["command-order-book", "http-plans"] }
+safe-cex-crypto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+safe-cex-crypto = { workspace = true, features = ["secp256k1"] }
+safe-cex-engine = { workspace = true, features = ["test-support"] }
+alloy-dyn-abi.workspace = true
+alloy-signer = { workspace = true, features = ["eip712"] }
+alloy-signer-local.workspace = true
+
+[lints]
+workspace = true

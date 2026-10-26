@@ -22,6 +22,19 @@ describe('ChaserOrderInstance', () => {
     mockExchange = createMockExchange();
   });
 
+  it('captures the native position before a pending streaming flush', () => {
+    const store = { positions: [] as Array<{ symbol: string; side: string; contracts: number }> };
+    const syncAccountState = vi.fn(() => {
+      store.positions = [{ symbol: 'BTCUSDT', side: 'long', contracts: 4 }];
+    });
+    const exchange = { store, syncAccountState } as unknown as Exchange;
+    const instance = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT', size: 2, side: OrderSide.Buy, maxAttempts: 10, delay: 100,
+    });
+    expect(syncAccountState).toHaveBeenCalledOnce();
+    expect(instance.targetPositionContracts).toBe(6);
+  });
+
   describe('Backwards Compatibility - Origin Field', () => {
     it('should create instance without origin (backwards compatibility)', () => {
       // This simulates old code that doesn't pass origin

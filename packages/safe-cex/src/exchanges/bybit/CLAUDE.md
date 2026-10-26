@@ -69,6 +69,15 @@ shared exchange skips. `bybit` and `bybitinverse` load them in `start()` via
 
 ## Authentication
 
+### Rust signer custody
+
+Rust Bybit variants use opaque primary/secondary identities and the engine's
+send-time Signer for REST, opposite-environment diagnostics and static private
+socket authentication. Trusted setup consumes raw credentials before venue
+construction; secondary GET routing and primary writes/socket login remain.
+Protocol clock calibration affects canonical stamping; raw timers stay unchanged.
+This does not add a transient session-token service or a remote provider bootstrap.
+
 ### REST API Signing (`bybit.api.ts`)
 
 Authentication uses HMAC-SHA256 with the following process:
@@ -1717,6 +1726,17 @@ primary environment. The probe is scoped out for `options.testnet`,
 `bybitSiteId: 'BRA_BTL'`, custom Bybit-compatible origins such as HyroTrader,
 `bybitinverse`, `bybitspot`, and remote-signer/no-secret paths.
 
+The Rust engine applies this diagnostic to its terminal startup fee-read 10003.
+One opposite-host GET uses the exact rejected GET credential, including a
+secondary read key, and has both a two-second native deadline and request timeout.
+Only HTTP success plus integer `retCode: 0` adds the hint. Fractional, floating
+zero, quoted and other malformed codes retain the original error. Concurrent
+category failures share one probe
+and late replies cannot emit another terminal failure. The original native
+message stays in `venueMessage`; primary/read-key deactivation policy is retained.
+Native eligibility receives the SDK's site marker and excludes any nonempty
+site, custom endpoint, testnet, Hyro, inverse, spot or remote-signing account.
+
 **`start()` does not claim the account is ready when the key was rejected.** All
 three bybit variants end startup with a readiness line, and they used to log
 `Ready to trade on Bybit` unconditionally — beside the auth error, for an account
@@ -1929,3 +1949,120 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 - Linear, inverse and spot send `orderLinkId`, rule `^[A-Za-z0-9_-]{1,36}$`, on the single-order path and on the batch path (`formatOrderForBatch`).
 - **HyroTrader rejects caller IDs** (`clientOrderIdRule = undefined`): its order recovery re-mints `orderLinkId` after a reject, which would rewrite a caller's ID. Its own `placeOrders` override must keep calling `assertCallerClientOrderIds` first.
 - Regular-order `updateOrder` uses `REPLACE_ORDER` (amend), which keeps `orderLinkId`.
+
+## Rust engine variants
+
+With `engine: 'rust'`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo` and
+`hyrotrader` use one `sdk-rs/venues/bybit` state machine with a variant/paths
+option. Demo/testnet routing and the Hyro configured-origin selection remain
+as described above. The registry resolves raw `hyrotrader` mode and URL maps,
+using the simulator for demo mode or an empty production REST livenet URL,
+then selecting testnet/livenet. All three selected URLs must be configured.
+Native callers may instead supply explicit `endpoints` when `hyrotrader` is
+absent; missing endpoints fail before I/O.
+
+Inverse keeps native USD order amounts and coin position PnL. The frame bridge
+preserves native order remainder and reconstructs native position size for
+copiers. Its wallet PnL is converted to USD, fixing the TS aggregate-unit bug.
+Spot reads current instrument precision/quantity fields, sends base-coin market
+buy units, and uses spot conditional/cancellation families. It refuses trailing
+position stops. Hyro keeps its order/position-only private subscription and
+emits incremental fills from cumulative order executions; ordinary Bybit variants
+use individual execution events.
+
+Rust execution topics deduplicate the latest 4,096 `(symbol, execId)` pairs
+per product, including repeated rows within one frame and across reconnects.
+Invalid quantity/price packets do not consume identity. Older evicted IDs and
+legacy packets without `execId` have no exactly-once guarantee. Demo/Hyro
+accepted cancels and terminal stream rows advance reconciliation revisions,
+so an in-flight REST snapshot cannot restore a retired order even at the same
+engine timestamp. Those variants retain the latest 4,096 terminal native order
+IDs across reconnects to filter replica-stale open rows in later reads too.
+Only final wire statuses establish tombstones; `Triggered`/`PendingCancel` do not.
+Older evicted order IDs have no persistent terminal-fence guarantee. The inverse variant waits for authoritative order updates
+after amend; coin-unit `remaining` and native `extra.remainingNative` stay
+separate throughout that path.
+
+Linear Rust accounts now honor `enableInverseMarkets` and
+`enableOptionMarkets` together. Other variants keep their TS product eligibility
+and do not enable these combined modes. Independent category startup, public
+feeds and snapshot generations join one catalog/account; a shared private
+subscription acknowledgment heals every enabled category, and category position
+updates preserve sibling leverage/margin settings. Failed or malformed snapshots
+retain prior state. Account-wide history joins categories before newest-first
+global limiting.
+
+Typed option terms survive frames as `Market.option`, and position Greeks keep
+their documented native units keyed by position ID. Option-chain/expiry/account
+Greek queries use the native endpoints. Plain limit/market option orders retain
+base quantity and required client identity; IV-priced limit orders send
+`orderIv` without a competing price. Unsupported derivative controls and IV on
+non-options reject the whole batch before writes. Options do not support the
+derivative candle/leverage/position-mode paths. Typed instrument classification
+preserves absent/empty/unknown `symbolType`, region and underlying through both
+frame consumers, restoring the actual CLI TradFi preflight.
+
+The TS implementations remain the replay oracle and support existing TS-engine
+callers. No proven-unused helper or alternate Rust venue crate is retained. Verification,
+known TS defects and live-connectivity limits are recorded in
+`docs/plans/BYBIT_VARIANTS_PORT.md` and
+`docs/plans/RUST_PRODUCT_SEMANTICS.md`.
+
+Rust Partial position TP/SL edits preserve the owner-selected TS cancel/recreate
+semantics: the raw requested price against mark selects SL or TP while keeping
+Buy/Sell. A replacement uses trading-stop directly, native total quantity and
+the new leg's default trigger when flipping type. The cancellation must prove
+the captured order was accepted (matching per-row status or Hyro order ID),
+and replacement errors remain visible. Missing-mark and standalone inverse
+amount-only fallbacks retain their distinct TS fields. Shared-family success
+requests authoritative order reconciliation even with a healthy private socket;
+it never restores the old canceled row to mimic a local TS lifecycle state.
+
+### Native explicit catalogue refresh
+
+Rust `refreshMarkets()` issues a bounded public catalogue walk across all enabled
+categories, commits atomically, then flushes the host before returning one
+added/removed delta. Account/order/settings/book/candle/ticker state and known
+symbol fees survive. It never starts signed reconciliation or restarts sockets.
+`fetchMarkets()` and `fetchTickers()` remain cached. New symbol fees need startup
+fee discovery after restart; degraded optional products also require restart.
+Shared consumers must refresh their source then restart provider/accounts through
+the existing identity-change contract. Hyro retains its USDT perpetual filter
+and normal 10 s ping deadline; 5 s watch wakes never imply an early ping.
+
+
+## Rust private row admission
+
+Ordinary REST order/position snapshots and WS order/position arrays admit healthy
+peers when another row is malformed. A rejected native order retains its cached
+parent, attached TP/SL family and position-bound metadata; a valid admitted parent
+owns its complete family, including explicit removal of old brackets. Rejected
+positions retain the affected symbol's cached legs and Greeks without republishing
+cached leverage/mode as newly confirmed settings. Unknown identity holds absence
+removal for the category, while valid peers can progress; ambiguous same-symbol
+mode transitions remain coherent. Coverage storage is bounded and exhaustion
+holds the scope conservatively.
+
+Rejected WS evidence fences older REST joins and coalesces a newer read-only
+repair. Orders use the existing bounded retry cadence; positions use account
+polling. Strict Hyro handshake/account evidence and financial execution/history
+coverage remain separate. Structural/envelope or paging failures never establish
+authoritative empty exposure.
+
+
+Rust acknowledged leverage writes (including native leverage-not-modified replies)
+advance the existing positions revision before publishing the selected leverage.
+An older in-flight positions join cannot restore stale leverage/settings; it
+coalesces one fresh read after settling. A refused write leaves the authoritative
+read eligible. The fence adds no write retries and does not alter position-mode
+switch semantics.
+
+Rust closed-PnL and unbounded order-history page-cap warnings carry their actual
+native query command in `history.incomplete` before partial completion/window
+continuation. Existing rows, caps and error policies are preserved; the host can
+flag the owning partial array and route its warning without crossing callers.
+
+Rust release code generation for the Bybit crate uses `opt-level = "z"` for
+family WASM size. CI still requires the public CPU/memory gates and complete raw replay
+outputs, including caller identities; the source parsers, handlers and financial
+calculations retain their existing behavior.

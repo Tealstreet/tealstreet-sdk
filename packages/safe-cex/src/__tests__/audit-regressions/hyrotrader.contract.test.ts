@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { isBaseCapabilityFallback } from '../../exchanges/base';
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
+import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, Market, Order, OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
 
@@ -169,8 +168,7 @@ describe('HyroTrader supported subset (partner simulator contract)', () => {
     await expect(exchange.fetchApiKeyInfo()).rejects.toThrow('does not provide');
     await expect(exchange.changePositionMode(true)).rejects.toThrow('one-way');
     await expect(exchange.changeMarginType(true)).rejects.toThrow('cross margin');
-    expect(isBaseCapabilityFallback(exchange.fetchIncomeHistory, 'fetchIncomeHistory')).toBe(true);
-    expect(isBaseCapabilityFallback(exchange.fetchIncomeHistoryRange, 'fetchIncomeHistoryRange')).toBe(true);
+    expect(exchange.capabilities).toMatchObject({ incomeHistory: false, incomeRange: false });
     expect(get).not.toHaveBeenCalled();
     expect(getExchangeMetadata('hyrotrader')).toMatchObject({
       positionModes: [PositionMode.OneWay],

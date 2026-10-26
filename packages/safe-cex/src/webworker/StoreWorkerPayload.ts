@@ -1,3 +1,4 @@
+import type { CommandProgress } from '@tealstreet/safe-cex-wasm/host';
 import type { PackedTickerDelta } from '../store/store.interface';
 import type { StoreData, Writable } from '../types';
 
@@ -56,6 +57,8 @@ export type StoreWorkerOutgoingOp =
   // Store
   | 'store'
   | 'store:delta'
+  // One Rust engine flush frame (an ArrayBuffer), see store/frameApplier
+  | 'frame'
   // Orderbook
   | 'listenOrderBook'
   | 'listenOrderBook:delta'
@@ -67,10 +70,14 @@ export type StoreWorkerOutgoingOp =
   | 'callMethod:done'
   | 'twap:stateUpdate'
   | 'chaser:complete'
+  // Native order attribution, independent of RPC settlement and store frames.
+  | 'command-progress'
   // Lifecycle
   | 'deactivate-status'
   | 'start-status'
   | 'ws-reconnected'
+  // Structured Rust event; data is [EngineEvent].
+  | 'engine-event'
   // Logging
   | 'log'
   | 'error'
@@ -132,6 +139,11 @@ export interface WorkerConfig {
    * mirrored through the public SDK surface and should stay narrow.
    */
   wsDiagnosticsEnabled?: boolean;
+  /**
+   * The main thread applies Rust engine frames (`op: 'frame'`) itself, so
+   * accounts on the engine send frames instead of venue data as objects.
+   */
+  acceptsFrames?: boolean;
 }
 
 /** One captured outbound worker message, stamped relative to recording start. */
@@ -156,3 +168,9 @@ export interface PerfFixtureConfig {
   /** Restart from frame 0 at the end. Defaults to true. */
   loop?: boolean;
 }
+
+/** Receipt ownership is the original native host session and worker generation. */
+export type StoreWorkerCommandProgress = CommandProgress & {
+  account: string;
+  generation: number;
+};

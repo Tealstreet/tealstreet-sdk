@@ -1,0 +1,448 @@
+{
+  "oracle": "Official tradeparadex/paradex-py main: tests/api/test_sbe_codec.py builders decoded by paradex_py/api/sbe/codec.py (schema 1:2), retrieved 2026-10-20; synthetic documented payloads, no live account.",
+  "cases": [
+    {
+      "name": "trade-v1",
+      "base64": "MgABAAEAAQBAwpJmPBMGACoAAAAAAAAA5wMAAAAAAAABgAB95tEDAACghgEAAAAAAKBmkmY8EwYAAQxCVEMtVVNELVBFUlA=",
+      "channel": "trades.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000123,
+        "seq_no": 42,
+        "trade_id": 999,
+        "side": "BUY",
+        "price": "42000.50000000",
+        "size": "0.00100000",
+        "created_at": 1710000000100,
+        "trade_type": "FILL",
+        "market": "BTC-USD-PERP",
+        "trade_id_str": null
+      }
+    },
+    {
+      "name": "trade-v2",
+      "base64": "MgABAAEAAgBAwpJmPBMGACoAAAAAAAAAkqNeXB4B61wBgAB95tEDAACghgEAAAAAAKBmkmY8EwYAAQxCVEMtVVNELVBFUlAcMTc5MDI0MzMxMTE4MDIwMTcwOTIyMDU3MDAwMg==",
+      "channel": "trades.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000123,
+        "seq_no": 42,
+        "trade_id": "6695446500926727058",
+        "side": "BUY",
+        "price": "42000.50000000",
+        "size": "0.00100000",
+        "created_at": 1710000000100,
+        "trade_type": "FILL",
+        "market": "BTC-USD-PERP",
+        "trade_id_str": "1790243311180201709220570002"
+      }
+    },
+    {
+      "name": "trade-v2-no-tail",
+      "base64": "MgABAAEAAgBAwpJmPBMGACoAAAAAAAAAkqNeXB4B61wBgAB95tEDAACghgEAAAAAAKBmkmY8EwYAAQxCVEMtVVNELVBFUlA=",
+      "channel": "trades.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000123,
+        "seq_no": 42,
+        "trade_id": "6695446500926727058",
+        "side": "BUY",
+        "price": "42000.50000000",
+        "size": "0.00100000",
+        "created_at": 1710000000100,
+        "trade_type": "FILL",
+        "market": "BTC-USD-PERP",
+        "trade_id_str": null
+      }
+    },
+    {
+      "name": "bbo",
+      "base64": "MAACAAEAAQAA4JBmPBMGAAEAAAAAAAAAABCC49EDAAAAwusLAAAAAADxd+nRAwAAgNHwCAAAAAAMQlRDLVVTRC1QRVJQ",
+      "channel": "bbo.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 1,
+        "bid_price": "42000.00000000",
+        "bid_size": "2.00000000",
+        "ask_price": "42001.00000000",
+        "ask_size": "1.50000000",
+        "market": "BTC-USD-PERP"
+      }
+    },
+    {
+      "name": "book-snapshot",
+      "base64": "WQADAAEAAQAA4JBmPBMGAAoAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgBAAAgAAEILj0QMAAADC6wsAAAAAAC+M3dEDAAAAo+ERAAAAABAAAQAA8Xfp0QMAAIDR8AgAAAAADEJUQy1VU0QtUEVSUA==",
+      "channel": "order_book.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 10,
+        "pkg_type": "SNAPSHOT",
+        "best_bid_price": null,
+        "best_bid_size": null,
+        "best_ask_price": null,
+        "best_ask_size": null,
+        "relative_spread": null,
+        "best_bid_api_price": null,
+        "best_bid_api_size": null,
+        "best_ask_api_price": null,
+        "best_ask_api_size": null,
+        "bids": [
+          [
+            "42000.00000000",
+            "2.00000000"
+          ],
+          [
+            "41999.00000000",
+            "3.00000000"
+          ]
+        ],
+        "asks": [
+          [
+            "42001.00000000",
+            "1.50000000"
+          ]
+        ],
+        "market": "BTC-USD-PERP"
+      }
+    },
+    {
+      "name": "book-delta",
+      "base64": "WQADAAEAAQAA4JBmPBMGAAsAAAAAAAAAAQAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgBAAAQAAEILj0QMAAAAAAAAAAAAAEAAAAAxCVEMtVVNELVBFUlA=",
+      "channel": "order_book.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 11,
+        "pkg_type": "DELTA",
+        "best_bid_price": null,
+        "best_bid_size": null,
+        "best_ask_price": null,
+        "best_ask_size": null,
+        "relative_spread": null,
+        "best_bid_api_price": null,
+        "best_bid_api_size": null,
+        "best_ask_api_price": null,
+        "best_ask_api_size": null,
+        "bids": [
+          [
+            "42000.00000000",
+            "0.00000000"
+          ]
+        ],
+        "asks": [],
+        "market": "BTC-USD-PERP"
+      }
+    },
+    {
+      "name": "summary",
+      "base64": "8AAEAAEAAQAA4JBmPBMGAAUAAAAAAAAAABCC49EDAAAARuen0QMAAADaHB/SAwAAAACkWL9lSToAdDukCwAAAEBCDwAAAAAAABCC49EDAAAA8Xfp0QMAAAAAil14RWMB4F74//////8AAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAMQlRDLVVTRC1QRVJQ",
+      "channel": "markets_summary.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 5,
+        "mark_price": "42000.00000000",
+        "index_price": "41990.00000000",
+        "last_price": "42010.00000000",
+        "volume_usd24h": "42000000000.00000000",
+        "open_interest": "500.00000000",
+        "funding_rate": "0.01000000",
+        "bid": "42000.00000000",
+        "ask": "42001.00000000",
+        "total_volume": "1000000000.00000000",
+        "price_change_rate24h": "-0.00500000",
+        "mark_iv": null,
+        "bid_iv": null,
+        "ask_iv": null,
+        "last_iv": null,
+        "delta": null,
+        "gamma": null,
+        "vega": null,
+        "theta": null,
+        "rho": null,
+        "volga": null,
+        "vanna": null,
+        "future_funding_rate": null,
+        "external_fair_price": null,
+        "bid_size": null,
+        "ask_size": null,
+        "forward_rate": null,
+        "risk_free_rate": null,
+        "funding_rate_precise": null,
+        "market": "BTC-USD-PERP"
+      }
+    },
+    {
+      "name": "order-v1",
+      "base64": "fgAUAAEAAQAA4JBmPBMGAAcAAAAAAAAAAwEBAQAQguPRAwAAAAAAAAAAAIAA4fUFAAAAAIDw+gIAAAAAABCC49EDAAAA4JBmPBMGAEAioGY8EwYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN6tvu+AZK9mPBMGAMCmvmY8EwYAAAEJb3JkZXItMTIzCmNsaWVudC00NTYMQlRDLVVTRC1QRVJQAA==",
+      "channel": "orders.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 7,
+        "status": "OPEN",
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "time_in_force": "GTC",
+        "price": "42000.00000000",
+        "trigger_price": null,
+        "size": "1.00000000",
+        "size_open": "0.50000000",
+        "avg_fill_price": "42000.00000000",
+        "created_at": 1710000000000,
+        "updated_at": 1710000001000,
+        "account": "0xdeadbeef",
+        "received_at": 1710000002000,
+        "published_at": 1710000003000,
+        "stp": "NONE",
+        "flags": [
+          "REDUCE_ONLY"
+        ],
+        "order_id": "order-123",
+        "client_order_id": "client-456",
+        "market": "BTC-USD-PERP",
+        "cancel_reason": "",
+        "request_info": null
+      }
+    },
+    {
+      "name": "order-v2",
+      "base64": "gAAUAAEAAgAA4JBmPBMGAAcAAAAAAAAAAwEBAQAQguPRAwAAAAAAAAAAAIAA4fUFAAAAAIDw+gIAAAAAABCC49EDAAAA4JBmPBMGAEAioGY8EwYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN6tvu+AZK9mPBMGAMCmvmY8EwYAAAEBAQlvcmRlci0xMjMKY2xpZW50LTQ1NgxCVEMtVVNELVBFUlAAB3JlcS03ODkA",
+      "channel": "orders.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 7,
+        "status": "OPEN",
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "time_in_force": "GTC",
+        "price": "42000.00000000",
+        "trigger_price": null,
+        "size": "1.00000000",
+        "size_open": "0.50000000",
+        "avg_fill_price": "42000.00000000",
+        "created_at": 1710000000000,
+        "updated_at": 1710000001000,
+        "account": "0xdeadbeef",
+        "received_at": 1710000002000,
+        "published_at": 1710000003000,
+        "stp": "NONE",
+        "flags": [
+          "REDUCE_ONLY"
+        ],
+        "order_id": "order-123",
+        "client_order_id": "client-456",
+        "market": "BTC-USD-PERP",
+        "cancel_reason": "",
+        "request_info": {
+          "id": "req-789",
+          "message": "",
+          "request_type": "MODIFY_ORDER",
+          "status": "PENDING"
+        }
+      }
+    },
+    {
+      "name": "order-v2-short",
+      "base64": "fgAUAAEAAgAA4JBmPBMGAAcAAAAAAAAAAwEBAQAQguPRAwAAAAAAAAAAAIAA4fUFAAAAAIDw+gIAAAAAABCC49EDAAAA4JBmPBMGAEAioGY8EwYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN6tvu+AZK9mPBMGAMCmvmY8EwYAAAEJb3JkZXItMTIzCmNsaWVudC00NTYMQlRDLVVTRC1QRVJQAA==",
+      "channel": "orders.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 7,
+        "status": "OPEN",
+        "side": "BUY",
+        "order_type": "LIMIT",
+        "time_in_force": "GTC",
+        "price": "42000.00000000",
+        "trigger_price": null,
+        "size": "1.00000000",
+        "size_open": "0.50000000",
+        "avg_fill_price": "42000.00000000",
+        "created_at": 1710000000000,
+        "updated_at": 1710000001000,
+        "account": "0xdeadbeef",
+        "received_at": 1710000002000,
+        "published_at": 1710000003000,
+        "stp": "NONE",
+        "flags": [
+          "REDUCE_ONLY"
+        ],
+        "order_id": "order-123",
+        "client_order_id": "client-456",
+        "market": "BTC-USD-PERP",
+        "cancel_reason": "",
+        "request_info": null
+      }
+    },
+    {
+      "name": "fill-v1",
+      "base64": "awAVAAEAAQAA4JBmPBMGAAgAAAAAAAAAAQICABCC49EDAACA8PoCAAAAAICne/P/////AAAAAAAAAIAA4JBmPBMGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADerb7vAEbnp9EDAAAAZc0dAAAAAAZmaWxsLTEHb3JkZXItMQhjbGllbnQtMQd0cmFkZS0xDEJUQy1VU0QtUEVSUA==",
+      "channel": "fills.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 8,
+        "fill_type": "FILL",
+        "side": "SELL",
+        "liquidity": "TAKER",
+        "price": "42000.00000000",
+        "size": "0.50000000",
+        "fee": "-2.10000000",
+        "realized_pnl": null,
+        "created_at": 1710000000000,
+        "account": "0xdeadbeef",
+        "underlying_price": "41990.00000000",
+        "realized_funding": "5.00000000",
+        "flags": null,
+        "orderbook_seq_no": null,
+        "fill_id": "fill-1",
+        "order_id": "order-1",
+        "client_order_id": "client-1",
+        "trade_id": "trade-1",
+        "market": "BTC-USD-PERP",
+        "fee_currency": null
+      }
+    },
+    {
+      "name": "fill-v2",
+      "base64": "dAAVAAEAAgAA4JBmPBMGAAgAAAAAAAAAAQEBABCC49EDAACA8PoCAAAAAIBYhAwAAAAAAAAAAAAAAIAA4JBmPBMGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADerb7vAEbnp9EDAAAAAAAAAAAAAAMGEg8AAAAAAAZmaWxsLTEHb3JkZXItMQhjbGllbnQtMQd0cmFkZS0xDEJUQy1VU0QtUEVSUARESU1F",
+      "channel": "fills.BTC-USD-PERP",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 8,
+        "fill_type": "FILL",
+        "side": "BUY",
+        "liquidity": "MAKER",
+        "price": "42000.00000000",
+        "size": "0.50000000",
+        "fee": "2.10000000",
+        "realized_pnl": null,
+        "created_at": 1710000000000,
+        "account": "0xdeadbeef",
+        "underlying_price": "41990.00000000",
+        "realized_funding": "0.00000000",
+        "flags": [
+          "INTERACTIVE",
+          "RPI"
+        ],
+        "orderbook_seq_no": 987654,
+        "fill_id": "fill-1",
+        "order_id": "order-1",
+        "client_order_id": "client-1",
+        "trade_id": "trade-1",
+        "market": "BTC-USD-PERP",
+        "fee_currency": "DIME"
+      }
+    },
+    {
+      "name": "position-long",
+      "base64": "mgAWAAEAAQAA4JBmPBMGAAkAAAAAAAAAAQDh9QUAAAAAABCC49EDAAAADvrV/v///wDKmjsAAAAAACx2j88DAAAAAAAAAAAAgABlzR0AAAAAQCKgZjwTBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3q2+7wAQguPRAwAAABCC49EDAAAAEILj0QMAAADKmjsAAAAAAJsy4v////8BDEJUQy1VU0QtUEVSUAhmaWxsLWFiYw==",
+      "channel": "positions",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 9,
+        "side": "LONG",
+        "size": "1.00000000",
+        "avg_entry_price": "42000.00000000",
+        "unrealized_pnl": "-50.00000000",
+        "realized_pnl": "10.00000000",
+        "mark_price": "41900.00000000",
+        "liquidation_price": null,
+        "leverage": "5.00000000",
+        "updated_at": 1710000001000,
+        "account": "0xdeadbeef",
+        "avg_entry_price_usd": "42000.00000000",
+        "cost": "42000.00000000",
+        "cost_usd": "42000.00000000",
+        "cached_funding_index": "10.00000000",
+        "unrealized_funding_pnl": "-5.00000000",
+        "status": "OPEN",
+        "market": "BTC-USD-PERP",
+        "last_fill_id": "fill-abc"
+      }
+    },
+    {
+      "name": "position-short",
+      "base64": "mgAWAAEAAQAA4JBmPBMGAAkAAAAAAAAAAgDh9QUAAAAAABCC49EDAAAADvrV/v///wDKmjsAAAAAACx2j88DAAAAAAAAAAAAgABlzR0AAAAAQCKgZjwTBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3q2+7wAQguPRAwAAABCC49EDAAAAEILj0QMAAADKmjsAAAAAAJsy4v////8BDEJUQy1VU0QtUEVSUAhmaWxsLWFiYw==",
+      "channel": "positions",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 9,
+        "side": "SHORT",
+        "size": "-1.00000000",
+        "avg_entry_price": "42000.00000000",
+        "unrealized_pnl": "-50.00000000",
+        "realized_pnl": "10.00000000",
+        "mark_price": "41900.00000000",
+        "liquidation_price": null,
+        "leverage": "5.00000000",
+        "updated_at": 1710000001000,
+        "account": "0xdeadbeef",
+        "avg_entry_price_usd": "42000.00000000",
+        "cost": "42000.00000000",
+        "cost_usd": "42000.00000000",
+        "cached_funding_index": "10.00000000",
+        "unrealized_funding_pnl": "-5.00000000",
+        "status": "OPEN",
+        "market": "BTC-USD-PERP",
+        "last_fill_id": "fill-abc"
+      }
+    },
+    {
+      "name": "account-v1",
+      "base64": "cQAXAAEAAQAA4JBmPBMGAAsAAAAAAAAAABCl1OgAAAAAiFJqdAAAAADQ7ZAuAAAAAOh2SBcAAAAAhOB49AAAAAB0O6QLAAAAQCKgZjwTBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3q2+7wAoLozRAAAAAQRVU0RD",
+      "channel": "account",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 11,
+        "total_collateral": "10000.00000000",
+        "free_collateral": "5000.00000000",
+        "initial_margin_req": "2000.00000000",
+        "maintenance_margin_req": "1000.00000000",
+        "account_value": "10500.00000000",
+        "unrealized_pnl": "500.00000000",
+        "updated_at": 1710000001000,
+        "account": "0xdeadbeef",
+        "margin_cushion": "9000.00000000",
+        "status": "ACTIVE",
+        "last_seen_notification": null,
+        "settlement_asset": "USDC"
+      }
+    },
+    {
+      "name": "account-v2",
+      "base64": "eQAXAAEAAgAA4JBmPBMGAAsAAAAAAAAAABCl1OgAAAAAiFJqdAAAAADQ7ZAuAAAAAOh2SBcAAAAAhOB49AAAAAB0O6QLAAAAQCKgZjwTBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3q2+7wAoLozRAAAAAQCwWwZUFgYABFVTREM=",
+      "channel": "account",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 11,
+        "total_collateral": "10000.00000000",
+        "free_collateral": "5000.00000000",
+        "initial_margin_req": "2000.00000000",
+        "maintenance_margin_req": "1000.00000000",
+        "account_value": "10500.00000000",
+        "unrealized_pnl": "500.00000000",
+        "updated_at": 1710000001000,
+        "account": "0xdeadbeef",
+        "margin_cushion": "9000.00000000",
+        "status": "ACTIVE",
+        "last_seen_notification": 1713400000000,
+        "settlement_asset": "USDC"
+      }
+    },
+    {
+      "name": "account-v2-short",
+      "base64": "cQAXAAEAAgAA4JBmPBMGAAsAAAAAAAAAABCl1OgAAAAAiFJqdAAAAADQ7ZAuAAAAAOh2SBcAAAAAhOB49AAAAAB0O6QLAAAAQCKgZjwTBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3q2+7wAoLozRAAAAAQRVU0RD",
+      "channel": "account",
+      "expected": {
+        "timestamp": 1710000000000,
+        "seq_no": 11,
+        "total_collateral": "10000.00000000",
+        "free_collateral": "5000.00000000",
+        "initial_margin_req": "2000.00000000",
+        "maintenance_margin_req": "1000.00000000",
+        "account_value": "10500.00000000",
+        "unrealized_pnl": "500.00000000",
+        "updated_at": 1710000001000,
+        "account": "0xdeadbeef",
+        "margin_cushion": "9000.00000000",
+        "status": "ACTIVE",
+        "last_seen_notification": null,
+        "settlement_asset": "USDC"
+      }
+    }
+  ]
+}

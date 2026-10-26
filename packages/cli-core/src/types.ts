@@ -44,6 +44,8 @@ export interface WebSocketLike {
  */
 export interface ExchangeLike {
   name: string;
+  /** Synchronize native private state before making a store-based decision. */
+  syncAccountState?: () => void;
   store?: {
     markets?: Market[];
     orders?: Order[];

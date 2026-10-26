@@ -1,6 +1,0 @@
-{
-  "base_sha": "259a993ab27fd0aa5b50fb7ab5824258bc37bbe9",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/api_guards.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/api_guards.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/api_guards.rs\n@@ -30,7 +30,7 @@\n     string: impl FnOnce(T) -> Result<Vec<u16>, E>,\n ) -> Result<bool, E> {\n     let code = string(code)?;\n-    Ok(code.iter().copied().eq(\"40101\".encode_utf16()))\n+    Ok(code.iter().copied().eq(\"40102\".encode_utf16()))\n }\n \n /// Some is a primitive JS string; all other kinds share the false branch.\n",
-  "expected_named_assertion": "CRYPTOCOM-API-GUARD-NATIVE code case8 number-code"
-}

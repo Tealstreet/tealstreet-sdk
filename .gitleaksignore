@@ -1,0 +1,131 @@
+# Public Binance HMAC documentation vector in a historical signing unit test:
+# https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
+# Exact commit/path/rule/line only; production source and future changes stay scanned.
+# 879fdc is a feat/rust-rewrite commit (pre-move path); keep this until that branch merges
+# into master, since CI scans the proposed master..landing range.
+879fdc74610ec6b2504c9faf8a8d8ffbaff576c7:sdk-rs/safe-cex-venue-binance/src/sign.rs:generic-api-key:103
+# Coinbase test sessions use the literal non-credential organizations/test/apiKeys/test.
+7109423877ec7595c9e7735bf2065f6a31ca494d:sdk-rs/venues/coinbase/tests/history.rs:generic-api-key:52
+# Same literal test-only identity in the private CFM-to-Spot history fixture.
+ca876aa0aacfe9e7fd56a2a985d3a0d067d2f432:sdk-rs/venues/coinbase/tests/support/history_family.rs:generic-api-key:10
+c410bfed862bd1f75962c1a69fb8a0151c4a6a85:sdk-rs/venues/coinbase/tests/account.rs:generic-api-key:27
+c62a5408611859b331a221d25bff85c81e88cbc0:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:30
+# PEM delimiter strings only: parser labels, then intentionally invalid AAAA test input.
+5eea59543bdefc41f6b7b4a42dea5c1fb55a5e7a:sdk-rs/venues/coinbase/src/sign.rs:private-key:259
+5eea59543bdefc41f6b7b4a42dea5c1fb55a5e7a:sdk-rs/venues/coinbase/src/sign.rs:private-key:566
+# Synthetic Phemex websocket HMAC vector, independently generated from literal
+# test key "key" and secret "secret"; the flagged hex string is a signature.
+8b9da50d11d154e7ff999a0cf2823f4b7b49879f:sdk-rs/venues/phemex/tests/sign.rs:generic-api-key:52
+# Kraken replay fixture only: base64 of the literal "replay-secret", paired
+# with "replay-key" and independently checked by kraken-protocol.mjs. No account.
+# Exact historical fingerprint; future source and credential changes stay scanned.
+6e7a3e90853214fd9c9377e5bbf96be74b972303:sdk-rs/harness/venues.mjs:generic-api-key:161
+
+# Aster published V3 demonstration private key, copied only into signing fixtures
+# and their independent oracle/generator (never a funded account credential):
+# https://github.com/asterdex/api-docs/blob/master/V3%28Recommended%29/EN/aster-finance-futures-api-v3.md
+# Exact historical occurrences only; production source and future changes stay scanned.
+076496fbb11bf2810d7209ba5bc98a536cf13ffb:sdk-rs/harness/asterdex-requests.mjs:generic-api-key:15
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/generate-signing.mjs:generic-api-key:8
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:6
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:31
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:56
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:80
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:104
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:125
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:146
+a6551624d25024133a95f02c4037ec3f0211d8e0:sdk-rs/venues/asterdex/tests/fixtures/signing.json:generic-api-key:164
+37cb0677150e831f00f0753dd699217cd5e50979:sdk-rs/hosts/wasm/src/lib.rs:generic-api-key:1573
+
+# Polymarket actual-Wasm replay fixture only: base64 of the literal
+# "safe-fake-secret", paired with "documented-fake-api-key"; never an account.
+# Exact historical fingerprint only; production and future credential changes stay scanned.
+d2db97a4af1ad06a0b92f3bb4b8db4915ee01821:packages/safe-cex/src/__tests__/audit-regressions/polymarket.rust-boundary.wasm.test.ts:generic-api-key:23
+
+# KuCoin Spot synthetic invalid-auth header in a rejected-request test, beside
+# replay-key and a placeholder signature; never a supplied credential. Replaced
+# with placeholder. Exact historical occurrence only; future changes stay scanned.
+c58afe1514d38ddbd90e45261f078721a9db03c6:sdk-rs/harness/kucoinspot.test.mjs:generic-api-key:6
+
+# Spot replay oracles only: Hyperliquid uses the public synthetic 0x012345...0123
+# Ethereum test vector; Kraken is base64 of the literal "replay-secret", paired
+# with "replay-key". Neither is an account credential. Exact historical
+# fingerprints only; future changes and production credentials remain scanned.
+3972cc5f54587301f5da05a3fbd6c406ba1691c6:sdk-rs/harness/hyperliquidspot.mjs:generic-api-key:5
+3972cc5f54587301f5da05a3fbd6c406ba1691c6:sdk-rs/harness/krakenspot.mjs:generic-api-key:3
+# Coinbase read-only key tests: literal non-credential key names
+# organizations/test/apiKeys/{test,read} and placeholder secrets.
+070fd851dd0377bb63c4c4235c3bb58db0fd0307:packages/safe-cex/src/__tests__/audit-regressions/coinbase.secondary-read-key.test.ts:generic-api-key:10
+070fd851dd0377bb63c4c4235c3bb58db0fd0307:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1693
+b7b8856406fbe53c71fdd298c3aa40f6e80b2c69:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1757
+27a5979867c0f2d0ae002abe803eeca5b4c9977a:sdk-rs/venues/coinbase/tests/trading.rs:generic-api-key:1919
+
+# Orderly construction test: the public Bitcoin wiki WIF example, used only as a
+# wrong-length base58 key (never a credential); replaced by a synthetic value since.
+# Exact historical fingerprint only; future changes stay scanned.
+6c0b435132267af4c4b95b3249845dffa3c78e8d:sdk-rs/registry/tests/construction.rs:generic-api-key:193
+
+# Restored master coinbase.utils.ts (B2 hosted signing): PEM header strings in a
+# doc comment and regex, not a key. Exact fingerprint only.
+a44fd8ea8eb80f4e805280933728c0642d35cf2f:packages/safe-cex/src/exchanges/coinbase/coinbase.utils.ts:private-key:159
+
+# Hosted-signing strict-schema rejection tests use literal opaque provider refs,
+# not API credentials. Current values were renamed to ref:owned-primary.
+# Exact historical fingerprints only; all future source/credential changes scan.
+11455d16800a4927fc06f0c8577152072531c1ec:sdk-rs/registry/tests/hosted_signing.rs:generic-api-key:220
+11455d16800a4927fc06f0c8577152072531c1ec:sdk-rs/registry/tests/hosted_signing.rs:generic-api-key:221
+
+# Public plan prose ("token inventory" followed by slash-separated freshness
+# adjectives), verified not a credential; owner approved this one historical
+# commit/file/rule/line fingerprint. Current prose is reworded; no path/rule bypass.
+1a72d442724332d247511dc58fd81f77e5bd2e19:docs/plans/RUST_FINANCIAL_SNAPSHOT_FRESHNESS.md:generic-api-key:83
+
+# Synthetic Coinbase capability-test key, replaced with the signing-test fixture.
+# Owner approved this exact historical fingerprint only; future changes scan.
+04c434dc2d482cd4498a50e9086be82dfb2071c4:sdk-rs/venues/coinbase/tests/support/history_family.rs:generic-api-key:116
+
+# Synthetic Phemex socket vector: HMAC-SHA256("secret", "key1700000060").
+# This is the independently verified signature from literal test credentials.
+# Exact historical occurrence only; production and future changes remain scanned.
+81fc6001a6b07234f69a44f04c7c261982f418aa:sdk-rs/venues/phemex/tests/managed_private_socket.rs:generic-api-key:146
+
+# Same synthetic Phemex HMAC vector in the original signer RED: literal
+# test key/secret; independently recomputed, never an account credential.
+# Exact historical occurrence only; no path or rule exemption.
+77f3a83f9fa9ffdfc6493e7903810ecf337464cd:sdk-rs/venues/phemex/tests/dispatch_signing.rs:generic-api-key:424
+
+# Maintainer-approved historical Bitrue plan attribution prose; no credential.
+# Current wording changed; only this original commit/file/rule/line is ignored.
+48f8b6cbe5788fabdc417e507b6cded77b23aa7a:docs/plans/RUST_BITRUE_DISPATCH_SIGNER.md:generic-api-key:271
+
+# Derived BloFin test MAC from fixture-secondary-secret; exact historical fingerprint only.
+ea5ec84ee69b5a6e4f7f90322f9afd285a718a0f:sdk-rs/venues/blofin/tests/hmac_dispatch_original.rs:generic-api-key:341
+
+# Public synthetic Crypto.com WS HMAC vector, independently recomputed from
+# fixture-primary-material and public/auth1710000000000fixture-primary-key1710000000000.
+# Exact historical plan occurrence only; no path or rule exemption.
+317454665878720881c9de9635d8c1533e8db083:docs/plans/RUST_CRYPTOCOM_PRIVATE_REQUEST_CONTEXT.md:generic-api-key:121
+
+# Kraken hosted proof: base64 of literal "kraken-test-secret", with fixture-primary.
+# Current fixtures encode that public plaintext; these exact old occurrences only.
+# No production, path-wide or future-commit exception.
+228b4707f09eef9e5e05ddb5d3721e3e06b9029e:sdk-rs/hosts/wasm/js/hosted-operation.integration.mjs:generic-api-key:15
+228b4707f09eef9e5e05ddb5d3721e3e06b9029e:sdk-rs/venues/kraken/src/sign/hosted_tests.rs:generic-api-key:232
+
+# Public Git commit SHA in the Lighter principal plan, beside reviewer prose.
+# Exact historical documentation fingerprint only; no credential bytes.
+25b7d8a4edf1fb1bb7c839783f458b252db6e937:docs/plans/RUST_LIGHTER_SETUP_PRINCIPAL.md:generic-api-key:4
+
+# Deterministic public Kraken replay fixture, replaced by encoding replay-secret.
+5453dc4802960a9b5e19c7f60b027438d46331c8:sdk-rs/harness/kraken-beta-errors.integration.mts:generic-api-key:6
+
+# Bitunix hosted login golden: a public double-SHA256 vector over fixture inputs,
+# shared with base.ws-auth-signing.test.ts. Exact fingerprint only; no credential bytes.
+c85ca651b15d165d618d12fbeb385a1bf0c783b9:packages/safe-cex/src/__tests__/audit-regressions/rust.bitunix-hosted-provider.wasm.test.ts:generic-api-key:61
+
+# Historical public impostor-URL fixture; no credential, now assembled from URL components.
+2fe0c6b5007f157d12a19ff1c5e77302cbe030c6:sdk-rs/harness/live-smoke-venues.test.mjs:generic-api-key:222
+
+# Public reviewer names in historical Lighter plan prose; no credential material.
+# Exact commit/path/rule/line only.
+94f58d0d64773c6c915a6da1ada5d756442f8871:docs/plans/RUST_LIGHTER_REMAINING_FUNNEL.md:generic-api-key:7

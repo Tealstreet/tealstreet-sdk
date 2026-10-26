@@ -1,0 +1,114 @@
+[package]
+name = "safe-cex-venues"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Every Rust venue, constructed by name from one options shape"
+
+[features]
+address-nonce = ["dispatch-signing", "safe-cex-engine/address-nonce", "safe-cex-crypto/address-nonce"]
+# Additive provider bootstrap; at least one venue feature is still required.
+dispatch-signing = ["dep:safe-cex-crypto"]
+default = [
+    "bitunix",
+    "grvt",
+    "polymarket",
+    "coinbase",
+    "breakoutprop",
+    "paradex",
+    "apexomni",
+    "txflow",
+    "kraken",
+    "asterdex",
+    "lighter",
+    "woo",
+    "bitrue",
+    "bitget",
+    "backpack",
+    "blofin",
+    "mexc",
+    "bingx",
+    "weex",
+    "phemex",
+    "cryptocom",
+    "binance",
+    "kucoin",
+    "kucoinspot",
+    "bybit",
+    "hyperliquid",
+    "okx",
+    "orderly"
+]
+grvt = ["dep:safe-cex-venue-grvt"]
+polymarket = ["dep:safe-cex-venue-polymarket"]
+coinbase = ["dep:safe-cex-venue-coinbase"]
+breakoutprop = ["dep:safe-cex-venue-breakoutprop"]
+paradex = ["dep:safe-cex-venue-paradex"]
+apexomni = ["dep:safe-cex-venue-apexomni", "dispatch-signing"]
+txflow = ["dep:safe-cex-venue-txflow"]
+kraken = ["dep:safe-cex-venue-kraken"]
+asterdex = ["dep:safe-cex-venue-asterdex", "dispatch-signing", "address-nonce"]
+lighter = ["dep:safe-cex-venue-lighter", "dispatch-signing", "safe-cex-crypto/schnorr", "dep:serde_json"]
+woo = ["dep:safe-cex-venue-woo"]
+bitrue = ["dep:safe-cex-venue-bitrue", "dispatch-signing"]
+bitunix = ["dep:safe-cex-venue-bitunix", "dispatch-signing", "safe-cex-crypto/trim-signing"]
+bitget = ["dep:safe-cex-venue-bitget", "dispatch-signing"]
+backpack = ["dep:safe-cex-venue-backpack", "dispatch-signing", "safe-cex-crypto/ed25519"]
+blofin = ["dep:safe-cex-venue-blofin", "dispatch-signing"]
+mexc = ["dep:safe-cex-venue-mexc", "dispatch-signing", "dep:serde_json"]
+bingx = ["dep:safe-cex-venue-bingx", "dispatch-signing"]
+weex = ["dep:safe-cex-venue-weex", "dispatch-signing"]
+phemex = ["dep:safe-cex-venue-phemex", "dispatch-signing"]
+cryptocom = ["dep:safe-cex-venue-cryptocom", "dispatch-signing"]
+binance = ["dep:safe-cex-venue-binance", "dispatch-signing"]
+kucoin = ["dep:safe-cex-venue-kucoin"]
+kucoinspot = ["dep:safe-cex-venue-kucoin", "safe-cex-venue-kucoin/spot"]
+bybit = ["dep:safe-cex-venue-bybit", "dispatch-signing"]
+hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
+okx = ["dep:safe-cex-venue-okx", "dispatch-signing"]
+orderly = ["dep:safe-cex-venue-orderly", "dispatch-signing", "safe-cex-crypto/ed25519"]
+
+[dependencies]
+serde_json = { workspace = true, optional = true }
+safe-cex-crypto = { workspace = true, optional = true }
+safe-cex-engine.workspace = true
+serde.workspace = true
+zeroize.workspace = true
+safe-cex-venue-breakoutprop = { path = "../venues/breakoutprop", optional = true }
+safe-cex-venue-grvt = { workspace = true, optional = true }
+safe-cex-venue-polymarket = { path = "../venues/polymarket", optional = true }
+safe-cex-venue-coinbase = { path = "../venues/coinbase", optional = true }
+safe-cex-venue-paradex = { path = "../venues/paradex", optional = true }
+safe-cex-venue-apexomni = { path = "../venues/apexomni", optional = true }
+safe-cex-venue-txflow = { path = "../venues/txflow", optional = true }
+safe-cex-venue-kraken = { path = "../venues/kraken", optional = true }
+safe-cex-venue-asterdex = { path = "../venues/asterdex", optional = true }
+safe-cex-venue-lighter = { path = "../venues/lighter", optional = true }
+safe-cex-venue-woo = { workspace = true, optional = true }
+safe-cex-venue-bitrue = { workspace = true, optional = true }
+safe-cex-venue-bitunix = { workspace = true, optional = true }
+safe-cex-venue-bitget = { path = "../venues/bitget", optional = true }
+safe-cex-venue-backpack = { path = "../venues/backpack", optional = true }
+safe-cex-venue-blofin = { workspace = true, optional = true }
+safe-cex-venue-mexc = { workspace = true, optional = true }
+safe-cex-venue-bingx = { workspace = true, optional = true }
+safe-cex-venue-weex = { workspace = true, optional = true }
+safe-cex-venue-phemex = { workspace = true, optional = true }
+safe-cex-venue-orderly = { path = "../venues/orderly", optional = true }
+safe-cex-venue-cryptocom = { workspace = true, optional = true }
+safe-cex-venue-binance = { workspace = true, optional = true }
+safe-cex-venue-kucoin = { workspace = true, optional = true }
+safe-cex-venue-bybit = { workspace = true, optional = true }
+safe-cex-venue-hyperliquid = { workspace = true, optional = true }
+safe-cex-venue-okx = { workspace = true, optional = true }
+
+[build-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1,3 +1,4 @@
+import { serializeCommandError } from '../../commandOutcome';
 import { getCommandExecutor } from '../commandExecutor';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
@@ -45,7 +46,13 @@ export class CommandHandler extends BaseHandler {
             this._exchange.emitter.emit('exec-log', reqId === undefined ? { message } : { message, reqId });
             // A caller awaiting this reqId would otherwise wait out its timeout.
             if (reqId !== undefined) {
-              this._exchange.emitter.emit('exec-result', { reqId, handled: true, success: false, error: message });
+              this._exchange.emitter.emit('exec-result', {
+                reqId,
+                handled: true,
+                success: false,
+                error: message,
+                ...(err instanceof Error && { errorDetails: serializeCommandError(err) }),
+              });
             }
           }
         })();

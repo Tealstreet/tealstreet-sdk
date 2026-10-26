@@ -4,15 +4,33 @@ This directory contains the GRVT exchange integration for Tealstreet.
 
 ## Exchange Information
 
-GRVT (Gravity) is a hybrid cryptocurrency derivatives exchange built on ZK Stack (zkSync Hyperchain), offering:
+GRVT (Gravity) is a hybrid cryptocurrency derivatives exchange built on ZK Stack (zkSync Hyperchain). This adapter exposes perpetuals:
 
-- Perpetual futures and options trading
+- Perpetual futures trading
 - On-chain settlement with off-chain orderbook
 - Session-based authentication with API keys
 - EIP-712 signed orders for trustless verification
-- Multi-instrument support (Perpetual, Future, Call, Put)
+- The upstream protocol enumerates Perpetual, Future, Call and Put; current SDK discovery requests perpetuals only
 - Builder fee program (Tealstreet integration)
 - Full and Lite API formats (compact field names for performance)
+
+### Supported product boundary
+
+`fetchMarkets()` posts `{}` to `all_instruments`. The official API defaults
+omitted/empty `k` to `PERPETUAL`; it does not mean all kinds. The generic mapper
+will accept injected Future/Call/Put rows, and native-ID ticker/book/order
+plumbing has no additional kind guard. These latent paths are not supported
+non-perpetual product lifecycles: signing metadata drops kind/expiry/strike.
+Exact-symbol cancellation's snapshot safeguards do not enable new products.
+Read-only production and
+testnet probes on 2026-10-20 returned only perpetuals for `{}` and no rows for
+explicit `FUTURE/CALL/PUT` filters.
+
+The Rust cutover decision retires this unexposed mapper-only surface, retaining
+perpetuals and all TS sources. It does not declare GRVT incapable of offering
+those products. See [the product decision and evidence](../../../../../docs/plans/GRVT_PRODUCTS_DECISION.md).
+Future enablement needs real listings, typed expiry/strike/kind/settlement
+metadata through consumers and product-specific lifecycle verification.
 
 ## API Documentation
 
@@ -85,13 +103,14 @@ When a TDG request fails with error code `1000` (session expired):
 3. Calls `exchange.authenticate()` to get new session
 4. Retries the failed request with new credentials
 5. Uses `_retry` flag on config to prevent infinite loops
+6. Replaces both cookie and proxy-session headers and reconnects an authenticated private socket with the new session
 
 ### EIP-712 Order Signing (`grvt.exchange.ts:1050-1126`)
 
 Every order must be cryptographically signed:
 
 1. **Wallet Initialization** (`grvt.exchange.ts:92-124`): `ethers.Wallet` created from `opts.secret` (private key). Address validated against `opts.grvtSignerAddress` if provided.
-2. **Domain Configuration**: `{ name: "Grvt", version: "0", chainId }` where chainId is 326 (testnet) or 325 (production)
+2. **Domain Configuration**: `{ name: "GRVT Exchange", version: "0", chainId }` where chainId is 326 (testnet) or 325 (production)
 3. **EIP-712 Message Structure** (`grvt.exchange.ts:1083-1106`):
    - `subAccountID`: Integer trading account ID
    - `isMarket`: Boolean
@@ -314,6 +333,11 @@ actionable error; it must never continue with the stale cookie.
 - `is_full: false` requests lite format for efficiency
 
 **Ping/Pong** (`grvt.ws-private.ts:48-53`): Sends string `"ping"`, expects string `"pong"` response.
+Both TS and Rust schedule a replaceable one-shot ping five seconds after a
+pong, independently of intervening account data. Rust fences that timer by
+socket and authenticated-session generation and clears it on retirement.
+Heartbeat timing is not subscription identity; replay protocol audits still
+require authentication before private sends and exact responses to server pings.
 
 **Stream Handling** (`grvt.ws-private.ts:199-217`):
 
@@ -418,21 +442,51 @@ Trigger metadata format:
 
 - **Single**: `cancelOrder()` via `grvtClient.tdgClient.cancelOrder()` with `sub_account_id` and `order_id`
 - **All**: `cancelAllOrders()` via `grvtClient.tdgClient.cancelAllOrders()` with `sub_account_id`
-- **By Symbol**: `cancelSymbolOrders()` via `cancelAllOrders` with additional `instrument_id`
+- **By Symbol**: `cancelSymbolOrders()` reads the complete authenticated subaccount open-orders snapshot, matches exact native leg instruments, and cancels the matching native IDs individually. It never uses broad kind/base/quote cancellation filters.
 - **Batch**: `cancelOrders()` loops sequentially, each failure logged but does not stop the batch
 
 ### Order Update (`grvt.exchange.ts:1459-1496`)
 
+Regular entry TP/SL options create an ordinary entry followed by distinct
+opposite-side reduce-only trigger orders. Both protective legs are retained;
+a failure reports the IDs already created. A standalone SL/TP uses market
+execution and explicit non-split trigger metadata. Symbol cancel-all uses the
+complete native open-orders snapshot (`POST /lite/v1/open_orders`, `{sa}`),
+then exact native order IDs (or validated uint64 client IDs when the native ID
+is unassigned). The endpoint has no instrument filter, page cursor, limit or
+documented response cap; its documented result is a complete snapshot, excluding
+new orders still in flight. The raw read preserves error/truncation signals
+that SDK schema mapping would obscure. Malformed/ambiguous envelopes, partial
+responses, invalid or duplicate identities, account mismatches, and unsupported
+multi-leg orders fail before the first write.
+Client-ID fallback also fails if local order/lifecycle evidence changes during
+the snapshot or write-authentication awaits, rather than retargeting a reused
+ID. Disposing during reads/authentication stops writes; cancellation failures stop the sequence and
+are never retried on ambiguous network failure. Individual writes preserve
+raw responses too: they require an explicit accepted ACK or a returned order
+matching the requested native/client ID, account and instrument. Missing,
+false, malformed or mismatched acknowledgements stop all remaining writes.
+Explicit error/code aliases (`e`, `error`, `c`, `code`) invalidate both snapshot
+rows and returned Order proofs even alongside success fields; mixed Ack/Order
+objects are rejected regardless of the acknowledgement value;
+no local terminal state is inferred from an ACK. Client-only cancellations
+refuse the trading client's internal authentication resend; a fresh complete
+snapshot is required after session rejection. An exact native-ID cancellation
+may retain one definitive-auth retry only while the exchange is live and the
+same authenticated main account/subaccount is preserved. Global `cancelAllOrders()`
+retains the account-wide native request. See the current
+[official open-orders contract](https://api-docs.grvt.io/trading_api/#open-orders).
+
 GRVT does not support native order modification. `updateOrder()` builds and
 validates the full replacement *before* cancelling the live order, then
-cancels and places it. REST `mapOrder()` and private-WS `parseOrder()` must
+cancels and places the desired total minus already-filled quantity. REST `mapOrder()` and private-WS `parseOrder()` must
 both preserve GRVT's `time_in_force`/`ti`, `post_only`/`po`, `reduce_only`/`ro`,
 and TP/SL metadata. `post_only: true` is represented as safe-cex
 `OrderTimeInForce.PostOnly`; GTT, IOC, and FOK map to their respective
 safe-cex TIF values.
 
 For standalone TP/SL, the store price is `trigger_price`, and replacement
-passes it explicitly as `triggerPrice` together with `trigger_by` and
+passes it explicitly as `triggerPrice`, preserves the native market/limit execution choice and separate limit price, together with `trigger_by` and
 `close_position`. Do not default a missing/unsupported TIF, trigger price,
 trigger type, or close flag: fail before cancellation so an existing order is
 never silently replaced with weaker semantics.
@@ -518,8 +572,8 @@ From lite format instrument data:
 
 For EIP-712 signature, values are converted to contract-level integers:
 
-- **Contract Size**: `Math.floor(size * 10^baseDecimals)` where `baseDecimals` comes from instrument (`bd` field, default 9)
-- **Limit Price**: `Math.floor(price * 1_000_000_000)` (PRICE_MULTIPLIER = 1e9, always)
+- **Contract Size**: exact decimal string scaled by instrument `bd`, using checked BigInt arithmetic; missing metadata fails preflight
+- **Limit Price**: exact decimal string scaled by 1e9 using checked BigInt arithmetic
 - **Asset ID**: `instrument_hash` passed as hex string (e.g., `"0x030501"`)
 
 ### API Payload vs EIP-712
@@ -530,8 +584,8 @@ The API payload uses **human-readable decimal strings** (e.g., `size: "0.1"`, `l
 
 GRVT uses nanosecond timestamps throughout:
 
-- `expiration`: `(Date.now() + 3600*1000) * 1e6` -- kept as string (exceeds MAX_SAFE_INTEGER)
-- `create_time`: `Date.now() * 1_000_000`
+- `expiration`: `(BigInt(Date.now()) + 3600000n) * 1000000n` as a decimal string
+- `create_time`: `BigInt(Date.now()) * 1000000n` as a decimal string
 - Kline timestamps: Divided by `1_000_000_000` to convert to seconds
 - Position update timestamps: Divided by `1_000_000` to convert to milliseconds
 
@@ -540,7 +594,7 @@ GRVT uses nanosecond timestamps throughout:
 Uses `/lite/v1/aggregated_account_summary`:
 
 - `total` = `parseFloat(aggData.te)` (total_equity)
-- `free` = `parseFloat(aggData.ts2)` (total_sub_account_available_balance), falls back to total_equity
+- `free` = `parseFloat(aggData.ts2)` (total_sub_account_available_balance), falls back to total_equity only when absent; an explicit zero stays zero
 - `used` = total - free
 - Spot balances parsed from `aggData.sb` array
 
@@ -595,6 +649,13 @@ Both order and position WebSocket events trigger a throttled REST fetch to ensur
 
 GRVT creates "fake" zero-size positions for every market (one-way mode). Real positions are merged with fake positions -- fake positions are filtered out for symbols that have real positions (`grvt.exchange.ts:797-800`). This ensures the UI always shows a position entry for every market.
 
+### Ticker deltas
+
+The rolling buy/sell volumes and open price are retained independently across
+partial updates. Quote volume and percentage use the current last price even
+when a frame omits the corresponding input. GRVT empty strings clear numeric
+fields to zero; next funding time is nanoseconds in either JSON numeric form.
+
 ### Ticker Population
 
 Initial tickers are placeholders with all zeros (`fetchTickers()` just creates stubs from markets). Real values are populated via WebSocket `v1.ticker.d` delta stream.
@@ -602,7 +663,7 @@ Initial tickers are placeholders with all zeros (`fetchTickers()` just creates s
 ## Exchange Metadata
 
 - **Position Mode**: One-way (`getPositionMode()` returns `PositionMode.OneWay`)
-- **Margin Type**: Isolated (`MarginType.Isolated` used in positions, `grvt.exchange.ts:789`)
+- **Margin Type**: native `mt` / `margin_type` (`CROSS` or `ISOLATED`); legacy missing fields retain isolated fallback.
 - **Default Leverage**: 10x (`grvt.exchange.ts:73`)
 - **SDK Package**: `@tealstreet/grvt-ts-sdk` (forked) for signing, `@tealstreet/grvt-client` (forked from `@grvt/client`) for API
 
@@ -790,3 +851,58 @@ add a credential-reading script under `src/exchanges/**`.
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `metadata.client_order_id`. GRVT types it uint64 with the top half reserved for its own UI, so the rule accepts canonical decimal strings `1..2^63-1`. The caller's ID then becomes the canonical safe-cex order ID: it replaces the nonce everywhere the nonce was used (`recordNonce`, builder-fee events, the return value).
+
+## Rust socket supervision
+
+All Rust public, per-timeframe candle and private sockets use `engine::socket::Supervisor` for connection deadlines and capped exponential reconnect delay with jitter. Public/candle idle deadlines remain 20 seconds; the private idle deadline is 90 seconds and proxy authentication has a separate 15-second deadline. Native lowercase ping/pong remains venue-owned, including the replaceable, socket/generation-fenced private ping five seconds after a pong. Terminal authentication rejection still suppresses retries; dropping the last candle interest cancels its supervision and pending reconnect.
+
+## Rust shared public feed
+
+Shared provider quotes enter the native ticker store and run GRVT's existing
+position and balance PnL calculation using the current last price. This starts
+only after native private balance and position snapshots are loaded; a public
+quote cannot mark private datasets ready. Native account-summary and catalog
+refreshes retain provider quotes and the resulting private PnL. Summary equity,
+available funds and margin usage continue to come from the authenticated venue.
+
+## Rust public discovery resilience
+
+Rust catalogue/ticker reads retry through the shared engine capped exponential
+backoff. A malformed typed public row is skipped with a warning while valid
+neighbours remain usable. Private account initialization starts once the usable
+catalogue is available, without waiting for REST ticker seeds. Account snapshots,
+mutation acknowledgements and signing validation retain their stricter rules.
+See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+## Rust builder error contract
+
+Native definitive missing/insufficient approval preserves
+`GRVT_BUILDER_UNAUTHORIZED`, `reason: unauthorized | cap-too-low`,
+`requiredRaw: 300` and the parsed `authorizedRaw` for a low cap. The shared host
+and SDK command allowlist carry this through local, worker and hosted rejection.
+Use SDK-root `builderAuthorizationOf(error)` for structural recognition; the old
+TS class prototype is not reconstructed. NX's existing class-only modal handler
+must migrate deliberately. Pending/unknown checks and exhausted network or
+malformed-list failures remain ordinary errors. Existing validation order,
+missing/unreadable-cap policy, retry budget, FIFO and write outcomes stay intact.
+
+
+### Native REST order-book query
+
+Rust exposes public SDK fetchOrderBook through an unsigned MDG POST on live and
+testnet, using the stored native instrument ID. The [official lite book schema](https://api-docs.grvt.io/market_data_api/#orderbook-levels)
+requires {i:nativeId,d:50}; this deliberately corrects TS's legacy instrument_id
+body and long-only response mapping. Caller limit stays ignored. Lite r/b/a/p/s
+and full result/bids/asks/price/size aliases map directly to numeric price and base
+amount, cumulative amount totals per side, native order and zero quantity rows;
+no price IDs, sequence metadata or decimal/contract scaling is introduced.
+
+Unknown markets, missing/null result and missing/null sides retain TS's empty
+book behavior. Present malformed structures, invalid/nonfinite financial rows
+and cumulative overflow fail the complete query. Named record boundaries require
+objects. This command never publishes subscription books or account/session
+headers, including on public code1000 or responses with cookies/account IDs.
+HTTP/native failures do not retry or refresh auth; transport uses the existing
+five bounded read reissues, then a typed owned Network/NotSent failure. Public
+rate1006/HTTP429 retains bounded usable Retry-After metadata without account-auth
+classification. The standalone family explicitly enables its JSON book decoder.

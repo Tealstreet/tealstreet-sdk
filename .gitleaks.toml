@@ -29,103 +29,64 @@ paths = [
 ]
 
 # ---------------------------------------------------------------------------
-# sdk-rs: triaged 2026-10-14 against `gitleaks dir sdk-rs` - 366 findings, 332
-# of them outside sdk-rs/target. Every one was synthetic. The notes name the
-# evidence, because "it is probably a fixture" is not a clearance for pushing
-# to a public mirror.
+# sdk-rs: signing test vectors use fixed synthetic keys and secrets (for
+# example "secret": "test-secret-value" style fixtures and RFC test keys).
+# Scoped to test fixture paths; a long opaque string in production source is
+# still reported.
 # ---------------------------------------------------------------------------
 
 [[rules]]
-id = "private-key"
-[rules.allowlist]
-description = """
-PEM MARKERS and deliberately tiny synthetic bodies, not key material. Scoped by
-PATH rather than by regex because the same strings appear with three different
-escapings - real newlines in .cjs, \\n in Rust string literals, \\\\n in JSON -
-and every site in these files was read individually:
-
-  * bodies are AQID (base64 of bytes 1,2,3) or AQIDBA== (1,2,3,4);
-  * scripts/crypto-encoding.cjs GENERATES its body with
-    Array.from({length}, (_, i) => (i * 23) & 0xff), i.e. counting bytes;
-  * scripts/credentials.cjs uses the literal abc;
-  * src/utils.rs matches only because coinbase_pem_contains_private_key
-    declares the two BEGIN markers as the constants it searches FOR.
-
-A PEM anywhere else in the tree is still reported.
-"""
-paths = [
-  "sdk-rs/safe-cex-venue-coinbase/scripts/(credentials|signing-helpers|crypto-encoding|order-sync-auth)\\.cjs$",
-  "sdk-rs/safe-cex-venue-coinbase/tests/(credentials|signing_helpers|order_sync_auth)\\.rs$",
-  "sdk-rs/safe-cex-venue-coinbase/tests/fixtures/order-sync-auth\\.json$",
-  "sdk-rs/safe-cex-venue-coinbase/src/utils\\.rs$",
-]
-
-[[rules]]
 id = "generic-api-key"
-[rules.allowlist]
-description = """
-Four distinct false-positive shapes across 306 findings, all verified:
-
- 1. COMPUTED SIGNATURES, not credentials. kucoin's KC-API-SIGN /
-    KC-API-PASSPHRASE, woo's x-api-signature and bitget's signing reference are
-    the HMAC OUTPUT of signing a fixture request with a fixture secret.
- 2. A literal test secret. safe-cex-crypto/tests/fixtures/node-crypto.json
-    carries "secret": "dGVzdC1zZWNyZXQtdmFsdWU=", which is base64 for
-    test-secret-value.
- 3. FILE -> SHA MAPS in gate-result records (*_GATE_EXITS.json,
-    COMPLETION_GATES.json, RPC_GATE_RESULTS.json). The "secret" is a content
-    hash beside a filename; the same shape produced the two
-    coinbase-access-token hits, which matched on coinbase-tests.log.
- 4. Ordinary PROSE long enough to trip the entropy heuristic with no secret in
-    it at all - blofin CLAUDE.md, weex MARKET_READS_GATE_EVIDENCE.md and
-    SELECTION_GATE_EVIDENCE.md.
-
-Scoped to fixture, test, script, gate-record and evidence paths. A long opaque
-string in production source is still reported.
-"""
+[[rules.allowlists]]
+description = "Public synthetic Ethereum key and its independently derived Paradex test keys."
+condition = "AND"
+regexTarget = "secret"
+regexes = [
+  "^1111111111111111111111111111111111111111111111111111111111111111$",
+  "^0x4b66a9d883cd6dd0ada419c06467b69124fd6e06c7ebed6c391314fea35ddcd$",
+  "^0x30aa092002d2810ad48c006709502638b83f7552f0a6ba69968d05d2c19d0cf$",
+]
 paths = [
-  "sdk-rs/[^/]+/tests/",
-  "sdk-rs/[^/]+/scripts/",
-  "sdk-rs/[^/]+/[A-Z_]+\\.json$",
-  "sdk-rs/[^/]+/[A-Za-z_]+\\.md$",
-  # 5. Gate EVIDENCE trees, measured 2026-10-16 on the commit that published
-  #    `sdk-rs` to the mirror: 1043 of 1054 findings, across 316 files, all in
-  #    an `evidence/` directory. Every one is a hash manifest or an oracle
-  #    capture - `"api_factory.rs": "<sha>"` is the shape, a FILE NAME beside
-  #    its content hash, which is the same false positive already recorded for
-  #    coinbase-tests.log below. The entries above only matched ONE directory
-  #    level under `sdk-rs/`, so `sdk-rs/parity/evidence/` and
-  #    `sdk-rs/<crate>/evidence/audit-*/` fell through them.
-  "sdk-rs/(.+/)?evidence/",
-  # 5b. The accepted-set contract fixtures: ten `"token": "..."` hits, all
-  #     hand-made JWT expiry vectors whose signature is the literal string
-  #     `sig` or `x`. Decoded: {"alg":"HS256"}.{"exp":2}.sig,
-  #     {}.{"exp":100}.sig and {}.{"exp":4102444800}.x - three segments of
-  #     base64 chosen to exercise expiry branches, not credentials.
-  "sdk-rs/safe-cex-parity/accepted-set/",
-  # 6. Manifest rows are prose plus mappings. The single remaining finding was
-  #    `keyed comparison, <phrase>` in a woo row note - English long enough to
-  #    trip the entropy heuristic, rule 4 above in a file type it did not list.
-  "sdk-rs/parity/manifest/",
-  # 7. A PUBLIC ADDRESS, not a key. The Hyperliquid realm socket unit test
-  #    passes `"key": "0x1479..."` - 0x plus 40 hex digits, i.e. a 20-byte EVM
-  #    account address (Hyperliquid's `key` option is the account address), the
-  #    same value the registry hyperliquid native-host tests use. Its `secret`
-  #    is the empty string. Exact file only.
-  "sdk-rs/safe-cex-venue-hyperliquid/src/realm/socket_tests\\.rs$",
+  # Independently generated StarkNet derivation vectors from the public,
+  # synthetic Ethereum key consisting of 32 repeated 0x11 bytes.
+  "^sdk-rs/venues/paradex/tests/sign-vectors\\.json$",
 ]
 
-[[rules]]
-id = "coinbase-access-token"
-[rules.allowlist]
-description = """
-Matched on LOG FILENAMES inside a gate-result record -
-"coinbase-tests.log": "<hash>" in RPC_GATE_RESULTS.json. A filename beside its
-content hash, not a token.
-"""
+# SHA-256 of the checked-in TS API client in an independent-vector
+# provenance manifest. Require both this exact fixture and this public hash; a
+# new credential in the same fixture or in any test source must still fail.
+[[rules.allowlists]]
+description = "Public api-client.ts provenance hash, not a credential."
+condition = "AND"
+paths = ["^sdk-rs/crypto/tests/fixtures/lighter/venue-signing-preimages\\.json$"]
+regexTarget = "secret"
+regexes = ["^99291b039f7ecd9952d7fc8fda105c5ca631b597cfbc5a4de4a7f95d435e4470$"]
+
+# This public documentation vector was already recorded in .gitleaksignore for
+# the original first-port path. Scope it to the exact current source and bytes.
+[[rules.allowlists]]
+description = "Binance published SIGNED Endpoint Examples HMAC secret."
+condition = "AND"
 paths = [
-  "sdk-rs/[^/]+/[A-Z_]+\\.json$",
-  # The same filename-beside-hash shape in the evidence trees: 27 hits on
-  # 2026-10-16, all inside an `evidence/` directory.
-  "sdk-rs/(.+/)?evidence/",
+  "^sdk-rs/venues/binance/src/sign\\.rs$",
+  # Same published vector, now shared with the injected local-provider tests.
+  "^sdk-rs/crypto/tests/fixtures/hmac/binance\\.json$",
 ]
+regexTarget = "secret"
+regexes = ["^2b5eb11e18796d12d88f13dc27dbbd02c2cc51ff7059765ed9821957d82bb4d9$"]
+
+# Kraken requires a base64 secret; this is exactly base64("replay-secret").
+[[rules.allowlists]]
+description = "Public deterministic Kraken replay secret in the venue registry."
+condition = "AND"
+paths = ["^sdk-rs/harness/venues\\.mjs$"]
+regexTarget = "secret"
+regexes = ["^cmVwbGF5LXNlY3JldA==$"]
+
+# Existing Polymarket boundary-test HMAC key: base64("safe-fake-secret").
+[[rules.allowlists]]
+description = "Public synthetic Polymarket boundary-test API secret."
+condition = "AND"
+paths = ["^packages/safe-cex/src/__tests__/audit-regressions/polymarket\\.rust-boundary\\.wasm\\.test\\.ts$"]
+regexTarget = "secret"
+regexes = ["^c2FmZS1mYWtlLXNlY3JldA==$"]

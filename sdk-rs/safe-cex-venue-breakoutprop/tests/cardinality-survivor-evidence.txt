@@ -1,2 +1,0 @@
-portfolio: orders.truncate(1) compiled and SURVIVED exit 0
-portfolio_reads: orders.truncate(1) compiled and SURVIVED exit 0

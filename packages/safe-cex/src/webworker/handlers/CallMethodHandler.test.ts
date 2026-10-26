@@ -1,10 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Exchange } from '../../exchanges/base';
 import type { ExchangeName } from '../../types';
-import { OrderStopTriggerType } from '../../types';
 import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../../exchanges/base';
+import {
+  decodeWorkerOrderIds,
+  replacementClientOrderIdOf,
+  withReplacementClientOrderId,
+} from '../../exchanges/clientOrderId';
+import { OrderStopTriggerType } from '../../types';
 import { CallMethodHandler } from './CallMethodHandler';
 
 describe('CallMethodHandler', () => {
@@ -64,6 +72,37 @@ describe('CallMethodHandler', () => {
 
   describe('handle', () => {
     describe('callMethod', () => {
+      it('answers the Rust native account reads a main-thread mirror forwards', async () => {
+        const reads = {
+          fetchPositions: vi.fn().mockResolvedValue([{ symbol: 'BTCUSDT' }]),
+          fetchBalance: vi.fn().mockResolvedValue({ total: 1 }),
+          fetchPositionMode: vi.fn().mockResolvedValue(true),
+        };
+        Object.assign(mockExchange, reads);
+        for (const [method, call] of Object.entries(reads)) {
+          await handler.handleCallMethod(method, method as never, method === 'fetchPositions' ? [['BTCUSDT']] : []);
+          expect(call).toHaveBeenCalledOnce();
+          expect(mockPostMessage).toHaveBeenLastCalledWith({
+            op: 'callMethod:done',
+            data: { requestId: method, result: await call.mock.results[0].value, success: true },
+          });
+        }
+        expect(reads.fetchPositions).toHaveBeenCalledWith(['BTCUSDT']);
+        for (const method of Object.keys(reads)) expect(WORKER_WRITE_METHODS.has(method)).toBe(false);
+      });
+
+      it('routes catalogue refresh to the worker engine and returns its authoritative delta', async () => {
+        const delta = { added: [{ id: 'NEWUSDT' }], removed: [{ id: 'OLDUSDT' }] };
+        const refresh = vi.fn().mockResolvedValue(delta);
+        Object.assign(mockExchange, { refreshMarkets: refresh });
+        await handler.handleCallMethod('refresh', 'refreshMarkets', []);
+        expect(refresh).toHaveBeenCalledOnce();
+        expect(mockPostMessage).toHaveBeenLastCalledWith({
+          op: 'callMethod:done', data: { requestId: 'refresh', result: delta, success: true },
+        });
+        expect(WORKER_WRITE_METHODS.has('refreshMarkets')).toBe(false);
+      });
+
       it('should call setLeverage and post success', async () => {
         const payload: StoreWorkerPayload = {
           op: 'callMethod',
@@ -220,6 +259,45 @@ describe('CallMethodHandler', () => {
         });
       });
 
+      it.each(['COMMAND_TIMEOUT', 'ENGINE_DISPOSED', 'ENGINE_DEAD'])('retains %s command attribution', async (code) => {
+        const error = Object.assign(new Error('Interrupted'), {
+          code,
+          command: 'setLeverage',
+          timeoutMs: 120000,
+          outcome: 'unknown',
+          clientOrderId: 'caller',
+          clientOrderIds: ['caller'],
+          partialOrderIds: ['accepted'],
+          partialOrderCount: 1,
+          totalOrderCount: 2,
+          failedOrderIndex: 1,
+        });
+        vi.mocked(mockExchange.setLeverage).mockRejectedValueOnce(error);
+        await handler.handleCallMethod('typed', 'setLeverage', ['BTCUSDT', 10]);
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: {
+            requestId: 'typed',
+            success: false,
+            result: {
+              message: 'Interrupted',
+              name: 'Error',
+              stack: expect.any(String),
+              code,
+              command: 'setLeverage',
+              timeoutMs: 120000,
+              outcome: 'unknown',
+              clientOrderId: 'caller',
+              clientOrderIds: ['caller'],
+              partialOrderIds: ['accepted'],
+              partialOrderCount: 1,
+              totalOrderCount: 2,
+              failedOrderIndex: 1,
+            },
+          },
+        });
+      });
+
       it('should handle unknown method', async () => {
         const payload: StoreWorkerPayload = {
           op: 'callMethod',
@@ -317,6 +395,97 @@ describe('CallMethodHandler', () => {
     it('should clear throttle manager on dispose', () => {
       // Just ensure it doesn't throw
       expect(() => handler.dispose()).not.toThrow();
+    });
+  });
+  describe('main-thread trading methods', () => {
+    it('runs a trading method on the worker exchange and returns its IDs', async () => {
+      const order = { symbol: 'BTCUSDT', side: 'buy', type: 'limit', amount: 1, price: 2, clientOrderId: 'c-1' };
+      (mockExchange as unknown as Record<string, unknown>).placeOrders = vi.fn().mockResolvedValue(['1', '2']);
+      handler.handle({ op: 'callMethod', data: { requestId: 'trade-1', method: 'placeOrders', args: [[order]] } });
+      await vi.waitFor(() => {
+        expect(mockExchange.placeOrders).toHaveBeenCalledWith([order]);
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: { requestId: 'trade-1', result: ['1', '2'], success: true },
+        });
+      });
+    });
+
+    it('sends the replacement client ID of an amendment beside its IDs, surviving a JSON bridge', async () => {
+      (mockExchange as unknown as Record<string, unknown>).updateOrder = vi
+        .fn()
+        .mockResolvedValue(withReplacementClientOrderId(['9'], 'replacement-1'));
+      handler.handle({ op: 'callMethod', data: { requestId: 'amend-1', method: 'updateOrder', args: [{}] } });
+      await vi.waitFor(() => expect(mockPostMessage).toHaveBeenCalled());
+      const { result } = JSON.parse(JSON.stringify(mockPostMessage.mock.calls[0][0].data));
+      const decoded = decodeWorkerOrderIds(result);
+      expect([...decoded]).toEqual(['9']);
+      expect(replacementClientOrderIdOf(decoded)).toBe('replacement-1');
+    });
+
+    it('serializes a worker trading rejection with its outcome fields', async () => {
+      const failure = Object.assign(new Error('rejected by venue'), { outcome: 'rejected', clientOrderIds: ['c-1'] });
+      (mockExchange as unknown as Record<string, unknown>).cancelOrders = vi.fn().mockRejectedValue(failure);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      handler.handle({ op: 'callMethod', data: { requestId: 'cancel-1', method: 'cancelOrders', args: [[]] } });
+      await vi.waitFor(() =>
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: {
+            requestId: 'cancel-1',
+            success: false,
+            result: expect.objectContaining({
+              message: 'rejected by venue',
+              outcome: 'rejected',
+              clientOrderIds: ['c-1'],
+            }),
+          },
+        }),
+      );
+    });
+
+    it('reads caller client IDs only from placement arguments', () => {
+      expect(workerCallClientOrderIds('placeOrders', [[{ clientOrderId: 'a' }, {}, { clientOrderId: 'b' }]])).toEqual([
+        'a',
+        'b',
+      ]);
+      expect(workerCallClientOrderIds('placeOrderWithClientOrderId', [{ clientOrderId: 'c' }])).toEqual(['c']);
+      expect(workerCallClientOrderIds('cancelOrders', [[{ clientOrderId: 'd' }]])).toBeUndefined();
+      expect(workerCallClientOrderIds('placeOrder', [{}])).toBeUndefined();
+      expect(workerCallClientOrderIds('placeOrders', undefined)).toBeUndefined();
+    });
+  });
+  describe('optional engine methods', () => {
+    it('runs one the worker exchange defines', async () => {
+      (mockExchange as unknown as Record<string, unknown>).changeAccountTier = vi.fn().mockResolvedValue(undefined);
+      handler.handle({
+        op: 'callMethod',
+        data: { requestId: 'tier-1', method: 'changeAccountTier', args: ['premium'] },
+      });
+      await vi.waitFor(() =>
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: { requestId: 'tier-1', result: undefined, success: true },
+        }),
+      );
+      expect(
+        (mockExchange as unknown as Record<string, ReturnType<typeof vi.fn>>).changeAccountTier,
+      ).toHaveBeenCalledWith('premium');
+    });
+
+    it('rejects one the worker exchange lacks, with the reason', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      handler.handle({ op: 'callMethod', data: { requestId: 'tier-2', method: 'fetchAccountTier', args: [] } });
+      await vi.waitFor(() =>
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: {
+            requestId: 'tier-2',
+            success: false,
+            result: expect.objectContaining({ message: 'bybit does not support fetchAccountTier' }),
+          },
+        }),
+      );
     });
   });
 });

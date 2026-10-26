@@ -333,3 +333,23 @@ describe('mexc permission rejections the venue sends', () => {
     expect(match('Please enable API Key trading information write access')).toBe('auth_permissions');
   });
 });
+
+describe('engine capacity refusals are not venue rate limits', () => {
+  const match = (message: string) => {
+    for (const pattern of DEFAULT_ERROR_PATTERNS) {
+      for (const p of pattern.patterns) {
+        const hit = typeof p === 'string' ? message.toLowerCase().includes(p.toLowerCase()) : p.test(message);
+        if (hit) return pattern.category;
+      }
+    }
+    return null;
+  };
+
+  it('leaves the Rust engine capacity message unclassified', () => {
+    expect(match('Engine request capacity reached')).toBeNull();
+  });
+
+  it('documents why the former engine text was replaced', () => {
+    expect(match('Too many requests in flight')).toBe('rate_limit');
+  });
+});

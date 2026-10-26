@@ -1,7 +1,0 @@
-{
-  "safe-cex-venue-woo/src/binding/hosts/order_writes.rs::LOCAL_FUNCTION:has_in": {
-    "category": "non-decoder",
-    "reason": "Inside the native order-write host in-operator: checks existing own/prototype properties and array length presence. It returns a bool and does not map raw order fields into a typed order. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification. Canonical ArrayData review: source callbacks retain the original array; sort final writes use checked Set/Delete and slice captures length before coercion then reads reached live indices. The nested has_in membership helper is unchanged.",
-    "sourceSha256": "30dec27e06b7fc331fb4037da07877188f293898fe68992d6860cf8cb45cb3f3"
-  }
-}

@@ -1,0 +1,796 @@
+{
+  "status": "PASS for the frozen standard artifacts and landed finalizeReplay measurement source recorded per gate.",
+  "toolchain": "1.99.0",
+  "wasmByteBudget": 1258291,
+  "normalEgress": true,
+  "native": {
+    "evidenceKind": "Integration lane fresh scoped KuCoin test at the frozen source; exact workspace Clippy attribution recorded separately.",
+    "source": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+    "command": "cargo test --manifest-path sdk-rs/Cargo.toml --locked -p safe-cex-venue-kucoin --features spot",
+    "log": "/tmp/parity-final17-kucoin-native.log",
+    "logSha256": "ecbc19fcf26c7b5960707ed288fd76fa2dae66960900f1a08917df715c351ecc",
+    "groupsPassed": [
+      17,
+      13,
+      23,
+      20,
+      46,
+      30,
+      0
+    ],
+    "totalPassed": 149,
+    "spotPassed": 46,
+    "clippy": {
+      "status": "PASS",
+      "source": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "command": "cargo clippy --manifest-path sdk-rs/Cargo.toml --workspace --all-targets -- -D warnings",
+      "scope": "Integration lane frozen-head workspace all-target Clippy includes KuCoin spot.",
+      "log": "/tmp/parity-final17-clippy.log",
+      "logSha256": "165d8134374587714b6a14592d96354d496f9fbf157d561aa7de9a8e6ad5a9bf"
+    },
+    "coverageNotes": [
+      "The existing IV mixed-batch atomic guard is unchanged. Secondary GET identity, unsigned public reads, primary mutations, credential validation and cache-only lookup behavior are covered; 149 tests include 46 Spot integration tests."
+    ]
+  },
+  "sdkBoundary": {
+    "command": "corepack yarn workspace @tealstreet/safe-cex test-wasm src/__tests__/audit-regressions/kucoinspot.rust-boundary.wasm.test.ts",
+    "passed": 2,
+    "artifactSha256": "b90c7a6b92f5cc3613cfe3928746cf4c93dd5f146a820d93aad3c113d922b9cc",
+    "log": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoinspot-sdk.log",
+    "source": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+    "sourceHeadBefore": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+    "sourceHeadAfter": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+    "logSha256": "454037cf29a07fde040bf23db51963f8ca336f0fc75b846dba4628c5e354db63",
+    "coverage": "The actual SDK/WASM boundary case runs with primary-only credentials and with secondary GET credentials, including exact HMAC/passphrase/broker signatures, caller-symbol amend/cancel context, quantities and lookup/cache behavior."
+  },
+  "capture": {
+    "kucoinspot": {
+      "seconds": 20,
+      "symbols": [
+        "BTC-USDT",
+        "ETH-USDT"
+      ],
+      "maxTimestampMs": 19993,
+      "tickerFrames": 26094,
+      "bookSnapshots": {
+        "BTC-USDT": 177,
+        "ETH-USDT": 149
+      },
+      "depthPerSide": 50
+    },
+    "kucoin": {
+      "seconds": 20,
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "maxTimestampMs": 19992,
+      "httpAnchors": 15,
+      "explicitRequestOrdinals": true,
+      "concurrentBulletCompletionMs": {
+        "requestOrdinal3": 842,
+        "requestOrdinal4": 809
+      }
+    }
+  },
+  "gates": [
+    {
+      "venue": "kucoinspot",
+      "stage": "public",
+      "sourceHeadBefore": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "sourceHeadAfter": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "harnessSource": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "proofWrittenAt": "2026-10-20T10:02:30.655462+00:00",
+      "standardEgress": true,
+      "tape": "sdk-rs/harness/fixtures/kucoinspot-public.jsonl.gz",
+      "tapeBytes": 1591824,
+      "tapeSha256": "72c38d8bcff802c12497fe3074d50b54dec5d74ce2b0aa436441fde04c04f8a0",
+      "records": 26431,
+      "outputDirectory": "sdk-rs/harness/out/kucoinspot-4765",
+      "rawRunFiles": {
+        "ts": [
+          "sdk-rs/harness/out/kucoinspot-4765/ts-0.json",
+          "sdk-rs/harness/out/kucoinspot-4765/ts-1.json",
+          "sdk-rs/harness/out/kucoinspot-4765/ts-2.json"
+        ],
+        "rust": [
+          "sdk-rs/harness/out/kucoinspot-4765/rust-0.json",
+          "sdk-rs/harness/out/kucoinspot-4765/rust-1.json",
+          "sdk-rs/harness/out/kucoinspot-4765/rust-2.json"
+        ]
+      },
+      "log": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoinspot-public.log",
+      "logSha256": "60641517b1f30f50c7c3b903760cadc8083bb171ad2025141b3d7794fba02a3c",
+      "artifact": {
+        "venue": "kucoinspot",
+        "source": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+        "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+        "bytes": 687701,
+        "sha256": "b90c7a6b92f5cc3613cfe3928746cf4c93dd5f146a820d93aad3c113d922b9cc",
+        "budget": 1258291,
+        "standardBuild": true,
+        "buildCommand": "corepack yarn -s rust:build-wasm --venue kucoinspot",
+        "buildLog": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoinspot-build.log",
+        "savedArtifact": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/artifacts/kucoinspot.wasm",
+        "webSha256": "b90c7a6b92f5cc3613cfe3928746cf4c93dd5f146a820d93aad3c113d922b9cc"
+      },
+      "pass": true,
+      "implementations": {
+        "ts": {
+          "runs": 3,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 474.265,
+              "steadyCpuMs": 302.067,
+              "processCpuMs": 653.99,
+              "wallMs": 758.643209,
+              "rssBytes": 163659776,
+              "heapBeforeBytes": 28390496,
+              "heapUsedBytes": 46831832,
+              "heapRetainedBytes": 18441336,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 2667503,
+              "buffersAfter": 2735288,
+              "wasmBytes": 0,
+              "retainedBytes": 18509121
+            },
+            {
+              "cpuMs": 470.997,
+              "steadyCpuMs": 303.483,
+              "processCpuMs": 676.549,
+              "wallMs": 756.2390829999999,
+              "rssBytes": 163282944,
+              "heapBeforeBytes": 28390864,
+              "heapUsedBytes": 46835104,
+              "heapRetainedBytes": 18444240,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 2667503,
+              "buffersAfter": 2735288,
+              "wasmBytes": 0,
+              "retainedBytes": 18512025
+            },
+            {
+              "cpuMs": 472.816,
+              "steadyCpuMs": 301.839,
+              "processCpuMs": 681.376,
+              "wallMs": 754.0244170000001,
+              "rssBytes": 162086912,
+              "heapBeforeBytes": 28390424,
+              "heapUsedBytes": 46813368,
+              "heapRetainedBytes": 18422944,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 2667503,
+              "buffersAfter": 2735288,
+              "wasmBytes": 0,
+              "retainedBytes": 18490729
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "9c5a21a135f204939c2541469c9040de9aed685f9948fdeed62df99fedd38890",
+            "a6ff110dd1a65edb679ab83c5da2b4a0a26701c03684f8df84b9137a168a8db8",
+            "a2efe0a84a953087ab383f6235e2282d58b3f01950a891cf1925cbcb174c679b"
+          ],
+          "frames": 26427,
+          "markets": 968,
+          "tickers": 968,
+          "books": 2,
+          "commands": 0,
+          "median": {
+            "cpuMs": 472.816,
+            "steadyCpuMs": 302.067,
+            "processCpuMs": 676.549,
+            "retainedBytes": 18509121
+          },
+          "bookDepth": {
+            "ETH-USDT": {
+              "bids": 50,
+              "asks": 50
+            },
+            "BTC-USDT": {
+              "bids": 50,
+              "asks": 50
+            }
+          },
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        },
+        "rust": {
+          "runs": 3,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 421.369,
+              "steadyCpuMs": 266.353,
+              "processCpuMs": 592.305,
+              "wallMs": 707.583083,
+              "rssBytes": 133857280,
+              "heapBeforeBytes": 24946816,
+              "heapUsedBytes": 27114808,
+              "heapRetainedBytes": 2167992,
+              "bufferRetainedBytes": 246156,
+              "buffersBefore": 1618655,
+              "buffersAfter": 1864811,
+              "wasmBytes": 1835008,
+              "retainedBytes": 4249156
+            },
+            {
+              "cpuMs": 418.969,
+              "steadyCpuMs": 274.24,
+              "processCpuMs": 573.95,
+              "wallMs": 699.6062909999999,
+              "rssBytes": 133545984,
+              "heapBeforeBytes": 24946800,
+              "heapUsedBytes": 27074968,
+              "heapRetainedBytes": 2128168,
+              "bufferRetainedBytes": 246156,
+              "buffersBefore": 1618655,
+              "buffersAfter": 1864811,
+              "wasmBytes": 1835008,
+              "retainedBytes": 4209332
+            },
+            {
+              "cpuMs": 420.256,
+              "steadyCpuMs": 270.743,
+              "processCpuMs": 590.18,
+              "wallMs": 703.041792,
+              "rssBytes": 133693440,
+              "heapBeforeBytes": 24946816,
+              "heapUsedBytes": 27118072,
+              "heapRetainedBytes": 2171256,
+              "bufferRetainedBytes": 246156,
+              "buffersBefore": 1618655,
+              "buffersAfter": 1864811,
+              "wasmBytes": 1835008,
+              "retainedBytes": 4252420
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "0de4293eeb0a54ce82fd4d588016cbe81e9faf89c68e4b63b75d19949b918ee2",
+            "3e22b937a3d6a8f289297d643fa9490779a94b8e1e9a22dc132488a3980914ec",
+            "57ea23f6098269570cb79c6285f7ac0f61b724cac526c288d0f7fd04775cb947"
+          ],
+          "frames": 26427,
+          "markets": 968,
+          "tickers": 968,
+          "books": 2,
+          "commands": 0,
+          "median": {
+            "cpuMs": 420.256,
+            "steadyCpuMs": 270.743,
+            "processCpuMs": 590.18,
+            "retainedBytes": 4249156
+          },
+          "bookDepth": {
+            "ETH-USDT": {
+              "bids": 50,
+              "asks": 50
+            },
+            "BTC-USDT": {
+              "bids": 50,
+              "asks": 50
+            }
+          },
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        }
+      }
+    },
+    {
+      "venue": "kucoinspot",
+      "stage": "private",
+      "sourceHeadBefore": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "sourceHeadAfter": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "harnessSource": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "proofWrittenAt": "2026-10-20T10:02:41.823556+00:00",
+      "standardEgress": true,
+      "tape": "sdk-rs/harness/tapes/kucoinspot-private.jsonl",
+      "tapeBytes": 11845,
+      "tapeSha256": "631ddaee04f31d326745d2badae5f67d2593617238ef601f6c098b832d9c3320",
+      "records": 46,
+      "outputDirectory": "sdk-rs/harness/out/kucoinspot-5369",
+      "rawRunFiles": {
+        "ts": [
+          "sdk-rs/harness/out/kucoinspot-5369/ts-0.json"
+        ],
+        "rust": [
+          "sdk-rs/harness/out/kucoinspot-5369/rust-0.json"
+        ]
+      },
+      "log": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoinspot-private.log",
+      "logSha256": "d3084b27b3a4438db9618c6c51f9df211e1ea52a3abae8083bb37f2ebaf055a3",
+      "artifact": {
+        "venue": "kucoinspot",
+        "source": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+        "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+        "bytes": 687701,
+        "sha256": "b90c7a6b92f5cc3613cfe3928746cf4c93dd5f146a820d93aad3c113d922b9cc",
+        "budget": 1258291,
+        "standardBuild": true,
+        "buildCommand": "corepack yarn -s rust:build-wasm --venue kucoinspot",
+        "buildLog": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoinspot-build.log",
+        "savedArtifact": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/artifacts/kucoinspot.wasm",
+        "webSha256": "b90c7a6b92f5cc3613cfe3928746cf4c93dd5f146a820d93aad3c113d922b9cc"
+      },
+      "pass": true,
+      "implementations": {
+        "ts": {
+          "runs": 1,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 83.576,
+              "steadyCpuMs": 27.711,
+              "processCpuMs": 159.299,
+              "wallMs": 4613.696709,
+              "rssBytes": 100909056,
+              "heapBeforeBytes": 8159400,
+              "heapUsedBytes": 21300568,
+              "heapRetainedBytes": 13141168,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 1087524,
+              "buffersAfter": 1155309,
+              "wasmBytes": 0,
+              "retainedBytes": 13208953
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "0c0c164d092d0daed3dffc995ade1c1b406765850c7e5e014557291017429ea0"
+          ],
+          "frames": 22,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 13,
+          "median": {
+            "cpuMs": 83.576,
+            "steadyCpuMs": 27.711,
+            "processCpuMs": 159.299,
+            "retainedBytes": 13208953
+          },
+          "bookDepth": {},
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        },
+        "rust": {
+          "runs": 1,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 30.891,
+              "steadyCpuMs": 13.214,
+              "processCpuMs": 31.033,
+              "wallMs": 3619.2965830000003,
+              "rssBytes": 63979520,
+              "heapBeforeBytes": 4725272,
+              "heapUsedBytes": 5400408,
+              "heapRetainedBytes": 675136,
+              "bufferRetainedBytes": 5076,
+              "buffersBefore": 38676,
+              "buffersAfter": 43752,
+              "wasmBytes": 327680,
+              "retainedBytes": 1007892
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "c45b35782cb752075ccfe85e5c428d0edcfb6253794419a133403a60cff93d7d"
+          ],
+          "frames": 22,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 13,
+          "median": {
+            "cpuMs": 30.891,
+            "steadyCpuMs": 13.214,
+            "processCpuMs": 31.033,
+            "retainedBytes": 1007892
+          },
+          "bookDepth": {},
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        }
+      }
+    },
+    {
+      "venue": "kucoin",
+      "stage": "public",
+      "sourceHeadBefore": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "sourceHeadAfter": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "harnessSource": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "proofWrittenAt": "2026-10-20T10:02:02.351165+00:00",
+      "standardEgress": true,
+      "tape": "sdk-rs/harness/fixtures/kucoin-public.jsonl.gz",
+      "tapeBytes": 488852,
+      "tapeSha256": "6830bc02106fb6b4d05db9a3c4e535ea3c6937f39498fc980755facaa44f16b5",
+      "records": 8322,
+      "outputDirectory": "sdk-rs/harness/out/kucoin-2460",
+      "rawRunFiles": {
+        "ts": [
+          "sdk-rs/harness/out/kucoin-2460/ts-0.json",
+          "sdk-rs/harness/out/kucoin-2460/ts-1.json",
+          "sdk-rs/harness/out/kucoin-2460/ts-2.json"
+        ],
+        "rust": [
+          "sdk-rs/harness/out/kucoin-2460/rust-0.json",
+          "sdk-rs/harness/out/kucoin-2460/rust-1.json",
+          "sdk-rs/harness/out/kucoin-2460/rust-2.json"
+        ]
+      },
+      "log": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoin-public.log",
+      "logSha256": "5fc6b7e839e81d97e647286accc8c7aafafb24e145fda8c460f4ea7bec47036c",
+      "artifact": {
+        "venue": "kucoin",
+        "source": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+        "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+        "bytes": 782377,
+        "sha256": "3cffe3ad74843d9bf893b87d9160c87c577a6e182ea78fcc7bd0f5902830ca2b",
+        "budget": 1258291,
+        "standardBuild": true,
+        "buildCommand": "corepack yarn -s rust:build-wasm --venue kucoin",
+        "buildLog": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoin-build.log",
+        "savedArtifact": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/artifacts/kucoin.wasm",
+        "webSha256": "3cffe3ad74843d9bf893b87d9160c87c577a6e182ea78fcc7bd0f5902830ca2b"
+      },
+      "pass": true,
+      "implementations": {
+        "ts": {
+          "runs": 3,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 371.56,
+              "steadyCpuMs": 230.043,
+              "processCpuMs": 536.897,
+              "wallMs": 1434.5315,
+              "rssBytes": 130056192,
+              "heapBeforeBytes": 17071904,
+              "heapUsedBytes": 38404608,
+              "heapRetainedBytes": 21332704,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 1564531,
+              "buffersAfter": 1632316,
+              "wasmBytes": 0,
+              "retainedBytes": 21400489
+            },
+            {
+              "cpuMs": 381.541,
+              "steadyCpuMs": 231.219,
+              "processCpuMs": 556.446,
+              "wallMs": 1441.198125,
+              "rssBytes": 130203648,
+              "heapBeforeBytes": 17071984,
+              "heapUsedBytes": 38404760,
+              "heapRetainedBytes": 21332776,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 1564531,
+              "buffersAfter": 1632316,
+              "wasmBytes": 0,
+              "retainedBytes": 21400561
+            },
+            {
+              "cpuMs": 386.929,
+              "steadyCpuMs": 242.124,
+              "processCpuMs": 552.002,
+              "wallMs": 1453.1405,
+              "rssBytes": 128876544,
+              "heapBeforeBytes": 17071912,
+              "heapUsedBytes": 38404208,
+              "heapRetainedBytes": 21332296,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 1564531,
+              "buffersAfter": 1632316,
+              "wasmBytes": 0,
+              "retainedBytes": 21400081
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "404f66c697f6b12ceeae9d7a72cee05c5bd7709fba672793d117b0df135e974b",
+            "eec9610a06311047f5556be0912707adb6b12c405d7caf94184fee016e085895",
+            "91a33e4f2cd67714baf5434b7ebe5fd615ad6cafa1abc669f00089f1ddb2aaa1"
+          ],
+          "frames": 8306,
+          "markets": 692,
+          "tickers": 692,
+          "books": 2,
+          "commands": 0,
+          "median": {
+            "cpuMs": 381.541,
+            "steadyCpuMs": 231.219,
+            "processCpuMs": 552.002,
+            "retainedBytes": 21400489
+          },
+          "bookDepth": {
+            "BTCUSDT": {
+              "bids": 1013,
+              "asks": 1001
+            },
+            "ETHUSDT": {
+              "bids": 1004,
+              "asks": 998
+            }
+          },
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        },
+        "rust": {
+          "runs": 3,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 190.976,
+              "steadyCpuMs": 106.645,
+              "processCpuMs": 358.547,
+              "wallMs": 281.657791,
+              "rssBytes": 102301696,
+              "heapBeforeBytes": 13627896,
+              "heapUsedBytes": 16363192,
+              "heapRetainedBytes": 2735296,
+              "bufferRetainedBytes": 259308,
+              "buffersBefore": 515683,
+              "buffersAfter": 774991,
+              "wasmBytes": 1048576,
+              "retainedBytes": 4043180
+            },
+            {
+              "cpuMs": 193.144,
+              "steadyCpuMs": 108.682,
+              "processCpuMs": 360.911,
+              "wallMs": 287.816958,
+              "rssBytes": 102268928,
+              "heapBeforeBytes": 13627944,
+              "heapUsedBytes": 16362360,
+              "heapRetainedBytes": 2734416,
+              "bufferRetainedBytes": 259308,
+              "buffersBefore": 515683,
+              "buffersAfter": 774991,
+              "wasmBytes": 1048576,
+              "retainedBytes": 4042300
+            },
+            {
+              "cpuMs": 197.839,
+              "steadyCpuMs": 113.516,
+              "processCpuMs": 366.176,
+              "wallMs": 290.060334,
+              "rssBytes": 103383040,
+              "heapBeforeBytes": 13627896,
+              "heapUsedBytes": 16363016,
+              "heapRetainedBytes": 2735120,
+              "bufferRetainedBytes": 259308,
+              "buffersBefore": 515683,
+              "buffersAfter": 774991,
+              "wasmBytes": 1048576,
+              "retainedBytes": 4043004
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "16cd55e1df94bf263bcecf0ce08edfc2894889a534f9d5308d637b5625841ccc",
+            "c70c0eb139e5f91a9d6492a184bfaf0a20ff93ef9a7cdcb1967ef34cb59a7ead",
+            "0da3f1a0397c5478178eb9856a8c5333f74d771c0ff2bb7c0019b3aad4394eac"
+          ],
+          "frames": 8306,
+          "markets": 692,
+          "tickers": 692,
+          "books": 2,
+          "commands": 0,
+          "median": {
+            "cpuMs": 193.144,
+            "steadyCpuMs": 108.682,
+            "processCpuMs": 360.911,
+            "retainedBytes": 4043004
+          },
+          "bookDepth": {
+            "BTCUSDT": {
+              "bids": 1013,
+              "asks": 1001
+            },
+            "ETHUSDT": {
+              "bids": 1004,
+              "asks": 998
+            }
+          },
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        }
+      }
+    },
+    {
+      "venue": "kucoin",
+      "stage": "private",
+      "sourceHeadBefore": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "sourceHeadAfter": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "harnessSource": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+      "proofWrittenAt": "2026-10-20T10:02:16.746321+00:00",
+      "standardEgress": true,
+      "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
+      "tapeBytes": 26347,
+      "tapeSha256": "31eaff8fcb6de28468ba8724923c891650d2734d02b401e200b277bdfc9b20e7",
+      "records": 77,
+      "outputDirectory": "sdk-rs/harness/out/kucoin-3145",
+      "rawRunFiles": {
+        "ts": [
+          "sdk-rs/harness/out/kucoin-3145/ts-0.json"
+        ],
+        "rust": [
+          "sdk-rs/harness/out/kucoin-3145/rust-0.json"
+        ]
+      },
+      "log": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoin-private.log",
+      "logSha256": "9b7ebbb3a4fef6d90972f633fbdb977febaa28ca9184ad55f0b89719e334cfd4",
+      "artifact": {
+        "venue": "kucoin",
+        "source": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+        "artifact": "sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm",
+        "bytes": 782377,
+        "sha256": "3cffe3ad74843d9bf893b87d9160c87c577a6e182ea78fcc7bd0f5902830ca2b",
+        "budget": 1258291,
+        "standardBuild": true,
+        "buildCommand": "corepack yarn -s rust:build-wasm --venue kucoin",
+        "buildLog": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/kucoin-build.log",
+        "savedArtifact": "/tmp/kucoin-parity-gates/frozen-f920bcf5e5/artifacts/kucoin.wasm",
+        "webSha256": "3cffe3ad74843d9bf893b87d9160c87c577a6e182ea78fcc7bd0f5902830ca2b"
+      },
+      "pass": true,
+      "implementations": {
+        "ts": {
+          "runs": 1,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 89.095,
+              "steadyCpuMs": 56.214,
+              "processCpuMs": 160.233,
+              "wallMs": 9043.864,
+              "rssBytes": 99844096,
+              "heapBeforeBytes": 8193776,
+              "heapUsedBytes": 24003280,
+              "heapRetainedBytes": 15809504,
+              "bufferRetainedBytes": 67785,
+              "buffersBefore": 1102026,
+              "buffersAfter": 1169811,
+              "wasmBytes": 0,
+              "retainedBytes": 15877289
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "49e9b6264ffe54f4a26a0df06f4c6828f64601695f07a0b7a09d740827a40d82"
+          ],
+          "frames": 32,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 17,
+          "median": {
+            "cpuMs": 89.095,
+            "steadyCpuMs": 56.214,
+            "processCpuMs": 160.233,
+            "retainedBytes": 15877289
+          },
+          "bookDepth": {},
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        },
+        "rust": {
+          "runs": 1,
+          "rawMetricsByRun": [
+            {
+              "cpuMs": 46.758,
+              "steadyCpuMs": 17.264,
+              "processCpuMs": 61.559,
+              "wallMs": 3568.457416,
+              "rssBytes": 65961984,
+              "heapBeforeBytes": 4756712,
+              "heapUsedBytes": 5495416,
+              "heapRetainedBytes": 738704,
+              "bufferRetainedBytes": 4972,
+              "buffersBefore": 53178,
+              "buffersAfter": 58150,
+              "wasmBytes": 327680,
+              "retainedBytes": 1071356
+            }
+          ],
+          "rawResultSha256ByRun": [
+            "53dda3d1654da143fa3dea8a59632c8ef4b0dcc00eca2e52e522b292c10f178e"
+          ],
+          "frames": 32,
+          "markets": 2,
+          "tickers": 2,
+          "books": 0,
+          "commands": 17,
+          "median": {
+            "cpuMs": 46.758,
+            "steadyCpuMs": 17.264,
+            "processCpuMs": 61.559,
+            "retainedBytes": 1071356
+          },
+          "bookDepth": {},
+          "requestAudit": {
+            "unserved": 0,
+            "missingWrites": 0,
+            "invalidSignatures": 0,
+            "unusedWrites": 0,
+            "protocolErrors": []
+          }
+        }
+      }
+    }
+  ],
+  "findingsAddressed": [
+    {
+      "issue": "Spot steady CPU baseline exceeded TS on the fixed twenty-second fixture.",
+      "fixCommit": "b0fb89f6cc7262f3a2d5894a38ecc5f54ef2e9b9",
+      "correction": "Decode typed public ticker envelope and price together; preserve the same Price fields and symbol precedence."
+    },
+    {
+      "issue": "Concurrent bullet replies recorded by completion order swapped snapshot shard tokens during replay.",
+      "fixCommit": "6ba4327e4a",
+      "correction": "The generic recorder assigns requestOrdinal before awaiting I/O; replay orders each explicit queue by request initiation. The replacement futures capture exercises reversed completion order."
+    },
+    {
+      "issue": "Same-clock independent Spot engines could mint colliding missing clientOid values.",
+      "fixCommit": "3e5df81d46c5a11b1931b31821dcc9c8fb16de52",
+      "correction": "Use fallible shared cryptographic uuid generation; preserve caller IDs verbatim and reject the staged batch on entropy failure."
+    },
+    {
+      "issue": "An unsolicited pre-welcome pong cleared the welcome watchdog; repeated pongs postponed an unsent heartbeat.",
+      "fixCommit": "3e5df81d46c5a11b1931b31821dcc9c8fb16de52",
+      "correction": "Accept pongs only after readiness with an outstanding ping watchdog; retain welcome recovery and ignore unsolicited duplicate replies."
+    }
+  ],
+  "validationHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+  "privatePerformanceIsInformational": true,
+  "harnessFilesSha256": {
+    "sdk-rs/harness/gate.mjs": "59eb8d3dcc49df85d4a917ec8f6f3d20abfaffe3d5665783a3a785564acd78dc",
+    "sdk-rs/harness/replay.mjs": "b7c79906ef1cb93c1f8f49b46e82fa3ba6f26b97275ffd5ff7d7da2789d5fd08",
+    "sdk-rs/harness/responses.mjs": "c185de2632561867775f5a5605369259351e3fd263a6ac8a993d572147752fc7",
+    "sdk-rs/harness/tape.mjs": "248ed8a6931bd5ff5a564ffb3d7771b990f78f0c98ef9d6c985557f87dea63d6",
+    "sdk-rs/harness/kucoin.mjs": "6f1aeaea34cd13a05f9c812a52f9acb11de811d9e5377ad826dab345c7b18384",
+    "sdk-rs/harness/kucoinspot.mjs": "743ebe1596044e7e4d385e0e8197b911c8de843234e42a7a4c54b04502bdfb3b",
+    "sdk-rs/harness/account-shapes.mjs": "4b8af322b7401fecf29f406d0621b89b65cc8f9ec59ecaec5242acd8d2490dc5",
+    "sdk-rs/hosts/wasm/js/host.mjs": "718ce1b0b5bfa8cf0273ce752cc336ddd0ee8a83a0d9c34be2e9087844586e75",
+    "sdk-rs/harness/replay-finalize.mjs": "ed1d62c25d8d3920f0c7b3c2b8f05c65fa7a792ac213ae6629e0a717b84a7777"
+  },
+  "runtimeSourceHead": "f920bcf5e5ab51a163525df5b0b1cb170aa06b0a",
+  "measurement": "Both implementations capture detached logical-end snapshots before memory settling; reconstruction is included in the main-thread CPU window through finalizeReplay.",
+  "supersedesHistoricalSourceHeads": [
+    "41e28f774aba143e524a295b6bc58c1537751e7a",
+    "e0abc9b0f1ca1cb4116411d00094dc6432ee39ff",
+    "d06809837aadc771c5c19b9f06bfd61445e0581f",
+    "ee4a31906146a02b1370ece46b5e0d113b30d602"
+  ],
+  "historicalSourceScopes": [
+    {
+      "sourceHead": "2f5433ff7b8702f2b800387a5b5f6d3ee6553a0c",
+      "changedRuntimeFile": "sdk-rs/venues/bybit/src/wire.rs",
+      "reason": "The standard KuCoin/Spot features exclude the optional Bybit crate. Their compiled inputs/harness and recorded e0abc source attribution remain unchanged."
+    }
+  ]
+}

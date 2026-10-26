@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
-import { mapBybitOptionInstrument } from '../exchanges/bybit/bybit.options';
+import { BybitExchange } from './reference/bybit/bybit.exchange';
+import { mapBybitOptionInstrument } from './reference/bybit/bybit.options';
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
-import { BybitDemoExchange } from '../exchanges/bybit/bybitdemo.exchange';
+import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderTimeInForce, OrderType } from '../types';
 

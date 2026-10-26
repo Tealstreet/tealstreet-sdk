@@ -61,6 +61,7 @@ Must call `configureHOW()` before use:
 ```typescript
 configureHOW({
   getProxyToken: () => Promise<string>,
+  bindProxyToken?: () => () => Promise<string>, // per-context hosts; bound at request/socket start
   isTokenExpired: (token: string) => boolean,
   simulateHttpOverWebsocket?: boolean,
   syncServerTime?: (serverTime: number) => void,
@@ -92,10 +93,21 @@ yarn test           # Vitest
   function. Keep the nested `new Promise` limited to the response event bridge;
   async Promise executors swallow thrown authentication failures and leave the
   caller pending.
+- The adapter's `prepare(config)` awaits connection/time-sync/authentication
+  without sending `rpc.http`. Its one-use `bind(finalConfig)` validates and
+  serializes the final packet; `ready()` checks the original deadline and socket
+  authentication epoch. `dispatch()` calls raw WebSocket.send synchronously.
+  Managed requests accept exact string bodies, reject Axios parameter/body
+  transformations, and negotiate raw responses even on the default adapter.
+  `prepareLegacy` and the Axios function retain the existing parser/simulation
+  behavior and provide no engine release guarantee. An epoch change invalidates
+  a managed preparation before dispatch; cancellation never closes a shared peer.
 - Axios `config.timeout` is one deadline for the complete tunnel request, not
   only the post-send response wait. Token retrieval, socket/time sync,
   authentication, simulation, and response handling all consume the same
-  budget. When it expires, the adapter rejects with
+  budget. `config.signal` cancels only its request, including token waits,
+  without closing a shared connection or cancelling another request's refresh.
+  When the deadline expires, the adapter rejects with
   `TradeTunnelTimeoutError` and must not transmit the now-stale request.
 - A `Bad` authentication state is connection-scoped. Concurrent Axios requests
   share one refresh/token-send attempt per `HOWWebSocket` through the adapter's
@@ -104,14 +116,26 @@ yarn test           # Vitest
   waits under its own complete-request deadline; if it joined an attempt owned
   by a shorter-deadline request, it may elect a new attempt rather than inherit
   the other request's `TradeTunnelTimeoutError` context. Non-timeout refresh
-  failures remain shared and propagate to every joined caller.
+  failures remain shared and propagate to every joined caller. A disposed
+  adapter's typed `TradeTunnelDisposedError` is also owner-scoped: surviving
+  adapters sharing the default HOW connection elect another refresh instead
+  of inheriting that disposal.
 - TradeTunnel can auto-authenticate backend-whitelisted client IPs by sending an
   unsolicited successful `rpc.auth` frame after connect. The Axios adapter must
   honor an already-`Good` socket before fetching a JWT; otherwise trusted
   headless tools block on token acquisition even though the server already
   admitted them. Non-whitelisted connections retain the normal JWT flow.
 - Browser uses native WebSocket and sends its own UA; Node.js/Bun must use a
-  constructor path that accepts headers.
+  constructor path that accepts headers. Workers pass their fetch-upgrade
+  constructor through `CreateAxiosHttpOverWebsocketAdapterOptions.WebSocket`
+  and the fourth `RelayWebSocket` constructor argument, preserving required
+  WAF upgrade headers and raw binary frames. An injected HOW adapter owns its
+  regional clients; its `dispose()` cancels pending requests and closes those
+  clients without touching the default runtime singletons.
+- Engine Node hosts inject the header-capable constructor from `nativeTransport`
+  into HOW and relay, including in pure ESM. It resolves `ws` beside the host's
+  declared dependency through `createRequire`; do not rely on bundled dynamic
+  `require` shims to load a header-capable socket.
 - Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`
   before exit. The SG/JA HOW clients are module-singletons, so exchange-level
   disposal alone does not close their sockets/timers.
@@ -140,18 +164,3 @@ yarn test           # Vitest
   while legacy servers may return both fields. Browser `ArrayBuffer`/`Blob` and
   Node/Bun buffer views are supported, and every older text response remains a
   valid fallback.
-
-## Rust transport correspondence
-
-The Rust host contract and declared representation differences are documented in
-[sdk-rs transport](../../sdk-rs/safe-cex-transport/README.md), with independent
-mutation controls in its [gate evidence](../../sdk-rs/safe-cex-transport/GATE_EVIDENCE.md).
-Fresh relay upgrade authentication remains a provider until the inner tunnel dial;
-required-auth headers must be checked before construction and before a lazy dial.
-
-The Rust raw-body parser also reproduces the deterministic big-integer regex
-corruption inside quoted strings, including outbound null data; its live-source
-oracle forces a revisit when the TypeScript parser is corrected.
-
-Rust uses the same exact staging flag for HOW and relay paths (native environment
-at first endpoint use, wasm build environment).

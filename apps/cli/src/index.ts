@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // Shim WebSocket for tealstreet.io proxy connections (must be first import)
 import './ws-shim';
+import './rust-engine';
 import '@tealstreet/safe-cex/src/transport/registerTealstreetTransport';
 import { Command, Option } from 'commander';
 import chalk from 'chalk';

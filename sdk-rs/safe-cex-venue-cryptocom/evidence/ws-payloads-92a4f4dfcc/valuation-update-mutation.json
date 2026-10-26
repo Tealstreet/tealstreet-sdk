@@ -1,9 +1,0 @@
-{
-  "base_sha": "92a4f4dfcc7eb28defeaf018911ca5abb5fe5332",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n@@ -393,8 +393,8 @@\n impl CryptocomWsValuationUpdate {\n     pub fn from_value(value: &PayloadValue) -> Result<Self, PayloadError> {\n         Ok(Self {\n-            instrument_name: (string)(field(value, \"instrument_name\")?)?,\n-            subscription: (string)(field(value, \"subscription\")?)?,\n+            instrument_name: (string)(field(value, \"subscription\")?)?,\n+            subscription: (string)(field(value, \"instrument_name\")?)?,\n             channel: (CryptocomWsValuationChannel::from_value)(field(value, \"channel\")?)?,\n             data: (|v| array(v, CryptocomWsValuationData::from_value))(field(value, \"data\")?)?,\n         })\n",
-  "expected_named_assertion": "CRYPTOCOM-PAYLOAD-NATIVE-STRING CryptocomWsValuationUpdate:rows-0.instrument_name",
-  "runtime_proof": true,
-  "stop_case_name": "CryptocomWsValuationUpdate:rows-0",
-  "stop_case_index": 25
-}

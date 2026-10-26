@@ -1,0 +1,141 @@
+// Declared read-key policy (docs/plans/RUST_READ_KEY_POLICY.md), JS setup side.
+// Synthetic setup controls cover both policies; actual declarations are pinned below.
+import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { ExchangeName, ExchangeOptions } from '../../types';
+import type { SignerSetupPolicy } from '../../exchanges/rust/construction';
+
+import { describe, expect, it } from 'vitest';
+
+import { LocalSignerSetup, readCredentialsValidity, withoutSigningCredentials } from '../../exchanges/rust/localSignerSetup';
+import { deriveBridgeConstruction, deriveSignerSetupPolicy } from '../../exchanges/rust/construction';
+import rules from '../../exchanges/rust/construction-rules.json';
+
+const SENTINEL = 'read-key-material-sentinel';
+const base = { key: 'primary-key', secret: 'primary-material', publicDataOnly: false } as ExchangeOptions;
+type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
+
+const construct = (options: ExchangeOptions, policy: SignerSetupPolicy) => {
+  const setup = new LocalSignerSetup(options, policy);
+  const calls: string[][] = [];
+  class Engine {
+    constructor(...args: string[]) {
+      calls.push(args);
+    }
+  }
+  setup.construct(Engine as unknown as Constructor, 'probe', JSON.stringify(withoutSigningCredentials(options)));
+  return { setup, optionsJson: calls[0][1], capsule: calls[0][2] };
+};
+
+describe('ValidateOnly read keys', () => {
+  const validateOnly = { readCredentials: 'validateOnly' as const };
+
+  it('carries only the validation result, never the read key', () => {
+    for (const [read, valid] of [
+      [{ secondary_key: 'read', secondary_secret: SENTINEL }, true],
+      [{ secondary_key: 'read' }, false],
+      [{ secondary_key: 'read', secondary_secret: '' }, false],
+      [{ secondary_key: ' ', secondary_secret: SENTINEL }, true], // untrimmed, as in Rust
+    ] as const) {
+      for (const publicDataOnly of [false, true]) {
+        const { setup, optionsJson, capsule } = construct({ ...base, ...read, publicDataOnly }, validateOnly);
+        expect(setup.readCredentialsValid).toBe(valid);
+        expect(setup.hasSecondary).toBe(false);
+        expect(JSON.parse(optionsJson).readCredentialsValid).toBe(valid);
+        expect(JSON.parse(capsule).secondary).toBeUndefined();
+        expect(capsule).not.toContain(SENTINEL);
+        expect(optionsJson).not.toContain(SENTINEL);
+        expect(JSON.parse(capsule).primary).toEqual({ key: 'primary-key', secret: 'primary-material' });
+      }
+    }
+  });
+
+  it('sends nothing without a read key, by the legacy bridge presence rule, and never throws', () => {
+    for (const read of [{}, { secondary_secret: SENTINEL }, { secondary_key: '', secondary_secret: SENTINEL }]) {
+      const { setup, optionsJson, capsule } = construct({ ...base, ...read }, validateOnly);
+      expect(setup.readCredentialsValid).toBeUndefined();
+      expect(JSON.parse(optionsJson)).not.toHaveProperty('readCredentialsValid');
+      expect(capsule).not.toContain(SENTINEL);
+    }
+  });
+
+  it('the non-dispatch bridge and trusted setup share one validity rule', () => {
+    expect(readCredentialsValidity({ ...base })).toBeUndefined();
+    expect(readCredentialsValidity({ ...base, secondary_key: '' })).toBeUndefined();
+    expect(readCredentialsValidity({ ...base, secondary_key: 'read' })).toBe(false);
+    expect(readCredentialsValidity({ ...base, secondary_key: 'read', secondary_secret: SENTINEL })).toBe(true);
+  });
+
+  it('refuses read-identity setup metadata, which would describe an identity it never installs', () => {
+    expect(() => new LocalSignerSetup({ ...base, localSigner: { secondary: { stableId: 'read' } } }, validateOnly))
+      .toThrow('Invalid local signer setup metadata');
+  });
+
+  it('keeps large numeric options exact while adding the result', () => {
+    const calls: string[][] = [];
+    class Engine {
+      constructor(...args: string[]) {
+        calls.push(args);
+      }
+    }
+    const setup = new LocalSignerSetup({ ...base, secondary_key: 'read', secondary_secret: SENTINEL }, validateOnly);
+    // Hand-written JSON: a JS number literal would already have rounded.
+    setup.construct(Engine as unknown as Constructor, 'probe', '{"lighterIntegratorAccountIndex":9007199254740993}');
+    expect(calls[0][1]).toBe('{"readCredentialsValid":true,"lighterIntegratorAccountIndex":9007199254740993}');
+    const empty = new LocalSignerSetup({ ...base, secondary_key: 'read' }, validateOnly);
+    empty.construct(Engine as unknown as Constructor, 'probe', '{}');
+    expect(calls[1][1]).toBe('{"readCredentialsValid":false}');
+  });
+});
+
+describe('PublicRead read keys', () => {
+  it('Backpack declares PublicRead in the bridge and real signer setup capsule', () => {
+    const policy = deriveSignerSetupPolicy('backpack');
+    expect(policy.readCredentials).toBe('publicRead');
+    expect(deriveBridgeConstruction('backpack', base).readCredentials).toBe('publicRead');
+    const { capsule } = construct({ ...base, publicDataOnly: true, secondary_key: 'read', secondary_secret: SENTINEL }, policy);
+    expect(JSON.parse(capsule).primary).toBeUndefined();
+    expect(capsule).not.toContain('primary-material');
+    expect(JSON.parse(capsule).secondary).toEqual({ key: 'read', secret: SENTINEL });
+  });
+
+  const publicRead = { readCredentials: 'publicRead' as const };
+  const read = { secondary_key: 'read', secondary_secret: SENTINEL };
+
+  it('drops the primary from public-only setup and keeps the read key', () => {
+    const { capsule } = construct({ ...base, ...read, publicDataOnly: true }, publicRead);
+    expect(JSON.parse(capsule).primary).toBeUndefined();
+    expect(capsule).not.toContain('primary-material');
+    expect(JSON.parse(capsule).secondary).toEqual({ key: 'read', secret: SENTINEL });
+  });
+
+  it('is unchanged in private mode', () => {
+    const { capsule } = construct({ ...base, ...read }, publicRead);
+    expect(JSON.parse(capsule).primary).toEqual({ key: 'primary-key', secret: 'primary-material' });
+    expect(JSON.parse(capsule).secondary).toEqual({ key: 'read', secret: SENTINEL });
+  });
+});
+
+describe('the unchanged default', () => {
+  it('installs a complete read key and still rejects an incomplete one, exactly as before', () => {
+    const { setup, optionsJson, capsule } = construct({ ...base, secondary_key: 'read', secondary_secret: SENTINEL }, {});
+    expect(setup.readCredentialsValid).toBeUndefined();
+    expect(setup.hasSecondary).toBe(true);
+    expect(JSON.parse(capsule).secondary).toEqual({ key: 'read', secret: SENTINEL });
+    expect(JSON.parse(optionsJson)).not.toHaveProperty('readCredentialsValid');
+    expect(() => new LocalSignerSetup({ ...base, secondary_key: 'read' }, {}))
+      .toThrow('Rust engine secondary signing keys require a nonempty key and secret');
+  });
+
+  it('keeps bridge records and setup policy unchanged for undeclared families', () => {
+    for (const name of Object.keys(rules.venues) as ExchangeName[]) {
+      if (name === 'cryptocom' || name === 'backpack') continue;
+      expect(deriveBridgeConstruction(name, base)).not.toHaveProperty('readCredentials');
+      expect(deriveSignerSetupPolicy(name)).not.toHaveProperty('readCredentials');
+    }
+  });
+});
+
+it('declares Crypto.com ValidateOnly in both the bridge and trusted setup', () => {
+  expect(deriveBridgeConstruction('cryptocom', base)).toHaveProperty('readCredentials', 'validateOnly');
+  expect(deriveSignerSetupPolicy('cryptocom')).toHaveProperty('readCredentials', 'validateOnly');
+});

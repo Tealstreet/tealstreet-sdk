@@ -22,12 +22,24 @@
 export class WsDirectFallback {
   private connects = 0;
   private messages = 0;
-  private silentConnects = 0;
+  private silentConnects: number;
   private activeIndex = 0; // 0 = primary, k = candidates[k - 1]
+  private preferLast = false;
   private candidateCount = 0;
   private advancePending = false;
 
-  constructor(private readonly maxSilentConnects = 2) {}
+  // Some TS sockets count startup itself as their first silent attempt.
+  constructor(
+    private readonly maxSilentConnects = 2,
+    initialSilentConnects = 0,
+  ) {
+    this.silentConnects = initialSilentConnects;
+  }
+
+  /** A host recovery signal chooses the last declared candidate and stays there. */
+  preferFallback(): void {
+    this.preferLast = true;
+  }
 
   /**
    * Call exactly once per connect attempt. `fallbackUrls` is the chain to walk
@@ -51,6 +63,7 @@ export class WsDirectFallback {
     }
     this.connects++;
     this.messages = 0;
+    if (this.preferLast) this.activeIndex = candidates.length;
     if (this.silentConnects >= this.maxSilentConnects && this.activeIndex < candidates.length) {
       this.activeIndex++;
       this.silentConnects = 0;

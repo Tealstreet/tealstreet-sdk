@@ -7,6 +7,15 @@ bridges store snapshots back via `postMessage`. Entry point:
 instance plus its `DefaultStore`, and pushes throttled store
 snapshots to the main thread on every `store.notify()`.
 
+## History result completeness
+
+Successful `callMethod:done` replies include optional `data.completeness:
+{ incomplete: true }` beside `requestId` and `result` when the returned array
+has the host marker. Array properties do not survive clone/JSON transports.
+The matching BaseExchange receiver restores it before resolving or notifying
+result observers; senders and receivers must upgrade together. Never infer a
+complete window from missing metadata or attach a notice to another request.
+
 ## Time synchronization
 
 The browser main thread owns public time polling. It synchronizes once per
@@ -315,3 +324,91 @@ Driven from the page by `apps/web/src/utils/dev/perfFixture.ts`
 (`?perfFixture=record`, then `__tsPerfFixture.save()` / `.replay()` / `.off()`).
 Opt-in: with no URL param and no stored mode the worker stays in `off` and the
 cost is one boolean per outbound message.
+
+## Rust engine traps and worker ownership
+
+`engine-dead` is terminal for one native account. The worker owns recovery only
+once startup has completed: it invalidates the old callback generation, detaches
+its store listener, clears the trailing throttle/handlers, stops its own chasers
+and exact TWAP instances, and makes one fresh account/store after a 500 ms delay.
+A second panic or failed replacement stops recovery and warns the consumer.
+Every fatal event invalidates loaded flags and derived active-algorithm lists,
+including terminal shared-feed failures, while preserving last known main-thread
+venue values until a real replacement snapshot arrives. The disposed native
+adapter's local store may reset through its inherited dispose implementation.
+Initial startup failures still return `false` to `store.webworker.ts` for cleanup;
+explicit dispose/deactivate cancels both queued and in-flight replacement.
+For a native trap, the adapter already emits the fatal error once; the worker
+adds startup context as a warning log instead of reporting a duplicate error.
+
+Every generation fences frame callbacks, store notifications, event forwarding
+and handler state messages. A request already in flight may receive its one
+correlated result from the old generation, preserving known write IDs or typed
+unknown outcomes. A task fallback fails any interrupted executor that does not
+report, and later duplicate replies stay fenced. Fresh state resets the object/delta baselines
+and advances order/position freshness IDs; the adapter sends its native empty
+full snapshot before starting the replacement, clearing the main decoder's
+catalog/book baselines. Do not reuse a poisoned host or reset the shared WASM
+module loader: other accounts in the same realm remain live.
+
+Only current book/candle desired subscriptions survive reconstruction, keyed by
+stream kind/subId and removed by subId-only unsubscribe even during recovery.
+The latest UI state and active ticker symbols are also restored as safe demand. Trading,
+CLI commands, method calls and algorithm state are never replayed. Requests
+arriving during recovery receive a visible failure (with their existing request
+ID where the protocol supports one). Interrupted writes may already have reached
+the venue: recovery does not prove cancellation or authorize a retry.
+
+A transferred shared-public-feed port belongs to the failed account and is
+closed during disposal. That policy fails closed: recovery requires a fresh
+provider attachment and explicit account init, rather than silently opening
+direct public feeds or reusing the closed port. Shared-worker attachments during
+an existing recovery retain that owner and receive a failed startup acknowledgement
+and warning on the attaching port, without interrupting existing clients.
+
+TWAP instances are tracked by actual handler-created instance identity, never
+account name, so terminating one worker cannot stop another same-name account.
+`TwapInstance.start()` checks termination again after its awaited placement;
+otherwise a reply arriving after terminate could schedule another old slice.
+
+## Interrupted command replies
+
+Normal disposal fences state immediately, then lets pending native command
+rejections and acknowledgements already queued reach their original request IDs
+before one task fallback. Repeated disposal preserves that grace window. Host
+`ENGINE_DEAD`, `ENGINE_DISPOSED`, and `COMMAND_TIMEOUT` errors retain their
+allowlisted command, timeout, caller client IDs, outcome (`notSent`/`rejected`/
+`unknown`), Rust `ExchangeError` kind/venue code/message/retry delay and known
+partial-order receipts through `commandOutcome.ts`; never spread arbitrary error
+properties into worker messages. Known venue rejections are not relabelled as
+unknown. Timeouts end the caller's wait; they do not prove cancellation or permit
+placement replay.
+
+The fallback knows only the RPC method and its arguments: dispatched
+`WORKER_WRITE_METHODS` (leverage/margin/mode, `scheduleCancel`, and the
+main-thread trading methods) are interrupted writes and carry the caller client
+IDs in their placement arguments, while reads receive no write-outcome marker.
+It must not parse CLI text or invent native IDs. `exec-result.error` and
+`updatePositions:done.reason` remain strings; optional `errorDetails` carries the
+original structured failure when it is still available.
+
+Native `command-progress` is an additive typed worker event with object data
+(`StoreWorkerCommandProgress`), including the host-session receipt key, native
+command ID, exact typed receipt rows, completion/late flags, owning account and
+original worker generation. It remains routable after the corresponding RPC
+has timed out; it never depends on a pending request or enters the Store,
+SCXF frames, or shared public feeds. Closed/replaced generations cannot emit
+receipts. No receipt ledger or trading replay is maintained by the worker.
+Existing logging consumers receive the adapter's late-receipt log fallback;
+the worker does not produce a duplicate log for the typed event.
+
+Command errors distinguish caller `clientOrderId(s)` from actual native
+`orderIdentities` and `actualClientOrderIds`. A numeric `clientOrderIndex` or
+`orderCode` stays an exact string in its original namespace. A receipt records
+an identity selected for a write, not venue acknowledgement or proof of
+acceptance; an interruption snapshot may be incomplete while native work lives.
+
+Rust `engine-event` diagnostics use the existing generation-guarded event bridge
+with `data: [EngineEvent]`. Legacy `error` options and the third `log` argument
+retain the event for callers migrating in place. Consumers must choose one
+channel per diagnostic to avoid double counting/toasting.

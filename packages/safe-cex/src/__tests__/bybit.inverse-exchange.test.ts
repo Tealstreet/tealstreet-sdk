@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
+import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
-import { BybitDemoExchange } from '../exchanges/bybit/bybitdemo.exchange';
+import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
 import { DefaultStore } from '../store/store.base';
 import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
 import { OrderSide, OrderType } from '../types';
@@ -416,7 +416,7 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     vi.stubEnv('NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL', 'https://simulator.test');
     vi.resetModules();
     try {
-      const { HyrotraderExchange } = await import('../exchanges/bybit/hyrotrader.exchange');
+      const { HyrotraderExchange } = await import('./reference/bybit/hyrotrader.exchange');
       const { DefaultStore: Store } = await import('../store/store.base');
       const exchange = new HyrotraderExchange(
         'hyrotrader',

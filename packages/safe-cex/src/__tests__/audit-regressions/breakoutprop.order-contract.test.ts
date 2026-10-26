@@ -4,8 +4,8 @@ import { AxiosError } from 'axios';
 import {
   BreakoutpropExchange,
   parseDxSessionTimeoutMs,
-} from '../../exchanges/breakoutprop/breakoutprop.exchange';
-import { ENDPOINTS } from '../../exchanges/breakoutprop/breakoutprop.types';
+} from '../reference/breakoutprop/breakoutprop.exchange';
+import { ENDPOINTS } from '../reference/breakoutprop/breakoutprop.types';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, OrderSide, OrderType } from '../../types';
 
@@ -145,7 +145,7 @@ describe('Breakout Prop official DX REST order contract', () => {
       releaseCancel = resolve;
     });
     vi.spyOn(exchange, 'cancelOrder').mockReturnValue(cancelPending.then(() => 'old-order'));
-    const placeOrder = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(43);
+    const placeOrder = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['43']);
     const update = exchange.updateOrder({
       order: {
         id: 'old-order',
@@ -166,7 +166,7 @@ describe('Breakout Prop official DX REST order contract', () => {
     await Promise.resolve();
     expect(placeOrder).not.toHaveBeenCalled();
     releaseCancel();
-    await expect(update).resolves.toBe(43);
+    await expect(update).resolves.toEqual(['43']);
     expect(placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 3657 }));
   });
 
@@ -225,6 +225,26 @@ describe('Breakout Prop official DX REST order contract', () => {
 
     const expectedLiveTimestamp = Math.floor(expectedRestTimestamp / 300) * 300;
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({ timestamp: expectedLiveTimestamp }));
+  });
+
+  it('publishes one synthetic quote level on each side', () => {
+    const listener = vi.fn();
+    exchange.listenOrderBook(symbol, listener);
+    exchange.publicWebsocket.messageHandlers[`poll_book.${symbol}`][0]({ bid: 3500, ask: 3501 });
+    expect(listener).toHaveBeenCalledWith({ bids: [{ price: 3500, amount: 1, total: 1 }], asks: [{ price: 3501, amount: 1, total: 1 }] });
+  });
+
+  it('keeps public-only quote listeners polling without portfolio reads', async () => {
+    vi.spyOn(exchange, 'isPublicDataOnly', 'get').mockReturnValue(true);
+    const portfolio = vi.spyOn(exchange, 'fetchPortfolioRaw');
+    vi.spyOn(exchange, 'fetchTickers').mockResolvedValue([{ id: symbol, symbol, bid: 3500, ask: 3501, last: 3500 } as any]);
+    const listener = vi.fn();
+    exchange.listenOrderBook(symbol, listener);
+    vi.spyOn(exchange, 'getTickInterval' as any).mockReturnValue(Number.POSITIVE_INFINITY);
+    await exchange.tick();
+    exchange.dispose();
+    expect(portfolio).not.toHaveBeenCalled();
+    expect(listener).toHaveBeenCalledOnce();
   });
 
   it('uses the portfolio snapshot for orders and maps close/update fields', async () => {
@@ -395,5 +415,29 @@ describe('Breakout Prop official DX REST session contract', () => {
     expect(loginCalls).toBe(1);
     expect(privateCalls).toBe(2);
     expect(exchange.sessionToken).toBe('fresh');
+  });
+});
+
+describe('Breakout Prop documented order prices', () => {
+  it.each([
+    ['LIMIT', { limitPrice: 3529.47 }, undefined, 3529.47],
+    ['STOP', { stopPrice: 3500 }, undefined, 3500],
+    ['STOP', { stopPrice: 3500 }, 0, 3500],
+    ['STOP', {}, 3500, 3500],
+    ['MARKET', {}, undefined, 0],
+  ] as const)('reads %s prices with documented and legacy payloads', (type, prices, legacy, expected) => {
+    const exchange = new BreakoutpropExchange('breakoutprop', { key: 'user', secret: 'password' } as ExchangeOptions, new DefaultStore());
+    try {
+      const orders = exchange.formatOrders({ portfolios: [{ orders: [{
+        orderCode: 'native:1', instrument: 'ETHUSD', type, status: 'WORKING', ...prices,
+        transactionTime: '2026-07-15T10:00:00Z',
+        legs: [{ side: 'SELL', positionEffect: 'CLOSE', quantity: 0, filledQuantity: 0, remainingQuantity: 0,
+          ...(legacy === undefined ? {} : { price: legacy }) }],
+      }] }] } as any);
+      expect(orders).toHaveLength(1);
+      expect(orders[0].price).toBe(expected);
+    } finally {
+      exchange.dispose();
+    }
   });
 });

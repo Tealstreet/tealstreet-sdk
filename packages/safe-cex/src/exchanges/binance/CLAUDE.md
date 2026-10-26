@@ -1,5 +1,108 @@
 # Binance Exchange Integration
 
+Rust hosted browser signing uses the installed primitive provider for both
+`signHttpRequest` and `signWsAuth`, without venue startup or transport actions; the default host clock retains
+its existing synchronized-time initialization.
+Its standalone request interceptor is shared with the TS Axios clients and
+retains their exact public/listen-key policy, qs spelling, parameter order and
+data-to-query handling. WS capture signs the caller's original preimage. No raw
+secret is restored to exchange options and no TS venue class is constructed.
+Keyless RemoteSigner/PayloadSigner routing is a separate companion migration.
+
+## Rust profiles
+
+`sdk-rs/venues/binance` implements all four profiles through `Options.variant`
+and one endpoint table. The legacy `portfolio_margin` flag remains compatible.
+`binance`, `binancepm`, `binanceinverse` and `binancespot` select the corresponding
+profile through the WASM host and worker adapter.
+
+COIN-M placement and order amounts are native contract counts; market
+`contractSize` is USD per contract. Position `contracts` remains base quantity
+at the mark price, `notional` is native quantity times contract size, and
+position PnL/margin remains in collateral coin. Aggregate wallet balances are
+USD-valued; an unpriced coin retains its native balance without inventing a USD
+price. The USD total waits for a missing quote only while one is plausible: any
+catalogued USD route before the ticker seed, afterwards only a TRADING route,
+for at most 30s after the seed. Then the coin counts at 0 (one warning per
+asset), as TS does; a partial catalogue still waits. Stops, trailing orders and regular orders share COIN-M's regular order
+endpoints. COIN-M caller client IDs remain unsupported and reject the entire
+batch before writes.
+
+Spot uses signed `userDataStream.subscribe.signature`, checks the matching
+subscription ACK and subscription ID, and checks `session.subscriptions` for
+liveness. It exposes native per-asset free/used/total currency balances alongside
+USD totals and coin amounts. Full snapshots replace assets; partial socket
+updates retain untouched assets and explicit zeros. It has no derivative positions/settings. Spot
+order identity is the native client ID. A cancel/replace preserves time in
+force but generates a new client ID. Regular-order cancellation replies on all
+four Rust profiles must prove native identity, terminal status and cumulative
+quantity before replacement. Algo/PM conditional cancellation uses its own
+identity and terminal-acknowledgement contract.
+Amendment recomputes the remaining size after the acknowledgement and racing
+fills; Filled wins, and ambiguous/unknown cancellation never places a replacement.
+Cancel-all handles Spot order-list/OCO replies atomically and preserves native
+terminal fences against stale replicas and reused client IDs. Whole-batch validation rejects unsupported
+trailing/conditional parameters, derivative execution flags, invalid triggers
+and client IDs before cancellation or placement.
+
+Rust derivative fills require `x=TRADE` and valid last quantity/price. Native
+trade IDs are deduplicated in a bounded 16,384-execution window retained across
+private reconnects; missing IDs use cumulative progress, so complete identity
+coverage requires the venue's documented `t`. Execution delivery is independent
+of lifecycle terminal state: a genuine stop fill after `EXPIRED` still emits,
+while an old generation cannot close a new PM order across regular and strategy
+families. PM records native ownership from observed stream/REST sources, so a
+triggered regular STOP_MARKET still cancels through the regular endpoint.
+Malformed handoff economics cannot retire the current owner; malformed REST
+joins retain the prior account state. Explicit PM `fs:"CM"` account events do
+not create USD-M positions. Trade-first fills emit immediately while ownership
+waits for a regular NEW or accepted snapshot.
+Accepted cancellations invalidate in-flight order snapshots. Generated-ID
+entropy failures return an error instead of sharing a broker-only ID.
+COIN-M partial placement failures reject with the proven accepted native IDs
+on `error.partialOrderIds`; subsequent placement steps stop. PM stop quantities
+honor explicit nonzero size even with `close:true`; zero means the full position.
+
+All four Rust profiles sign REST requests with `extra.recvWindow` (default
+20,000); the Spot private subscription retains its separate 5,000 window.
+Spot/COIN-M native historical fills/orders/income queries report unsupported;
+SDK methods expose the matching branded Base fallbacks so history ingestion
+can distinguish unsupported from a successful empty result. USD-M/PM histories
+remain implemented, including EXPIRED_IN_MATCH as canceled.
+
+Spot cancellation totals update sizing without consuming TRADE delivery. Its
+latest 16,384 native trade IDs dedupe across reconnects; terminal/reused client
+rows cannot suppress a genuine old execution or change a newer row. Only the
+first accepted REST observation seeds historical filled quantity; stream-first
+orders keep a zero floor, and later reads/ACKs never advance delivery. Idless
+packets use cumulative progress; evicted or mixed idless/identified packets have
+no lifetime exactly-once guarantee. Historical fills are not fabricated from
+ACKs or REST quantity.
+
+TypeScript USD-M/PM cancel acknowledgements preserve rows already `Closed` or
+`Canceled`, including fills received while cancellation was in flight. Accepted
+nonterminal rows, including local Creating/Updating/Canceling states, become
+Canceled; PM commits each success before attempting the next cancellation.
+These TS paths retain their existing stale-snapshot limitation. Rust tracks
+native order incarnations; TS cancellation does not add canonical client-ID
+tombstones that would block immediate PM client-ID reuse.
+
+The shared engine STP option is currently AsterDEX-only: every Binance profile
+rejects it for the whole batch before any action. Newly shared STP, native
+account/book and symbol-aware cancel commands complete with an explicit
+unsupported error instead of leaving their command pending.
+
+Spot public ticker streams use individual `@ticker` topics, with bid/ask from
+the same event, split into sockets of at most 1024 topics with stable feed
+identities. Each control frame is capped at 128 topics and 4096 UTF-8 bytes,
+paced at 400 ms per socket: Node WebSocket compression otherwise caused live
+`Payload too long` policy closes. The retired `!bookTicker` and `!ticker@arr` topics are not used.
+Depth and candles use a separate feed; Spot continuity uses the `U`/`u` range,
+while futures additionally require `pu` continuity after synchronization.
+Sources: [Spot changelog](https://developers.binance.com/docs/binance-spot-api-docs/CHANGELOG),
+[Spot user-data requests](https://developers.binance.com/docs/binance-spot-api-docs/websocket-api/user-data-stream-requests),
+[COIN-M orders](https://developers.binance.com/docs/derivatives/coin-margined-futures/trade/rest-api/New-Order).
+
 This directory contains five Binance exchange variants for Tealstreet: **USD-M Futures**, **COIN-M Inverse Futures**, **Spot**, **Portfolio Margin** and **Options** (`binanceoptions`, REST only, see [Options](#options-binanceoptions)). All variants share the same directory rather than having separate subdirectories.
 
 ## Exchange Information
@@ -153,6 +256,12 @@ copy in sync through `afterMethodCalledInWorker`; update both `isHedged` and the
 symbol's `fetchedLeverage.positionMode`. Treat Binance code `-4059` (`No need to
 change position side`) as idempotent success for the requested mode, and keep it
 in the REST client's silent error-code list so duplicate clicks don't emit a UI error.
+
+`setLeverage()` updates each existing position/placeholder ID for the symbol,
+including the one-way ID (the bare symbol). Updating only legacy hedge IDs leaves
+the cached leverage stale and can make restoration skip its REST write. A rejected
+leverage write propagates to the caller and preserves prior settings; the live
+smoke gate requires successful commands rather than identical swallowed errors.
 
 Futures REST snapshots that expect arrays must validate the response shape before
 calling `.find()` / `.map()` / `.reduce()`. Binance and proxy/tunnel paths can
@@ -1101,6 +1210,39 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 - **USD-M** sends `newClientOrderId`, rule `^[.A-Z:/a-z0-9_-]{1,36}$`; **PM** the same charset capped at 32. **Spot's documented legal range is narrower**, `^[A-Za-z0-9_-]{1,36}$` — `.`, `:` and `/` that USD-M accepts are rejected by Spot, so it has its own rule.
 - A caller ID replaces the generated `x-s3vFFRQp…` ID outright; no broker prefix is composed. PM and Spot return `newClientOrderId` as the order ID, so the placement result is the caller's ID there.
 - `updateOrder` is cancel+replace on all three; the replacement gets a generated ID (Spot refuses a reused ID until the old order fills).
+
+
+## Rust definitive client-ID lookup
+
+When secondary GET credentials are configured, TS and Rust bypass cached
+client-ID matches: that cache may contain another account's orders. Primary
+HTTP success, absence or failure determines the result without changing the
+cache. Without secondary credentials the existing cache shortcut is retained.
+PM lookup keeps `clientOrderId` as canonical `Order.id`, matching live orders
+and cancellation; the native numeric ID remains in `info.orderId`.
+
+USD-M and PM engine lookups query the primary placement account through the
+correct fapi/papi order endpoint, even when ordinary GET reads use secondary
+credentials. Only the venue's explicit order-not-found code on an accepted
+HTTP status establishes a definitive miss. Unknown markets are non-definitive;
+malformed, mismatched, authentication and transport failures are errors.
+`EXPIRED_IN_MATCH` is canceled, like `EXPIRED`, in both TS history/lookup and
+Rust; an STP expiration does not mean the order filled.
+
+Rust secondary GET parity includes Spot and COIN-M. Spot uses the selected GET
+client for unsigned catalog/ticker/candle reads, stripping credentials while
+retaining its egress. USD-M/PM/COIN-M separate public clients bypass account
+egress; signed GETs use read credentials and writes/WS auth stay primary.
+
+
+## Security audit: post-only amendments
+
+USD-M REST open-order and private-stream NEW mappers retain native time-in-force.
+Cancel-and-replace `updateOrder` copies that value onto the replacement, so a
+GTX maker order stays post-only when repriced instead of silently becoming GTC.
+The security live-smoke runner checks both writes on its scripted transport; its
+TS/Rust replay keeps time-in-force in strict write identity. This paired TS fix
+changes no order size, identity, cancellation or retry contract.
 
 ## Options (`binanceoptions`)
 

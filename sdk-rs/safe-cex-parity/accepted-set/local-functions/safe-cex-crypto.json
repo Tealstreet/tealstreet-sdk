@@ -1,7 +1,0 @@
-{
-  "safe-cex-crypto/src/starknet.rs::LOCAL_FUNCTION:visit": {
-    "category": "non-decoder",
-    "reason": "Nested sdk_type_hash::visit traverses JSON-parsed type declarations, checks field/type availability and depth, and accumulates a deduplicated dependency-name worklist solely for the authenticated type-hash preimage. The parent exposes a computed hash, not a decoded domain owner; sdk_tuple retains its separate executed parser contract. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
-    "sourceSha256": "b28607378c9d99cb202580c0f55101de80a928f92b03256358921ef1c29173b5"
-  }
-}

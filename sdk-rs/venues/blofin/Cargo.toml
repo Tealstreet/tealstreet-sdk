@@ -1,0 +1,18 @@
+[package]
+name = "safe-cex-venue-blofin"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+safe-cex-engine = { workspace = true, features = ["order-locks", "serial-plans"] }
+safe-cex-crypto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }

@@ -1,6 +1,0 @@
-{
-  "base_sha": "a92859adcdbb90a778150f3fdfa59956160cd2be",
-  "patch": "diff --git a/sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs b/sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs\nindex 74b473c95f..108917298e 100644\n--- a/sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs\n+++ b/sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs\n@@ -18,4 +18,4 @@ pub fn is_successful_code(code: SuccessCode<'_>) -> bool {\n }\n \n // Source: noop because server/client ping directions are reversed.\n-pub fn ping() {}\n+pub fn ping() { panic!(\"intentional private ping mutation\") }\n",
-  "named_assertion": "BITRUE-WS-PING-NATIVE private",
-  "control_stop": "46 code inputs then private ping"
-}

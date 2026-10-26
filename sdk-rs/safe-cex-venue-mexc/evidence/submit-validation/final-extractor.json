@@ -1,9 +1,0 @@
-{
-  "sha": "1a87d90c0c06bc0b8fba790c419a7bdd3eb26239",
-  "command": [
-    "node",
-    "/Users/sam/.volta/tools/image/yarn/1.22.21/bin/yarn.js",
-    "parity:extract:check"
-  ],
-  "exit": 0
-}

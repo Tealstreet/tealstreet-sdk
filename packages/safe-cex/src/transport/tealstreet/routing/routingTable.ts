@@ -113,13 +113,17 @@ const okxeuWs: WsGroup = {
 // and then the relay, which egresses from the same fleet as its REST.
 const bitgetWs: WsGroup = {
   // bitget.ws-secondary-public reuses the same public fallback host as ws-public.
-  public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic },
+  public: { kind: 'fallbackOnly', fallback: WS.bitgetPublic, initialSilentConnects: 1 },
+  // Master's TS proxy/relay routing. The Rust engine host routes its UTA socket
+  // (v3) through privateUta by URL, so no UTA direct bypass remains.
   private: {
     kind: 'proxyConditional',
     host: WS.bitgetPrivate,
     fallback: WS.bitgetPrivate,
     relayUpstream: RELAY_UPSTREAM.bitgetPrivate,
     relayWhenTunnelled: true,
+    initialSilentConnects: 1,
+    ignoredMessages: ['pong'],
   },
   privateUta: {
     kind: 'proxyConditional',
@@ -187,12 +191,7 @@ const WS_OVERRIDES: Partial<Record<ExchangeName, WsGroup>> = {
 // bybitinverse, bybitspot, and bybitdemo (extends BybitExchange {}). HyroTrader
 // is Bybit-compatible but direct to a first-party simulator, so it intentionally
 // stays out of this list.
-const HOW_REGION_CONDITIONAL: ExchangeName[] = [
-  'bybit',
-  'bybitdemo',
-  'bybitinverse',
-  'bybitspot',
-];
+const HOW_REGION_CONDITIONAL: ExchangeName[] = ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot'];
 
 // The set of exchanges is enumerated exactly once, at the type level (ExchangeName)
 // and at runtime by exchangeMetadata's keys — which TypeScript pins to ExchangeName

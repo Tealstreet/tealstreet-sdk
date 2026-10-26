@@ -1,2 +1,0 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
-     Running `sdk-rs/target/debug/parity-check --workspace /Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/target/polymarket-parity-y5pn57ge --manifest /Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/parity/manifest/exchanges/polymarket --exempt /Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/target/polymarket-parity-y5pn57ge/exempt.toml`

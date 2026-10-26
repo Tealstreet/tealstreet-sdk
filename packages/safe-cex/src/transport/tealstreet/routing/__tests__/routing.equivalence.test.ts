@@ -133,8 +133,11 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('bitget', offProxy).wsPrivate).toEqual({
       tunnelled: false,
       fallback: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
+      initialSilentConnects: 1,
+      ignoredMessages: ['pong'],
       relay: bitgetRelay('v2'),
     });
+    // The Rust engine host routes its UTA (v3) socket through privateUta by URL.
     expect(resolveExchangeRouting('bitget', proxy).wsPrivate).toEqual({
       tunnelled: true,
       host: 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private',
@@ -149,6 +152,7 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('bitget', offProxy).wsPublic).toEqual({
       tunnelled: false,
       fallback: 'wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public',
+      initialSilentConnects: 1,
     });
 
     // wsRouteCandidates (lighter): gated by tealstreetWsRoute, NOT tealstreetProxy.

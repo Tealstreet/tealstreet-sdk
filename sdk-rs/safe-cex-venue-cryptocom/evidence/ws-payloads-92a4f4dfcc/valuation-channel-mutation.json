@@ -1,9 +1,0 @@
-{
-  "base_sha": "92a4f4dfcc7eb28defeaf018911ca5abb5fe5332",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n@@ -298,7 +298,7 @@\n     pub fn from_value(value: &PayloadValue) -> Result<Self, PayloadError> {\n         let value = string(value)?;\n         if value == \"mark\".encode_utf16().collect::<Vec<_>>() {\n-            return Ok(Self::Mark);\n+            return Ok(Self::Index);\n         }\n         if value == \"index\".encode_utf16().collect::<Vec<_>>() {\n             return Ok(Self::Index);\n",
-  "expected_named_assertion": "CRYPTOCOM-PAYLOAD-NATIVE-LITERAL CryptocomWsValuationUpdate:rows-0.channel",
-  "runtime_proof": true,
-  "stop_case_name": "CryptocomWsValuationUpdate:rows-0",
-  "stop_case_index": 25
-}

@@ -1,1 +1,0 @@
-{"input_sha": "7dcfd8e6ab143aebc1ca07979dbc4d47176a14dc", "frozen_input_sha": "d74a1c01f77439f9df61fa330063be194aab7576", "sample": 36, "population_divergent": 92, "labels": {"finding": 19, "supported": 16, "unresolved": 1}, "status_rows_moved": 0, "stop": "iteration12 per venue"}

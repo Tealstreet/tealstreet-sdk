@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '../transport/registerTealstreetTransport';
 
 import { ENDPOINTS, resolveLighterDeploymentProfile } from '../exchanges/lighter/lighter.types';
-import { LighterPublicWebsocket } from '../exchanges/lighter/lighter.ws-public';
+import { LighterPublicWebsocket } from './reference/lighter/lighter.ws-public';
 import { resolveExchangeRouting } from '../transport/tealstreet/routing/resolveExchangeRouting';
 
 // Lighter's public proxy WS host, now sourced from the routing table (was WS_PROXY_URL.public).

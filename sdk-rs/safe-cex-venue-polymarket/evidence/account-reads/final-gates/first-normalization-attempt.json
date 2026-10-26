@@ -1,4 +1,0 @@
-{
-  "exit": 1,
-  "failure": "Whole Spec bytes were not a prefix because WEEX section was inserted before an existing Orderly section; inspected raw diff and corrected precise foreign-section comparison. No code/test mutation or gate pass claimed for that attempt."
-}

@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "<worktree>/sdk-rs/parity/evidence/mexc-asterdex-audit/verify.py", line 38, in <module>
-    assert Counter(r['cause_class'] for r in rows if r['classification']=='finding')==types,'AUDIT-PRIMARY-TYPES changed'
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: AUDIT-PRIMARY-TYPES changed

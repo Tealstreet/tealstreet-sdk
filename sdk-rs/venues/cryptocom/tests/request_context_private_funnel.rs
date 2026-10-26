@@ -1,0 +1,1607 @@
+//! Original callback controls for the complete private dispatch cutover.
+mod support;
+use safe_cex_engine::signing::{
+    Capability, KeyRef, SignError, SignFuture, SignRequest, SignResult, Signer,
+};
+use safe_cex_engine::{
+    Action, Command, Engine, ErrorKind, Event, HttpRequest, Method, Notice, Outcome, Query,
+    ReadCredentials, Response, VenueError,
+};
+use safe_cex_venue_cryptocom::{Cryptocom, sign::Params};
+use std::sync::Arc;
+use support::Harness;
+use support::fixture::Options;
+
+const NOW: f64 = 1_710_000_000_000.;
+const OWNER: u32 = 700;
+const IDENTITY: &str = r#"{"code":0,"result":{"this_account":{"uuid":9007199254740993}}}"#;
+type TestEngine = Engine<Cryptocom>;
+
+struct Parked;
+impl Signer for Parked {
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        Box::pin(std::future::pending())
+    }
+    fn can_sign(&self, _: &KeyRef, _: safe_cex_engine::signing::Algorithm) -> Capability {
+        Capability::Supported
+    }
+}
+struct Refused;
+struct CountingRefused(Arc<std::sync::atomic::AtomicUsize>);
+impl Signer for CountingRefused {
+    fn sign(&self, work: SignRequest) -> SignFuture {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Refused.sign(work)
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Refused.sign_ready(work)
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: safe_cex_engine::signing::Algorithm) -> Capability {
+        Refused.can_sign(key, algorithm)
+    }
+}
+struct ParkedWs(Arc<dyn Signer>);
+impl Signer for ParkedWs {
+    fn sign(&self, work: SignRequest) -> SignFuture {
+        if work.context.method == "WS" {
+            Box::pin(std::future::pending())
+        } else {
+            self.0.sign(work)
+        }
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if work.context.method == "WS" {
+            None
+        } else {
+            self.0.sign_ready(work)
+        }
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: safe_cex_engine::signing::Algorithm) -> Capability {
+        self.0.can_sign(key, algorithm)
+    }
+}
+impl Signer for Refused {
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        Box::pin(async { Err(SignError::Refused) })
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign_ready(&self, _: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        Some(Err(SignError::Refused))
+    }
+    fn can_sign(&self, _: &KeyRef, _: safe_cex_engine::signing::Algorithm) -> Capability {
+        Capability::Supported
+    }
+}
+fn options() -> Options {
+    Options {
+        key: Some("fixture-primary-key".into()),
+        secret: Some("fixture-primary-material".into()),
+        ..Default::default()
+    }
+}
+fn engine(opts: Options) -> TestEngine {
+    support::fixture::engine(opts)
+}
+fn actions(e: &mut TestEngine, now: f64) -> Vec<Action> {
+    support::fixture::actions(e, now)
+}
+fn ask(e: &mut TestEngine, now: f64) -> Vec<Action> {
+    e.handle(
+        now,
+        Event::Command(Command::FetchAccount { command: OWNER }),
+    );
+    actions(e, now)
+}
+fn http(a: &[Action], path: &str) -> HttpRequest {
+    a.iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.contains(path) => Some(r.clone()),
+            _ => None,
+        })
+        .expect("native physical request")
+}
+fn terminals(a: &[Action]) -> Vec<Result<String, VenueError>> {
+    a.iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandDone {
+                command: OWNER,
+                result,
+            }) => Some(Ok(result.clone())),
+            Action::Notice(Notice::CommandFailed {
+                command: OWNER,
+                error,
+            }) => Some(Err(error.clone())),
+            _ => None,
+        })
+        .collect()
+}
+fn respond(e: &mut TestEngine, now: f64, r: &HttpRequest, status: u16, body: &str) -> Vec<Action> {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
+    actions(e, now)
+}
+/// After an Unknown write the only private HTTP is the engine-owned reconcile
+/// read: it starts at once (fence opt-in), and nothing continues or resends.
+fn only_reconcile_read(a: &[Action]) {
+    let private: Vec<_> = a
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.url.contains("/private/") => Some(r.url.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        private
+            .iter()
+            .all(|url| url.contains("private/get-positions")),
+        "only the reconcile read may follow an Unknown write: {private:?}"
+    );
+    assert_eq!(private.len(), 1, "the reconcile read starts at once");
+}
+fn no_private_http(a: &[Action]) {
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/private/"))),
+        "opaque provider custody must precede private HTTP release"
+    );
+}
+#[test]
+fn identity_waits_for_the_injected_provider() {
+    let mut e = engine(options());
+    e.set_signer(Some(Arc::new(Parked))).unwrap();
+    let a = ask(&mut e, NOW);
+    no_private_http(&a);
+    assert!(a.iter().any(|a| matches!(a, Action::Sign { .. })));
+    assert!(terminals(&a).is_empty());
+}
+#[test]
+fn identity_without_a_provider_cannot_use_raw_secret_fallback() {
+    let mut e = engine(options());
+    e.set_signer(None).unwrap();
+    let a = ask(&mut e, NOW);
+    no_private_http(&a);
+    let t = terminals(&a);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::NotSent));
+}
+#[test]
+fn identity_provider_refusal_is_one_not_sent_terminal() {
+    let mut e = engine(options());
+    e.set_signer(Some(Arc::new(Refused))).unwrap();
+    let a = ask(&mut e, NOW);
+    no_private_http(&a);
+    let t = terminals(&a);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::NotSent));
+}
+
+#[derive(Clone, Copy)]
+enum BadResult {
+    Unchanged,
+    Receipt,
+    Headers,
+    Count,
+    Mac,
+    Crlf,
+    Utf8,
+}
+struct CorruptProvider {
+    inner: Arc<dyn Signer>,
+    bad: BadResult,
+    ws_only: bool,
+}
+impl Signer for CorruptProvider {
+    fn sign(&self, _: SignRequest) -> SignFuture {
+        Box::pin(async { Err(SignError::Unavailable) })
+    }
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: safe_cex_engine::signing::Algorithm) -> Capability {
+        self.inner.can_sign(key, algorithm)
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        let mut result = match self.inner.sign_ready(work)? {
+            Ok(result) => result,
+            Err(error) => return Some(Err(error)),
+        };
+        if self.ws_only && work.context.method != "WS" {
+            return Some(Ok(result));
+        }
+        match self.bad {
+            BadResult::Unchanged => {}
+            BadResult::Receipt => {
+                result.receipt.stamp_ms = result.receipt.stamp_ms.map(|stamp| stamp + 1.)
+            }
+            BadResult::Headers => result
+                .headers
+                .push(("X-Provider".into(), "untrusted".into())),
+            BadResult::Count => result.values.push(vec![1]),
+            BadResult::Mac => result.values[1].truncate(31),
+            BadResult::Crlf => result.values[0] = b"provider-key\r\n".to_vec(),
+            BadResult::Utf8 => result.values[0] = vec![0xff],
+        }
+        Some(Ok(result))
+    }
+}
+#[test]
+fn malformed_provider_results_cannot_release_identity_or_leak_material() {
+    for bad in [
+        BadResult::Unchanged,
+        BadResult::Receipt,
+        BadResult::Headers,
+        BadResult::Count,
+        BadResult::Mac,
+        BadResult::Crlf,
+        BadResult::Utf8,
+    ] {
+        let (options, signer) = support::fixture::setup(options());
+        let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
+        e.set_signer(Some(Arc::new(CorruptProvider {
+            inner: signer,
+            bad,
+            ws_only: false,
+        })))
+        .unwrap();
+        let actions = ask(&mut e, NOW);
+        if matches!(bad, BadResult::Unchanged) {
+            let request = http(&actions, "private/get-accounts");
+            let delivered = respond(&mut e, NOW, &request, 200, IDENTITY);
+            assert_eq!(
+                terminals(&delivered),
+                vec![Ok(
+                    r#"{"userId":"9007199254740993","affiliateId":null}"#.into()
+                )]
+            );
+            continue;
+        }
+        no_private_http(&actions);
+        let t = terminals(&actions);
+        assert_eq!(t.len(), 1);
+        let error = t[0].as_ref().unwrap_err();
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert_eq!(error.kind, Some(ErrorKind::Internal));
+        assert_eq!(error.message, "Invalid signing result");
+        for material in [
+            "fixture-primary-key",
+            "fixture-primary-material",
+            "provider-key",
+            "untrusted",
+        ] {
+            assert!(!error.message.contains(material));
+        }
+    }
+}
+
+#[test]
+fn malformed_provider_results_cannot_release_ws_auth() {
+    for bad in [
+        BadResult::Unchanged,
+        BadResult::Receipt,
+        BadResult::Headers,
+        BadResult::Count,
+        BadResult::Mac,
+        BadResult::Crlf,
+        BadResult::Utf8,
+    ] {
+        let (options, signer) = support::fixture::setup(options());
+        let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
+        e.set_signer(Some(Arc::new(CorruptProvider {
+            inner: signer,
+            bad,
+            ws_only: true,
+        })))
+        .unwrap();
+        let mut h = Harness {
+            engine: e,
+            actions: vec![],
+            failures: vec![],
+            now: NOW,
+        };
+        h.engine.start(NOW);
+        h.collect();
+        h.reply("public/get-instruments", support::INSTRUMENTS);
+        h.reply("public/get-tickers", support::TICKERS);
+        h.load();
+        let socket = h.socket(true);
+        h.actions.clear();
+        h.event(Event::WsOpened { socket });
+        let timer = h
+            .actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1000. => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        h.actions.clear();
+        h.now = NOW + 1000.;
+        h.event(Event::TimerFired { timer });
+        let auth = h.actions.iter().filter(|action| matches!(action, Action::WsSend { text, .. } if text.contains("public/auth"))).count();
+        assert_eq!(auth, usize::from(matches!(bad, BadResult::Unchanged)));
+        if !matches!(bad, BadResult::Unchanged) {
+            assert_eq!(
+                h.actions
+                    .iter()
+                    .filter(
+                        |action| matches!(action, Action::WsClose { socket: own } if *own == socket)
+                    )
+                    .count(),
+                1
+            );
+        }
+    }
+}
+#[test]
+fn identity_caller_deadline_equality_denies_success_data() {
+    let mut e = engine(options());
+    e.handle_command(NOW, Command::FetchAccount { command: OWNER }, Some(50))
+        .unwrap();
+    let r = http(&actions(&mut e, NOW), "private/get-accounts");
+    let a = respond(&mut e, NOW + 50., &r, 200, IDENTITY);
+    let t = terminals(&a);
+    assert_eq!(t.len(), 1);
+    let error = t[0]
+        .as_ref()
+        .expect_err("root equality cannot publish identity");
+    assert_eq!(error.kind, Some(ErrorKind::Timeout));
+    assert_eq!(error.outcome, None);
+    assert!(respond(&mut e, NOW + 51., &r, 200, IDENTITY).is_empty());
+}
+#[test]
+fn duplicate_identity_entry_cannot_send_a_second_request() {
+    let mut e = engine(options());
+    let first = http(&ask(&mut e, NOW), "private/get-accounts");
+    let a = ask(&mut e, NOW + 1.);
+    no_private_http(&a);
+    assert!(terminals(&a).is_empty());
+    assert_eq!(
+        terminals(&respond(&mut e, NOW + 2., &first, 200, IDENTITY)).len(),
+        1
+    );
+}
+#[test]
+fn identity_capacity_refusal_preserves_all_live_public_peers() {
+    let mut e = engine(options());
+    let mut peers = vec![];
+    for command in 1..=256 {
+        e.handle(
+            NOW,
+            Event::Command(Command::FetchOrderBook {
+                command,
+                symbol: "BTCUSD-PERP".into(),
+                limit: None,
+            }),
+        );
+        let preparation = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(action) => match *action {
+                    safe_cex_engine::request_context::HttpAction::Prepare {
+                        preparation, ..
+                    } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("genuine public peer preparation");
+        peers.push(preparation);
+    }
+    assert!(peers.iter().all(|p| e.http_preparation_pending(*p)));
+    let a = ask(&mut e, NOW);
+    assert!(peers.iter().all(|p| e.http_preparation_pending(*p)));
+    no_private_http(&a);
+    let t = terminals(&a);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().kind, Some(ErrorKind::Internal));
+}
+#[test]
+fn startup_private_snapshot_waits_for_provider_after_public_catalogue() {
+    let mut e = engine(options());
+    e.set_signer(Some(Arc::new(Parked))).unwrap();
+    e.start(NOW);
+    let r = http(&actions(&mut e, NOW), "public/get-instruments");
+    let a = respond(&mut e, NOW, &r, 200, support::INSTRUMENTS);
+    no_private_http(&a);
+    assert!(a.iter().any(|a| matches!(a, Action::Sign { .. })));
+}
+
+#[test]
+fn account_provider_refusal_schedules_one_poll_without_transport_retries() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut e = engine(options());
+    e.set_signer(Some(Arc::new(CountingRefused(calls.clone()))))
+        .unwrap();
+    e.start(NOW);
+    let catalogue = http(&actions(&mut e, NOW), "public/get-instruments");
+    let failed = respond(&mut e, NOW, &catalogue, 200, support::INSTRUMENTS);
+    no_private_http(&failed);
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "provider refusal is not released transport failure"
+    );
+    assert_eq!(
+        failed
+            .iter()
+            .filter(
+                |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == NOW + 10000.)
+            )
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn account_preparation_refusal_schedules_one_poll_without_provider_work() {
+    use safe_cex_engine::request_context::{Error, HttpAction};
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut e = engine(options());
+    e.set_signer(Some(Arc::new(CountingRefused(calls.clone()))))
+        .unwrap();
+    e.start(NOW);
+    let catalogue = http(&actions(&mut e, NOW), "public/get-instruments");
+    e.handle(
+        NOW,
+        Event::HttpResponse {
+            request: catalogue.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: support::INSTRUMENTS,
+            },
+        },
+    );
+    let preparation = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if request.url.contains("private/get-positions") => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("native first account stage before provider work");
+    e.http_preparation_failed(
+        NOW,
+        preparation,
+        Error::Invalid,
+        VenueError::new("fixture route refused"),
+    );
+    let failed = actions(&mut e, NOW);
+    no_private_http(&failed);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(
+        failed
+            .iter()
+            .filter(
+                |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == NOW + 10000.)
+            )
+            .count(),
+        1
+    );
+}
+#[test]
+fn private_ws_auth_waits_for_provider_at_native_ready_boundary() {
+    let (options, signer) = support::fixture::setup(options());
+    let mut e = safe_cex_engine::test_support::seeded_engine(Cryptocom::new(options));
+    e.set_signer(Some(Arc::new(ParkedWs(signer)))).unwrap();
+    let mut h = Harness {
+        engine: e,
+        actions: vec![],
+        failures: vec![],
+        now: NOW,
+    };
+    h.engine.start(h.now);
+    h.collect();
+    h.reply("public/get-instruments", support::INSTRUMENTS);
+    h.reply("public/get-tickers", support::TICKERS);
+    h.load();
+    let socket = h.socket(true);
+    h.actions.clear();
+    h.event(Event::WsOpened { socket });
+    let (timer, at_ms) = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 1000. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("native one-second private ready timer");
+    h.actions.clear();
+    h.now = at_ms;
+    h.event(Event::TimerFired { timer });
+    assert!(
+        !h.actions
+            .iter()
+            .any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("public/auth"))),
+        "raw credentials must not bypass parked WS provider"
+    );
+    assert!(
+        h.actions.iter().any(|a| matches!(a, Action::Sign { .. })),
+        "parked WS work: {:?}",
+        h.actions
+    );
+}
+fn placement(id: &str) -> safe_cex_engine::model::PlaceOrderOpts {
+    let mut order: safe_cex_engine::model::PlaceOrderOpts = serde_json::from_str(
+        r#"{"symbol":"BTCUSD-PERP","type":"limit","side":"buy","amount":0.0021,"price":90.04}"#,
+    )
+    .unwrap();
+    order.client_order_id = Some(id.into());
+    order
+}
+fn pace(h: &mut Harness) {
+    if h.actions
+        .iter()
+        .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+        && !h
+            .actions
+            .iter()
+            .any(|a| matches!(a,Action::SetTimer {at_ms,..} if *at_ms==h.now+20.))
+    {
+        return;
+    }
+    let i = h
+        .actions
+        .iter()
+        .position(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 20.))
+        .unwrap();
+    let Action::SetTimer { timer, at_ms } = h.actions.remove(i) else {
+        unreachable!()
+    };
+    h.now = at_ms;
+    h.event(Event::TimerFired { timer });
+}
+#[test]
+fn best_effort_all_failed_batch_cannot_acknowledge_success() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::PlaceOrders {
+        command: OWNER,
+        orders: vec![placement("one")],
+    }));
+    h.reply(
+        "private/create-order",
+        r#"{"code":30014,"message":"invalid request"}"#,
+    );
+    pace(&mut h);
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    assert!(t[0].is_err(), "no accepted leg means the batch failed");
+}
+#[test]
+fn write_500_with_signature_code_cannot_resend() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::CancelSymbolOrders {
+        command: OWNER,
+        symbol: "BTCUSD-PERP".into(),
+    }));
+    let r = h.http("private/cancel-all-orders");
+    h.actions.clear();
+    h.event(Event::HttpResponse {
+        request: r.id,
+        response: Response {
+            status: 500,
+            headers: "",
+            body: r#"{"code":40101,"message":"bad signature"}"#,
+        },
+    });
+    only_reconcile_read(&h.actions);
+    pace(&mut h);
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t[0].as_ref().unwrap_err().outcome, Some(Outcome::Unknown));
+}
+#[test]
+fn accepted_id_survives_later_failed_leg_as_partial_failure() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::PlaceOrders {
+        command: OWNER,
+        orders: vec![placement("one"), placement("two")],
+    }));
+    h.reply(
+        "private/create-order",
+        r#"{"code":0,"result":{"order_id":9007199254740993}}"#,
+    );
+    pace(&mut h);
+    h.reply(
+        "private/create-order",
+        r#"{"code":30014,"message":"invalid request"}"#,
+    );
+    pace(&mut h);
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    let error = t[0]
+        .as_ref()
+        .expect_err("failed legs must remain in the terminal");
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["9007199254740993"]
+    );
+}
+#[test]
+fn private_history_uses_original_caller_deadline() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.engine
+        .handle_command(
+            h.now,
+            Command::Query {
+                command: OWNER,
+                query: Query::Fills {
+                    symbol: Some("BTCUSD-PERP".into()),
+                    order_id: None,
+                    from_ms: Some(h.now - 1000.),
+                    to_ms: Some(h.now + 1000.),
+                    limit: Some(1),
+                },
+            },
+            Some(50),
+        )
+        .unwrap();
+    h.collect();
+    let r = h.http("private/get-trades");
+    h.now += 50.;
+    h.respond(&r, support::EMPTY);
+    let t = terminals(&h.actions);
+    assert_eq!(t.len(), 1);
+    assert_eq!(
+        t[0].as_ref()
+            .expect_err("expired root cannot publish empty history")
+            .kind,
+        Some(ErrorKind::Timeout)
+    );
+}
+fn secondary(valid: bool) -> ReadCredentials {
+    ReadCredentials {
+        key: "fixture-read-key".into(),
+        secret: if valid { "fixture-read-material" } else { "" }.into(),
+        passphrase: None,
+    }
+}
+#[test]
+fn posted_read_keeps_primary_identity_without_route_or_auth_evidence() {
+    let mut opts = options();
+    opts.read_credentials = Some(secondary(true));
+    let mut e = engine(opts);
+    let a = ask(&mut e, NOW);
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::AccountAuth { .. })))
+    );
+    let r = http(&a, "private/get-accounts");
+    assert_eq!(r.method, Method::Post);
+    assert_eq!(r.route, None);
+    let body: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["api_key"], "fixture-primary-key");
+    let before = e.account_snapshot_frame(NOW).to_vec();
+    let t = terminals(&respond(&mut e, NOW, &r, 200, IDENTITY));
+    assert_eq!(
+        t,
+        [Ok(
+            r#"{"userId":"9007199254740993","affiliateId":null}"#.into()
+        )]
+    );
+    assert_eq!(e.account_snapshot_frame(NOW), before);
+    assert_eq!(e.health().auth_failures, 0);
+}
+#[test]
+fn invalid_secondary_blocks_start_before_discovery() {
+    for public_data_only in [false, true] {
+        for primary in [false, true] {
+            let mut opts = options();
+            opts.public_data_only = public_data_only;
+            if !primary {
+                opts.key = None;
+                opts.secret = None;
+            }
+            opts.read_credentials = Some(secondary(false));
+            let expected = "Secondary read credentials require a nonempty key and secret";
+            let mut e = engine(opts);
+            e.start(NOW);
+            let a = actions(&mut e, NOW);
+            assert!(!a.iter().any(|a| matches!(
+                a,
+                Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
+            )));
+            assert_eq!(a.iter().filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::CONFIG_INVALID && event.message == expected)).count(), 1);
+        }
+    }
+}
+#[test]
+fn invalid_secondary_identity_error_precedes_public_only_and_missing_primary() {
+    for public_data_only in [false, true] {
+        let read = secondary(false);
+        let expected = "Secondary read credentials require a nonempty key and secret";
+        let mut e = engine(Options {
+            public_data_only,
+            read_credentials: Some(read),
+            ..Default::default()
+        });
+        let a = ask(&mut e, NOW);
+        no_private_http(&a);
+        let t = terminals(&a);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].as_ref().unwrap_err().message, expected);
+    }
+}
+#[test]
+fn native_rest_and_ws_hmac_match_independent_python_literals() {
+    let params = Params::default()
+        .strings("exec_inst", vec!["REDUCE_ONLY".into(), "POST_ONLY".into()])
+        .text("instrument_name", "BTCUSD-PERP")
+        .number("limit", u64::MAX);
+    for (method, params, auth, expected) in [
+        (
+            "private/get-trades",
+            params,
+            false,
+            "ad5455a0093aba156f0ad8f96ec18c599add648c4de5dbe3b2059ea1fbbc43aa",
+        ),
+        (
+            "public/auth",
+            Params::default(),
+            true,
+            "0e9d20117ab7df8097634d022b6241c57cc2eba952e8685cbb2240e43efa48fb",
+        ),
+    ] {
+        let body: serde_json::Value =
+            serde_json::from_str(&recipe_envelope(method, params, NOW, auth)).unwrap();
+        assert_eq!(body["sig"], expected);
+        assert_eq!(body["nonce"], NOW as u64);
+        assert_eq!(body["id"], body["nonce"]);
+        if auth {
+            assert!(body.get("params").is_none());
+        } else {
+            assert_eq!(body["params"]["limit"].as_u64(), Some(u64::MAX));
+        }
+    }
+}
+#[test]
+fn native_same_millisecond_reissues_keep_the_same_stamp_without_counter() {
+    let first = recipe_envelope("private/get-accounts", Params::default(), NOW + 0.1, false);
+    assert_eq!(
+        first,
+        recipe_envelope("private/get-accounts", Params::default(), NOW + 0.9, false)
+    );
+    let later: serde_json::Value = serde_json::from_str(&recipe_envelope(
+        "private/get-accounts",
+        Params::default(),
+        NOW + 1.,
+        false,
+    ))
+    .unwrap();
+    assert_eq!(later["nonce"], NOW as u64 + 1);
+}
+
+fn recipe_envelope(method: &'static str, params: Params, now: f64, auth: bool) -> String {
+    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
+    use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
+    use safe_cex_engine::test_support::ProbeVenue;
+    use safe_cex_venue_cryptocom::{Pending, sign::Envelope};
+    let (provider, identities) = LocalSigner::from_setup(LocalSetup {
+        primary: Some(LocalIdentity {
+            key: Secret::new("fixture-primary-key".into()),
+            secret: Secret::new("fixture-primary-material".into()),
+            ..Default::default()
+        }),
+        secondary: None,
+    })
+    .unwrap();
+    let identity = identities.primary.unwrap();
+    let venue = ProbeVenue::new(
+        support::fixture::venue(Options::default()),
+        move |_: &mut Cryptocom, cx: &mut safe_cex_engine::Cx<'_, _>| {
+            if auth {
+                let url = "wss://stream.crypto.com/exchange/v1/user";
+                let socket = cx.connect(url);
+                cx.send_signed(
+                    socket,
+                    String::new(),
+                    Box::new(Envelope::ws_auth(identity.clone(), url)),
+                );
+            } else {
+                let url = format!("https://api.crypto.com/exchange/v1/{method}");
+                let context = cx
+                    .http_context(
+                        Scope::Background,
+                        Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 20000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap();
+                // This oracle carrier exercises real recipe prepare/apply only.
+                // Actual consumer custody is covered by the command controls above.
+                let request = cx.request(
+                    Method::Post,
+                    url.clone(),
+                    vec![("Content-Type", "application/json".into())],
+                    None,
+                    Pending::Tickers {
+                        context,
+                        rows: vec![],
+                        skipped: Default::default(),
+                    },
+                );
+                cx.sign_http(
+                    request,
+                    Box::new(Envelope::http(
+                        identity.clone(),
+                        method,
+                        params.clone(),
+                        &url,
+                    )),
+                );
+            }
+        },
+    );
+    let mut e = Engine::new(
+        venue,
+        Some(safe_cex_engine::test_support::seeded_entropy(7)),
+    )
+    .unwrap();
+    e.set_signer(Some(Arc::new(provider))).unwrap();
+    e.start(now);
+    safe_cex_engine::test_support::prepared_actions(&mut e, now)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) if !auth => r.body,
+            Action::WsSend { text, .. } if auth => Some(text),
+            _ => None,
+        })
+        .expect("real provider recipe envelope")
+}
+
+#[test]
+fn identity_transport_then_signature_failure_has_no_extra_retry() {
+    let mut e = engine(options());
+    let r = http(&ask(&mut e, NOW), "private/get-accounts");
+    e.handle(
+        NOW + 1.,
+        Event::HttpFailed {
+            request: r.id,
+            error: "connection lost",
+        },
+    );
+    let a = actions(&mut e, NOW + 1.);
+    assert!(terminals(&a).is_empty());
+    let retry = http(&a, "private/get-accounts");
+    let a = respond(&mut e, NOW + 2., &retry, 200, r#"{"code":40101}"#);
+    no_private_http(&a);
+    assert_eq!(terminals(&a).len(), 1);
+    assert!(terminals(&a)[0].is_err());
+}
+
+#[test]
+fn identity_signature_then_transport_uses_only_remaining_counter_budget() {
+    let mut e = engine(options());
+    let r = http(&ask(&mut e, NOW), "private/get-accounts");
+    let a = respond(&mut e, NOW + 1., &r, 200, r#"{"code":40101}"#);
+    let mut r = http(&a, "private/get-accounts");
+    for attempt in 1..=3 {
+        e.handle(
+            NOW + 1. + f64::from(attempt),
+            Event::HttpFailed {
+                request: r.id,
+                error: "connection lost",
+            },
+        );
+        let a = actions(&mut e, NOW + 1. + f64::from(attempt));
+        if attempt < 3 {
+            r = http(&a, "private/get-accounts");
+            assert!(terminals(&a).is_empty());
+        } else {
+            no_private_http(&a);
+            assert_eq!(terminals(&a).len(), 1);
+            assert!(terminals(&a)[0].is_err());
+        }
+    }
+}
+
+#[test]
+fn identity_four_transport_attempts_are_immediate_with_fresh_native_stamp() {
+    let mut e = engine(options());
+    let mut r = http(&ask(&mut e, NOW), "private/get-accounts");
+    for attempt in 1..=4 {
+        let now = NOW + f64::from(attempt);
+        e.handle(
+            now,
+            Event::HttpFailed {
+                request: r.id,
+                error: "connection lost",
+            },
+        );
+        let a = actions(&mut e, now);
+        if attempt < 4 {
+            r = http(&a, "private/get-accounts");
+            let body: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+            assert_eq!(body["nonce"], now as u64);
+            assert!(terminals(&a).is_empty());
+        } else {
+            no_private_http(&a);
+            assert_eq!(terminals(&a).len(), 1);
+        }
+    }
+}
+
+#[test]
+fn account_signature_transport_counter_resets_only_at_next_stage() {
+    let mut h = Harness::new();
+    let r = h.http("private/get-positions");
+    h.actions.clear();
+    h.event(Event::HttpFailed {
+        request: r.id,
+        error: "connection lost",
+    });
+    let retry = h.http("private/get-positions");
+    h.respond(&retry, support::EMPTY);
+    let balance = h.http("private/user-balance");
+    h.respond(&balance, r#"{"code":40101}"#);
+    let retry = h.http("private/user-balance");
+    h.respond(&retry, support::BALANCE);
+    h.reply("private/get-open-orders", support::EMPTY);
+    h.reply("private/advanced/get-open-orders", support::EMPTY);
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 10000.))
+    );
+}
+
+#[test]
+fn account_transport_then_signature_error_does_not_gain_another_retry() {
+    let mut h = Harness::new();
+    let r = h.http("private/get-positions");
+    h.actions.clear();
+    h.event(Event::HttpFailed {
+        request: r.id,
+        error: "connection lost",
+    });
+    let r = h.http("private/get-positions");
+    h.respond(&r, r#"{"code":40101}"#);
+    no_private_http(&h.actions);
+    assert_eq!(
+        h.actions
+            .iter()
+            .filter(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 10000.))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn account_signature_then_transport_uses_only_remaining_counter_budget() {
+    let mut h = Harness::new();
+    let r = h.http("private/get-positions");
+    h.actions.clear();
+    h.respond(&r, r#"{"code":40101}"#);
+    let mut r = h.http("private/get-positions");
+    for attempt in 1..=3 {
+        h.event(Event::HttpFailed {
+            request: r.id,
+            error: "connection lost",
+        });
+        if attempt < 3 {
+            r = h.http("private/get-positions");
+        } else {
+            no_private_http(&h.actions);
+            assert_eq!(
+                h.actions
+                    .iter()
+                    .filter(
+                        |a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 10000.)
+                    )
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
+fn orders_refresh_initially_and_every_fourth_account_poll() {
+    let mut h = Harness::new();
+    h.load();
+    for cycle in 1..=4 {
+        let (timer, at_ms) = h
+            .actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == h.now + 10000. => {
+                    Some((*timer, *at_ms))
+                }
+                _ => None,
+            })
+            .expect("native ten-second account poll");
+        h.actions.clear();
+        h.now = at_ms;
+        h.event(Event::TimerFired { timer });
+        h.reply("private/get-positions", support::EMPTY);
+        h.reply("private/user-balance", support::BALANCE);
+        if cycle == 4 {
+            h.reply("private/get-open-orders", support::EMPTY);
+            h.reply("private/advanced/get-open-orders", support::EMPTY);
+        } else {
+            assert!(
+                !h.actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.contains("get-open-orders")))
+            );
+        }
+    }
+}
+
+#[test]
+fn advanced_order_retry_retains_regular_rows_and_snapshot_authority() {
+    let mut h = Harness::new();
+    h.reply("private/get-positions", support::EMPTY);
+    h.reply("private/user-balance", support::BALANCE);
+    h.reply(
+        "private/get-open-orders",
+        &format!(r#"{{"code":0,"result":{{"data":[{}]}}}}"#, support::ORDER),
+    );
+    assert!(h.engine.store().order("9007199254740993").is_none());
+    let r = h.http("private/advanced/get-open-orders");
+    h.event(Event::HttpFailed {
+        request: r.id,
+        error: "connection lost",
+    });
+    h.reply("private/advanced/get-open-orders", support::EMPTY);
+    assert_eq!(
+        h.engine
+            .store()
+            .order("9007199254740993")
+            .unwrap()
+            .remaining,
+        1.
+    );
+}
+
+#[test]
+fn secret_erasure_removes_primary_and_unused_secondary_material() {
+    use safe_cex_crypto::secrets::EraseSecrets;
+    let mut opts = options();
+    opts.read_credentials = Some(secondary(true));
+    opts.erase_secrets();
+    assert!(opts.key.as_deref().is_none_or(str::is_empty));
+    assert!(opts.secret.as_deref().is_none_or(str::is_empty));
+    if let Some(read) = opts.read_credentials {
+        assert!(read.key.is_empty());
+        assert!(read.secret.is_empty());
+        assert!(read.passphrase.as_deref().is_none_or(str::is_empty));
+    }
+}
+
+#[test]
+fn empty_batches_keep_credentials_precedence_without_http_or_progress() {
+    for keyed in [false, true] {
+        for command in [
+            Command::PlaceOrders {
+                command: OWNER,
+                orders: vec![],
+            },
+            Command::CancelOrders {
+                command: OWNER,
+                ids: vec![],
+            },
+        ] {
+            let mut e = engine(if keyed { options() } else { Options::default() });
+            e.handle(NOW, Event::Command(command));
+            let a = actions(&mut e, NOW);
+            assert!(a.iter().all(|a| matches!(a, Action::Notice(_))));
+            assert!(
+                !a.iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandProgress { .. })))
+            );
+            let t = terminals(&a);
+            assert_eq!(t.len(), 1);
+            if keyed {
+                assert_eq!(t[0].as_ref().unwrap(), "[]");
+            } else {
+                assert_eq!(
+                    t[0].as_ref().unwrap_err().message,
+                    "Crypto.com credentials are required"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn recipe_apply_without_prepare_cannot_inject_a_signed_body() {
+    use safe_cex_engine::signing::{Identity, SignReceipt};
+    use safe_cex_engine::{RequestId, SignStep};
+    let identity: Identity =
+        serde_json::from_str(r#"{"credential":"primary.credential","signing":"primary.signing"}"#)
+            .unwrap();
+    let url = "https://api.crypto.com/exchange/v1/private/get-accounts";
+    let mut recipe = safe_cex_venue_cryptocom::sign::Envelope::http(
+        identity,
+        "private/get-accounts",
+        Params::default(),
+        url,
+    );
+    let original = HttpRequest {
+        id: RequestId(1),
+        method: Method::Post,
+        route: None,
+        timeout_ms: Some(20000),
+        url: url.into(),
+        headers: vec![("Content-Type", "application/json".into())],
+        signer_headers: vec![],
+        body: None,
+    };
+    let mut outbound = Action::Http(original.clone());
+    let result = SignResult::new(
+        vec![b"fixture-primary-key".to_vec(), vec![7; 32]],
+        SignReceipt::default(),
+    );
+    assert!(
+        recipe.apply(&mut outbound, &result).is_err(),
+        "apply needs its attested preparation and exact receipt"
+    );
+    let Action::Http(after) = outbound else {
+        unreachable!()
+    };
+    assert_eq!(
+        after, original,
+        "refusal must not partially mutate the request"
+    );
+}
+
+fn review_integrity(e: &mut TestEngine, now: f64, r: &HttpRequest) -> Vec<Action> {
+    e.handle(
+        now,
+        Event::HttpStart {
+            request: r.id,
+            status: 200,
+            headers: "",
+        },
+    );
+    e.handle(
+        now,
+        Event::HttpChunk {
+            request: r.id,
+            data: &[0xff],
+        },
+    );
+    e.handle(now, Event::HttpEnd { request: r.id });
+    actions(e, now)
+}
+#[test]
+fn review_identity_integrity_is_not_a_transport_retry() {
+    let mut e = engine(options());
+    let first = ask(&mut e, NOW);
+    let r = http(&first, "private/get-accounts");
+    let out = review_integrity(&mut e, NOW + 1., &r);
+    no_private_http(&out);
+    let t = terminals(&out);
+    assert_eq!(t.len(), 1, "one strict integrity failure");
+    assert_eq!(t[0].as_ref().unwrap_err().kind, Some(ErrorKind::Internal));
+}
+#[test]
+fn review_history_integrity_is_not_a_transport_retry() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.engine
+        .handle_command(
+            h.now,
+            Command::Query {
+                command: OWNER,
+                query: Query::Fills {
+                    symbol: Some("BTCUSD-PERP".into()),
+                    order_id: None,
+                    from_ms: Some(h.now - 1000.),
+                    to_ms: Some(h.now + 1000.),
+                    limit: Some(1),
+                },
+            },
+            None,
+        )
+        .unwrap();
+    h.collect();
+    let r = h.http("private/get-trades");
+    h.actions.clear();
+    let out = review_integrity(&mut h.engine, h.now + 1., &r);
+    let t = terminals(&out);
+    assert_eq!(
+        t.len(),
+        1,
+        "integrity must not park a retry instead of terminating"
+    );
+    assert_eq!(t[0].as_ref().unwrap_err().kind, Some(ErrorKind::Internal));
+    no_private_http(&out);
+}
+#[test]
+fn review_account_integrity_recovers_once_without_inline_transport_retry() {
+    let mut h = Harness::new();
+    let r = h.http("private/get-positions");
+    h.actions.clear();
+    let out = review_integrity(&mut h.engine, h.now + 1., &r);
+    no_private_http(&out);
+    assert_eq!(
+        out.iter()
+            .filter(|a| matches!(a,Action::SetTimer {at_ms,..} if *at_ms==h.now+1.+10_000.))
+            .count(),
+        1
+    );
+}
+
+fn physical_timer(out: &[Action], at: f64) -> safe_cex_engine::TimerId {
+    out.iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == at => Some(*timer),
+            _ => None,
+        })
+        .expect("real physical request timer")
+}
+
+#[test]
+fn identity_physical_timeout_keeps_native_retry_budget_and_retires_old_delivery() {
+    let mut e = engine(options());
+    let first = ask(&mut e, NOW);
+    let old = http(&first, "private/get-accounts");
+    let timer = physical_timer(&first, NOW + 20_000.);
+    e.handle(NOW + 20_000., Event::TimerFired { timer });
+    let out = actions(&mut e, NOW + 20_000.);
+    let retry = http(&out, "private/get-accounts");
+    assert_ne!(retry.id, old.id);
+    assert!(terminals(&out).is_empty());
+    let stale = respond(&mut e, NOW + 20_001., &old, 200, IDENTITY);
+    assert!(terminals(&stale).is_empty());
+    let out = respond(&mut e, NOW + 20_002., &retry, 200, IDENTITY);
+    assert_eq!(terminals(&out).len(), 1);
+    assert!(terminals(&out)[0].is_ok());
+    no_private_http(&out);
+}
+
+fn private_fills(h: &mut Harness, limit: u32) -> HttpRequest {
+    h.engine
+        .handle_command(
+            h.now,
+            Command::Query {
+                command: OWNER,
+                query: Query::Fills {
+                    symbol: Some("BTCUSD-PERP".into()),
+                    order_id: None,
+                    from_ms: Some(h.now - 1000.),
+                    to_ms: Some(h.now + 1000.),
+                    limit: Some(limit),
+                },
+            },
+            None,
+        )
+        .unwrap();
+    h.collect();
+    h.http("private/get-trades")
+}
+
+#[test]
+fn history_physical_timeout_waits_once_then_sends_a_fresh_leg() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    let old = private_fills(&mut h, 1);
+    let timer = physical_timer(&h.actions, h.now + 20_000.);
+    h.actions.clear();
+    h.now += 20_000.;
+    h.event(Event::TimerFired { timer });
+    no_private_http(&h.actions);
+    assert!(terminals(&h.actions).is_empty());
+    let retry_timer = physical_timer(&h.actions, h.now + 1000.);
+    h.actions.clear();
+    h.now += 1000.;
+    h.event(Event::TimerFired { timer: retry_timer });
+    let fresh = h.http("private/get-trades");
+    assert_ne!(fresh.id, old.id);
+    h.respond(&fresh, support::EMPTY);
+    assert_eq!(terminals(&h.actions), vec![Ok("[]".into())]);
+}
+
+#[test]
+fn account_integrity_retires_once_and_the_native_poll_restarts_from_positions() {
+    let mut h = Harness::new();
+    let old = h.http("private/get-positions");
+    h.actions.clear();
+    let out = review_integrity(&mut h.engine, h.now + 1., &old);
+    no_private_http(&out);
+    let poll = physical_timer(&out, h.now + 10_001.);
+    h.now += 2.;
+    h.respond(&old, support::EMPTY);
+    assert!(
+        !h.actions
+            .iter()
+            .any(|action| matches!(action, Action::SetTimer { .. }))
+    );
+    no_private_http(&h.actions);
+    h.now += 9999.;
+    h.event(Event::TimerFired { timer: poll });
+    let fresh = h.http("private/get-positions");
+    assert_ne!(fresh.id, old.id);
+    h.respond(&fresh, support::EMPTY);
+    let _ = h.http("private/user-balance");
+}
+
+#[test]
+fn history_integrity_after_an_accepted_page_strictly_discards_the_prefix() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    let first = private_fills(&mut h, 101);
+    let rows: Vec<_> = (1..=100)
+        .map(|id| format!(
+            r#"{{"trade_id":{id},"order_id":9007199254740993,"instrument_name":"BTCUSD-PERP","side":"BUY","traded_price":"100","traded_quantity":"0.1","fees":"-0.02","fee_instrument_name":"USD","taker_side":"MAKER","create_time":1610000000000,"create_time_ns":{}}}"#,
+            1_610_000_000_000_000_000_u64 + id
+        ))
+        .collect();
+    h.respond(
+        &first,
+        &format!(r#"{{"code":0,"result":{{"data":[{}]}}}}"#, rows.join(",")),
+    );
+    assert!(terminals(&h.actions).is_empty());
+    let timer = physical_timer(&h.actions, h.now + 1000.);
+    h.actions.clear();
+    h.now += 1000.;
+    h.event(Event::TimerFired { timer });
+    let second = h.http("private/get-trades");
+    h.actions.clear();
+    let out = review_integrity(&mut h.engine, h.now + 1., &second);
+    no_private_http(&out);
+    let failures = terminals(&out);
+    assert_eq!(failures.len(), 1);
+    let error = failures[0]
+        .as_ref()
+        .expect_err("no prefix recovery for integrity failures");
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_eq!(error.outcome, None);
+    assert_eq!(
+        error.message,
+        "response did not contain the expected list: \u{fffd}"
+    );
+    assert!(
+        !out.iter().any(
+            |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 1001.)
+        )
+    );
+}
+
+#[test]
+fn account_physical_timeout_retries_after_retiring_the_old_background_read() {
+    let mut h = Harness::new();
+    let old = h.http("private/get-positions");
+    let timer = physical_timer(&h.actions, h.now + 20_000.);
+    h.actions.clear();
+    h.now += 20_000.;
+    h.event(Event::TimerFired { timer });
+    let fresh = h.http("private/get-positions");
+    assert_ne!(fresh.id, old.id);
+    assert!(!h.actions.iter().any(
+        |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 10_000.)
+    ));
+    h.respond(&old, support::EMPTY);
+    no_private_http(&h.actions);
+    h.respond(&fresh, support::EMPTY);
+    let _ = h.http("private/user-balance");
+}
+
+fn fail_released_write(h: &mut Harness, request: &HttpRequest, timeout: bool) {
+    let timer = timeout.then(|| physical_timer(&h.actions, h.now + 20_000.));
+    h.actions.clear();
+    if let Some(timer) = timer {
+        h.now += 20_000.;
+        h.event(Event::TimerFired { timer });
+    } else {
+        h.event(Event::HttpFailed {
+            request: request.id,
+            error: "released write connection reset",
+        });
+    }
+}
+
+#[test]
+fn independent_unproven_http_failure_continues_without_reusing_the_failed_call() {
+    let mut h = Harness::new();
+    h.load();
+    h.actions.clear();
+    h.event(Event::Command(Command::PlaceOrders {
+        command: OWNER,
+        orders: vec![placement("unproven"), placement("accepted")],
+    }));
+    let first = h.http("private/create-order");
+    h.actions.clear();
+    h.event(Event::HttpResponse {
+        request: first.id,
+        response: Response {
+            status: 500,
+            headers: "",
+            body: r#"{"code":40101,"message":"bad signature"}"#,
+        },
+    });
+    assert!(terminals(&h.actions).is_empty());
+    no_private_http(&h.actions);
+    pace(&mut h);
+    let sibling = h.http("private/create-order");
+    assert_ne!(first.id, sibling.id);
+    assert!(sibling.body.as_ref().unwrap().contains("accepted"));
+    h.respond(
+        &sibling,
+        r#"{"code":0,"result":{"order_id":9007199254740993}}"#,
+    );
+    pace(&mut h);
+    let terminal = terminals(&h.actions);
+    assert_eq!(terminal.len(), 1);
+    let error = terminal[0]
+        .as_ref()
+        .expect_err("unproven first row stays failed");
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["9007199254740993"]
+    );
+}
+
+#[test]
+fn independent_released_write_failure_waits_20ms_before_the_native_sibling() {
+    for timeout in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.actions.clear();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: OWNER,
+            orders: vec![placement("failed"), placement("accepted")],
+        }));
+        let first = h.http("private/create-order");
+        fail_released_write(&mut h, &first, timeout);
+        assert!(terminals(&h.actions).is_empty());
+        no_private_http(&h.actions);
+        let timer = physical_timer(&h.actions, h.now + 20.);
+        h.now += 19.;
+        h.event(Event::TimerFired { timer });
+        no_private_http(&h.actions);
+        h.now += 1.;
+        h.event(Event::TimerFired { timer });
+        let sibling = h.http("private/create-order");
+        assert_ne!(first.id, sibling.id);
+        h.respond(
+            &sibling,
+            r#"{"code":0,"result":{"order_id":9007199254740993}}"#,
+        );
+        pace(&mut h);
+        let terminal = terminals(&h.actions);
+        assert_eq!(terminal.len(), 1);
+        let error = terminal[0]
+            .as_ref()
+            .expect_err("the failed row stays failed");
+        assert_eq!(
+            error.partial.as_ref().unwrap().order_ids,
+            ["9007199254740993"]
+        );
+    }
+}
+
+#[test]
+fn independent_failure_keeps_earlier_ids_and_later_sibling_ids_in_order() {
+    for timeout in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.actions.clear();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: OWNER,
+            orders: vec![placement("one"), placement("failed"), placement("three")],
+        }));
+        h.reply(
+            "private/create-order",
+            r#"{"code":0,"result":{"order_id":9007199254740993}}"#,
+        );
+        pace(&mut h);
+        let second = h.http("private/create-order");
+        fail_released_write(&mut h, &second, timeout);
+        assert!(terminals(&h.actions).is_empty());
+        no_private_http(&h.actions);
+        pace(&mut h);
+        h.reply(
+            "private/create-order",
+            r#"{"code":0,"result":{"order_id":9007199254740995}}"#,
+        );
+        pace(&mut h);
+        let terminal = terminals(&h.actions);
+        assert_eq!(terminal.len(), 1);
+        let error = terminal[0]
+            .as_ref()
+            .expect_err("the middle failure stays in the journal");
+        assert_eq!(
+            error.partial.as_ref().unwrap().order_ids,
+            ["9007199254740993", "9007199254740995"]
+        );
+    }
+}
+
+#[test]
+fn independent_all_released_failures_emit_one_failure_and_no_success() {
+    for timeout in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.actions.clear();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: OWNER,
+            orders: vec![placement("one"), placement("two")],
+        }));
+        let first = h.http("private/create-order");
+        fail_released_write(&mut h, &first, timeout);
+        assert!(terminals(&h.actions).is_empty());
+        pace(&mut h);
+        let second = h.http("private/create-order");
+        fail_released_write(&mut h, &second, timeout);
+        assert!(terminals(&h.actions).is_empty());
+        pace(&mut h);
+        let terminal = terminals(&h.actions);
+        assert_eq!(terminal.len(), 1);
+        assert_eq!(
+            terminal[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        only_reconcile_read(&h.actions);
+    }
+}
+
+#[test]
+fn coupled_leverage_released_failure_never_continues_or_resends() {
+    for timeout in [false, true] {
+        let mut h = Harness::new();
+        h.load();
+        h.actions.clear();
+        h.event(Event::Command(Command::SetLeverage {
+            command: OWNER,
+            symbol: "BTCUSD-PERP".into(),
+            leverage: 20.,
+            side: None,
+        }));
+        h.reply(
+            "private/user-balance",
+            r#"{"code":0,"result":{"data":[{"account_id":"account-123"}]}}"#,
+        );
+        pace(&mut h);
+        let write = h.http("private/change-account-leverage");
+        fail_released_write(&mut h, &write, timeout);
+        only_reconcile_read(&h.actions);
+        let terminal = terminals(&h.actions);
+        assert_eq!(terminal.len(), 1);
+        assert_eq!(
+            terminal[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        assert!(!h.actions.iter().any(
+            |action| matches!(action, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 20.)
+        ));
+    }
+}

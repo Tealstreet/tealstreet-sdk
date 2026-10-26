@@ -1,8 +1,0 @@
-public.connectAndSubscribe: baseline0 / mutation101 (native dispatch trace:public.connectAndSubscribe) / restored0
-private.connectAndSubscribe: baseline0 / mutation101 (independent replay count:private.connectAndSubscribe) / restored0
-public.onMessage: baseline0 / mutation101 (native dispatch trace:public.onMessage) / restored0
-private.onMessage: baseline0 / mutation101 (native refresh trigger) / restored0
-public.subscribeToAsset: baseline0 / mutation101 (native dispatch trace:public.subscribeToAsset) / restored0
-public.unsubscribeFromAsset: baseline0 / mutation101 (native dispatch trace:public.unsubscribeFromAsset) / restored0
-public.subscribeToOrderBook: baseline0 / mutation101 (native dispatch trace:public.subscribeToOrderBook) / restored0
-public.handleLastTradePrice: baseline0 / mutation101 (native Number bits) / restored0

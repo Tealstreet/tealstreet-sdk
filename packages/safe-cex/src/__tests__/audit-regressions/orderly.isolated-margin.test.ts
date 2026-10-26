@@ -3,8 +3,8 @@ import type { Axios } from 'axios';
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
-import { ENDPOINTS } from '../../exchanges/orderly/orderly.types';
+import { OrderlyExchange } from '../reference/orderly/orderly.exchange';
+import { ENDPOINTS } from '../reference/orderly/orderly.types';
 import { DefaultStore } from '../../store/store.base';
 import {
   MarginType,

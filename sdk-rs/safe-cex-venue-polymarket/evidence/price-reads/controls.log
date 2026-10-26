@@ -1,8 +1,0 @@
-getMidpoint: baseline0 / mutation101 (native price result:getMidpoint:native Number bits) / restored0
-getMidpoints: baseline0 / mutation101 (native mapped row key:getMidpoints) / restored0
-getPrice: baseline0 / mutation101 (native parameter key:getPrice) / restored0
-getLastTradePrice: baseline0 / mutation101 (native price result:getLastTradePrice:native Number bits) / restored0
-getPriceHistory: baseline0 / mutation101 (native original array identity:getPriceHistory) / restored0
-getOrder: baseline0 / mutation101 (native request URL:getOrder) / restored0
-getBalanceAllowance: baseline0 / mutation101 (native numeric parameter:getBalanceAllowance:native Number bits) / restored0
-deriveApiKey: baseline0 / mutation101 (native header units:deriveApiKey) / restored0

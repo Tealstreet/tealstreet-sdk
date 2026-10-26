@@ -40,6 +40,7 @@
     "logs": "tail -f ~/.tealstreet/cli.log",
     "test": "vitest",
     "test-ci": "vitest run",
+    "test-wasm": "SAFE_CEX_WASM_TESTS=1 vitest run .wasm.test.ts --maxWorkers=2",
     "postinstall": "node scripts/install-binary.cjs --optional",
     "torture": "bun scripts/torture-one-shot.ts"
   },
@@ -48,6 +49,7 @@
     "@tealstreet/cli-core": "*",
     "@tealstreet/oems-core": "*",
     "@tealstreet/safe-cex": "*",
+    "@tealstreet/safe-cex-wasm": "*",
     "@tealstreet/script-api-core": "*",
     "@tealstreet/script-api-web": "*",
     "@tealstreet/script-authoring": "*",

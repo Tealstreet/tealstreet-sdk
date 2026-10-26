@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { CoinbaseStarbaseProtocolError } from '../../exchanges/coinbase/coinbase.starbase';
+import { CoinbaseStarbaseProtocolError } from '../reference/coinbase/coinbase.starbase';
 import {
   buildCoinbaseStarbaseDisableCancelOnDisconnect,
   buildCoinbaseStarbaseEnableCancelOnDisconnect,
@@ -11,7 +11,7 @@ import {
   COINBASE_STARBASE_WEBSOCKET_ONLY_SESSION_METHODS,
   decodeCoinbaseStarbaseCancelOnDisconnectMutationResult,
   decodeCoinbaseStarbaseGetCancelOnDisconnectResult,
-} from '../../exchanges/coinbase/coinbase.starbase-session';
+} from '../reference/coinbase/coinbase.starbase-session';
 
 describe('Coinbase Starbase inert cancel-on-disconnect contracts', () => {
   it('builds the exact three published requests with omitted, connection, or account scope', () => {
@@ -89,10 +89,10 @@ describe('Coinbase Starbase inert cancel-on-disconnect contracts', () => {
 
   it('remains statically inert outside the Starbase contract files', () => {
     for (const file of [
-      'coinbase.api.ts',
-      'coinbase.exchange.ts',
-      'coinbase.ws-private.ts',
-      'coinbase.ws-public.ts',
+      '../../__tests__/reference/coinbase/coinbase.api.ts',
+      '../../__tests__/reference/coinbase/coinbase.exchange.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-private.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-public.ts',
       '../../createExchangeFromAccount.ts',
       '../../exchangeMetadata.ts',
       '../../transport/tealstreet/routing/routingTable.ts',

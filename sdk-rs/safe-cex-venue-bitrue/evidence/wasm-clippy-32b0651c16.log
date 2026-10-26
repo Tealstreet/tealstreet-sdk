@@ -1,9 +1,0 @@
-SHA: 32b0651c16ea5d586a4a77dfbf21ce2c84ae64bc
-COMMAND: ["/opt/homebrew/opt/rustup/bin/cargo", "clippy", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-store", "-p", "safe-cex-venue-bitrue", "--target", "wasm32-unknown-unknown", "--all-targets", "--jobs", "2", "--locked", "--", "-D", "warnings"]
-    Checking safe-cex-store v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-store)
-    Checking safe-cex-crypto v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-crypto)
-    Checking safe-cex-exchange v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-exchange)
-    Checking safe-cex-venue-bitrue v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-cryptocom/sdk-rs/safe-cex-venue-bitrue)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 40.68s
-
-MEASURED EXIT: 0

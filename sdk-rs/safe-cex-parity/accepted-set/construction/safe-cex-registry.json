@@ -1,8 +1,0 @@
-{
-  "safe_cex_registry::module_host::ExchangeConstructor": {
-    "traits": [
-      "core::clone::Clone"
-    ],
-    "reason": "Reviewed module_host.rs::ExchangeConstructor: Clone retains the same Rc<ConstructorFactory>; same_constructor explicitly compares that pointer. This IS a reusable construction capability: construct takes &self and forwards typed name/options/Store to the same captured host factory. Cloning aliases that granted capability and captured state, rather than minting an independently validated venue, invoking construction, or duplicating a one-use admission token See sdk-rs/parity/MANIFEST-SPEC.md#registry-constructor-object-and-continuation-choices. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
-  }
-}

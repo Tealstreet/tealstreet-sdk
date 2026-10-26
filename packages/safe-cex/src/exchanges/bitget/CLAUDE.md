@@ -16,6 +16,26 @@ This directory contains the Bitget exchange integration for Tealstreet, supporti
 - **CCXT REST Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/bitget.ts
 - **CCXT WebSocket Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/bitget.ts
 
+## Rust engine parity
+
+The engine (`sdk-rs/venues/bitget`) supports `bitget`, `bitgetusdc` and
+`bitgetinverse`. Inverse order amount/filled and placement sizes preserve the TS
+native units; only remaining and position display sizes use the TS price-based
+8-decimal conversion. Collateral uses each market's base coin and preserves the
+per-coin balance map through worker frames.
+
+UTA bills use v3 `financial-records`, retaining raw signed amount and fee metadata
+without assuming trade rows are gross PnL. Classic trailing modifies through
+`modify-plan-order`; UTA trailing uses `type=trailing_stop` and native distance
+parameters. Size-only edits preserve original callback parameters and activation
+basis. Unsupported external opening, ambiguous exposure, limit-execution or
+index-triggered trailing configurations remain visible and cancelable; edits
+fail before canceling them.
+
+Documented native regressions and private tapes cover these engine paths; the TS
+implementation below remains the replay reference for its supported overlap.
+See `docs/plans/RUST_BITGET_PARITY.md` for verification and explicit TS fixes.
+
 ## UTA Support Status
 
 Bitget Unified Trading Account (UTA) keys cannot call Classic v2 account/trade
@@ -898,3 +918,105 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Classic and UTA both send `clientOid`, rule `^[.A-Z:/a-z0-9_-]{1,32}$`. Inherited by inverse and USDC.
 - **The native modify-order sends `newClientOid: uuid()`**, so an amend rewrites the client ID even though it keeps the order. Not changed: whether Bitget accepts the old ID as `newClientOid` is unverified, and a rejection falls back to cancel+replace silently.
+
+## Rust account and trading audit fixes
+
+Isolated hedge leverage preserves the requested Long/Short through the shared
+command: Classic uses `holdSide`, UTA uses `posSide`; omission defaults long.
+Successful writes and snapshots retain independent buy/sell settings, including
+flat legs and stale-read fences. Cross and one-way leverage stay coupled.
+Commands wait for the existing account probe. Anonymous orders below one lot
+are skipped within a batch; explicit caller IDs still fail preflight if no
+order can honor them. Sized full-position stops emit a downgrade warning.
+
+Classic history recognizes forced-close long/short suffixes and absent profit
+as zero. An unmappable or malformed REST position/order row (including one on
+a market missing from a partial catalogue) is skipped with a redacted warning
+and keeps only its own stored copy: orders by native id (preset TP/SL children
+follow their parent id), positions by symbol and side (no side keeps both legs;
+no symbol keeps every stored position). Valid peers still update; a skipped row
+with no stored copy waits for the next snapshot. Actual empty lists clear state.
+Rust inverse positions size coin quantity by the row's own mark price, then
+ticker mark/last, then entry (TS skips the row mark), so a snapshot read before
+tickers load is not sized at entry.
+Malformed envelopes and failed reads never clear good state. Busy
+Classic stream refreshes reschedule, zero leverage limits default to 1/20, and
+invalid bounds fail visibly before writes. UTA one-way fills retain their
+execution-derived position leg. The Confirm audit item remains outside this
+change.
+
+Rust private startup is gated on the `/api/v3/account/settings` probe, at
+startup and after a late `40085` promotion. 40084 detects Classic; a 200 with
+valid settings detects UTA. A first-probe transport or HTML 5xx failure keeps
+the TS fallback to Classic (a later 40085 promotes). Every other failure (429/418,
+5xx or system-code envelopes, non-JSON, malformed settings, unknown codes, and
+transport failures once UTA is confirmed) retries through `startup::Backoff`
+(1 s doubling to 30 s, forever), so polling never stalls undetected. Before the
+account loads, only documented key refusals end startup with one
+`StartupFailed`: 40001/40006/40011/40012/40037 or an "environment is incorrect"
+message (`AuthInvalid`), 40014/40018 (`AuthPermission`), and 40009 after one
+re-signed resend; timestamp codes stay transient. A UTA account on inverse or
+testnet fails startup as `Unsupported`, a missing passphrase or invalid
+read-only credentials as `InvalidInput`. Before the account loads, a socket login
+refused with 30011/30012 (`event: "error"` or `login`) fails startup; other login
+errors (30005 etc.) reconnect with backoff. A rejection stops the probe and
+account timers and retires the private socket; a refused trading key also emits
+`Deactivate`. A 418/429 sets `rest_paused_until` from `Retry-After`, else 30 s,
+and the probe retry waits out that window; transport failures keep plain backoff.
+
+
+## Rust private WS row recovery
+
+Ordinary order/position arrays decode rows independently. Valid Classic/UTA peers
+advance while rejected cached identities retain exposure, protection and native
+routing metadata. Unknown identity holds absence. Rejection observers protect
+older pending REST reads without replacing or renewing actual WS financial
+freshness; fresh admitted reads can heal. Partial snapshots preserve an earlier
+clean snapshot's older-read fence without claiming new global financial authority.
+All-rejected initial snapshots never establish loaded-empty readiness; valid empty
+snapshots still load and clear positions.
+
+Position mode is account/product-wide: partial or contradictory rows, including
+incremental deltas, cannot flip global routing while retaining exposure in another
+mode. A complete consistent snapshot can change mode. Retained cached positions
+do not republish stale settings. Native plans and trailing metadata use the same
+revision/terminal/opened fence as retained order rows, preserving cancel routes.
+Read-only recovery uses the existing coalesced timers and busy/pause handling;
+malformed-only or foreign-only traffic does not claim useful financial liveness.
+The financial fill channel, auth, signing and write-retry policy are unchanged.
+
+
+## Rust dispatch signer checkpoint
+
+The draft native migration stages private HTTP and Classic/UTA login with shared
+engine SignStep work. Venue state carries opaque identities; trusted setup owns
+all material. Private primary passphrase is mandatory; an absent secondary
+passphrase inherits its primary provider ref, while explicit empty rejects.
+Ordinary GET uses secondary, degraded balance recovery remains primary, and POST
+and WS stay primary. Public broker headers remain unchanged.
+
+Owned identity/history/trade read provider refusal bypasses network read retries.
+Background account failures retain existing recovery/backoff, and provider refusal
+cannot promote an unconfirmed Classic account. Earlier accepted writes, native40009 resend evidence
+and original rollback diagnostics retain existing outcome semantics. Hosted
+admission is described below. No secret restoration or venue-local signing
+fallback is permitted.
+
+
+## Rust hosted and remote signing
+
+Hosted `signHttpRequest`/`signWsAuth` and keyless `remoteSigner` are admitted
+for all three aliases through the shared owned provider; no TS venue is built.
+`bitget.signing.ts` is the standalone HTTP codec shared with the `bitget.api.ts`
+interceptor: same `$` symbol strip (except candles), `encode: false` query,
+underscore-stripped signed body and ms timestamp. Hosted capture uses primary
+custody only and sets `ACCESS-KEY`/`ACCESS-SIGN`/`ACCESS-TIMESTAMP`/
+`ACCESS-PASSPHRASE`; the passphrase comes from the provider's Present result.
+
+Remote WS login keeps the legacy wire (`exchangeName: 'bitget'`, Base64,
+`extraData.timestamp` in seconds over `timestamp + "GET" + "/user/verify"`).
+The decode is declared in `construction-rules.json` as `secondsTimestamp` with
+`secondsSuffix`, shared with OKX; native login work is three typed parts.
+Private `PayloadSigner` is typed unsupported (the TS interceptor never calls
+it), RemoteSigner wins without fallback, and primary-only remote wire refuses
+secondary-identity work before any callback. Actual-WASM proofs are CI-run.

@@ -12,6 +12,12 @@ export interface ResolvedWs {
   fallback?: string;
   relay?: string;
   readonly?: string;
+  /** Account for a venue's first-connect silence check before any reconnect. */
+  initialSilentConnects?: number;
+  /** Frames still reach the engine, but do not prove the current route works. */
+  ignoredMessages?: string[];
+  /** Exact upstream URLs which bypass every fallback and recovery policy. */
+  directUrls?: string[];
 }
 
 export interface ResolvedRouting {
@@ -29,6 +35,12 @@ export interface RestTransportContext {
   exchange: ExchangeName;
   options: ExchangeOptions;
   config: CreateAxiosDefaults;
+  /** Managed engine requests select routing before credential presentation. */
+  credentialIntent?: 'public' | 'primary' | 'secondary';
+  /** A host may resolve the account once and reuse it across requests. */
+  routing?: ResolvedRouting;
+  /** Server fetch runtimes must supply the browser headers expected by the proxy. */
+  serverHeaders?: boolean;
 }
 
 export interface RestTransport {
@@ -41,7 +53,8 @@ export interface RestTransport {
 }
 
 /** Which flavour of request adapter a factory asks for; `bigInt` keeps 64-bit ids as strings. */
-export type RestAdapterVariant = 'default' | 'bigInt' | { region?: 'JA' | 'SG' };
+export type RestAdapterVariant =
+  'default' | 'bigInt' | { region?: 'JA' | 'SG'; raw?: boolean; WebSocket?: typeof WebSocket };
 
 export interface RestAdapterContext {
   exchange: ExchangeName;

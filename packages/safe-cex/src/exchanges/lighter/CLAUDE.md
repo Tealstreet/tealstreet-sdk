@@ -791,3 +791,94 @@ Use a small funded account and minimum-safe size.
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+## Rust engine
+
+`engine: 'rust'` selects `sdk-rs/venues/lighter` for both `lighter` and
+`lighter-robinhood` perpetuals, with deployment-local hosts, quote currency and
+signing chain. The Rust host forwards Application ID, API key index, integrator
+index (as exact decimal text), `remoteSigner`, `extra.lighterSignerProvider`,
+and `extra.lighterStopSlippagePct`. Missing API key index, or neither a local
+secret nor `remoteSigner`, starts public-only data. A remote signer without a
+local secret enables unsigned account snapshots and polling; it does not
+provide transaction signing or a private socket. Remote-only native writes fail
+when the signer is unavailable. Caller client order IDs are refused on every
+shape and across the entire batch before any engine command/write.
+
+Both sockets use engine timers for handshake, idle and reconnect watchdogs.
+Private fills come exclusively from execution records, deduplicated by native
+trade ID; a filled-order cumulative amount is never another execution. Live
+executions during the first five seconds after connecting are retained, while
+subscription history is suppressed. Settings use per-market confirmation clocks
+and uncertain writes block dependent settings updates until fresh confirmation.
+
+Rust history reads actual executions from `trades`, inactive orders from
+`accountInactiveOrders`, and funding from `positionFunding`. It preserves exact
+IDs, signed rebates and actual account-side realized PnL, converts native fee
+rate ticks using `FeeTick = 1_000_000`, and fails incomplete cursor walks rather
+than returning a successful empty/partial history. Execution results retain SDK
+seconds; engine range inputs use integer milliseconds.
+
+The signer supports current market IDs `0..32767` except reserved `255`; API key
+indices remain `0..254`. Independent TS/Go-WASM vectors cover serialization,
+preimages, builder fp5 aggregation, auth and the new high market IDs. Unused
+first-port grouped-order/approval signer surfaces and their unused 32-byte hash
+helpers are removed; the exchange places bracket siblings sequentially as TS
+currently does. Deliberate TS fixes are listed in the port plan and replay gate.
+
+## Rust position leverage and partial amendments
+
+Position `initial_margin_fraction` is a percent string (`"20.00"` = 20% = 5x;
+`"1.00"` = 100x, clamped to the market max); strings above 100 and integers are
+1/10,000 ticks, floats are percents.
+After a private reconnect, fills made during the outage are backfilled once from
+`/api/v1/trades`; fills stamped ahead of the host clock are kept.
+Public market risk fractions keep their separate tick-based interpretation.
+Margin-mode writes preserve the parsed position leverage. Invalid market
+bounds fail without panicking or replacing a known account snapshot.
+Price-only cancel/recreate amendments use the observed remaining quantity;
+explicit replacement amounts keep the caller's requested quantity. This fixes
+the TS default that re-places the original amount after a partial execution.
+
+## Rust shared public feeds
+
+Shared public-feed snapshots revalue loaded native positions with the current
+positive normalized mark, then last price, using the direct ticker handler's
+PnL formula. The ticker mapper copies index into mark when mark is absent;
+an explicit zero mark falls through to last. These are cumulative ticker
+snapshots, so the fallback uses current native fields rather than which
+optional fields appeared in a venue delta.
+Public quotes do not mark private datasets loaded and do not change balance;
+the next authenticated account snapshot calculates balance from native reported
+PnL (or retained prior same-side PnL when omitted), preserving native equity/free.
+Shared prices can still revalue displayed positions after that snapshot. Later
+native REST ticker seeds cannot replace provider quotes and reapply position
+valuations after restoration.
+
+A partial Rust catalogue must not turn unknown owned exposure into an empty
+successful account. A REST snapshot with an unmappable nonzero position, or
+an open-order scope with an unmappable working order, warns and retains its
+previous scope. Zero unknown positions and terminal unknown orders remain
+ignorable. This bounded whole-scope guard precedes separate row-isolation work.
+
+Rust private account valuation uses the native `positions[].unrealized_pnl` and
+`position_value` when supplied (official model:
+https://github.com/elliottech/lighter-python/blob/main/docs/AccountPosition.md).
+Missing native PnL retains the prior finite valuation for the same market and
+position side; a new unvalued exposure remains visible with zero unavailable PnL
+and a warning. Realized PnL is never substituted. Aggregate balance sums the
+preserved position PnL instead of calculating a fictitious entry loss from a
+zero/missing ticker. Native account equity/free remain authoritative; a genuine
+later public quote can update position PnL, which a subsequent private snapshot
+without PnL retains. Explicit native PnL overrides conflicting public quotes.
+
+## Rust reduce-only confirmation and rate errors
+
+When a reduce-only limit lacks matching exposure, Rust waits for the account
+read to complete with target size/absence evidence, with a10s deadline. The wait
+belongs to one command and read serial. Settings-only retained positions cannot
+confirm it, and a timed-out read cannot release the next queued order. Failed
+confirmation sends no nonce/signature; prior accepted legs keep aggregate outcome
+safety. HTTP405/429 retain native diagnostics and add neutral guidance without
+replaying placement. An explicit21613 placement refusal refreshes account/orders
+without guessing the opposite margin mode.

@@ -159,4 +159,17 @@ describe('ChaserOrderHandler', () => {
       });
     });
   });
+
+  it('refuses a chase visibly when native account state cannot be read', () => {
+    const emit = vi.fn();
+    (mockExchange as unknown as { emitter: { emit: typeof emit } }).emitter = { emit };
+    vi.mocked(ChaserOrderInstance).mockImplementationOnce(function () {
+      throw new Error('Native market catalog is not ready');
+    });
+    expect(() =>
+      handler.handle({ op: 'chaser:start', data: { symbol: 'BTCUSDT', side: OrderSide.Buy, size: 1 } } as StoreWorkerPayload),
+    ).not.toThrow();
+    expect(chaserOrderManagerInstance.add).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('error', 'Chase for BTCUSDT was not started: Native market catalog is not ready');
+  });
 });

@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"id":"okx-subscribe-unit","units":[55296],"wire":"{\"op\":\"subscribe\",\"args\":[{\"channel\":\"tickers\",\"instId\":\"\\ud800\"}]}"}]}

@@ -1,5 +1,19 @@
 # CLAUDE.md - safe-cex Package
 
+The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
+SDK factories and workers have no TypeScript venue fallback; OUT names refuse
+with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
+and test-only replay/reference implementations remain independent dependencies.
+Historical Rust-adapter fixtures mock only beta admission through
+`__tests__/reference/retainedRustPolicy.ts`; unmocked construction tests enforce
+the real refusal boundary. These fixtures confer no beta activation.
+Hosted-enabled beta names are Binance x4, Bybit x4, OKX x4, Bitget/USDC and
+Bitunix (#2262). Provider-mode eligibility still follows each declared remote
+policy, with no separate beta override.
+Rust option-query capabilities remain false until the loaded native record
+explicitly enables them; a generic wrapper method alone never advertises them.
+
+
 Core exchange integration library. See also exchange-specific `CLAUDE.md` files in `src/exchanges/*/`.
 
 > **CLAUDE.md is a living spec.** When you change non-obvious
@@ -36,6 +50,417 @@ yarn test-ci       # Run all tests (deterministic, no network)
 yarn test          # Watch mode
 ```
 
+Rust venue release profiles live in `sdk-rs/Cargo.toml`; standalone overrides
+live in `sdk-rs/harness/build.sh`. Size profiles must pass the fixed family and
+combined budgets, public CPU/memory gates and complete raw replay comparison,
+retaining identities and financial fields. Native release builds share the
+package setting; measured performance evidence covers WASM.
+
+Migrated Rust signing uses the shared dispatch-time Signer (`docs/plans/RUST_SIGNER.md`).
+The construction-rules `dispatchSigning` flag selects provider setup, currently
+Binance's four aliases, Bybit's five aliases, WEEX (hosted admission disabled),
+AsterDEX and Lighter. AsterDEX first maps its account through `asterdexSignerSetup.ts`
+(resolved API version, hex V3 wallet keys, read agent aliasing the primary
+wallet); native setup and `asterdex-signer-setup.golden.json` pin the same
+mapping. High-level credential input is consumed by a trusted
+`LocalSignerSetup` before `BaseExchange` retains options; generic options contain
+no primary/secondary signing credentials. The WASM constructor's optional third
+argument is private provider setup, separate from engine-options JSON. Cached
+construction metadata preserves `canSign`/public mode; transport receives only
+read-identity presence; managed routing uses explicit credential intent before
+credentials are materialised, while legacy requests retain header-based routing.
+Lighter's trusted native/JSON mapping uses a typed API-index principal when a
+private Schnorr signing ref exists and the original key is not Nonblank.
+Original SetupFacts stay unchanged; the principal is never presentable. Validated
+public L1 lookup metadata is captured before stripping credentials. The resolved
+Account/API index and installed signing ref bind the transaction/auth recipes.
+Schnorr activation and eager-holder removal ship together in the venue cutover.
+
+Rust `localSigner` setup metadata selects explicit secret encoding (`utf8`,
+`base64`, `hex`, or PEM envelope), credential trimming and caller-assigned
+`stableId` per primary/secondary identity. It is consumed with passphrases through
+the private setup channel, never retained in generic exchange options. Unmigrated
+Rust venues reject this metadata. Stable ids never default to key hashes or slot
+names; identity/nonce consumers require the caller's intended stable mapping.
+
+Trusted signer setup uses shared declarative per-family/per-slot normalization
+from construction-rules.json. Unspecified fields preserve caller trimCredential
+metadata; MEXC forces primary credential trimming and secondary preservation. Bitunix declares `trimSigning` with `trimCredential` for both slots, so the
+signing key is trimmed once at setup too (applies once Bitunix adopts dispatch signing).
+The same field policy declares primary required-for-private passphrases and
+required secondary passphrases with primary fallback for OKX and Bitget aliases
+and WEEX.
+Missing/JSON-null secondary passphrases inherit an opaque primary reference;
+explicit empty never inherits. Public mode bypasses only the primary requirement,
+while secondary validation stays active. Shared publicMode intent takes precedence
+over legacy publicDataOnly, including null/omitted requested. This declaration does
+not enable signing for an unmigrated family.
+Normalization and required-material validation occur before opaque identities are installed, and SDK cached
+public/private intent uses the same effective presence before raw options are
+stripped. Whitespace follows Rust Unicode White_Space (NEL removed, BOM kept),
+not JavaScript String.trim. Secret/passphrase bytes and stable IDs are unchanged.
+This policy does not enable an unmigrated family; opaque external providers
+remain responsible for compliant provisioning.
+
+The same construction declaration carries hosted signature encoding and an
+optional passphrase presentation header. Registry HTTP captures snapshot that
+policy and request a distinct Present operation for the setup-owned passphrase
+ref; they never interpolate it into the HMAC payload. Formatting validates the
+entire result and combined header bounds before publication. Callback precedence
+uses the existing declared, case-insensitive header policy. These codec metadata
+fields do not enable runtime family admission or replace actual hosted tests.
+Callback setup reuses the same required-field/absent-only fallback resolver,
+consuming passphrase material into a separate provider Present map and exposing
+only opaque refs to the engine. Presenting one requires admitted signing work
+for its owning identity; it cannot be used in a Credential payload part. Missing
+required material rejects synchronously. The unchanged remote wire supplies only
+the MAC, in the declared hex or canonical padded base64 encoding of 32 raw bytes;
+it cannot supply a missing passphrase. Generic options and callback receiver
+snapshots retain no passphrase, and disposal revokes the setup wrapper.
+
+Callers must provision worker/hosted providers separately rather than copy
+`exchange.options` as credentials, and use readiness/public-mode metadata instead
+of checking `options.key`. Raw legacy native/WASM input is a trusted compatibility
+adapter until those cutover callers migrate; it converges on the same provider
+path and must be removed before TS venue/reference deletion.
+
+For families with enabled hosted-signing admission, browser-facing `signHttpRequest`
+and `signWsAuth` use the same owned provider through bounded signing-only captures, without
+starting account discovery or venue transport work. The default synchronized
+clock can still initialize its existing time-source calibration. The original HTTP config/WS response
+wire stays intact. Shared standalone Binance/Bybit and AsterDEX V1 (an explicit,
+setup-resolved `apiVersion: v1` only; never V3 wallet keys) request-shape interceptors,
+their codec/site tables and the capture utility are the TS retained for remote
+signing after TS venue classes are deleted; no TS venue/API factory is created.
+They retain real qs/Axios serialization and caller-owned WS preimages. Capture
+tokens are single use and fenced by raw deadlines, protocol expiry and clock
+revision; provider text and partial results are not returned on failure.
+A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
+its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
+The BingX native checkpoint keeps hosted admission disabled until those gates.
+Phemex native dispatch signing likewise keeps hosted/delegated admission disabled.
+Trusted setup removes both local credential slots from generic options; its
+REST and user.auth recipes use provider custody and the signed expiry-only receipt.
+The shared delegated-provider companion admits keyless `remoteSigner` and
+`PayloadSigner` accounts only for aliases enabled in construction-rules.json.
+RemoteSigner wins and cannot fall back to PayloadSigner/local secrets; secondary
+remote signing is refused. PayloadSigner retains REST-only private feeds and
+declared native result-header precedence. Its ordinary-function receiver is a
+private frozen public-metadata snapshot with the selected public key, excluding
+all secret/passphrase fields and arbitrary nested caller objects. Callbacks must
+hold their own secret instead of reading `this.secret`; generic exchange options
+retain neither credentials nor callbacks. Provision callbacks in the executing
+host/worker because ordinary worker initialization cannot serialize functions.
+The central policy also declares legacy WS labels and extraData codecs. Metadata
+comes from prepared receipt/payload structure, never a new wall clock or advisory
+context; HTTP remains distinct even when its query matches WS preimage grammar.
+Signing-only HTTP captures accept only their trusted declared header policy;
+WS and credential captures retain default deny.
+The delegated provider initializes UTF-8 codecs only when provider work begins.
+Importing the native registry before its host installs TextEncoder/TextDecoder
+must remain supported; signing and frame I/O require those runtime codecs.
+
+The beta registry always selects Rust in SDK factories and `ExchangeWorker`;
+`ExchangeOptions.engine` remains an accepted compatibility input only.
+`src/__tests__/cutover/*.wasm.test.ts` verifies the worker frame/store consumer
+contract for every `RUST_VENUES` name; actual native startup and independent
+binary lifecycle fixtures have separate evidence scopes. See phase 9 of
+`docs/plans/RUST_REWRITE.md` for deletion blockers; no TS venue may be removed
+merely because its name is registered in Rust.
+
+## Exchange event listeners
+
+`BaseExchange` uses a local TinyEmitter subclass for both TS and Rust venues.
+One throwing listener cannot starve later listeners for the same event; errors
+are reported through `console.error` with venue, event and original cause.
+Reporting emits no error/log event, so failures in those listeners cannot recurse.
+The inherited once/off/context and subscription-snapshot behavior stays intact.
+
+## Rust public-feed ownership
+
+Rust accounts use `publicFeed: { mode: 'direct' | 'disabled' }` or
+`publicFeed: { mode: 'shared', port }`. Without an explicit policy,
+`privateOnly: true` selects disabled; otherwise direct. The pre-start
+`disablePublicWebsockets()` hook also reaches native suppression. Policies are
+fixed before startup. Native suppression covers Public-role sockets and retries;
+Private/Business roles remain independent even on the same URL. Metadata REST
+and account reconciliation remain native to each account.
+
+Rust private startup resolves once the native catalogue, balance, orders and
+positions have loaded, so a retrying public ticker seed cannot time out and
+dispose a healthy account. Public-only startup still requires native tickers.
+Shared accounts additionally wait for compatible provider metadata and a real
+matching ticker seed; private readiness never bypasses that validation. Venue
+account mappers own any price prerequisites for authoritative valuation, and
+`loaded.tickers` remains false until the native ticker seed actually succeeds.
+
+Start a public-only `RustEngineExchange`, then construct `RustPublicFeedProvider`
+(exported by the SDK). Call `provider.attach(channel.port1)` once per account,
+and explicitly transfer `channel.port2` with its shared-policy options to that
+account's worker. One provider per source owns book/candle subscriptions and aggregates ticker
+interest from attached accounts; late book subscribers receive the native
+snapshot without waiting for a new venue event. Tick data, books
+and candles enter the receiving native engine by symbol and leave through its
+normal frames; never copy them into only the JS store. Providers send no private
+sections or account metadata. A running/loaded direct source is mandatory. exchange-server's
+`externalPublicData: { type: 'in-process', source }` uses the same protocol over an
+in-memory port (`serveInProcessPublicData`). One hub per source keeps a single store
+subscription and broadcasts changed tickers every 250 ms. Like TS, it is lenient:
+private startup continues after 30 s without a loaded source, account markets the
+source has not listed are tolerated, and book/candle requests for them wait. A real
+field mismatch still fails. Testnet accounts ignore the venue-keyed source and run
+their own feed. Websocket gateways still reject.
+A source may forward frames: provider-owned book/candle listeners still run
+before the buffer is transferred, while ordinary worker callbacks stay silent.
+Matching shared ticker seeds wake startup even when identical REST data means
+the native engine emits no changed frame.
+Book/candle listeners registered before startup retain current demand and replay
+after native metadata is ready, including when the JS store was restored from
+cache. Callbacks register before the first subscription, and forwarded catalog
+frames precede any synchronous subscription data. Public `fetchMarkets` and
+`fetchTickers` start an unstarted Rust engine and wait up to 30 seconds for their
+native readiness flags, independently of private balance/order reconciliation.
+Running reads return native snapshots; they do not force a metadata refresh.
+The caller still owns the exchange after successful `validateAccount`, including
+disposal; validation does not invalidate an instance intended for reuse.
+Venue/network/product identity and native instrument IDs/flags/contract sizes
+must match before account readiness; account-local metadata may be a subset.
+Catalog changes require restarting provider/accounts. Heartbeats release dead
+ports; provider loss or incompatible data disposes the receiving account without
+a direct-feed fallback. Cached provider fields stay authoritative across later
+account-local REST ticker polls; private state remains independent.
+
+The TS `externalPublicData` option remains for TS adapters. Rust rejects it with
+migration guidance to the explicit port policy. Existing gateway/application
+owners must adopt this API deliberately; a Rust registry entry does not migrate
+their configuration. The policy controls live feed ownership, not routing,
+credentials, supported venue products, or whether explicit public REST queries
+are allowed.
+
+Rust `fetchOrders`, `fetchPositions`, `fetchBalance` and `fetchPositionMode` wait
+for the relevant native readiness flags on cold starts, then apply and forward
+the current native account snapshot. This closes the store-flush delay without
+requesting a network resync. Public-only engines with no requested private
+readiness reject once metadata is ready; explicitly loaded native empties remain
+valid. Missing account-snapshot support, terminal engines
+and disposal reject instead of returning cached rows. Synchronous in-process
+decisions can call `syncAccountState()` once native metadata is ready; the Base
+implementation is a harmless no-op for TS adapters. Native account reads carry
+an explicit frame marker so both worker and main preserve observation freshness
+counters; ordinary stream frames still advance them. Recursive notification
+readers reuse the already-applied state rather than publishing another snapshot.
+
+Rust `nukePositions` sizes one current native position snapshot with the shared
+native-unit sizing helper, preserving each hedge leg. It submits one reduce-only
+market batch and propagates partial or unknown outcomes without automatic retry.
+`nuke` also attempts the venue's cancel-all operation after a close failure;
+the original close failure remains the result. Concurrent nukes are rejected.
+
+## Rust account construction
+
+`exchanges/rust/construction-rules.json` declares signing and private-data
+eligibility for every Rust account. TS reads it synchronously before WASM loads;
+Rust embeds the same table and resolves it before credential validation and
+startup. The optional `publicMode` object carries raw caller intent (including
+remote versus payload signer and index presence) beside `publicDataOnly`.
+Without it, legacy native/harness options keep their original interpretation.
+WASM `construction()` reports credential-free `canSign`, `publicDataOnly`, and
+Aster API-version metadata. `resolveConstruction` exposes the same resolution
+without engine construction or I/O. CI compares both evaluators for every
+registered name. Explicit-private Paradex validation belongs to the registry.
+
+The table's compact `bridge` policy also resolves spot/demo identity, primary-only
+read credentials, payload-signing transport, API-index validation and isolated
+book subscriptions before WASM loads. Native `construction().bridge` reports the
+same choices; runtime behavior uses the engine capability record. Do not add a
+venue-name fallback for either path. FrameApplier quantity units continue to
+come from MARKETS flags; native sizing computations remain unchanged.
+
+The bridge forwards raw Hyro mode and production/simulator URL maps; the
+registry selects network endpoints. Native callers can retain explicit
+`endpoints` when the raw `hyrotrader` config is absent. Private non-Paradex
+`payloadSigner` refusal also belongs to the registry. WASM constructor errors
+carry JSON `venueError` detail, which the bridge wraps as `ExchangeError` to
+preserve `unsupported`/`notSent` through startup and account validation.
+
+## Rust engine capabilities
+
+Each Rust venue reports a capability record (`safe_cex_engine::Capabilities`,
+read through `EngineHost.capabilities()`): account identity, client-order
+lookup, history axes, fills by order id, native cancel-all, leverage reads and
+maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
+order-book queries and options. Clock selection is shared engine-host policy:
+the default SDK transport awaits the shared `virtualClock` startup and reads it
+dynamically for every venue. Explicit host/recording transports retain their own
+clock; native servers supply their OS clock and own its synchronization. There is no per-venue
+`hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
+never from venue names, and adopts it once the engine exists (`ensureHost` or
+`start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
+`fetchLeverageForSymbol`: `onRead` asks the venue, `settings` answers from
+published rails, and `onMetadata` answers from those rails once a metadata
+refresh has loaded them but asks the venue for a symbol not yet refreshed (the
+worker only asks when the active symbol has no rails). `onReadAndMetadata`
+keeps explicit reads fresh and also refreshes a selected symbol through
+`updateSymbolMetadata`; it does not add metadata reads to ordinary `onRead`
+venues. WEEX uses `onReadAndMetadata` so selecting a flat symbol refreshes
+its signed configuration despite cached rails; public-only metadata stays inert.
+Missing history axes
+take the branded base fallbacks, so `exchange.capabilities` reports them absent
+once the engine exists. `account` also gates the engine: `FetchAccount` to a
+venue whose record says `unsupported` is refused before the venue runs, so a
+venue answering identity for only some products (Binance USD-M/PM, Bybit
+except HyroTrader) reports it per product.
+
+Journal adapters, closed-position formats, history-bound normalization, filter
+refusals, STP/execution controls, numeric validation and book callback isolation
+also use engine policies. Capability flags and enum fields append to the existing
+two-word snapshot record without changing quantity units or older discriminants.
+
+Capability-dependent calls made during startup wait for that existing startup
+before validating or dispatching. Internal startup commands do not wait on
+themselves, and ready accounts retain immediate placement/cancel-all dispatch.
+With no capability record and no pending startup, or after failed startup, calls
+reject with a method-specific `ExchangeError` (`invalidInput`, `notSent`) and
+exactly-once reporting. A queued write that never dispatched remains `notSent`
+even if startup traps. Worker forwarding still runs before local policy checks;
+never start a second mirror engine to obtain capabilities. Explicit worker-aware
+readiness is recommended before local history/preflight work; cached markets
+alone do not establish it. Callers must handle typed readiness failures.
+
+## Rust main-thread trading
+
+The web builds a second `RustEngineExchange` on the main thread; the worker's
+instance owns the engine. An instance with a `callMethod` listener (the host's
+worker bridge) forwards the `WORKER_FORWARDED_METHODS` in `exchanges/base.ts`
+(trading, nuke, client-ID lookup, public trades, candles, history axes; plus
+`fetchHistoricalPositions` and the native account reads `fetchOrders`,
+`fetchPositions`, `fetchBalance` and `fetchPositionMode` by name, since those
+wait on native state and would otherwise start a local engine; the worker
+answers them as `WORKER_OPTIONAL_METHODS`, and a mirror's `syncAccountState` is
+a no-op because worker frames keep its store current) whole through
+`callMethodInWorker`, so preflight, placement scopes and nuke retries run
+against the worker's state and report there once. This holds even if a
+main-thread read (`fetchMarkets` during warm start) started a local engine; the
+worker never has that listener. Without a bridge, an instance runs locally.
+`updateOrder` crosses as `{ orderIds, clientOrderId }` because array properties
+do not survive a JSON bridge. Interrupted forwarded writes carry
+`outcome: 'unknown'` and the caller's client order IDs (`WORKER_WRITE_METHODS`,
+`workerCallClientOrderIds`); requests still buffered when a worker stops before
+startup are answered `notSent`. Cancel-all and nuke wait five command deadlines.
+
+A bridged mirror never builds an engine for capabilities. In frame mode it
+adopts the record a snapshot frame carries; in store-payload mode (and from
+`loadCapabilities`) it asks the worker (`fetchEngineCapabilities`) once the
+mirror store reports markets loaded. Capability-defined methods
+(Lighter `changeAccountTier`/`fetchAccountTier`, history fallbacks) then exist on
+the mirror, and the tier methods forward to the worker
+(`WORKER_OPTIONAL_METHODS`). A failed load retries after 30 seconds. Branded
+capability fallbacks are never wrapped, so `capabilities` keeps reporting them.
+
+## Rust engine failure
+
+Physical socket/request/signing/timer IDs are exact JS-safe integers through
+`2^53 - 1`; command IDs and durations retain their existing bounds. Host adapters
+must not coerce resource IDs to 32 bits. WASM rejects malformed numeric IDs before
+parsing payloads or advancing clocks. Checked allocator exhaustion is sticky and
+uses the same terminal path as a trap, withholding the complete queued output
+batch. Workers retire their host and flush intervals before reporting terminal
+StartupFailed; captured pending write failures still reach their original owner
+across replacement, while stale successes and diagnostics remain suppressed.
+Native account streams settle pending owners Internal/Unknown and replay only the
+terminal notice, without constructing a frame from the failed engine.
+
+A native WASM trap makes that exchange instance terminal (`isEngineDead`),
+settles its pending commands and emits `engine-dead` after one visible error.
+The host stops its I/O and ignores late callbacks. Ordinary venue validation,
+transport and consumer-callback errors do not mark the engine dead. Interrupted
+writes report an unknown outcome with supplied client order IDs; never replay
+them automatically or interpret failure as proof that no order exists.
+
+A running ExchangeWorker makes at most one delayed reconstruction attempt with
+a fresh exchange and native state, retaining only public subscription demand.
+The new stream starts with a full native empty snapshot to discard old book and
+catalog baselines. Chasers/TWAPs stop and commands arriving during recovery fail.
+Shared-feed accounts require a fresh provider attachment and account init;
+their closed transferred port cannot be reused. Module-wide WASM initialization
+and sibling accounts remain independent of one account's terminal state.
+
+A terminal `StartupFailed` rejects `start()` with an `ExchangeError` that keeps
+the engine's `kind` and `venueCode`; `validateAccount` returns the same `kind`
+beside `error` (the typed failure wins over the error log venues emit just
+before it), so callers can branch on `authInvalid`/`authPermission` instead of
+matching text. A bare deactivation carries no `kind`.
+
+Rust command waits default to 120 seconds. `extra.rustCommandTimeoutMs` sets a
+positive integer deadline up to 2147482647 ms; long paginated queries may need
+a larger value. The Rust worker RPC allows one additional second for delivery;
+TS worker RPCs retain their five-second wait. Expiry does not cancel the venue
+action, dispose the engine or retry a write. `COMMAND_TIMEOUT` and
+`ENGINE_DISPOSED` preserve unknown outcomes for interrupted writes and currently
+known caller client IDs. Native-generated identity receipts are tracked by the
+bridge-fixes plan; caller IDs alone do not establish complete attribution.
+Native rejections retain known partial-order results. SDK worker and outer CLI
+executor error boundaries copy an explicit allowlist of command fields, including IDs and
+partial counts, instead of flattening them or copying arbitrary error objects.
+Cancellation commands retain the caller's id, symbol and type alongside legacy
+ID dispatch; venue unknown-ID behavior is a separate native contract.
+
+Rust command rejections report once at the SDK command boundary. Explicitly
+correlated native diagnostics remain warning logs while pending or late; a
+known partial success still emits its first associated error. Background logs
+retain their normal visibility. Reporting preserves the original rejection and
+all outcome/receipt fields even when listeners throw. The shared command-error
+allowlist carries `errorReported`; frozen errors use weak object metadata rather
+than message matching or a retained operation ledger. Subscription commands own
+their rejected promises without reporting the same failure a second time.
+
+Definitive GRVT builder approval refusals expose stable
+`GRVT_BUILDER_UNAUTHORIZED`, `reason`, `requiredRaw` and optional `authorizedRaw`.
+The SDK-root `builderAuthorizationOf(error)` validates the complete record and
+works for TS classes, native host errors and worker/hosted deserialization.
+Use it instead of class identity or text. Unknown/pending/network/malformed
+checks stay ordinary failures. The command error allowlist retains only validated
+approval fields; the old class export stays available without prototype repair.
+
+## Rust incomplete history
+
+A successful partial Rust history read returns the available rows with a
+command-attributed `history.incomplete` notice. The JS host marks
+that command's array with non-enumerable `incomplete: true`, independently of
+notice-level filtering. Absence of this positive assertion never proves that a
+venue's history endpoint is exhaustive.
+
+`CallMethodHandler` carries optional `data.completeness: { incomplete: true }`
+beside the existing successful reply's `requestId` and `result`, through both
+structured clone and hosted JSON. `BaseExchange.callMethodInWorker` restores
+that pending request's marker before resolution and observers. Upgrade sender
+and receiver together. Public `historyCompletenessOf`, `withHistoryCompleteness`
+and `copyHistoryCompleteness` helpers preserve it before row transformations;
+Rust derived position and reported closed-PnL mappings retain it even on empty
+results. Bybit's derived history combines both source axes' assertions.
+
+The journal fold rejects flagged fills and symbol-scoped income; with complete
+account-wide fills it discards flagged income enrichment and leaves funding
+unattributed. NX ingestion must still inspect completeness before transforms
+and leave historical coverage uncompleted. Raw native/DO clients correlate the
+translated event command themselves; this SDK transport does not change their
+wire protocol. See B11 in `docs/plans/RUST_CUTOVER_CALLERS.md`.
+
+## Rust socket health
+
+Engine venues own their sockets and reconnect policy; the wasm host only
+observes them. `EngineHost.socketHealth()` keeps per-channel (public, business,
+private) open/first-frame/close state, at one property write per frame.
+`RustEngineExchange` exposes one `RustSocketHandle` per channel through the
+`BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
+CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
+`store.socketHealth` through the shared `summarizeSocketHealth`, on socket
+changes and every 5 s, never through the TS watchdog. A private socket is healthy
+for 60 s of silence, the engine venues' own idle limit. Reconnecting closes only
+open sockets; a connect in flight is left alone, as in TS. `Deactivate` and
+`auth.rejected` events raise `authFailureStreak`; a private stream delivering
+again resets it.
+
 ## Client order ID contract
 
 `PlaceOrderOpts.clientOrderId` is a caller-supplied ID for the venue-native
@@ -69,7 +494,7 @@ SDK.
   OKX (+EU/demo), Bybit linear/inverse/spot (+demo), Bitget (+inverse/USDC),
   KuCoin futures/spot, Phemex, BloFin, BingX, WEEX, Bitunix, Bitrue, Backpack,
   Coinbase (+spot), Crypto.com, WOO, Orderly family, Paradex, GRVT, ApeX Omni,
-  Hyperliquid (+spot). **Hyperliquid honors every shape**, stops and brackets
+  Hyperliquid (+spot), TxFlow (testnet plain Limit/Market). **Hyperliquid honors every shape**, stops and brackets
   included (`isHonorableShape`): a stop is one native order, and on a bracket
   the caller's ID goes on the entry while each TP/SL leg gets its own minted
   cloid. It also mints a cloid for every order it places, caller ID or not.
@@ -169,6 +594,14 @@ contract documented in this CLAUDE.md tree. Tests committed to the package must
 be deterministic and must not require network access, API keys, or local secret
 files. Live probes belong outside the test runner and outside `src/exchanges/`.
 
+The shared Vitest setup denies and records unstubbed fetch, XHR send and socket
+connections. Cleanup rejects recorded attempts even when exchange code catches
+the immediate error. Supply explicit local fixture facts instead of relying on
+an endpoint response. An intentional in-process socket fixture must bind loopback
+and use the test guard's exact-port allowance, revoked in `finally`; there is no
+blanket localhost or exchange-host exception. See
+`docs/plans/TS_UNIT_TRANSPORT_ISOLATION.md` for the test-only boundary.
+
 Vitest discovers deterministic `*.test.*` files throughout `src/` and excludes
 only explicitly named `*.integration.test.*` and `*.network.test.*` suites.
 It does not blanket-exclude `src/exchanges/**`, and coverage includes that tree
@@ -204,6 +637,28 @@ part of the venue contract. Never turn a transport/auth/rate-limit failure into
 documented rather than statically enforced because distinguishing a legitimate
 successful empty response from an error fallback requires venue-specific
 control-flow and response knowledge.
+
+Rust diagnostics emit `engine-event` with the full `EngineEvent` (code, level,
+message, fields), forwarded by the worker as `{ op: 'engine-event', data: [event] }`.
+`ExchangeHealthMonitor.processEvent(event, classified?)` uses codes only;
+`processHealth(exchange.getHealth())` copies authoritative lifetime counters,
+including diagnostics hidden by minimum-level filtering. Category counts and
+recent errors count observed reports, separately from engine counters. Subscribe
+to the structured channel once; skip legacy notifications only when they
+carry `engineEvent`. Keep listeners for uncoded command/host errors.
+For compatibility, Errors still emit `error` with `opts.engineEvent` and Info/Warn
+still emit `log` with the event as the third argument. Telemetry has `event_code`.
+This preserves existing auth badge/reload delivery until downstream cutover;
+new Rust consumers use codes/typed errors, while legacy TS keeps text patterns.
+
+The `'error'` event's options carry `classified: { kind, outcome, venueCode }`
+for typed engine errors (`classifiedError`), and
+`ExchangeHealthMonitor.processMessage(message, isError, classified)` lets
+specific kinds (auth, rate limit, venue unavailable, network/timeout) win over
+text; catch-all kinds (`rejected`, `invalidInput`, `internal`, `unsupported`)
+only replace the `unknown` fallback, because text patterns know venue auth codes
+the engine leaves generic. Hosts must pass `opts.classified` from their `'error'`
+listener into `processMessage` for this to apply.
 
 `src/health/errorPatterns.ts` is not just toast labeling. The web controller
 uses its `auth_invalid`, `auth_expired`, and `auth_permissions` categories to
@@ -298,7 +753,7 @@ position". If neither exists, the honest code path is a refusal.
 
 ### The inverse rule — and what is NOT true about it
 
-Inverse handling belongs in SIZING. `order/positionSizing.ts:nativePositionSize`
+Inverse handling belongs in SIZING. `safe-cex/src/utils/nativePositionSize.ts`
 branches on `isInverse` because an inverse contract is a fixed QUOTE amount, so
 its count comes from the notional.
 
@@ -367,9 +822,10 @@ only defined on linear markets.
 
 ### 3. Native position sizing — converged, and the proof it works
 
-`script-api-core/src/order/positionSizing.ts:nativePositionSize` is the single
-definition; web's `getPositionNativeSize` and the CLI's `nativeCloseSize` are
-both thin wrappers over it. Its own comment records that the copies HAD drifted
+`safe-cex/src/utils/nativePositionSize.ts` is the single definition;
+`script-api-core/src/order/positionSizing.ts` re-exports it for existing callers.
+Web's `getPositionNativeSize`, the CLI's `nativeCloseSize`, and Rust bulk closes
+use it. Its own comment records that the copies HAD drifted
 before they were merged. One function in the shared layer, adapters either
 side.
 
@@ -409,8 +865,11 @@ See `apps/web/src/positionsHistory/helpers/CLAUDE.md`.
 
 `BaseExchange` deliberately supplies inert defaults for `start`, `placeOrder`,
 and `fetchHistoricalFills`. These functions carry a private
-runtime brand exposed through `isBaseCapabilityFallback`; derived class fields
-replace the branded function during construction. The deterministic capability
+runtime brand; derived class fields replace the branded function during
+construction. `exchange.capabilities` is the only reader: a capability is
+present when its method (`CAPABILITY_METHODS`) is neither the branded fallback
+nor an unconditional `return []`. Subclasses opt out of an axis with
+`markBaseCapabilityFallback`. The deterministic capability
 suite in `src/__tests__/audit-regressions/exchange-metadata-capabilities.test.ts`
 loads the real registry and enforces the following minimum contracts:
 
@@ -421,7 +880,7 @@ loads the real registry and enforces the following minimum contracts:
 - TP/SL trigger defaults must belong to the unique advertised trigger set.
 
 The fills-history runtime gate is deliberately not metadata. Ingestion checks
-the capability brand on `fetchHistoricalFills` and then applies
+`exchange.capabilities.fillHistory` and then applies
 `symbolScopedFills.ts` to decide whether the venue can be asked account-wide or
 must be walked by symbols discovered from the income ledger. A branded fallback,
 an unenumerable symbol-scoped venue, and an empty result are three different
@@ -462,8 +921,20 @@ secret and sign elsewhere. It receives the exact bytes the venue would HMAC
 and returns the value for the signature slot, plus headers to add to the same
 request. Paradex is covered in `exchanges/paradex/CLAUDE.md`.
 `utils/payloadSigner.ts` routes both modes through one function, so local
-signing and delegated signing share the same payload. It signs REST only: with it set, `start()` skips the private
-websocket. Tests: `src/__tests__/payload-signer.test.ts`.
+signing and delegated signing share the same payload. Binance and Bybit skip
+the private websocket with this REST signer. Paradex obtains its JWT through
+the payload signer and uses that JWT on its private websocket too.
+The Rust Paradex host returns signatures as typed engine events; callers keep
+the same callback contract. No other Rust venue consumes a payload signer. `runsOnRustEngine` keeps
+Bybit- and Binance-family accounts with one on TS, whose signers honour it.
+Every other TS venue, including the hosted Coinbase/Orderly classes, ignores a
+payload signer while `canSign` counts it, so those accounts stay on the engine.
+A Rust account that would run privately with a payload signer refuses at
+startup, before any engine or transport work: an `ExchangeError` with
+`kind: 'unsupported'`, `outcome: 'notSent'`, which `validateAccount` reports
+with its kind. Lighter's payload-only accounts still start public. Tests: `src/__tests__/payload-signer.test.ts`,
+`src/__tests__/paradex.payload-signer.test.ts` and
+`src/__tests__/audit-regressions/rust.payload-signer-refusal.test.ts`.
 
 ## Account data on shared public markets (`loadAccountMarketOverlay`)
 
@@ -495,7 +966,11 @@ is how a host opts in; the web main thread registers one in
 `hyperliquid.builder-fee-approved` event to `/api/logger/builder-fee`. **Never
 import a telemetry client or POST to a Tealstreet route from this package** —
 call `reportException` / `reportEvent` and let the host decide. Workers still
-ship errors through the `sendToSentry` op, not the sink.
+ship errors through the `sendToSentry` op, not the sink. `emitAndLogError` (the path every command rejection takes,
+in the worker, main thread and exchange-server) and `ExchangeWorker.logError`
+tag typed engine errors with `error_kind`, `error_category`, `error_outcome`
+and `venue_code` (`exchangeErrorTags`, closed set only), so filters can key on
+the kind rather than venue text.
 
 ## Proxy & Tunnel Architecture
 
@@ -510,6 +985,58 @@ approvals, the public CORS proxy for clocks, UDF and lighter, the secondary-key 
 public-server proxies) use `proxyPrefix` / `privateProxy` / `withPublicCorsProxy` /
 `serverProxyUrl`. A method returning nothing means "go direct". Tealstreet's pools,
 tunnel and passthroughs are `transport/tealstreet/tealstreetTransport.ts`.
+
+**Engine hosts use the same provider.** `RustEngineExchange` wraps its raw host
+transport with `transport/engine.ts`; the venue still emits real URLs. Resolve
+the account's routing once and reuse provider REST authorization per operation.
+HOW uses the package's raw adapter so signed request strings, large native IDs,
+status/error bodies and response headers survive unchanged. Preserve the venue
+factory gates (BingX private defaults to HOW unless explicitly disabled; Binance
+public clients bypass ordinary proxies; WEEX/GRVT/BloFin do not install HOW).
+KuCoin futures and spot install HOW for private clients even if
+`tealstreetTunnel` is false or unset. Paradex payload signing skips its API
+factory's HOW adapter; JWT acquisition uses a direct request in every mode.
+Account normalization already applies metadata; do not normalize explicit
+headless options again at this boundary. Engine socket effects carry optional
+public/private/business roles; new venues with shared URLs must supply the role.
+Reuse `WsDirectFallback` and the feature-gated package relay. Native launchers
+serialize `resolveEngineRoutingPlan(exchange, options, realRestBaseURL)` and pass
+it to `NetworkTransport::with_routing` with a fresh context token provider; never
+serialize a JWT. API venue engines mirror the TS secondary client's GET-only
+identity and egress when `secondary_key` and `secondary_secret` are supplied;
+`secondary_passphrase` overrides the primary passphrase only when present.
+Writes, posted reads and private socket authentication retain the primary key.
+Definitive client-ID reads and Kraken's separate history client explicitly use
+primary routing; Bitget degraded-stream balance repair retains its fast primary
+client. Public GETs remain unsigned where the venue omits authentication; those
+using the TS dynamic client still select its secondary egress. Binance's public
+client and Aster's public API keep their existing routes. Incomplete secondary
+credentials reject before I/O. Aster's separate read-agent auth contract remains
+unchanged. HTTP `primary` hints fence primary-account reads from the secondary
+route. Optional HTTP `direct` / `publicCors` route hints support venue clock fallback;
+hosts consume these hints before network I/O. Public CORS routes come from the
+provider (and serialized native plan), never venue URLs. Missing native CORS
+policy fails explicitly; normal requests retain account routing and deadlines.
+
+Managed engine HTTP uses `Transport.prepareHttp` to finish route/proxy-token
+and tunnel readiness before signing. `credentialIntent` (`public`, `primary`,
+`secondary`) selects the route independently of HTTP method or credential headers;
+custom routing providers must honor it. A custom HTTP/tunnel adapter without the
+prepared interface fails explicitly instead of invoking its legacy sender.
+Preparation and binding never send HTTP. Binding preserves signed URL/query/body
+bytes and rejects conflicting host headers; `ready()` rechecks the original
+request deadline and resource, and `dispatch()` invokes fetch/WebSocket.send
+synchronously after the engine release claim. Cancellation releases only that
+request's prepared/bound resources. Opaque legacy requests share the executor but
+retain their older routing and carry no managed release/outcome guarantee.
+
+Engine venue requests use native authorization headers. On Coinbase and its
+spot alias, an ordinary REST proxy owns `Authorization`, so the host moves the
+venue JWT to `Coinbase-Authorization` before acquiring proxy authorization.
+Direct and HOW requests retain the original `Authorization`. Native plans carry
+this as optional per-route `headerAliases`; native code applies those aliases
+before route authorization and has no Coinbase routing table. Alias conflicts
+fail before network I/O. Plans contain header names, never credential values.
 
 **The default is `directTransport` (`transport/direct.ts`).** Every Tealstreet entry
 point imports `transport/registerTealstreetTransport` as a side effect: the web main
@@ -703,8 +1230,8 @@ existing connection only where the venue keeps them in the same account as its
 derivatives, so balance, margin and positions stay one view. A venue with a separate
 options account gets its own exchange name instead. Option markets carry
 `Market.option`; chains, expiries and account greeks come from `fetchOptionChain`,
-`fetchOptionExpiries` and `fetchAccountGreeks`, which are branded, so check them with
-`isInertCapability`. Chains are fetched on demand and never enter the store, so the
+`fetchOptionExpiries` and `fetchAccountGreeks`; check them with
+`exchange.capabilities` (`optionChain`, `optionExpiries`, `accountGreeks`). Chains are fetched on demand and never enter the store, so the
 perp ticker path is unchanged when options are on.
 
 ### Decision Flow
@@ -751,7 +1278,13 @@ Is requiresCors true?
   before the browser shared-worker or CLI/global refresh path, but invalid,
   expired, empty, or throwing contextual providers must fall back to the normal
   module token path. Do not replace this with module-global `setProxyToken` in
-  multi-user hosts.
+  multi-user hosts. Rust engine transports capture the provider of the context
+  that created the account and reinstate it around each proxy authorization
+  (`withProxyTokenProvider`), because engine requests start from timers, sockets
+  and shared feeds whose async context is not the account's. HOW requests and
+  relay sockets read the token after awaits or on open, so they bind the lookup
+  at request/socket start through `HOWConfig.bindProxyToken`
+  (`bindProxyTokenLookup`); the engine creates relays inside the scope.
 - **Static validation**: `exchangeMetadata.test.ts` has invariant tests that catch impossible configurations (e.g., `requiresCors + forbidCors`). Run `yarn test-ci` after changing metadata.
 - **Unknown metadata fails closed**: `getExchangeMetadata` throws for runtime
   names outside the exhaustive registry. Never restore a venue-shaped fallback;
@@ -893,6 +1426,19 @@ The Rust polling helpers preserve wildcard fallback, finite-value clamping,
 and replacement of the entire map. `get_tick_interval` takes the resolved base
 and auth-failure streak so the multiplier precedes the same backoff cap.
 
+Every Rust SDK account sends `setPollScale` before native startup and when the
+multiplier or Base auth streak changes: its resolved Base `getTickInterval()`
+over the metadata `tickInterval`. Each venue keeps its own reconcile cadence
+(Bybit 5s, Kraken 5-10s, Paradex 10s), so the scale slows or speeds those
+cadences rather than replacing them with the metadata tick. The resolved tick also
+travels as `ceiling`, so a server multiplier or the auth-backoff cap bounds the
+slowed cadence as before unless a venue's native cadence is already slower. Effective option
+changes are checked at the existing store flush cadence. Infinity is the explicit
+scale `null`; venue constructor options do not carry a second polling policy. Unchanged values are suppressed, failed delivery stays
+eligible for retry, and disposal removes the multiplier listener. These controls
+govern periodic reconciliation, not socket supervision or explicit reads. Base
+auth-streak propagation alone does not prove classified native auth feedback.
+
 ## Debugging exchange REST traffic
 
 REST routed through the HOW adapter appears as WS frames, not XHRs.
@@ -924,3 +1470,36 @@ runner depends on that bit for `retry`, blocking steps, and capture
 writeback. For fire-and-forget worker commands with no `reqId`,
 handled failures should still emit `exec-log` so the terminal displays
 the error.
+
+## Orderly Rust engine
+
+Tealstreet DEX, KodiakFi, WOOFi, Mode, SalsaDEX and What use one Rust venue
+with broker options. Production registries must not import the frozen replay
+reference in `src/__tests__/reference/orderly`. ED25519 signatures cover exact
+request bytes. The shared engine transport supports direct requests, proxies
+and the built-in raw HTTP-over-WebSocket adapter (`supportsTunnel: true`).
+Authorization may add intermediary headers but must not change the original
+URL suffix, body, method or venue headers. Socket roles and feed identities
+are declared by the venue; the shared host applies account routing policy.
+Custom provider upgrade headers require a capable host and are checked before
+engine construction. History `orderId`/`status` filters fail explicitly rather
+than returning unrelated rows. See `sdk-rs/venues/orderly/README.md`
+for native IDs, margin modes, caller IDs and socket capacity.
+
+
+## Native credential polling feedback
+
+Rust account-read notices carry the construction-time signer slot and read
+scope, never credentials or response bodies. Bounded counters isolate primary
+and secondary Account/Balance/Orders/Positions/Settings failures; only matching
+accepted evidence clears a counter. Their maximum drives the existing Base
+polling policy, including server slowdown and Infinity. Unknown, public,
+unsigned and retry-intermediate results do not clear or create failures.
+Coinbase currently uses primary JWT credentials only: saved read fields and
+their proxy are dropped from effective options with a warning before startup.
+
+MEXC trusted compatibility setup preserves its existing persisted account IDs:
+`mexc:` plus the first12 SHA256 bytes of the raw Primary API key are supplied as
+explicit Primary stableId before provider trimming. JS/native setup reject a
+conflicting supplied mapping. Generic LocalSigner never derives stable IDs;
+MEXC venue execution reads only installed metadata, never hashes credentials.

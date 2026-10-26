@@ -1,0 +1,189 @@
+{
+  "oracle": "Installed Starknet JS typedData.getMessageHash/ec.starkCurve.sign; ethers Wallet.signTypedData plus @starkware-industries/starkware-crypto-utils key derivation. Synthetic keys only. Upstream message shapes: https://github.com/tradeparadex/paradex-py/tree/main/paradex_py/message",
+  "cases": [
+    {
+      "environment": "prod",
+      "chain": "PRIVATE_SN_PARACLEAR_MAINNET",
+      "ethChain": "1",
+      "key": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "address": "0x0123",
+      "subkey": "0x456",
+      "now": 1717171717171,
+      "auth": {
+        "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717258117}}",
+        "hash": "0x3022060ac040332d4cc24e4457629ef819a81080b07b4c494edddf07b86bab9",
+        "signature": "[\"306591831957677688406173037759283545231962084881224351267944421290858705903\",\"1710667514104241741625798608779486922475855940293283417316240003060459014041\"]"
+      },
+      "orders": [
+        {
+          "name": "limit-tiny",
+          "market": "BTC-USD-PERP",
+          "side": "BUY",
+          "type": "LIMIT",
+          "size": "0.00000999",
+          "price": "0.00000999",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Order\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Order\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"BTC-USD-PERP\",\"side\":\"1\",\"orderType\":\"LIMIT\",\"size\":\"999\",\"price\":\"999\"}}",
+          "hash": "0x7f15406ab59102012e076c00e9afb9c3a20445f1d7e7e41ea14d17e473f17ac",
+          "signature": "[\"702906913845950371474759134675218167779701135371852744705547339813771784599\",\"368956470510664006617870137893676054369598787424255564035881922496304184251\"]"
+        },
+        {
+          "name": "market",
+          "market": "ETH-USD-PERP",
+          "side": "SELL",
+          "type": "MARKET",
+          "size": "1.234567899",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Order\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Order\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"ETH-USD-PERP\",\"side\":\"2\",\"orderType\":\"MARKET\",\"size\":\"123456789\",\"price\":\"0\"}}",
+          "hash": "0x4b9713bfe3a5052b2d0cc1771d18030de062243c398b94b0d8975e699b7a030",
+          "signature": "[\"2826855445598021114879235695730856886486949683069951021764878651480801738819\",\"816470002013353219256281536392710911500305399892707869582062616800230529874\"]"
+        },
+        {
+          "name": "stop-market",
+          "market": "BTC-USD-PERP",
+          "side": "SELL",
+          "type": "STOP_MARKET",
+          "size": "1e-8",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Order\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Order\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"BTC-USD-PERP\",\"side\":\"2\",\"orderType\":\"STOP_MARKET\",\"size\":\"1\",\"price\":\"0\"}}",
+          "hash": "0x4541c0147205f6e9e5280db6a3cea40647b079712032412e644cd686afcf4bf",
+          "signature": "[\"2777513964357598283918518206075298801527383723227064473572550091235812968847\",\"368858296697259889013922236586438601808505474756260804698152612377336965934\"]"
+        },
+        {
+          "name": "take-profit-limit",
+          "market": "ETH-USD-PERP",
+          "side": "SELL",
+          "type": "TAKE_PROFIT_LIMIT",
+          "size": "12.00000001",
+          "price": "3456.123456789",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Order\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Order\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"ETH-USD-PERP\",\"side\":\"2\",\"orderType\":\"TAKE_PROFIT_LIMIT\",\"size\":\"1200000001\",\"price\":\"345612345678\"}}",
+          "hash": "0x2f58b09f4c152f66b72963f155fb279b84c134c791aa1ead9561d716fe218b8",
+          "signature": "[\"452450867586545933641628077099678622628820096324906086054416351010816325184\",\"1713793911345893275834075528817900886069198147811725997455688028036688386908\"]"
+        },
+        {
+          "name": "modify",
+          "market": "BTC-USD-PERP",
+          "side": "BUY",
+          "type": "LIMIT",
+          "size": "2.5",
+          "price": "12500.12345678",
+          "id": "123456789012345678901",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"ModifyOrder\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"ModifyOrder\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"},{\"name\":\"id\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"BTC-USD-PERP\",\"side\":\"1\",\"orderType\":\"LIMIT\",\"size\":\"250000000\",\"price\":\"1250012345678\",\"id\":\"123456789012345678901\"}}",
+          "hash": "0xe783385d87e3261f26af9a6ab077e2cda37c195a70f621587f17382e00dd52",
+          "signature": "[\"308729275519161986477959453958607911431728456959530109624189128709017120847\",\"2548235221438463163401566567042133278306498144490020548019522951626175541451\"]"
+        }
+      ],
+      "ethereum": {
+        "key": "1111111111111111111111111111111111111111111111111111111111111111",
+        "seed": "0x32f840abbaf2ebf8b9a62c81643f45501fedc36048bd296efd73bd274e5e7e162ef4bc57c0c23f41e263240cf23f1620b32caf6d9817e9d893d4e1387ef32e801b",
+        "derivedKey": "0x4b66a9d883cd6dd0ada419c06467b69124fd6e06c7ebed6c391314fea35ddcd",
+        "publicKey": "0x4d9096599a1c0192b391365007929657a13e21241cc5c060b6614dba9b1dd66",
+        "address": "0x164f1d17c7a66fea8cb5b0716ec5f36e61bb9d56aa42b3e562bb64f9ede55c8",
+        "auth": {
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717258117}}",
+          "hash": "0x7c2e06c3525b6541334453736f9722480c2ce32659c0fa2d4f2b8fc52a0de79",
+          "signature": "[\"81452468745321081314422137953619068506022007472660034095415855042691851024\",\"1838150356649616347743283627632738209519745256637659853685349021030282165143\"]"
+        },
+        "shortAuth": {
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717172017}}",
+          "hash": "0x40b6064ba2d662d4e6e7b48a416d96cb730b5453cc61b5c04bf602d66cd34ce",
+          "signature": "[\"760460408874822742719819630491380929488671230540536395794208817992832734855\",\"1320110736178224356113551929302115749790352335557005451264196218294579524126\"]"
+        }
+      },
+      "shortAuth": {
+        "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_PARACLEAR_MAINNET\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717172017}}",
+        "hash": "0x59fb845367c361556226659e66ca45112fd70cae0c0f7283731ea961195fc81",
+        "signature": "[\"231979350948343018106765523287202811199617808344828686846219691482795094354\",\"832468217157371240387679252539815718862416568643662979876906935613286465501\"]"
+      }
+    },
+    {
+      "environment": "testnet",
+      "chain": "PRIVATE_SN_POTC_SEPOLIA",
+      "ethChain": "11155111",
+      "key": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "address": "0x0123",
+      "subkey": "0x456",
+      "now": 1717171717171,
+      "auth": {
+        "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717258117}}",
+        "hash": "0x462b3df5c0f9aef5fbc4387b2ad0ba76434bcb50149b2c53509ba1c6283b039",
+        "signature": "[\"4596418650441562905267783266986014476053003827159051489919432137346770139\",\"1087816289933734614480758605279275927821253756148705067020382346532340082248\"]"
+      },
+      "orders": [
+        {
+          "name": "limit-tiny",
+          "market": "BTC-USD-PERP",
+          "side": "BUY",
+          "type": "LIMIT",
+          "size": "0.00000999",
+          "price": "0.00000999",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Order\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Order\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"BTC-USD-PERP\",\"side\":\"1\",\"orderType\":\"LIMIT\",\"size\":\"999\",\"price\":\"999\"}}",
+          "hash": "0x5388e5d9db18af1be2a8837649ae186c61eba97a0776d5e0340c8b2afb0a9fa",
+          "signature": "[\"1520729459328372596890482179401107980884190293605742106114772373339766267468\",\"2421770459166941952523009651755438684651363741137356555618632413809318734795\"]"
+        },
+        {
+          "name": "market",
+          "market": "ETH-USD-PERP",
+          "side": "SELL",
+          "type": "MARKET",
+          "size": "1.234567899",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Order\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Order\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"ETH-USD-PERP\",\"side\":\"2\",\"orderType\":\"MARKET\",\"size\":\"123456789\",\"price\":\"0\"}}",
+          "hash": "0x194a5f13e5354c03783be9f74026d8f15514d0583c5f57667671b713b97e0a6",
+          "signature": "[\"852646908358860246263112613099801864049807133871534903179569789623653202466\",\"2699361278114010761116654343935644359512846028014613549988897278290716041894\"]"
+        },
+        {
+          "name": "stop-market",
+          "market": "BTC-USD-PERP",
+          "side": "SELL",
+          "type": "STOP_MARKET",
+          "size": "1e-8",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Order\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Order\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"BTC-USD-PERP\",\"side\":\"2\",\"orderType\":\"STOP_MARKET\",\"size\":\"1\",\"price\":\"0\"}}",
+          "hash": "0x1903fd59549e6927def823eee210ec63ac3cd515c2b05ab3eb27205a6e4c853",
+          "signature": "[\"3306959234154518064514521621523063057363539011072845844460741563651942502836\",\"2402204750038206707287589642174470548664073088280544371888954550480096817930\"]"
+        },
+        {
+          "name": "take-profit-limit",
+          "market": "ETH-USD-PERP",
+          "side": "SELL",
+          "type": "TAKE_PROFIT_LIMIT",
+          "size": "12.00000001",
+          "price": "3456.123456789",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Order\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Order\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"ETH-USD-PERP\",\"side\":\"2\",\"orderType\":\"TAKE_PROFIT_LIMIT\",\"size\":\"1200000001\",\"price\":\"345612345678\"}}",
+          "hash": "0x13479a61719cb856bf558d09fb76386f25bc0a6c247c2fa1f44e9ef298e8863",
+          "signature": "[\"2891929510172765377270830833715286736209092917509223909557000186460776104530\",\"3109115242092674628468263383300106793188073206665160064888374587448676237051\"]"
+        },
+        {
+          "name": "modify",
+          "market": "BTC-USD-PERP",
+          "side": "BUY",
+          "type": "LIMIT",
+          "size": "2.5",
+          "price": "12500.12345678",
+          "id": "123456789012345678901",
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"ModifyOrder\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"ModifyOrder\":[{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"market\",\"type\":\"felt\"},{\"name\":\"side\",\"type\":\"felt\"},{\"name\":\"orderType\",\"type\":\"felt\"},{\"name\":\"size\",\"type\":\"felt\"},{\"name\":\"price\",\"type\":\"felt\"},{\"name\":\"id\",\"type\":\"felt\"}]},\"message\":{\"timestamp\":\"1717171717171\",\"market\":\"BTC-USD-PERP\",\"side\":\"1\",\"orderType\":\"LIMIT\",\"size\":\"250000000\",\"price\":\"1250012345678\",\"id\":\"123456789012345678901\"}}",
+          "hash": "0x762195a2d9768df906a75da73e797a84090444fe956da02e2ef095e50692f00",
+          "signature": "[\"1786399941642571172746240586507505350672717227918809119348425732382093135104\",\"2887360532777226688043365234760327050353144387978300768775338731205374964894\"]"
+        }
+      ],
+      "ethereum": {
+        "key": "1111111111111111111111111111111111111111111111111111111111111111",
+        "seed": "0xa4c0280bd61047e81410212664d31bc4ee88d05e2060241890fad6c3bd3d69fc328a7cfd9baf493439845f7d30ab7980e5332bf5a0e9f4726f8136d24a0eebd71b",
+        "derivedKey": "0x30aa092002d2810ad48c006709502638b83f7552f0a6ba69968d05d2c19d0cf",
+        "publicKey": "0x6e13c200559930b97d8760119b5f63647dc8a32b0dcb0129a76cd577c44e1ff",
+        "address": "0x41dec1cfae735052bb70f160f76d27ae515bc6f966e6071157b755bb5ae9723",
+        "auth": {
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717258117}}",
+          "hash": "0x63e06503c5a93c38acee9b5eec3e9dd6ab4e9ca1be51a4e0ed4846d53977c0b",
+          "signature": "[\"3130601969825633528042781643618849397700393871191295593153177385668011628815\",\"1544685308404509673589024586843482169246348639361366022474354012239216793382\"]"
+        },
+        "shortAuth": {
+          "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717172017}}",
+          "hash": "0x6ab136bf8160e6c6dce953d78a727b7ebc3d2ae66ab4f12c34a481cb0a15ac6",
+          "signature": "[\"1380525831866187140855060399656173769485343258683608351934767225859144711380\",\"1355324703687702537343818203428942149814570699551551364445721834808452951097\"]"
+        }
+      },
+      "shortAuth": {
+        "raw": "{\"domain\":{\"name\":\"Paradex\",\"chainId\":\"PRIVATE_SN_POTC_SEPOLIA\",\"version\":\"1\"},\"primaryType\":\"Request\",\"types\":{\"StarkNetDomain\":[{\"name\":\"name\",\"type\":\"felt\"},{\"name\":\"chainId\",\"type\":\"felt\"},{\"name\":\"version\",\"type\":\"felt\"}],\"Request\":[{\"name\":\"method\",\"type\":\"felt\"},{\"name\":\"path\",\"type\":\"felt\"},{\"name\":\"body\",\"type\":\"felt\"},{\"name\":\"timestamp\",\"type\":\"felt\"},{\"name\":\"expiration\",\"type\":\"felt\"}]},\"message\":{\"method\":\"POST\",\"path\":\"/v1/auth\",\"body\":\"\",\"timestamp\":1717171717,\"expiration\":1717172017}}",
+        "hash": "0x5b6fe460c2edeaa75028908661a7ef4943342dcd9aa9b00b5e16840df0f891a",
+        "signature": "[\"801454883139064163261939273803191067529563982847479340440534498648984543027\",\"378418729177399347803761029550918249565270261658281232928426170046659620465\"]"
+      }
+    }
+  ]
+}

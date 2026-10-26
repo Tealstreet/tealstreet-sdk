@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
-import { BackpackPublicWebSocket } from '../../exchanges/backpack/backpack.ws-public';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
+import { BackpackPublicWebSocket } from '../reference/backpack/backpack.ws-public';
 import { DefaultStore } from '../../store/store.base';
 
 const symbol = 'BTC_USDC_PERP';

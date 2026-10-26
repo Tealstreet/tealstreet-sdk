@@ -1,11 +1,11 @@
-import type { CoinbaseStarbaseCutoverEvidence } from '../../exchanges/coinbase/coinbase.starbase-cutover';
+import type { CoinbaseStarbaseCutoverEvidence } from '../reference/coinbase/coinbase.starbase-cutover';
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { CoinbaseStarbaseProtocolError } from '../../exchanges/coinbase/coinbase.starbase';
+import { CoinbaseStarbaseProtocolError } from '../reference/coinbase/coinbase.starbase';
 import {
   COINBASE_STARBASE_CURRENT_CUTOVER_EVIDENCE,
   COINBASE_STARBASE_HTTP_SHADOW_ACTIVATION_ENABLED,
@@ -13,7 +13,7 @@ import {
   COINBASE_STARBASE_WEBSOCKET_ACTIVATION_ENABLED,
   evaluateCoinbaseStarbaseHttpShadowReadinessForTestsOnly,
   selectCoinbaseStarbaseCutoverPlan,
-} from '../../exchanges/coinbase/coinbase.starbase-cutover';
+} from '../reference/coinbase/coinbase.starbase-cutover';
 
 const HTTP_SHADOW_READY_EVIDENCE: CoinbaseStarbaseCutoverEvidence = {
   ...COINBASE_STARBASE_CURRENT_CUTOVER_EVIDENCE,
@@ -183,10 +183,10 @@ describe('Coinbase Starbase inert cutover gate', () => {
 
   it('remains absent from active Coinbase runtime, metadata, registry, and routing', () => {
     for (const file of [
-      'coinbase.api.ts',
-      'coinbase.exchange.ts',
-      'coinbase.ws-private.ts',
-      'coinbase.ws-public.ts',
+      '../../__tests__/reference/coinbase/coinbase.api.ts',
+      '../../__tests__/reference/coinbase/coinbase.exchange.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-private.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-public.ts',
       '../../createExchangeFromAccount.ts',
       '../../exchangeMetadata.ts',
       '../registry.native.ts',

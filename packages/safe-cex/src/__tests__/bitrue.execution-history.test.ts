@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitrueExchange } from '../exchanges/bitrue/bitrue.exchange';
-import { ENDPOINTS } from '../exchanges/bitrue/bitrue.types';
+import { BitrueExchange } from './reference/bitrue/bitrue.exchange';
+import { ENDPOINTS } from './reference/bitrue/bitrue.types';
 import { OrderSide } from '../types';
 
 const createExchangeLike = () => {
@@ -46,6 +46,7 @@ describe('BitrueExchange execution history mapping', () => {
         code: '0',
         data: [
           {
+            tradeId: 1001,
             contractName: 'E_BTCUSDT',
             side: 'BUY',
             price: '50000',
@@ -58,6 +59,7 @@ describe('BitrueExchange execution history mapping', () => {
             isMaker: false,
           },
           {
+            tradeId: 1002,
             contractName: 'E_BTCUSDT',
             side: 'SELL',
             price: '51000',
@@ -70,6 +72,7 @@ describe('BitrueExchange execution history mapping', () => {
             isMaker: true,
           },
           {
+            tradeId: 1003,
             contractName: 'E_ETHUSDT',
             side: 'BUY',
             price: '3000',
@@ -133,23 +136,25 @@ describe('BitrueExchange execution history mapping', () => {
         code: 0,
         data: [
           {
+            tradeId: 1004,
             contractName: 'E_BTCUSDT',
             side: 'BUY',
             price: '60000',
             qty: '0.25',
             amount: '15000',
             fee: '0.1',
-            bidId: 'oid-1',
+            bidId: '11111',
             ctime: 1_700_000_009_123,
           },
           {
+            tradeId: 1005,
             contractName: 'E_BTCUSDT',
             side: 'BUY',
             price: '61000',
             qty: '0.25',
             amount: '15250',
             fee: '0.2',
-            bidId: 'oid-2',
+            bidId: '22222',
             ctime: 1_700_000_010_123,
           },
         ],
@@ -158,15 +163,16 @@ describe('BitrueExchange execution history mapping', () => {
 
     const executions = await exchange.fetchHistoricalFills({
       symbol: 'E-BTC-USDT',
-      orderId: 'oid-1',
+      orderId: '11111',
       limit: 100,
     });
 
     expect(executions).toEqual([
       {
+        id: '1004',
         timestamp: 1_700_000_009,
         symbol: 'E-BTC-USDT',
-        orderId: 'oid-1',
+        orderId: '11111',
         price: 60000,
         qty: 0.25,
         side: OrderSide.Buy,
@@ -179,7 +185,7 @@ describe('BitrueExchange execution history mapping', () => {
     ]);
   });
 
-  it('returns empty and logs when my trades API responds with error code', async () => {
+  it('rejects and logs when my trades API responds with error code', async () => {
     const { exchange, get } = createExchangeLike();
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
 
@@ -191,9 +197,7 @@ describe('BitrueExchange execution history mapping', () => {
       },
     });
 
-    const trades = await exchange.fetchHistoricalFills({ symbol: 'E-BTC-USDT' });
-
-    expect(trades).toEqual([]);
+    await expect(exchange.fetchHistoricalFills({ symbol: 'E-BTC-USDT' })).rejects.toThrow('request failed');
     expect(emitAndLogError).toHaveBeenCalledWith('request failed');
   });
 });

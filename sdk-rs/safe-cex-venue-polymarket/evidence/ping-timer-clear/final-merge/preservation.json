@@ -1,8 +1,0 @@
-{
-  "compared_gate_sha": "8bbaee3c80152f03eadbcecc62aae129944f1058",
-  "preserved_at_sha": "d9d0a7592d8115b3870af4908f0cdd2619bedbc1",
-  "integration_parent": "61c78429c39fc37b14d3fb5d479572ec74ab9c29",
-  "crate_src_tests_manifests_diff_exit": 0,
-  "seven_dependency_src_cargo_toml_diff_exit": 0,
-  "lock_change": "one unrelated indexmap dependency added to safe-cex-venue-coinbase"
-}

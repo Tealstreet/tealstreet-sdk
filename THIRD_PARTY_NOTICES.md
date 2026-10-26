@@ -62,33 +62,12 @@ which keep their upstream licences. `scripts/check-licenses.mjs` fails CI when a
 
 ## zkLink native cryptography and contract serialization
 
-- Files: `sdk-rs/safe-cex-crypto/src/zklink.rs` and
-  `sdk-rs/safe-cex-crypto/src/zklink/contract.rs`.
+- Files: `sdk-rs/crypto/src/zklink.rs` and
+  `sdk-rs/crypto/src/zklink/contract.rs`.
 - Upstream: https://github.com/zkLinkProtocol/zklink_sdk at
   `3152525e2615ecbbdb56fd6728ce265ad2dde485`.
 - Licence: Apache-2.0; upstream notice retained in
-  `sdk-rs/safe-cex-crypto/LICENSE-zklink`. Copyright 2023-present, zk.link.
+  `sdk-rs/crypto/LICENSE-zklink`. Copyright 2023-present, zk.link.
 - Modified by Tealstreet Ltd: extracted deterministic signing and contract
   serialization primitives, with explicit errors for unsafe packing/price
   inputs and a seed-only native signer capability.
-
-## Rust Number radix conversion
-
-- `sdk-rs/safe-cex-exchange/src/js_runtime/number_radix.rs` adapts V8's
-  `DoubleToRadixStringView` from Node v24.20.0:
-  https://github.com/nodejs/node/blob/v24.20.0/deps/v8/src/numbers/conversions.cc
-- Licence: BSD-3-Clause; the full notice is retained in the Rust file header.
-- Copyright 2011 the V8 project authors. All rights reserved.
-- Modified by Tealstreet Ltd: Rust vectors replace the split character buffer;
-  decimal and special values use the SDK's existing number formatter.
-
-## Native JavaScript TimSort
-
-- Source: https://github.com/v8/v8/blob/13.6.233.17/third_party/v8/builtins/array-sort.tq
-- Scope: `sdk-rs/safe-cex-num/src/sorting.rs`.
-- Copyright Python Software Foundation and the V8 project authors.
-- Licences: PSF-2.0 and V8 BSD-3-Clause notices are retained in
-  `sdk-rs/safe-cex-num/licenses/v8-timsort.txt`.
-- Modified by Tealstreet: Rust translation of run detection, binary insertion,
-  run-stack collapse and galloping merges, using the existing fallible native
-  comparator and separate JavaScript receiver boundary.

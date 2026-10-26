@@ -42,6 +42,8 @@ class VirtualClock {
       this.started = true;
       await this.syncClientServerTime();
       this.scheduleNextSync();
+    } else if (this.syncInFlight) {
+      await this.syncInFlight;
     }
   };
 

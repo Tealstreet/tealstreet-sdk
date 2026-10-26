@@ -47,6 +47,7 @@ const KEY_REJECTION = new RegExp(
     'invalid (ok-access-key|sign)', // okx
     'invalid signature',
     'signature (mismatch|invalid|for this request is not valid)', // binance
+    'credentials were rejected', // Rust engine venues
   ].join('|'),
   'i',
 );

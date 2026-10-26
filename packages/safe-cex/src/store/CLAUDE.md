@@ -4,6 +4,64 @@ The Tealstreet exchange store. One `DefaultStore` per exchange
 account; mirrored across worker → main thread via the worker's
 throttled postMessage.
 
+Rust frames keep the venue adapter's published SDK quantity units. COIN-M
+orders carry native contract counts while positions carry base quantity; the
+COIN-M applier preserves the USD contract multiplier in native sizing extras.
+For MEXC, BloFin, KuCoin futures, Coinbase and the OKX family,
+`FrameApplier` also retains native placement-unit order extras in both worker
+and main stores. Prefer the exact native remaining column when present; legacy
+frames reconstruct placement quantities from `contractSize` so chaser arithmetic
+retains its native-volume contract. Use decimal-safe division here: a base fill
+of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots. Position frames also
+restore `extra.contractsNative` for native-volume venues, which copier closes
+consume as their placement quantity. `SETTINGS` optionally carries
+separate buy/sell leverage columns; do not collapse these hedge rails to the
+single representative leverage value when applying frames. `POSITIONS` may append
+string references for venue-defined position IDs; preserve these when present
+so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
+frames still derive identity from symbol and position mode.
+
+Revised SCXF sections carry explicit revisions with fixed tails. Preserve venue
+`prettySymbol`, bracket trigger types, conditional prices, remaining notionals,
+and ticker `midPrice`, including clearing midpoint on packed and object worker
+updates. Shared public ticker updates also preserve midpoint: omitted keeps the
+cached value, a number replaces it, and null clears it across native polling. Orders, positions, fills and settings retain explicit symbols for rows
+missing from MARKETS. `FrameApplier` owns fetched-leverage writes, including rare
+query results; a SETTINGS replacement remains authoritative. Frame forwarding
+also sends changed query-derived leverage and includes it in late snapshots,
+since such reads need not cause an engine SETTINGS frame. Recovery snapshots
+carry a copied leverage map after flushing pending SETTINGS. Cached rails with
+missing, nonfinite or nonpositive sides are unknown, not market maxima.
+
+A failed book or account section must not suppress independent valid sections.
+Rejecting a book batch invalidates its baselines until fresh full books arrive;
+rejecting an envelope invalidates indexed identities until fresh MARKETS arrive.
+Stage identities before adopting a new table, retain the old table when market
+metadata fails, and use explicit fill identities until a snapshot repairs it.
+Apply failures request a bounded local engine snapshot or worker snapshot RPC;
+snapshots contain no executions, so deliver valid original FILLS once. Listener
+failures are distinct from protocol failures and do not trigger snapshot loops.
+
+FILLS revision 2 carries optional native execution IDs and the existing financial
+columns. Event `id` uses that ID when present, falling back to `orderId`; order
+attribution always uses the separate `orderId`. Legacy revision-1 frames remain
+readable both with and without the optional #1430 financial tails.
+
+Initial Rust SDK readiness requires successfully decoded catalogue and account
+sections as well as native STATUS flags. A failed section revokes its decoded
+evidence until a valid replacement arrives; independent valid sections remain
+usable, and validated empty tables count. Invalid catalogue identity revokes
+all indexed evidence. A shared catalogue must pass compatibility validation
+before its store notification can complete startup. Private startup does not require
+tickers. Public-only startup still requires an accepted ticker table, and shared
+startup requires a matching finite quote; a null-only midpoint clear is not a
+first quote.
+
+Aggregate venue ticker streams may still contain delisted symbols absent from
+the current market table. `TICKERS` then carries optional symbol/ID references;
+`FrameApplier` uses those identities for orphan rows and preserves packed delta
+indexes. Keep those ticker rows without synthesizing markets or filtering them.
+
 `serialize()` carries every derived display bridge field, including
 `displayedPositions` and `displayedMargin`. Hosted or force-full-store paths
 must not depend on postprocessors happening to reconstruct a field after
@@ -86,6 +144,20 @@ raw order/position snapshots on these counters. Without consistent
 bumps from `update()`, a wholesale refresh can be pruned as
 unchanged. If you add a new bulk-replacement helper, bump the
 relevant `updateIds.*`.
+
+Native `ACCOUNT_READ` frames are the explicit exception: FrameApplier uses
+`update(changes, false, 'account-read')` to apply and notify their current values
+without advancing order/position freshness. Reading the same native state is
+not another venue observation; the pending ordinary stream frame owns that
+freshness increment. The marker travels with transferred frames so worker and
+main apply the same rule. Ordinary bulk updates retain their existing counters.
+
+`FILLS` may append reported realized-PnL/fee columns; absent metadata stays
+absent, while zero remains a reported value. Keep each venue's live-event PnL
+convention separate from historical execution normalization. Forward the native
+order identity as both the existing fill `id` and `orderId`: chaser tracking
+requires `orderId` for attribution. Preserve generic `Order.triggerType` beside
+the existing stop-loss/take-profit aliases.
 
 An attempted mutation of a missing row is a no-op: `removeOrder` and
 `updatePosition` must not advance an updateId unless they find and mutate the
@@ -208,7 +280,6 @@ than skipped so the chaser can still move closer to the touch.
   `ExchangeWorker._packTickerDeltasSinceBaseline`; the store's apply/consume
   methods are compatibility and test scaffolding, not an active producer path.
 
-
 ## `markOrdersTerminal` — a stale snapshot cannot reopen a closed order
 
 A REST orders snapshot can read the venue BEFORE a cancel or fill and land
@@ -225,5 +296,95 @@ in, or the row is dropped if the order already left.
 and rely on them coming back) or from `updateOrdersStatus` (Bybit and Phemex map
 a non-final "Triggered" to Closed; Binance sends `EXPIRED` when a stop
 triggers). Only a venue whose stream event is FINAL calls it — OKX's `filled` /
-`canceled` today. `fromWorker` is skipped because the worker's store has already
+`canceled`, and BloFin's `filled` / `canceled` / `effective` / `order_failed`. `fromWorker` is skipped because the worker's store has already
 applied it. Proven by the gap-4 cases in `__tests__/faultBench/badLink.scenarios.test.ts`.
+
+## Rust frame books
+
+`FrameApplier` retains book baselines by symbol and market ID, independent of
+market-row ordering. `BOOK` replaces both sides, including an empty reset;
+`BOOK_DELTA` upserts price/amount pairs and deletes zero amounts. Prices may
+be any finite value, including zero-price prediction levels; only amount zero
+deletes a level. Consumers
+receive best-first sorted levels with recomputed cumulative totals. A delta
+without a matching full baseline throws a snapshot-required error; reconnect
+must create a new stream from its snapshot before applying deltas. Frame book
+sections are ingested once, even when `apply` and `books` both read the frame,
+and subsequent updates do not mutate books already handed to listeners. Actual book readers retain copied numeric baselines so transferring a source
+frame cannot detach future delta state. Forwarding workers call
+`apply(frame, false)` and leave book ingestion to the receiving main thread.
+
+## Rust frame native units
+
+`FrameApplier` preserves inverse sizing metadata across the worker bridge.
+For Bybit/Bitget inverse, position `notional` is the native quote-contract
+size, so the applier also publishes it as `extra.contractsNative`. Binance
+COIN-M uses fixed USD contract sizes: its worker and main appliers divide
+notional by market `contractSize` for native contract counts, and multiply exact
+order leaves by `contractSize` for `remainingNotional`; `extra.unrealizedPnlNative`
+keeps the native PnL. Copier closes consume the native size rather than the
+rounded base-coin `contracts` field.
+
+An optional trailing `ORDERS.remainingNative` frame column carries the venue's
+exact native leaves quantity into `extra.remainingNative`; inverse markets also
+publish `extra.remainingNotional`. Do not infer it by multiplying rounded base remainder
+by price, or from an amount-zero Full position stop. Legacy seven-column frames
+remain readable. Bybit leaves those extras absent on legacy frames; Bitget
+inverse publishes native amount/filled, so its adapter can subtract those values
+when the exact optional tail is absent. Order rejection metadata must survive
+alongside the native sizing fields.
+
+OKX frame bridges keep native contract-count placement amounts separately from
+base-sized fills and remaining quantities. Exact native leaves populate
+`remainingNative`, with inverse `remainingNotional` equal to those counts times
+the quote contract value. A finite exact `filledInPlacementUnits` tail is
+authoritative; legacy regular-order frames derive native fills as amount minus
+leaves. Position `contractsNative` is base contracts divided by ctVal for linear
+markets and quote notional divided by ctVal for inverse markets. OKX inverse
+PnL is already converted to USD, so do not relabel it as coin-native PnL. Both
+the worker and main-thread frame appliers use this OKX profile; other venue
+quantity profiles keep their existing conventions. Strictly admitted X-Perp
+market IDs retain their dated identity and their base/quote XPERP display label.
+
+## Prediction-market frame metadata
+
+Optional typed `PREDICTION_MARKETS` and `PREDICTION_HOLDINGS` sections carry
+outcome condition/question/tick/neg-risk metadata and redemption/merge flags.
+The numeric market and position tables retain their existing shapes. Both
+worker and main-thread FrameApplier instances retain metadata across later
+position-only frames; explicit empty sections clear it. Holdings removed from
+the authoritative position table lose their flags before later reopening.
+
+Each market's MARKETS flags carry its quantity units (bits 8-11, declared by the
+venue's `Capabilities::quantity_units`): native placement (MEXC, BloFin, KuCoin
+futures, Coinbase), inverse native (Bitget inverse), contract count (OKX) or
+inverse contract-sized (Binance COIN-M). `FrameApplier` reads them per market,
+so worker and main-thread appliers need no venue arguments; rows outside the
+table use the venue's units, kept across an empty table. OKX native
+contract-count metadata stays separate from Binance COIN-M contract multipliers.
+
+## Instrument and derivative frame metadata
+
+Optional `UNDERLYING_TOKENS` carries the venue token behind a market whose
+display name differs from it: Hyperliquid's merged spot pairs publish the
+token name and full name (`UBTC`, `Unit Bitcoin` behind `BTC/USDC`), applied as
+`market.info.hlTokenName`/`hlTokenFullName`, which the web's Underlying Token
+disclosure reads. Rows index the current market table and reset with it.
+
+Optional `INSTRUMENT_CLASSIFICATIONS` preserves native `symbolType`,
+`marketRegion` and `underlyingTicker` without an arbitrary JSON payload.
+Absent and explicitly empty labels are distinct; Bybit's empty label and
+`innovation` positively identify crypto, while absent/new values remain unknown.
+Both frame consumers reconstruct these minimal `Market.info` fields for the
+shared classifier and actual CLI TradFi preflight.
+
+`DERIVATIVE_PRODUCTS` carries typed Future/Call/Put identity and known terms.
+Unknown expiry/strike/settlement remain absent; only complete European cash
+option terms create `Market.option`. A market replacement clears old indexed
+metadata; metadata-only changes re-emit their matching market table.
+`POSITION_GREEKS` uses exact position IDs and clears on position closure, so
+reopening cannot resurrect stale Greeks. The optional second `ORDERS` tail
+retains exact `filledInPlacementUnits` after native leaves. Inverse fills cannot
+be reconstructed by dividing base fills by a quote contract multiplier. OKX
+reports USD-normalized position PnL, so its frame consumer does not label that
+number as native coin PnL.

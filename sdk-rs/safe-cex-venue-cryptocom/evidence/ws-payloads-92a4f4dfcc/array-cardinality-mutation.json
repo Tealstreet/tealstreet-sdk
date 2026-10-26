@@ -1,9 +1,0 @@
-{
-  "base_sha": "92a4f4dfcc7eb28defeaf018911ca5abb5fe5332",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n@@ -270,7 +270,7 @@\n     mut decode: impl FnMut(&PayloadValue) -> Result<T, PayloadError>,\n ) -> Result<Vec<T>, PayloadError> {\n     match value {\n-        PayloadValue::Array(values) => values.iter().map(&mut decode).collect(),\n+        PayloadValue::Array(values) => values.iter().take(1).map(&mut decode).collect(),\n         _ => Err(PayloadError(\"array\")),\n     }\n }\n",
-  "expected_named_assertion": "CRYPTOCOM-PAYLOAD-NATIVE-ARRAY-LENGTH CryptocomWsTickerUpdate:rows-2.data",
-  "runtime_proof": true,
-  "stop_case_name": "CryptocomWsTickerUpdate:rows-2",
-  "stop_case_index": 2
-}

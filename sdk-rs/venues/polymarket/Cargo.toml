@@ -1,0 +1,20 @@
+[package]
+name = "safe-cex-venue-polymarket"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+safe-cex-engine = { workspace = true, features = ["prediction"] }
+safe-cex-crypto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+alloy-primitives.workspace = true
+
+[dev-dependencies]
+safe-cex-engine = { workspace = true, features = ["test-support"] }
+alloy-dyn-abi.workspace = true
+
+[lints]
+workspace = true

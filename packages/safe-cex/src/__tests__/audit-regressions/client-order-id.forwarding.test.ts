@@ -1,32 +1,38 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { Market, PlaceOrderOpts } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
-import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
-import { BinanceSpotExchange } from '../../exchanges/binance/binancespot.exchange';
-import { BingxExchange } from '../../exchanges/bingx/bingx.exchange';
-import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
-import { BitrueExchange } from '../../exchanges/bitrue/bitrue.exchange';
-import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
-import { BlofinExchange } from '../../exchanges/blofin/blofin.exchange';
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
-import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
-import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
-import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
-import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
-import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
-import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
-import { KucoinSpotExchange } from '../../exchanges/kucoin/kucoinspot.exchange';
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
-import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
-import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
-import { WeexExchange } from '../../exchanges/weex/weex.exchange';
-import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
+import { BinanceSpotExchange } from '../reference/binance/binancespot.exchange';
+import { BingxExchange } from '../reference/bingx/bingx.exchange';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
+import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
+import { BlofinExchange } from '../reference/blofin/blofin.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
+import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
+import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
+import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
+import { KucoinSpotExchange } from '../reference/kucoin/kucoinspot.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
+import { RustEngineExchange as OrderlyExchange } from '../../exchanges/rust/rust.exchange';
+import { WeexExchange } from '../reference/weex/weex.exchange';
+import { WOOXExchange } from '../reference/woo/woo.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
 
 const MARKET: Market = {
   id: 'BTCUSDT',
@@ -207,7 +213,12 @@ const CASES: Case[] = [
     async (id) => {
       const exchange = create(PhemexExchange, 'phemex');
       vi.spyOn(exchange, 'getOrFetchPositionsForSymbol').mockResolvedValue([]);
-      return (await exchange.formatCreateOrder(limit({ clientOrderId: id })))[0];
+      vi.spyOn(exchange, 'fetchRawPositionModeForSymbol').mockResolvedValue(PositionMode.OneWay);
+      const get = recorder({ data: { positions: [] } });
+      exchange.xhr = { get };
+      const payload = (await exchange.formatCreateOrder(limit({ clientOrderId: id })))[0];
+      expect(get).not.toHaveBeenCalled();
+      return payload;
     },
   ],
   [
@@ -299,14 +310,14 @@ const CASES: Case[] = [
   [
     'orderly',
     'caller-orderly-1',
-    'client_order_id',
+    'clientOrderId',
     async (id) => {
       const exchange = create(OrderlyExchange, 'salsadex');
-      vi.spyOn(exchange, 'getPositionSideForOrder').mockResolvedValue(undefined);
-      const post = recorder({ data: { order_id: 99 } });
-      exchange.xhr = { post };
+      adoptEngineCapabilities(exchange);
+      const command = vi.fn(async (_command: { orders: PlaceOrderOpts[] }) => ['99']);
+      exchange.host = { command };
       await exchange.placeOrder(limit({ clientOrderId: id }));
-      return post.mock.calls[0][1];
+      return command.mock.calls[0][0].orders[0];
     },
   ],
   [

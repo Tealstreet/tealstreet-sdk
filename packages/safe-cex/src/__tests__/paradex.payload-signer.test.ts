@@ -1,4 +1,4 @@
-import type { ParadexSDKAccount } from '../exchanges/paradex/paradex.sdk';
+import type { ParadexSDKAccount } from './reference/paradex/paradex.sdk';
 import type { ExchangeOptions, PayloadSignerRequest } from '../types';
 
 import '../transport/registerTealstreetTransport';
@@ -7,8 +7,8 @@ import { Account, ec } from 'starknet';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { axiosHttpOverWebsocketAdapter } from '../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { createAPI } from '../exchanges/paradex/paradex.api';
-import { ParadexJWTManager, ParadexRequestSigner } from '../exchanges/paradex/paradex.sdk';
+import { createAPI } from './reference/paradex/paradex.api';
+import { ParadexJWTManager, ParadexRequestSigner } from './reference/paradex/paradex.sdk';
 
 const ADDRESS = '0x4f3c1d2e5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2';
 const CONFIG = { paradexChainId: 'PRIVATE_SN_POTC_SEPOLIA' };
