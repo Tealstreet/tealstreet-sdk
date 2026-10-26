@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { posix } from 'node:path';
 import { GATE_SUITES, replayMatrix } from './ci-gate-suites.mjs';
 import { venueFamilies, venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { nativeMatrix } from './native-ci-checks.mjs';
@@ -29,13 +30,31 @@ export function reverseVenueDependencies(manifests) {
   return result;
 }
 
-export function selectCi({ paths, manifests, full = false }) {
+export function rustDocumentInputs(sources) {
+  const paths = new Set();
+  let unresolved = false;
+  for (const [source, text] of sources) {
+    const includes = [...text.matchAll(/\binclude_(?:str|bytes)\s*!\s*\(\s*([^)]*)\)/g)];
+    for (const match of includes) {
+      const literal = /^"([^"\\]*)"\s*,?\s*$/.exec(match[1]);
+      if (!literal) unresolved = true;
+      else paths.add(posix.normalize(posix.join(posix.dirname(source), literal[1])));
+    }
+  }
+  return { paths, unresolved };
+}
+
+export function selectCi({ paths, manifests, full = false, documents = { paths: new Set(), unresolved: false } }) {
   if (!Array.isArray(paths) || paths.some(path => typeof path !== 'string' || !path || path.startsWith('/') || path.split('/').includes('..')))
     throw new Error('Invalid changed paths');
   const crates = new Set(), reasons = [], tests = new Set();
   let nativeFull = full, consumerTests = false;
   for (const path of paths) {
-    if (path.startsWith('docs/') || /\.(?:md|rst|adoc)$/.test(path)) continue;
+    if (path.startsWith('docs/')) continue;
+    if (/\.(?:md|rst|adoc)$/.test(path)) {
+      if (documents.unresolved || documents.paths.has(path)) { full = true; reasons.push(`Rust include: ${path}`); }
+      continue;
+    }
     const venue = /^sdk-rs\/venues\/([^/]+)\/(.*)$/.exec(path);
     if (venue) {
       try { crateFamily(venue[1]); } catch { full = true; reasons.push(path); continue; }
@@ -105,7 +124,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     }
   }
   const paths = base ? execFileSync('git', ['diff', '--no-renames', '--name-only', '-z', base, 'HEAD'], { encoding: 'utf8' }).split('\0').filter(Boolean) : [];
-  const result = selectCi({ paths, manifests, full: !isPr });
+  const documents = paths.some(path => !path.startsWith('docs/') && /\.(?:md|rst|adoc)$/.test(path))
+    ? rustDocumentInputs(execFileSync('git', ['ls-files', '-z', '--', '*.rs'], { encoding: 'utf8' })
+      .split('\0').filter(Boolean).map(path => [path, readFileSync(path, 'utf8')]))
+    : undefined;
+  const result = selectCi({ paths, manifests, full: !isPr, documents });
   result.checkoutSha = git('rev-parse', 'HEAD');
   console.log(JSON.stringify({ base: base ?? null, ...result }, null, 2));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, ciOutputs(result));

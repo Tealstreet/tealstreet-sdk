@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, readdirSync } from 'node:fs';
-import { selectCi, checkoutBase, ciOutputs } from './ci-selection.mjs';
+import { selectCi, checkoutBase, ciOutputs, rustDocumentInputs } from './ci-selection.mjs';
 import { GATE_SUITES } from './ci-gate-suites.mjs';
 import { venueFamilies } from '../hosts/wasm/js/venues.mjs';
 
@@ -32,6 +32,16 @@ test('checkout outputs are literal SHAs while matrices remain JSON', () => {
   const sha = 'a'.repeat(40);
   assert.equal(ciOutputs({ checkoutSha: sha, full: false, native: [{ check: 'fmt' }] }),
     `checkoutSha=${sha}\nfull=false\nnative=[{"check":"fmt"}]\n`);
+});
+
+test('documentation included by Rust, and unresolved include macros, select full checks', () => {
+  const sources = [['sdk-rs/engine/src/lib.rs', '#![doc = include_str!("../README.md")]\nconst DATA: &[u8] = include_bytes!("../rules.adoc");']];
+  const documents = rustDocumentInputs(sources);
+  for (const path of ['sdk-rs/engine/README.md', 'sdk-rs/engine/rules.adoc'])
+    assert.equal(selectCi({ paths: [path], manifests, documents }).full, true);
+  assert.equal(selectCi({ paths: ['README.md'], manifests, documents }).full, false);
+  for (const text of ['include_str!(concat!("../", "README.md"))', 'include_bytes!(r"../README.md")'])
+    assert.equal(selectCi({ paths: ['README.md'], manifests, documents: rustDocumentInputs([['src/lib.rs', text]]) }).full, true);
 });
 
 test('docs and inert tests skip replay/size, but unknown and shared inputs select everything', () => {
