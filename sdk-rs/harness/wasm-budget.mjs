@@ -16,13 +16,22 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
 // Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
 // #2219 shared signing encodings: CI 1,445,978, 1413 KiB by overseer ruling.
+// Kraken composed CI: 1,399,905, then #2219 signing encodings 1,400,974, rounded up to KiB under the
+// standing venue allowance.
+// #2223 shared credential core: CI Bitget/USDC 1,481,804 and AsterDEX 1,385,869 rounded up to
+// KiB, each a <=2 KiB shared-code raise pre-approved by the overseer while the combined holds.
+// #2223 composed with #2219 on the #2245 tip: CI Bitget 1,482,944, AsterDEX 1,386,952 and Kraken
+// 1,402,082, each rounded up to the KiB as a <=2 KiB shared-code raise (standing ruling);
+// the overseer confirmed Bitget 1449 KiB with a 1452 KiB ceiling.
 // Kraken beta error custody CI: 1,404,713 bytes, rounded up under the standing
 // 5% venue allowance; unrelated venue overrides remain unchanged.
+// #2223 on #2247: CI Kraken 1,405,315 rounded up to 1373 KiB, a <=2 KiB shared-code raise (pre-approved).
+// #2223 on #2224/#2248: CI Bitget 1,483,869 (1450 KiB, within the 1452 KiB ceiling) and AsterDEX
+// 1,387,670 (1356 KiB), each a <=2 KiB shared-code raise.
+// #2223 on the #2259 tip: CI Bybit 1,446,915 rounded up to 1414 KiB, a <=2 KiB shared-code raise.
 // AsterDEX host address setup (#2233): CI 1,417,307, rounded up to 1385 KiB under the
 // standing venue allowance; the larger of it and the incoming cap.
-// #2255 CI Kraken: 1,404,999 bytes, rounded up to KiB under the standing
-// 2 KiB shared-code allowance; the combined budget remains unchanged.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_483_776, bitgetusdc: 1_483_776, bybit: 1_446_912, asterdex: 1_418_240, kraken: 1_405_952, krakenspot: 1_405_952 });
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_484_800, bitgetusdc: 1_484_800, bybit: 1_447_936, asterdex: 1_418_240, kraken: 1_405_952, krakenspot: 1_405_952 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
