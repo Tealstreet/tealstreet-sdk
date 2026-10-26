@@ -3729,7 +3729,7 @@ impl<V: Venue> Engine<V> {
         let release_domain = V::http_release_domain();
         #[cfg(feature = "release-domains")]
         if let Some(domain) = release_domain {
-            release_domain::validate(domain, venue.http_pacing()).map_err(|_| {
+            release_domain::validate(domain, &http_pacing).map_err(|_| {
                 VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
             })?;
         }
@@ -5554,6 +5554,12 @@ impl<V: Venue> Engine<V> {
                     false
                 }
             })
+    }
+
+    /// The latest event time, for fixtures that prepare after `handle`.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn dispatch_now(&self) -> f64 {
+        self.io.core.dispatch_now
     }
 
     pub fn prepare_dispatch(&mut self, now: f64) {

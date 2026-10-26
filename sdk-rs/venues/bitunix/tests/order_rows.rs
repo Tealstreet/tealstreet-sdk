@@ -85,7 +85,9 @@ fn protection_seed() -> Vec<String> {
 fn seeded() -> (TestEngine, SocketId) {
     let (mut e, socket) = startup();
     refresh(&mut e, socket, 1000.0, &regular_seed(), &protection_seed());
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     assert!(e.store().order("A__tp").is_some());
     assert!(e.store().order("P__position-1__sl").is_some());
     (e, socket)
@@ -157,7 +159,9 @@ fn unknown_tpsl_neighbor_does_not_preserve_old_virtual_siblings_of_an_admitted_r
     assert_eq!(e.store().order("P").unwrap().price, 95.0);
     assert!(e.store().order("Q").is_some());
     assert!(e.store().order("R").is_some());
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     refresh(
         &mut e,
         socket,
@@ -228,7 +232,9 @@ fn numeric_raw_identity_is_retained_despite_an_unrelated_bad_numeric_field() {
         &[numeric.clone(), regular("B", 200, false)],
         &protection_seed(),
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     refresh(
         &mut e,
         socket,
@@ -257,7 +263,9 @@ fn retained_tpsl_family_keeps_native_cancel_and_amend_execution_metadata() {
             &regular_seed(),
             &[bad, protection("Q", 75, false)],
         );
-        e.drain_actions().for_each(drop);
+        safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .for_each(drop);
         let command = if amend {
             Command::AmendOrder {
                 command: 91,
@@ -401,7 +409,7 @@ fn partial_initial_halves_never_load_and_recovery_requires_both_current_serials(
             }
             // Keep the earlier bootstrap repair if it was already armed; a bad
             // half must not postpone that deadline. Replay timer cancellation.
-            for action in e.drain_actions() {
+            for action in safe_cex_engine::test_support::prepared_now(&mut e).into_iter() {
                 match action {
                     Action::SetTimer { timer, at_ms } if at_ms >= 1000.0 && at_ms <= retry_at => {
                         repairs.push((timer, at_ms))
@@ -462,7 +470,9 @@ fn partial_owned_order_refresh_cannot_advance_a_write_preflight() {
         3200.0,
         &body(&[bad, regular("B", 250, false)], false),
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(
         !actions
             .iter()
