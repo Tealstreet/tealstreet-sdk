@@ -1967,6 +1967,12 @@ impl CommandWrites {
         self
     }
 
+    /// Mark a live journal maybe-sent; like `inheriting`, never clears.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn inherit_uncertain(&mut self) {
+        self.inherited_uncertain = true;
+    }
+
     /// Seal exactly once. A caller's fallback text never chooses the outcome;
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.

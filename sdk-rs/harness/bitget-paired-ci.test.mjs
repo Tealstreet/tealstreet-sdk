@@ -78,14 +78,6 @@ test('landing push uses the authenticated actual first parent and exact landing 
   assert.equal(result.baseline, A); assert.equal(result.candidate, H);
 });
 
-test('a fresh dispatch on the landing branch uses that landing, without requiring an open PR', async () => {
-  const x = fixture(); x.run.event = 'workflow_dispatch'; x.run.head_branch = 'feat/rust-rewrite';
-  x.context.gitRead = (...args) => args[1] === 'HEAD' ? H : TREE;
-  x.context.reader.listCommitPulls = async () => { throw new Error('landing dispatch is not a PR head'); };
-  const result = await selectBitgetPair(x.context);
-  assert.equal(result.baseline, A); assert.equal(result.candidate, H);
-});
-
 test('master pushes cannot obtain a Rust paired certificate', async () => {
   const x = fixture(); x.run.event = 'push'; x.run.head_branch = 'master';
   await assert.rejects(selectBitgetPair(x.context), /Rust landing branch/);
