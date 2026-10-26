@@ -1,6 +1,9 @@
-//! R5: `AuthRecipe` through the real engine dispatcher and `LocalSigner`
-//! places the legacy `auth_token` byte for byte in each of Lighter's three
-//! placements, and refuses foreign targets and colliding auth before signing.
+#[path = "support/reference_signer.rs"]
+mod reference_signer;
+use reference_signer::Signer;
+// R5: `AuthRecipe` through the real engine dispatcher and `LocalSigner`
+// places the legacy `auth_token` byte for byte in each of Lighter's three
+// placements, and refuses foreign targets and colliding auth before signing.
 use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
 use safe_cex_engine::book::Book;
 use safe_cex_engine::entropy::Entropy;
@@ -11,7 +14,7 @@ use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{
     Action, Command, Cx, Engine, HttpRequest, Method, Response, SocketId, TimerId, Venue,
 };
-use safe_cex_venue_lighter::sign::{Account, AuthPlacement, AuthRecipe, Signer};
+use safe_cex_venue_lighter::sign::{Account, AuthPlacement, AuthRecipe};
 use std::cell::RefCell;
 
 const ORIGIN: &str = "https://mainnet.zklighter.elliot.ai";
