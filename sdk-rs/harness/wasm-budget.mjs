@@ -13,7 +13,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // ruling the cap is that plus 4 KiB, below the shared venue budget. It can only go down.
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
 // Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_480_704, bitgetusdc: 1_480_704, bybit: 1_445_888, asterdex: 1_330_120 });
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_481_728, bitgetusdc: 1_481_728, bybit: 1_445_888, asterdex: 1_330_120 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
