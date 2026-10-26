@@ -170,13 +170,12 @@ mod keyless_serial {
                     Pending::Call(context),
                 )
             };
-            if self.mode == Mode::LegacyAttach {
-                if let Ok(id) = &result {
-                    let before = (cx.io.core.next_id, cx.io.core.actions.len());
-                    cx.sign_http(*id, Box::new(ForbiddenRecipe));
-                    self.legacy_unchanged =
-                        before == (cx.io.core.next_id, cx.io.core.actions.len());
-                }
+            if self.mode == Mode::LegacyAttach
+                && let Ok(id) = &result
+            {
+                let before = (cx.io.core.next_id, cx.io.core.actions.len());
+                cx.sign_http(*id, Box::new(ForbiddenRecipe));
+                self.legacy_unchanged = before == (cx.io.core.next_id, cx.io.core.actions.len());
             }
             self.after = Some(cx.io.core.next_id);
             self.issue = Some(result.map(drop).map_err(|(_, e)| e));
