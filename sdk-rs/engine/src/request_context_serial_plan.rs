@@ -200,8 +200,7 @@ impl<P> Cx<'_, P> {
         #[cfg(not(feature = "release-domains"))]
         let pacing = policy.pacing;
         #[cfg(feature = "release-domains")]
-        let in_domain =
-            pacing.is_some() && pacing == self.io.core.release_domain.map(|domain| domain.pacing);
+        let in_domain = self.io.core.domain_paces(pacing);
         #[cfg(not(feature = "release-domains"))]
         let in_domain = false;
         if !in_domain {

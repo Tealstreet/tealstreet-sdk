@@ -16,6 +16,8 @@ pub enum PrimaryReason {
     DegradedRead,
     Catalog,
     History,
+    /// Verifying the trading key's own capabilities before private startup.
+    KeyPermissions,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -259,6 +261,7 @@ mod tests {
             PrimaryReason::DegradedRead,
             PrimaryReason::Catalog,
             PrimaryReason::History,
+            PrimaryReason::KeyPermissions,
         ] {
             let role = PrimaryRead {
                 reason,

@@ -295,7 +295,7 @@ export interface SignRequest {
 export type SigningScope = 'account' | 'balance' | 'orders' | 'positions' | 'settings';
 export type SigningRole = { readonly kind: 'read'; readonly scope: SigningScope | null }
   | { readonly kind: 'primaryRead'; readonly reason: 'clientOrderLookup' | 'postUnknownOrderRead'
-    | 'degradedRead' | 'catalog' | 'history'; readonly scope: SigningScope | null }
+    | 'degradedRead' | 'catalog' | 'history' | 'keyPermissions'; readonly scope: SigningScope | null }
   | { readonly kind: 'mutation' | 'sessionAuth' };
 /** Immutable engine ownership captured at Action::Sign delivery. */
 export interface SignMeta {
