@@ -9605,6 +9605,14 @@ unproven released send. Their resend freezes codec bytes while refreshing the
 bundle at Bind; Preflight signed calls repeat their existing provider work.
 No current venue enables a new auth mode in this engine slice.
 
+### Primary key-permission verification reads
+
+`PrimaryReason::KeyPermissions` (`keyPermissions` in signMeta) names a primary
+read that verifies the trading key's own capabilities before private startup,
+such as Coinbase `GET /api/v3/brokerage/key_permissions`. It is primary-only,
+like every `PrimaryRead`. A secondary read-key verification stays an ordinary
+`Read`. No existing reason was reused, because none describes it truthfully.
+
 ### Binance signing residue: legacy test oracle retired
 
 No caller-visible change. Binance already signed every request through the provider. The remaining legacy signing code was a test-only HMAC oracle and fixtures, now replaced by provider-path proofs of the documented vector and of every configured receive window ([RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md)). Signing inventory for Binance: 27 → 4, the four being the dispatch recipe's own lines.
