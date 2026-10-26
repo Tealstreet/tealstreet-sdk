@@ -3,6 +3,7 @@ use crate::provider::SignerBinding;
 use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
 use safe_cex_engine::request_context::Credential;
 use safe_cex_engine::signing::{Identities, Identity, KeyPresence, PrimaryLogin, SetupFacts};
+use safe_cex_engine::{Command, signing::SignError};
 use std::sync::Arc;
 
 pub(crate) struct Installed {
@@ -13,7 +14,11 @@ pub(crate) struct Installed {
 }
 impl Installed {
     pub fn new(identities: Identities, facts: Option<SetupFacts>, public_data_only: bool) -> Self {
-        let primary = identities.primary.filter(|_| !public_data_only);
+        let primary = identities.primary.filter(|identity| {
+            !public_data_only
+                && (facts.is_some()
+                    || (identity.validate().is_ok() && identity.signing_ref().is_ok()))
+        });
         let login = facts
             .and_then(|facts| facts.primary_login())
             .or_else(|| {
@@ -42,6 +47,20 @@ impl Installed {
             .select(CredentialRole::Mutation)
             .ok()
             .map(|(selection, identity)| selection.credential(identity.credential.clone()))
+    }
+    pub fn command_credential(&self, command: &Command) -> Result<Option<Credential>, SignError> {
+        match command {
+            Command::PlaceOrders { .. } | Command::AmendOrder { .. } => {
+                self.primary().ok_or(SignError::MissingKey)?.signing_ref()?;
+                self.write_credential()
+                    .map(Some)
+                    .ok_or(SignError::MissingKey)
+            }
+            Command::CancelOrders { .. }
+            | Command::CancelSymbolOrders { .. }
+            | Command::SetLeverage { .. } => Ok(None),
+            _ => Err(SignError::InvalidRequest),
+        }
     }
     pub fn identity_eligible(&self) -> bool {
         self.credentials.has_primary()

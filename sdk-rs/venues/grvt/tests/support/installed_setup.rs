@@ -123,8 +123,79 @@ fn injected_full_identity_never_creates_an_empty_login() {
             .select(CredentialRole::SessionAuth)
             .is_err()
     );
+    assert!(!credential_only.identity_eligible());
+    assert!(credential_only.primary().is_none());
+    for identity in [
+        Identity::new(KeyRef("api".into()), Some(KeyRef(String::new()))),
+        Identity::new(KeyRef(String::new()), Some(KeyRef("scalar".into()))),
+    ] {
+        let installed = Installed::new(
+            Identities {
+                primary: Some(identity),
+                secondary: None,
+            },
+            None,
+            false,
+        );
+        assert!(installed.login.select(CredentialRole::SessionAuth).is_err());
+        assert!(installed.primary().is_none());
+        assert!(!installed.identity_eligible());
+    }
 }
 
 fn eligible_or_blank(key: Option<&str>) -> bool {
     key.is_some_and(|key| !key.is_empty())
+}
+
+#[test]
+fn unsigned_commands_do_not_borrow_a_signing_credential_and_signed_commands_never_fall_back() {
+    use safe_cex_engine::signing::SignError;
+    for scalar in [false, true] {
+        let setup = if scalar {
+            format!(r#"{{"primary":{{"key":"api","secret":"{:064x}"}}}}"#, 1)
+        } else {
+            r#"{"primary":{"key":"api"}}"#.to_owned()
+        };
+        let (_, identities, facts) =
+            LocalSigner::from_json_with_facts(setup, setup_policy(), false).unwrap();
+        let installed = Installed::new(identities, Some(facts), false);
+        for command in [
+            Command::CancelOrders {
+                command: 1,
+                ids: vec![],
+            },
+            Command::CancelSymbolOrders {
+                command: 1,
+                symbol: "BTC/USDT:USDT".into(),
+            },
+            Command::SetLeverage {
+                command: 1,
+                symbol: "BTC/USDT:USDT".into(),
+                leverage: 2.,
+                side: None,
+            },
+        ] {
+            assert_eq!(installed.command_credential(&command), Ok(None));
+        }
+        for command in [
+            Command::PlaceOrders {
+                command: 1,
+                orders: vec![],
+            },
+            Command::AmendOrder {
+                command: 1,
+                id: "order".into(),
+                price: Some(2.),
+                amount: None,
+            },
+        ] {
+            let credential = installed.command_credential(&command);
+            if scalar {
+                assert_eq!(credential, Ok(installed.write_credential()));
+                assert!(credential.unwrap().is_some());
+            } else {
+                assert_eq!(credential, Err(SignError::SigningNotConfigured));
+            }
+        }
+    }
 }
