@@ -474,3 +474,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | GRVT EIP712 provider recipe and installed construction | Local recipe source CLEAR; D1 carry review; installed construction held on G3/G6 | Before installing the minimal hosted/local signing inputs, removing raw GRVT keys, or composing serial resend with Session headers. | [RUST_GRVT_PROVIDER_RECIPE.md](RUST_GRVT_PROVIDER_RECIPE.md) |
 | Engine signing metadata | Source CLEAR (m26ps4, 9czdjh); sizes and CI pending | Before exporting signing-task metadata or carrying a CredentialRole into managed admission. | [RUST_ENGINE_SIGN_META.md](RUST_ENGINE_SIGN_META.md) |
+
+| WOO managed socket adoption | Native codec over shared lifecycle | Before modifying WOO epoch, auth, interest replay, retirement or supervision. | [RUST_WOO_MANAGED_SOCKETS.md](RUST_WOO_MANAGED_SOCKETS.md) |
+| WOO socket adoption and request funnel | Source/API/native/map carry CLEAR; first-source paired sizes fit, current combined and CI pending | Before importing reviewed WOO sockets or converting its 30 request / 20 signing sites. | [RUST_WOO_ADOPTION_AND_FUNNEL.md](RUST_WOO_ADOPTION_AND_FUNNEL.md) |
