@@ -9317,3 +9317,19 @@ Covered reconciliation reads publish one merged Orders snapshot before retiring 
 The separately owned core CancelOnly overlap rule landed in #2181. Per the overseer's #2181 ruling, repair cancel and foreground cancel-all may coexist on the same symbol without capturing the cancel-all's IDs. Explicit-ID CancelOrders still conflicts on the same ID, and repair/Place-or-Amend conflicts stay fenced. A newer cancel-all racing the repair retains native refusal -> Rejected -> one manual-cancel error; no gone/Satisfied mapping is added. Existing trading.rs native controls and the frozen 19 repair originals are retained verbatim. No consumer deferral, re-queue, numeric completion or raw HTTP fallback is introduced.
 
 Phemex late-repair source corrections retain native envelope/row refusal codes and typed classification. A refused repair admission refreshes the account; non-capacity mint refusals give an explicit manual-cancel diagnostic. Retry reads can temporarily overlap the retiring Read by one Context to retain snapshot DATA custody. Phemex does not advance the selective snapshot fence; retirement relies on the receipt's begin-after-mint check and actual absence. The dispatch-signing fixture's Pending variant matcher changes; signing vectors do not.
+
+### Shared hosted operation foundation
+
+The opt-in structured-operation provider/peer uses immutable per-slot negotiated
+bindings and closed native family codecs. Legacy v1 signing contexts and routes
+stay unchanged. Missing business ownership, unknown recipes, replay, deadline or
+clock-revision changes refuse without a fallback. Peer validation failures are
+sanitized NotSent refusals, not credential latch evidence. Late work cannot
+publish a signature or HTTP request, and cancellation grants no joined-resource
+acknowledgement. The 64-entry per-account bound refuses new work rather than
+forgetting unexpired replay decisions.
+
+Kraken's advisory SignRequest context retains the exact wire path instead of the
+stripped signing path; the native preimage builder still strips /derivatives at
+the same cryptographic boundary. HTTP bytes, financial fields and native MACs are
+unchanged. This foundation does not enable hosted Kraken or alter nonce issuers.
