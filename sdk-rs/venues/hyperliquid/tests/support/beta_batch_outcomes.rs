@@ -21,7 +21,12 @@ fn pair(e: &mut Engine<Hyperliquid>) -> HttpRequest {
             orders: vec![order],
         }),
     );
-    write(e)
+    let request = write(e);
+    assert_eq!(
+        body(&request)["action"]["orders"].as_array().unwrap().len(),
+        2
+    );
+    request
 }
 
 #[test]
