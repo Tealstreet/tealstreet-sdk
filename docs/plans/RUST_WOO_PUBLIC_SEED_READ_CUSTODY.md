@@ -163,7 +163,7 @@ source review -> execution/fixture/typed-failure/credit/size qualification ->
 immutable preservation carry -> one source push/PR run -> full green CI family
 record plus current local combined -> auditor exact-tree GO and guarded merge.
 
-## Local originals checkpoint
+## Historical originals on unchanged runtime
 
 On the actual25ca8466d63 landing, the new public_seed_context target has32 tests:
 7 native working controls plus one exact-cleanup calibration pass and24 intended custody/policy assertions fail,
@@ -199,21 +199,9 @@ failures because raw startup collectors cannot capture managed preparations;
 these were qualification failures, not infrastructure. The exact fixture artifacts
 were reviewed before adoption and the eventual complete rerun is264PASS.
 
-The current tip74a0ba44d38 is plain-merged at8a73888af55; README is full incoming
-plus the own row once. No incoming WOO source overlap. First-source measurements
-must use this actual composition and retain their exact source/toolchain pins.
-
-
-Exact source/control and all three narrow startup-fixture artifacts are CLEAR
-(hcmq3f). The reviewed fixture helpers are adopted locally at original clocks;
-one now-unused public_supervision requests import is removed mechanically.
-The full family rerun waits for the sequential size builds, so the earlier11
-fixture failures remain historical until that rerun. Current first-source WOO
-pair74a0 -> e4f9 is1,321,862 ->1,335,186 (+13,324), within the unchanged1,343,488
-cap. This local qualification pair is not a CI family record. Both Node/Web
-outputs match, and each scratch target was deleted before the next build.
-The current bare/composed combined pair is still running; no combined delta or
-budget PASS is claimed until its optimized artifacts finish.
+The measurement baseline74a0ba44d38 is plain-merged at8a73888af55; README is
+full incoming plus the own row once. No incoming WOO source overlap. The
+completed pair below retains this actual composition and exact toolchain pins.
 
 
 ## Completed local first-source measurements
