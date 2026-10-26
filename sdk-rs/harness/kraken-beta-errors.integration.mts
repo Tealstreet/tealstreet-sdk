@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spotRig, spotResponse } from './spot-host-rig.mjs';
 import { krakenSpotPairs, krakenSpotTickers } from './private-tape-krakenspot.mjs';
 
-const credentials = { key: 'replay-key', secret: 'cmVwbGF5LXNlY3JldA==' };
+const credentials = { key: 'replay-key', secret: Buffer.from('replay-secret').toString('base64') };
 const order = (spot) => ({ symbol: spot ? 'XBT/USD' : 'PF_XBTUSD', type: 'limit', side: 'buy', amount: 1, price: 99 });
 function rig(spot, writeReply) {
   return spotRig(spot ? 'krakenspot' : 'kraken', credentials, (request) => {
