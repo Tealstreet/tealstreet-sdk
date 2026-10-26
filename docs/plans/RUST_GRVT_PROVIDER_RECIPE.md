@@ -604,4 +604,26 @@ Session auth declaration. A mixed amend root retains its write credential while
 inspect, cancel and verify are unsigned Session calls; only create uses provider
 signing. Installed unsigned-only commands deliberately borrow no signing authority.
 No call infers auth from recipe presence, and sign-requiring work never falls back
-to a keyless root. This shared follow-up remains a source/landing gate.
+to a keyless root. The shared follow-up landed in #2220 at 70da1f50e87; the native sender must now adopt it.
+
+
+### Current adoption checkpoint
+
+The published draft contains the reviewed result-bound provider, trusted
+SetupFacts carrier and installed-slot selection controls, plus the revisioned
+Session bundle hooks. Native construction, FIFO, login presentation and trading
+still use their existing sender; Installed remains test-only until their direct
+cutover. Enabling the shared features is preparation, not proof of adoption.
+
+On the composition containing #2220 and #2222, the GRVT library controls pass
+25/25. The registry controls pass 24/24 and strict Clippy passes for GRVT and
+registry with grvt plus dispatch-signing. The registry presence fixture was
+corrected explicitly: a raw identity can exist without a valid credential;
+the factory's canonical credential ref, rather than Option presence, is its
+credential-install oracle. KeyPresence and PrimaryLogin expectations are
+unchanged, and m26ps4 cleared that correction. The earlier 23/24 result remains
+a failed fixture run, not an original RED or source qualification.
+
+The native routing-intent controls and all originally gated custody suffixes
+remain required. Landing also waits for the per-venue Session-feature cost gate
+owned by 55ao7t, or an explicit accepted remeasurement. This draft is not READY.
