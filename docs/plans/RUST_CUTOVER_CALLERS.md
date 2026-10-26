@@ -9503,7 +9503,7 @@ Bitunix REST and its private socket login now sign at dispatch through the engin
 - **Login signing failure.** The engine's socket path handles it: an entropy failure closes the session and the reconnect re-signs; a provider refusal latches the role. Native's venue-side `STREAM_UNAVAILABLE` on entropy failure is replaced by the engine's signing diagnostics. The login still follows the ping on the wire.
 - **Wire.** Headers, the login frame and the double-SHA scheme are byte-identical to native; the wire stamp is clamped to be nonnegative.
 - **Controls moved.** The shared "unmigrated family" controls (registry `dispatch_provider` and `hosted_signing`, the WASM shared-provider test and the TS hosted-signing and WASM signer tests) now use MEXC. Crypto.com, named in the plan, already has `dispatchSigning`. Hosted Bitunix signing (P7) is a separate PR.
-- **Inventory.** Bitunix signing sites 25 → 6. Production keeps the user-facing "key and secret" message and the `Sha256SecretSuffix` algorithm name; the doc-vector and the provider fixture account for the rest. Its sign modules are now under the migrated-family ban. Credential selection 9 → 4: the `read_credentials` Options field name and the shared read-key message.
+- **Inventory.** Bitunix signing sites 25 → 6. Production keeps the user-facing "key and secret" message and the `Sha256SecretSuffix` algorithm name; the doc-vector and the provider fixture account for the rest. Its sign modules are now under the migrated-family ban. Credential selection 9 → 1: the `ReadCredentials` Options type.
 
 ### WEEX remaining inventory and identity custody
 
