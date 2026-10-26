@@ -102,9 +102,11 @@ mod enabled {
     }
 
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
-    pub(crate) enum AddressCapability {
-        #[default]
-        Uninitialized,
+    pub(crate) struct AddressCapability {
+        state: Option<Box<AddressState>>,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum AddressState {
         Refused(SignError),
         Verified(VerifiedAddress),
     }
@@ -133,14 +135,24 @@ mod enabled {
         }
     }
     impl AddressCapability {
+        fn refused(error: SignError) -> Self {
+            Self {
+                state: Some(Box::new(AddressState::Refused(error))),
+            }
+        }
+        fn bound(value: VerifiedAddress) -> Self {
+            Self {
+                state: Some(Box::new(AddressState::Verified(value))),
+            }
+        }
         pub(crate) fn verified(
             &self,
             identity: &Identity,
             slot: CredentialSlot,
             domain: Option<&'static NonceDomain>,
         ) -> Result<VerifiedAddress, NonceSelectionError> {
-            match self {
-                Self::Verified(value)
+            match self.state.as_deref() {
+                Some(AddressState::Verified(value))
                     if value.slot == slot
                         && value.domain == domain
                         && identity
@@ -149,7 +161,9 @@ mod enabled {
                 {
                     Ok(value.clone())
                 }
-                Self::Refused(error) => Err(NonceSelectionError::SetupCapability(*error)),
+                Some(AddressState::Refused(error)) => {
+                    Err(NonceSelectionError::SetupCapability(*error))
+                }
                 _ => Err(NonceSelectionError::InvalidSubject),
             }
         }
@@ -157,9 +171,9 @@ mod enabled {
     impl Identity {
         pub fn verified_signing_address(&self) -> Result<[u8; 20], SignError> {
             let signing = self.signing_ref()?;
-            match &self.address {
-                AddressCapability::Verified(value) if value.signing == *signing => Ok(value.bytes),
-                AddressCapability::Refused(error) => Err(*error),
+            match self.address.state.as_deref() {
+                Some(AddressState::Verified(value)) if value.signing == *signing => Ok(value.bytes),
+                Some(AddressState::Refused(error)) => Err(*error),
                 _ => Err(SignError::InvalidRequest),
             }
         }
@@ -363,7 +377,7 @@ mod enabled {
                 let signing = match identity.signing_ref() {
                     Ok(key) => key.clone(),
                     Err(error) => {
-                        identity.address = AddressCapability::Refused(error);
+                        identity.address = AddressCapability::refused(error);
                         continue;
                     }
                 };
@@ -375,7 +389,7 @@ mod enabled {
                     core.address_setup.support == SetupHostSupport::OwnedPublicAddress1
                 };
                 if !capable {
-                    identity.address = AddressCapability::Refused(SignError::Unsupported);
+                    identity.address = AddressCapability::refused(SignError::Unsupported);
                     continue;
                 }
                 let work = SignRequest {
@@ -390,7 +404,7 @@ mod enabled {
                     .as_ref()
                     .and_then(|provider| provider.create_public_address_setup(work.clone()));
                 if !external && owner.is_none() {
-                    identity.address = AddressCapability::Refused(SignError::Unsupported);
+                    identity.address = AddressCapability::refused(SignError::Unsupported);
                     continue;
                 }
                 let id = core.signing.next_id();
@@ -443,7 +457,7 @@ mod enabled {
                     task.result = Some(Err(SignError::TimedOut));
                     task.retiring = true;
                     if let Some(identity) = identity_mut(&mut core.identities, task.slot) {
-                        identity.address = AddressCapability::Refused(SignError::TimedOut);
+                        identity.address = AddressCapability::refused(SignError::TimedOut);
                     }
                     if let Some(owner) = &mut task.owner {
                         let _ = owner.cancel();
@@ -485,7 +499,7 @@ mod enabled {
                 {
                     identity.address = match task.result.unwrap_or(Err(SignError::InvalidResult)) {
                         Ok(bytes) if now < task.deadline && !task.retiring => {
-                            AddressCapability::Verified(VerifiedAddress {
+                            AddressCapability::bound(VerifiedAddress {
                                 bytes,
                                 signing: task.signing,
                                 slot: task.slot,
@@ -494,8 +508,8 @@ mod enabled {
                                 generation: setup.generation,
                             })
                         }
-                        Err(error) => AddressCapability::Refused(error),
-                        _ => AddressCapability::Refused(SignError::TimedOut),
+                        Err(error) => AddressCapability::refused(error),
+                        _ => AddressCapability::refused(SignError::TimedOut),
                     };
                 }
             }
@@ -612,12 +626,9 @@ mod enabled {
             for slot in [CredentialSlot::Primary, CredentialSlot::Secondary] {
                 if core.address_setup.slots.contains(slot)
                     && let Some(identity) = identity_mut(&mut core.identities, slot)
-                    && !matches!(
-                        identity.address,
-                        AddressCapability::Verified(_) | AddressCapability::Refused(_)
-                    )
+                    && identity.address.state.is_none()
                 {
-                    identity.address = AddressCapability::Refused(SignError::Unsupported);
+                    identity.address = AddressCapability::refused(SignError::Unsupported);
                 }
             }
         }
@@ -698,3 +709,28 @@ pub(super) use enabled::AddressNonceSetup;
 pub(crate) use enabled::{AddressCapability, VerifiedAddress};
 #[cfg(feature = "address-nonce")]
 pub use enabled::{AddressSetupCleanup, AddressSetupProgress, SetupHostSupport};
+
+#[cfg(all(test, feature = "address-nonce"))]
+mod capability_layout_tests {
+    use super::AddressCapability;
+
+    #[test]
+    fn private_address_capability_fits_one_pointer() {
+        assert!(
+            size_of::<AddressCapability>() <= size_of::<usize>(),
+            "address capability is {} bytes; one pointer is {} bytes",
+            size_of::<AddressCapability>(),
+            size_of::<usize>(),
+        );
+    }
+
+    #[test]
+    fn unified_address_feature_keeps_read_custody_within_clippy_variant_limit() {
+        let admitted = size_of::<crate::selected_read::AdmittedRead>();
+        let context = size_of::<crate::request_context::Context>();
+        assert!(
+            admitted.saturating_sub(context) <= 200,
+            "signed read is {admitted} bytes versus unsigned context {context} bytes",
+        );
+    }
+}

@@ -9571,3 +9571,36 @@ Kraken's advisory SignRequest context retains the exact wire path instead of the
 stripped signing path; the native preimage builder still strips /derivatives at
 the same cryptographic boundary. HTTP bytes, financial fields and native MACs are
 unchanged. This foundation does not enable hosted Kraken or alter nonce issuers.
+
+### Address setup at host start
+
+With `address-nonce`, native Host, frame-server and WASM startup initialize the
+installed provider before the existing engine seal. Synchronous local providers
+therefore expose genuine verified public addresses to `Venue::start`, including
+independently sealed aliased slots. Unsupported providers retain their per-slot
+NotSent refusal while public work starts. Hosted/asynchronous callers must finish
+the explicit pre-start result and actual-cleanup join before invoking start;
+unfinished work is still retired and refused at that boundary. No host support,
+nonce permission, retry or peer activation is inferred by these automatic calls.
+
+In address-nonce builds the frame-server account actor retains the same independent
+cleanup owner as native Host. Normal shutdown waits for actual setup cleanup;
+cleanup/task failures return a sanitized server error. Aborted actors retain the
+original cleanup in the live runtime and grant no retirement or replacement
+acknowledgement. Runtime teardown remains no join.
+
+### Explicit authentication on serial calls
+
+SerialCall declares Preflight or Session authentication. Existing adopters use
+Preflight with their previous read/write policy. A Session call carries no
+credential, signing or nonce authority and uses the retained login Session's
+explicit egress. Installed unsigned-only commands may deliberately use a Session
+root; sign-requiring commands never fall back to it. Credential-bearing login
+Sessions must match the engine's own installed Primary slot and credential ref.
+The venue selects the actual login Session: the engine checks authority and
+liveness but cannot distinguish its business purpose from a listen-key Session.
+Mixed roots retain the exact write credential for their later Preflight calls.
+Session calls keep Mutation journal evidence, order locks and Unknown on an
+unproven released send. Their resend freezes codec bytes while refreshing the
+bundle at Bind; Preflight signed calls repeat their existing provider work.
+No current venue enables a new auth mode in this engine slice.
