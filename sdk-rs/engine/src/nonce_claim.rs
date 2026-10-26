@@ -57,7 +57,7 @@ impl NonceClaim {
         selection: Selection,
         identity: &Identity,
     ) -> Result<Self, NonceSelectionError> {
-        let address_domain = *domain != super::KRAKEN;
+        let address_domain = domain.subject == super::NonceSubjectStrategy::Address;
         if address_domain {
             identity.signing_ref().map_err(|error| match error {
                 SignError::SigningNotConfigured => NonceSelectionError::SigningNotConfigured,
@@ -119,6 +119,11 @@ pub(crate) struct NonceReservation {
     pub(crate) nonce: u64,
 }
 impl ClaimAuthority {
+    #[cfg(feature = "address-nonce")]
+    pub(crate) fn address_bound(&self) -> bool {
+        self.domain.subject == super::NonceSubjectStrategy::Address
+    }
+
     pub(crate) fn matches_identity(&self, identity: &Identity) -> bool {
         if identity.validate().is_err()
             || self.credential.reference != identity.credential
@@ -126,16 +131,26 @@ impl ClaimAuthority {
         {
             return false;
         }
-        #[cfg(feature = "address-nonce")]
-        if let Some(address) = &self.address {
-            return identity
-                .address
-                .verified(identity, self.selection.slot(), Some(self.domain))
-                .is_ok_and(|current| current == *address);
+        match self.domain.subject {
+            super::NonceSubjectStrategy::StableId => identity
+                .require_stable_id()
+                .is_ok_and(|id| self.subject.0 == NonceKey::stable_id(id)),
+            super::NonceSubjectStrategy::Address => {
+                #[cfg(feature = "address-nonce")]
+                {
+                    self.address.as_ref().is_some_and(|address| {
+                        identity
+                            .address
+                            .verified(identity, self.selection.slot(), Some(self.domain))
+                            .is_ok_and(|current| current == *address)
+                    })
+                }
+                #[cfg(not(feature = "address-nonce"))]
+                {
+                    false
+                }
+            }
         }
-        identity
-            .require_stable_id()
-            .is_ok_and(|id| self.subject.0 == NonceKey::stable_id(id))
     }
 
     pub(crate) fn bind_once(&self) -> Result<(), SignError> {

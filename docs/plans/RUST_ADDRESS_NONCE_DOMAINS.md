@@ -444,3 +444,13 @@ feature-mode rows, fmt, all bans/ratchets, immutable source/fixture/map review,
 frozen-head CI and auditor GO remain required. CI records family sizes, never
 the local combined artifact. The planning checkpoint has shipping delta0 by
 construction, with no measured runtime or execution claim.
+
+Source ownership pins: each domain declares a private StableId or Address
+strategy; generic minting never infers it by excluding Kraken. A LocalSigner
+factory derives public bytes while borrowing its declared store entry and
+returns a dormant result-only handle, never another scalar copy. Native run
+retains cleanup through observer unwind and cancellation; a continuing runtime
+polls the original driver, while only its actual completion proves settlement.
+The sign-meta business carrier is a separate fe7-owned prerequisite PR; this
+address seam contributes only the genuine setup-table accessor branch and its
+setup construction on that carrier.

@@ -773,7 +773,7 @@ fn implemented(algorithm: Algorithm) -> bool {
 
 #[cfg(feature = "address-nonce")]
 struct LocalAddressSetup {
-    key: Option<Zeroizing<Vec<u8>>>,
+    address: Option<Result<[u8; 20], SignError>>,
     result: Option<Result<SignResult, SignError>>,
     started: bool,
 }
@@ -785,22 +785,19 @@ impl safe_cex_engine::signing::OwnedSetupExecution for LocalAddressSetup {
         }
         self.started = true;
         self.result = Some(
-            primitives::secp256k1_address(
-                self.key
-                    .take()
-                    .as_deref()
-                    .ok_or(SignError::InvalidRequest)?,
-            )
-            .map(|value| SignResult {
-                receipt: Default::default(),
-                values: vec![value],
-                headers: Vec::new(),
-            }),
+            self.address
+                .take()
+                .ok_or(SignError::InvalidRequest)?
+                .map(|value| SignResult {
+                    receipt: Default::default(),
+                    values: vec![value.to_vec()],
+                    headers: Vec::new(),
+                }),
         );
         Ok(())
     }
     fn cancel(&mut self) -> Result<(), SignError> {
-        self.key = None;
+        self.address = None;
         self.started = true;
         Ok(())
     }
@@ -858,11 +855,12 @@ impl Signer for LocalSigner {
                 return None;
             }
             Some(Box::new(LocalAddressSetup {
-                key: Some(Zeroizing::new(
-                    self.declared_key(key, Algorithm::Secp256k1Digest)
-                        .ok()?
-                        .to_vec(),
-                )),
+                address: Some(
+                    primitives::secp256k1_address(
+                        self.declared_key(key, Algorithm::Secp256k1Digest).ok()?,
+                    )
+                    .and_then(|bytes| bytes.try_into().map_err(|_| SignError::InvalidResult)),
+                ),
                 result: None,
                 started: false,
             }))
@@ -2800,6 +2798,20 @@ mod owned_address_setup_tests {
         );
         work.validate_result(&result).unwrap();
         assert_eq!(owner.poll_joined(&mut cx), Poll::Ready(Ok(())));
+    }
+    #[test]
+    fn dormant_local_handle_stores_only_the_fixed_public_result() {
+        use safe_cex_engine::signing::OwnedSetupExecution;
+        let mut owner = LocalAddressSetup {
+            address: Some(Ok([19; 20])),
+            result: None,
+            started: false,
+        };
+        let public: &Option<Result<[u8; 20], SignError>> = &owner.address;
+        assert_eq!(public, &Some(Ok([19; 20])));
+        owner.cancel().unwrap();
+        assert!(owner.address.is_none());
+        assert!(owner.result.is_none());
     }
     #[test]
     fn direct_factory_rejects_foreign_ref_algorithm_receipt_and_extra_work() {

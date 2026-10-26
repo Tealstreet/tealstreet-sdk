@@ -162,6 +162,9 @@ impl Pending {
     #[cfg(feature = "address-nonce")]
     pub(crate) fn nonce_identity_current(&self, identities: &crate::signing::Identities) -> bool {
         self.nonce_claim.as_ref().is_none_or(|claim| {
+            if !claim.address_bound() {
+                return true;
+            }
             let identity = match claim.selection.slot() {
                 crate::CredentialSlot::Primary => identities.primary.as_ref(),
                 crate::CredentialSlot::Secondary => identities.secondary.as_ref(),

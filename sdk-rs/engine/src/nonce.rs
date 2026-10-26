@@ -43,9 +43,17 @@ impl NonceKey {
     }
 }
 
-/// One family's nonce policy, declared once here rather than in venue code.
+/// Trusted identity source declared with each nonce policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonceSubjectStrategy {
+    StableId,
+    Address,
+}
+
+/// One family's nonce policy, including the trusted identity source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NonceDomain {
+    subject: NonceSubjectStrategy,
     name: &'static str,
     floor: NonceFloor,
     limit: u64,
@@ -54,6 +62,7 @@ pub struct NonceDomain {
 /// Hyperliquid and TxFlow agents (including vaults) share one sequence per
 /// agent address: raw host milliseconds within the safe-integer range.
 pub const HYPERLIQUID_AGENT: NonceDomain = NonceDomain {
+    subject: NonceSubjectStrategy::Address,
     name: "hyperliquid-agent",
     floor: NonceFloor::RawMs { scale: 1 },
     limit: (1 << 53) - 1,
@@ -62,6 +71,7 @@ pub const HYPERLIQUID_AGENT: NonceDomain = NonceDomain {
 /// Aster V3 uses calibrated whole milliseconds scaled to microseconds.
 #[cfg(feature = "address-nonce")]
 pub const ASTERDEX_V3: NonceDomain = NonceDomain {
+    subject: NonceSubjectStrategy::Address,
     name: "asterdex-v3",
     floor: NonceFloor::ProtocolMs { scale: 1000 },
     limit: u64::MAX,
@@ -69,6 +79,7 @@ pub const ASTERDEX_V3: NonceDomain = NonceDomain {
 
 /// Kraken Spot and Futures share a counter for the same trusted stable subject.
 pub const KRAKEN: NonceDomain = NonceDomain {
+    subject: NonceSubjectStrategy::StableId,
     name: "kraken",
     floor: NonceFloor::RawMs { scale: 1000 },
     limit: u64::MAX,
@@ -214,6 +225,13 @@ pub fn reserve_kraken_legacy(identity: [u8; 32], floor: u64) -> Result<u64, Stri
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reviewed_domains_declare_their_subject_strategy() {
+        assert_eq!(KRAKEN.subject, NonceSubjectStrategy::StableId);
+        assert_eq!(HYPERLIQUID_AGENT.subject, NonceSubjectStrategy::Address);
+        #[cfg(feature = "address-nonce")]
+        assert_eq!(ASTERDEX_V3.subject, NonceSubjectStrategy::Address);
+    }
     use super::*;
 
     #[test]

@@ -894,9 +894,8 @@ impl<T: Send + Sync> ProviderBounds for T {}
 pub trait ProviderBounds {}
 #[cfg(target_arch = "wasm32")]
 impl<T> ProviderBounds for T {}
-/// Host-injected signing. Providers own secrets and may complete asynchronously.
-/// Hosts enforce cancellation/timeout independently of this future settling.
 /// An execution whose join includes all owned work and cleanup, not a timeout wrapper.
+/// Poll::Ready from poll_joined requires actual resource settlement, including on Err.
 pub trait OwnedSetupExecution: SetupExecutionBounds {
     fn start(&mut self) -> Result<(), SignError>;
     fn cancel(&mut self) -> Result<(), SignError>;
@@ -918,10 +917,15 @@ pub trait SetupExecutionBounds {}
 #[cfg(target_arch = "wasm32")]
 impl<T: ?Sized> SetupExecutionBounds for T {}
 
+/// Host-injected signing. Providers own secrets and may complete asynchronously.
+/// Hosts enforce cancellation/timeout independently of the signing future settling.
 pub trait Signer: ProviderBounds {
     fn owned_public_address_capability(&self) -> Capability {
         Capability::Unsupported
     }
+    /// Dormant owned work; refuse anything except one own-ref Secp256k1 PublicAddress
+    /// with an empty receipt/context. Pure local derivation may happen here;
+    /// asynchronous emission starts only through the retained execution's start.
     fn create_public_address_setup(
         &self,
         _request: SignRequest,

@@ -958,7 +958,7 @@ export class EngineHost {
     switch (action?.op) {
       case 'retireAddressSetup':
         this.dispose();
-        throw new EngineDisposedError('Address setup support was not negotiated');
+        throw new EngineDisposedError();
       case 'sign':
         this.sign(action);
         break;

@@ -380,6 +380,7 @@ impl safe_cex_venues::Visit for Boxed {
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum ActionOut<'a> {
+    #[cfg(feature = "address-nonce")]
     RetireAddressSetup {
         task: u64,
         token: String,
@@ -507,10 +508,13 @@ fn encode(actions: &[Action]) -> String {
     let out: Vec<ActionOut<'_>> = actions
         .iter()
         .map(|action| match action {
+            #[cfg(feature = "address-nonce")]
             Action::RetireAddressSetup { task, token } => ActionOut::RetireAddressSetup {
                 task: task.0,
                 token: token.to_wire(),
             },
+            #[cfg(not(feature = "address-nonce"))]
+            Action::RetireAddressSetup { .. } => panic!("Address setup is unsupported"),
             Action::WsConnect {
                 binary,
                 socket,

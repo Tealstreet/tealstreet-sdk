@@ -9242,3 +9242,11 @@ adoption pins its warning-only option and exact actual signer before CreateOrder
 Aster separately pins typed per-slot mismatch refusal and cold-instance replacement;
 HL separately accounts for its legacy prepared/released work. No nonce counter is
 reset and no possibly-sent mutation is replayed by setup or retirement.
+
+Native address-setup shutdown retains its independent cleanup owner before
+observer callbacks can escape. Observer panics propagate after actual cleanup
+joins. Cancelling or dropping the native run future transfers that same driver
+into the live Tokio runtime; cancellation is never retirement evidence, and the
+runtime must remain alive through the genuine join. Runtime teardown itself is
+not a resource-retirement report. Local setup handles retain only the derived
+20-byte public result, with scalar bytes staying in the installed store.

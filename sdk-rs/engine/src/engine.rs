@@ -477,10 +477,6 @@ impl From<&String> for SocketSpec {
 
 #[derive(Clone)]
 pub enum Action {
-    RetireAddressSetup {
-        task: RequestId,
-        token: std::sync::Arc<SetupRetirement>,
-    },
     WsConnect {
         /// Preserve application binary frames rather than decoding UTF-8.
         binary: bool,
@@ -524,6 +520,10 @@ pub enum Action {
         timer: TimerId,
     },
     Notice(Notice),
+    RetireAddressSetup {
+        task: RequestId,
+        token: std::sync::Arc<SetupRetirement>,
+    },
 }
 
 impl PartialEq for Action {

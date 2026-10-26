@@ -124,6 +124,32 @@ pub struct Host<V: Venue, T: Transport> {
     terminal_reported: bool,
 }
 
+#[cfg(feature = "address-nonce")]
+struct SetupRunOwner<V: Venue, T: Transport> {
+    host: Option<Host<V, T>>,
+    cleanup: Option<std::pin::Pin<Box<safe_cex_engine::AddressSetupCleanup>>>,
+}
+#[cfg(feature = "address-nonce")]
+impl<V: Venue, T: Transport> Drop for SetupRunOwner<V, T> {
+    fn drop(&mut self) {
+        let cleanup = self.cleanup.take().or_else(|| {
+            self.host.as_mut().map(|host| {
+                host.stop();
+                Box::pin(host.engine.take_address_setup_cleanup())
+            })
+        });
+        if let Some(cleanup) = cleanup {
+            // Cancellation transfers ownership, never retirement evidence. The
+            // runtime must stay alive until this actual cleanup driver finishes.
+            tokio::spawn(async move {
+                if cleanup.await.is_err() {
+                    eprintln!("Address setup cleanup failed after host cancellation");
+                }
+            });
+        }
+    }
+}
+
 impl<V: Venue, T: Transport> Host<V, T> {
     pub fn new(engine: Engine<V>, transport: T) -> Self {
         let (events, inbox) = mpsc::unbounded_channel();
@@ -166,7 +192,6 @@ impl<V: Venue, T: Transport> Host<V, T> {
         Ok(self)
     }
 
-    /// Feed live configuration alongside transport completions.
     /// Read-only metadata of the current managed signing task; see
     /// `Engine::sign_meta`. Descriptive only.
     #[cfg(feature = "sign-meta")]
@@ -185,6 +210,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
         self.engine.poll_address_setup((self.clock)(), cx);
         self.engine.address_nonce_setup_ready()
     }
+    /// Feed live configuration alongside transport completions.
     pub fn event_sender(&self) -> Events {
         self.events.clone()
     }
@@ -192,15 +218,74 @@ impl<V: Venue, T: Transport> Host<V, T> {
     /// Run until `commands` closes, handing each flush frame to `on_frame`
     /// and every log line or command result to `on_notice`. Returns the
     /// engine for inspection.
-    pub async fn run(
-        mut self,
+    pub fn run(
+        self,
         mut commands: mpsc::UnboundedReceiver<Command>,
         flush_every: Duration,
         mut on_frame: impl FnMut(&[u8]),
         mut on_notice: impl FnMut(Notice),
-    ) -> Engine<V> {
+    ) -> impl std::future::Future<Output = Engine<V>> {
+        #[cfg(feature = "address-nonce")]
+        let mut retirement = SetupRunOwner {
+            host: Some(self),
+            cleanup: None,
+        };
+        async move {
+            #[cfg(feature = "address-nonce")]
+            {
+                use futures_util::FutureExt;
+                let result = std::panic::AssertUnwindSafe(retirement.host.as_mut().unwrap().drive(
+                    &mut commands,
+                    flush_every,
+                    &mut on_frame,
+                    &mut on_notice,
+                ))
+                .catch_unwind()
+                .await;
+                retirement.host.as_mut().unwrap().stop();
+                retirement.cleanup = Some(Box::pin(
+                    retirement
+                        .host
+                        .as_mut()
+                        .unwrap()
+                        .engine
+                        .take_address_setup_cleanup(),
+                ));
+                let cleanup = retirement.cleanup.as_mut().unwrap().await;
+                retirement.cleanup = None;
+                let mut host = retirement.host.take().unwrap();
+                if let Err(panic) = result {
+                    std::panic::resume_unwind(panic);
+                }
+                host.report_terminal(&mut on_notice);
+                if cleanup.is_err() {
+                    on_notice(Notice::StartupFailed {
+                        error: VenueError::new("Address setup cleanup failed")
+                            .kind(safe_cex_engine::ErrorKind::Internal),
+                    });
+                }
+                host.engine
+            }
+            #[cfg(not(feature = "address-nonce"))]
+            {
+                let mut host = self;
+                host.drive(&mut commands, flush_every, &mut on_frame, &mut on_notice)
+                    .await;
+                host.report_terminal(&mut on_notice);
+                host.engine
+            }
+        }
+    }
+
+    async fn drive(
+        &mut self,
+        commands: &mut mpsc::UnboundedReceiver<Command>,
+        flush_every: Duration,
+        on_frame: &mut impl FnMut(&[u8]),
+        on_notice: &mut impl FnMut(Notice),
+    ) {
         self.turn(|host| host.engine.start((host.clock)()));
-        self.execute(&mut on_notice);
+        self.execute(on_notice);
         let mut flush = tokio::time::interval(flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         while self.terminal.is_none() {
@@ -211,24 +296,15 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     None => break,
                 },
                 _ = flush.tick() => {
-                    self.frame(&mut on_frame);
+                    self.frame(on_frame);
                 }
             }
-            self.execute(&mut on_notice);
+            self.execute(on_notice);
         }
         if self.terminal.is_none() {
-            self.frame(&mut on_frame);
+            self.frame(on_frame);
         }
         self.stop();
-        self.report_terminal(&mut on_notice);
-        #[cfg(feature = "address-nonce")]
-        if self.engine.take_address_setup_cleanup().await.is_err() {
-            on_notice(Notice::StartupFailed {
-                error: VenueError::new("Address setup cleanup failed")
-                    .kind(safe_cex_engine::ErrorKind::Internal),
-            });
-        }
-        self.engine
     }
 
     fn turn<R>(&mut self, operation: impl FnOnce(&mut Self) -> R) -> Option<R> {
