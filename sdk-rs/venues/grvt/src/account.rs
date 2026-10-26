@@ -40,6 +40,33 @@ pub(crate) struct Session {
     pub cookie: String,
     pub account_id: String,
 }
+impl Session {
+    fn headers(
+        &self,
+    ) -> Result<
+        safe_cex_engine::request_context::SessionHeaders,
+        safe_cex_engine::request_context::Error,
+    > {
+        use safe_cex_engine::request_context::{
+            SecretHeaderValue, SessionHeaders, SessionPlacement,
+        };
+        SessionHeaders::new(vec![
+            (
+                "X-Ts-Grvt-Session",
+                SecretHeaderValue::new(self.cookie.clone())?,
+            ),
+            (
+                "Cookie",
+                SecretHeaderValue::new(format!("rm=true; gravity={}", self.cookie))?,
+            ),
+            (
+                "X-Grvt-Account-Id",
+                SecretHeaderValue::new(self.account_id.clone())?,
+            ),
+        ])
+        .map(|headers| headers.placed(SessionPlacement::After("Content-Type")))
+    }
+}
 pub(crate) struct OrderProgress {
     pub native_id: Option<String>,
     pub created_ns: u64,
@@ -782,6 +809,48 @@ struct FillWire<'a> {
     price: Number,
 }
 impl Grvt {
+    pub(crate) fn account_bearer_revision(&self, generation: u64) -> Option<u64> {
+        use safe_cex_engine::request_context::Owner;
+        let session = self.account.login_session.as_ref()?;
+        if session.owner() != (Owner::Session { generation }) {
+            return None;
+        }
+        self.account.session.as_ref()?;
+        Some(self.account.generation)
+    }
+    pub(crate) fn account_bearer(
+        &self,
+        generation: u64,
+    ) -> safe_cex_engine::request_context::SessionBearer {
+        use safe_cex_engine::request_context::SessionBearer;
+        let Some(revision) = self.account_bearer_revision(generation) else {
+            return SessionBearer::NotReady;
+        };
+        match self
+            .account
+            .session
+            .as_ref()
+            .and_then(|session| session.headers().ok())
+        {
+            Some(headers) => SessionBearer::Ready { headers, revision },
+            None => SessionBearer::NotReady,
+        }
+    }
+    fn announce_account_session(&mut self, cx: &mut Cx<'_, Pending>) {
+        use safe_cex_engine::request_context::Waiter;
+        let Some(session) = self.account.login_session.as_ref() else {
+            return;
+        };
+        for waiter in cx.session_ready(session) {
+            match waiter {
+                Waiter::Ready(context, mut pending) => {
+                    pending.context = Some(context);
+                    self.send_request(cx, pending);
+                }
+                Waiter::Failed(_, pending, error) => self.fail_pending(cx, pending, &error.message),
+            }
+        }
+    }
     pub(crate) fn account_headers(&self) -> Vec<(&'static str, String)> {
         let mut headers = vec![("Content-Type", "application/json".into())];
         if let Some(session) = &self.account.session {
@@ -1544,9 +1613,21 @@ impl Grvt {
                     self.fail_waiting(cx);
                     return;
                 };
+                let session = Session { cookie, account_id };
+                let Some(revision) = self.account.generation.checked_add(1) else {
+                    self.fail_authentication(cx, code::STREAM_UNAVAILABLE);
+                    self.fail_waiting(cx);
+                    return;
+                };
+                if session.headers().is_err() {
+                    self.fail_authentication(cx, code::STREAM_UNAVAILABLE);
+                    self.fail_waiting(cx);
+                    return;
+                }
                 self.cancel_pong_ping(cx);
-                self.account.session = Some(Session { cookie, account_id });
-                self.account.generation += 1;
+                self.account.session = Some(session);
+                self.account.generation = revision;
+                self.announce_account_session(cx);
                 if self.account.trading_account_id.is_none()
                     && let Ok(login) = serde_json::from_str::<LoginBody<'_>>(response.body)
                     && valid_account(&login.sub_account_id)
@@ -1836,32 +1917,35 @@ impl Grvt {
             return;
         }
         let (cookie, account_id) = session_headers(response);
-        if let Some(session) = &mut self.account.session {
-            let mut changed = false;
-            if let Some(cookie) = cookie
-                && cookie != session.cookie
-            {
-                session.cookie = cookie;
-                changed = true;
-            }
-            if let Some(account_id) = account_id
-                && account_id != session.account_id
-            {
-                session.account_id = account_id;
-                changed = true;
-            }
-            if changed {
-                self.cancel_pong_ping(cx);
-                self.account.generation += 1;
-                self.account.authenticated = false;
-                if let Some(socket) = self.account.socket.take() {
-                    cx.close(socket);
-                }
-                self.account.supervisor.cancel(cx);
-                if self.account.started {
-                    self.connect_private(cx);
-                }
-            }
+        let Some(current) = self.account.session.as_ref() else {
+            return;
+        };
+        let next = Session {
+            cookie: cookie.unwrap_or_else(|| current.cookie.clone()),
+            account_id: account_id.unwrap_or_else(|| current.account_id.clone()),
+        };
+        if next.cookie == current.cookie && next.account_id == current.account_id {
+            return;
+        }
+        let Some(revision) = self.account.generation.checked_add(1) else {
+            self.fail_authentication(cx, code::STREAM_UNAVAILABLE);
+            return;
+        };
+        if next.headers().is_err() {
+            self.fail_authentication(cx, code::STREAM_UNAVAILABLE);
+            return;
+        }
+        self.cancel_pong_ping(cx);
+        self.account.session = Some(next);
+        self.account.generation = revision;
+        self.announce_account_session(cx);
+        self.account.authenticated = false;
+        if let Some(socket) = self.account.socket.take() {
+            cx.close(socket);
+        }
+        self.account.supervisor.cancel(cx);
+        if self.account.started {
+            self.connect_private(cx);
         }
     }
     pub(crate) fn check_builder(&mut self, cx: &mut Cx<'_, Pending>) {

@@ -738,6 +738,12 @@ impl Grvt {
     }
 }
 impl Venue for Grvt {
+    fn session_bearer(&self, generation: u64) -> safe_cex_engine::request_context::SessionBearer {
+        self.account_bearer(generation)
+    }
+    fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
+        self.account_bearer_revision(generation)
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
