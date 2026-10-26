@@ -9956,7 +9956,11 @@ is true on a backoff re-ask with no new uncertain write since the last ask: the
 hook must then join any read already running or owed, never start or owe
 another (a slow read would otherwise never complete and release). A venue may hold the fence to its
 native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
-opts in. Not covered yet (Phase B): an Unknown marker for venues with no
+opts in. AsterDEX opts in: its hook starts an open-orders read at once, or, when a
+read is already in flight (which predates the seal and cannot clear the fence),
+starts the fresh one as that read completes. It releases only on a clean read,
+so a persistently malformed order row keeps that venue's placements refused
+(cancels by ID stay admitted) until the row parses. Not covered yet (Phase B): an Unknown marker for venues with no
 placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
 until its opt-in) from managed, single-Context and legacy `cx.request` writes,
 and amend roots whose replacement places (zs5e83's audits,
@@ -10048,6 +10052,25 @@ beta safety; it does not enable hosted signing. Native engine controls prove
 retry/amend refusal, stale/fresh release, held reads across three engine re-asks,
 503 recovery and rejected-row refusal. Browser readiness remains a separate
 JS/WASM host gate.
+
+## Hyperliquid uncertain-placement reconciliation
+
+Hyperliquid and HyperliquidSpot reconcile uncertain placements through their
+existing complete `frontendOpenOrders` read. Repeated engine requests join the
+in-flight DEX scope and owe at most one successor read. After Store publication,
+only a clean snapshot with zero rejected rows reports that scope reconciled;
+duplicate or malformed rows cannot release it. The engine's dispatch token
+keeps a pre-write read from releasing a newer uncertainty fence.
+
+Both products opt into `fence_uncertain_placements` on the engine's generic
+legacy-write Phase B. An Unknown placement or amend refuses overlapping new
+placements and amends as NotSent until a fresh clean read reconciles them.
+Cancel by ID remains available. The perps and Spot four-step controls were RED
+at the retry assertion before Phase B and now execute through stale-read
+refusal, fresh Store publication and a successful retry. Duplicate rows keep
+the fence standing. This slice adds no venue retry loop or write resend.
+Multi-DEX reads release symbol-scoped marks only; an unknown-ID amend is refused
+NotSent before dispatch and cannot create an all-symbol mark on this venue.
 
 ### Binance: an Unknown placement fences its symbol
 
