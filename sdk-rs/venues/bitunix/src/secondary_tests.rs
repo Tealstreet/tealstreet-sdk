@@ -47,10 +47,10 @@ fn check_signature(r: &HttpRequest, key: &str, material: &str, query: &str) {
     let expected = hex(&sha256(format!("{first}{material}").as_bytes()));
     assert_eq!(header(r, "sign"), expected);
 }
-/// Selection is by role, not method: reads sign with the read key, and a
-/// trading-job request and the socket login sign Primary whatever the method.
+/// Selection is by role: reads sign with the read key and the socket login
+/// signs Primary. In-job reads sign Primary (trading_funnel control 4).
 #[test]
-fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
+fn reads_use_the_read_key_and_the_login_stays_primary() {
     for secondary in [false, true] {
         let (mut opts, provider) = options();
         if !secondary {
@@ -66,26 +66,15 @@ fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
                 };
                 v.signed_request(
                     cx,
-                    Method::Get,
                     "/secondary-test",
                     params(),
-                    None,
                     Pending::SymbolSettings {
                         symbol: "BTCUSDT".into(),
                         write_revision: 0,
                         serial: 0,
+                        custody: None,
                     },
                 );
-                for method in [Method::Get, Method::Post] {
-                    v.signed_request(
-                        cx,
-                        method,
-                        "/secondary-test",
-                        params(),
-                        (method != Method::Get).then(|| r#"{"amount":"1"}"#.into()),
-                        Pending::Trade(trading::Request::leverage_probe(9)),
-                    );
-                }
                 v.login(cx, SocketId(777));
             },
         );
@@ -100,7 +89,7 @@ fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
                 _ => None,
             })
             .collect();
-        assert_eq!(requests.len(), 3);
+        assert_eq!(requests.len(), 1);
         for (index, r) in requests.into_iter().enumerate() {
             let (key, material) = if secondary && index == 0 {
                 ("read-key", "read-material")
@@ -145,7 +134,9 @@ fn reads_use_the_read_key_and_trading_and_login_stay_primary() {
     }
 }
 #[test]
-fn every_account_axis_settings_and_history_get_uses_read_identity() {
+/// History signs with the read key too; tests/history.rs pins it on its own
+/// caller root (a probe has no genuine command entry).
+fn every_account_axis_and_settings_get_uses_read_identity() {
     let (opts, provider) = options();
     let venue = ProbeVenue::new(
         BitunixFutures::new(opts),
@@ -185,17 +176,6 @@ fn every_account_axis_settings_and_history_get_uses_read_identity() {
                 v.read_axis(cx, axis);
             }
             v.read_symbol_settings(cx, "BTCUSDT");
-            v.query(
-                cx,
-                7,
-                safe_cex_engine::Query::Income {
-                    from_ms: None,
-                    to_ms: None,
-                    symbol: None,
-                    kind: None,
-                    limit: None,
-                },
-            );
         },
     );
     let mut e = safe_cex_engine::test_support::seeded_engine(venue);
@@ -208,7 +188,7 @@ fn every_account_axis_settings_and_history_get_uses_read_identity() {
             _ => None,
         })
         .collect();
-    assert_eq!(requests.len(), 6);
+    assert_eq!(requests.len(), 5);
     for r in requests {
         let query = r
             .url

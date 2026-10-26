@@ -143,6 +143,10 @@ impl State {
         }
         self.arm(cx);
     }
+    /// The last settings serial issued, for any symbol.
+    pub(crate) fn settings_sequence(&self) -> u64 {
+        self.settings_sequence
+    }
     pub(crate) fn settings_current(&self, symbol: &str, serial: u64) -> bool {
         self.settings_serial.get(symbol) == Some(&serial)
     }

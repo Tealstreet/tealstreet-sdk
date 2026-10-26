@@ -15,26 +15,27 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit', 'kraken', 'krakenspot']);
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_353 * 1_024);
-  assert.equal(wasmBudgetError(1_385_472, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_385_473, 'venue', 'asterdex'), /exceeds 1385472/);
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_354 * 1_024);
+  assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(1_386_497, 'venue', 'asterdex'), /exceeds 1386496/);
   for (const venue of ['bitget', 'bitgetusdc']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1447 * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1448 * 1024);
     assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1448 * 1024);
-    assert.equal(wasmBudgetError(1_481_728, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_481_729, 'venue', venue), /exceeds 1481728/);
+    assert.equal(wasmBudgetError(1_482_752, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_482_753, 'venue', venue), /exceeds 1482752/);
   }
   for (const venue of ['kraken', 'krakenspot']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1368 * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1369 * 1024);
     assert.equal(wasmBudgetError(1_399_777, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_399_808, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_399_905, 'venue', venue), undefined);
-    assert.equal(wasmBudgetError(1_400_832, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_400_833, 'venue', venue), /exceeds 1400832/);
+    assert.equal(wasmBudgetError(1_400_974, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(1_401_856, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_401_857, 'venue', venue), /exceeds 1401856/);
   }
-  assert.equal(WASM_VENUE_OVERRIDES.bybit, 1_343_488 + 102_400);
-  assert.equal(wasmBudgetError(1_445_888, 'venue', 'bybit'), undefined);
-  assert.match(wasmBudgetError(1_445_889, 'venue', 'bybit'), /exceeds 1445888/);
+  assert.equal(WASM_VENUE_OVERRIDES.bybit, 1413 * 1024);
+  assert.equal(wasmBudgetError(1_446_912, 'venue', 'bybit'), undefined);
+  assert.match(wasmBudgetError(1_446_913, 'venue', 'bybit'), /exceeds 1446912/);
   assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bybit'), /exceeds 14680064/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue', 'okx'), /exceeds 1343488/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue'), /exceeds 1343488/);

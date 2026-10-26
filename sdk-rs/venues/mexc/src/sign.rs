@@ -1,13 +1,18 @@
 //! MEXC signs the exact POST body, or the sorted GET query, in REST headers.
+pub mod dispatch;
+#[cfg(test)]
 use safe_cex_crypto::{Encoding, hmac_sha256};
+#[cfg(test)]
 use safe_cex_engine::num;
 use safe_cex_engine::url::encode;
 use std::collections::BTreeMap;
 
+#[cfg(test)]
 pub struct Credentials {
     pub key: String,
     pub secret: String,
 }
+#[cfg(test)]
 impl Credentials {
     pub fn signature(&self, now: f64, payload: &str) -> String {
         hmac_sha256(
@@ -90,6 +95,7 @@ mod tests {
     }
 }
 
+#[cfg(test)]
 safe_cex_crypto::erase_credentials_on_drop!(Credentials, key, secret);
 
 #[cfg(test)]

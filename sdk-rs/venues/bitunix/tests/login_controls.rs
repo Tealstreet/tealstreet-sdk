@@ -9,7 +9,9 @@ fn message(
     text: &str,
 ) -> Vec<Action> {
     e.handle(at, Event::WsMessage { socket, text });
-    e.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect()
 }
 fn retry(actions: &[Action], at: f64) -> TimerId {
     actions
@@ -40,7 +42,14 @@ fn malformed_login_controls_warn_without_claiming_bad_credentials_and_retry() {
         assert!(!actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == code::AUTH_REJECTED || event.message.contains("never-log-me"))));
         let timer = retry(&actions, 2100.0);
         e.handle(2100.0, Event::TimerFired { timer });
-        assert_eq!(login_sends(&e.drain_actions().collect::<Vec<_>>()), 1);
+        assert_eq!(
+            login_sends(
+                &safe_cex_engine::test_support::prepared_now(&mut e)
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            ),
+            1
+        );
     }
 }
 #[test]
@@ -63,7 +72,14 @@ fn explicit_refusal_remains_visible_but_success_cancels_its_retry() {
         r#"{"op":"login","data":{"result":true}}"#,
     );
     e.handle(2100.0, Event::TimerFired { timer });
-    assert_eq!(login_sends(&e.drain_actions().collect::<Vec<_>>()), 0);
+    assert_eq!(
+        login_sends(
+            &safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect::<Vec<_>>()
+        ),
+        0
+    );
 }
 #[test]
 fn repeated_login_refusals_do_not_postpone_the_existing_retry() {
@@ -74,7 +90,14 @@ fn repeated_login_refusals_do_not_postpone_the_existing_retry() {
     let second = message(&mut e, socket, 2000.0, text);
     assert!(!second.iter().any(|a| matches!(a, Action::SetTimer { .. })));
     e.handle(2100.0, Event::TimerFired { timer });
-    assert_eq!(login_sends(&e.drain_actions().collect::<Vec<_>>()), 1);
+    assert_eq!(
+        login_sends(
+            &safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect::<Vec<_>>()
+        ),
+        1
+    );
 }
 #[test]
 fn retired_login_retry_cannot_sign_on_a_replacement_socket() {
@@ -87,7 +110,9 @@ fn retired_login_retry_cannot_sign_on_a_replacement_socket() {
     );
     let timer = retry(&first, 2100.0);
     e.handle(200.0, Event::WsClosed { socket, code: 1006 });
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     let mut replacement = actions.iter().find_map(|a| match a {
         Action::WsConnect { socket, .. } => Some(*socket),
         _ => None,
@@ -101,10 +126,12 @@ fn retired_login_retry_cannot_sign_on_a_replacement_socket() {
             })
             .expect("socket retry");
         e.handle(at, Event::TimerFired { timer: retry_timer });
-        replacement = e.drain_actions().find_map(|a| match a {
-            Action::WsConnect { socket, .. } => Some(socket),
-            _ => None,
-        });
+        replacement = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            });
     }
     e.handle(
         1500.0,
@@ -112,9 +139,18 @@ fn retired_login_retry_cannot_sign_on_a_replacement_socket() {
             socket: replacement.unwrap(),
         },
     );
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
     e.handle(2100.0, Event::TimerFired { timer });
-    assert_eq!(login_sends(&e.drain_actions().collect::<Vec<_>>()), 0);
+    assert_eq!(
+        login_sends(
+            &safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .collect::<Vec<_>>()
+        ),
+        0
+    );
 }
 /// Plan control 5: a login that cannot draw signing entropy sends no frame and
 /// raises no venue STREAM_UNAVAILABLE; the engine's socket path closes it, and

@@ -10,10 +10,12 @@ use support::{MARKETS, TICKERS, TestEngine, jittered};
 const DEPTH: &str = r#"{"success":true,"code":0,"data":{"version":10,"bids":[[60000,10,1]],"asks":[[60001,40,1]]}}"#;
 
 fn new() -> TestEngine {
-    safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }))
+    support::TestEngine::from(safe_cex_engine::test_support::seeded_engine(
+        MexcFutures::new(Options {
+            public_data_only: true,
+            ..Default::default()
+        }),
+    ))
 }
 fn actions(e: &mut TestEngine, now: f64) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(e, now)
