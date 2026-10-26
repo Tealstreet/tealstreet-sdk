@@ -2097,6 +2097,13 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Retire the current unissued call of an independent complete Plan that
+    /// the venue decides not to send. No journal fact; its reservations return.
+    /// Inert until source: see docs/plans/RUST_PLAN_RETIRE_UNISSUED.md.
+    pub fn retire_unissued_plan_call(&mut self, _plan: &Plan, _slot: &Slot) -> Result<(), Error> {
+        Err(Error::Invalid)
+    }
+
     /// Explicit empty native plan. No root, Context, physical attempt or accepted
     /// write fact is manufactured for a successful no-op.
     pub fn done_empty_plan(&mut self, preflight: &Preflight, result: String) -> Result<(), Error> {

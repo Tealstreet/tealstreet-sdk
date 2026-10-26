@@ -42,14 +42,19 @@ generic over `Cx<P>`, so families that never call it link nothing.
 2. `policy.independent_calls` and a complete, declared Plan. A serial Plan is
    `State`; a dependent Plan is `Invalid`. Skipping in a dependent Plan would
    change what its later steps mean.
-3. The slot is the schedule's current `Available` call: its entry is `Unissued`,
-   has no call, is not parked, and is eligible (`eligible_at <= now`). This is
-   the same moment and order at which the venue could have issued it. Any other
-   slot (Waiting, Active, Complete, Branch) is `Revoked`.
+3. The slot is an `Available` call: its entry is `Unissued`, has no call, is not
+   parked, and is eligible (`eligible_at <= now`). This is the same moment and
+   order at which the venue could have issued it. All Available calls belong to
+   the current step, so a step of several calls may retire one while a sibling
+   is Active (dazzy3 P2). Any other slot (Waiting, Active, Complete, Branch) is
+   `Revoked`.
 4. The slot is not a member of a declared mutation barrier group (`Invalid`).
    Barrier groups are all-or-nothing.
 5. The same issue custody as `plan_leg_context` (`plan_issue_custody`): only
-   where the venue could have issued this call.
+   where the venue could have issued this call. That includes the admission
+   callback (initial custody), the delivery that finished the previous call, and
+   the Plan-ready callback. Consecutive retirements in one callback are allowed,
+   because the next step's wait_ms 0 call is immediately Available and eligible.
 
 ## Effects (one transaction, after all checks)
 
@@ -61,7 +66,9 @@ generic over `Cx<P>`, so families that never call it link nothing.
 - No journal registration, write fact, intent or delivery: the leg never
   existed. Terminal projection sees only legs that were issued.
 - `refresh_availability(now)` and `rearm_plan(plan)`, as after `finish_plan_call`.
-  The next step becomes eligible on its own `wait_ms` from now.
+  The next step becomes eligible on its own `wait_ms` from now, exactly as after
+  `settle`. Bitrue cancel steps are all `wait_ms` 0, so the next target follows
+  at once, as in native `trade_step` (dazzy3 P3).
 
 The venue then continues as after a finished call: it issues the next Available
 slot, or calls `done_plan` / `fail_plan` once the schedule is complete. The
@@ -90,7 +97,12 @@ issue and finish. Until source, the API is an inert stub returning `Invalid`.
    step adds no fact.
 4. Reservation: retirement frees exactly one reserved context immediately, and
    the next step's issue succeeds.
-5. Refusals each leave state byte-identical (same available slots, reserved
+5. Every step retired, from admission custody, consecutively in one callback:
+   no physical call, and `done_plan` returns native `[]` with no journal leg. The
+   same with `fail_plan` projects NotSent (4yjlw0 a/b/c, dazzy3 P1).
+6. A step of two calls: the second Available call retires while the first is
+   Active (dazzy3 P2).
+7. Refusals each leave state byte-identical (same available slots, reserved
    counts and journal):
    - a dependent Plan (`Invalid`);
    - a serial Plan (`State`);
@@ -99,6 +111,12 @@ issue and finish. Until source, the API is an inert stub returning `Invalid`.
    - a barrier-group member (`Invalid`);
    - outside issue custody (`Revoked`);
    - an expired owner (refused, nothing changed).
+
+Executed against the inert stub: 10 tests, 9 assertion RED, 1 GREEN (the
+dependent-Plan refusal, which the stub's `Invalid` satisfies), 0 ignored. The
+serial and barrier refusals are source-stage controls (they need those
+features' fixtures). Suffix assertions after a RED stop are not claimed as
+executed.
 
 ## Gates
 
