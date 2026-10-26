@@ -921,6 +921,29 @@ class DataMacroModuleProvenance(unittest.TestCase):
                 self.assertTrue(self.inventory(root_source=prefix + 'mod wire; mod account;'))
 
 
+    PACKAGE = {'venues/reference/Cargo.toml': '[package]\nname = "safe-cex-venue-reference"\n'}
+
+    def test_an_own_crate_self_alias_in_an_ancestor_keeps_the_scope(self):  # Lighter lib.rs shape
+        for alias in ['extern crate self as safe_cex_venue_reference;',
+                      '#[cfg(test)] extern crate self as safe_cex_venue_reference;']:
+            with self.subTest(alias=alias):
+                self.assertEqual(self.inventory(root_source='mod wire; mod account;' + alias,
+                                                engine=self.PACKAGE), {})
+        for alias, engine in [
+                ('extern crate self as other_name;', self.PACKAGE),
+                ('extern crate self as safe_cex_engine;', self.PACKAGE),
+                ('extern crate external;', self.PACKAGE),
+                ('extern crate external as safe_cex_venue_reference;', self.PACKAGE),
+                ('#[macro_use] extern crate self as safe_cex_venue_reference;', self.PACKAGE),
+                ('extern crate self as safe_cex_venue_reference; extern crate external;', self.PACKAGE),
+                ('extern crate self as safe_cex_venue_reference;', {}),
+                ('extern crate self as safe_cex_venue_reference;',
+                 {'venues/reference/Cargo.toml': '[package]\nname = "safe-cex-venue-other"\n'}),
+                ('extern crate self as safe_cex_venue_reference;',
+                 {'venues/reference/Cargo.toml': '# [package]\n# name = "safe-cex-venue-reference"\n'})]:
+            with self.subTest(alias=alias, engine=engine):
+                self.assertTrue(self.inventory(root_source='mod wire; mod account;' + alias, engine=engine))
+
     def test_out_of_scope_globs_and_ordinary_ancestor_imports_do_not_reach_child(self):
         for prefix in ['use external::custom as matches;', 'use wire::*;']:
             with self.subTest(prefix=prefix):
