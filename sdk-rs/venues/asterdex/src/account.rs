@@ -35,6 +35,8 @@ pub struct AccountState {
     key_deadline: Option<TimerId>,
     key_retry: Option<TimerId>,
     key_failures: u32,
+    /// The engine stopped the private feed for good; no further create may run.
+    feed_stopped: bool,
     tick: Option<TimerId>,
     positions_timer: Option<TimerId>,
     orders_timer: Option<TimerId>,
@@ -429,7 +431,11 @@ impl AsterDex {
             .is_some_and(|feed| cx.socket_epoch(feed).is_some())
     }
     fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.key_pending || self.account.key_retry.is_some() || self.private_epoch(cx) {
+        if self.account.key_pending
+            || self.account.key_retry.is_some()
+            || self.account.feed_stopped
+            || self.private_epoch(cx)
+        {
             return;
         }
         self.account.key_pending = true;
@@ -786,7 +792,12 @@ impl AsterDex {
                     }
                     Err(error) => {
                         crate::socket_failed(cx, error);
-                        self.listen_key_failed(cx);
+                        if error == SocketError::NotPermitted {
+                            // A stopped or refused feed never connects again.
+                            self.stop_private(cx);
+                        } else {
+                            self.listen_key_failed(cx);
+                        }
                     }
                 }
             }
@@ -983,6 +994,13 @@ impl AsterDex {
             }
             // A reconnect needs a fresh listen key; its answer connects the feed.
             LifecycleEvent::Reconnect(_) => self.request_listen_key(cx),
+            LifecycleEvent::Retired {
+                reason: RetireReason::Stopped,
+                ..
+            } => {
+                self.account.socket = None;
+                self.stop_private(cx);
+            }
             LifecycleEvent::Retired { .. } => {
                 self.account.socket = None;
                 self.invalidate_listen_key(cx);
@@ -1001,6 +1019,13 @@ impl AsterDex {
                 cx.retire_socket(feed, RetireReason::Closed)
             }
             _ => self.listen_key_failed(cx),
+        }
+    }
+    fn stop_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.invalidate_listen_key(cx);
+        self.account.feed_stopped = true;
+        if let Some(timer) = self.account.key_retry.take() {
+            cx.clear_timer(timer);
         }
     }
     fn listen_key_failed(&mut self, cx: &mut Cx<'_, Pending>) {

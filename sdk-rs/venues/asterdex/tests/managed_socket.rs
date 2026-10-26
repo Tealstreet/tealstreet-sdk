@@ -219,10 +219,11 @@ fn private_duplicate_open_does_not_refresh_twice() {
     let socket = h.private_socket();
     h.event(Event::WsOpened { socket });
     assert_eq!(h.sent_on(socket, LIST_PRIVATE), 1);
-    assert_eq!(h.count("/openOrders"), 1);
+    // Answered, so an in-flight guard cannot mask a second refresh.
+    h.reply("/openOrders", "[]");
     h.event(Event::WsOpened { socket });
     assert_eq!(h.sent_on(socket, LIST_PRIVATE), 1);
-    assert_eq!(h.count("/openOrders"), 1);
+    assert_eq!(h.count("/openOrders"), 0);
 }
 
 #[test]
@@ -378,5 +379,53 @@ fn listen_key_expiry_reconnects_on_a_new_key() {
         h.sockets
             .iter()
             .any(|(s, url)| *s == replacement && url.ends_with("/ws/renewed"))
+    );
+}
+
+#[test]
+fn unanswered_listen_key_create_times_out_and_a_late_answer_is_fenced() {
+    let mut h = H::start(Options {
+        key: Some("documented-key".into()),
+        secret: Some("synthetic-secret".into()),
+        ..Default::default()
+    });
+    h.reply("/account", r#"{"totalWalletBalance":"1000","availableBalance":"800","totalInitialMargin":"0","totalOpenOrderInitialMargin":"0","totalUnrealizedProfit":"0"}"#);
+    h.reply("/positionRisk", "[]");
+    h.reply("/openOrders", "[]");
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":false}"#);
+    assert_eq!(h.count("/listenKey"), 1);
+    h.advance(10_000.0);
+    h.advance(1_000.0);
+    assert_eq!(h.count("/listenKey"), 2, "the deadline retried the create");
+    h.reply("/listenKey", r#"{"listenKey":"late"}"#);
+    assert!(!h.sockets.iter().any(|(_, url)| url.contains("/ws/")));
+    h.reply("/listenKey", r#"{"listenKey":"current"}"#);
+    assert!(
+        h.sockets
+            .iter()
+            .any(|(_, url)| url.ends_with("/ws/current"))
+    );
+}
+
+#[test]
+fn listen_key_backoff_continues_across_a_socket_retirement() {
+    let mut h = H::account();
+    let socket = h.private_socket();
+    h.event(Event::WsOpened { socket });
+    h.reply("/openOrders", "[]");
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.advance(1_000.0);
+    let armed: Vec<_> = h.timers.iter().map(|(id, _)| *id).collect();
+    h.reply_status("/listenKey", 500, r#"{"code":-1001,"msg":"internal"}"#);
+    let (_, at) = *h
+        .timers
+        .iter()
+        .filter(|(id, _)| !armed.contains(id))
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap();
+    assert!(
+        (1_500.0..=2_000.0).contains(&(at - h.now)),
+        "{}",
+        at - h.now
     );
 }
