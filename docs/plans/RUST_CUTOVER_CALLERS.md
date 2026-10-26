@@ -9308,6 +9308,16 @@ engine failures delivered through on_http_failed, which remain strict (including
 a non-streamed response body the engine cannot decode). No retry is authorized
 by error-message text.
 
+### Phemex final four: late repair authority
+
+Late cancel-only requests spend engine repair subjects minted at the original admitted cancel-all entry. Primary signing, native symbol/side groups, chunks of ten, FIFO, immediate stream discovery, signing-expiry-plus-5000 read discovery, no resend, and original command terminals are retained. A refused admission emits the native manual-cancel diagnostic without publishing Canceling; a repeat observation does not retry it. The 20-second per-call bound now includes preparation, signing and queue time as well as native physical HTTP; no aggregate repair lifetime is added.
+
+Covered reconciliation reads publish one merged Orders snapshot before retiring covered subjects. Newer stream rows remain authoritative. Store orders_revision advances once per committed read, and changes.orders is set even for an unchanged snapshot; account.order_revision retains its native row bookkeeping. The commit is guarded by held relevant subjects and loaded.orders: early pre-snapshot reconciliation stays incremental and does not mark Orders loaded. Stale snapshot tokens use native incremental publication and supply no retirement proof.
+
+The separately owned core CancelOnly overlap rule landed in #2181. Per the overseer's #2181 ruling, repair cancel and foreground cancel-all may coexist on the same symbol without capturing the cancel-all's IDs. Explicit-ID CancelOrders still conflicts on the same ID, and repair/Place-or-Amend conflicts stay fenced. A newer cancel-all racing the repair retains native refusal -> Rejected -> one manual-cancel error; no gone/Satisfied mapping is added. Existing trading.rs native controls and the frozen 19 repair originals are retained verbatim. No consumer deferral, re-queue, numeric completion or raw HTTP fallback is introduced.
+
+Phemex late-repair source corrections retain native envelope/row refusal codes and typed classification. A refused repair admission refreshes the account; non-capacity mint refusals give an explicit manual-cancel diagnostic. Retry reads can temporarily overlap the retiring Read by one Context to retain snapshot DATA custody. Phemex does not advance the selective snapshot fence; retirement relies on the receipt's begin-after-mint check and actual absence. The dispatch-signing fixture's Pending variant matcher changes; signing vectors do not.
+
 
 ### Kraken managed socket admission
 
