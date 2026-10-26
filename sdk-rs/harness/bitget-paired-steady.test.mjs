@@ -275,3 +275,49 @@ test('identical pinned anchor and candidate passes without advancing the anchor'
   assert.equal(result.certificate.authority.baseline, result.certificate.authority.candidate);
   assert.equal(certificateFor(data).steadyAccepted, true);
 });
+
+function identicalFixture(q = 1.049219) {
+  const data = fixture(q);
+  const { archives, cohorts } = data.evidence;
+  const candidate = archives.candidate;
+  candidate.metadata.hashes = { ...archives.baseline.metadata.hashes };
+  candidate.metadataBytes = JSON.stringify(candidate.metadata) + '\n';
+  candidate.files = { ...candidate.metadata.hashes, 'build.json': sha(candidate.metadataBytes) };
+  for (const archive of Object.values(archives)) archive.shipped = {
+    node: { ...archive.metadata.hashes, 'safe_cex_wasm.d.ts': sha('node types'), 'safe_cex_wasm_bg.wasm.d.ts': sha('wasm types') },
+    web: { 'safe_cex_wasm.js': sha('web glue'), 'safe_cex_wasm_bg.wasm': sha('web module'),
+      'safe_cex_wasm.d.ts': sha('web types'), 'safe_cex_wasm_bg.wasm.d.ts': sha('web wasm types') },
+  };
+  for (const cohort of cohorts) if (cohort.before.arm === 'candidate') {
+    cohort.before.hashes = { ...candidate.files };
+    cohort.evidence.report.ciWasm = candidate.metadata;
+    cohort.evidence.reportBytes = JSON.stringify(cohort.evidence.report);
+  }
+  return data;
+}
+
+test('identical shipping proves tip non-regression despite timing drift; fixed anchor still blocks', () => {
+  const data = identicalFixture(), result = assessBitgetPairedSteady(data);
+  assert.equal(result.valid, true, result.errors.join('\n'));
+  assert.equal(result.certificate.steadyAccepted, true);
+  assert.equal(result.certificate.tipProof.rule, 'identical-bytes PASS');
+  assert(result.certificate.q > BITGET_PAIRED_TOLERANCE);
+  const anchor = assessBitgetPairedSteady(anchorFixture(data));
+  assert.equal(anchor.valid, true, anchor.errors.join('\n'));
+  assert.equal(anchor.certificate.steadyAccepted, false);
+  assert.equal(combineBitgetPairedCertificates(result.certificate, anchor.certificate).steadyAccepted, false);
+});
+
+test('one differing shipped byte forces timing; node-only identity and forged hashes refuse', () => {
+  for (const name of ['safe_cex_wasm.js', 'safe_cex_wasm_bg.wasm', 'safe_cex_wasm.d.ts']) {
+    const data = identicalFixture(); data.evidence.archives.candidate.shipped.web[name] = sha('one byte different');
+    const result = assessBitgetPairedSteady(data);
+    assert.equal(result.valid, true); assert.equal(result.certificate.steadyAccepted, false);
+    assert.equal(result.certificate.tipProof.rule, 'paired-timing');
+  }
+  for (const mutate of [a => { delete a.shipped.web; }, a => { delete a.shipped.node['safe_cex_wasm.d.ts']; },
+    a => { a.shipped.node['safe_cex_wasm_bg.wasm'] = sha('forged'); }]) {
+    const data = identicalFixture(); mutate(data.evidence.archives.candidate);
+    assert.equal(assessBitgetPairedSteady(data).valid, false);
+  }
+});

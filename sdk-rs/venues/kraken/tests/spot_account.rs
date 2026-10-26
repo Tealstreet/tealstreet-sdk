@@ -50,7 +50,7 @@ fn multi_asset_balance_open_order_aliases_and_spot_settings() {
 }
 #[test]
 fn token_refreshed_per_socket_and_stale_token_never_subscribes_new_socket() {
-    let (mut e, _, private) = ready(false);
+    let (mut e, _, private) = ready_without_private_open();
     let old = private.unwrap();
     e.handle(NOW, Event::WsOpened { socket: old });
     let request = requests(&mut e).pop().unwrap();

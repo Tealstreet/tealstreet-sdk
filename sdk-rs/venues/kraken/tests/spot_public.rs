@@ -240,7 +240,7 @@ fn missing_credentials_automatically_select_public_only_like_ts() {
 
 #[test]
 fn dogecoin_rest_identity_is_preserved_while_v2_ticker_and_book_use_doge() {
-    let (mut e, s, _) = ready_with_payloads(true, DOGE_META, DOGE_TICKERS, BALANCE);
+    let (mut e, s, _) = ready_with_public_unopened(DOGE_META, DOGE_TICKERS, BALANCE);
     for quote in ["USD", "USDT", "USDC"] {
         let symbol = format!("XDG/{quote}");
         let market = e.store().market(&symbol).unwrap();

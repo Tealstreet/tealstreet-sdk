@@ -37,6 +37,12 @@ const primaryBooks = Object.freeze({
 });
 
 export const GATE_SUITES = Object.freeze(Object.keys(primaryBooks));
+export const replayMatrix = (suites = GATE_SUITES, familyOf = (venue) => venue) => suites.map((venue) => {
+  if (!GATE_SUITES.includes(venue)) throw new Error(`Unknown replay suite ${venue}`);
+  const private_script = venue === 'binance' ? 'rust:private-tape'
+    : ['weex', 'blofin', 'phemex'].includes(venue) ? `rust:private-tape:${venue}` : `rust:private-tape-${venue}`;
+  return { venue, family: familyOf(venue), books: primaryBooks[venue], private_script };
+});
 const publicCase = (venue, books, fixture = venue) => ({ venue, tape: `sdk-rs/harness/fixtures/${fixture}-public.jsonl.gz`, books });
 const privateCase = (venue, fixture = venue) => ({ venue, tape: `sdk-rs/harness/tapes/${fixture}-private.jsonl`, books: '' });
 const xperpBooks = 'BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404';
