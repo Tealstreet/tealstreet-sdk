@@ -65,3 +65,15 @@ export default function init(module?: unknown): Promise<unknown>;
 
 /** Resolved account choices without construction or I/O. */
 export function resolveConstruction(venue: string, optionsJson: string): string;
+
+/** Kraken-family pure codec exports; absence is not capability negotiation. */
+export function krakenHostedDescriptor(workJson: string): string;
+export function krakenHostedValidate(descriptorJson: string, receiptJson: string, slot: string, roleJson: string, now: number, deadline: number): void;
+export function krakenHostedVerify(descriptorJson: string, resultJson: string, publicCredential: string): void;
+/** Trusted signing-only installation. Never pass setup through the op channel. */
+export class HostedOperationExecutor {
+  constructor(setupJson: string, spot: boolean, testnet: boolean);
+  binding(slot: string): string;
+  sign(descriptorJson: string, receiptJson: string, slot: string, roleJson: string, now: number, deadline: number): string;
+  free(): void;
+}
