@@ -167,3 +167,29 @@ The documented MinTradeSpotNtl floor is 10 quote tokens, distinct from the
 perpetual dollar floor: [official error contract](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses).
 Non-USDC quotes and missing or inconsistent metadata refuse before placement.
 Profile and scripted checks do not claim a successful credentialed live run.
+
+## Kraken Spot beta smoke
+
+Kraken Spot requires explicit `--mainnet`, a dedicated small-balance account
+with no open orders, and its own `RUST_LIVE_SMOKE_KRAKEN_SPOT_MAINNET_KEY` and
+`RUST_LIVE_SMOKE_KRAKEN_SPOT_MAINNET_SECRET` (Base64 API secret). Futures keys
+are never used as a fallback; its existing demo default remains unchanged.
+Credentials enter through the existing environment boundary; preserve them
+with `oneshot-secret peek` and never print or log their values.
+
+The profile permits only `https://api.kraken.com`, `wss://ws.kraken.com`, and
+`wss://ws-auth.kraken.com`. It keeps fixed 1x leverage and post-only writes.
+Sizing matches the unique native display symbol (for example `XBT/USD`),
+checks the selected normalized ID (`BTC/USD`), and excludes dark-pool rows.
+It uses `costmin`
+(quote units), `ordermin` (base units), and `lot_decimals` from a complete online
+unit-lot [AssetPairs response](https://docs.kraken.com/api-reference/market-data/get-tradable-asset-pairs).
+Missing, inconsistent or later failed catalog data refuses before placement.
+Existing dollar-quote restrictions, the $100 maximum, no write retry, and
+fresh cleanup/readback remain unchanged.
+
+`corepack yarn rust:live-smoke --venue krakenspot --mainnet --symbol XBT/USD --out /tmp/krakenspot-private-smoke.jsonl`
+
+This adds a reviewed harness profile, not credentialed live-success evidence.
+The probe uses the compiled Rust engine through JS `EngineHost`; native-only
+unit results do not establish browser beta readiness.
