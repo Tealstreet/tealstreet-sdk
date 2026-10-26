@@ -3132,10 +3132,11 @@ fn a_reconcile_during_an_in_flight_order_read_issues_its_own_read() {
     // One page per settle coin.
     let per_read = reads(&h);
     assert!(per_read > 0, "the first seal's reconcile read");
+    // BTCUSDT is fenced now; a second seal on another symbol.
     place(
         &mut h,
         32,
-        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 89000.0)],
+        vec![limit("ETHUSDT", OrderSide::Buy, 0.1, 3000.0)],
     );
     let second = h.take("/v5/order/create-batch").id;
     h.event(Event::HttpFailed {
@@ -3249,6 +3250,49 @@ fn an_unknown_placement_refuses_a_retry_on_its_symbol_until_reconciled() {
         h.has_request("/v5/order/create-batch"),
         "a fresh read clears the fence: {:?}",
         h.result(34)
+    );
+}
+
+/// 8x5tm1 re-ask hazard: engine re-asks while a slow (>1 s) reconcile read is
+/// out join it instead of replacing it, and that read still releases.
+#[test]
+fn engine_re_asks_join_a_slow_reconcile_read_that_still_releases() {
+    let mut h = ready();
+    place(
+        &mut h,
+        41,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let write = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: write,
+        error: "connection reset",
+    });
+    let realtime = |h: &Harness| -> Vec<_> {
+        h.requests
+            .iter()
+            .filter(|r| r.url.contains("/v5/order/realtime"))
+            .map(|r| r.id)
+            .collect()
+    };
+    let pages = realtime(&h);
+    assert!(!pages.is_empty(), "the seal's reconcile read");
+    // The engine re-asks at +1, +2, +4 s; none replaces the read still out.
+    h.advance(8_000.0);
+    assert_eq!(realtime(&h), pages, "re-asks join the slow read");
+    const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[],"nextPageCursor":""}}"#;
+    for id in pages {
+        h.reply(id, 200, EMPTY);
+    }
+    place(
+        &mut h,
+        42,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    assert!(
+        h.has_request("/v5/order/create-batch"),
+        "the slow read releases: {:?}",
+        h.result(42)
     );
 }
 
