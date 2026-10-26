@@ -72,9 +72,9 @@ fn candidate(actions: &[Action], path: &str) -> HttpRequest {
 
 fn prepared(actions: &[Action], path: &str) {
     assert!(
-        !actions.iter().any(
-            |action| matches!(action, Action::Http(packet) if packet.url.contains(path))
-        ),
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(packet) if packet.url.contains(path))),
         "{path}: physical HTTP must await genuine route preparation"
     );
     assert_eq!(
@@ -221,8 +221,12 @@ fn limits_wait_for_preparation_before_partner_attributed_order() {
     let mut engine = ready(false);
     let actions = place(&mut engine);
     prepared(&actions, "accountLimits");
-    assert!(!actions.iter().any(|action| matches!(action, Action::Http(packet)
-        if packet.url.contains("sendTx"))));
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(packet)
+        if packet.url.contains("sendTx")))
+    );
 }
 
 #[test]
@@ -274,9 +278,16 @@ fn unclaimed_history_cannot_finish_or_reissue() {
     let actions = issue(&mut engine, fills(), 30_000);
     let packet = candidate(&actions, "/trades?");
     let actions = after_reply(&mut engine, &packet, r#"{"code":200,"trades":[]}"#);
-    assert!(terminal(&actions).is_empty(), "unclaimed DATA has no terminal authority");
-    assert!(!actions.iter().any(|action| matches!(action, Action::Http(_)
-        | Action::ManagedHttp(_))), "unclaimed DATA cannot start another page");
+    assert!(
+        terminal(&actions).is_empty(),
+        "unclaimed DATA has no terminal authority"
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_) | Action::ManagedHttp(_))),
+        "unclaimed DATA cannot start another page"
+    );
 }
 
 #[test]
@@ -286,7 +297,11 @@ fn history_root_expires_at_the_original_caller_wait() {
     engine.prepare_dispatch(NOW + 20.0);
     let actions = engine.drain_actions().collect::<Vec<_>>();
     let terminals = terminal(&actions);
-    assert_eq!(terminals.len(), 1, "original receipt expires once at equality");
+    assert_eq!(
+        terminals.len(),
+        1,
+        "original receipt expires once at equality"
+    );
     assert!(matches!(terminals[0], Notice::CommandFailed { error, .. }
         if error.kind == Some(safe_cex_engine::ErrorKind::Timeout)));
 }
@@ -381,7 +396,16 @@ fn proven_21104_reseed_then_acceptance_is_plain_success() {
     let tx = decoded_tx(&retry);
     assert_eq!(tx["Nonce"], 20);
     assert_eq!(tx["ClientOrderIndex"], first_tx["ClientOrderIndex"]);
-    reply_at(&mut engine, at, &retry, 200, r#"{"code":200,"tx_hash":"accepted"}"#);
+    reply_at(
+        &mut engine,
+        at,
+        &retry,
+        200,
+        r#"{"code":200,"tx_hash":"accepted"}"#,
+    );
     let actions = engine.drain_actions().collect::<Vec<_>>();
-    assert!(matches!(terminal(&actions).as_slice(), [Notice::CommandDone { .. }]));
+    assert!(matches!(
+        terminal(&actions).as_slice(),
+        [Notice::CommandDone { .. }]
+    ));
 }
