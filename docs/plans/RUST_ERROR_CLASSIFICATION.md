@@ -257,6 +257,12 @@ before fixing it, because other lanes may have landed it already.
 | 24 | orderly | `trading.rs:1781,1513` | −1007 is left None and skips the uncertain-write account reconcile. |
 | 25 | coinbase | `trading.rs:1533-1535` | `DUPLICATE_CLIENT_ORDER_ID` "may name a live order" but is None, not Unknown. |
 
+Kraken beta remediation (rows 18 and 21, Kraken portions only): failures now
+retain structured accepted IDs and explicit Unknown after effects, with shared
+order-lock reconciliation. Rows 30 and 37 are corrected for Kraken: one Spot
+HTTP auth refusal does not deactivate; Futures native codes pass through the
+CodeTable on non-2xx. Other venues listed in those inventory rows remain separate.
+
 ### P1: wrong kind, outcome or auth decision in the safe direction
 
 | # | Venue | Site | Defect |
