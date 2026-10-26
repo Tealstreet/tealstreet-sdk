@@ -20,14 +20,7 @@ impl ContextRegistry {
         let generation = self.validate_session(session)?;
         if let Some(credential) = self.sessions.credential(generation) {
             let identity = identities.primary.as_ref().ok_or(Error::Invalid)?;
-            if credential.slot != crate::CredentialSlot::Primary
-                || credential.reference != identity.credential
-                || identity.validate_credential().is_err()
-                || write.is_some_and(|write| {
-                    write != credential
-                        || !identity.signing_ref().is_ok_and(|key| !key.0.is_empty())
-                })
-            {
+            if !identity.accepts_session_root(credential, write) {
                 return Err(Error::Invalid);
             }
         } else if write.is_some() || self.sessions.egress(generation).is_none() {
