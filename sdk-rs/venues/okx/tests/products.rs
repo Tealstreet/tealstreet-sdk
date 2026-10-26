@@ -397,6 +397,8 @@ fn malformed_xperp_catalogue_row_does_not_discard_valid_swaps() {
         ..Options::default()
     });
     e.start(0.0);
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let a = take_http(&mut prepared(&mut e, 1.0));
@@ -628,6 +630,7 @@ fn unparseable_xperp_ticker_row_keeps_valid_swap_peers_and_logs_the_row() {
         ..Options::default()
     });
     e.start(0.0);
+    e.set_log_level(safe_cex_engine::Level::Debug);
     let a = take_http(&mut prepared(&mut e, 0.0));
     reply(&mut e, &a, &envelope(MARKET), 1.0);
     let a = take_http(&mut prepared(&mut e, 1.0));

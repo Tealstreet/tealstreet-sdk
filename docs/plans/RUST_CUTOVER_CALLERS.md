@@ -9937,6 +9937,32 @@ mock the beta admission layer explicitly; real SDK/worker refusal controls do
 not use that fixture. Retained oracle execution is not beta activation. R2 owns
 adapter relocation/deletion and retargets those test-only imports.
 
+### Uncertain-placement fence (Phase A)
+
+A placing scope that sealed Unknown marks its symbols uncertain until a fresh
+order read reconciles them. A venue that opts into
+`fence_uncertain_placements` now refuses a later `PlaceOrders` or amend on an
+uncertain symbol NotSent ("Placement outcome is uncertain; reconcile before
+placing or amending"), so a user retry cannot duplicate a possibly placed order.
+Cancel by ID stays admitted; cancel-all keeps each venue's existing
+`fence_uncertain_cancel_all` disposition (default refused until reconcile, Phemex
+admitted). A venue opts in only when `reconcile_uncertain` starts a fresh read
+(or joins one dispatched after the write); without that hook the fence could
+hang, which is why the default is off. While a symbol stays uncertain the engine
+re-asks the hook with backoff (1 s doubling to 30 s, restarted by a new seal)
+until a post-mark `orders_reconciled` clears it, so a failed reconcile read
+cannot leave the fence standing; hooks stay single-shot. `Cx::reconcile_reask()`
+is true on a backoff re-ask with no new uncertain write since the last ask: the
+hook must then join any read already running or owed, never start or owe
+another (a slow read would otherwise never complete and release). A venue may hold the fence to its
+native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
+opts in. Not covered yet (Phase B): an Unknown marker for venues with no
+placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
+until its opt-in) from managed, single-Context and legacy `cx.request` writes,
+and amend roots whose replacement places (zs5e83's audits,
+/tmp/codex-beta-plan-fence-audit/report.md and followup.md). Paradex's
+venue-local same-ID amend fence stays as is.
+
 ## Lighter public beta data
 
 Market snapshots seed last price and start ticker hydration before socket Open.

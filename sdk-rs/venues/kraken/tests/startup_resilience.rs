@@ -65,6 +65,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
             .unwrap();
         assert_eq!(request.url, original_url);
     }
+    // Skipped discovery rows log at Debug.
+    engine.set_log_level(safe_cex_engine::Level::Debug);
     engine.handle(now, Event::HttpResponse { request: request.id, response: Response { status: 200, headers: "", body: r###"{"result":"success","instruments":[{"symbol":"PF_XBTUSD","base":"BTC","quote":"USD","tradeable":true,"tickSize":0.5,"contractSize":1,"contractValueTradePrecision":3,"marginLevels":[{"initialMargin":0.02}]},{"symbol":"PF_ETHUSD","base":"ETH","quote":"USD","tradeable":true,"tickSize":0.1,"contractSize":1,"contractValueTradePrecision":2,"marginLevels":[{"initialMargin":0.05}]},{"symbol":"PF_INVALIDUSD","contractValueTradePrecision":"malformed"}]}"### } });
     assert!(engine.store().loaded().markets);
     assert_eq!(engine.store().markets().len(), 2);
