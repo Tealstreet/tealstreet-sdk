@@ -1,0 +1,37 @@
+[package]
+name = "safe-cex-candle-cache"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+safe-cex-num.workspace = true
+safe-cex-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.53.2", features = ["rt", "time", "sync", "fs", "io-util", "io-std", "net"] }
+redis = { version = "1.7.1", default-features = false, features = ["tokio-comp", "tokio-rustls-comp"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+wasm-bindgen-futures = "0.4.79"
+js-sys = "0.3.106"
+web-sys = { version = "0.3.106", features = ["console", "Window", "IdbFactory", "IdbOpenDbRequest", "IdbRequest", "IdbDatabase", "IdbTransaction", "IdbTransactionMode", "IdbObjectStore", "IdbCursorWithValue", "IdbCursor", "IdbKeyRange", "DomStringList", "DomException", "Event"] }
+futures-channel = "0.3.34"
+futures-util = "0.3.34"
+
+[[bin]]
+name = "candle-cache-owner"
+path = "src/owner.rs"
+
+[[example]]
+name = "indexed_db_probe"
+crate-type = ["cdylib"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1.53.2", features = ["test-util"] }

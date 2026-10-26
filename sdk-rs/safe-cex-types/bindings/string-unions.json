@@ -1,0 +1,404 @@
+{
+  "DataProvenance": [
+    {
+      "name": "Venue",
+      "value": "venue"
+    },
+    {
+      "name": "Derived",
+      "value": "derived"
+    }
+  ],
+  "ExchangeName": [
+    {
+      "name": "Apexomni",
+      "value": "apexomni"
+    },
+    {
+      "name": "Asterdex",
+      "value": "asterdex"
+    },
+    {
+      "name": "Backpack",
+      "value": "backpack"
+    },
+    {
+      "name": "Binance",
+      "value": "binance"
+    },
+    {
+      "name": "Binanceinverse",
+      "value": "binanceinverse"
+    },
+    {
+      "name": "Binancespot",
+      "value": "binancespot"
+    },
+    {
+      "name": "Binancepm",
+      "value": "binancepm"
+    },
+    {
+      "name": "Bingx",
+      "value": "bingx"
+    },
+    {
+      "name": "Bitget",
+      "value": "bitget"
+    },
+    {
+      "name": "Bitgetinverse",
+      "value": "bitgetinverse"
+    },
+    {
+      "name": "Bitgetusdc",
+      "value": "bitgetusdc"
+    },
+    {
+      "name": "Bitrue",
+      "value": "bitrue"
+    },
+    {
+      "name": "Bitunix",
+      "value": "bitunix"
+    },
+    {
+      "name": "Blofin",
+      "value": "blofin"
+    },
+    {
+      "name": "Breakoutprop",
+      "value": "breakoutprop"
+    },
+    {
+      "name": "Bybit",
+      "value": "bybit"
+    },
+    {
+      "name": "Bybitdemo",
+      "value": "bybitdemo"
+    },
+    {
+      "name": "Bybitinverse",
+      "value": "bybitinverse"
+    },
+    {
+      "name": "Bybitspot",
+      "value": "bybitspot"
+    },
+    {
+      "name": "Hyrotrader",
+      "value": "hyrotrader"
+    },
+    {
+      "name": "Coinbase",
+      "value": "coinbase"
+    },
+    {
+      "name": "Coinbasespot",
+      "value": "coinbasespot"
+    },
+    {
+      "name": "Cryptocom",
+      "value": "cryptocom"
+    },
+    {
+      "name": "Grvt",
+      "value": "grvt"
+    },
+    {
+      "name": "Hyperliquid",
+      "value": "hyperliquid"
+    },
+    {
+      "name": "Hyperliquidspot",
+      "value": "hyperliquidspot"
+    },
+    {
+      "name": "Lighter",
+      "value": "lighter"
+    },
+    {
+      "name": "LighterRobinhood",
+      "value": "lighter-robinhood"
+    },
+    {
+      "name": "Mexc",
+      "value": "mexc"
+    },
+    {
+      "name": "Okx",
+      "value": "okx"
+    },
+    {
+      "name": "Okxdemo",
+      "value": "okxdemo"
+    },
+    {
+      "name": "Okxeu",
+      "value": "okxeu"
+    },
+    {
+      "name": "Okxeudemo",
+      "value": "okxeudemo"
+    },
+    {
+      "name": "Paradex",
+      "value": "paradex"
+    },
+    {
+      "name": "Phemex",
+      "value": "phemex"
+    },
+    {
+      "name": "Polymarket",
+      "value": "polymarket"
+    },
+    {
+      "name": "Kodiakfi",
+      "value": "kodiakfi"
+    },
+    {
+      "name": "Mode",
+      "value": "mode"
+    },
+    {
+      "name": "Salsadex",
+      "value": "salsadex"
+    },
+    {
+      "name": "TealstreetDex",
+      "value": "tealstreet-dex"
+    },
+    {
+      "name": "Txflow",
+      "value": "txflow"
+    },
+    {
+      "name": "What",
+      "value": "what"
+    },
+    {
+      "name": "Weex",
+      "value": "weex"
+    },
+    {
+      "name": "Woo",
+      "value": "woo"
+    },
+    {
+      "name": "Woofi",
+      "value": "woofi"
+    },
+    {
+      "name": "Kucoin",
+      "value": "kucoin"
+    },
+    {
+      "name": "Kucoinspot",
+      "value": "kucoinspot"
+    },
+    {
+      "name": "Kraken",
+      "value": "kraken"
+    },
+    {
+      "name": "Krakenspot",
+      "value": "krakenspot"
+    }
+  ],
+  "ExtendedTimeframe": [
+    {
+      "name": "H3",
+      "value": "3h"
+    },
+    {
+      "name": "H5",
+      "value": "5h"
+    },
+    {
+      "name": "H7",
+      "value": "7h"
+    },
+    {
+      "name": "H8",
+      "value": "8h"
+    },
+    {
+      "name": "H9",
+      "value": "9h"
+    },
+    {
+      "name": "H10",
+      "value": "10h"
+    },
+    {
+      "name": "H11",
+      "value": "11h"
+    },
+    {
+      "name": "H24",
+      "value": "24h"
+    },
+    {
+      "name": "D2",
+      "value": "2d"
+    },
+    {
+      "name": "D3",
+      "value": "3d"
+    },
+    {
+      "name": "MN1",
+      "value": "1M"
+    }
+  ],
+  "IncomeCategory": [
+    {
+      "name": "RealizedPnl",
+      "value": "realized_pnl"
+    },
+    {
+      "name": "Funding",
+      "value": "funding"
+    },
+    {
+      "name": "Commission",
+      "value": "commission"
+    },
+    {
+      "name": "Rebate",
+      "value": "rebate"
+    },
+    {
+      "name": "Transfer",
+      "value": "transfer"
+    },
+    {
+      "name": "Liquidation",
+      "value": "liquidation"
+    },
+    {
+      "name": "Other",
+      "value": "other"
+    }
+  ],
+  "MessageHandlerStatsType": [
+    {
+      "name": "Public",
+      "value": "public"
+    },
+    {
+      "name": "Private",
+      "value": "private"
+    },
+    {
+      "name": "Futures",
+      "value": "futures"
+    },
+    {
+      "name": "Business",
+      "value": "business"
+    }
+  ],
+  "OptionRight": [
+    {
+      "name": "Call",
+      "value": "call"
+    },
+    {
+      "name": "Put",
+      "value": "put"
+    }
+  ],
+  "RequestOutcome": [
+    {
+      "name": "Ok",
+      "value": "ok"
+    },
+    {
+      "name": "RateLimit",
+      "value": "rateLimit"
+    },
+    {
+      "name": "Auth",
+      "value": "auth"
+    },
+    {
+      "name": "Network",
+      "value": "network"
+    },
+    {
+      "name": "Other",
+      "value": "other"
+    }
+  ],
+  "SecondsTimeframe": [
+    {
+      "name": "S1",
+      "value": "1s"
+    },
+    {
+      "name": "S5",
+      "value": "5s"
+    },
+    {
+      "name": "S15",
+      "value": "15s"
+    },
+    {
+      "name": "S30",
+      "value": "30s"
+    }
+  ],
+  "Timeframe": [
+    {
+      "name": "M1",
+      "value": "1m"
+    },
+    {
+      "name": "M3",
+      "value": "3m"
+    },
+    {
+      "name": "M5",
+      "value": "5m"
+    },
+    {
+      "name": "M15",
+      "value": "15m"
+    },
+    {
+      "name": "M30",
+      "value": "30m"
+    },
+    {
+      "name": "H1",
+      "value": "1h"
+    },
+    {
+      "name": "H2",
+      "value": "2h"
+    },
+    {
+      "name": "H4",
+      "value": "4h"
+    },
+    {
+      "name": "H6",
+      "value": "6h"
+    },
+    {
+      "name": "H12",
+      "value": "12h"
+    },
+    {
+      "name": "D1",
+      "value": "1d"
+    },
+    {
+      "name": "W1",
+      "value": "1w"
+    }
+  ]
+}
