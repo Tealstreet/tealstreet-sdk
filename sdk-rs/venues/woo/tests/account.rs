@@ -119,9 +119,9 @@ fn start_with_retry_at(
         ..Default::default()
     }));
     e.start(at);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, at).remove(0);
     response(&mut e, &r, at + 10.0, markets);
-    let mut early = e.drain_actions().collect::<Vec<_>>();
+    let mut early = prepared_seed_actions(&mut e, at + 10.0);
     let ticker = early
         .iter()
         .find_map(|a| match a {
@@ -1538,9 +1538,9 @@ fn stop_read_before_the_ticker_seed_is_reread_as_soon_as_prices_exist() {
         ..Default::default()
     }));
     e.start(0.0);
-    let r = requests(&mut e).remove(0);
+    let r = prepared_seed_requests(&mut e, 0.).remove(0);
     response(&mut e, &r, 10.0, MARKETS);
-    let mut early = requests(&mut e);
+    let mut early = prepared_seed_requests(&mut e, 10.);
     let ticker = take(&mut early, "/public/futures");
     let regular = take(&mut early, "/v1/orders?");
     let algo = take(&mut early, "/v3/algo/orders?");
@@ -1634,7 +1634,7 @@ fn partial_catalogue_is_reread_and_releases_the_repaired_market() {
     e.drain_actions().for_each(drop);
     let retry = retry.expect("partial catalogue schedules a re-read");
     e.handle(1010.0, Event::TimerFired { timer: retry });
-    let reread = requests(&mut e);
+    let reread = prepared_seed_requests(&mut e, 1010.);
     assert_eq!(reread.len(), 1);
     assert!(reread[0].url.ends_with("/v1/public/info"));
     response(
