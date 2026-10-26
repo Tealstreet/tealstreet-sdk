@@ -378,6 +378,8 @@ fn full_missing_cursor_and_oversized_pages_keep_native_failure_policy() {
 #[test]
 fn malformed_row_preserves_valid_neighbour_and_empty_catalogue_retries() {
     let mut e = public();
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     let r = start(&mut e);
     let body = page(
         vec![

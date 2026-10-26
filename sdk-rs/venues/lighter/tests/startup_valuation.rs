@@ -41,6 +41,13 @@ fn before_quotes(
                             ticker.last = price;
                             ticker.mark = price;
                         });
+                    } else if request.url.ends_with("/api/v1/exchangeStats") {
+                        reply(
+                            &mut engine,
+                            &request,
+                            200,
+                            r#"{"code":200,"order_book_stats":[]}"#,
+                        );
                     } else if request.url.contains("/account?") {
                         reply(&mut engine, &request, 200, &account(pnl));
                     } else if request.url.contains("accountActiveOrders") {
@@ -91,8 +98,8 @@ fn refresh(engine: &mut Engine<Lighter>, socket: SocketId, body: &str) -> Vec<St
 fn reported_private_pnl_and_notional_do_not_depend_on_zero_nonfinite_or_conflicting_quotes() {
     for price in [0., -1., f64::NAN, f64::INFINITY, 900.] {
         let (engine, _, _, _) = before_quotes(Some(4.), price);
-        // The venue's catalogue creates ticker scaffolding; no quote transport
-        // was opened, so only the injected zero/invalid/conflicting row exists.
+        // The catalogue creates ticker scaffolding; the empty bootstrap stats
+        // supply no quotes, so only the injected zero/invalid/conflicting row exists.
         let position = &engine.store().positions()[0];
         assert_eq!(
             (

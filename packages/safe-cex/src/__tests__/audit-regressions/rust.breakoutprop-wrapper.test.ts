@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -46,7 +51,7 @@ afterEach(() => { setTickIntervalMultipliers(undefined); for (const exchange of 
 describe('BreakoutProp Rust wrapper session and account boundary', () => {
   it('registers the venue and preserves account selection, pacing and timeout options', async () => {
     const { exchange, construct, commands } = fixture({ subaccount: '00002', extra: { tickInterval: 5000, recvWindow: 9000 } });
-    expect(isRustVenue('breakoutprop')).toBe(true);
+    expect(isRustVenue('breakoutprop')).toBe(false);
     await exchange.start();
     expect(construct.mock.calls[0][0]).toBe('breakoutprop');
     expect(JSON.parse(construct.mock.calls[0][1])).toMatchObject({ key: 'username', secret: 'password', subaccount: '00002', recvWindow: 9000 });

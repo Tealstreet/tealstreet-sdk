@@ -121,3 +121,63 @@ fn an_unsupported_candle_interval_is_a_typed_read_refusal() {
     assert_eq!(error.kind, Some(ErrorKind::Unsupported));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
 }
+
+#[test]
+fn an_invalid_plan_reports_its_diagnostic_then_one_invalid_input_refusal() {
+    let mut engine = keyed(Variant::UsdM);
+    let orders = serde_json::from_str(
+        r#"[{"symbol":"NOPEUSDT","type":"limit","side":"buy","amount":1,"price":100}]"#,
+    )
+    .unwrap();
+    engine.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 51,
+            orders,
+        }),
+    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW);
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
+    let diagnostic = out.iter().position(|a| {
+        matches!(a, Action::Notice(Notice::CommandError { command: 51, message }) if message.contains("NOPEUSDT"))
+    });
+    let terminals: Vec<_> = out
+        .iter()
+        .enumerate()
+        .filter_map(|(at, a)| match a {
+            Action::Notice(Notice::CommandFailed { command: 51, error }) => Some((at, error)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(terminals.len(), 1, "{out:?}");
+    let (at, error) = terminals[0];
+    assert!(
+        diagnostic.is_some_and(|d| d < at),
+        "diagnostic precedes the terminal: {out:?}"
+    );
+    assert!(error.message.contains("NOPEUSDT"), "{}", error.message);
+    assert_eq!(error.kind, Some(ErrorKind::InvalidInput));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn an_invalid_candle_range_is_a_not_sent_read_refusal() {
+    let mut engine = keyed(Variant::UsdM);
+    let error = refused(
+        &mut engine,
+        61,
+        Command::FetchCandles {
+            command: 61,
+            symbol: "BTCUSDT".into(),
+            interval: Interval::M1,
+            limit: None,
+            from_ms: None,
+            to_ms: Some(f64::INFINITY),
+        },
+    );
+    assert_refusal(
+        &error,
+        "Binance candle end time is invalid",
+        ErrorKind::InvalidInput,
+    );
+}

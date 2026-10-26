@@ -34,7 +34,7 @@ fn setup() -> (Engine<Lighter>, SocketId, HttpRequest, TimerId) {
         })
         .unwrap();
     reply(&mut e, &request, 1_000.0, MARKETS);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0);
     let socket = actions
         .iter()
         .find_map(|a| {
@@ -55,8 +55,7 @@ fn setup() -> (Engine<Lighter>, SocketId, HttpRequest, TimerId) {
             }
         })
         .unwrap();
-    e.handle(1_000.0, Event::WsOpened { socket });
-    let seed = safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+    let seed = actions
         .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
@@ -66,6 +65,12 @@ fn setup() -> (Engine<Lighter>, SocketId, HttpRequest, TimerId) {
             }
         })
         .unwrap();
+    e.handle(1_000.0, Event::WsOpened { socket });
+    assert!(
+        safe_cex_engine::test_support::prepared_actions(&mut e, 1_000.0)
+            .into_iter()
+            .all(|action| !matches!(action, Action::Http(r) if r.url.ends_with("exchangeStats")))
+    );
     (e, socket, seed, poll)
 }
 fn message(e: &mut Engine<Lighter>, socket: SocketId, t: f64, text: &str) {
