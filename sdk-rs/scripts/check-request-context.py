@@ -17,6 +17,7 @@ import subprocess
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = 'scripts/request-legacy-sites.json'
 TEST_MANIFEST = 'scripts/request-legacy-test-sites.json'
+ENGINE_LIB = 'engine/src/lib.rs'
 METHODS = {'request', 'request_streamed', 'request_streamed_body', 'sign_http', 'done', 'fail'}
 IDENT = re.compile(r'[A-Za-z_][A-Za-z_0-9]*')
 RAW = re.compile(r'(?:br|cr|r)(\#*)"')
@@ -666,9 +667,10 @@ def plain_module_links(path, stream, sources):
 class MacroImportProof:
     """Read-only, single-hop source proofs; unknown module graphs stay opaque."""
 
-    def __init__(self, sources, tracked):
+    def __init__(self, sources, tracked, engine_tracked=frozenset()):
         self.sources = sources
         self.tracked = tracked
+        self.engine_tracked = engine_tracked
         self.streams = {path: tokens(source) for path, source in sources.items()}
         self.links = {path: plain_module_links(path, stream, sources)
                       for path, stream in self.streams.items()}
@@ -700,6 +702,8 @@ class MacroImportProof:
                        for item in (*parents, path)]
 
         def glob_proof(part, index):
+            if part[:2] == ['use', 'safe_cex_engine']:
+                return self.engine_glob_proof(root, part)
             if part[:2] != ['use', 'crate'] or len(part) != 7 \
                     or part[2] != '::' or part[4:] != ['::', '*', ';']:
                 return None
@@ -729,6 +733,54 @@ class MacroImportProof:
                                          + b'\0' + self.sources[target].encode()).hexdigest()}
 
         return lambda index: macro_imports_at(self.streams[path], index, glob_proof, chain_proof)
+
+    def engine_glob_proof(self, root, part):
+        """`use safe_cex_engine::<module>::*;` from the workspace engine imports only
+        that module's `pub` items; a macro can enter that namespace solely by a
+        top-level `pub use` (exported macros live at the crate root)."""
+        if len(part) != 7 or part[2] != '::' or part[4:] != ['::', '*', ';'] \
+                or not IDENT.fullmatch(part[3]):
+            return None
+        manifest = root.parent.parent / 'Cargo.toml'
+        engine_lib = (ROOT / ENGINE_LIB).resolve()
+        try:
+            dependencies = [line for line in manifest.read_text().splitlines()
+                            if re.match(r'\s*safe[-_]cex[-_]engine\s*=', line)]
+            workspace = (ROOT / 'Cargo.toml').read_text()
+        except OSError:
+            return None
+        if not dependencies or any(not re.fullmatch(
+                r'safe-cex-engine = \{ workspace = true(, features = \[[^\]]*\])? \}', line.strip())
+                for line in dependencies):
+            return None
+        if workspace.count('safe-cex-engine = { path = "engine" }') != 1 \
+                or re.search(r'package\s*=\s*"safe-cex-engine"', workspace):
+            return None
+        if engine_lib not in self.engine_tracked:
+            return None
+        lib_stream = tokens(engine_lib.read_text())
+        if source_macro_hazard(lib_stream, True):
+            return None
+        targets = plain_module_links(engine_lib, lib_stream, self.engine_tracked).get(part[3], [])
+        if len(targets) != 1 or targets[0] is None:
+            return None
+        target = targets[0]
+        source = target.read_text()
+        stream = tokens(source)
+        if source_macro_hazard(stream):
+            return None
+        depth = brace_ranges(stream)
+        top = lambda i: not any(a < i < b for a, b in depth)
+        for start, _ in use_items(stream):
+            if top(start) and start and stream[start - 1] in {'pub', ')'}:
+                return None
+        if any(stream[i + 1:i + 2] == ['!'] and top(i) for i in range(len(stream))):
+            return None
+        return {'crate': 'safe_cex_engine', 'module': part[3],
+                'declaration': ['pub', 'mod', part[3], ';'],
+                'path': str(target.relative_to(ROOT.resolve())),
+                'blob': hashlib.sha1(b'blob ' + str(len(source.encode())).encode()
+                                     + b'\0' + source.encode()).hexdigest()}
 
 
 def macro_imports_at(stream, index, resolve_glob=None, chain=None):
@@ -1182,9 +1234,10 @@ def request_sites(removed=None):
                              if 'target' not in path.relative_to(ROOT).parts])
     try:
         tracked = {(ROOT / path).resolve() for path in git('ls-files', '--', 'venues').splitlines()}
+        engine_tracked = {(ROOT / path).resolve() for path in git('ls-files', '--', 'engine/src').splitlines()}
     except subprocess.CalledProcessError:
-        tracked = set()  # No tracked declaration proof: retain conservative rows.
-    macro_proofs = MacroImportProof(sources, tracked)
+        tracked = engine_tracked = set()  # No tracked declaration proof: retain conservative rows.
+    macro_proofs = MacroImportProof(sources, tracked, engine_tracked)
     prod, test = {}, {}
     for path, source in sources.items():
         relative = str(path.relative_to(root))
