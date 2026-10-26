@@ -9658,6 +9658,18 @@ peers then two independent candle peers after genuine429. Exact completion
 Cancel is captured/checked once. The secondary helper is test support with real
 installed providers and genuine test command entry; native assertions retained.
 
+### Phemex beta non-success write diagnostics
+
+Non-2xx managed writes retain the shared classifier's kind and strict native
+code/message in the terminal error instead of only embedding the HTTP body in
+prose. HTTP408/5xx use the existing bounded diagnostic-evidence hook; they keep
+the shared status precedence. All non-2xx writes remain Unknown, with no resend
+or financial reducer authority, including a body claiming an accepted order ID.
+Auth/rate status fallbacks and header-proven Retry-After remain shared policy.
+The regression covers coded400,401,403,429,408,500 and malformed gateway bodies.
+Beta public evidence uses explicit Rust through the JS/WASM host, including
+managed HTTP recording; native unit results alone do not certify that path.
+
 ### Per-call pacing on serial Plans
 
 `SerialCall.pacing` names the pacing a call's legs carry; `None` inherits the
