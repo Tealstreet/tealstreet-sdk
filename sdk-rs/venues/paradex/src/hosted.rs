@@ -5,12 +5,16 @@
 use serde::{Deserialize, Deserializer, de::Error as _};
 use starknet_crypto::Felt;
 
-use crate::sign::{chain_id, felt, quantum, word};
+use crate::sign::{
+    AUTH_TYPE, auth_values, chain_id, felt, order_values, quantum, typed_hash, word,
+};
 
 /// Native `/v1/orders/batch` accepts at most this many orders.
 pub const MAX_BATCH: usize = 10;
 const MAX_SAFE: u64 = (1 << 53) - 1;
 const AUTH_LIFETIME_S: u64 = 300;
+const AUTH_SKEW_S: u64 = 30;
+const ORDER_SKEW_MS: u64 = 30_000;
 
 /// Closed, sanitized refusal codes; none carries request content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -395,8 +399,32 @@ pub fn validate(
     peer_now_ms: f64,
     deadline_ms: f64,
 ) -> Result<(), DescriptorError> {
-    let _ = (descriptor, peer_now_ms, deadline_ms);
-    Err(DescriptorError::Malformed)
+    for time in [peer_now_ms, deadline_ms] {
+        if !time.is_finite() || time < 0. || time > MAX_SAFE as f64 {
+            return Err(DescriptorError::Time);
+        }
+    }
+    if peer_now_ms >= deadline_ms {
+        return Err(DescriptorError::Deadline);
+    }
+    descriptor.check()?;
+    let now_ms = peer_now_ms as u64;
+    let within = |stamp: u64, now: u64, skew: u64| stamp.abs_diff(now) <= skew;
+    let fresh = match descriptor {
+        ParadexDescriptor::Auth { timestamp_s, .. } => {
+            within(*timestamp_s, now_ms / 1000, AUTH_SKEW_S)
+        }
+        ParadexDescriptor::OrderCreate { order, .. } => {
+            within(order.timestamp_ms, now_ms, ORDER_SKEW_MS)
+        }
+        ParadexDescriptor::OrderBatch { items } => items
+            .iter()
+            .all(|item| within(item.timestamp_ms, now_ms, ORDER_SKEW_MS)),
+        ParadexDescriptor::OrderModify(modify) => {
+            within(modify.timestamp_ms, now_ms, ORDER_SKEW_MS)
+        }
+    };
+    fresh.then_some(()).ok_or(DescriptorError::Skew)
 }
 
 /// The native typed-data hashes to sign, through the same builder local signing
@@ -405,8 +433,78 @@ pub fn digests(
     descriptor: &ParadexDescriptor,
     binding: &ParadexBinding,
 ) -> Result<Digests, DescriptorError> {
-    let _ = (descriptor, binding);
-    Err(DescriptorError::Malformed)
+    descriptor.check()?;
+    let hash = |definition: &str, values: &[Felt]| {
+        typed_hash(binding.chain_id, binding.account, definition, values)
+            .map(|hash| hash.to_bytes_be())
+            .map_err(|_| DescriptorError::Presence)
+    };
+    let order = |order: &Order| {
+        let (definition, values) = order_values(
+            order.timestamp_ms,
+            &order.market,
+            side(order.side),
+            order_type(order.order_type),
+            &order.size,
+            order.price.as_deref(),
+            None,
+        )
+        .map_err(|_| DescriptorError::Presence)?;
+        hash(definition, &values)
+    };
+    let digests = match descriptor {
+        ParadexDescriptor::Auth {
+            timestamp_s,
+            expiration_s,
+        } => vec![hash(AUTH_TYPE, &auth_values(*timestamp_s, *expiration_s))?],
+        ParadexDescriptor::OrderCreate { order: item, .. } => vec![order(item)?],
+        ParadexDescriptor::OrderBatch { items } => {
+            items.iter().map(order).collect::<Result<_, _>>()?
+        }
+        ParadexDescriptor::OrderModify(modify) => {
+            let (definition, values) = order_values(
+                modify.timestamp_ms,
+                &modify.market,
+                side(modify.side),
+                modify_type(modify.order_type),
+                &modify.size,
+                Some(&modify.price),
+                Some(&modify.id),
+            )
+            .map_err(|_| DescriptorError::Presence)?;
+            vec![hash(definition, &values)?]
+        }
+    };
+    Ok(Digests(digests))
+}
+
+fn side(side: Side) -> &'static str {
+    match side {
+        Side::Buy => "BUY",
+        Side::Sell => "SELL",
+    }
+}
+
+fn order_type(kind: OrderType) -> &'static str {
+    match kind {
+        OrderType::Limit => "LIMIT",
+        OrderType::Market => "MARKET",
+        OrderType::StopLimit => "STOP_LIMIT",
+        OrderType::StopMarket => "STOP_MARKET",
+        OrderType::TakeProfitMarket => "TAKE_PROFIT_MARKET",
+    }
+}
+
+fn modify_type(kind: ModifyOrderType) -> &'static str {
+    match kind {
+        ModifyOrderType::Limit => "LIMIT",
+        ModifyOrderType::StopLimit => "STOP_LIMIT",
+        ModifyOrderType::StopMarket => "STOP_MARKET",
+        ModifyOrderType::StopLossLimit => "STOP_LOSS_LIMIT",
+        ModifyOrderType::StopLossMarket => "STOP_LOSS_MARKET",
+        ModifyOrderType::TakeProfitLimit => "TAKE_PROFIT_LIMIT",
+        ModifyOrderType::TakeProfitMarket => "TAKE_PROFIT_MARKET",
+    }
 }
 
 fn safe_int<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
