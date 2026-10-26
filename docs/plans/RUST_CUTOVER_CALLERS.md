@@ -9222,3 +9222,32 @@ financial outcome or authentication latch. Negotiated v2 refuses missing
 ownership before transport; no route, timeout or method fabricates metadata.
 Setup ownership remains a distinct reviewed extension with its own negotiated
 owned-execution and retirement support, not a SessionAuth substitute.
+
+
+### WOO unsigned public seed observations
+
+Markets, Tickers and Funding use independent unsigned Background Read contexts
+with Primary egress, native unspecified route and a NEW20s/Never per-call bound.
+Rows, diagnostics and Store publication require current DATA. Exact retirement
+precedes catalogue followups, keyed Backoff, account startup/refresh, public
+connect and funding cadence effects. No latest-kind gate or signing migration.
+Owned precommit recovery is limited to Capacity/TimedOut, or Invalid with
+Network/Timeout/Internal; other finite refusals warn only. Released failure
+keeps Markets/Tickers keyed recovery and Funding warning-only. Each finite
+Funding dispatch attempt retains exactly one60s cadence rearm even if refused.
+Nonfinite venue callbacks retire only their returned request, without venue
+work or diagnostics. The inherited engine startup watchdog may independently
+emit its exact startup.incomplete notice at positive infinity; the control pins
+that separately from exact once-only physical timer/preparation cleanup.
+Native no-newwork controls now distinguish that cleanup from new dispatch.
+
+Startup seed fixtures complete real preparation/binding/claim at their original
+observation clocks through a seed-only collector. The shared raw requests()
+helper and private/candle/book collectors remain unchanged. No blanket timer
+flush, fabricated request/context or financial-clock supersession is used.
+
+The socket-only supervision fixture explicitly fails each released Funding
+observation at its original cadence clock, so the real returned cleanup removes
+its deadline before the next minute. It does not filter timers. The positional
+trading fixture only changes its0/10 seed release collector. Original financial
+payloads, assertions and clocks stay intact; all264 family controls pass locally.
