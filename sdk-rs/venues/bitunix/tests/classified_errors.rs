@@ -8,7 +8,9 @@ fn order(extra: &str) -> PlaceOrderOpts {
 }
 
 fn classified_failure(e: &mut TestEngine, command: u32) -> safe_cex_engine::VenueError {
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(e)
+        .into_iter()
+        .collect();
     assert_eq!(
         actions
             .iter()
@@ -78,9 +80,18 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
         let error = classified_failure(&mut e, 1001);
         assert_eq!(error.kind, Some(kind));
         assert_eq!(error.outcome, Some(outcome));
-        assert_eq!(error.message, "Sign signature error");
-        assert_eq!(error.venue_code.as_deref(), Some("10007"));
-        assert_eq!(error.venue_message.as_deref(), Some("Sign signature error"));
+        // The status classifies a non-2xx answer; its body code is not evidence,
+        // and the engine seals 408/5xx before the venue reads the body.
+        let unproven = status == 408 || status >= 500;
+        assert_eq!(
+            error.message,
+            if unproven {
+                "HTTP response does not prove the write outcome"
+            } else {
+                "Sign signature error"
+            }
+        );
+        assert_eq!(error.venue_code, None);
     }
 }
 
@@ -159,7 +170,9 @@ fn batch_item_failures_complete_once_with_partials_and_do_not_block_independent_
         first.id,
         r#"{"code":0,"data":{"successList":[{"orderId":"accepted-first"},{"orderId":"accepted-2"},{"orderId":"accepted-3"},{"orderId":"accepted-4"}],"failureList":[{"errorCode":20003,"errorMsg":"Insufficient balance"}]}}"#,
     );
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(!actions.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
@@ -199,7 +212,7 @@ fn batch_item_failures_complete_once_with_partials_and_do_not_block_independent_
 }
 
 #[test]
-fn unknown_batch_leg_stays_unknown_after_later_rejected_leg() {
+fn an_unknown_batch_leg_ends_the_job_before_later_chunks() {
     use safe_cex_engine::Outcome;
     let (mut e, _) = startup();
     e.handle(
@@ -215,31 +228,17 @@ fn unknown_batch_leg_stays_unknown_after_later_rejected_leg() {
         first.id,
         r#"{"code":0,"data":{"successList":[{"orderId":"accepted"},{"orderId":"accepted-2"},{"orderId":"accepted-3"},{"orderId":"accepted-4"}],"failureList":[{"errorCode":10001,"errorMsg":"Network Error"}]}}"#,
     );
-    let timer = e
-        .drain_actions()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .find_map(|a| match a {
-            Action::SetTimer {
-                timer,
-                at_ms: 1000.0,
-            } => Some(timer),
-            _ => None,
-        })
-        .unwrap();
-    e.handle(1000.0, Event::TimerFired { timer });
-    let second = requests(&mut e).remove(0);
-    reply(
-        &mut e,
-        second.id,
-        r#"{"code":20003,"msg":"Insufficient balance"}"#,
-    );
+    // Native sent the next chunk; an uncertain leg now stops the job's writes.
     let error = classified_failure(&mut e, 1005);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(
         error.partial.unwrap().order_ids,
         vec!["accepted", "accepted-2", "accepted-3", "accepted-4"]
+    );
+    assert!(
+        !requests(&mut e)
+            .iter()
+            .any(|r| r.url.ends_with("place_order"))
     );
 }
 
@@ -294,8 +293,15 @@ fn uncertain_amend_answer_never_enters_cancel_recreate_fallback() {
             status,
             r#"{"code":20003,"msg":"The order does not support this operation"}"#,
         );
-        let actions: Vec<_> = e.drain_actions().collect();
-        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
+        // Only the reconcile's order census follows; no fallback write.
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
+        );
         assert!(actions.iter().any(|a| matches!(a,Action::Notice(Notice::CommandFailed {command:1007,error}) if error.outcome==Some(Outcome::Unknown))));
     }
 }
@@ -335,7 +341,9 @@ fn replacement_read_transport_failure_keeps_effective_cancel_without_claiming_un
         },
     );
     let error = classified_failure(&mut e, 1008);
-    assert_eq!(error.kind, Some(ErrorKind::Network));
+    // The journal selects the refused amend; the lost read's text follows.
+    assert_eq!(error.kind, Some(ErrorKind::Rejected));
+    assert!(error.message.ends_with("; read lost"), "{}", error.message);
     assert_eq!(error.outcome, None);
     assert_ne!(error.outcome, Some(Outcome::NotSent));
     assert_eq!(
@@ -400,7 +408,9 @@ fn successful_single_ack_without_native_id_preserves_existing_client_identity_co
     );
     let request = requests(&mut e).remove(0);
     reply(&mut e, request.id, r#"{"code":0,"data":{}}"#);
-    let actions: Vec<_> = e.drain_actions().collect();
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
     assert!(actions.iter().any(|action| matches!(action,
         Action::Notice(Notice::CommandDone {command:1010,result}) if result==r#"["ack-client"]"#)));
     assert!(!actions.iter().any(|action| matches!(
