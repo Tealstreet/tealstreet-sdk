@@ -1,10 +1,9 @@
 //! Rare reads stage streamed pages; income completeness follows the shared span walker.
 use crate::account_wire::{OrderRow, id};
-use crate::sign::encode;
 use crate::wire::{Str, number, optional_number, timestamp};
 use crate::{Pending, Task, WeexFutures};
 use safe_cex_engine::Level;
-use safe_cex_engine::credential_selection::{PrimaryReason, SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::PrimaryReason;
 use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory, ReadRangeHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -14,6 +13,7 @@ use safe_cex_engine::request_context::{Context, Error, Operation, Owner, Policy,
 use safe_cex_engine::selected_read::{
     LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
 };
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     CommandId, CommandWait, Cx, Method, Outcome, Query, Response, TimerId, VenueError,
 };
@@ -412,11 +412,6 @@ impl WeexFutures {
         if matches!(kind, Kind::Trades) {
             return cx.admit_caller_read_root(None, None).ok().map(Root::Public);
         }
-        let slots = Slots::new(
-            self.credentials.primary.clone(),
-            self.credentials.read.clone(),
-            SlotPolicy::default(),
-        );
         let role = if matches!(kind, Kind::Income) {
             ReadRole::Primary {
                 reason: PrimaryReason::History,
@@ -427,7 +422,7 @@ impl WeexFutures {
         };
         SelectedRead::command_root(
             cx,
-            SelectedRead::select(&slots, role),
+            SelectedRead::select(&self.slots, role),
             LocalRefusal {
                 diagnostic: None,
                 error: VenueError::new("WEEX history signing unavailable")
@@ -614,7 +609,7 @@ impl WeexFutures {
         command: CommandId,
         read: Query,
     ) {
-        if self.credentials.primary.is_none()
+        if !self.slots.has_primary()
             && !matches!(
                 read,
                 Query::PublicTrades { .. } | Query::OrderByClientId { .. }
