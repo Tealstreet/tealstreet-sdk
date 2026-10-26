@@ -327,3 +327,309 @@ fn an_older_prerequisite_snapshot_never_overwrites_a_newer_one() {
     );
     assert_eq!(writes(&http(&actions), "/tpsl/"), 0);
 }
+
+fn post(requests: &[HttpRequest], path: &str) -> Option<HttpRequest> {
+    requests
+        .iter()
+        .find(|r| r.method == safe_cex_engine::Method::Post && r.url.contains(path))
+        .cloned()
+}
+/// Answers every prerequisite GET until a write goes out; returns the writes.
+fn through_reads(
+    e: &mut TestEngine,
+    mut now: f64,
+    mut requests: Vec<HttpRequest>,
+) -> Vec<HttpRequest> {
+    for _ in 0..10 {
+        let writes: Vec<_> = requests
+            .iter()
+            .filter(|r| r.method == safe_cex_engine::Method::Post)
+            .cloned()
+            .collect();
+        if !writes.is_empty() {
+            return writes;
+        }
+        let mut next = Vec::new();
+        for r in requests {
+            now += 1.0;
+            let body = if r.url.contains("get_pending_positions") {
+                POSITIONS
+            } else if r.url.contains("/tpsl/") {
+                TPSL
+            } else {
+                ORDERS
+            };
+            next.extend(http(&answer(e, now, &r, body)));
+        }
+        requests = next;
+    }
+    panic!("no write followed the reads")
+}
+
+/// Control 6: "position does not exist" re-reads and re-places once, as
+/// continuations; a second refusal ends the job with the refusal kept.
+#[test]
+fn position_does_not_exist_re_reads_and_re_places_once() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 81,
+            orders: vec![serde_json::from_str(
+                r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","price":90500.04,"amount":0.0021}"#,
+            )
+            .unwrap()],
+        }),
+    );
+    let first = post(&http(&prepared(&mut e, 1.0)), "place_order").expect("the place");
+    let refused = r#"{"code":20003,"msg":"Position does not exist"}"#;
+    let actions = answer(&mut e, 2.0, &first, refused);
+    assert!(
+        failure(&actions, 81).is_none(),
+        "native recover, not a terminal"
+    );
+    let reads = http(&actions);
+    assert!(
+        reads
+            .iter()
+            .any(|r| r.url.contains("get_pending_positions")),
+        "the re-read is the job's own Read call"
+    );
+    assert_eq!(api_key(&reads[0]), "replay-key");
+    let writes = through_reads(&mut e, 3.0, reads);
+    let again = post(&writes, "place_order").expect("the one re-place");
+    let actions = answer(&mut e, 20.0, &again, refused);
+    assert_eq!(
+        failure(&actions, 81).and_then(|e| e.outcome),
+        Some(Outcome::Rejected)
+    );
+    assert_eq!(writes_of(&actions, "place_order"), 0, "never a third place");
+}
+fn writes_of(actions: &[Action], path: &str) -> usize {
+    http(actions)
+        .iter()
+        .filter(|r| r.method == safe_cex_engine::Method::Post && r.url.contains(path))
+        .count()
+}
+
+/// Control 9 (a): a command arriving inside the amend fallback (after its
+/// cancel is sent, and again before its replacement) is refused by the lock.
+#[test]
+fn the_order_lock_holds_across_the_amend_fallback() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 85,
+            id: "one__tp".into(),
+            price: Some(79.0),
+            amount: None,
+        }),
+    );
+    let amend = http(&prepared(&mut e, 1.0)).remove(0);
+    let actions = answer(
+        &mut e,
+        2.0,
+        &amend,
+        r#"{"code":20003,"msg":"The order does not support this operation"}"#,
+    );
+    let cancel = post(&http(&actions), "cancel_orders").expect("the fallback cancel");
+    e.handle(
+        3.0,
+        Event::Command(Command::CancelOrders {
+            command: 86,
+            ids: vec!["one".into()],
+        }),
+    );
+    let actions = prepared(&mut e, 3.0);
+    assert_eq!(
+        writes_of(&actions, "/"),
+        0,
+        "no write between cancel and replacement"
+    );
+    assert!(failure(&actions, 86).is_some());
+    let actions = answer(
+        &mut e,
+        4.0,
+        &cancel,
+        r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
+    );
+    assert!(
+        http(&actions)
+            .iter()
+            .any(|r| r.url.contains("get_order_detail")),
+        "the final-state read precedes any replacement"
+    );
+    e.handle(
+        5.0,
+        Event::Command(Command::AmendOrder {
+            command: 87,
+            id: "one".into(),
+            price: Some(81.0),
+            amount: None,
+        }),
+    );
+    let actions = prepared(&mut e, 5.0);
+    assert_eq!(writes_of(&actions, "/"), 0);
+    assert!(failure(&actions, 87).is_some());
+}
+
+/// Control 9b (b): margin against leverage on one symbol and mode against
+/// mode are refused while one is live.
+#[test]
+fn settings_scopes_cover_margin_with_leverage_and_mode_with_mode() {
+    let (mut e, _) = startup();
+    e.store_mut().set_positions(vec![]);
+    e.handle(1.0, Event::Command(leverage(101, 5.0)));
+    e.handle(
+        1.0,
+        Event::Command(Command::SetPositionMode {
+            command: 102,
+            hedged: true,
+            symbol: None,
+        }),
+    );
+    let first = http(&prepared(&mut e, 1.0));
+    assert_eq!(writes(&first, "change_leverage"), 1);
+    assert_eq!(writes(&first, "change_position_mode"), 1);
+    e.handle(
+        2.0,
+        Event::Command(Command::SetMarginType {
+            command: 103,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        }),
+    );
+    e.handle(
+        2.0,
+        Event::Command(Command::SetPositionMode {
+            command: 104,
+            hedged: false,
+            symbol: None,
+        }),
+    );
+    let actions = prepared(&mut e, 2.0);
+    assert_eq!(writes_of(&actions, "/"), 0);
+    for command in [103, 104] {
+        assert_eq!(
+            failure(&actions, command).and_then(|e| e.outcome),
+            Some(Outcome::NotSent)
+        );
+    }
+}
+
+/// Control 9b (M1): an Unknown leverage change holds its symbol until a fresh
+/// settings read lands; a second change is refused until then, then admitted.
+#[test]
+fn an_unknown_leverage_change_holds_the_symbol_until_a_fresh_read() {
+    let (mut e, _) = startup();
+    e.handle(1.0, Event::Command(leverage(111, 5.0)));
+    let write = post(&http(&prepared(&mut e, 1.0)), "change_leverage").expect("the write");
+    e.handle(
+        2.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "lost settings ACK",
+        },
+    );
+    let actions = prepared(&mut e, 2.0);
+    assert_eq!(
+        failure(&actions, 111).and_then(|e| e.outcome),
+        Some(Outcome::Unknown)
+    );
+    let read = http(&actions)
+        .into_iter()
+        .find(|r| r.url.contains("get_leverage_margin_mode"))
+        .expect("the hold's fresh settings read");
+    e.handle(3.0, Event::Command(leverage(112, 10.0)));
+    let actions = prepared(&mut e, 3.0);
+    assert_eq!(writes(&http(&actions), "change_leverage"), 0);
+    assert_eq!(
+        failure(&actions, 112).and_then(|e| e.outcome),
+        Some(Outcome::NotSent)
+    );
+    answer(
+        &mut e,
+        4.0,
+        &read,
+        r#"{"code":0,"data":{"leverage":5,"marginMode":"CROSS"}}"#,
+    );
+    e.handle(5.0, Event::Command(leverage(113, 10.0)));
+    assert_eq!(
+        writes(&http(&prepared(&mut e, 5.0)), "change_leverage"),
+        1,
+        "admitted once the fresh read lands"
+    );
+}
+
+/// L1 (dazzy3): the amend fallback's replacement is fenced as a placement, so
+/// a lost replacement ACK leaves cancel-all refused until a fresh census.
+#[test]
+fn a_lost_fallback_replacement_fences_cancel_all() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 121,
+            id: "one__tp".into(),
+            price: Some(79.0),
+            amount: None,
+        }),
+    );
+    let amend = http(&prepared(&mut e, 1.0)).remove(0);
+    let actions = answer(
+        &mut e,
+        2.0,
+        &amend,
+        r#"{"code":20003,"msg":"The order does not support this operation"}"#,
+    );
+    let cancel = post(&http(&actions), "cancel_orders").expect("the fallback cancel");
+    let actions = answer(
+        &mut e,
+        3.0,
+        &cancel,
+        r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
+    );
+    let detail = http(&actions)
+        .into_iter()
+        .find(|r| r.url.contains("get_order_detail"))
+        .expect("the final-state read");
+    let actions = answer(
+        &mut e,
+        4.0,
+        &detail,
+        r#"{"code":0,"data":{"orderId":"one","symbol":"BTCUSDT","status":"CANCELED","qty":"3","tradeQty":"1"}}"#,
+    );
+    let replacement = post(&http(&actions), "place_order").expect("the replacement");
+    e.handle(
+        5.0,
+        Event::HttpFailed {
+            request: replacement.id,
+            error: "lost replacement ACK",
+        },
+    );
+    let actions = prepared(&mut e, 5.0);
+    assert_eq!(
+        failure(&actions, 121).and_then(|e| e.outcome),
+        Some(Outcome::Unknown)
+    );
+    e.handle(
+        6.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 122,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let actions = prepared(&mut e, 6.0);
+    // The engine defers cancel-all behind the uncertain placement.
+    assert_eq!(
+        writes_of(&actions, "cancel_orders"),
+        0,
+        "cancel-all stays fenced"
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 122, .. })))
+    );
+}

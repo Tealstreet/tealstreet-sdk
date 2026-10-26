@@ -274,7 +274,12 @@ fn accepted_settings_writes_keep_the_fence_while_unproved_writes_leave_the_read_
                 )
             )));
             notify(&mut e, socket, 250.0, "BTCUSDT");
-            let actions = answer(&mut e, &old, 300.0, SETTINGS);
+            let mut actions = answer(&mut e, &old, 300.0, SETTINGS);
+            // An unproved symbol write holds its scope and re-reads at once:
+            // that fresh read supersedes the older one and carries the store.
+            if kind != "mode" && matches!(result, "malformed" | "transport") {
+                actions = answer(&mut e, &settings(&complete), 301.0, SETTINGS);
+            }
             if result == "accepted" {
                 let expected = match kind {
                     "leverage" => (30.0, Some(MarginType::Cross)),

@@ -716,6 +716,8 @@ impl BitunixFutures {
                 p.margin_type = Some(margin);
             }
         });
+        self.trading
+            .settings_observed(&format!("symbol:{symbol}"), serial);
     }
     pub(crate) fn fail_private(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
@@ -879,6 +881,7 @@ impl BitunixFutures {
             return true;
         }
         if self.account.tick == Some(timer) {
+            self.restore_retired(cx);
             self.account
                 .terminal
                 .retain(|_, at| cx.now - *at < 300_000.0);
@@ -1083,6 +1086,7 @@ impl BitunixFutures {
         if !self.account.recovery.settings_current(symbol, serial) {
             return;
         }
+        self.trading.settings_unread(&format!("symbol:{symbol}"));
         self.account.symbol_settings.remove(symbol);
         let key = crate::recovery::Key::Settings(symbol.into());
         if write_revision != self.account.position_write_revision {
@@ -1221,6 +1225,7 @@ impl BitunixFutures {
                     extract_account(body, 0).ok_or_else(|| "missing Bitunix account".to_string());
                 match result {
                     Ok(a) => {
+                        self.trading.settings_observed("mode", read.serial);
                         let previous = cx.store.hedged();
                         let hedged = !a.position_mode.eq_ignore_ascii_case("ONE_WAY");
                         cx.store.set_hedged(hedged);

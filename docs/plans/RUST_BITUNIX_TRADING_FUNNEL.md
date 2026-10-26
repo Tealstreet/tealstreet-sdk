@@ -47,8 +47,9 @@ Every remaining legacy Bitunix request leaves `cx.request`/`request_streamed`: a
 8. A cancel batch's partial ACK keeps accepted IDs; an unknown leg projects Unknown.
 9. Two commands on the same order: the second is refused by the order lock before any write, including one that arrives between an amend's cancel and its replacement (a).
 9b. A second leverage, margin or mode change on the same scope is serialized or refused, while a placement proceeds concurrently (b).
+    An Unknown settings change keeps its scope held until a fresh settings (or account, for mode) read lands (dazzy3 M1).
 9c. Two jobs whose prerequisite reads return out of order: the older snapshot never overwrites the newer (c).
-9d. A cancel is not held behind another job's 1000 ms batch-place gap.
+9d. A by-ID cancel is not held behind another job's 1000 ms batch-place gap (`CancelSymbolOrders` keeps the engine lock's placement deferral).
 10. Inventory: Bitunix request 10 to 0.
 
 ## Decisions

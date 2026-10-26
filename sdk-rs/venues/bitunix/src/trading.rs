@@ -5,7 +5,7 @@ use crate::account::{Axis, NativeOrder};
 use crate::sign::Params;
 use crate::wire::Str;
 use crate::{BitunixFutures, Pending, codes, error};
-use safe_cex_engine::classify::{BatchItem, Native, NativeCode, WriteFact};
+use safe_cex_engine::classify::{BatchItem, Intent, Native, NativeCode, WriteFact};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
@@ -155,6 +155,12 @@ impl Step {
     fn single_place(&self) -> bool {
         matches!(self.call, Call::Place { batch: false, .. })
     }
+    fn setting(&self) -> bool {
+        matches!(
+            self.call,
+            Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
+        )
+    }
 }
 #[derive(Default)]
 struct Job {
@@ -186,12 +192,19 @@ struct Live {
     failure: Option<VenueError>,
     /// Native text that follows the journal's selected error.
     note: Option<String>,
+    /// A settings write is released without a definitive answer yet.
+    settings_released: bool,
+    /// An amend job: its fallback replacement is fenced as a placement.
+    amend: bool,
 }
 #[derive(Default)]
 pub struct TradingState {
     live: HashMap<u32, Live>,
     settings: HashSet<String>,
-    /// Jobs the engine sealed itself; their rows restore at the reconcile.
+    /// Settings scopes whose change may still execute: held until a read
+    /// issued at or after the serial lands (`None`: that read is not issued).
+    held: HashMap<String, Option<u64>>,
+    /// Jobs the engine sealed itself; their rows restore at the next callback.
     retired: Vec<Job>,
 }
 impl TradingState {
@@ -207,6 +220,20 @@ impl TradingState {
     }
     pub(crate) fn live(&self, command: u32) -> bool {
         self.live.contains_key(&command)
+    }
+    /// The hold's read failed: the next refused change issues another.
+    pub(crate) fn settings_unread(&mut self, key: &str) {
+        if let Some(issued) = self.held.get_mut(key) {
+            *issued = None;
+        }
+    }
+    /// A fresh settings read for `key` landed: release an uncertain hold.
+    pub(crate) fn settings_observed(&mut self, key: &str, serial: u64) {
+        if let Some(Some(threshold)) = self.held.get(key)
+            && serial >= *threshold
+        {
+            self.held.remove(key);
+        }
     }
 }
 fn text<T: Serialize>(v: &T) -> String {
@@ -460,8 +487,11 @@ impl BitunixFutures {
                 waiting: None,
                 failure: None,
                 note: None,
+                settings_released: false,
+                amend: matches!(command, Command::AmendOrder { .. }),
             },
         );
+        self.restore_retired(cx);
         // (b): one settings change per scope; a second is refused, not queued.
         if let Some(key) = settings {
             if self.trading.settings.contains(&key) {
@@ -470,6 +500,19 @@ impl BitunixFutures {
                     id,
                     error::not_sent(
                         "Bitunix setting change is already in flight",
+                        ErrorKind::InvalidInput,
+                    ),
+                );
+            }
+            // An uncertain change may still execute: wait for a fresh read
+            // (issued once; a failed one is issued again here).
+            if self.trading.held.contains_key(&key) {
+                self.reread_held(cx);
+                return self.end(
+                    cx,
+                    id,
+                    error::not_sent(
+                        "Bitunix setting change outcome is unresolved; a fresh settings read is pending",
                         ErrorKind::InvalidInput,
                     ),
                 );
@@ -1443,10 +1486,20 @@ impl BitunixFutures {
         step: Step,
         resent: bool,
     ) {
-        let Some(plan) = self.trading.plan(command).cloned() else {
+        let Some(live) = self.trading.live.get(&command) else {
             return;
         };
-        let context = match cx.plan_leg_context(&plan, &slot) {
+        let Some(plan) = live.plan.clone() else {
+            return;
+        };
+        // An amend fallback's replacement may leave a live order on a lost
+        // ACK: fence it as a placement, not as the amended order.
+        let context = if live.amend && step.path == PLACE {
+            cx.plan_leg_context_with_intent(&plan, &slot, Intent::Place)
+        } else {
+            cx.plan_leg_context(&plan, &slot)
+        };
+        let context = match context {
             Ok(context) => context,
             Err(reason) => {
                 let error = VenueError::new(reason.venue_error().message);
@@ -1501,6 +1554,11 @@ impl BitunixFutures {
             body.clone(),
             self.options.testnet,
         );
+        if step.setting()
+            && let Some(live) = self.trading.live.get_mut(&command)
+        {
+            live.settings_released = true;
+        }
         let pending = Pending::Trade(Request {
             command,
             step,
@@ -1530,12 +1588,51 @@ impl BitunixFutures {
             }
         }
     }
+    /// Ends a job's authority. A settings scope whose write may still execute
+    /// stays held until a fresh read; any other ends with the job.
     fn take_live(&mut self, command: u32) -> Option<Live> {
         let live = self.trading.live.remove(&command)?;
         if let Some(key) = &live.settings {
             self.trading.settings.remove(key);
+            if live.settings_released {
+                self.trading.held.entry(key.clone()).or_insert(None);
+            }
         }
         Some(live)
+    }
+    /// Issues the read that can release each hold not yet waiting on one.
+    fn reread_held(&mut self, cx: &mut Cx<'_, Pending>) {
+        let keys: Vec<_> = self
+            .trading
+            .held
+            .iter()
+            .filter(|(_, issued)| issued.is_none())
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in keys {
+            self.reread_settings(cx, &key);
+        }
+    }
+    /// The symbol's settings read, or the account read for position mode.
+    fn reread_settings(&mut self, cx: &mut Cx<'_, Pending>, key: &str) {
+        let threshold = if let Some(symbol) = key.strip_prefix("symbol:") {
+            let threshold = self.account.recovery.settings_sequence() + 1;
+            self.account.symbol_settings.remove(symbol);
+            self.read_symbol_settings(cx, symbol);
+            threshold
+        } else {
+            let threshold = self.account.serials[0] + 1;
+            self.read_axis(cx, Axis::Balance);
+            threshold
+        };
+        self.trading.held.insert(key.to_owned(), Some(threshold));
+    }
+    /// Restores rows of jobs the engine sealed, at the first callback after.
+    pub(crate) fn restore_retired(&mut self, cx: &mut Cx<'_, Pending>) {
+        for job in std::mem::take(&mut self.trading.retired) {
+            Self::cleanup(cx, &job);
+        }
+        self.reread_held(cx);
     }
     /// Fails the job under its owner; the journal projects the outcome.
     fn end(&mut self, cx: &mut Cx<'_, Pending>, command: u32, error: VenueError) {
@@ -1543,6 +1640,7 @@ impl BitunixFutures {
             return;
         };
         Self::cleanup(cx, &live.job);
+        self.reread_held(cx);
         match &live.plan {
             None => {
                 let failed = cx.fail_preflight(&live.preflight, error);
@@ -1592,8 +1690,8 @@ impl BitunixFutures {
             }
         }
     }
-    /// The engine retired a trading owner itself; its rows restore at the
-    /// reconcile it asks for.
+    /// The engine retired a trading owner itself (no Cx here); its rows and
+    /// any settings read follow at the next callback.
     pub(crate) fn trading_retired(&mut self, owner: &HttpOwnerRetirement) {
         let commands: Vec<u32> = self
             .trading
@@ -1610,9 +1708,7 @@ impl BitunixFutures {
     }
     /// Native restore for sealed jobs, then Primary order snapshots.
     pub(crate) fn reconcile_trading(&mut self, cx: &mut Cx<'_, Pending>) {
-        for job in std::mem::take(&mut self.trading.retired) {
-            Self::cleanup(cx, &job);
-        }
+        self.restore_retired(cx);
         self.account.reconcile = true;
         self.account.reconciled = [false, false];
         self.read_axis(cx, Axis::Orders);
@@ -1643,6 +1739,10 @@ impl BitunixFutures {
         request: Request,
         error: VenueError,
     ) {
+        // Never released: a settings scope ends with the job.
+        if let Some(live) = self.trading.live.get_mut(&request.command) {
+            live.settings_released = false;
+        }
         // An unreleased call the engine already stopped leaves it the terminal.
         if let Some(plan) = self.trading.plan(request.command).cloned()
             && cx
@@ -1751,6 +1851,11 @@ impl BitunixFutures {
         {
             return;
         }
+        if request.step.setting()
+            && let Some(live) = self.trading.live.get_mut(&command)
+        {
+            live.settings_released = false;
+        }
         self.account.generations[2] += 1;
         self.debounce(cx, Axis::Orders);
         match accepted {
@@ -1790,20 +1895,24 @@ impl BitunixFutures {
             code: NativeCode::Int(code),
             message: "",
         });
+        let mut refused = false;
         let grant = match cx.classify_write(
             &request.context,
             &codes::BITUNIX,
             native.as_ref(),
             error.message.clone(),
         ) {
-            Ok(fact) => cx.http_write_fact(
-                &request.context,
-                WriteFact::Failed {
-                    fact,
-                    known_effects: false,
-                },
-                None,
-            ),
+            Ok(fact) => {
+                refused = fact.verdict().is_refusal();
+                cx.http_write_fact(
+                    &request.context,
+                    WriteFact::Failed {
+                        fact,
+                        known_effects: false,
+                    },
+                    None,
+                )
+            }
             Err(_) => cx
                 .http_write_unproven(&request.context, error.message.clone())
                 .map(|()| None),
@@ -1812,6 +1921,13 @@ impl BitunixFutures {
             Ok(grant) => grant,
             Err(_) => return,
         };
+        // A proven refusal settles a settings write; a resend re-releases it.
+        if refused
+            && grant.is_none()
+            && let Some(live) = self.trading.live.get_mut(&command)
+        {
+            live.settings_released = false;
+        }
         let plan = self.trading.plan(command).cloned().expect("delivered Plan");
         // 10007: the one re-signed resend, with a fresh nonce.
         if let Some(grant) = grant
@@ -2091,8 +2207,8 @@ impl BitunixFutures {
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.job.ids.extend(ids.iter().cloned());
         }
-        // Native: a refused or uncertain chunk never holds back later chunks;
-        // the job fails once they have gone out.
+        // Native: a refused chunk never holds back later chunks; the job fails
+        // once they have gone out. An uncertain chunk ends the job here.
         match cx.http_write_batch(
             &request.context,
             &codes::BITUNIX,
@@ -2102,17 +2218,13 @@ impl BitunixFutures {
             None,
         ) {
             Ok(WriteResult::Accepted { .. }) => Ok(()),
-            Ok(
-                WriteResult::Rejected(error)
-                | WriteResult::KnownPartial(error)
-                | WriteResult::PartialUnknown(error)
-                | WriteResult::Failed(error),
-            ) => {
+            Ok(WriteResult::Rejected(error) | WriteResult::KnownPartial(error)) => {
                 if let Some(live) = self.trading.live.get_mut(&request.command) {
                     live.failure.get_or_insert(error);
                 }
                 Ok(())
             }
+            Ok(WriteResult::PartialUnknown(error) | WriteResult::Failed(error)) => Err(Some(error)),
             Err(_) => Err(None),
         }
     }
