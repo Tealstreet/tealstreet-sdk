@@ -9190,3 +9190,21 @@ and sibling liveness. The injected Ready Capacity is a boundary control, not
 proof of normal pressure reachability. Any normally reachable fail-closed row
 goes back to the overseer. Auth HMAC/ACK bytes, native HTTP/reducers and existing
 supervision constants are unchanged; no generic coexistence/recovery seam.
+
+
+### WOO unsigned public seed observations
+
+Markets, Tickers and Funding use independent unsigned Background Read contexts
+with Primary egress, native unspecified route and a NEW20s/Never per-call bound.
+Rows, diagnostics and Store publication require current DATA. Exact retirement
+precedes catalogue followups, keyed Backoff, account startup/refresh, public
+connect and funding cadence effects. No latest-kind gate or signing migration.
+Owned precommit recovery is limited to Capacity/TimedOut, or Invalid with
+Network/Timeout/Internal; other finite refusals warn only. Released failure
+keeps Markets/Tickers keyed recovery and Funding warning-only. Each finite
+Funding dispatch attempt retains exactly one60s cadence rearm even if refused.
+Nonfinite venue callbacks retire only their returned request, without venue
+work or diagnostics. The inherited engine startup watchdog may independently
+emit its exact startup.incomplete notice at positive infinity; the control pins
+that separately from exact once-only physical timer/preparation cleanup.
+Native no-newwork controls now distinguish that cleanup from new dispatch.

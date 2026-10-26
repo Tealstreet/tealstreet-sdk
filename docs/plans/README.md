@@ -484,4 +484,4 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 - [KuCoin request and signing funnel](RUST_KUCOIN_FUNNEL.md): predecessor preservation, native refusal resend and compiling custody originals; production adoption remains local.
 
-| WOO unsigned public-seed read custody | Plan/API/refusal matrix CLEAR; local originals 7 native GREEN / 24 assertion RED | Before converting Markets, Tickers or Funding to independent Background Read observations. | [RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md](RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md) |
+| WOO unsigned public-seed read custody | Plan/originals CLEAR; local source32 contracts PASS, source/fixture reviews pending | Before converting Markets, Tickers or Funding to independent Background Read observations. | [RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md](RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md) |

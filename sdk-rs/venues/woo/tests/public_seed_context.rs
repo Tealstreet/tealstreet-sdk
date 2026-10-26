@@ -106,6 +106,17 @@ fn exact_cleanup(actions: &[Action], packet: &Packet) -> Result<(), &'static str
         Err("missing exact once-only cleanup")
     }
 }
+fn after_exact_cleanup(actions: Vec<Action>, packet: &Packet) -> Vec<Action> {
+    if packet.preparation.is_none() {
+        return actions;
+    }
+    let (cleanup, effects): (Vec<_>, Vec<_>) = actions.into_iter().partition(|action| {
+        matches!(action, Action::ClearTimer { .. })
+            || matches!(action, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Cancel { .. }))
+    });
+    assert_eq!(exact_cleanup(&cleanup, packet), Ok(()));
+    effects
+}
 fn release<V: Venue>(e: &mut Engine<V>, p: &Packet, now: f64) {
     if let Some(preparation) = p.preparation {
         e.http_prepared(
@@ -396,6 +407,7 @@ fn native_empty_discovery_retries_as_a_distinct_observation() {
         response(&mut e, &p, now + 1., 200, EMPTY);
         assert_unpublished(&e, seed);
         let actions: Vec<_> = e.drain_actions().collect();
+        let actions = after_exact_cleanup(actions, &p);
         assert_eq!(warns(&actions, code::REQUEST_FAILED), 2);
         let (timer, due) = actions
             .iter()
@@ -437,6 +449,7 @@ fn native_funding_cadence_is_dispatch_driven_and_failure_warns_only() {
         },
     );
     let actions: Vec<_> = e.drain_actions().collect();
+    let actions = after_exact_cleanup(actions, &p);
     assert_eq!(warns(&actions, code::REQUEST_FAILED), 1);
     assert!(!actions.iter().any(|a| matches!(
         a,
@@ -567,6 +580,38 @@ fn nonfinite_delivery(failure: bool) {
                 "nonfinite DATA cannot change any Store section"
             );
             let actions: Vec<_> = e.drain_actions().collect();
+            let (watchdog, actions): (Vec<_>, Vec<_>) = actions.into_iter().partition(|action| {
+                matches!(action, Action::Notice(Notice::Event(event)) if event.code == code::STARTUP_INCOMPLETE)
+            });
+            let expected_watchdog = usize::from(invalid == f64::INFINITY && seed != Seed::Funding);
+            assert_eq!(
+                watchdog.len(),
+                expected_watchdog,
+                "inherited engine startup watchdog only"
+            );
+            for action in watchdog {
+                let Action::Notice(Notice::Event(event)) = action else {
+                    unreachable!()
+                };
+                assert_eq!(
+                    event.level,
+                    if seed == Seed::Markets {
+                        safe_cex_engine::Level::Error
+                    } else {
+                        safe_cex_engine::Level::Warn
+                    }
+                );
+                assert_eq!(
+                    event.message,
+                    if seed == Seed::Markets {
+                        "Startup incomplete: still waiting for markets, tickers"
+                    } else {
+                        "Startup incomplete: still waiting for tickers"
+                    }
+                );
+                assert!(event.fields.is_empty());
+            }
+
             assert_eq!(
                 exact_cleanup(&actions, &p),
                 Ok(()),

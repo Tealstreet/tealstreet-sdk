@@ -2,8 +2,8 @@
 
 ## Status and prerequisites
 
-The overseer authorizes local originals; no production source or push occurs in
-this checkpoint. #2169 landed as25ca8466d63d8f39954618635305cc083f9ec3f2,
+The overseer authorizes local originals and source implementation; all work stays
+unpushed while exact review and qualification proceed. #2169 landed as25ca8466d63d8f39954618635305cc083f9ec3f2,
 which is integrated locally without rebase. Its exact landing tree is
 3bc41fd92fe8e1baa8db1e3fbc9d6065fc0c09b8. Reviewer: codex-hcmq3f.
 The plan/matrix direction is CLEAR in scratch artifact
@@ -182,3 +182,19 @@ actions and permits each exact cleanup only once. Calibrators reject foreign,
 duplicate and missing cleanup using a separately issued peer; that peer still
 completes at finite time. Nonfinite Funding delivery also retains its genuinely
 captured independent60s cadence and a finite successful next observation.
+
+## Local source qualification
+
+The local candidate implements one boxed physical context plus native staged
+payload for all three seed routes. Corrected originals execute32/32PASS with no
+ignored tests. Two native controls distinguish exact cancellation cleanup from
+new work; nonfinite controls separately pin the inherited engine startup
+watchdog notice before applying the strict physical cleanup ledger. Exact
+source/control review is pending. The first full family run has11 fixture-target
+failures because raw startup collectors cannot capture managed preparations;
+these are qualification failures, not infrastructure. Narrow fixture artifacts
+are under review before adoption. No full-family GREEN or publication claim.
+
+The current tip74a0ba44d38 is plain-merged at8a73888af55; README is full incoming
+plus the own row once. No incoming WOO source overlap. First-source measurements
+must use this actual composition and retain their exact source/toolchain pins.
