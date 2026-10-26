@@ -48,7 +48,7 @@ apexomni = ["dep:safe-cex-venue-apexomni", "dispatch-signing"]
 txflow = ["dep:safe-cex-venue-txflow"]
 kraken = ["dep:safe-cex-venue-kraken"]
 asterdex = ["dep:safe-cex-venue-asterdex", "dispatch-signing"]
-lighter = ["dep:safe-cex-venue-lighter", "dispatch-signing", "safe-cex-crypto/schnorr"]
+lighter = ["dep:safe-cex-venue-lighter", "dispatch-signing", "safe-cex-crypto/schnorr", "dep:serde_json"]
 woo = ["dep:safe-cex-venue-woo"]
 bitrue = ["dep:safe-cex-venue-bitrue", "dispatch-signing"]
 bitunix = ["dep:safe-cex-venue-bitunix", "dispatch-signing", "safe-cex-crypto/trim-signing"]
@@ -73,7 +73,6 @@ serde_json = { workspace = true, optional = true }
 safe-cex-crypto = { workspace = true, optional = true }
 safe-cex-engine.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 zeroize.workspace = true
 safe-cex-venue-breakoutprop = { path = "../venues/breakoutprop", optional = true }
 safe-cex-venue-grvt = { workspace = true, optional = true }
