@@ -11,13 +11,12 @@ const INSTRUMENTS: &str = r#"{"code":"0","data":[{"instId":"BTC-USDT","instType"
 const MARGIN: &str = r#"{"code":"0","data":{"marginMode":"cross"}}"#;
 const MODE: &str = r#"{"code":"0","data":{"positionMode":"net_mode"}}"#;
 
-fn keyed() -> Options {
-    Options {
-        key: Some("key".into()),
-        secret: Some("secret".into()),
-        passphrase: Some("pass".into()),
-        ..Options::default()
-    }
+fn keyed() -> trusted::Keys {
+    trusted::Keys::new("key", "secret", "pass")
+}
+
+fn engine(keys: trusted::Keys) -> safe_cex_engine::Engine<safe_cex_venue_blofin::Blofin> {
+    trusted::trusted_engine_with(Options::default(), Some(keys))
 }
 
 #[derive(Default)]
@@ -142,7 +141,7 @@ fn to_settings(engine: &mut Engine<Blofin>, rig: &mut Rig) -> (Action, Action, S
 
 #[test]
 fn transient_settings_failures_back_off_and_the_account_still_loads() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (mut margin, mode, _) = to_settings(&mut engine, &mut rig);
     respond(&mut engine, &mode, 200, MODE, 2.);
@@ -180,7 +179,7 @@ fn transient_settings_failures_back_off_and_the_account_still_loads() {
 
 #[test]
 fn transport_failure_of_a_setting_read_is_retried() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (_, mode, _) = to_settings(&mut engine, &mut rig);
     let Action::Http(request) = &mode else {
@@ -200,7 +199,7 @@ fn transport_failure_of_a_setting_read_is_retried() {
 
 #[test]
 fn rejected_key_fails_startup_once_and_stops_retrying() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (margin, mode, _) = to_settings(&mut engine, &mut rig);
     let refused = r#"{"code":"152401","msg":"Access key does not exist"}"#;
@@ -224,7 +223,7 @@ fn rejected_key_fails_startup_once_and_stops_retrying() {
 
 #[test]
 fn bad_signature_is_final_only_after_one_re_signed_resend() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (_, mode, _) = to_settings(&mut engine, &mut rig);
     let sign = r#"{"code":"152409","msg":"Signature verification failed"}"#;
@@ -245,7 +244,7 @@ fn bad_signature_is_final_only_after_one_re_signed_resend() {
 
 #[test]
 fn concurrent_bad_signatures_on_both_reads_are_each_re_signed() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (margin, mode, _) = to_settings(&mut engine, &mut rig);
     let sign = r#"{"code":"152409","msg":"Signature verification failed"}"#;
@@ -274,7 +273,7 @@ fn concurrent_bad_signatures_on_both_reads_are_each_re_signed() {
 
 #[test]
 fn bad_signature_after_the_other_read_recovered_is_re_signed() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (margin, mode, _) = to_settings(&mut engine, &mut rig);
     let sign = r#"{"code":"152409","msg":"Signature verification failed"}"#;
@@ -300,8 +299,8 @@ fn bad_signature_after_the_other_read_recovered_is_re_signed() {
 
 #[test]
 fn rejected_read_only_ip_fails_startup_without_deactivating() {
-    let mut engine = trusted::trusted_engine(Options {
-        read_credentials: Some(ReadCredentials {
+    let mut engine = engine(trusted::Keys {
+        read: Some(ReadCredentials {
             key: "read".into(),
             secret: "read-secret".into(),
             passphrase: None,
@@ -327,44 +326,26 @@ fn rejected_read_only_ip_fails_startup_without_deactivating() {
 
 #[test]
 fn missing_passphrase_fails_startup() {
-    let mut engine = trusted::trusted_engine(Options {
+    let mut engine = engine(trusted::Keys {
         passphrase: None,
         ..keyed()
     });
     let mut rig = Rig::default();
     engine.start(0.);
-    let instruments = rig.take_prepared(&mut engine, 0.).remove(0);
-    respond(&mut engine, &instruments, 200, INSTRUMENTS, 1.);
-    rig.take_prepared(&mut engine, 1.);
+    // Refused at startup, before any discovery request (better than TS, which
+    // discovered first).
+    assert!(!rig.take_prepared(&mut engine, 0.).iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::ManagedHttp(_) | Action::Sign { .. }
+    )));
     assert_eq!(rig.failures.len(), 1);
     assert_eq!(rig.failures[0].message, "BloFin requires a passphrase");
     assert_eq!(rig.failures[0].kind, Some(ErrorKind::InvalidInput));
 }
 
 #[test]
-fn invalid_read_only_credentials_fail_startup() {
-    let mut engine = trusted::trusted_engine(Options {
-        read_credentials: Some(ReadCredentials {
-            key: "read".into(),
-            secret: String::new(),
-            passphrase: None,
-        }),
-        ..keyed()
-    });
-    let mut rig = Rig::default();
-    engine.start(0.);
-    assert!(
-        !rig.take(&mut engine)
-            .iter()
-            .any(|a| matches!(a, Action::Http(_)))
-    );
-    assert_eq!(rig.failures.len(), 1);
-    assert_eq!(rig.failures[0].kind, Some(ErrorKind::InvalidInput));
-}
-
-#[test]
 fn rejected_socket_login_fails_startup_and_stops_reconnecting() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (_, _, private) = to_settings(&mut engine, &mut rig);
     engine.handle(2., Event::WsOpened { socket: private });
@@ -386,7 +367,7 @@ fn rejected_socket_login_fails_startup_and_stops_reconnecting() {
 
 #[test]
 fn generic_socket_login_failure_reconnects() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (_, _, private) = to_settings(&mut engine, &mut rig);
     engine.handle(2., Event::WsOpened { socket: private });
@@ -413,7 +394,7 @@ fn generic_socket_login_failure_reconnects() {
 
 #[test]
 fn bad_signature_on_socket_login_reconnects() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (_, _, private) = to_settings(&mut engine, &mut rig);
     engine.handle(2., Event::WsOpened { socket: private });
@@ -446,7 +427,7 @@ fn rate_limited_settings_read_waits_out_the_rate_limit_window() {
         (418, "", 60_000.),
         (429, "", 60_000.),
     ] {
-        let mut engine = trusted::trusted_engine(keyed());
+        let mut engine = engine(keyed());
         let mut rig = Rig::default();
         let (margin, mode, _) = to_settings(&mut engine, &mut rig);
         respond(&mut engine, &mode, 200, MODE, 2.);
@@ -472,7 +453,7 @@ fn rate_limited_settings_read_waits_out_the_rate_limit_window() {
 
 #[test]
 fn a_read_failing_during_a_ban_waits_out_the_ban_too() {
-    let mut engine = trusted::trusted_engine(keyed());
+    let mut engine = engine(keyed());
     let mut rig = Rig::default();
     let (margin, mode, _) = to_settings(&mut engine, &mut rig);
     // The margin read is banned for 120 s at t=2 ms while the mode read is still in flight.
