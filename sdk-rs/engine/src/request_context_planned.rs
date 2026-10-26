@@ -1195,15 +1195,22 @@ impl<P> Cx<'_, P> {
         );
         // A domain Plan's calls are members by their own operation: a Read call
         // in a Mutations domain is not paced.
+        // A serial call carries its own resolved pacing.
         #[cfg(feature = "release-domains")]
-        let pacing = match self.io.core.release_domain {
-            Some(domain) if body.policy.pacing == Some(domain.pacing) => {
-                self.io.core.domain_pacing(operation, None)?
-            }
-            _ => body.policy.pacing,
+        let pacing = match body.serial.as_ref() {
+            Some(serial) => serial.pacing(),
+            None if self.io.core.domain_paces(body.policy.pacing) => self
+                .io
+                .core
+                .domain_member(operation)
+                .and(body.policy.pacing),
+            None => body.policy.pacing,
         };
         #[cfg(all(feature = "serial-plans", not(feature = "release-domains")))]
-        let pacing = body.policy.pacing;
+        let pacing = body
+            .serial
+            .as_ref()
+            .map_or(body.policy.pacing, |serial| serial.pacing());
         #[cfg(feature = "serial-plans")]
         let mut context = Context::new(
             plan.owner(),

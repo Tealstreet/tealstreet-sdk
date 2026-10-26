@@ -93,6 +93,70 @@ class RequestContextBan(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ban.manifest(text)
 
+    def test_parent_inventory_union_uses_maximum_counts_not_sum(self):
+        path = 'venues/reference/src/lib.rs'
+        first, second = 'a' * 64, 'b' * 64
+        parents = [{path: {first: 2}}, {path: {first: 3, second: 1}}]
+        inherited = ban.maximum_manifest(parents)
+        self.assertEqual(inherited, {path: {first: 3, second: 1}})
+        self.assertFalse(ban.check(inherited, inherited, [('merge parents', inherited)]))
+        added = {path: {first: 4, second: 1}}
+        self.assertTrue(ban.check(added, added, [('merge parents', inherited)]))
+
+    def test_branch_merging_tip_inherits_reviewed_inventory_from_either_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = pathlib.Path(directory)
+            root = repo / 'sdk-rs'
+            source = root / 'venues/reference/src/lib.rs'
+            source.parent.mkdir(parents=True)
+            inventory = root / ban.MANIFEST
+            inventory.parent.mkdir(parents=True)
+
+            def command(*args):
+                return subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Ratchet',
+                                       '-c', 'user.email=ratchet@example.invalid', *args],
+                                      check=True, capture_output=True, text=True).stdout.strip()
+
+            def commit():
+                command('add', '.')
+                command('commit', '-m', 'fixture')
+
+            command('init', '-b', 'master')
+            source.write_text('cx.request(1);')
+            first = {source.relative_to(root).as_posix(): dict(ban.fingerprints(source.read_text()))}
+            inventory.write_text(json.dumps(first))
+            commit()
+            command('switch', '-c', 'topic')
+            (repo / 'topic.txt').write_text('independent branch work')
+            commit()
+            command('switch', 'master')
+            source.write_text('cx.request(1); cx.request(2);')
+            inherited = {source.relative_to(root).as_posix(): dict(ban.fingerprints(source.read_text()))}
+            inventory.write_text(json.dumps(inherited))
+            commit()
+            tip = command('rev-parse', 'HEAD')
+            command('update-ref', 'refs/remotes/origin/feat/rust-rewrite', tip)
+            command('switch', 'topic')
+            command('merge', '--no-ff', '--no-edit', 'master')
+            event = repo / 'event.json'
+            event.write_text(json.dumps({'pull_request': {'base': {'sha': tip}}}))
+            with mock.patch.object(ban, 'ROOT', root), mock.patch.dict(
+                    os.environ, {'GITHUB_EVENT_PATH': str(event)}, clear=True):
+                previous = ban.previous_manifests(merge_parents=True)
+                self.assertFalse(ban.check(inherited, inherited, previous))
+                self.assertIn(('merge parents', inherited), previous)
+                self.assertIn((tip, inherited), previous)
+                self.assertIn(('refs/remotes/origin/feat/rust-rewrite', inherited), previous)
+                # Current source must still match exactly; independent base
+                # limits and growth beyond every parent remain enforced.
+                self.assertTrue(ban.check(first, inherited, previous))
+                self.assertTrue(ban.check(inherited, inherited, [('older base', first)]))
+                # Socket inventories use another schema and retain the old
+                # per-ref interface without invoking the request-map reducer.
+                with mock.patch.object(ban, 'maximum_manifest', side_effect=AssertionError):
+                    independent = ban.previous_manifests()
+                self.assertTrue(ban.check(inherited, inherited, independent))
+
     def test_base_ref_and_exact_event_commit_are_required(self):
         sha = '1' * 40
         calls = []
@@ -502,7 +566,12 @@ class DataMacroProvenance(unittest.TestCase):
                 expression = 'matches!(request.kind, Kind::Normal);'
                 source = self.source(binding + expression if before else expression + binding)
                 with self.subTest(binding=binding, before=before):
-                    self.assertTrue(self.prod(source))
+                    # Bindings scope forward: only a preceding binder reaches the
+                    # macro. A later `bind!(request)` is its own unproven site.
+                    if before or binding == 'bind!(request);':
+                        self.assertTrue(self.prod(source))
+                    else:
+                        self.assertEqual(self.prod(source), {})
 
     def test_exact_five_macros_precede_later_nested_queue_error_binding(self):
         macros = ('matches!(request.kind, Kind::Algo);'
@@ -518,23 +587,33 @@ class DataMacroProvenance(unittest.TestCase):
         self.assertEqual(self.prod(self.source('matches!(request.kind, Kind::Normal);'
                          'match result { Err(_) => { let request = other; }, _ => {} }')), {})
 
-    def test_narrow_exception_rejects_containment_ambiguity_and_second_binders(self):
+    def test_narrow_exception_rejects_containment_ambiguity_and_preceding_binders(self):
         expression = 'matches!(request.kind, Kind::Normal);'
+        # A binder that precedes or encloses the macro could rebind its name.
         for body in [
-                expression + 'let Task::Account(request) = pending.task else { unreachable!() };',
                 'match result { Err(_) => { let request = other;' + expression + ' }, _ => {} }',
                 'match result { Err(_) => { let request = other; }, _ => {} }' + expression,
-                expression + 'match result { Err(_) => { let request = other; }, _ => {} }'
-                + 'let request = second;',
-                expression + 'match result { Err(_) => { bind!(request); }, _ => {} }',
-                expression + 'match result { Err(_) => { each(|request| {}); }, _ => {} }',
-                expression + 'match result { Err(_) => { let make!(request) = other; }, _ => {} }',
                 'let Task::Account(request) = pending.task else {' + expression + ' return; };',
+                'match result { Err(_) => { bind!(request); }, _ => {} }' + expression,
+                'each(|request| {});' + expression,
                 'fn nested() {}' + expression]:
             with self.subTest(body=body):
                 self.assertTrue(self.prod(self.source(body)))
+        # Bindings scope forward: binders after the macro cannot reach it.
+        for body in [
+                expression + 'let Task::Account(request) = pending.task else { unreachable!() };',
+                expression + 'match result { Err(_) => { let request = other; }, _ => {} }'
+                + 'let request = second;',
+                expression + 'match result { Err(_) => { each(|request| {}); }, _ => {} }']:
+            with self.subTest(body=body):
+                self.assertEqual(self.prod(self.source(body)), {})
+        # A later macro carrying the name is its own unproven site.
+        for body in [expression + 'match result { Err(_) => { bind!(request); }, _ => {} }',
+                     expression + 'match result { Err(_) => { let make!(request) = other; }, _ => {} }']:
+            with self.subTest(body=body):
+                self.assertTrue(self.prod(self.source(body)))
 
-    def test_match_guard_references_are_not_patterns_but_guard_binders_refuse(self):
+    def test_match_guard_references_are_not_patterns_and_later_guard_binders_cannot_reach(self):
         expression = 'matches!(request.kind, Kind::Normal);'
         self.assertEqual(self.prod(self.source(expression +
                          'match other { Kind::One if request.page > 0 => {}, _ => {} }')), {})
@@ -542,7 +621,8 @@ class DataMacroProvenance(unittest.TestCase):
                     'Kind::One if each(|request| true) => {}',
                     'Kind::One if let Some(request) = other => {}']:
             with self.subTest(arm=arm):
-                self.assertTrue(self.prod(self.source(expression + 'match other { ' + arm + ', _ => {} }')))
+                self.assertEqual(self.prod(self.source(expression + 'match other { ' + arm + ', _ => {} }')), {})
+                self.assertTrue(self.prod(self.source('match other { ' + arm + ', _ => {} }' + expression)))
 
     def test_visible_macro_shadows_and_import_aliases_are_conservative(self):
         for prefix in ['macro_rules! matches { ($x:expr,$p:pat) => { true } }',
@@ -591,6 +671,27 @@ class DataMacroProvenance(unittest.TestCase):
                 'matches!(step, Step::Send { request, .. } if request.send::<u8>());',
                 'matches!(step, Step::Send { request, .. } if (request.send)());',
                 'matches!(step, Step::Send { request, .. } if ((request.send))());']:
+            with self.subTest(body=body):
+                self.assertTrue(self.prod(self.source(body)))
+
+    def test_bindings_after_the_macro_cannot_rebind_its_name(self):  # Lighter trading.rs shape
+        for body in ['let seen = matches!(request.kind, Kind::Normal); match request { _ => {} }',
+                     'let seen = matches!(request.kind, Kind::Normal); let request = other(); drop(request);',
+                     'let seen = matches!(&request, Kind::Normal); for request in rows() { drop(request); }']:
+            with self.subTest(body=body):
+                self.assertEqual(self.prod(self.source(body)), {})
+        for body in ['let request = cx; matches!(request.kind, Kind::Normal);',
+                     'match other() { request => { matches!(request.kind, Kind::Normal); } }',
+                     'rows().for_each(|request| { matches!(request.kind, Kind::Normal); });',
+                     'let seen = matches!(request.kind, Kind::Normal); cx.request(1);',
+                     # Block items are visible across the whole block, before or after.
+                     'let seen = matches!(request.side, Side::Buy); const request: Order = ORDER;',
+                     'let seen = matches!(request.side, Side::Buy); static request: Order = ORDER;',
+                     'let seen = matches!(request.side, Side::Buy); static mut request: Order = ORDER;',
+                     'let seen = matches!(request.side, Side::Buy); use crate::Order as request;',
+                     'let seen = matches!(request.side, Side::Buy); use crate::orders::request;',
+                     'let seen = matches!(request.side, Side::Buy); struct request;',
+                     'const request: Order = ORDER; let seen = matches!(request.side, Side::Buy);']:
             with self.subTest(body=body):
                 self.assertTrue(self.prod(self.source(body)))
 
@@ -695,6 +796,27 @@ class DataMacroModuleProvenance(unittest.TestCase):
                          body='matches!(request.kind, Kind::Normal);', **changes):
         return self.inventory(consumer_prefix=prefix, body=body, engine={**self.ENGINE, **changes})
 
+    CRYPTO = {'Cargo.toml': '[workspace.dependencies]\nsafe-cex-engine = { path = "engine" }\n'
+                            'safe-cex-crypto = { path = "crypto" }\n',
+              'venues/reference/Cargo.toml': '[dependencies]\nsafe-cex-engine = { workspace = true }\n'
+                                             'safe-cex-crypto = { workspace = true }\n'}
+
+    def test_a_proven_impl_only_workspace_macro_in_an_ancestor_keeps_the_scope(self):
+        root = 'mod wire; mod account; pub struct Venue; safe_cex_crypto::redacted_debug!(Venue);'
+        self.assertEqual(self.engine_inventory(**self.CRYPTO, **{'venues/reference/src/lib.rs': None})
+                         if False else self.inventory(root_source=root, consumer_prefix='use safe_cex_engine::model::*;',
+                                                      engine={**self.ENGINE, **self.CRYPTO}), {})
+        for root, extra in [
+                ('mod wire; mod account; other::items!();', {}),
+                ('mod wire; mod account; safe_cex_crypto::not_impl_only!(Venue);', {}),
+                ('mod wire; mod account; use foreign as safe_cex_crypto; safe_cex_crypto::redacted_debug!(Venue);', {}),
+                ('mod wire; mod account; safe_cex_crypto::redacted_debug!(Venue);',
+                 {'venues/reference/Cargo.toml': '[dependencies]\nsafe-cex-engine = { workspace = true }\n'
+                                                 'safe-cex-crypto = { package = "evil", path = "../evil" }\n'})]:
+            with self.subTest(root=root):
+                self.assertTrue(self.inventory(root_source=root, consumer_prefix='use safe_cex_engine::model::*;',
+                                               engine={**self.ENGINE, **self.CRYPTO, **extra}))
+
     def test_a_workspace_engine_module_glob_without_reexports_is_proven(self):
         self.assertEqual(self.engine_inventory(), {})
         self.assertEqual(self.engine_inventory(**{'venues/reference/Cargo.toml':
@@ -798,6 +920,29 @@ class DataMacroModuleProvenance(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.assertTrue(self.inventory(root_source=prefix + 'mod wire; mod account;'))
 
+
+    PACKAGE = {'venues/reference/Cargo.toml': '[package]\nname = "safe-cex-venue-reference"\n'}
+
+    def test_an_own_crate_self_alias_in_an_ancestor_keeps_the_scope(self):  # Lighter lib.rs shape
+        for alias in ['extern crate self as safe_cex_venue_reference;',
+                      '#[cfg(test)] extern crate self as safe_cex_venue_reference;']:
+            with self.subTest(alias=alias):
+                self.assertEqual(self.inventory(root_source='mod wire; mod account;' + alias,
+                                                engine=self.PACKAGE), {})
+        for alias, engine in [
+                ('extern crate self as other_name;', self.PACKAGE),
+                ('extern crate self as safe_cex_engine;', self.PACKAGE),
+                ('extern crate external;', self.PACKAGE),
+                ('extern crate external as safe_cex_venue_reference;', self.PACKAGE),
+                ('#[macro_use] extern crate self as safe_cex_venue_reference;', self.PACKAGE),
+                ('extern crate self as safe_cex_venue_reference; extern crate external;', self.PACKAGE),
+                ('extern crate self as safe_cex_venue_reference;', {}),
+                ('extern crate self as safe_cex_venue_reference;',
+                 {'venues/reference/Cargo.toml': '[package]\nname = "safe-cex-venue-other"\n'}),
+                ('extern crate self as safe_cex_venue_reference;',
+                 {'venues/reference/Cargo.toml': '# [package]\n# name = "safe-cex-venue-reference"\n'})]:
+            with self.subTest(alias=alias, engine=engine):
+                self.assertTrue(self.inventory(root_source='mod wire; mod account;' + alias, engine=engine))
 
     def test_out_of_scope_globs_and_ordinary_ancestor_imports_do_not_reach_child(self):
         for prefix in ['use external::custom as matches;', 'use wire::*;']:

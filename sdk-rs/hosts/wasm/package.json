@@ -35,6 +35,14 @@
       "types": "./js/loader.d.mts",
       "default": "./js/engine.web.mjs"
     },
+    "./engine/beta-web": {
+      "types": "./js/loader.d.mts",
+      "default": "./js/engine.beta.web.mjs"
+    },
+    "./beta-venues": {
+      "types": "./js/beta-venues.d.mts",
+      "default": "./js/beta-venues.mjs"
+    },
     "./venues": {
       "types": "./js/venues.d.mts",
       "default": "./js/venues.mjs"

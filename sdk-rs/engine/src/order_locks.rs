@@ -36,6 +36,9 @@ fn native(id: &str) -> &str {
         "__stop_loss",
         "__take_profit",
         "__trailing_stop_loss",
+        // Bitunix legs: `<order>__tp`, ahead of the single-underscore forms.
+        "__tp",
+        "__sl",
         "_tsl",
         "_sl",
         "_tp",
@@ -537,6 +540,38 @@ impl OrderLocks {
 #[cfg(test)]
 mod managed_tests {
     use super::*;
+
+    #[test]
+    fn a_double_underscore_leg_locks_its_parent_order() {
+        let amend = |command, id: &str| Command::AmendOrder {
+            command,
+            id: id.into(),
+            price: Some(1.),
+            amount: None,
+        };
+        let cancel = |command, id: &str| Command::CancelOrders {
+            command,
+            ids: vec![id.into()],
+        };
+        let mut locks = OrderLocks::default();
+        locks
+            .acquire(&amend(1, "one__tp"), &Store::default(), false)
+            .unwrap();
+        assert!(
+            locks
+                .acquire(&cancel(2, "one"), &Store::default(), false)
+                .is_err()
+        );
+        assert!(
+            locks
+                .acquire(&amend(3, "one__sl"), &Store::default(), false)
+                .is_err()
+        );
+        assert_eq!(
+            locks.acquire(&cancel(4, "one_"), &Store::default(), false),
+            Ok(())
+        );
+    }
 
     #[test]
     fn one_managed_release_and_an_opaque_legacy_send_cannot_mark_an_unsent_sibling_sent() {

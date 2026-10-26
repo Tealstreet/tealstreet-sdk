@@ -148,3 +148,22 @@ native network primitives provide its transport. No engine shapes change.
   298.6/177.5 ms, steady CPU 175.2/96.3 ms, retained memory 16.3/3.3 MB.
   Merge review PASS; post the repaired-head evidence and wait for its full CI
   before merging PR #1332, then cut the fresh follow-up branch.
+
+
+## Hyperliquid Spot beta smoke
+
+Hyperliquid and Hyperliquid Spot share the HYPERLIQUID environment fields:
+SIGNER_ADDRESS is the agent (API) wallet address, PRIVATE_KEY is that agent's
+key, and ACCOUNT_ADDRESS is the funded account. Never provide the main wallet
+key. Equal signer/account addresses refuse; distinct addresses alone do not
+prove that an API wallet was authorized. The mainnet beta run must explicitly use --mainnet and a dedicated account
+with no open orders; use --symbol UBTC/USDC for Spot. Spot leverage is fixed at 1,
+so the harness never attempts a leverage change. Existing write caps, no-retry,
+post-only and fresh cleanup readback checks stay in effect.
+
+Spot sizing requires a successful spotMetaAndAssetCtxs reply that uniquely
+identifies the selected pair, its base lot precision and USDC quote token.
+The documented MinTradeSpotNtl floor is 10 quote tokens, distinct from the
+perpetual dollar floor: [official error contract](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses).
+Non-USDC quotes and missing or inconsistent metadata refuse before placement.
+Profile and scripted checks do not claim a successful credentialed live run.

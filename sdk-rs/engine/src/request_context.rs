@@ -396,12 +396,15 @@ pub struct Pacing {
     pub minimum_gap_ms: f64,
 }
 
-/// One venue-wide FIFO of REST releases, each at least the registered group
-/// gap after the previous member's final release (docs/plans/RUST_RELEASE_DOMAINS.md).
+/// One venue-wide FIFO of REST releases in acceptance order. Each member names
+/// one admissible pacing and its Claim waits out that pacing's own floors
+/// (docs/plans/RUST_RELEASE_DOMAINS.md).
 #[cfg(feature = "release-domains")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ReleaseDomain {
-    pub pacing: Pacing,
+    /// The admissible pacings, matched exactly (group and gap). The first is
+    /// stamped onto a member whose Policy names none.
+    pub pacings: &'static [Pacing],
     pub members: DomainMembers,
 }
 

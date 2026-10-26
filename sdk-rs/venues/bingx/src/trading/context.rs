@@ -13,6 +13,7 @@ pub(super) const SERIAL: SerialCall = SerialCall {
     operation: Operation::Mutation,
     timeout_ms: 20_000,
     attempts: 2,
+    pacing: None,
 };
 
 // BingX Swap V2 common error codes: https://bingx-api.github.io/docs/#/en-us/swapV2/base-info.html
@@ -22,6 +23,21 @@ pub(super) const TABLE: CodeTable = CodeTable {
         Row {
             key: Key::Int(100001),
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100004),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100413),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(100419),
+            verdict: Verdict::Refused(ErrorKind::AuthPermission),
             only: None,
         },
         Row {
@@ -178,5 +194,31 @@ mod tests {
     #[test]
     fn bingx_table_is_well_formed() {
         safe_cex_engine::classify::assert_table(&super::TABLE);
+    }
+}
+
+#[cfg(test)]
+mod key_refusal_tests {
+    use super::*;
+    use safe_cex_engine::classify::{Native, NativeCode};
+
+    /// Every key refusal the read side rejects on is an auth refusal on writes.
+    #[test]
+    fn every_read_key_refusal_is_an_auth_refusal_on_writes() {
+        for code in KEY_REFUSALS {
+            let native = Native {
+                code: NativeCode::Int(code),
+                message: "native",
+            };
+            let verdict = TABLE.verdict(&native, Intent::Place);
+            assert!(
+                matches!(
+                    verdict,
+                    Verdict::Refused(ErrorKind::AuthInvalid | ErrorKind::AuthPermission)
+                        | Verdict::RefusedResend(ErrorKind::AuthInvalid)
+                ),
+                "{code}: {verdict:?}"
+            );
+        }
     }
 }

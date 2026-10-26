@@ -3,11 +3,11 @@ mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::request_context::{Error, HttpAction, Preparation};
 use safe_cex_engine::{Action, Command, ErrorKind, Event, Notice, Outcome, VenueError};
-use safe_cex_venue_mexc::{MexcFutures, Options};
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+use support::Options;
 use support::TestEngine;
 const NOW: f64 = 1000.;
 const OWNER: u32 = 700;
@@ -72,11 +72,11 @@ impl Case {
 }
 fn engine(private: bool) -> (TestEngine, Arc<AtomicUsize>) {
     let markets = support::started().0.store().markets().to_vec();
-    let mut e = safe_cex_engine::test_support::seeded_engine(MexcFutures::new(Options {
+    let mut e = support::configured(Options {
         key: private.then(|| "fixture-key".into()),
         secret: private.then(|| "fixture-secret".into()),
         ..Options::default()
-    }));
+    });
     e.store_mut().set_markets(markets);
     e.take_frame(NOW);
     let calls = Arc::new(AtomicUsize::new(0));
