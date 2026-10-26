@@ -246,16 +246,19 @@ body equality: the local path and the hosted path produce byte-equal bodies,
 signatures included. Digest equality alone is not enough. An independent Stark
 verifier checks each signature.
 
-Present control: a RED asserting that the Present value equals the configured
-public account address exactly, and that no frame or result carries the
-scalar, a JWT or the subkey.
+Present control: a RED asserting that the returned Present value equals the
+configured public account address exactly and is never the subkey. The Stark
+scalar and any JWT are forbidden everywhere in these op frames and results. The
+provider-confirmed public subkey remains allowed where #8169 requires it, in
+init, capability and binding metadata, and the PublicKey check stays separate.
 
 Refusals fall into two classes.
 - Pre-validation failures: zero signing callbacks and no HTTP. This covers every
-  descriptor-shape, batch, operation/target, credential-mismatch and time-input
-  failure below.
-- Post-callback failures: invalid, swapped, missing or extra returned
-  signatures, and a deadline or cancel during partial signing. Callbacks may
+  descriptor-shape, batch, operation/target and time-input failure below, and
+  a requested binding/account mismatch.
+- Post-callback failures: a returned Present value that differs from the
+  expected public account address; invalid, swapped, missing or extra returned
+  signatures; and a deadline or cancel during partial signing. Callbacks may
   already have run; these guarantee no HTTP and no partial result.
 
 The refusals:
@@ -273,12 +276,14 @@ The refusals:
 - operations and targets:
   - a non-LIMIT order or a triggerPrice on target `ordersBatchSingle`;
   - a create-only type (MARKET) on modify, and a modify-only type on create;
-  - a Present credential that differs from the expected credential;
+  - a requested binding/account that differs from the peer's own slot;
   - each excluded op (cancel-by-signature, onboarding, transfer, withdraw, unknown);
   - a method, path or subkey substitution;
   - a descriptor carrying a digest;
   - an origin projection mismatch;
-- signatures:
+- returned results (post-callback):
+  - a returned Present value that differs from the expected public account
+    address;
   - swapped, missing, extra or invalid signatures;
 - timing:
   - a NaN, ±Infinity or negative peerNowMs or deadlineMs, refused before any
