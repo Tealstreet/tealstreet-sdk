@@ -1235,10 +1235,14 @@ def pattern_macro_proof(stream, index, end, imports, found, bound=frozenset()):
                 or token == '!' and stream[k + 1:k + 2] != ['=']:
             return None
         # A binding is only read as `name.field`: never called, assigned or passed.
-        if token in METHODS and (token not in names or stream[k - 1] in {'.', '::'}
-                                 or stream[k + 1:k + 2] != ['.'] or not IDENT.fullmatch(stream[k + 2])
-                                 or stream[k + 2] in METHODS or stream[k + 3:k + 4] == ['(']):
-            return None
+        if token in METHODS:
+            after = k + 3
+            while stream[after:after + 1] == [')']:
+                after += 1
+            if token not in names or stream[k - 1] in {'.', '::'} or stream[k + 1:k + 2] != ['.'] \
+                    or not IDENT.fullmatch(stream[k + 2]) or stream[k + 2] in METHODS \
+                    or stream[after:after + 1] in (['('], ['::']):
+                return None
         if token == '=' and not (stream[k + 1:k + 2] == ['='] and stream[k + 2:k + 3] != ['=']
                                  or stream[k - 1] in {'=', '!', '<', '>'} and stream[k + 1:k + 2] != ['=']):
             return None

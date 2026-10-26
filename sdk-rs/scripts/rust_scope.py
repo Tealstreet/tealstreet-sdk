@@ -159,6 +159,7 @@ TRUSTED_ATTRIBUTES = {'derive', 'cfg', 'allow', 'warn', 'deny', 'forbid', 'expec
                       'cold', 'default', 'serde'}
 STD_DERIVES = {'Debug', 'Clone', 'Copy', 'PartialEq', 'Eq', 'PartialOrd', 'Ord', 'Hash', 'Default'}
 SERDE_DERIVES = {'Serialize', 'Deserialize'}
+MACRO_NAMES = TRUSTED_MACROS | TRUSTED_ATTRIBUTES | STD_DERIVES | SERDE_DERIVES
 KEYWORDS = {'if', 'while', 'match', 'return', 'in', 'let', 'else', 'for', 'loop', 'move', 'as',
             'break', 'continue', 'mut', 'ref', 'where', 'unsafe', 'async', 'await', 'dyn', 'impl'}
 WORKSPACE_MACRO_CRATES = {'safe_cex_crypto': 'crypto'}
@@ -358,14 +359,144 @@ def brace_depths(stream):
     return result
 
 
-def crate_refusals(sdk_root, streams, watched, allowed_use=None, definitions=None):
+# Crate roots a proof may rely on, and the one workspace dependency each must be.
+ROOT_DEPENDENCIES = {'safe_cex_engine': 'safe-cex-engine = { path = "engine" }',
+                     'safe_cex_crypto': 'safe-cex-crypto = { path = "crypto" }',
+                     'serde': 'serde = { version = "1", features = ["derive"] }'}
+TEST_ATTRIBUTE = ['#', '[', 'cfg', '(', 'test', ')', ']']
+
+
+def strip_cfg_test(stream):
+    """Drop `mod` items whose attribute run includes `#[cfg(test)]`; production builds
+    never contain them."""
+    kept, i = [], 0
+    while i < len(stream):
+        if stream[i] == '#' and stream[i + 1:i + 2] == ['['] and (not kept or kept[-1] != '#'):
+            k, gated = i, False
+            while stream[k:k + 2] == ['#', '[']:
+                end = group_close(stream, k + 1)
+                gated |= stream[k:end] == TEST_ATTRIBUTE
+                k = end
+            m = k + (stream[k:k + 1] == ['pub'])
+            if stream[m:m + 1] == ['('] or stream[k:k + 1] == ['pub'] and stream[k + 1:k + 2] == ['(']:
+                m = group_close(stream, k + 1)
+            if gated and stream[m:m + 1] == ['mod'] and m + 2 < len(stream):
+                if stream[m + 2] == ';':
+                    i = m + 3
+                    continue
+                if stream[m + 2] == '{':
+                    i = group_close(stream, m + 2)
+                    continue
+        kept.append(stream[i])
+        i += 1
+    return kept
+
+
+def module_closure(streams, production):
+    """Every out-of-line module of the crate, loaded from disk when a `mod` names a file
+    inside the crate directory; ([reasons], streams). A target outside the crate, a missing
+    or ambiguous file, or an out-of-line `mod` inside an inline module refuses."""
+    streams = dict(streams)
+    roots = [p for p in streams if 'src' in p.parts]
+    if not roots:
+        return ['no crate sources'], streams
+    crate_dir = next(parent.parent for parent in roots[0].parents if parent.name == 'src')
+    reasons, pending = [], list(streams)
+    while pending:
+        path = pending.pop()
+        stream = streams[path]
+        depth = brace_depths(stream)
+        for i, token in enumerate(stream):
+            if token != 'mod' or i + 2 >= len(stream) or stream[i + 2] != ';':
+                continue
+            if depth[i]:
+                reasons.append(f'{path.name}: out-of-line mod inside a block')
+                continue
+            k, attribute_path = i - 1, None
+            if stream[k:k + 1] == [')']:
+                k = next(j for j in range(k, -1, -1) if stream[j] == '(') - 1
+            if stream[k:k + 1] == ['pub']:
+                k -= 1
+            while stream[k:k + 1] == [']']:
+                opening = max(j for j in range(k) if stream[j] == '[' and group_close(stream, j) == k + 1)
+                if stream[opening + 1:opening + 3] == ['path', '=']:
+                    attribute_path = stream[opening + 3]
+                k = opening - 2
+            name = stream[i + 1].removeprefix('r#')
+            if attribute_path is not None:
+                if not attribute_path.startswith('"'):
+                    reasons.append(f'{path.name}: unparsed path attribute')
+                    continue
+                candidates = [path.parent / attribute_path.strip('"')]
+            else:
+                base = path.parent if path.name in {'lib.rs', 'main.rs', 'mod.rs'} else path.parent / path.stem
+                candidates = [base / f'{name}.rs', base / name / 'mod.rs']
+            found = [c.resolve() for c in candidates if c.exists()]
+            if len(found) != 1 or crate_dir.resolve() not in found[0].parents:
+                reasons.append(f'{path.name}: module {name} has no unique source inside the crate')
+                continue
+            target = found[0]
+            known = {p.resolve(): p for p in streams}
+            if target not in known:
+                loaded = request_tokens(target.read_text())
+                streams[target] = strip_cfg_test(loaded) if production else loaded
+                pending.append(target)
+    return reasons, streams
+
+
+def dependency_reasons(crate_dir, names):
+    """Each root in `names` is the expected workspace dependency, and no other Cargo
+    key of the venue crate spells a watched name."""
+    reasons = []
+    try:
+        manifest = (crate_dir / 'Cargo.toml').read_text()
+        workspace = (crate_dir.parent.parent / 'Cargo.toml').read_text()
+    except OSError:
+        return ['no Cargo manifests']
+    keys = collections.defaultdict(list)
+    for line in manifest.splitlines():
+        match = re.match(r'\s*([A-Za-z0-9_-]+)(\.workspace)?\s*=', line)
+        if match and not line.strip().startswith('['):
+            keys[match.group(1).replace('-', '_')].append(line.strip())
+    for name in names:
+        lines = keys.get(name, [])
+        if name not in ROOT_DEPENDENCIES:
+            if lines:
+                reasons.append(f'Cargo dependency spells watched name {name}')
+            continue
+        dependency = ROOT_DEPENDENCIES[name].split(' =')[0]
+        if not lines or any(not re.fullmatch(
+                re.escape(dependency) + r'(\.workspace = true| = \{ workspace = true(, features = \[[^\]]*\])? \})', line)
+                for line in lines):
+            reasons.append(f'{name} is not the workspace dependency')
+        if workspace.count(ROOT_DEPENDENCIES[name]) != 1 or re.search(
+                r'package\s*=\s*"' + re.escape(dependency) + '"', workspace):
+            reasons.append(f'workspace {name} is not {ROOT_DEPENDENCIES[name]}')
+    return reasons
+
+
+def crate_refusals(sdk_root, streams, watched, allowed_use=None, definitions=None, production=False):
     """Reasons the crate's sources cannot prove `watched` names unshadowed; [] when proven.
 
     `allowed_use(name, path)` admits a specific import of a watched name, and
-    `definitions` maps a watched name to its one permitted (path, token index) item."""
+    `definitions` maps a watched name to its one permitted (path, token index) item.
+    With `production`, `#[cfg(test)]` modules are absent, as in a production build."""
     allowed_use = allowed_use or (lambda name, path: False)
     definitions = definitions or {}
-    reasons = []
+    if production:
+        streams = {path: strip_cfg_test(stream) for path, stream in streams.items()}
+    reasons, streams = module_closure(streams, production)
+    # Roots the crate's generators rely on are proven like any watched root.
+    watched = set(watched)
+    for stream in streams.values():
+        if any(len(path) == 2 and path[0] in WORKSPACE_MACRO_CRATES for path, _ in macro_invocations(stream)):
+            watched.add('safe_cex_crypto')
+        if any(path[:1] == ['serde'] or path[:1] == ['derive'] and 'serde' in arguments
+               or path[:1] == ['derive'] and SERDE_DERIVES & set(arguments)
+               for path, arguments in attributes(stream)):
+            watched.add('serde')
+    crate_dir = next(parent.parent for parent in next(iter(streams)).parents if parent.name == 'src')
+    reasons += dependency_reasons(crate_dir, watched)
     crate_items, crate_variants = set(), collections.defaultdict(set)
     every_binder = []
     for path, stream in streams.items():
@@ -380,10 +511,13 @@ def crate_refusals(sdk_root, streams, watched, allowed_use=None, definitions=Non
             continue  # A variant binds only under its enum's path, or through a glob of it.
         if kind == 'unparsed use':
             reasons.append(f'{path.name}: unparsed use')
-        elif kind in {'macro_rules', 'macro'} and name in TRUSTED_MACROS:
+        elif kind in {'macro_rules', 'macro', 'extern crate'} and name in MACRO_NAMES:
             reasons.append(f'{path.name}: shadows trusted macro {name}')
-        elif kind == 'use' and name in TRUSTED_MACROS | STD_DERIVES:
+        elif kind == 'use' and name in TRUSTED_MACROS | TRUSTED_ATTRIBUTES:
             reasons.append(f'{path.name}: imports {name}')
+        elif kind == 'use' and name in STD_DERIVES and not (
+                detail[:1] in (('std',), ('core',)) and detail[-1] == name):
+            reasons.append(f'{path.name}: imports {name} from {"::".join(detail)}')
         elif kind == 'use' and name in SERDE_DERIVES and detail != ('serde', name):
             reasons.append(f'{path.name}: imports {name} from {"::".join(detail)}')
         elif name in watched and not (kind == 'use' and allowed_use(name, detail)) \

@@ -33,15 +33,16 @@ def _load(name, file):
     return module
 
 
-_tokens = _load('request_tokens', 'check-request-context.py').tokens
+_request = _load('request_tokens', 'check-request-context.py')
+_tokens = _request.tokens
 rust_scope = _load('rust_scope', 'rust_scope.py')
 
 
-def declared_variants(source, crate_proven=True):
+def declared_variants(source, crate_proven=True, tests_proven=True):
     """Line number -> count of proven engine `Algorithm::<variant>` uses; none unless
     the crate-wide proof closes every generator and glob and leaves the engine root
     unshadowed."""
-    if not crate_proven:
+    if not crate_proven and not tests_proven:
         return collections.Counter()
     try:
         positioned = _tokens(source, positions=True)
@@ -49,8 +50,13 @@ def declared_variants(source, crate_proven=True):
         return collections.Counter()
     stream = [text for text, _ in positioned]
     found = collections.Counter()
+    # Production code needs the production-build proof; test-only code the proof
+    # that includes `#[cfg(test)]` modules.
+    tests = _request.test_ranges(stream)
     for i in range(len(stream) - 2):
         if stream[i] != 'Algorithm' or stream[i + 1] != '::' or stream[i + 2] not in VARIANTS:
+            continue
+        if not (tests_proven if any(a <= i < b for a, b in tests) else crate_proven):
             continue
         if stream[i + 3:i + 4] in (['('], ['::'], ['!'], ['{']):
             continue
@@ -73,24 +79,29 @@ def counted(line, declared):
     return bool(PATTERN.search(line))
 
 
-def proven_crates():
-    """Venue crates whose sources pass the crate-wide proof for the engine root."""
+def proven_crates(production=True):
+    """Venue crates whose sources pass the crate-wide proof for the engine root, for the
+    production build or, without `production`, a build including `#[cfg(test)]` code."""
     by_crate = collections.defaultdict(dict)
     for path in sorted((ROOT / 'venues').glob('*/src/**/*.rs')):
         by_crate[path.relative_to(ROOT / 'venues').parts[0]][path] = _tokens(path.read_text())
     return {crate for crate, streams in by_crate.items()
-            if not rust_scope.crate_refusals(SDK, streams, {'safe_cex_engine'})}
+            if not rust_scope.crate_refusals(SDK, streams, {'safe_cex_engine'}, production=production)}
 
 
 def sites():
     found = collections.defaultdict(collections.Counter)
-    proven = proven_crates()
+    proven, tests_proven = proven_crates(), proven_crates(production=False)
     for path in sorted((ROOT / 'venues').glob('*/src/**/*.rs')):
         relative = path.relative_to(ROOT / 'venues')
         if relative.parts[0] not in {'asterdex', 'binance', 'bingx', 'bybit', 'okx', 'bitget', 'phemex', 'bitrue'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
             continue
         source = path.read_text()
-        declared = declared_variants(source, relative.parts[0] in proven)
+        production = not (path.name == 'tests.rs' or path.name.endswith(('_tests.rs', '_test.rs'))
+                          or 'tests' in relative.parts)
+        crate = relative.parts[0]
+        declared = declared_variants(source, production and crate in proven,
+                                     crate in proven and crate in tests_proven)
         for number, line in enumerate(source.splitlines(), 1):
             if not line.strip().startswith('//') and counted(line, declared[number]):
                 digest = hashlib.sha256(line.strip().encode()).hexdigest()

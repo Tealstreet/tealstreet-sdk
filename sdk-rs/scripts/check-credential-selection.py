@@ -103,6 +103,9 @@ _scope_spec.loader.exec_module(rust_scope)
 
 PROVIDER_IDENTITY = ['safe_cex_engine', '::', 'signing', '::', 'Identity']
 ROOT_NAMES = {'safe_cex_engine', 'Option'}
+# Tokens that may follow a field read; none starts a call (`(`, `::` turbofish).
+FIELD_FOLLOW = {'.', ')', ',', ';', '}', ']', '?', '{', '&', '|', '=', '!', '<', '>', '+', '-', '*', '/',
+                '%', '^', 'as', 'else'}
 
 
 def provider_type(stream, start, end):
@@ -292,7 +295,12 @@ class CrateTypes:
     def occurrence(self, stream, i):
         """Whether the `read_credentials` token at `i` provably holds or reads a holder."""
         if stream[i - 1] == '.':
-            if stream[i + 1:i + 2] == ['(']:
+            # A field read: never a method call, a turbofish, or a call of the
+            # parenthesized value.
+            j = i + 1
+            while stream[j:j + 1] == [')']:
+                j += 1
+            if stream[i + 1] not in FIELD_FOLLOW or stream[j:j + 1] in (['('], ['::']):
                 return False
             if stream[i - 2] == 'self' and stream[i - 3] not in {'.', '::'}:
                 owner = impl_type(stream, i)
@@ -357,7 +365,7 @@ def identity_crates(files):
     by_crate = collections.defaultdict(dict)
     for _, path, native in files:
         if not native:
-            by_crate[path.relative_to(ROOT / 'venues').parts[0]][path] = strip_test_modules(tokens(path.read_text()))
+            by_crate[path.relative_to(ROOT / 'venues').parts[0]][path] = rust_scope.strip_cfg_test(tokens(path.read_text()))
     adopted = set()
     for crate, streams in by_crate.items():
         if not any('read_credentials' in stream for stream in streams.values()):
@@ -373,7 +381,7 @@ def identity_crates(files):
         definitions = {name: (types.structs[name][0], types.structs[name][1]) for name in types.used}
         allowed = lambda name, path: name in types.used and path[:1] in (('crate',), ('super',), ('self',)) \
             and path[-1] == name
-        if not rust_scope.crate_refusals(SDK, streams, watched, allowed, definitions):
+        if not rust_scope.crate_refusals(SDK, streams, watched, allowed, definitions, production=True):
             adopted.add(crate)
     return adopted
 

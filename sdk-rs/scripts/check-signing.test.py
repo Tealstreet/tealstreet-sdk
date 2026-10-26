@@ -23,15 +23,21 @@ class SigningBan(unittest.TestCase):
             'aliased_engine_root': 'use crate::wire as safe_cex_engine;\n' + declaration,
             'unproven_glob': 'use vendor::*;\n' + declaration,
             'untrusted_attribute': '#[vendor::magic]\n' + declaration,
+            'renamed_engine_dependency': declaration,
+            'path_module_outside_crate': '#[path = "../../opaque.rs"] mod opaque;\n' + declaration,
         }
         old_root = ban.ROOT
         with tempfile.TemporaryDirectory() as directory:
             try:
                 ban.ROOT = pathlib.Path(directory)
+                (ban.ROOT / 'Cargo.toml').write_text(
+                    '[workspace.dependencies]\n' + '\n'.join(ban.rust_scope.ROOT_DEPENDENCIES.values()) + '\n')
                 for crate, source in crates.items():
                     path = ban.ROOT / f'venues/{crate}/src/lib.rs'
                     path.parent.mkdir(parents=True)
                     path.write_text(source)
+                    cargo = '' if crate == 'renamed_engine_dependency' else 'safe-cex-engine = { workspace = true }\n'
+                    (ban.ROOT / f'venues/{crate}/Cargo.toml').write_text('[dependencies]\n' + cargo)
                 self.assertEqual(ban.proven_crates(), {'clean'})
                 found = ban.sites()
                 self.assertNotIn('venues/clean/src/lib.rs', found)

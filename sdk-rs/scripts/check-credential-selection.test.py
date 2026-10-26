@@ -52,6 +52,9 @@ class CredentialSelectionBan(unittest.TestCase):
             'rebind_borrow_move': P + FIELD + 'pub struct Venue { options: Options }\n'
                 'fn n(options: Options) -> Venue { let mut options = options; helper(&options); '
                 'options.read_credentials.take(); Venue { options } }\n',
+            'path_module_inside_crate': {'src/lib.rs': '#[path = "inner/wire.rs"] mod wire;\n' + P + FIELD + USE,
+                                         'src/inner/wire.rs': '#[derive(Default)]\npub struct Wire { a: u8 }\n'},
+            'std_default_import': 'use std::default::Default;\n' + P + FIELD + USE,
             'impl_only_workspace_macro': P + FIELD + 'safe_cex_crypto::redacted_debug!(Options);\n'
                 '#[derive(Clone, Debug, serde::Deserialize)]\n#[serde(default)]\npub struct Wire { a: u8 }\n'
                 'fn g() { assert!(true); format!("x"); }\n' + USE,
@@ -99,14 +102,41 @@ class CredentialSelectionBan(unittest.TestCase):
             'duplicate_holder_name': P + FIELD + 'mod m { pub struct Options { pub read_credentials: Option<RawKeys> } }\n' + USE,
             'unproven_glob': P + 'use vendor::*;\n' + FIELD + USE,
             'non_impl_workspace_macro': P + 'safe_cex_crypto::other_macro!(Options);\n' + FIELD + USE,
+            # A field read never calls: no turbofish, no call of the parenthesized value.
+            'turbofish_member': P + FIELD + 'fn g(o: &Options) { o.read_credentials::<u8>(); }\n',
+            'turbofish_self': P + 'pub struct Venue { read_credentials: Option<Identity> }\n'
+                'impl Venue { fn g(&self) { self.read_credentials::<u8>(); } }\n',
+            'parenthesized_call': P + FIELD + 'fn g(o: &Options) { (o.read_credentials)(); }\n',
+            # Generator and helper roots must be the real dependencies.
+            'aliased_crypto_root': P + 'use foreign as safe_cex_crypto;\nsafe_cex_crypto::redacted_debug!(Options);\n' + FIELD + USE,
+            'imported_serde_attribute': P + 'use foreign::serde;\n#[serde]\npub struct W;\n' + FIELD + USE,
+            'aliased_serde_derive': P + 'use foreign as serde;\n#[derive(serde::Deserialize)]\npub struct W;\n' + FIELD + USE,
+            'imported_default_helper': P + 'use foreign::default;\n' + FIELD + USE,
+            'renamed_engine_dependency': {'src/lib.rs': P + FIELD + USE, 'Cargo.toml':
+                '[dependencies]\nsafe-cex-engine = { package = "evil", path = "../evil" }\n'},
+            'missing_cargo_manifest': {'src/lib.rs': P + FIELD + USE, 'Cargo.toml': None},
+            # The module graph must be closed over real sources inside the crate.
+            'path_module_wrapper': {'src/lib.rs': '#[path = "../opaque.rs"] mod foreign;\nuse crate::foreign::*;\n'
+                                    + P + FIELD + USE,
+                                    'opaque.rs': 'pub struct Option<T> { value: T, key: Vec<u8> }\n'},
+            'path_module_outside_crate': {'src/lib.rs': '#[path = "../../opaque.rs"] mod foreign;\n' + P + FIELD + USE},
+            'missing_module': 'mod missing;\n' + P + FIELD + USE,
         }
         with tempfile.TemporaryDirectory() as directory:
             try:
                 ban.ROOT = pathlib.Path(directory)
+                (ban.ROOT / 'Cargo.toml').write_text(
+                    '[workspace.dependencies]\n' + '\n'.join(ban.rust_scope.ROOT_DEPENDENCIES.values()) + '\n')
+                manifest = ('[dependencies]\nsafe-cex-engine = { workspace = true }\n'
+                            'safe-cex-crypto = { workspace = true }\nserde.workspace = true\n')
                 for crate, source in {**adopted, **counted}.items():
-                    path = ban.ROOT / f'venues/{crate}/src/lib.rs'
-                    path.parent.mkdir(parents=True)
-                    path.write_text(source)
+                    files = {'Cargo.toml': manifest, **(source if isinstance(source, dict) else {'src/lib.rs': source})}
+                    for name, text in files.items():
+                        if text is None:
+                            continue
+                        path = ban.ROOT / f'venues/{crate}/{name}'
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(text)
                 files = [(None, p, False) for p in sorted((ban.ROOT / 'venues').glob('*/src/**/*.rs'))]
                 self.assertEqual(ban.identity_crates(files), set(adopted))
                 (ban.ROOT / 'hosts/native/src').mkdir(parents=True)

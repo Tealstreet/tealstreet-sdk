@@ -587,7 +587,10 @@ class DataMacroProvenance(unittest.TestCase):
                 'matches!(step, Step::Send { request, .. } if request.count += 1);',
                 'matches!(step, Step::Send { request, .. } if request.done.is_some());',
                 'matches!(step, Step::Send { request, .. } if request.0);',
-                'matches!(step, Step::Send { request, .. } if consume(request));']:
+                'matches!(step, Step::Send { request, .. } if consume(request));',
+                'matches!(step, Step::Send { request, .. } if request.send::<u8>());',
+                'matches!(step, Step::Send { request, .. } if (request.send)());',
+                'matches!(step, Step::Send { request, .. } if ((request.send))());']:
             with self.subTest(body=body):
                 self.assertTrue(self.prod(self.source(body)))
 
