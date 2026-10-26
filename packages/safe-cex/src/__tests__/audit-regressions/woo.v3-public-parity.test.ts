@@ -429,7 +429,7 @@ describe('WOO V3 endpoint-specific public read parity', () => {
   });
 
   it('remains transport-free, disconnected, and behind all eight hard-false gates', () => {
-    const wooDirectory = join(__dirname, '../../exchanges/woo');
+    const wooDirectory = join(__dirname, '../reference/woo');
     for (const runtimeFile of ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-public.ts', 'woo.ws-private.ts']) {
       expect(readFileSync(join(wooDirectory, runtimeFile), 'utf8')).not.toContain('woo.v3.public-parity');
     }

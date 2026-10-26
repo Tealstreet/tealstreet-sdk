@@ -596,7 +596,7 @@ describe('WOO V3 inert websocket contracts', () => {
     expect(WOO_V3_WS_BLOCKERS['listen-key-rotation-overlap-undocumented']).toMatchObject({
       requires: 'credentialed-demo',
     });
-    const wooDirectory = join(__dirname, '../../exchanges/woo');
+    const wooDirectory = join(__dirname, '../reference/woo');
     for (const runtimeFile of ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-private.ts', 'woo.ws-public.ts']) {
       expect(readFileSync(join(wooDirectory, runtimeFile), 'utf8')).not.toContain('woo.v3.websocket');
     }

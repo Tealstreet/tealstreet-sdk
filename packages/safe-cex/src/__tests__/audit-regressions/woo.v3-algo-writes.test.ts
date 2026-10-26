@@ -397,7 +397,7 @@ describe('WooX V3 inert algo-order writes', () => {
         symbolPendingCancel: 'blocked-published-query-schema-conflicts-with-prose',
       }),
     );
-    const wooDirectory = join(__dirname, '../../exchanges/woo');
+    const wooDirectory = join(__dirname, '../reference/woo');
     for (const runtimeFile of ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-private.ts', 'woo.ws-public.ts']) {
       expect(readFileSync(join(wooDirectory, runtimeFile), 'utf8')).not.toContain('woo.v3.algo-writes');
     }

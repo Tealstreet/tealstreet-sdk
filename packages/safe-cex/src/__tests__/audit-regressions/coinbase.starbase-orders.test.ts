@@ -338,15 +338,15 @@ describe('Coinbase Starbase inert order-write contracts', () => {
 
   it('remains statically inert outside the Starbase contract files', () => {
     for (const file of [
-      '../../__tests__/reference/coinbase/coinbase.api.ts',
-      '../../__tests__/reference/coinbase/coinbase.exchange.ts',
-      '../../__tests__/reference/coinbase/coinbase.ws-private.ts',
-      '../../__tests__/reference/coinbase/coinbase.ws-public.ts',
-      '../../createExchangeFromAccount.ts',
-      '../../exchangeMetadata.ts',
-      '../../transport/tealstreet/routing/routingTable.ts',
+      '__tests__/reference/coinbase/coinbase.api.ts',
+      '__tests__/reference/coinbase/coinbase.exchange.ts',
+      '__tests__/reference/coinbase/coinbase.ws-private.ts',
+      '__tests__/reference/coinbase/coinbase.ws-public.ts',
+      'createExchangeFromAccount.ts',
+      'exchangeMetadata.ts',
+      'transport/tealstreet/routing/routingTable.ts',
     ]) {
-      const source = readFileSync(resolve(__dirname, '../reference/coinbase', file), 'utf8');
+      const source = readFileSync(resolve(__dirname, '../..', file), 'utf8');
       expect(source).not.toContain('coinbase.starbase-orders');
     }
   });

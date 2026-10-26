@@ -416,7 +416,7 @@ describe('WooX V3 inert account writes', () => {
         isolatedLeverage: 'blocked-outside-safe-cex-cross-margin-contract',
       }),
     );
-    const wooDirectory = join(__dirname, '../../exchanges/woo');
+    const wooDirectory = join(__dirname, '../reference/woo');
     for (const runtimeFile of ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-private.ts', 'woo.ws-public.ts']) {
       expect(readFileSync(join(wooDirectory, runtimeFile), 'utf8')).not.toContain('woo.v3.account-writes');
     }

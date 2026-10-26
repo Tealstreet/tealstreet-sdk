@@ -122,7 +122,7 @@ describe('WooX V3 inert Cancel-All-After contract', () => {
   it('remains disconnected from every active Woo runtime and owns no transport or selector', () => {
     const runtimeFiles = ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-public.ts', 'woo.ws-private.ts'];
     for (const file of runtimeFiles) {
-      const source = readFileSync(join(__dirname, '../../exchanges/woo', file), 'utf8');
+      const source = readFileSync(join(__dirname, '../reference/woo', file), 'utf8');
       expect(source).not.toContain('woo.v3.cancel-all-after');
       expect(source).not.toContain('TRADE_CANCEL_ALL_AFTER');
       expect(source).not.toContain('cancelAllAfterDemoLifecycle');

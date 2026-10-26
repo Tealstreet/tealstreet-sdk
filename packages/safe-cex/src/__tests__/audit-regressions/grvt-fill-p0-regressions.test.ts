@@ -18,17 +18,21 @@ const makeExchange = () => {
 
 describe('GRVT fill-verification P0 regression', () => {
   it('keeps GRVT runtime sources free of console diagnostics that could expose credentials', () => {
-    const grvtDirectory = resolve(process.cwd(), 'src/exchanges/grvt');
-    const runtimeSources = readdirSync(grvtDirectory).filter((sourceFile) => /^grvt\..+\.ts$/.test(sourceFile));
+    // The kept runtime helpers and the frozen TS oracle are both scanned.
+    const runtimeSources = ['src/exchanges/grvt', 'src/__tests__/reference/grvt'].flatMap((directory) =>
+      readdirSync(resolve(process.cwd(), directory))
+        .filter((sourceFile) => /^grvt\..+\.ts$/.test(sourceFile))
+        .map((sourceFile) => resolve(process.cwd(), directory, sourceFile)),
+    );
 
     for (const sourceFile of runtimeSources) {
-      const source = readFileSync(resolve(grvtDirectory, sourceFile), 'utf8');
+      const source = readFileSync(sourceFile, 'utf8');
       expect(source).not.toMatch(/\bconsole\.(?:debug|error|info|log|trace|warn)\b/);
     }
   });
 
   it('keeps GRVT signing, private-order, and shared failed-send diagnostics payload-free', () => {
-    const grvtDirectory = resolve(process.cwd(), 'src/exchanges/grvt');
+    const grvtDirectory = resolve(process.cwd(), 'src/__tests__/reference/grvt');
     const exchangeSource = readFileSync(resolve(grvtDirectory, 'grvt.exchange.ts'), 'utf8');
     const privateWsSource = readFileSync(resolve(grvtDirectory, 'grvt.ws-private.ts'), 'utf8');
     const publicWsSource = readFileSync(resolve(grvtDirectory, 'grvt.ws-public.ts'), 'utf8');

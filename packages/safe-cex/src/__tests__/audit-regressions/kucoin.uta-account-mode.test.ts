@@ -314,7 +314,7 @@ describe('KuCoin inert UTA account-mode contract', () => {
       'kucoinspot.ws-private.ts',
       'kucoinspot.ws-public.ts',
     ]) {
-      const source = readFileSync(resolve(__dirname, '../../exchanges/kucoin', file), 'utf8');
+      const source = readFileSync(resolve(__dirname, '../reference/kucoin', file), 'utf8');
       expect(source).not.toContain('kucoin.uta-account-mode');
     }
   });

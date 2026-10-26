@@ -401,7 +401,7 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
 
     const runtimeFiles = ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-public.ts', 'woo.ws-private.ts'];
     for (const runtimeFile of runtimeFiles) {
-      const source = readFileSync(join(process.cwd(), 'src/exchanges/woo', runtimeFile), 'utf8');
+      const source = readFileSync(join(process.cwd(), 'src/__tests__/reference/woo', runtimeFile), 'utf8');
       expect(source).not.toContain('woo.v3.public');
       expect(source).not.toContain('woo.v3.ticker');
     }
