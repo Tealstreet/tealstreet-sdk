@@ -3339,3 +3339,18 @@ The overseer approved the new 20s bound, strict pre-release cleanup and stale
 continuation suppression; CALLERS discloses them. Original plan/native/API and
 30-control review are CLEAR at b34798899c2 and 13f6a5dc13a. Exact source review,
 paired family/combined size and qualifying CI remain separate gates.
+## WOO socket authority adoption
+
+WOO's two physical connect sites use the landed managed-socket core. Native
+code retains protocol construction, book/candle facts and account decoding;
+Engine owns epochs, auth evidence, timers, retry and complete interest release.
+The public AnyText/ControlPolicy::None policy preserves cached-index ticker
+processing without a second control JSON parse. Native private refusal continues
+through reconnect without revoking the public sibling or clearing financial state.
+
+Compatibility review found financial fixtures delivering private data before
+an open and a signing fixture opening years after connection creation. They now
+establish valid ingress custody while retaining their original result and wire
+assertions. No account reducer or native snapshot token logic is changed. Socket
+inventory pruning is WOO-only; the request inventory and every other family stay
+exact. Bitunix remains excluded under Sam's explicit option-1 decision.

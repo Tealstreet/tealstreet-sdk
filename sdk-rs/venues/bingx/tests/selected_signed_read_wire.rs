@@ -142,7 +142,19 @@ fn expected(primary: bool, read: bool) -> Vec<String> {
     let (intent, key) = match (primary, read) {
         (true, true) => ("Secondary", "ref:secondary-credential"),
         (true, false) => ("Primary", "ref:primary-credential"),
-        _ => return Vec::new(),
+        // Keyless public reads are managed and unsigned; a read key alone signs nothing.
+        _ => {
+            return [
+                "https://open-api.bingx.com/openApi/swap/v2/quote/contracts",
+                "https://open-api.bingx.com/openApi/swap/v3/quote/klines?endTime=120000&interval=1m&startTime=0&symbol=BTC-USDT",
+            ]
+            .map(|url| {
+                format!(
+                    r#"Get {url} [("X-SOURCE-KEY", "Tealstreet"), ("Content-Type", "application/json, charset=utf-8")] Public -> unsigned"#
+                )
+            })
+            .into();
+        }
     };
     let headers =
         r#"[("X-SOURCE-KEY", "Tealstreet"), ("Content-Type", "application/json, charset=utf-8")]"#;
