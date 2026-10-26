@@ -145,9 +145,19 @@ construction, and Required is unchanged.**
   options" terminal. No family is Optional yet, so per-family acceptance waits
   for the first one. Secondary slots always require `signing`.
 
-**D3: the key-presence fact, `LocalIdentity.key: Option<Secret>`.**
-- `key` drops `#[serde(default)]`. An omitted key and `"key": null` both mean
-  `None`, which is `Absent`.
+**D3: the key-presence fact, carried by the setup material type.**
+- **Shape as built (ddi2il approved the deviation from `Option<Secret>`):**
+  presence lives inside the setup material type, `Secret(Option<Zeroizing<String>>)`,
+  so the 82 `LocalIdentity` literal sites are unchanged.
+  - Only `key` reads `null` as absent (a field-level deserializer); omitted
+    is absent through a private `absent()` serde default.
+  - `secret` defaults to a present empty value (`Secret::empty()`) and still
+    refuses `null`; `passphrase: null` stays "no passphrase", as before.
+  - The type does not derive `Default`; the absent form is private to
+    `crypto/src/signer.rs` (the key default and `LocalIdentity::default()`).
+  - Absent reads as empty bytes, so every byte consumer is unchanged, and
+    absent material is never installed or read: signing refuses first.
+- An omitted key and `"key": null` both mean `Absent`; `""` is `Empty`.
 - The WASM entry takes setup as a JSON string (`signer_setup_json:
   Option<String>`, `hosts/wasm/src/lib.rs`). `JSON.stringify` already omits
   `undefined`, so an absent `options.key` arrives as `None` and `""` arrives as
@@ -164,9 +174,14 @@ construction, and Required is unchanged.**
 - **`SetupFacts { primary_key: KeyPresence }`:** it covers the primary only
   and holds only the enum. Its `Debug` and serialized forms are the variant
   name, and it is never formatted into diagnostics beyond that.
-  `from_setup_with_policy_and_mode` and the JSON variant return it beside
-  `Identities`. The registry hands it to venue construction on the record that
-  already carries `read_status` and `readCredentialsValid`.
+  API as built: `LocalSigner::from_setup_with_facts(setup, policy,
+  public_data_only)` and `LocalSigner::from_json_with_facts(...)` return
+  `(LocalSigner, Identities, SetupFacts)` beside the unchanged
+  `from_setup_with_policy_and_mode` / `from_json_with_policy_and_mode`, so
+  existing callers keep their return types. `SetupFacts` has no `Deserialize`
+  and exposes `primary_key()` and `primary_login() -> Option<PrimaryLogin>`.
+  The hosted `LocalSetup` path (GRVT, G5) uses `from_setup_with_facts`.
+  Handing the facts to venue construction is the consumer's adoption step.
 - **Existing families** ignore `SetupFacts`. Native per-family builders that
   read `options.key` (`registry/src/lib.rs`, `asterdex_setup.rs`) keep their
   presence gates; only the `Secret` wrapping changes.
