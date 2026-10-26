@@ -9629,3 +9629,12 @@ read that verifies the trading key's own capabilities before private startup,
 such as Coinbase `GET /api/v3/brokerage/key_permissions`. It is primary-only,
 like every `PrimaryRead`. A secondary read-key verification stays an ordinary
 `Read`. No existing reason was reused, because none describes it truthfully.
+
+### Binance COIN-M: per-coin currencies and coinMargined, as in TypeScript
+
+The COIN-M balance now carries a per-coin `currencies` row next to `coins`, in
+coin units: total = walletBalance, free = availableBalance, used =
+initialMargin, upnl = unrealizedProfit. `FetchBalanceInfo` answers
+`{"coinMargined":true}` with no I/O, so `getBalanceSlice` gives an inverse
+market its margin coin's balance and reads zero for a coin the account does
+not hold, instead of the USD total.
