@@ -2911,3 +2911,9 @@ mod tests {
         ));
     }
 }
+
+#[cfg(all(test, feature = "address-nonce", feature = "dispatch-signing"))]
+#[path = "../../native/tests/support/address_start.rs"]
+mod address_start_fixture;
+#[cfg(all(test, feature = "address-nonce", feature = "dispatch-signing"))]
+mod address_start_tests;
