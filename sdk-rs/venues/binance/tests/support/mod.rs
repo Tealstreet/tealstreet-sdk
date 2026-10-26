@@ -96,6 +96,9 @@ impl Harness {
     pub fn collect(&mut self) {
         for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
+                Action::RetireAddressSetup { .. } => {
+                    panic!("address setup is unsupported in the binance test harness")
+                }
                 Action::ManagedHttp(_) => {
                     panic!("managed HTTP preparation is not configured in this harness yet")
                 }

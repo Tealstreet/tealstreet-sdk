@@ -8,8 +8,7 @@ import { parseArgs } from 'node:util';
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
 // total package size; Sam approved the combined 14 MiB ceiling on 2026-10-26.
 export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_064 });
-// Bitget: CI family size rounded up to KiB under the overseer's standing ceiling of 1448 KiB
-// (1446 KiB after #2204's CI measured 1,479,691).
+// #2193 shared-core: CI Bitget/USDC 1,479,932 rounded up to KiB (overseer ceiling 1448 KiB).
 // AsterDEX: the venue crate at opt-level "s" (#2178) measured 1,326,024 in CI. Per the overseer's
 // ruling the cap is that plus 4 KiB, below the shared venue budget. It can only go down.
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
