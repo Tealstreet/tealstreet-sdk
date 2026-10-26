@@ -288,42 +288,56 @@ impl BinanceFutures {
     }
 
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
-        if let Command::FetchStpMode { command }
-        | Command::AmendOrderWithSymbol { command, .. }
-        | Command::SetStpMode { command, .. }
-        | Command::CancelOrdersWithSymbols { command, .. }
-        | Command::FetchAccount { command }
-        | Command::FetchOrderBook { command, .. } = &command
-        {
-            cx.fail(
-                *command,
+        // Every refusal before admission is the command's own typed terminal.
+        let operation = if matches!(
+            command,
+            Command::FetchStpMode { .. }
+                | Command::FetchAccount { .. }
+                | Command::FetchOrderBook { .. }
+                | Command::FetchLeverage { .. }
+        ) {
+            Operation::Read
+        } else {
+            Operation::Mutation
+        };
+        if matches!(
+            command,
+            Command::FetchStpMode { .. }
+                | Command::AmendOrderWithSymbol { .. }
+                | Command::SetStpMode { .. }
+                | Command::CancelOrdersWithSymbols { .. }
+                | Command::FetchAccount { .. }
+                | Command::FetchOrderBook { .. }
+        ) {
+            cx.refuse_command(
+                operation,
                 not_sent("This Binance command is not supported").kind(ErrorKind::Unsupported),
             );
             return;
         }
-        if self.is_spot() {
-            let id = match &command {
-                Command::SetLeverage { command, .. }
-                | Command::FetchLeverage { command, .. }
-                | Command::SetMarginType { command, .. }
-                | Command::SetPositionMode { command, .. } => Some(*command),
-                _ => None,
-            };
-            if let Some(id) = id {
-                cx.fail(
-                    id,
-                    not_sent("Binance Spot does not support derivative settings")
-                        .kind(ErrorKind::Unsupported),
-                );
-                return;
-            }
+        if self.is_spot()
+            && matches!(
+                command,
+                Command::SetLeverage { .. }
+                    | Command::FetchLeverage { .. }
+                    | Command::SetMarginType { .. }
+                    | Command::SetPositionMode { .. }
+            )
+        {
+            cx.refuse_command(
+                operation,
+                not_sent("Binance Spot does not support derivative settings")
+                    .kind(ErrorKind::Unsupported),
+            );
+            return;
         }
         // A limit-execution stop would be re-placed as a market stop at its limit price.
         if let Command::AmendOrder { command, id, .. } = &command
             && self.account.limit_stops.contains(id)
         {
-            cx.fail(
-                *command,
+            let _ = command;
+            cx.refuse_command(
+                operation,
                 not_sent("Binance stop-limit orders cannot be amended; cancel and place a new one")
                     .kind(ErrorKind::Unsupported),
             );
@@ -470,7 +484,7 @@ impl BinanceFutures {
         };
         if !self.credentials.has_primary() {
             let error = not_sent("Binance trading needs an API key").kind(ErrorKind::AuthInvalid);
-            cx.fail(id, error);
+            cx.refuse_command(operation, error);
             return;
         }
         let plan = plan.and_then(|job| {
@@ -514,7 +528,7 @@ impl BinanceFutures {
             }
             Err(message) => {
                 cx.command_error(id, message.clone());
-                cx.fail(id, not_sent(message).kind(ErrorKind::InvalidInput));
+                cx.refuse_command(operation, not_sent(message).kind(ErrorKind::InvalidInput));
             }
         }
     }
@@ -1129,8 +1143,9 @@ impl BinanceFutures {
         // Binance allows one closePosition order per direction per symbol.
         let mut replaced: Vec<Order> = Vec::new();
         let pm = self.options.portfolio_margin;
+        let replaces_close_orders = !pm && !self.is_spot();
         for opts in orders {
-            if !pm {
+            if replaces_close_orders {
                 for existing in self.conflicting_close_orders(cx, opts) {
                     if !replaced.iter().any(|o| o.id == existing.id) {
                         replaced.push(existing);
@@ -1363,9 +1378,8 @@ impl BinanceFutures {
         cx: &Cx<'_, Pending>,
         opts: &PlaceOrderOpts,
     ) -> Result<Vec<Params>, String> {
-        if opts.reduce_only == Some(true) || opts.close == Some(true) {
-            return Err("Binance Spot does not support reduceOnly or closePosition".into());
-        }
+        // Spot has no position to reduce, so the flags are dropped as in TS; a sell
+        // beyond the balance fails at Binance.
         if matches!(
             opts.kind,
             OrderType::TrailingStopLoss | OrderType::Conditional

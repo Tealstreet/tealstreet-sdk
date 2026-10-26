@@ -78,11 +78,22 @@ fn spot_post_only_and_native_identity() {
     );
 }
 #[test]
+fn spot_drops_reduce_only_and_close_like_typescript() {
+    for fields in [r#""reduceOnly":true"#, r#""close":true"#] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, vec![order(Variant::Spot, fields)]);
+        let r = h.take("/api/v3/order");
+        assert!(r.url.contains("type=LIMIT"), "{fields}");
+        assert!(!r.url.contains("reduceOnly"), "{fields}");
+        assert!(!r.url.contains("closePosition"), "{fields}");
+        h.reply(r.id, 200, "", r#"{"orderId":123}"#);
+        assert!(h.result(77).unwrap().is_ok(), "{fields}");
+    }
+}
+#[test]
 fn invalid_second_spot_order_rejects_whole_batch_before_writes() {
     for fields in [
         r#""type":"trailing_stop_loss""#,
-        r#""reduceOnly":true"#,
-        r#""close":true"#,
         r#""clientOrderId":"illegal.dot""#,
         r#""type":"stop_loss","price":0"#,
     ] {
@@ -93,8 +104,6 @@ fn invalid_second_spot_order_rejects_whole_batch_before_writes() {
             r#""type":"trailing_stop_loss""# => {
                 bad.kind = safe_cex_engine::model::OrderType::TrailingStopLoss
             }
-            r#""reduceOnly":true"# => bad.reduce_only = Some(true),
-            r#""close":true"# => bad.close = Some(true),
             r#""clientOrderId":"illegal.dot""# => bad.client_order_id = Some("illegal.dot".into()),
             _ => {
                 bad.kind = safe_cex_engine::model::OrderType::StopLoss;
