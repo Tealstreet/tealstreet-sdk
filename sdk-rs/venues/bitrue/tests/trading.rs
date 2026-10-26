@@ -20,6 +20,8 @@ struct Harness {
     trace: Vec<Trace>,
     timers: Vec<(TimerId, f64)>,
     sockets: Vec<(SocketId, String)>,
+    /// The latest event time; managed requests prepare and answer no earlier.
+    now: f64,
 }
 impl Harness {
     fn new() -> Self {
@@ -37,6 +39,7 @@ impl Harness {
             trace: vec![],
             timers: vec![],
             sockets: vec![],
+            now: 100.0,
         };
         h.collect();
         let request = h.take(Method::Get, "/fapi/v1/contracts");
@@ -57,8 +60,30 @@ impl Harness {
         }]);
         h
     }
+    /// Collects released work, then fires any timer armed for this very
+    /// instant: venue completions deferred out of a delivery run one tick later.
     fn collect(&mut self) {
-        for action in safe_cex_engine::test_support::prepared_actions(&mut self.e, 100.).into_iter()
+        loop {
+            let armed = self.timers.len();
+            self.collect_once();
+            let now = self.now;
+            let due: Vec<_> = self.timers[armed..]
+                .iter()
+                .filter(|(_, at)| *at <= now)
+                .map(|(timer, _)| *timer)
+                .collect();
+            if due.is_empty() {
+                break;
+            }
+            self.timers.retain(|(timer, _)| !due.contains(timer));
+            for timer in due {
+                self.e.handle(now, Event::TimerFired { timer });
+            }
+        }
+    }
+    fn collect_once(&mut self) {
+        for action in
+            safe_cex_engine::test_support::prepared_actions(&mut self.e, self.now).into_iter()
         {
             match &action {
                 Action::Http(r) => self.trace.push(Trace::Http(r.id)),
@@ -92,9 +117,13 @@ impl Harness {
             .unwrap_or_else(|| panic!("missing {method:?} {path}, requests {:?}", self.requests));
         self.requests.remove(index)
     }
+    fn handle(&mut self, at: f64, event: Event<'_>) {
+        self.now = self.now.max(at);
+        self.e.handle(at, event);
+    }
     fn reply(&mut self, request: HttpRequest, body: &str) {
         self.e.handle(
-            100.0,
+            self.now,
             Event::HttpResponse {
                 request: request.id,
                 response: Response {
@@ -107,7 +136,7 @@ impl Harness {
         self.collect();
     }
     fn command(&mut self, command: Command) {
-        self.e.handle(100.0, Event::Command(command));
+        self.e.handle(self.now, Event::Command(command));
         self.collect();
     }
     fn place(&mut self, raw: &str) {
@@ -339,7 +368,7 @@ fn lost_placement_response_never_retries_a_write() {
     let mut h = Harness::new();
     h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000}]"#);
     let request = h.take(Method::Post, "/fapi/v2/order");
-    h.e.handle(
+    h.handle(
         110.0,
         Event::HttpFailed {
             request: request.id,
@@ -505,14 +534,14 @@ fn post_write_census(h: &mut Harness) -> HttpRequest {
     // Startup's census predates the write. It cannot certify its outcome.
     let stale = h.take(Method::Get, "/fapi/v2/openOrders");
     h.reply(stale, r#"{"code":"0","data":[]}"#);
-    // The failed census retries ORDER_RETRY's 500 ms, jittered, after the 100 ms reply.
+    // The failed census retries ORDER_RETRY's 500 ms, jittered, after the reply.
     let (timer, due) = *h
         .timers
         .iter()
         .rev()
-        .find(|(_, at)| (475.0..=600.0).contains(at))
+        .find(|(_, at)| (h.now + 375.0..=h.now + 500.0).contains(at))
         .unwrap();
-    h.e.handle(due, Event::TimerFired { timer });
+    h.handle(due, Event::TimerFired { timer });
     h.collect();
     h.take(Method::Get, "/fapi/v2/openOrders")
 }
@@ -628,7 +657,7 @@ fn conditional_census_superseded_by_stream_cannot_authorize_cancel_all() {
         .find(|(_, url)| url.contains("fapiws.bitrue.com"))
         .unwrap()
         .0;
-    h.e.handle(700.0, Event::WsMessage { socket, text: r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":999,"S":"BUY","o":"LIMIT","x":"NEW","X":"NEW","q":"1","z":"0","p":"2000"}}"# });
+    h.handle(700.0, Event::WsMessage { socket, text: r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":999,"S":"BUY","o":"LIMIT","x":"NEW","X":"NEW","q":"1","z":"0","p":"2000"}}"# });
     h.collect();
     h.reply(census, &protective_census(&client));
     assert!(h.failed());
@@ -644,7 +673,7 @@ fn conditional_census_transport_retries_do_not_complete_or_send_guessed_cancel()
     });
     let mut census = post_write_census(&mut h);
     for attempt in 0..4 {
-        h.e.handle(
+        h.handle(
             700.0 + f64::from(attempt),
             Event::HttpFailed {
                 request: census.id,
@@ -705,6 +734,53 @@ fn conditional_census_accepts_rewritten_zero_and_missing_client_ids_without_trus
         assert_eq!(body(&cancel)["conditionOrder"], true);
     }
 }
+/// B1 interim (fe7lgm): a census delivery completes nothing inside itself; its
+/// result lands exactly once on the next tick, with native's GET count.
+#[test]
+fn a_census_completes_its_placement_once_on_the_tick_after_its_delivery() {
+    let (mut h, _) = protective_ack();
+    let census = post_write_census(&mut h);
+    let gets = |h: &Harness| {
+        h.requests
+            .iter()
+            .filter(|r| r.method == Method::Get && r.url.contains("/fapi/v2/openOrders"))
+            .count()
+    };
+    let before = gets(&h);
+    let armed = h.timers.len();
+    let now = h.now;
+    h.e.handle(
+        now,
+        Event::HttpResponse {
+            request: census.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":"0","data":[]}"#,
+            },
+        },
+    );
+    h.collect_once();
+    assert_eq!(h.result(), None, "nothing completes inside the delivery");
+    let ticks: Vec<_> = h.timers[armed..]
+        .iter()
+        .filter(|(_, at)| *at <= now)
+        .copied()
+        .collect();
+    assert_eq!(ticks.len(), 1, "one deferred census tick");
+    h.timers.retain(|tick| *tick != ticks[0]);
+    h.handle(now, Event::TimerFired { timer: ticks[0].0 });
+    h.collect();
+    assert_eq!(h.result(), Some("[]"));
+    let done = h
+        .notices
+        .iter()
+        .filter(|n| matches!(n, Notice::CommandDone { command: 7, .. }))
+        .count();
+    assert_eq!(done, 1, "exactly once");
+    h.collect();
+    assert_eq!(gets(&h), before, "no extra open-order read");
+}
 #[test]
 fn complete_post_write_empty_census_proves_no_open_protection_and_releases_cancel_all() {
     let (mut h, _) = protective_ack();
@@ -762,14 +838,14 @@ fn protective_amend_failed_census_keeps_native_cancel_all_uncertain_until_a_fres
     });
     assert_eq!(h.writes(), 0);
     assert!(h.notices.iter().any(|n| matches!(n, Notice::CommandFailed { command: 12, error } if error.legacy_text().contains("uncertain"))));
-    // The failed census retries ORDER_RETRY's 500 ms, jittered, after the 100 ms reply.
+    // The failed census retries ORDER_RETRY's 500 ms, jittered, after the reply.
     let (timer, due) = *h
         .timers
         .iter()
         .rev()
-        .find(|(_, at)| (475.0..=600.0).contains(at))
+        .find(|(_, at)| (h.now + 375.0..=h.now + 500.0).contains(at))
         .unwrap();
-    h.e.handle(due, Event::TimerFired { timer });
+    h.handle(due, Event::TimerFired { timer });
     h.collect();
     let census = h.take(Method::Get, "/fapi/v2/openOrders");
     h.reply(census, r#"{"code":"0","data":[]}"#);
@@ -823,7 +899,7 @@ fn protective_amend_lost_or_malformed_create_ack_fences_cancel_until_fresh_nativ
     ] {
         let (mut h, create) = protective_amend_create();
         if outcome == "lost" {
-            h.e.handle(
+            h.handle(
                 700.0,
                 Event::HttpFailed {
                     request: create.id,
@@ -832,7 +908,7 @@ fn protective_amend_lost_or_malformed_create_ack_fences_cancel_until_fresh_nativ
             );
             h.collect();
         } else if outcome == "server_error" {
-            h.e.handle(
+            h.handle(
                 700.0,
                 Event::HttpResponse {
                     request: create.id,
@@ -946,7 +1022,7 @@ fn protective_amend_preflight_failure_keeps_existing_protection_cancelable() {
 #[test]
 fn protective_amend_rejection_preserves_an_earlier_lost_replacement_fence() {
     let (mut h, create) = protective_amend_create();
-    h.e.handle(
+    h.handle(
         700.0,
         Event::HttpFailed {
             request: create.id,
@@ -1126,7 +1202,7 @@ fn cancel_batch_continues_after_native_and_transport_and_identity_failures() {
         let first = h.take(Method::Post, "/fapi/v2/cancel");
         match failure {
             "transport" => {
-                h.e.handle(
+                h.handle(
                     101.0,
                     Event::HttpFailed {
                         request: first.id,
@@ -1509,7 +1585,7 @@ fn failed_protective_census_read_reports_once_through_the_placement() {
     h.notices.clear();
     // Reads may retry; exhaust every attempt of the post-write census.
     for _ in 0..10 {
-        h.e.handle(
+        h.handle(
             100.0,
             Event::HttpFailed {
                 request: census.id,
@@ -1577,7 +1653,7 @@ fn write_failures_are_classified_without_changing_their_text() {
             r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000}]"#,
         );
         let request = h.take(Method::Post, "/fapi/v2/order");
-        h.e.handle(
+        h.handle(
             110.0,
             Event::HttpResponse {
                 request: request.id,
@@ -1605,7 +1681,7 @@ fn write_failures_are_classified_without_changing_their_text() {
     let mut h = Harness::new();
     h.place(r#"[{"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.003,"price":2000}]"#);
     let request = h.take(Method::Post, "/fapi/v2/order");
-    h.e.handle(
+    h.handle(
         110.0,
         Event::HttpFailed {
             request: request.id,

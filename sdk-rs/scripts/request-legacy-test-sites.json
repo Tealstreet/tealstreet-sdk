@@ -2,10 +2,6 @@
   "venues/bingx/src/account.rs": {
     "8907f38dcee7367c011ac797732f8780004c6710d7395d59812584ac876a5ddc": 1
   },
-  "venues/bitrue/src/secondary_tests.rs": {
-    "14ff7b932a6042d0adee80518f703a27a5e51c41add140215703e93820dc3475": 1,
-    "496bfb28799c729f0f335ccce50062d6a9ba06a581527e6a36a638ac44c84dc8": 1
-  },
   "venues/kucoin/src/history.rs": {
     "6dc8ff5c9a3f54afd832946af7fc2e777f459ef0ebb8da410821660b9044f481": 1,
     "770f2dcac9b528f2bacfc9329e543f5215a004fb671054775207c827e04764a8": 1,
