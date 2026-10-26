@@ -14,7 +14,8 @@ qualification. The original tape and failing report remain in scratch.
   both exist, regardless of JSON order, so the rest of the stats row survives.
 - Seed last price from the accepted market snapshot before socket stats arrive.
 - Aggregate REST depth at the market's native amount precision, without binary
-  addition residue. Preserve price ordering, full depth and zero handling.
+  addition residue. Deltas replace a complete parsed native size, without
+  addition. Preserve price ordering, full depth and zero handling.
 - On public close, request one prompt managed REST snapshot for each subscribed
   book. Keep the existing single-flight and pacing rules. An older REST reply
   cannot overwrite a newer socket snapshot. Repeated closes cannot multiply

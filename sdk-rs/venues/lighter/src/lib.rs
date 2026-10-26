@@ -681,6 +681,7 @@ impl Lighter {
                 for level in levels {
                     let (p, n) = level.pair();
                     if p > 0.0 && n >= 0.0 {
+                        // Deltas replace the complete native size; only snapshots add sizes.
                         state.book.apply(side, p, n);
                     }
                 }
