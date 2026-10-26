@@ -973,3 +973,193 @@ fn stale_old_reply_cannot_settle_the_next_fifo_owner() {
     let done: Vec<_> = e.drain_actions().collect();
     assert_eq!(results(&done, OWNER + 1), vec![Ok("[]".into())]);
 }
+
+fn native_two_row_reply(body: &str) -> (Engine<Probe>, Vec<Action>) {
+    let (mut e, _) = boot();
+    let mut c = place(OWNER);
+    if let Command::PlaceOrders { orders, .. } = &mut c {
+        orders[0].stop_loss = Some(80.);
+    }
+    let a = command(&mut e, NOW, c);
+    let request = native_release(&mut e, &a);
+    let wire: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(wire["action"]["orders"].as_array().unwrap().len(), 2);
+    respond(&mut e, NOW + 1., &request, 200, body);
+    let actions = e.drain_actions().collect();
+    (e, actions)
+}
+
+#[test]
+fn native_mixed_refusal_scans_accepted_rows_after_the_first_error() {
+    let (e, a) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"first rejected"},{"resting":{"oid":901}}]}}}"#,
+    );
+    let result = results(&a, OWNER);
+    assert_eq!(result.len(), 1);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.message, "first rejected");
+    assert_eq!(error.kind, Some(ErrorKind::Rejected));
+    assert_eq!(error.outcome, None);
+    assert!(e.store().order("901").is_none());
+    no_trade(&a);
+}
+
+#[test]
+fn native_all_rejected_rows_keep_the_full_ordered_diagnostic() {
+    let (e, a) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"first rejected"},{"error":"second rejected"}]}}}"#,
+    );
+    let result = results(&a, OWNER);
+    assert_eq!(result.len(), 1);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.message, "first rejected, second rejected");
+    assert_eq!(error.kind, Some(ErrorKind::Rejected));
+    assert_eq!(error.outcome, Some(Outcome::Rejected));
+    assert!(e.store().orders().is_empty());
+    no_trade(&a);
+}
+
+#[test]
+fn native_short_and_long_status_arrays_publish_no_prefix() {
+    for statuses in [
+        json!([{"resting":{"oid":900}}]),
+        json!([{"resting":{"oid":900}}, {"resting":{"oid":901}}, {"resting":{"oid":902}}]),
+    ] {
+        let reply = json!({"status":"ok","response":{"type":"order","data":{"statuses":statuses}}});
+        let (e, a) = native_two_row_reply(&reply.to_string());
+        let result = results(&a, OWNER);
+        assert_eq!(result.len(), 1);
+        let error = result[0].as_ref().unwrap_err();
+        assert_eq!(error.message, "Invalid Hyperliquid command response");
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert!(e.store().orders().is_empty());
+        no_trade(&a);
+    }
+}
+
+#[test]
+fn native_unknown_suffix_keeps_the_already_published_prefix() {
+    let (e, a) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":900}},"mystery"]}}}"#,
+    );
+    let result = results(&a, OWNER);
+    assert_eq!(result.len(), 1);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.message, "Unknown Hyperliquid order status");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(e.store().order("900").unwrap().id, "900");
+    no_trade(&a);
+}
+
+#[test]
+fn native_wrong_response_kind_cannot_publish_matching_rows() {
+    let (e, a) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":[{"resting":{"oid":900}},{"resting":{"oid":901}}]}}}"#,
+    );
+    let result = results(&a, OWNER);
+    assert_eq!(result.len(), 1);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.message, "Invalid Hyperliquid command response");
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert!(e.store().orders().is_empty());
+    no_trade(&a);
+}
+
+#[test]
+fn native_waiting_rows_complete_without_invented_order_ids() {
+    let (e, a) = native_two_row_reply(
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForFill","waitingForTrigger"]}}}"#,
+    );
+    assert_eq!(results(&a, OWNER), vec![Ok("[]".into())]);
+    assert!(e.store().orders().is_empty());
+    no_trade(&a);
+}
+
+#[test]
+fn native_terminal_cancel_diagnostic_is_not_amendment_proof() {
+    for amend in [false, true] {
+        for reply in [
+            r#"{"status":"err","response":"Order was never placed, already canceled, or filled. asset=0"}"#,
+            r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":[{"error":"Order was never placed, already canceled, or filled. asset=0"}]}}}"#,
+        ] {
+            let (mut e, socket) = boot();
+            seed_order(&mut e, socket);
+            let c = if amend {
+                Case::Amend.command()
+            } else {
+                Case::Cancel.command()
+            };
+            let a = command(&mut e, NOW, c);
+            let cancel = native_release(&mut e, &a);
+            respond(&mut e, NOW + 1., &cancel, 200, reply);
+            let a: Vec<_> = e.drain_actions().collect();
+            let result = results(&a, OWNER);
+            assert_eq!(result.len(), 1);
+            if amend {
+                assert!(
+                    result[0]
+                        .as_ref()
+                        .unwrap_err()
+                        .message
+                        .contains("already canceled")
+                );
+                assert!(e.store().order("9").is_some());
+            } else {
+                assert_eq!(result, vec![Ok("[]".into())]);
+                assert!(e.store().order("9").is_none());
+            }
+            no_trade(&a);
+        }
+    }
+}
+
+#[test]
+fn native_late_source_fill_keeps_the_confirmed_replacement_identity() {
+    let (mut e, socket) = boot();
+    seed_order(&mut e, socket);
+    let a = command(&mut e, NOW, Case::Amend.command());
+    let cancel = native_release(&mut e, &a);
+    respond(
+        &mut e,
+        NOW + 1.,
+        &cancel,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    assert!(results(&a, OWNER).is_empty());
+    let timer = a
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 334. => Some(*timer),
+            _ => None,
+        })
+        .expect("native replacement pacing timer");
+    e.handle(NOW + 334., Event::TimerFired { timer });
+    let a: Vec<_> = e.drain_actions().collect();
+    let replacement = native_release_at(&mut e, NOW + 334., &a);
+    let wire: Value = serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    let cloid = wire["action"]["orders"][0]["c"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    e.handle(NOW + 335., Event::WsMessage { socket, text: r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"0"},"status":"filled"}]}"# });
+    let a: Vec<_> = e.drain_actions().collect();
+    assert!(results(&a, OWNER).is_empty());
+    no_trade(&a);
+    respond(
+        &mut e,
+        NOW + 336.,
+        &replacement,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":10}}]}}}"#,
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    let result = results(&a, OWNER);
+    assert_eq!(result.len(), 1);
+    let ids: Value = serde_json::from_str(result[0].as_ref().unwrap()).unwrap();
+    assert_eq!(ids["orderIds"], json!(["10"]));
+    assert_eq!(ids["clientOrderId"], cloid);
+    assert!(e.store().order("10").is_some());
+    no_trade(&a);
+}

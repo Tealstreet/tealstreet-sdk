@@ -76,6 +76,10 @@ trait AnyEngine {
     fn signing_pending(&self, _: RequestId) -> bool {
         false
     }
+    #[cfg(feature = "sign-meta")]
+    fn sign_meta(&self, _: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
+        None
+    }
     fn http_preparation_pending(&self, _: safe_cex_engine::request_context::Preparation) -> bool {
         false
     }
@@ -179,6 +183,10 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
     fn signing_pending(&self, attempt: RequestId) -> bool {
         Engine::signing_pending(self, attempt)
+    }
+    #[cfg(feature = "sign-meta")]
+    fn sign_meta(&self, task: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
+        Engine::sign_meta(self, task)
     }
     fn http_preparation_pending(
         &self,

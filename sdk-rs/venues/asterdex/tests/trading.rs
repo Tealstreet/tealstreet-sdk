@@ -1007,19 +1007,22 @@ fn trading_failures_carry_the_aster_code_kind_and_outcome() {
         (
             503,
             r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
-            Some(ErrorKind::Rejected),
+            // The shared classifier ranks an unproven gateway status above
+            // the native code.
+            Some(ErrorKind::VenueUnavailable),
             Outcome::Unknown,
         ),
         (
             503,
             r#"{"msg":"Unknown error, please check your request or try again later."}"#,
-            None,
+            Some(ErrorKind::VenueUnavailable),
             Outcome::Unknown,
         ),
         (
             200,
             r#"{"code":200,"msg":"success"}"#,
-            None,
+            // An acknowledgement without an order ID is an unproven reply.
+            Some(ErrorKind::Internal),
             Outcome::Unknown,
         ),
     ] {
