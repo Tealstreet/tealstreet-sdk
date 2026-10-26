@@ -139,6 +139,20 @@ mod tests {
             PrimaryLogin::Installed
         );
         assert!(installed.identity_eligible());
+        let (_, identities, facts) = LocalSigner::from_json_with_facts(
+            format!(r#"{{"primary":{{"secret":"{:064x}"}}}}"#, 1),
+            setup_policy(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(facts.primary_key(), KeyPresence::Absent);
+        let secret_only = Installed::new(identities, Some(facts), false);
+        assert!(
+            secret_only
+                .login
+                .select(CredentialRole::SessionAuth)
+                .is_err()
+        );
         let absent = Installed::new(Identities::default(), None, false);
         assert!(absent.login.select(CredentialRole::SessionAuth).is_err());
         let credential_only = Installed::new(

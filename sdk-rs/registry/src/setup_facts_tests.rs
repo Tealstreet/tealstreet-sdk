@@ -24,6 +24,13 @@ fn raw_trusted_setup_preserves_missing_empty_blank_and_nonblank_keys() {
     };
     for (input, presence, login, installed) in [
         ("{}", KeyPresence::Absent, None, false),
+        (r#"{"secret":"scalar"}"#, KeyPresence::Absent, None, false),
+        (
+            r#"{"key":null,"secret":"scalar"}"#,
+            KeyPresence::Absent,
+            None,
+            false,
+        ),
         (
             r#"{"key":""}"#,
             KeyPresence::Empty,

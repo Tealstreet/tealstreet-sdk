@@ -759,11 +759,13 @@ fn apexomni_local_setup(
     let any = options.key.is_some() || options.secret.is_some() || options.passphrase.is_some();
     let primary = (any || seed.is_some()).then(|| {
         let mut identity = LocalIdentity {
-            key: options.key.take().map_or_else(Secret::empty, Secret::new),
             secret: Secret::new(options.secret.take().unwrap_or_default()),
             passphrase: options.passphrase.take().map(Secret::new),
             ..Default::default()
         };
+        if let Some(key) = options.key.take() {
+            identity.key = Secret::new(key);
+        }
         if let Some(seed) = seed {
             identity.extra.0.insert(
                 ExtraKey::ZklinkSeed,
@@ -835,12 +837,15 @@ fn prepare_local_signer_with_policy(
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, Secret};
     let primary =
         if options.key.is_some() || options.secret.is_some() || options.passphrase.is_some() {
-            Some(LocalIdentity {
-                key: options.key.take().map_or_else(Secret::empty, Secret::new),
+            let mut identity = LocalIdentity {
                 secret: Secret::new(options.secret.take().unwrap_or_default()),
                 passphrase: options.passphrase.take().map(Secret::new),
                 ..Default::default()
-            })
+            };
+            if let Some(key) = options.key.take() {
+                identity.key = Secret::new(key);
+            }
+            Some(identity)
         } else {
             None
         };
