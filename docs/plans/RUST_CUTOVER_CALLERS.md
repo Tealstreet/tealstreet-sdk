@@ -9945,8 +9945,8 @@ same-ID amend fence stays as is.
 Both venues opt into the symbol fence from #2279: after an Unknown placement,
 a retry or amend is refused NotSent until a clean complete order read dispatched
 after the mark publishes and calls orders_reconciled. Older, incomplete or
-expired reads cannot release it. Cancels remain admitted; Phemex keeps its
-deliberate cancel-all fence opt-out.
+expired reads cannot release it. Cancel-by-ID admission is unchanged. BloFin
+keeps its default cancel-all fence; Phemex keeps its deliberate cancel-all opt-out.
 
 BloFin joins its existing Primary reconciliation snapshot, retaining the owed
 refresh and native backoff when an older snapshot is already in flight.
@@ -9962,12 +9962,18 @@ retry cannot clear uncertainty or add a late-cancel subject; panic cancel-all
 still runs, and a foreign order is not canceled merely because that retry's
 client ID appeared in a later snapshot. The old two-unknown-origin entry
 sequence is prevented by the fence; no production repair grouping is changed.
+Relevant Phemex rows with an unknown status or type make reconciliation
+incomplete. They retain the bounded retry/abandon policy and cannot release
+the placement fence; only a later clean complete read can do that.
 
-### BingX uncertain-placement fence: Phase B prerequisite
+### BingX uncertain-placement fence: Phase B
 
 BingX opts into the uncertain-placement fence and joins an already current
 Primary reconciliation read when the engine re-asks. Its four-step managed
-control stays enabled and is assertion-RED on #2279 Phase A because BingX has
-no placement scope. Phase B must mark Unknown write facts independently of
-guard_pending_placements before this slice can qualify or land; this change
-does not enable that guard or claim the Phase A flag alone protects retries.
+control is assertion-RED on #2279 Phase A and green on #2288 Phase B, which marks
+Unknown write facts independently of guard_pending_placements. This change
+does not enable that guard. A stale pre-mark read cannot release the fence.
+
+All three venues pin a slow held read across the engine's first two re-asks:
+the same census still publishes and releases, without restarting its floor or
+paid work. Phemex also pins re-asks while its native expiry-bound timer is owed.

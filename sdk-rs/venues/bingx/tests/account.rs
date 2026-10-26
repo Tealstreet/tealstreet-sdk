@@ -305,10 +305,17 @@ fn an_unknown_placement_requires_a_fresh_order_read_before_retrying() {
             && error.message.contains("uncertain")));
     };
     refused(&mut h, 701);
-    h.reply(stale.id, 200, r#"{"code":0,"data":[]}"#);
-    refused(&mut h, 702);
     let fresh = h.take(ORDERS);
     assert_ne!(fresh.id, stale.id);
+    for at in [7001. + 1000., 7001. + 3000.] {
+        h.fire_at(at);
+        assert!(
+            h.requests.iter().all(|r| !r.url.contains(ORDERS)),
+            "engine re-asks join the held fresh Primary read"
+        );
+    }
+    h.reply(stale.id, 200, r#"{"code":0,"data":[]}"#);
+    refused(&mut h, 702);
     h.reply(fresh.id, 200, r#"{"code":0,"data":[]}"#);
     h.now += 1.;
     h.event(Event::Command(place(703)));
