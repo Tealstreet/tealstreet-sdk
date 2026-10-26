@@ -197,9 +197,22 @@ fn native_reversed_range_precedes_private_credentials() {
 #[test]
 fn accepted_public_history_remains_unsigned_and_reachable() {
     let mut e = engine();
-    let out = run(&mut e, 100., trades("BTCUSDC", 2));
-    assert_eq!(out.len(), 1, "exact native accepted action batch: {out:?}");
-    let Action::Http(request) = &out[0] else {
+    e.handle(
+        100.,
+        Event::Command(Command::Query {
+            command: COMMAND,
+            query: trades("BTCUSDC", 2),
+        }),
+    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, 100.);
+    // One native request; the managed command root adds only its deadline.
+    let (http, other): (Vec<_>, Vec<_>) = out.iter().partition(|a| matches!(a, Action::Http(_)));
+    assert_eq!(http.len(), 1, "exact native accepted action batch: {out:?}");
+    assert!(
+        other.iter().all(|a| matches!(a, Action::SetTimer { .. })),
+        "{out:?}"
+    );
+    let Action::Http(request) = http[0] else {
         panic!("native public history request: {out:?}")
     };
     assert_eq!(request.method, Method::Get);

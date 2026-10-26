@@ -1,4 +1,5 @@
 //! Scripted discovery regressions; no network or account credentials.
+mod support;
 use safe_cex_engine::test_support::prepared_actions;
 use safe_cex_engine::{Action, Engine, Event, Response};
 use safe_cex_venue_orderly::{Options, Orderly};
@@ -77,12 +78,12 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn authenticated_discovery_starts_private_reads_before_tickers() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Orderly::new(Options {
+    let mut engine = support::engine(Options {
         key: Some("ed25519:11111111111111111111111111111111".into()),
         secret: Some(bs58::encode([7; 32]).into_string()),
         application_id: Some("scripted-account".into()),
         ..Default::default()
-    }));
+    });
     engine.start(0.0);
     let info = prepared_actions(&mut engine, 0.0)
         .into_iter()

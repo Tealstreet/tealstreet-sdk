@@ -780,8 +780,10 @@ that every lifecycle command is available for every product/account type.
 Polymarket's optional `RUST_LIVE_SMOKE_POLYMARKET_MAINNET_MARKET_SLUGS` is a comma-separated
 list of 1–100 distinct market slugs to bound discovery; pair it with `--symbol`
 for the desired outcome. It is public selection metadata, not a credential.
-Sizing currently refuses Phemex PerpetualV2 and Crypto.com because quantity ticks
-alone do not establish the monetary floor. Bybit inverse likewise requires an
+Phemex PerpetualV2 sizing requires explicit `minOrderValueRv`, `qtyStepSize` and
+`maxOrderQtyRq` from the matching listed, linear `/public/products` row. Missing
+or malformed fields refuse before placement. Crypto.com still refuses because
+quantity ticks alone do not establish the monetary floor. Bybit inverse requires an
 explicit monetary floor in discovery. These profiles can read accounts but will
 refuse trading before placing until their complete rules can be established.
 
