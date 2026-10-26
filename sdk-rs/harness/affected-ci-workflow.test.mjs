@@ -31,6 +31,10 @@ function check(text) {
   assert.doesNotMatch(text, /ref: \$\{\{ needs.selection.outputs.checkoutSha/);
   const required = job(text, 'result').match(/^    needs:.*$/m)[0];
   assert.match(required, /replay/); assert.doesNotMatch(required, /cpu-|bitget-paired|browser|, gate/);
+  // Parallel combined producers must not publish the same immutable artifact.
+  assert.match(job(text, 'combined'), /name: browser-wasm-combined/);
+  assert.match(job(text, 'gate'), /name: measured-browser-wasm-combined/);
+  assert.doesNotMatch(job(text, 'gate'), /name: browser-wasm-combined/);
   const families = job(text, 'families');
   assert.match(families, /if: needs.selection.outputs.sizeRequired == 'true'/);
   assert.match(families, /family: \$\{\{ fromJSON\(needs.selection.outputs.families\) \}\}/);

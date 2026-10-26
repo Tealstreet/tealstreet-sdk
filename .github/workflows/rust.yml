@@ -904,7 +904,7 @@ jobs:
         if: matrix.venue == 'binance' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/rust-rewrite'))
         uses: actions/upload-artifact@v7
         with:
-          name: browser-wasm-combined
+          name: measured-browser-wasm-combined
           path: sdk-rs/harness/out/browser-combined/
           retention-days: 14
           if-no-files-found: error
