@@ -4,7 +4,7 @@ import { AxiosError } from 'axios';
 import createHmac from 'create-hmac';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI, isBitrueSignatureRejection } from '../exchanges/bitrue/bitrue.api';
+import { createAPI, isBitrueSignatureRejection } from './reference/bitrue/bitrue.api';
 import { virtualClock } from '../utils/virtualClock';
 
 const exchange = { name: 'bitrue', emitter: { emit: () => undefined } } as any;

@@ -4,7 +4,7 @@ import {
   mapHyperliquidFillToIncomeRecords,
   mapHyperliquidFundingToIncomeRecord,
   paginateHyperliquidByTime,
-} from '../../exchanges/hyperliquid/hyperliquid.income';
+} from '../reference/hyperliquid/hyperliquid.income';
 
 const resolveSymbol = (coin: string) => (coin === 'DOGE' ? 'DOGE/USDC:USDC' : undefined);
 

@@ -2,13 +2,13 @@ import type { Candle, Timeframe } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { INTERVAL } from '../../exchanges/bybit/bybit.types';
-import { BybitPublicWebsocket } from '../../exchanges/bybit/bybit.ws-public';
-import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
-import { BybitInversePublicWebsocket } from '../../exchanges/bybit/bybitinverse.ws-public';
-import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
-import { BybitPublicWebsocket as BybitSpotPublicWebsocket } from '../../exchanges/bybit/bybitspot.ws-public';
+import { BybitPublicWebsocket } from '../reference/bybit/bybit.ws-public';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
+import { BybitInversePublicWebsocket } from '../reference/bybit/bybitinverse.ws-public';
+import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
+import { BybitPublicWebsocket as BybitSpotPublicWebsocket } from '../reference/bybit/bybitspot.ws-public';
 
 // Bybit v5 kline: `interval=M` is the UTC calendar month, `W` the Monday week
 // (https://bybit-exchange.github.io/docs/v5/market/kline). The REST rows and

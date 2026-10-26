@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { type Market, type Position, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';
