@@ -1,6 +1,6 @@
 # Phemex late cancel repair: final four legacy request sites
 
-Status: source and trusted-fixture carry CLEAR at 510eb5a1b6e, composed on actual tip 74a0ba44d38 including repair fixes #2181. Native 346/0/0, strict clippy and fmt pass; the affected fixture controls pass again after their setup extraction. Publication awaits the checker-precision dependency and combined measurement. Original runtime base is 49a5b54f362 (includes repair core 8f5f9a2f957); the native audit below remains pinned to 035948b564a. This consumer includes Phemex runtime adoption, repair-mutations Cargo activation, the exact four request-site removals and one orphan credential-site decrement. No generic engine, host, crypto, budget or CI change is included. Reviewer: claude-fe7lgm (core/API and custody), with claude-dazzy3 as alternate. Bitget history PR #2170 stays on its separate branch.
+Status: source and trusted-fixture carry CLEAR at 510eb5a1b6e, composed on actual tip 74a0ba44d38 including repair fixes #2181. Native 346/0/0, strict clippy and fmt pass; the affected fixture controls pass again after their setup extraction. Publication proceeds under the overseer’s instruction with the two genuine test-only macro false positives retained in the test inventory until checker-precision #2185 removes them. The unchanged fixture source is now automatically composed on c715b902069; the combined measurement below is pinned to its actual measured 74a0 tree. Original runtime base is 49a5b54f362 (includes repair core 8f5f9a2f957); the native audit below remains pinned to 035948b564a. This consumer includes Phemex runtime adoption, repair-mutations Cargo activation, the exact four request-site removals and one orphan credential-site decrement. No generic engine, host, crypto, budget or CI change is included. Reviewer: claude-fe7lgm (core/API and custody), with claude-dazzy3 as alternate. Bitget history PR #2170 stays on its separate branch.
 
 ## Scope and prerequisite
 
@@ -204,3 +204,9 @@ the exact two payloads and unchanged regression bodies. This consumer will
 compose that landing before publication; it adds no inventory allowance or
 macro-hiding workaround. CI supplies the family-size record, and a local
 combined measurement on the composed source is required before READY.
+
+## Publication and checker precision
+
+The overseer authorized publication before #2185 lands, retaining the outer and inner guarded `matches!` fingerprints d996a1201d82585408ab3816574bb362ae0635e43f62835bb12419e12772d37b and 7223d1e3ef2a11618fc585328d3d2c10b9cbc6197b7767d7c1e0726404e424d5 in the test inventory. They inspect `HttpAction::Prepare { request, .. }` fields in the unchanged synchronous-refusal regression; neither is a request or terminal authority. No test-body rewrite, checker exemption or production legacy site is added. The current shrink-only checker reports the test-inventory growth until #2185’s exact proof removes both rows; this is disclosed rather than hidden.
+
+The source/trusted-fixture tree 510eb5a1b6e on actual 74a0ba44d38 measures 14,080,905 combined bytes (web = node), leaving 74,871 under 14,155,776. Rust 1.99.0, wasm-bindgen 0.2.129, Binaryen 132, jobs 4, default flags and the unchanged shipping harness were used. SHA256 c3025f90a8cbc0728f189bd13e77736e8499ba38604151568d890458556420e7. The build target was deleted. This is a local combined record; CI supplies the family record. READY will use a current-tip composed combined measurement or an explicit carry disposition.
