@@ -3468,6 +3468,16 @@ persisted MEXC key-derived user IDs. Those mappings are later cutover work.
 
 [Provider contract and prerequisites](RUST_SIGNER_PREREQUISITES.md).
 
+**Bitunix signing-key trim (overseer decision, 2026-10-23).**
+- Setup policy `trimSigning` trims the signing-key text once at trusted setup,
+  alongside `trimCredential`. Bitunix declares both for the primary and
+  secondary slots, so REST and WS login sign with the same trimmed material.
+- Once Bitunix adopts dispatch signing, REST with a whitespace-padded key or
+  secret changes behaviour: it signed exactly before. Such keys could not
+  authenticate REST at the exchange anyway.
+- Today Bitunix has no dispatch-signing bridge, so REST still signs exactly
+  and callers need no change.
+
 
 ### BloFin general histories: owned cursor completion
 
@@ -9518,6 +9528,20 @@ Address-keyed nonce claims without the feature now refuse instead of accepting
 stable-id text as an address subject. No current adopter uses that unsupported
 path. The additive selection errors preserve typed missing/signing-not-configured
 and setup-capability refusals without adding an auth-health latch.
+
+## Bitunix signs through the engine provider (#2190)
+
+Bitunix REST and its private socket login now sign at dispatch through the engine provider, from trusted-setup identities. The venue no longer holds a key or secret. The request lifecycle is unchanged; trading moves onto managed Contexts in the Bitunix trading PR.
+
+- **Setup.** `construction-rules.json` gives `bitunix` `bridge.dispatchSigning: true`. Raw `key`/`secret`/`read_credentials` beside setup identities are refused ("Bitunix credentials belong in signer setup, not engine options"), and identities without a provider are refused. Legacy raw input through `build()` converges on the same local provider. Unchanged for callers: the TS `LocalSignerSetup` path, which already trims both slots (#1868).
+- **Trimming once at setup (better than TS).** Both slots trim the key and the signing secret, so REST and the login sign with the same material. Native trimmed only for the login, so a padded key could never authenticate REST. A whitespace-only secret is absent: the account starts public-only, as with no credentials, and never signs with an empty key.
+- **Selection by role, not method.** Account, settings and history reads sign with the read key (Secondary, else Primary); trading-job requests and the socket login sign Primary. The one caller-visible change: trading's ReconcileReplacement GET, inside a write job, now signs Primary rather than with the read key. Reads route through the selected egress as before.
+- **Signing refusal.** A provider refusal on a trading write sends no HTTP and fails the command `notSent` (composite jobs keep earlier attempts' outcomes), together with the engine's signing notices. Reads keep their native failure paths.
+- **Login signing failure.** The engine's socket path handles it: an entropy failure closes the session and the reconnect re-signs; a provider refusal latches the role. Native's venue-side `STREAM_UNAVAILABLE` on entropy failure is replaced by the engine's signing diagnostics. The login still follows the ping on the wire.
+- **Wire.** Headers, the login frame and the double-SHA scheme are byte-identical to native; the wire stamp is clamped to be nonnegative.
+- **Controls moved.** The shared "unmigrated family" controls (registry `dispatch_provider` and `hosted_signing`, the WASM shared-provider test and the TS hosted-signing and WASM signer tests) now use MEXC. Crypto.com, named in the plan, already has `dispatchSigning`. Hosted Bitunix signing (P7) is a separate PR.
+- **Inventory.** Bitunix signing sites 25 → 6. Production keeps the user-facing "key and secret" message and the `Sha256SecretSuffix` algorithm name; the doc-vector and the provider fixture account for the rest. Its sign modules are now under the migrated-family ban. Credential selection 9 → 1: the `ReadCredentials` Options type.
+
 ### WEEX remaining inventory and identity custody
 
 WEEX keeps one immutable `Slots<Identity>` owner for selected reads, required

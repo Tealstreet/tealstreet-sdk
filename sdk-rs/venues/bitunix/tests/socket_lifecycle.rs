@@ -1,13 +1,14 @@
+mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketId, TimerId};
-use safe_cex_venue_bitunix::{BitunixFutures, Options};
+use safe_cex_venue_bitunix::BitunixFutures;
 type TestEngine = Engine<BitunixFutures>;
 
 fn ready() -> (TestEngine, Vec<(String, SocketId)>) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(0.0);
     let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
         .into_iter()
