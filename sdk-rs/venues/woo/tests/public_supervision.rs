@@ -1,7 +1,7 @@
 mod support;
 use safe_cex_engine::{Action, Command, Event, PublicFeedPolicy, SocketChannel, SocketId, TimerId};
 use safe_cex_venue_woo::{Options, Woo};
-use support::{MARKETS, TICKERS, TestEngine, requests, response};
+use support::{MARKETS, TICKERS, TestEngine, response};
 
 const PING: &str = r#"{"event":"ping"}"#;
 const PONG: &str = r#"{"event":"pong"}"#;
@@ -28,9 +28,9 @@ impl Harness {
         }));
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(0.0);
-        let r = requests(&mut engine).remove(0);
+        let r = support::prepared_seed_requests(&mut engine, 0.).remove(0);
         response(&mut engine, &r, 10.0, MARKETS);
-        let r = requests(&mut engine).remove(0);
+        let r = support::prepared_seed_requests(&mut engine, 10.).remove(0);
         let mut h = Self {
             engine,
             now: 20.0,
@@ -45,7 +45,8 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        let mut funding = Vec::new();
+        for action in support::prepared_seed_actions(&mut self.engine, self.now) {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
@@ -56,8 +57,21 @@ impl Harness {
                 } => self.public.push(socket),
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } => self.closed.push(socket),
+                Action::Http(request) if request.url.ends_with("/v1/public/funding_rates") => {
+                    funding.push(request.id);
+                }
                 _ => (),
             }
+        }
+        for request in funding {
+            self.engine.handle(
+                self.now,
+                Event::HttpFailed {
+                    request,
+                    error: "scripted funding outage during socket supervision",
+                },
+            );
+            self.collect();
         }
     }
     fn event(&mut self, event: Event<'_>) {

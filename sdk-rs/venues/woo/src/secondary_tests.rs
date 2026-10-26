@@ -25,11 +25,7 @@ fn probe(venue: Woo) -> ProbeVenue<Woo, impl FnMut(&mut Woo, &mut Cx<'_, Pending
                     "/v1/secondary-test",
                     vec![],
                     None,
-                    Pending::Markets {
-                        rows: vec![],
-                        ranges: Default::default(),
-                        skipped: Default::default(),
-                    },
+                    Pending::SigningProbe,
                 )
                 .unwrap();
         }
