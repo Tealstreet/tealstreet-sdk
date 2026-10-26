@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 // @vitest-environment node
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -188,10 +193,10 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
   };
 }
 
-it('audits every registered alias as supported identity or an explicit unsupported product', () => {
+it('retains all historical identity cases and covers the beta alias subset', () => {
   const inventory = [...commandAliases, ...coinbaseAliases, ...orderlyAliases, ...unsupportedAliases];
   expect(new Set(inventory).size).toBe(49);
-  expect(inventory.slice().sort()).toEqual([...RUST_VENUES].sort());
+  expect(inventory.filter((name) => RUST_VENUES.has(name)).sort()).toEqual([...RUST_VENUES].sort());
   expect(commandAliases.length + coinbaseAliases.length + orderlyAliases.length).toBe(33);
 });
 

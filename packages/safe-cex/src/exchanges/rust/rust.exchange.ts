@@ -438,6 +438,16 @@ export class RustEngineExchange extends BaseExchange {
   }
   private capabilityRecord?: EngineCapabilities;
 
+  override get capabilities() {
+    const answers = super.capabilities;
+    if (!this.capabilityRecord?.options) {
+      answers.optionChain = false;
+      answers.optionExpiries = false;
+      answers.accountGreeks = false;
+    }
+    return answers;
+  }
+
   /** Venue-specific answers wait for the engine rather than guessing from the base contract. */
   private requireCapabilities(method: string): EngineCapabilities {
     if (this.capabilityRecord) return this.capabilityRecord;

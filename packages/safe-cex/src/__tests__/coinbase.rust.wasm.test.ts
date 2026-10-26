@@ -1,6 +1,6 @@
 vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
   const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
-  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>(), true);
 });
 
 import type { CommandProgress, Transport } from '@tealstreet/safe-cex-wasm/host';
@@ -89,7 +89,7 @@ const transport = (profile: 'spot' | 'cfm' = 'spot') => {
   return { native, requests, subscriptions };
 };
 
-describe('shipping Coinbase Rust family', () => {
+describe('retained Coinbase Rust family oracle', () => {
   let exchange: RustEngineExchange | undefined;
   let mirrored: BaseExchange | undefined;
   afterEach(() => { exchange?.dispose(); exchange = undefined; mirrored?.dispose(); mirrored = undefined; });

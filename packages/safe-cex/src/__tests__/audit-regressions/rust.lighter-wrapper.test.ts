@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -60,9 +65,9 @@ afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));
 
 describe.each(['lighter', 'lighter-robinhood'] as const)('Rust %s wrapper contract', (name) => {
   const variantSetup = (options: Partial<ExchangeOptions> = {}) => setup(options, name);
-  it('registers lighter and the distinct Robinhood deployment', () => {
+  it('admits Lighter beta while leaving Robinhood disabled', () => {
     expect(isRustVenue('lighter')).toBe(true);
-    expect(isRustVenue('lighter-robinhood')).toBe(true);
+    expect(isRustVenue('lighter-robinhood')).toBe(false);
   });
   it.each([{}, { apiKeyIndex: '1' }, { secret: 'private' }])(
     'starts public without a complete signer tuple %j',
