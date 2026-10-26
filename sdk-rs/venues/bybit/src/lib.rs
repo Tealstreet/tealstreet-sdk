@@ -28,7 +28,8 @@ use safe_cex_engine::model::{
 use safe_cex_engine::socket::{Config, Timeout};
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy, Interest,
-    Invalidation, LifecycleEvent, RetireReason, SocketCapabilities, SocketError, TrafficPolicy,
+    Invalidation, LifecycleEvent, MAX_INTERESTS, RetireReason, SocketCapabilities, SocketError,
+    TrafficPolicy,
 };
 use safe_cex_engine::time;
 use safe_cex_engine::{Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue};
@@ -187,6 +188,8 @@ struct Connection {
     socket: Option<SocketId>,
     open: bool,
     feed: Option<FeedId>,
+    /// Whether this Ready's ticker cap was already reported.
+    tickers_capped: bool,
 }
 
 impl Connection {
@@ -195,6 +198,7 @@ impl Connection {
             socket: None,
             open: false,
             feed: None,
+            tickers_capped: false,
         }
     }
 }
@@ -976,7 +980,8 @@ impl BybitLinear {
             }
             RetireReason::Timeout(_) => "Bybit socket timed out; reconnecting",
             RetireReason::Authentication => "Bybit socket authentication failed; reconnecting",
-            RetireReason::Closed | RetireReason::Stopped => "Bybit socket closed; reconnecting",
+            RetireReason::Closed => "Bybit socket closed; reconnecting",
+            RetireReason::Stopped => "Bybit socket stopped",
         };
         cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
     }
@@ -999,15 +1004,21 @@ impl BybitLinear {
         Some(Channel::Public)
     }
 
-    /// The current category's public topics: tickers, live books, candles, trades.
-    fn public_interests(&self, cx: &Cx<'_, Pending>) -> Vec<Interest> {
-        let mut topics: Vec<String> = cx
-            .store
+    /// The current category's ticker topics from the store.
+    fn ticker_topics(&self, cx: &Cx<'_, Pending>) -> Vec<String> {
+        cx.store
             .markets()
             .iter()
             .filter(|m| self.owns_symbol(&m.symbol))
             .map(|m| format!("tickers.{}", m.symbol))
-            .collect();
+            .collect()
+    }
+
+    /// The current category's public topics: live books, candles, trades, then
+    /// tickers. Tickers are capped so the requested topics always fit the
+    /// engine's interest bound; the bool reports a cap.
+    fn public_interests(&self, cx: &Cx<'_, Pending>) -> (Vec<Interest>, bool) {
+        let mut topics: Vec<String> = Vec::new();
         let spot = self.variant.is_spot();
         for (symbol, state) in &self.books {
             if (!spot && Category::for_symbol(symbol) != self.category)
@@ -1029,14 +1040,30 @@ impl BybitLinear {
                 .filter(|symbol| self.owns_symbol(symbol))
                 .map(|symbol| format!("publicTrade.{symbol}")),
         );
-        topics.into_iter().map(Interest::from_wire_args).collect()
+        let tickers = self.ticker_topics(cx);
+        let room = MAX_INTERESTS.saturating_sub(topics.len());
+        let capped = tickers.len() > room;
+        topics.extend(tickers.into_iter().take(room));
+        (
+            topics.into_iter().map(Interest::from_wire_args).collect(),
+            capped,
+        )
     }
 
     fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
-        if let Some(feed) = self.public.feed
-            && self.public.open
-            && let Err(error) = cx.set_socket_interests(feed, self.public_interests(cx))
-        {
+        let Some(feed) = self.public.feed.filter(|_| self.public.open) else {
+            return;
+        };
+        let (interests, capped) = self.public_interests(cx);
+        if capped && !self.public.tickers_capped {
+            self.public.tickers_capped = true;
+            cx.notice(
+                Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
+                "Bybit public ticker subscriptions exceed the socket interest limit; some tickers are not streamed",
+            );
+        }
+        if let Err(error) = cx.set_socket_interests(feed, interests) {
             self.socket_failed(cx, error);
         }
     }
@@ -2562,6 +2589,7 @@ impl Venue for BybitLinear {
                     }
                     state.sync = Sync::Waiting;
                 }
+                self.public.tickers_capped = false;
                 self.sync_public_interests(cx);
             }
             LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), r#"{"op":"ping"}"#),

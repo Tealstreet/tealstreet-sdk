@@ -32,10 +32,24 @@ venue hooks `socket_control`, `on_socket_event` and `encode_socket_interests`.
   acceptance; HyroTrader keeps its correlated acknowledgements.
 
 One managed-socket contract is stricter than the legacy supervisor: frames on
-an unopened or unauthenticated (Required-auth) socket are not delivered.
-Bybit's venue never sends private data before authentication, so production
-behaviour is unchanged. Test fixtures that sent frames first now open and
-authenticate the sockets first, with no assertion changed.
+an unopened socket are not delivered. Bybit's feeds are AuthMode::None to the
+engine; Bybit runs its own signed auth op and subscribes after its ACK, so
+production behaviour is unchanged. Test fixtures that sent frames first now open
+the sockets and complete Bybit's auth ACK first, with no assertion changed.
+
+Review records (fe7lgm, low findings):
+- A stopped feed (stop_feed/stop_all, no retry) says "Bybit socket stopped",
+  not "reconnecting".
+- The private reset on authentication retirement now runs during engine
+  retirement processing rather than inline; behaviour-equivalent, since the
+  legacy path also applied later rows.
+- Public ticker topics are recomputed from the store on each interest sync.
+  This is legacy parity: a market refresh subscribed new tickers without a
+  reconnect, pinned by market_refresh's pages_commit test, and book or candle
+  syncs leave the ticker set unchanged unless the markets changed.
+- Tickers are capped so the requested books, candles and trades always fit the
+  engine's MAX_INTERESTS (8192); one notice reports a cap per Ready. MAX_FRAMES
+  (4096) is not binding at ten topics per frame.
 
 ## Size and budget
 

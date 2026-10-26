@@ -83,8 +83,8 @@ fn handshake(h: &mut Harness) {
     ack(h, "subscribe");
 }
 
-/// Opens and authenticates the private socket; managed private feeds accept
-/// no traffic before authentication.
+/// Opens the private socket and completes Bybit's own auth ACK: managed sockets
+/// deliver nothing on an unopened socket, and Bybit's session starts at that ACK.
 fn authenticate(h: &mut Harness) {
     let socket = h.socket("/v5/private").unwrap();
     h.event(Event::WsOpened { socket });

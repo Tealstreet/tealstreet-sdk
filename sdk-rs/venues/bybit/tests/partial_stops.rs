@@ -141,7 +141,8 @@ fn ready(profile: Profile) -> Harness {
             );
         }
     } else {
-        // Managed private feeds accept no traffic before authentication.
+        // Managed sockets deliver nothing on an unopened socket; Bybit's own auth ACK then
+        // marks the private session live, as in a real session.
         let socket = h.socket("/v5/private").unwrap();
         h.event(Event::WsOpened { socket });
         h.message(
