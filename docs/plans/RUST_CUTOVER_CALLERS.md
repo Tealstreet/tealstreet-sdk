@@ -9667,3 +9667,5 @@ the shared status precedence. All non-2xx writes remain Unknown, with no resend
 or financial reducer authority, including a body claiming an accepted order ID.
 Auth/rate status fallbacks and header-proven Retry-After remain shared policy.
 The regression covers coded400,401,403,429,408,500 and malformed gateway bodies.
+Beta public evidence uses explicit Rust through the JS/WASM host, including
+managed HTTP recording; native unit results alone do not certify that path.
