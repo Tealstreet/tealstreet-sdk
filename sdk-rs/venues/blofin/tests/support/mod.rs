@@ -45,7 +45,12 @@ impl Harness {
     /// Trusted setup with the venue's refs adjusted, e.g. a missing passphrase ref.
     #[allow(dead_code)]
     pub fn with_identities(adjust: impl FnOnce(&mut safe_cex_engine::signing::Identities)) -> Self {
-        Self::build(INSTRUMENT, false, 0.0, None, adjust)
+        Self::build(INSTRUMENT, false, 0.0, None, false, adjust)
+    }
+    /// A configured Secondary serves signed GETs beside the Primary.
+    #[allow(dead_code)]
+    pub fn with_secondary() -> Self {
+        Self::build(INSTRUMENT, false, 0.0, None, true, |_| {})
     }
     fn with_entropy(
         instruments: &str,
@@ -53,26 +58,35 @@ impl Harness {
         now: f64,
         fill: Option<safe_cex_engine::entropy::Fill>,
     ) -> Self {
-        Self::build(instruments, broker_attribution, now, fill, |_| {})
+        Self::build(instruments, broker_attribution, now, fill, false, |_| {})
     }
     fn build(
         instruments: &str,
         broker_attribution: bool,
         now: f64,
         fill: Option<safe_cex_engine::entropy::Fill>,
+        secondary: bool,
         adjust: impl FnOnce(&mut safe_cex_engine::signing::Identities),
     ) -> Self {
         // Trusted setup registers the same opaque refs the venue holds.
-        let (signer, mut identities) = safe_cex_crypto::signer::LocalSigner::from_json(
-            r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#.into(),
-        )
-        .unwrap();
+        let setup = if secondary {
+            r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"},"secondary":{"key":"read-key","secret":"read-secret","passphrase":"read-pass"}}"#
+        } else {
+            r#"{"primary":{"key":"key","secret":"secret","passphrase":"pass"}}"#
+        };
+        let (signer, mut identities) =
+            safe_cex_crypto::signer::LocalSigner::from_json(setup.into()).unwrap();
         adjust(&mut identities);
         let mut e = safe_cex_engine::test_support::seeded_engine(Blofin::new(Options {
             broker_attribution,
             key: Some("key".into()),
             secret: Some("secret".into()),
             passphrase: Some("pass".into()),
+            read_credentials: secondary.then(|| safe_cex_engine::ReadCredentials {
+                key: "read-key".into(),
+                secret: "read-secret".into(),
+                passphrase: Some("read-pass".into()),
+            }),
             identities: identities.clone(),
             ..Options::default()
         }));
@@ -130,7 +144,8 @@ impl Harness {
         let actions = safe_cex_engine::test_support::prepared_actions(&mut self.e, now);
         self.collect_actions(actions);
     }
-    fn collect_actions(&mut self, actions: Vec<Action>) {
+    /// Records actions a caller already released (e.g. with routing intents).
+    pub fn collect_actions(&mut self, actions: Vec<Action>) {
         let mut receipts = Vec::new();
         for a in actions {
             if let Action::Http(r) = a {
@@ -207,12 +222,20 @@ impl Harness {
         self.respond_at(r, body, start);
     }
     pub fn respond_at(&mut self, r: HttpRequest, body: &str, now: f64) {
+        self.respond_status_at(r, 200, body, now);
+    }
+    #[allow(dead_code)]
+    pub fn respond_status(&mut self, r: HttpRequest, status: u16, body: &str) {
+        let start = self.start;
+        self.respond_status_at(r, status, body, start);
+    }
+    fn respond_status_at(&mut self, r: HttpRequest, status: u16, body: &str, now: f64) {
         self.e.handle(
             now,
             Event::HttpResponse {
                 request: r.id,
                 response: Response {
-                    status: 200,
+                    status,
                     headers: "",
                     body,
                 },
