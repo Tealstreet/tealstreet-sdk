@@ -119,7 +119,7 @@ impl Entry {
             return None;
         }
         let policy = SerialPolicy {
-            credential: credential.clone(),
+            credential: Some(credential.clone()),
             pacing: None,
             refusals_complete: false,
         };
