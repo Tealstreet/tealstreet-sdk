@@ -746,7 +746,6 @@ pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
         _ => false,
     }
 }
-/// Little-endian y (sign bit cleared) strictly below p = 2^255 - 19.
 /// `r || s || recovery` (0 or 1) as `r || s || v` with `v` = 27 or 28.
 fn evm_signature(bytes: &[u8]) -> Result<Zeroizing<[u8; 65]>, SignError> {
     let [signature @ .., recovery] = bytes else {
@@ -761,6 +760,7 @@ fn evm_signature(bytes: &[u8]) -> Result<Zeroizing<[u8; 65]>, SignError> {
     Ok(out)
 }
 
+/// Little-endian y (sign bit cleared) strictly below p = 2^255 - 19.
 fn ed25519_canonical_y(bytes: &[u8; 32]) -> bool {
     let mut y = *bytes;
     y[31] &= 0x7f;
