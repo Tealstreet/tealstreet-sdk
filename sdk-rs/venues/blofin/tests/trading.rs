@@ -16,6 +16,14 @@ fn done(h: &Harness) -> bool {
         .iter()
         .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
 }
+/// No write follows; the only request is the uncertain write's reconcile snapshot.
+fn only_reconcile_pending(h: &Harness) {
+    let urls: Vec<_> = h.pending.iter().map(|r| r.url.as_str()).collect();
+    assert_eq!(
+        urls,
+        ["https://openapi.blofin.com/api/v1/trade/orders-pending?limit=100"]
+    );
+}
 fn seed_order(h: &mut Harness, id: &str, extra: &str) {
     h.ws(&format!(r#"{{"arg":{{"channel":"orders"}},"data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"{id}","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"{extra}}}]}}"#));
 }
@@ -93,7 +101,7 @@ fn lost_placement_response_is_never_retried() {
     );
     h.collect();
     assert!(done(&h));
-    assert!(h.pending.is_empty());
+    only_reconcile_pending(&h);
     assert!(h.e.store().orders().is_empty());
 }
 #[test]
@@ -172,7 +180,7 @@ fn rejected_cancel_prevents_amend_replacement() {
         r#"{"code":"0","data":[{"orderId":"12","code":"500","msg":"denied"}]}"#,
     );
     assert!(done(&h));
-    assert!(h.pending.is_empty());
+    only_reconcile_pending(&h);
 }
 #[test]
 fn conditional_amend_preserves_nested_protection_and_native_execution_provenance() {
@@ -502,7 +510,9 @@ fn margin_default_change_preserves_live_position_margin() {
     );
 }
 #[test]
-fn isolated_hedge_leverage_sends_both_sides_before_either_response() {
+/// W1 interim (RUST_BLOFIN_WRITE_FUNNEL.md): short follows long's Accepted;
+/// W2's barrier restores native parallel release.
+fn isolated_hedge_leverage_sends_short_after_long_is_accepted() {
     let mut h = Harness::new();
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
@@ -553,23 +563,18 @@ fn isolated_hedge_leverage_sends_both_sides_before_either_response() {
         }),
     );
     h.collect();
-    let requests = h
-        .pending
-        .iter()
-        .filter(|r| r.url.ends_with("set-leverage"))
-        .collect::<Vec<_>>();
-    assert_eq!(requests.len(), 2);
-    assert!(
-        requests
+    let leg = |h: &Harness| {
+        let requests = h
+            .pending
             .iter()
-            .any(|r| r.body.as_ref().unwrap().contains("\"long\""))
-    );
-    assert!(
-        requests
-            .iter()
-            .any(|r| r.body.as_ref().unwrap().contains("\"short\""))
-    );
+            .filter(|r| r.url.ends_with("set-leverage"))
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 1);
+        requests[0].body.clone().unwrap()
+    };
+    assert!(leg(&h).contains("\"long\""));
     h.reply("set-leverage", r#"{"code":"0","data":{"leverage":"30"}}"#);
+    assert!(leg(&h).contains("\"short\""));
     assert_ne!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
     h.reply("set-leverage", r#"{"code":"0","data":{"leverage":"30"}}"#);
     assert_eq!(h.e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
@@ -711,7 +716,7 @@ fn already_gone_amend_aborts_without_a_replacement() {
     amend_normal(&mut h);
     h.reply("cancel-batch-orders", r#"{"code":"0","data":[{"orderId":"12","code":"1000","msg":"filled, triggered, canceled or does not exist"}]}"#);
     assert!(done(&h));
-    assert!(h.pending.is_empty());
+    only_reconcile_pending(&h);
 }
 #[test]
 fn replacement_requires_exact_canceled_detail_with_unchanged_fill_quantity() {
@@ -1398,8 +1403,15 @@ fn trading_failures_are_classified_without_changing_their_text() {
     assert_eq!(h.failures[0].outcome, Some(Outcome::Unknown));
     assert_eq!(h.failures[0].kind, Some(ErrorKind::Network));
 
+    // D-a: a documented row code is a typed refusal; a 5xx or an unproven
+    // acknowledgement carries the shared projection's kind. Text is unchanged.
     for (status, body, kind, outcome) in [
-        (502, "Bad Gateway", None, Some(Outcome::Unknown)),
+        (
+            502,
+            "Bad Gateway",
+            Some(ErrorKind::VenueUnavailable),
+            Some(Outcome::Unknown),
+        ),
         (
             429,
             "{}",
@@ -1409,19 +1421,19 @@ fn trading_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"code":"1","msg":"","data":[{"orderId":"","code":"102002","msg":"Insufficient balance"}]}"#,
-            None,
-            None,
+            Some(ErrorKind::Rejected),
+            Some(Outcome::Rejected),
         ),
         (
             200,
             r#"{"code":"0","msg":"","data":[{"orderId":"9","code":"0","msg":"Order placed successfully"}]}"#,
-            None,
+            Some(ErrorKind::Internal),
             Some(Outcome::Unknown),
         ),
         (
             200,
             r#"{"code":"0","msg":"","data":[]}"#,
-            None,
+            Some(ErrorKind::Internal),
             Some(Outcome::Unknown),
         ),
     ] {

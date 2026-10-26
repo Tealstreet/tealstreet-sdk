@@ -3528,6 +3528,60 @@ each one Background read.
 - **Unchanged.** Query bytes, results, row mapping and account Store effects. No
   new frame or result schema.
 
+### BloFin trading writes: Preflight roots and one serial Plan per job (W1)
+
+Every BloFin trading command (place, cancel, cancel-all, amend, leverage, margin
+type, position mode) now opens a Preflight root before validation and runs as one
+streamed serial Plan ([RUST_BLOFIN_WRITE_FUNNEL.md](RUST_BLOFIN_WRITE_FUNNEL.md)).
+Writes are Primary managed Mutations signed by the #2084 recipe, with one 20 s
+bound and no resend. The replacement Verify GET is a managed Read under the
+Secondary-else-Primary read credential and is never retried. The journal now
+projects every outcome.
+- **D-a, documented codes.** The cited BloFin codes (parameter, price/size, balance,
+  duplicate client ID, setting and auth refusals) are typed Rejected refusals.
+  Native row and setting refusals used to have no outcome. Unlisted codes and
+  shape mismatches are Unknown. BloFin returns its 400 ("Bad Request") and 401
+  ("Invalid signature") codes in a 200 body, so they're code rows. The only
+  documented HTTP statuses are 403 (firewall) and 429, and both stay Rejected.
+  Any other non-2xx without a cited body code is now Unknown; native had
+  Rejected for every 4xx. A 5xx is Unknown with kind `venueUnavailable`, and an
+  unproven acknowledgement is Unknown with kind `internal`. The journal owns
+  every outcome and kind. Text is unchanged.
+- **D-b.** A Verify failure after an accepted cancel is never NotSent.
+- **D-c, cancel "gone".** Code 1000 or 102068 on a plain cancel is satisfied.
+  "Gone" is now decided by code alone: the "does not exist" text is 102068's
+  own message. A row with that text under any other code is classified by its
+  code (unlisted is Unknown) and stops the job with its row kept, where native
+  removed the row and continued.
+  That's a behaviour change, under the shared absent-order rule: it now fences the
+  symbol and queues one fresh order snapshot (deferred while a placing scope is
+  held), and a clean snapshot clears the fence. Under a dependent replacement,
+  "gone" still stops with no replacement call.
+- **D-d.** Execution progress between steps ends the job before its next call.
+- **D-e, partial IDs.** IDs accepted before a later refusal now survive on the
+  failure's `partial` instead of being dropped.
+- **Reconcile.** Any Unknown write seal now queues one fresh order snapshot through
+  `reconcile_uncertain`; the native path had none. That snapshot is
+  Primary-signed (`PostUnknownOrderRead`) on every page, even with a read key
+  configured. Only a clean reconcile snapshot clears an order fence, and one
+  requested while another snapshot is in flight runs right after it. Ordinary
+  refreshes still read Secondary-else-Primary.
+- **Queue.** Commands still run in native FIFO order, each parked on its own
+  Preflight. A command whose caller wait lapsed while parked fails once (typed
+  Timeout, NotSent) at its turn and sends nothing.
+- **Store effects.** Creating rows, Canceling marks and the order revision bump
+  now apply per call, after admission and before release, rather than all at job
+  start. Commit effects still apply only after a successful terminal.
+- **W1-to-W2 interim (hedged isolated leverage).** The long leg goes first and the
+  short leg only after long is Accepted, at the cost of one extra round trip. A
+  long 503 or refusal means short is never sent. A short refusal or 503 after
+  long keeps long's effect (outcome None, or Unknown for the 503), applies no
+  commit and refreshes the account as before. W2's barrier restores native
+  parallel release.
+- **Unchanged.** Paths, bodies, batch sizes (20/10/1), the 1000-lot split, the
+  350/1000 ms pauses, client-ID rules, broker attribution, receipts and result
+  JSON.
+
 ### Bitunix histories: shared cursor and accepted-page completion
 
 Bitunix fills, orders and income now use the existing engine CursorHistory owner.
