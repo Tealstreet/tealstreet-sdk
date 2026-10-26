@@ -9908,3 +9908,12 @@ alias and transitive local Cargo features. Setup mappings declare their required
 bootstrap features; AsterDEX additionally requires address setup and signing
 metadata. Combined default features cannot satisfy an isolated family's check.
 Negative controls pin missing features and reject unknown setup mappings.
+
+### Lighter: an Unknown placement fences its symbol
+
+Lighter now opts into `guard_pending_placements`. After a placement whose
+outcome is Unknown (a lost or 5xx `sendTx`), `CancelSymbolOrders` on that
+symbol fails with "Placement outcome is uncertain; reconcile before
+cancel-all" and sends nothing, until the next complete orders snapshot
+reconciles. A further placement on the symbol is still admitted until the
+engine's order-lock acquire also consults the uncertain scope for placements.
