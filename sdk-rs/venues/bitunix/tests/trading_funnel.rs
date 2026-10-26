@@ -317,7 +317,10 @@ fn an_older_prerequisite_snapshot_never_overwrites_a_newer_one() {
     assert_eq!(reads.len(), 2, "each job reads positions");
     answer(&mut e, 2001.0, &reads[1], POSITIONS);
     let actions = answer(&mut e, 2002.0, &reads[0], r#"{"code":0,"data":[]}"#);
-    assert!(!e.store().positions().is_empty(), "the newer snapshot stands");
+    assert!(
+        !e.store().positions().is_empty(),
+        "the newer snapshot stands"
+    );
     assert_eq!(
         failure(&actions, 61).and_then(|e| e.outcome),
         Some(Outcome::NotSent)

@@ -152,6 +152,9 @@ impl Step {
     fn read(&self) -> bool {
         matches!(self.call, Call::ReconcileReplacement { .. })
     }
+    fn single_place(&self) -> bool {
+        matches!(self.call, Call::Place { batch: false, .. })
+    }
 }
 #[derive(Default)]
 struct Job {
@@ -1823,7 +1826,7 @@ impl BitunixFutures {
         }
         if definitive
             && message.contains("position does not exist")
-            && matches!(request.step.call, Call::Place { batch: false, .. })
+            && request.step.single_place()
             && let Some(orders) = self
                 .trading
                 .live
