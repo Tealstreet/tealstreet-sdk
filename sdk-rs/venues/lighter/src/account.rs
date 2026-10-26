@@ -852,8 +852,9 @@ impl Lighter {
     }
     /// An uncertainty reconcile needs a read requested after the write: one
     /// already in flight may predate it, so another follows once it settles.
+    /// A re-ask (no new uncertain write) joins the running read instead.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.orders_again |= self.account.orders_inflight;
+        self.account.orders_again |= self.account.orders_inflight && !cx.reconcile_reask();
         self.refresh_orders(cx);
     }
     fn orders_settled(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1929,6 +1930,7 @@ impl Lighter {
         revision: u64,
         orders: Vec<Order>,
         coverage: &SnapshotCoverage<String>,
+        paged: bool,
     ) {
         let mut ids = HashSet::new();
         let mut merged = orders
@@ -1955,7 +1957,12 @@ impl Lighter {
             .records
             .retain(|id, _| active.contains(id.as_str()));
         cx.store.set_orders(merged);
-        if !coverage.any() && revision == self.account.revision {
+        // Each per-market page carries its own read token, so the last one cannot
+        // vouch for the first: a paged census owed a successor may predate the write.
+        if !coverage.any()
+            && revision == self.account.revision
+            && !(paged && self.account.orders_again)
+        {
             cx.orders_reconciled(None);
         }
     }
@@ -2096,11 +2103,11 @@ impl Lighter {
                             self.request_orders(cx, Some(market), revision, coverage);
                         } else {
                             let batch = self.account.batch.take().unwrap();
-                            self.commit_orders(cx, batch.revision, batch.orders, &coverage);
+                            self.commit_orders(cx, batch.revision, batch.orders, &coverage, true);
                             self.orders_settled(cx);
                         }
                     } else {
-                        self.commit_orders(cx, revision, orders, &coverage);
+                        self.commit_orders(cx, revision, orders, &coverage, false);
                         self.orders_settled(cx);
                     }
                 } else if market.is_none()

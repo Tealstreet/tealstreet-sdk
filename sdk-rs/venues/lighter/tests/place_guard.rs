@@ -256,6 +256,56 @@ fn an_orders_read_issued_before_the_unknown_write_does_not_release_it() {
     assert_place_admitted(&mut e, &mut t, at, 9);
 }
 
+// The census can fall back to one accountActiveOrders read per market, each in its
+// own context. A census whose first page was read before the Unknown write must not
+// release it, even when its last page is requested after: a fresh census follows.
+#[test]
+fn a_per_market_census_begun_before_the_unknown_write_does_not_release_it() {
+    let (mut e, mut t) = ready_eth();
+    let at = NOW + 2_000.;
+    let all = orders_reads(&advance(&mut e, &mut t, at));
+    assert_eq!(all.len(), 1, "one pre-write orders read is in flight");
+    // The all-markets read is refused, so the census pages per market.
+    reply_at(
+        &mut e,
+        at,
+        &all[0],
+        400,
+        r#"{"code":20001,"message":"invalid param: market_id"}"#,
+    );
+    let first = orders_reads(&drain_at(&mut e, &mut t, at));
+    assert_eq!(
+        first.len(),
+        1,
+        "{:?}",
+        first.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    assert!(first[0].url.contains("market_id=1"), "{}", first[0].url);
+    // The first page is read before the write; the write then seals Unknown.
+    let out = unknown_placement_at(&mut e, &mut t, at);
+    assert!(
+        orders_reads(&out).is_empty(),
+        "the reconcile joins the running census"
+    );
+    reply_at(&mut e, at, &first[0], 200, OPEN);
+    let last = orders_reads(&drain_at(&mut e, &mut t, at));
+    assert_eq!(
+        last.len(),
+        1,
+        "{:?}",
+        last.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    assert!(last[0].url.contains("market_id=2"), "{}", last[0].url);
+    // The last page is requested after the write, but the census began before it.
+    reply_at(&mut e, at, &last[0], 200, r#"{"code":200,"orders":[]}"#);
+    let fresh = orders_reads(&drain_at(&mut e, &mut t, at));
+    assert_place_refused(&mut e, &mut t, at, 8);
+    assert_eq!(fresh.len(), 1, "a follow-up census starts");
+    reply_at(&mut e, at, &fresh[0], 200, OPEN);
+    drain_at(&mut e, &mut t, at);
+    assert_place_admitted(&mut e, &mut t, at, 9);
+}
+
 // The engine re-asks reconcile_uncertain at 1, 2 and 4 s while fenced. A re-ask must
 // join the outstanding post-write read (owing at most one more), never restart it or
 // raise a release floor, so a read slower than the backoff still releases on arrival.
