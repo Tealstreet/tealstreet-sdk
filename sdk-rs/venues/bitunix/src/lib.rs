@@ -96,21 +96,23 @@ impl Pending {
             _ => None,
         }
     }
-    /// Settle whatever read authority the request held; idempotent.
+    /// Settle a Background read's authority; idempotent. Command-owned
+    /// prerequisite reads settle through their Preflight or Plan instead.
     pub(crate) fn release(&mut self, cx: &mut Cx<'_, Pending>) {
         let custody = match self {
-            Self::Private(read) => read.custody.take(),
-            Self::SymbolSettings { custody, .. } => custody.take(),
-            _ => None,
+            Self::Private(read) => &mut read.custody,
+            Self::SymbolSettings { custody, .. } => custody,
+            _ => return,
         };
-        if let Some(custody) = custody {
+        if matches!(custody, Some(account::ReadCustody::Background(_)))
+            && let Some(custody) = custody.take()
+        {
             let _ = cx.finish_http_context(custody.context());
         }
     }
     /// Exact delivery precedes any decoding or Store effect.
     fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
-        self.custody()
-            .is_none_or(|custody| cx.validate_http_context(custody.context()).is_ok())
+        self.custody().is_none_or(|custody| custody.delivered(cx))
     }
 }
 #[derive(Clone)]
@@ -787,9 +789,10 @@ impl Venue for BitunixFutures {
                         account::Axis::Orders => 2,
                         account::Axis::Tpsl => 3,
                     }] == read.serial;
+                let custody = read.custody.take();
                 self.account_response(cx, read, response);
                 if let Some(command) = after {
-                    self.prepared(cx, command, success);
+                    self.prepared(cx, command, success, custody);
                 }
                 return;
             }

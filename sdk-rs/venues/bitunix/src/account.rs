@@ -9,7 +9,10 @@ use safe_cex_engine::execution::{Arithmetic, Cursor, ExecutionRounding};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::request_context::{Context, RetryPolicy, Scope};
+use safe_cex_engine::request_context::plan::{CallTerms, RetryWindow, SerialCall, Slot};
+use safe_cex_engine::request_context::{
+    Context, Operation, Plan, Policy, Preflight, RetryPolicy, Scope,
+};
 use safe_cex_engine::selected_read::{
     AdmittedRead, ReadPolicy, ReadRequest, ReadRole, SelectedRead,
 };
@@ -54,11 +57,25 @@ pub struct PositionAdmission {
 pub enum ReadCustody {
     /// A Background read on the read key (else Primary).
     Background(AdmittedRead),
+    /// A placement's prerequisite read before its Plan exists (Primary).
+    Preflight(Preflight, Context),
+    /// A prerequisite read as the job's own serial Read call (Primary).
+    Plan(Plan, Slot, Context),
 }
 impl ReadCustody {
     pub(crate) fn context(&self) -> &Context {
         match self {
             Self::Background(read) => read.context(),
+            Self::Preflight(_, context) | Self::Plan(_, _, context) => context,
+        }
+    }
+    pub(crate) fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        match self {
+            Self::Background(read) => cx.validate_http_context(read.context()).is_ok(),
+            Self::Preflight(preflight, context) => {
+                cx.validate_preflight_delivery(preflight, context).is_ok()
+            }
+            Self::Plan(plan, _, context) => cx.validate_plan_delivery(plan, context).is_ok(),
         }
     }
 }
@@ -313,6 +330,9 @@ impl BitunixFutures {
         if background {
             return self.issue_read(cx, path, params, pending);
         }
+        if let Pending::Private(read) = pending {
+            return self.issue_prerequisite(cx, path, params, read);
+        }
         // By role, not method: a GET inside a trading job signs Primary.
         let role = match &pending {
             Pending::Private(read) => CredentialRole::Read {
@@ -431,6 +451,94 @@ impl BitunixFutures {
             self.fail_private(cx, pending, &error.venue_error().message);
         }
     }
+    /// A placement's prerequisite read under its command: a Preflight read
+    /// before the Plan exists, else the Plan's next serial Read call. Both sign
+    /// Primary. Any refusal fails the prerequisite NotSent before a write.
+    fn issue_prerequisite(&mut self, cx: &mut Cx<'_, Pending>, path: &str, params: Params, mut read: Read) {
+        let command = read.after.expect("a prerequisite read");
+        let Some((credential, identity)) = self.trade_identity() else {
+            return self.prepared(cx, command, false, None);
+        };
+        let Some(live) = self.trading.live_mut(command) else {
+            return self.prepared(cx, command, false, None);
+        };
+        let custody = match live.plan.clone() {
+            None => {
+                let preflight = live.preflight.clone();
+                let context = cx.preflight_read_context(
+                    &preflight,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: Some(credential),
+                        timeout_ms: crate::trading::CALL_MS,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                    CallTerms {
+                        wait_ms: 0,
+                        timeout_ms: crate::trading::CALL_MS,
+                        attempts: 1,
+                        retry_window: RetryWindow::FreshAttempt,
+                    },
+                );
+                context.map(|context| ReadCustody::Preflight(preflight, context))
+            }
+            Some(plan) => match live.current.take() {
+                Some((slot, current)) => cx
+                    .continue_serial_plan(
+                        &plan,
+                        &slot,
+                        &current,
+                        SerialCall {
+                            operation: Operation::Read,
+                            timeout_ms: crate::trading::CALL_MS,
+                            attempts: 1,
+                        },
+                    )
+                    .and_then(|slot| {
+                        cx.plan_leg_context(&plan, &slot)
+                            .map(|context| ReadCustody::Plan(plan, slot, context))
+                    }),
+                None => Err(safe_cex_engine::request_context::Error::Revoked),
+            },
+        };
+        let Ok(custody) = custody else {
+            return self.prepared(cx, command, false, None);
+        };
+        let query = params.query();
+        let url = format!(
+            "{REST}{path}{}{}",
+            if query.is_empty() { "" } else { "?" },
+            query
+        );
+        let recipe = sign::dispatch::Http::new(
+            identity,
+            Method::Get,
+            url.clone(),
+            params.signing(),
+            None,
+            self.options.testnet,
+        );
+        let context = custody.context().clone();
+        let stream = read.axis != Axis::Balance;
+        read.custody = Some(custody);
+        match cx.request_signed_managed(
+            context,
+            None,
+            Method::Get,
+            url,
+            None,
+            Box::new(recipe),
+            Pending::Private(read),
+        ) {
+            Ok(id) => {
+                if stream {
+                    cx.stream_response(id, crate::recovery::LIST);
+                }
+            }
+            Err(_) => self.prepared(cx, command, false, None),
+        }
+    }
     pub(crate) fn read_axis(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
         self.read_axis_for(cx, axis, None);
     }
@@ -449,7 +557,7 @@ impl BitunixFutures {
             .blocked(cx, &crate::recovery::Key::Axis(axis))
         {
             if let Some(command) = after {
-                self.prepared(cx, command, false);
+                self.prepared(cx, command, false, None);
             }
             return;
         }
@@ -470,7 +578,7 @@ impl BitunixFutures {
                     "Bitunix order snapshot admission exhausted",
                 );
                 if let Some(command) = after {
-                    self.prepared(cx, command, false);
+                    self.prepared(cx, command, false, None);
                 }
                 return;
             };
@@ -994,7 +1102,7 @@ impl BitunixFutures {
             crate::recovery::notice(cx, response);
         }
         if let Some(command) = read.after {
-            self.prepared(cx, command, false);
+            self.prepared(cx, command, false, None);
         }
     }
     pub(crate) fn settings_failed(
