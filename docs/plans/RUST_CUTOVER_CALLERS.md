@@ -2661,6 +2661,18 @@ metadata/settings or fill-completeness state. Existing TS internal snapshot
 seeding/gap repair is separate; the bounded NX/CLI/MCP audit established no
 direct default producer or new caller argument.
 
+### Hyperliquid mixed batch effects and accepted identities
+
+Rust retains every proven Resting/Filled order ID from a correctly correlated
+batch, even when another row refuses. The failure carries structured partial
+order IDs and Unknown for a mixed result; it never reports the whole batch as
+rejected or resends it. Accepted rows run the normal account reducer. A mixed
+cancel removes successful/terminal legs and restores only refused legs, so a
+cancelled order is never resurrected. All-refused batches retain Rejected with
+no accepted IDs. An accepted earlier physical call followed by a later refusal
+also retains its IDs and projects Unknown. This deliberately fixes the native early-error return; existing
+custody originals that described its dropped-ID behaviour now pin this contract.
+
 ### Hyperliquid signed cancellation scheduling (#1693)
 
 The existing perpetual `scheduleCancel(time?: number | null): Promise<void>`
@@ -9658,14 +9670,14 @@ peers then two independent candle peers after genuine429. Exact completion
 Cancel is captured/checked once. The secondary helper is test support with real
 installed providers and genuine test command entry; native assertions retained.
 
-### Hyperliquid mixed batch effects and accepted identities
+### Phemex beta non-success write diagnostics
 
-Rust retains every proven Resting/Filled order ID from a correctly correlated
-batch, even when another row refuses. The failure carries structured partial
-order IDs and Unknown for a mixed result; it never reports the whole batch as
-rejected or resends it. Accepted rows run the normal account reducer. A mixed
-cancel removes successful/terminal legs and restores only refused legs, so a
-cancelled order is never resurrected. All-refused batches retain Rejected with
-no accepted IDs. An accepted earlier physical call followed by a later refusal
-also retains its IDs and projects Unknown. This deliberately fixes the native early-error return; existing
-custody originals that described its dropped-ID behaviour now pin this contract.
+Non-2xx managed writes retain the shared classifier's kind and strict native
+code/message in the terminal error instead of only embedding the HTTP body in
+prose. HTTP408/5xx use the existing bounded diagnostic-evidence hook; they keep
+the shared status precedence. All non-2xx writes remain Unknown, with no resend
+or financial reducer authority, including a body claiming an accepted order ID.
+Auth/rate status fallbacks and header-proven Retry-After remain shared policy.
+The regression covers coded400,401,403,429,408,500 and malformed gateway bodies.
+Beta public evidence uses explicit Rust through the JS/WASM host, including
+managed HTTP recording; native unit results alone do not certify that path.
