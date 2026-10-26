@@ -540,6 +540,11 @@ impl Venue for Kraken {
         true
     }
 
+    #[inline]
+    fn managed_sockets() -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }

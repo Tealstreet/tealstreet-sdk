@@ -402,6 +402,11 @@ impl Venue for KrakenSpot {
         true
     }
 
+    #[inline]
+    fn managed_sockets() -> bool {
+        true
+    }
+
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities::NO_HISTORY
