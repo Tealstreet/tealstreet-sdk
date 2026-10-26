@@ -9714,3 +9714,12 @@ managed-HTTP recorder fix; no native-host run counts as browser readiness.
 ### Binance signing residue: legacy test oracle retired
 
 No caller-visible change. Binance already signed every request through the provider. The remaining legacy signing code was a test-only HMAC oracle and fixtures, now replaced by provider-path proofs of the documented vector and of every configured receive window ([RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md)). Signing inventory for Binance: 27 → 4, the four being the dispatch recipe's own lines.
+
+### ApeX Omni browser signer bootstrap
+
+The isolated ApeX WASM family enables `dispatch-signing`, matching its
+construction declaration and accepting the bridge's separate local signer setup.
+Raw compatibility and explicit setup both construct a real installed provider,
+retain private capability, and start managed discovery. Native constructor and
+compiled-family integration controls exercise both paths with the public zkLink
+seed corpus. The cross-venue construction feature guard is a separate follow-up.

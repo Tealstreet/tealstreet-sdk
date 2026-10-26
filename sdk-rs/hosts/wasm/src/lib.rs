@@ -1762,6 +1762,46 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "apexomni", not(target_arch = "wasm32")))]
+    #[test]
+    fn apexomni_family_bootstraps_raw_and_explicit_local_signer_setup() {
+        let corpus: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../crypto/tests/fixtures/zklink/npm-wasm.json"
+        ))
+        .unwrap();
+        let seed = corpus["cases"][0]["seed"].as_str().unwrap();
+        let raw = serde_json::json!({
+            "key": "api-key", "secret": "bXlzZWNyZXQ=", "passphrase": "pass",
+            "omniKeySeed": seed,
+            "publicMode": {"requested": false},
+        });
+        let setup = serde_json::json!({"primary": {
+            "key": "api-key", "secret": "bXlzZWNyZXQ=", "passphrase": "pass",
+            "extra": {"zklinkSeed": {"value": seed, "encoding": "hex"}},
+        }});
+        for (options, setup) in [
+            (raw.to_string(), None),
+            (
+                r#"{"publicMode":{"requested":false}}"#.into(),
+                Some(setup.to_string()),
+            ),
+        ] {
+            let Ok(mut engine) = super::WasmEngine::new("apexomni", &options, setup) else {
+                panic!("ApeX local setup must construct the installed signer");
+            };
+            assert!(engine.dispatch_signing);
+            assert!(engine.inner.signer().is_some());
+            assert!(!engine.requires_external_signer());
+            let construction: serde_json::Value =
+                serde_json::from_str(&engine.construction()).unwrap();
+            assert_eq!(construction["canSign"], true);
+            assert_eq!(construction["publicDataOnly"], false);
+            let actions: Vec<serde_json::Value> =
+                serde_json::from_str(&engine.start(1000.)).unwrap();
+            assert!(actions.iter().any(|action| action["op"] == "managedHttp"));
+        }
+    }
+
     #[cfg(all(feature = "mexc", not(target_arch = "wasm32")))]
     #[test]
     fn mexc_family_bootstraps_raw_and_explicit_local_signer_setup() {
