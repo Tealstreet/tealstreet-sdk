@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle, restorePairedRawOutputs } from './cpu-ci.mjs';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -128,6 +129,34 @@ test('required check wrappers accept only successful complete same-run same-chec
     value => { value.results.suites.unknown = true; }, value => { value.suite = 'unknown'; }]) {
     const bad = structuredClone(args); change(bad); assert.throws(() => requireCertifiedSuite(bad));
   }
+});
+
+test('status names incomplete shared certification before reading absent or malformed output', () => {
+  for (const result of ['failure', 'cancelled', 'skipped', '']) for (const output of ['', '{not JSON']) {
+    const child = spawnSync(process.execPath, ['sdk-rs/harness/cpu-ci.mjs', '--command', 'status', '--suite', 'bitget'], {
+      encoding: 'utf8', env: { ...process.env, CPU_CERT_RESULT: result, CPU_CERT_RESULTS: output },
+    });
+    assert.equal(child.status, 1);
+    assert.equal(child.stderr.trim(), `shared CPU certification did not complete (result=${result || 'missing'}); non-blocking`);
+    assert.doesNotMatch(child.stdout, /accepted/);
+  }
+});
+
+test('successful upstream status still requires complete same-run same-checkout certification', () => {
+  const checkoutSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const results = { schema: 1, runId: 123, checkoutSha, suites: Object.fromEntries(GATE_SUITES.map(suite => [suite, true])) };
+  const status = value => spawnSync(process.execPath, ['sdk-rs/harness/cpu-ci.mjs', '--command', 'status', '--suite', 'bitget'], {
+    encoding: 'utf8', env: { ...process.env, CPU_CERT_RESULT: 'success', CPU_CERT_RESULTS: value, GITHUB_RUN_ID: '123' },
+  });
+  const pass = status(JSON.stringify(results));
+  assert.equal(pass.status, 0, pass.stderr);
+  assert.match(pass.stdout, /CPU certification accepted for bitget/);
+  for (const mutate of [value => { value.runId++; }, value => { value.checkoutSha = 'f'.repeat(40); },
+    value => { delete value.suites.woo; }, value => { value.suites.woo = false; }]) {
+    const value = structuredClone(results); mutate(value); const failure = status(JSON.stringify(value));
+    assert.equal(failure.status, 1); assert.doesNotMatch(failure.stdout, /accepted/);
+  }
+  assert.equal(status('').status, 1);
 });
 
 
