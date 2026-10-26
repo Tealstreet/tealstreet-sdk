@@ -851,6 +851,8 @@ impl BitgetFutures {
                             self.account.plans.insert(id, plan);
                         }
                     }
+                    // Only a clean census can prove an uncertain placement absent.
+                    let clean = snapshot.skipped.rejected() == 0;
                     self.commit_orders(
                         cx,
                         snapshot.rows,
@@ -859,10 +861,10 @@ impl BitgetFutures {
                         snapshot.started,
                         snapshot.stream_revision,
                     );
-                    if !snapshot.virtual_only {
+                    if !snapshot.virtual_only && clean {
                         cx.orders_reconciled(None);
                     }
-                    if self.account.uta && self.account.orders_dirty {
+                    if self.account.orders_dirty {
                         self.refresh_orders(cx, false);
                     }
                 }
@@ -2119,7 +2121,7 @@ impl BitgetFutures {
     }
 
     /// A complete order read for an Unknown write. One already in flight may
-    /// predate the write, so a UTA account reads again after it.
+    /// predate the write, so another follows it; a re-ask joins either.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.orders_dirty = true;
         self.refresh_orders(cx, false);

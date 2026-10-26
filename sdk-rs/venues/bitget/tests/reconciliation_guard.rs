@@ -176,3 +176,65 @@ fn an_unknown_placement_starts_a_fresh_order_census() {
             .any(|r| r.url.contains("/batch-place-order"))
     );
 }
+
+/// One Unknown BTCUSDT placement, with every earlier census settled first.
+fn unknown_placement(h: &mut Harness) {
+    while h.requests.iter().any(|r| r.url.contains("/orders-pending")) {
+        h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
+    }
+    place(h, 51);
+    let write = h.take("/batch-place-order");
+    h.event(Event::HttpFailed {
+        request: write.id,
+        error: "response lost after acceptance",
+    });
+}
+
+#[test]
+fn a_census_with_a_rejected_row_keeps_the_fence() {
+    let mut h = Harness::classic();
+    unknown_placement(&mut h);
+    // A malformed row could be the possibly placed order: the census is not clean.
+    h.orders(r#"{"code":"00000","data":{"entrustedList":[{"symbol":"BTCUSDT"}]}}"#);
+    h.failures.clear();
+    place(&mut h, 52);
+    assert!(
+        fenced(&h, 52),
+        "an unclean census never releases: {:?}",
+        h.done
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/batch-place-order"))
+    );
+}
+
+#[test]
+fn a_failed_census_is_re_asked_and_the_fresh_one_releases() {
+    let mut h = Harness::classic();
+    unknown_placement(&mut h);
+    h.respond("/orders-pending", 500, "");
+    while h.requests.iter().any(|r| r.url.contains("/orders-pending")) {
+        h.respond("/orders-pending", 500, "");
+    }
+    h.failures.clear();
+    place(&mut h, 53);
+    assert!(fenced(&h, 53), "a failed census keeps the fence");
+    // The engine re-asks reconcile_uncertain after 1 s; the hook starts a census.
+    h.timer_after(1_000.0);
+    assert!(
+        h.requests.iter().any(|r| r.url.contains("/orders-pending")),
+        "the re-ask starts a fresh census: {:?}",
+        h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
+    place(&mut h, 54);
+    assert!(
+        h.requests
+            .iter()
+            .any(|r| r.url.contains("/batch-place-order")),
+        "the fresh census releases: {:?}",
+        h.done
+    );
+}
