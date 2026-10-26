@@ -403,9 +403,54 @@ fn a_failed_entry_skips_only_its_children_then_attempts_the_next_entry() {
         assert_eq!(payload.kind, "MARKET");
         assert_eq!(payload.client_id.as_deref(), Some("next"));
         h.respond(next, 200, r#"{"id":"accepted-next","client_id":"next"}"#);
-        assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
         assert!(h.pending.is_empty());
+        if ambiguous {
+            // A lost entry may have been accepted: never success, and the
+            // accepted next order stays visible.
+            let error = failed(&h, 71);
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            assert_eq!(error.partial.unwrap().order_ids, ["accepted-next"]);
+        } else {
+            assert_eq!(h.result(71), Ok("[\"accepted-next\"]"));
+        }
     }
+}
+
+#[test]
+fn a_child_leg_lost_in_transport_makes_the_command_unknown_with_accepted_ids() {
+    let mut h = private();
+    bracket_entry(&mut h, 12, None);
+    let tp = h.take("/orders");
+    h.e.handle(
+        h.now,
+        Event::HttpFailed {
+            request: tp.id,
+            error: "response lost after possible acceptance",
+        },
+    );
+    h.collect();
+    // The sibling stop-loss is still placed.
+    let sl = h.take("/orders");
+    h.respond(sl, 200, r#"{"id":"sl"}"#);
+    assert!(h.pending.is_empty());
+    let error = failed(&h, 12);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.partial.unwrap().order_ids, ["entry", "sl"]);
+}
+
+fn failed(h: &Harness, id: u32) -> safe_cex_engine::VenueError {
+    h.actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error })
+                if *command == id =>
+            {
+                Some(error.clone())
+            }
+            _ => None,
+        })
+        .expect("command failed")
 }
 
 #[test]
