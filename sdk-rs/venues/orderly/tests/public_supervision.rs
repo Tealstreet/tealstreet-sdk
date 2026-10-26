@@ -47,7 +47,7 @@ impl Harness {
     }
     fn private() -> Self {
         let mut h = Self {
-            e: safe_cex_engine::test_support::seeded_engine(Orderly::new(options())),
+            e: support::engine(options()),
             clock: Clock::new(1000.0),
             log: vec![],
         };
