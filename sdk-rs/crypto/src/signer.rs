@@ -36,6 +36,11 @@ pub struct LocalIdentity {
     pub secret_encoding: KeyEncoding,
     #[serde(default)]
     pub trim_credential: bool,
+    /// Trim the signing key text once before decoding; policy-declared.
+    /// Linked only by families that declare it (Bitunix).
+    #[cfg(feature = "trim-signing")]
+    #[serde(default)]
+    pub trim_signing: bool,
     /// Declared extra signing material, e.g. ApeX's zkLink seed.
     #[serde(default)]
     pub extra: LocalExtras,
@@ -54,6 +59,8 @@ impl Default for LocalIdentity {
             stable_id: None,
             secret_encoding: KeyEncoding::default(),
             trim_credential: false,
+            #[cfg(feature = "trim-signing")]
+            trim_signing: false,
             extra: LocalExtras::default(),
             signing_from_primary: false,
         }
@@ -137,6 +144,19 @@ impl<'de> serde::Deserialize<'de> for Secret {
     }
 }
 
+/// Unicode White_Space trim into a fresh guarded buffer; the input is wiped on drop.
+#[cfg(feature = "trim-signing")]
+fn trimmed(input: Secret) -> Secret {
+    let Some(value) = input.0.as_deref() else {
+        return input;
+    };
+    let text = value.trim();
+    if text.len() == value.len() {
+        return input;
+    }
+    Secret::new(text.to_owned())
+}
+
 // Decoded buffers stay guarded on every failure, including the second slot.
 struct DecodedIdentity {
     key: Zeroizing<Vec<u8>>,
@@ -164,9 +184,17 @@ impl DecodedIdentity {
                     .to_vec(),
             );
         }
+        #[cfg(feature = "trim-signing")]
+        let secret = if identity.trim_signing {
+            trimmed(identity.secret)
+        } else {
+            identity.secret
+        };
+        #[cfg(not(feature = "trim-signing"))]
+        let secret = identity.secret;
         Ok(Self {
             key,
-            secret: key_material::decode(identity.secret, identity.secret_encoding)?,
+            secret: key_material::decode(secret, identity.secret_encoding)?,
             passphrase: identity
                 .passphrase
                 .map(|value| key_material::decode(value, KeyEncoding::Utf8))
@@ -291,6 +319,10 @@ impl LocalSigner {
                 if let Some(trim) = rule.and_then(|rule| rule.trim_credential) {
                     identity.trim_credential = trim;
                 }
+                #[cfg(feature = "trim-signing")]
+                if let Some(trim) = rule.and_then(|rule| rule.trim_signing) {
+                    identity.trim_signing = trim;
+                }
                 if let Some(encoding) = rule.and_then(|rule| rule.secret_encoding) {
                     identity.secret_encoding = encoding;
                 }
@@ -402,6 +434,18 @@ impl LocalSigner {
             if let (Some(identity), Some(algorithm)) = (identity, declared(rule))
                 && let Some(signing) = identity.signing_opt().filter(|key| !key.0.is_empty())
             {
+                // A declared Schnorr key is refused at setup, never reduced,
+                // with the same rule its sign and public-key arms apply. Only
+                // `schnorr` builds can sign one, so only they pay for the check.
+                #[cfg(feature = "schnorr")]
+                if algorithm == Algorithm::SchnorrDigest
+                    && !signer
+                        .keys
+                        .get(signing)
+                        .is_some_and(|key| crate::lighter::canonical_scalar(key).unwrap_or(false))
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 signer.algorithms.insert(signing.clone(), algorithm);
             }
         }
@@ -657,6 +701,7 @@ impl LocalSigner {
                     match algorithm {
                         Algorithm::Ed25519 => primitives::ed25519_public(key)?,
                         Algorithm::StarkDigest => primitives::stark_public(key)?,
+                        Algorithm::SchnorrDigest => primitives::schnorr_public(key)?,
                         _ => return Err(SignError::InvalidRequest),
                     }
                 }
@@ -733,6 +778,11 @@ pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
             algorithm: Algorithm::StarkDigest,
             ..
         } => crate::starknet::is_public_key(value),
+        #[cfg(feature = "schnorr")]
+        Operation::PublicKey {
+            algorithm: Algorithm::SchnorrDigest,
+            ..
+        } => crate::lighter::is_public_key(value),
         _ => false,
     }
 }
@@ -1248,6 +1298,150 @@ mod tests {
         (signer, ids.primary.unwrap().signing_ref().unwrap().clone())
     }
 
+    /// A declared Schnorr ref installed without setup's key check.
+    fn installed_schnorr(key: &[u8]) -> (LocalSigner, KeyRef) {
+        let mut signer = LocalSigner::new();
+        let reference = KeyRef("installed.schnorr".into());
+        signer
+            .insert_declared(reference.clone(), key.to_vec(), Algorithm::SchnorrDigest)
+            .unwrap();
+        (signer, reference)
+    }
+
+    fn schnorr_public_request(key: KeyRef) -> (Operation, SignRequest) {
+        let operation = Operation::PublicKey {
+            algorithm: Algorithm::SchnorrDigest,
+            key,
+        };
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![operation.clone()],
+        };
+        (operation, request)
+    }
+
+    /// R6: the provider's public key is Lighter's derivation, passes the
+    /// semantic check and verifies a signature from the same declared ref.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_key_matches_derivation_and_verifies_its_signature() {
+        use goldilocks_crypto::ScalarField;
+        let key = ScalarField::NEG_ONE.to_bytes_le();
+        let (signer, signing) = schnorr_signer(&key);
+        let (operation, request) = schnorr_public_request(signing.clone());
+        let mut result = signer.sign_now(&request).unwrap();
+        let public = result.values.remove(0);
+        assert_eq!(public, crate::lighter::public_key(&key).unwrap().to_vec());
+        assert!(valid_public_value(&operation, &public));
+        let input = [7u8; 16];
+        let mut payload = vec![0x22; 32];
+        payload.extend_from_slice(&input);
+        let signature = signer
+            .sign_now(&schnorr_request(signing, payload))
+            .unwrap()
+            .values
+            .remove(0);
+        assert!(crate::lighter::schnorr_verify(&input, &public, &signature).unwrap());
+    }
+
+    /// The derived public key is always canonical (each limb below p), as Go
+    /// emits it; this scalar's point once encoded a limb as an unreduced p.
+    #[test]
+    fn lighter_public_keys_are_canonically_encoded() {
+        use goldilocks_crypto::ScalarField;
+        const P: u64 = 0xFFFF_FFFF_0000_0001;
+        let public = crate::lighter::public_key(&ScalarField::NEG_ONE.to_bytes_le()).unwrap();
+        assert!(
+            public
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .all(|limb| u64::from_le_bytes(*limb) < P)
+        );
+        assert!(crate::lighter::is_public_key(&public));
+    }
+
+    /// R6: off-curve, non-canonical, neutral and wrong-width public values fail
+    /// the setup-boundary check.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_values_must_be_canonical_on_curve_points() {
+        use goldilocks_crypto::ScalarField;
+        let (operation, _) = schnorr_public_request(KeyRef("k".into()));
+        let good = crate::lighter::public_key(&ScalarField::NEG_ONE.to_bytes_le()).unwrap();
+        assert!(valid_public_value(&operation, &good));
+        // A flipped bit is no negative here: about half of all field elements
+        // encode some valid point. Non-canonical limbs, the neutral point and
+        // wrong widths are refused deterministically.
+        // The first little-endian limb at u64::MAX is at or above the
+        // Goldilocks prime, so this encoding is never canonical.
+        let mut noncanonical = good;
+        noncanonical[..8].fill(0xff);
+        for value in [
+            noncanonical.to_vec(),
+            [0u8; 40].to_vec(),
+            [0xff; 40].to_vec(),
+            good[..39].to_vec(),
+            [good.to_vec(), vec![0]].concat(),
+        ] {
+            assert!(!valid_public_value(&operation, &value), "{value:?}");
+        }
+    }
+
+    /// R6: the public-key arm applies the sign arm's key rule.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_public_key_refuses_noncanonical_and_zero_keys() {
+        use goldilocks_crypto::ScalarField;
+        for key in [
+            [0u8; 40].to_vec(),
+            ScalarField::N.to_bytes_le().to_vec(),
+            [0xff; 40].to_vec(),
+            vec![1; 39],
+        ] {
+            let (signer, signing) = installed_schnorr(&key);
+            let (_, request) = schnorr_public_request(signing);
+            assert_eq!(signer.sign_now(&request), Err(SignError::InvalidRequest));
+        }
+    }
+
+    /// R6: trusted setup refuses a declared Schnorr key the arms would refuse
+    /// (refused, never reduced), and accepts a canonical one.
+    #[cfg(feature = "schnorr")]
+    #[test]
+    fn schnorr_setup_refuses_noncanonical_declared_keys() {
+        use goldilocks_crypto::ScalarField;
+        let setup = |key: &[u8]| {
+            let hex: String = key.iter().map(|byte| format!("{byte:02x}")).collect();
+            try_public_setup(
+                serde_json::json!({"primary":{"signingAlgorithm":"schnorrDigest"}}),
+                serde_json::json!({"primary":{"key":"k","secret":hex,"secretEncoding":"hex"}}),
+            )
+            .map(drop)
+        };
+        for key in [
+            [0u8; 40].to_vec(),
+            ScalarField::N.to_bytes_le().to_vec(),
+            [0xff; 40].to_vec(),
+            vec![1; 39],
+        ] {
+            assert_eq!(setup(&key), Err(SignError::InvalidRequest), "{}", key.len());
+        }
+        assert_eq!(setup(&ScalarField::NEG_ONE.to_bytes_le()), Ok(()));
+    }
+
+    /// Without the schnorr feature the public-key arm refuses as Unsupported.
+    #[cfg(not(feature = "schnorr"))]
+    #[test]
+    fn schnorr_public_key_is_unsupported_without_the_feature() {
+        let mut key = [0u8; 40];
+        key[0] = 1;
+        let (signer, signing) = installed_schnorr(&key);
+        let (_, request) = schnorr_public_request(signing);
+        assert_eq!(signer.sign_now(&request), Err(SignError::Unsupported));
+    }
+
     /// R1: payloads without full entropy, or without whole input words, are refused.
     #[cfg(feature = "schnorr")]
     #[test]
@@ -1335,7 +1529,10 @@ mod tests {
             short,
             long,
         ] {
-            let (signer, signing) = schnorr_signer(&key);
+            // Installed directly: declared setup now refuses these keys first
+            // (schnorr_setup_refuses_noncanonical_declared_keys), so this
+            // pins the sign arm's own refusal.
+            let (signer, signing) = installed_schnorr(&key);
             assert_eq!(
                 signer.sign_now(&schnorr_request(signing, payload.clone())),
                 Err(SignError::InvalidRequest),
@@ -2756,6 +2953,124 @@ mod tests {
             wallet.can_sign(&key, Algorithm::Ed25519),
             Capability::Unsupported
         );
+    }
+
+    #[cfg(feature = "trim-signing")]
+    #[test]
+    fn declared_signing_trim_installs_one_trimmed_material_for_rest_and_login() {
+        use safe_cex_engine::signing::IdentitySetupPolicy;
+        // Bitunix: both the API key and the signing key are trimmed once at setup.
+        let trim = IdentitySetupPolicy {
+            trim_credential: Some(true),
+            trim_signing: Some(true),
+            ..Default::default()
+        };
+        let policy = CredentialSetupPolicy {
+            primary: Some(trim),
+            secondary: Some(trim),
+        };
+        let setup = r#"{"primary":{"key":" yourApiKey\t","secret":" yourSecretKey \n"},
+            "secondary":{"key":"read-key ","secret":" read-secret"}}"#;
+        let (signer, ids) = LocalSigner::from_json_with_policy(setup.into(), policy).unwrap();
+        for (identity, key, secret) in [
+            (ids.primary.unwrap(), "yourApiKey", "yourSecretKey"),
+            (ids.secondary.unwrap(), "read-key", "read-secret"),
+        ] {
+            assert_eq!(signer.key(&identity.credential).unwrap(), key.as_bytes());
+            assert_eq!(
+                signer.key(identity.signing_ref().unwrap()).unwrap(),
+                secret.as_bytes()
+            );
+            let request = SignRequest {
+                receipt: Default::default(),
+                context: Default::default(),
+                operations: vec![
+                    Operation::Sha256 {
+                        payload: vec![
+                            PayloadPart::Bytes {
+                                bytes: b"1234561700000000123".to_vec(),
+                            },
+                            PayloadPart::Credential {
+                                key: identity.credential.clone(),
+                            },
+                        ],
+                    },
+                    Operation::Sign {
+                        algorithm: Algorithm::Sha256SecretSuffix,
+                        key: identity.signing_ref().unwrap().clone(),
+                        payload: vec![PayloadPart::Result {
+                            index: 0,
+                            encoding: Encoding::Hex,
+                        }],
+                    },
+                ],
+            };
+            let inner = crate::hex(&crate::sha256(
+                format!("1234561700000000123{key}").as_bytes(),
+            ));
+            assert_eq!(
+                signer.sign_now(&request).unwrap().values[1],
+                crate::sha256(format!("{inner}{secret}").as_bytes()).to_vec()
+            );
+        }
+        // Undeclared, the exact bytes stay untouched.
+        let (exact, ids) = LocalSigner::from_json(setup.into()).unwrap();
+        assert_eq!(
+            exact
+                .key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            "\u{a0}yourSecretKey \n".as_bytes()
+        );
+        // The declared policy wins over contrary caller metadata, and trimming
+        // precedes decoding, so a pasted trailing newline on hex material decodes.
+        let off = CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                trim_signing: Some(false),
+                ..Default::default()
+            }),
+            secondary: None,
+        };
+        let (kept, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":" s ","trimSigning":true}}"#.into(),
+            off,
+        )
+        .unwrap();
+        assert_eq!(
+            kept.key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            b" s "
+        );
+        let (hex, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":"6162\n","secretEncoding":"hex"}}"#.into(),
+            policy,
+        )
+        .unwrap();
+        assert_eq!(
+            hex.key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            b"ab"
+        );
+        // Rust White_Space includes NEL (U+0085) but not BOM (U+FEFF).
+        for (secret, installed) in [(r"\u0085s\u0085", "s"), (r"\ufeffs", "\u{feff}s")] {
+            let (signer, ids) = LocalSigner::from_json_with_policy(
+                format!(r#"{{"primary":{{"key":"k","secret":"{secret}"}}}}"#),
+                policy,
+            )
+            .unwrap();
+            assert_eq!(
+                signer
+                    .key(ids.primary.unwrap().signing_ref().unwrap())
+                    .unwrap(),
+                installed.as_bytes()
+            );
+        }
+        // A whitespace-only signing key becomes absent material, not a ref.
+        let (_, ids) = LocalSigner::from_json_with_policy(
+            r#"{"primary":{"key":"k","secret":"  "}}"#.into(),
+            policy,
+        )
+        .unwrap();
+        assert!(ids.primary.unwrap().signing_ref().is_err());
     }
 }
 

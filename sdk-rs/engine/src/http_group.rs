@@ -93,6 +93,9 @@ impl<V: Venue> Engine<V> {
     }
 
     pub(super) fn pump_mutation_group(&mut self, now: f64, request: RequestId) {
+        if !V::http_mutation_barriers() {
+            return;
+        }
         let Some(managed) = self.io.core.managed_http.get(&request) else {
             return;
         };

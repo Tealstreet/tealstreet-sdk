@@ -13,7 +13,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // allowance over the opt-s 1,330,120 cap; the cap is that rounded up to the KiB. It can only go down.
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
 // Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_480_704, bitgetusdc: 1_480_704, bybit: 1_445_888, asterdex: 1_385_472 });
+// #2222: Kraken CI 1,399,905 rounded up to KiB under the standing 5% allowance.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_480_704, bitgetusdc: 1_480_704, bybit: 1_445_888, asterdex: 1_385_472, kraken: 1_400_832, krakenspot: 1_400_832 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {

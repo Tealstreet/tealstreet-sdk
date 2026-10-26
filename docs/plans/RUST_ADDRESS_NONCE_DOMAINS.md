@@ -501,3 +501,29 @@ All6,094 archived tracked blobs matched that tree; the owned target was deleted.
 This is not a fresh measurement of the later Bitget/Phemex composition. Their
 incoming changes and the exact source-preservation packet go to the auditor
 for bounded qualification/measurement carry before READY.
+
+### Automatic host initialization
+
+The native Host, frame-server account actor and typed WASM engine initialize
+address setup immediately before their existing engine start/seal boundary when
+`address-nonce` is enabled. A synchronous LocalSigner completes its genuine
+PublicAddress result and cleanup in that initialization turn, so declared slots
+are verified before `Venue::start` reads installed identities. Each aliased slot
+receives its own seal. A completed explicit initialization is reused.
+
+This wiring does not declare external setup support. An unsupported provider
+retains the typed per-slot refusal, and public/claim-free startup continues.
+Asynchronous providers still require the explicit pre-start initialization and
+actual result-plus-join handshake before the caller starts the engine. Starting
+with unfinished setup retains the existing conservative retirement/refusal;
+there is no blocking startup scheduler, automatic retry or hosted activation.
+Initialization errors are reported through the existing StartupFailed notice.
+All runtime additions are compiled only with `address-nonce`; CI records family
+sizes and an exact combined comparison verifies non-adopter shipping growth.
+
+The private capability uses an optional boxed state: uninitialized identities
+hold no allocation, while verified/refused slots retain the existing exact
+proof/error. This keeps Identity compact when Cargo unifies `address-nonce`
+across non-adopting venues; BingX/Phemex read custody must remain within clippy's
+200-byte variant-size difference. Slot/ref/domain/issuer/generation equality,
+serde omission, resets, setup ownership and final-Claim checks are unchanged.
