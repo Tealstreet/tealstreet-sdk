@@ -10164,3 +10164,10 @@ paths, IDs, position sides, ten-plus-singleton chunking, mixed-ack Store effects
 and independent-side FIFO/no-resend assertions. Concurrent setup necessarily
 changes observation timing; single-placement helpers retain their clocks.
 Incomplete reads now pin the fence's typed NotSent/uncertain refusal.
+
+Phemex's reconciliation hook settles retired placement custody immediately on
+Unknown, before the next command or stream callback. Two remaining-funnel
+fixtures pin the single native expiry-plus-five-second timer and cleanup at
+that delivery; later cancel-all/stream callbacks preserve it without duplicate
+warnings, timers or caller terminals. The old delayed-cleanup oracle is
+superseded; runtime cleanup and financial row handling are unchanged.
