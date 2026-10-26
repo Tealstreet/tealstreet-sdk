@@ -46,6 +46,7 @@ mod keyless_serial {
         ReadAuth,
         AuthChangedBody,
         SignedResend,
+        #[cfg(feature = "sign-meta")]
         Selected,
         ReadWithSecondary,
         NoSessionEgress,
@@ -729,7 +730,10 @@ mod keyless_serial {
             mode,
             ..Default::default()
         });
-        if matches!(mode, Mode::ReadWithSecondary | Mode::Selected) {
+        let secondary = mode == Mode::ReadWithSecondary;
+        #[cfg(feature = "sign-meta")]
+        let secondary = secondary || mode == Mode::Selected;
+        if secondary {
             e.set_identities(crate::signing::Identities {
                 primary: None,
                 secondary: Some(crate::signing::Identity::new(
