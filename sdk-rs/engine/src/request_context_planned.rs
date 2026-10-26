@@ -418,6 +418,12 @@ impl<P> Cx<'_, P> {
         declaration: AdmissionDeclaration<'_, '_, '_>,
         physical: bool,
     ) -> Result<(Plan, Option<(u64, Context)>), Error> {
+        // Before any ID, reservation or context: an undeclared venue must not
+        // admit a group its compiled-out paths would never pump.
+        #[cfg(feature = "http-mutation-barriers")]
+        if !declaration.barriers.is_empty() && !self.io.core.mutation_barriers_declared {
+            return Err(Error::Invalid);
+        }
         #[cfg(feature = "serial-plans")]
         {
             let AdmissionDeclaration {
