@@ -9483,3 +9483,16 @@ Bitunix REST and its private socket login now sign at dispatch through the engin
 - **Wire.** Headers, the login frame and the double-SHA scheme are byte-identical to native; the wire stamp is clamped to be nonnegative.
 - **Controls moved.** The shared "unmigrated family" controls (registry `dispatch_provider` and `hosted_signing`, the WASM shared-provider test and the TS hosted-signing and WASM signer tests) now use MEXC. Crypto.com, named in the plan, already has `dispatchSigning`. Hosted Bitunix signing (P7) is a separate PR.
 - **Inventory.** Bitunix signing sites 25 → 6. Production keeps the user-facing "key and secret" message and the `Sha256SecretSuffix` algorithm name; the doc-vector and the provider fixture account for the rest. Its sign modules are now under the migrated-family ban. Credential selection 9 → 4: the `read_credentials` Options field name and the shared read-key message.
+
+### WEEX remaining inventory and identity custody
+
+WEEX keeps one immutable `Slots<Identity>` owner for selected reads, required
+Primary history, Mutation signing and private SessionAuth. The redundant venue
+identity container and per-history slot reconstruction are removed. Existing
+completeness filters, public-only suppression, primary-private eligibility,
+secondary read preference, wire bytes and all failure/outcome policy are retained.
+
+The remaining conservative request/signing/credential inventory describes managed
+failure delegates, typed data macros, diagnostics, trusted fixtures and opaque
+identity options. This slice retains those rows and all checker rules; completion
+of the custody audit does not claim inventory zero or a new endpoint migration.
