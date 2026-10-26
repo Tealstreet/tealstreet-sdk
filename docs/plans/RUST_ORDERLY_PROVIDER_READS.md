@@ -37,6 +37,7 @@ In `account.rs`, the two `matches!(request, Request::Info)` checks become the `R
   - Public trades read unsigned under the command Context.
   - A transport loss keeps its typed kind (`Network`). A signing refusal is strict, even after accepted pages.
 - **Socket auth.** `sign::WsAuth` signs the whole-millisecond release stamp's decimal text. The frame is native-exact: `{"event":"auth","params":{orderly_key,sign,timestamp}}`. With no Primary identity the socket closes without a frame.
+- **Deferred trading tail (O1 interim, O2 deletes it).** The engine refuses any legacy completion inside a managed delivery, so a protective wait that an account snapshot confirms is released by a zero-delay venue timer armed from that delivery. It is armed only while a wait or fence exists, fires once, and its control is `tests/deferred_trade_tail.rs`. Without it, a confirmed pair never completed, which was CI's replay timeout on the first push.
 - **Signing at release.** Every signed request's stamp is its release time, the same instant native used whenever no queueing intervened.
 
 ## O2 (outline, to be detailed in its own PR)
