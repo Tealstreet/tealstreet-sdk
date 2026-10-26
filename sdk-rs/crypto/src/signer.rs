@@ -722,6 +722,10 @@ impl LocalSigner {
                             .div_ceil(3)
                             .checked_mul(4)
                             .ok_or(SignError::InvalidRequest)?,
+                        Encoding::EvmHex => {
+                            evm_signature(&results.values[*index])?;
+                            130
+                        }
                     }
                 }
             };
@@ -759,6 +763,12 @@ impl LocalSigner {
                                 crate::Encoding::Base64,
                             ));
                             message.extend_from_slice(encoded.as_bytes());
+                        }
+                        Encoding::EvmHex => {
+                            let signature = evm_signature(bytes)?;
+                            message.extend_from_slice(
+                                Zeroizing::new(crate::hex(&signature[..])).as_bytes(),
+                            );
                         }
                     }
                 }
@@ -881,6 +891,20 @@ pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
         _ => false,
     }
 }
+/// `r || s || recovery` (0 or 1) as `r || s || v` with `v` = 27 or 28.
+fn evm_signature(bytes: &[u8]) -> Result<Zeroizing<[u8; 65]>, SignError> {
+    let [signature @ .., recovery] = bytes else {
+        return Err(SignError::InvalidRequest);
+    };
+    if signature.len() != 64 || *recovery > 1 {
+        return Err(SignError::InvalidRequest);
+    }
+    let mut out = Zeroizing::new([0u8; 65]);
+    out[..64].copy_from_slice(signature);
+    out[64] = 27 + recovery;
+    Ok(out)
+}
+
 /// Little-endian y (sign bit cleared) strictly below p = 2^255 - 19.
 fn ed25519_canonical_y(bytes: &[u8; 32]) -> bool {
     let mut y = *bytes;
@@ -2036,6 +2060,36 @@ mod tests {
         expected.update(signer.key(&key).unwrap());
         assert_eq!(result.values[1], &expected.finalize()[..]);
         assert!(!format!("{request:?}{result:?}").contains("public-identifier"));
+    }
+    #[test]
+    fn evm_hex_renders_recovery_as_27_or_28_and_refuses_other_shapes() {
+        let mut raw = [7u8; 65];
+        for (recovery, v) in [(0u8, 27u8), (1, 28)] {
+            raw[64] = recovery;
+            let signature = evm_signature(&raw).unwrap();
+            assert_eq!(&signature[..64], &raw[..64]);
+            assert_eq!(signature[64], v);
+        }
+        raw[64] = 2;
+        assert_eq!(evm_signature(&raw).err(), Some(SignError::InvalidRequest));
+        assert_eq!(
+            evm_signature(&raw[..64]).err(),
+            Some(SignError::InvalidRequest)
+        );
+        assert_eq!(evm_signature(&[]).err(), Some(SignError::InvalidRequest));
+    }
+    #[test]
+    fn base64url_keys_decode_either_alphabet_with_or_without_padding() {
+        let decode = |text: &str| {
+            key_material::decode(Secret::new(text.into()), KeyEncoding::Base64Url)
+                .map(|bytes| bytes.to_vec())
+        };
+        assert_eq!(decode("c2VjcmV0").unwrap(), b"secret");
+        assert_eq!(decode("c2VjcmV0Cg").unwrap(), b"secret\n");
+        assert_eq!(decode("c2VjcmV0Cg==").unwrap(), b"secret\n");
+        assert_eq!(decode("-_-_").unwrap(), [0xfb, 0xff, 0xbf]);
+        assert_eq!(decode("+/+/").unwrap(), [0xfb, 0xff, 0xbf]);
+        assert!(decode("c2V*").is_err());
     }
     #[test]
     fn failed_batch_never_returns_partial_credentials_or_provider_text() {
