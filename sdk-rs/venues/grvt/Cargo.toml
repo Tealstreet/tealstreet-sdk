@@ -12,8 +12,8 @@ name = "request_context_write_funnel"
 required-features = ["private-adoption-originals"]
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["command-order-book", "http-plans"] }
-safe-cex-crypto.workspace = true
+safe-cex-engine = { workspace = true, features = ["command-order-book", "http-plans", "serial-plans", "condition-waits", "session-bearer"] }
+safe-cex-crypto = { workspace = true, features = ["secp256k1"] }
 serde.workspace = true
 serde_json.workspace = true
 

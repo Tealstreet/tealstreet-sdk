@@ -9341,3 +9341,18 @@ terminal follows the existing Plan journal: an accepted prefix yields None,
 and a released attempt followed by an unreleased failed resend may yield Unknown
 rather than whole-command NotSent. No native GRVT constructor or queue adoption
 is enabled by this shared prerequisite.
+
+
+### GRVT result-bound provider signer
+
+GRVT's signer-independent EIP712 digest needs no separate setup/address request.
+An atomic same-ref PublicAddress plus Secp256k1Digest result must pass exact
+receipt/header/shape validation and low-s recovery against the frozen digest
+before one installed engine/account/provider/ref lock is sealed. Concurrent
+results compare against the winning address before publishing a body; differing
+or invalid results refuse only that request and never rebind. Every Stale or
+auth resend repeats provider work over unchanged order fields. Configured
+signer_address remains warning-only. This replaces the earlier pre-pinned public
+address requirement without a builder Read or new engine setup operation.
+A later adoption of shared setup binding deletes this lock in the same change;
+there is no permanent second binding path or choice on disagreement.

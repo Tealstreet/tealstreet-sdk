@@ -9,7 +9,7 @@ use safe_cex_engine::signing::{
 };
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep};
 use serde::Serialize;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 const CREATE: &str = "/lite/v1/create_order";
 const LOGIN: &str = "/auth/api_key/login";
@@ -167,28 +167,44 @@ impl FrozenOrder {
     }
 }
 
+/// One installed account/provider/ref incarnation; recipes share only public proof.
+#[derive(Default)]
+pub struct SignerBinding {
+    address: OnceLock<[u8; 20]>,
+}
+impl SignerBinding {
+    pub fn address(&self) -> Option<String> {
+        self.address.get().map(|address| {
+            ethereum::get_address(&format!("0x{}", hex(address)))
+                .expect("verified twenty-byte address")
+        })
+    }
+    fn seal(&self, address: [u8; 20]) -> Result<(), SignError> {
+        if self.address.set(address).is_err() && self.address.get() != Some(&address) {
+            return Err(SignError::InvalidResult);
+        }
+        Ok(())
+    }
+}
+
 pub struct CreateOrder {
     signing: KeyRef,
-    expected_signer: String,
-    expected_address: [u8; 20],
+    binding: Arc<SignerBinding>,
     order: Arc<FrozenOrder>,
     prepared: Option<SignRequest>,
 }
 impl CreateOrder {
     pub fn new(
         identity: &Identity,
-        expected_signer: &str,
+        binding: Arc<SignerBinding>,
         order: Arc<FrozenOrder>,
     ) -> Result<Self, SignError> {
-        identity.validate().map_err(|_| SignError::InvalidRequest)?;
-        let expected_signer =
-            ethereum::get_address(expected_signer).map_err(|_| SignError::InvalidRequest)?;
-        let expected_address =
-            sign::parse_address(&expected_signer).map_err(|_| SignError::InvalidRequest)?;
+        identity
+            .validate_credential()
+            .map_err(|_| SignError::InvalidRequest)?;
         Ok(Self {
             signing: identity.signing_ref()?.clone(),
-            expected_signer,
-            expected_address,
+            binding,
             order,
             prepared: None,
         })
@@ -245,14 +261,17 @@ impl SignStep for CreateOrder {
         let work = self.prepared.take().ok_or(SignError::InvalidResult)?;
         attest(outbound, &self.url(), ORDER_HEADERS)?;
         work.validate_result(result)?;
-        if result.values[0].as_slice() != self.expected_address
-            || !ethereum::signed_by(&self.order.digest, &result.values[1], &self.expected_signer)
-        {
+        let address: [u8; 20] = result.values[0]
+            .as_slice()
+            .try_into()
+            .map_err(|_| SignError::InvalidResult)?;
+        let signer = ethereum::get_address(&format!("0x{}", hex(&address)))
+            .map_err(|_| SignError::InvalidResult)?;
+        if !ethereum::signed_by(&self.order.digest, &result.values[1], &signer) {
             return Err(SignError::InvalidResult);
         }
-        let body = self
-            .order
-            .render(self.expected_signer.clone(), &result.values[1])?;
+        let body = self.order.render(signer, &result.values[1])?;
+        self.binding.seal(address)?;
         let Action::Http(http) = outbound else {
             return Err(SignError::InvalidRequest);
         };

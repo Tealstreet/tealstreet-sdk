@@ -19,6 +19,8 @@ enum Mode {
     Local,
     External,
     WrongSigner,
+    ChangedAfterFirst,
+    InvalidFirst,
     WrongDigest,
     HighS,
     WrongReceipt,
@@ -64,11 +66,15 @@ impl Recording {
         let mut result = self.inner.sign_ready(work).unwrap()?;
         match self.mode {
             Mode::External => result.values[1] = bytes(&vectors().signatures[index % 2]),
-            Mode::WrongSigner => {
+            Mode::WrongSigner | Mode::ChangedAfterFirst
+                if index > 0 || matches!(self.mode, Mode::WrongSigner) =>
+            {
                 let key = "02".repeat(32);
                 let address = ethereum::private_key_address(&key).unwrap();
                 result.values[0] = bytes(&address);
-                result.values[1] = bytes(&ethereum::sign_digest(&digest(work), &key).unwrap());
+                if matches!(self.mode, Mode::ChangedAfterFirst) {
+                    result.values[1] = bytes(&ethereum::sign_digest(&digest(work), &key).unwrap());
+                }
             }
             Mode::WrongDigest => {
                 let mut d = digest(work);
@@ -77,6 +83,7 @@ impl Recording {
             }
             Mode::HighS => result.values[1] = bytes(&vectors().high_s),
             Mode::WrongReceipt => result.receipt.expiry_ms = Some(NOW + 3_600_001.),
+            Mode::InvalidFirst if index == 0 => result.receipt.expiry_ms = Some(NOW + 3_600_001.),
             Mode::ExtraHeader => result.headers.push(("X-Provider".into(), "refused".into())),
             _ => {}
         }
@@ -108,7 +115,7 @@ fn digest(work: &SignRequest) -> [u8; 32] {
     bytes.as_slice().try_into().unwrap()
 }
 struct Probe {
-    recipe: Option<Box<dyn SignStep>>,
+    recipe: VecDeque<Box<dyn SignStep>>,
     identity: Identity,
     url: String,
     login: bool,
@@ -182,7 +189,7 @@ impl Venue for Probe {
             Method::Post,
             self.url.clone(),
             None,
-            self.recipe.take().unwrap(),
+            self.recipe.pop_front().unwrap(),
             context,
         );
         assert!(result.is_ok());
@@ -201,6 +208,7 @@ struct Fixture {
     engine: Engine<Probe>,
     provider: Arc<Recording>,
     errors: Arc<Mutex<Vec<VenueError>>>,
+    binding: Arc<SignerBinding>,
 }
 fn fields() -> OrderFields {
     OrderFields {
@@ -246,6 +254,7 @@ fn fixture_with_fields(mode: Mode, testnet: bool, login: bool, material: OrderFi
     )
     .unwrap();
     let identity = ids.primary.as_ref().unwrap().clone();
+    let binding = Arc::new(SignerBinding::default());
     let (recipe, url): (Box<dyn SignStep>, String) = if login {
         let r = Login::new(identity.credential.clone(), testnet);
         let url = r.url();
@@ -253,8 +262,8 @@ fn fixture_with_fields(mode: Mode, testnet: bool, login: bool, material: OrderFi
     } else {
         let r = CreateOrder::new(
             &identity,
-            ADDRESS,
-            Arc::new(FrozenOrder::new(material, testnet).unwrap()),
+            binding.clone(),
+            Arc::new(FrozenOrder::new(material.clone(), testnet).unwrap()),
         )
         .unwrap();
         let url = r.url();
@@ -268,7 +277,21 @@ fn fixture_with_fields(mode: Mode, testnet: bool, login: bool, material: OrderFi
         work: Mutex::new(vec![]),
     });
     let mut engine = safe_cex_engine::test_support::seeded_engine(Probe {
-        recipe: Some(recipe),
+        recipe: {
+            let second: Box<dyn SignStep> = if login {
+                Box::new(Login::new(identity.credential.clone(), testnet))
+            } else {
+                Box::new(
+                    CreateOrder::new(
+                        &identity,
+                        binding.clone(),
+                        Arc::new(FrozenOrder::new(material, testnet).unwrap()),
+                    )
+                    .unwrap(),
+                )
+            };
+            VecDeque::from([recipe, second])
+        },
         identity,
         url,
         login,
@@ -296,6 +319,7 @@ fn fixture_with_fields(mode: Mode, testnet: bool, login: bool, material: OrderFi
         engine,
         provider,
         errors,
+        binding,
     }
 }
 fn drive(f: &mut Fixture, now: f64) -> Vec<Action> {
@@ -563,6 +587,7 @@ fn wrong_signer_wrong_digest_high_s_receipt_and_provider_headers_never_release()
         assert_eq!(f.provider.work.lock().unwrap().len(), 1);
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert_eq!(f.errors.lock().unwrap().len(), 1);
+        assert!(f.binding.address().is_none());
         assert_eq!(
             f.errors.lock().unwrap()[0].outcome,
             Some(safe_cex_engine::Outcome::NotSent)
@@ -652,7 +677,113 @@ fn credential_only_primary_cannot_construct_an_order_recipe() {
     assert!(identity.signing_ref().is_err());
     let order = Arc::new(FrozenOrder::new(fields(), false).unwrap());
     assert!(matches!(
-        CreateOrder::new(identity, ADDRESS, order),
-        Err(SignError::InvalidRequest)
+        CreateOrder::new(identity, Arc::new(SignerBinding::default()), order),
+        Err(SignError::SigningNotConfigured)
     ));
+}
+
+#[test]
+fn an_invalid_first_result_leaves_binding_empty_and_later_work_can_seal() {
+    let mut f = fixture(Mode::InvalidFirst, false, false);
+    assert!(
+        drive(&mut f, NOW)
+            .iter()
+            .all(|a| !matches!(a, Action::Http(_)))
+    );
+    assert!(f.binding.address().is_none());
+    f.engine
+        .handle_command(
+            NOW + 1.,
+            Command::CancelSymbolOrders {
+                command: 8,
+                symbol: "BTCUSD".into(),
+            },
+            None,
+        )
+        .unwrap();
+    let actions = drive(&mut f, NOW + 1.);
+    let _ = packet(&actions);
+    assert_eq!(f.binding.address().as_deref(), Some(ADDRESS));
+    assert_eq!(f.provider.work.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn a_new_valid_address_on_reprepare_is_refused_without_rebinding() {
+    let mut f = fixture(Mode::ChangedAfterFirst, false, false);
+    let (permit, _) = hold_bind(&mut f, NOW);
+    assert_eq!(f.binding.address().as_deref(), Some(ADDRESS));
+    assert!(f.engine.claim_http(NOW + 2., permit).is_err());
+    assert!(
+        drive(&mut f, NOW + 2.)
+            .iter()
+            .all(|a| !matches!(a, Action::Http(_)))
+    );
+    assert_eq!(f.binding.address().as_deref(), Some(ADDRESS));
+    assert_eq!(f.errors.lock().unwrap().len(), 1);
+    assert_eq!(
+        f.errors.lock().unwrap()[0].outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+}
+
+#[test]
+fn independent_installed_engines_with_the_same_ref_bind_independently() {
+    let mut first = fixture(Mode::Local, false, false);
+    let mut second = fixture(Mode::Local, false, false);
+    let _ = packet(&drive(&mut first, NOW));
+    assert_eq!(first.binding.address().as_deref(), Some(ADDRESS));
+    assert!(second.binding.address().is_none());
+    let _ = packet(&drive(&mut second, NOW));
+    assert!(!Arc::ptr_eq(&first.binding, &second.binding));
+    assert_eq!(first.binding.address(), second.binding.address());
+}
+
+#[test]
+fn concurrent_verified_results_compare_the_winner_before_body_publication() {
+    for different in [false, true] {
+        let mut f = fixture(Mode::Local, false, false);
+        let original = packet(&drive(&mut f, NOW)).clone();
+        let work = f.provider.work.lock().unwrap()[0].clone();
+        let first = f.provider.inner.sign_ready(&work).unwrap().unwrap();
+        let mut second = first.clone();
+        if different {
+            let key = "02".repeat(32);
+            second.values[0] = bytes(&ethereum::private_key_address(&key).unwrap());
+            second.values[1] = bytes(&ethereum::sign_digest(&digest(&work), &key).unwrap());
+        }
+        let binding = Arc::new(SignerBinding::default());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let identity = f.engine.venue().identity.clone();
+        let mut joins = vec![];
+        for result in [first, second] {
+            let mut recipe = CreateOrder::new(
+                &identity,
+                binding.clone(),
+                Arc::new(FrozenOrder::new(fields(), false).unwrap()),
+            )
+            .unwrap();
+            // Pure apply control, using the exact work emitted by the real engine above.
+            recipe.prepared = Some(work.clone());
+            let mut request = original.clone();
+            request.body = None;
+            let barrier = barrier.clone();
+            joins.push(std::thread::spawn(move || {
+                let mut outbound = Action::Http(request);
+                barrier.wait();
+                let result = recipe.apply(&mut outbound, &result);
+                let Action::Http(request) = outbound else {
+                    unreachable!()
+                };
+                assert_eq!(request.body.is_some(), result.is_ok());
+                result.is_ok()
+            }));
+        }
+        let accepted = joins
+            .into_iter()
+            .map(|join| join.join().unwrap())
+            .filter(|ok| *ok)
+            .count();
+        assert_eq!(accepted, if different { 1 } else { 2 });
+        assert!(binding.address().is_some());
+    }
 }

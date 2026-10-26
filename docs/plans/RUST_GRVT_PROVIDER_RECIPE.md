@@ -196,12 +196,18 @@ Create payload. Preserve native checksum signer text, 0x-prefixed 32-byte r/s
 and wire v=27+recovery, decimal expiration/nonce and chain text. The native
 sign_order/oracle vectors settle this conversion; do not forward raw 0/1 as v.
 Malformed, wrong-ref/receipt, high-s or wrong-digest results never reach Bind.
-Bind the expected actual signer to the installed signing ref using trusted
-public derivation. Each PublicAddress result must equal that pinned signer
-before signed_by verifies the prepared digest. It cannot move with a later
-provider answer, native account ID or optional configured signer_address;
-the latter retains its warning-only behavior. A different recovered signer or
-digest refuses the resend before release, even if its signature is otherwise valid.
+The first fully validated installed-provider result binds the actual signer to
+one private OnceLock per engine/account/provider/ref incarnation. The atomic
+same-ref PublicAddress and signature prove possession: recover against the
+venue-computed FrozenOrder digest, enforce low-s and the exact result graph,
+then seal before publishing any body. A losing concurrent set re-reads the
+winner and refuses a different address. Invalid first results seal nothing.
+Every later preparation/resend repeats provider work and checks that binding;
+no address can rebind it. Optional configured signer_address remains warning-only.
+This deliberately replaces the earlier pre-pinned-address requirement: GRVT's
+digest is signer-independent, so no setup or builder Read address work is needed.
+When GRVT adopts a shared setup binding in future, delete this result-bound lock
+in that same change; a disagreement must refuse, never select one authority.
 
 The SignReceipt carries the fixed payload expiry in protocol milliseconds,
 not a newly extended expiry or inferred timestamp. Shared dispatch also keeps
@@ -581,3 +587,21 @@ target. Default CI exercises the recipe and existing native controls; it does
 not claim the original custody gaps are fixed. The publication composes actual
 tip de1e2383410 with docs-only incoming-plus-own resolution. CI family sizes
 and one local composed combined measurement are required before READY.
+
+
+## Native cutover preparation on keyless serial roots
+
+Local source preparation now composes #2197. Phase 3 credential-only setup is
+landed; use from_setup_with_facts/from_json_with_facts and preserve raw key
+Absent/Empty/Blank/Nonblank facts without retaining material in the venue.
+A credential-only order recipe refuses SigningNotConfigured before work.
+The result-bound signer controls pass 11 cases, including invalid-first recovery,
+reprepare address refusal, independent engines and concurrent first-result races.
+This is scoped recipe evidence, not installed-constructor or native-adoption proof.
+
+The newly approved shared follow-up gives SerialCall an explicit Preflight or
+Session auth declaration. A mixed amend root retains its write credential while
+inspect, cancel and verify are unsigned Session calls; only create uses provider
+signing. Installed unsigned-only commands deliberately borrow no signing authority.
+No call infers auth from recipe presence, and sign-requiring work never falls back
+to a keyless root. This shared follow-up remains a source/landing gate.
