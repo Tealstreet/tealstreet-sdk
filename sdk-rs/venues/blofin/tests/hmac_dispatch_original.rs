@@ -22,17 +22,27 @@ const PRIMARY_SIGNATURE: &str =
     "MDIzM2U3NzAzYjk1ZWFmYjhlMGExY2IyOWYwODcyZDEwNWQ4YjQyM2M1NGQwOThjYzU2NWQzNTM3MWE1NTczZg==";
 type Draws = Arc<Mutex<Vec<usize>>>;
 
-fn options(secondary: bool) -> Options {
-    Options {
+/// Configured strings, read only by trusted setup; the venue gets refs.
+#[derive(Clone)]
+struct Material {
+    key: Option<String>,
+    secret: Option<String>,
+    passphrase: Option<String>,
+    read: Option<ReadCredentials>,
+    public_data_only: bool,
+}
+
+fn options(secondary: bool) -> Material {
+    Material {
         key: Some("fixture-primary-key".into()),
         secret: Some("fixture-primary-secret".into()),
         passphrase: Some("fixture-primary-pass".into()),
-        read_credentials: secondary.then(|| ReadCredentials {
+        read: secondary.then(|| ReadCredentials {
             key: "fixture-secondary-key".into(),
             secret: "fixture-secondary-secret".into(),
             passphrase: Some("fixture-secondary-pass".into()),
         }),
-        ..Default::default()
+        public_data_only: false,
     }
 }
 
@@ -47,17 +57,23 @@ struct Rig {
 }
 
 impl Rig {
-    fn new(mut options: Options, parked: bool, filtered: bool) -> Self {
+    fn new(material: Material, parked: bool, filtered: bool) -> Self {
+        let mut options = Options {
+            public_data_only: material.public_data_only,
+            ..Default::default()
+        };
         let setup = serde_json::json!({
             "primary": {
-                "key":options.key,
-                "secret":options.secret,
-                "passphrase":options.passphrase,
+                "key":material.key,
+                "secret":material.secret,
+                "passphrase":material.passphrase,
             },
-            "secondary":options.read_credentials.as_ref().map(|read|serde_json::json!({
+            "secondary":material.read.as_ref().map(|read|serde_json::json!({
                 "key":read.key,
                 "secret":read.secret,
-                "passphrase":read.passphrase.as_ref().or(options.passphrase.as_ref()),
+                // As the registry: an empty effective passphrase installs none.
+                "passphrase":read.passphrase.as_ref().or(material.passphrase.as_ref())
+                    .filter(|value| !value.is_empty()),
             })),
         });
         // Trusted setup hands the venue the same opaque refs it registers.
@@ -121,7 +137,7 @@ impl Rig {
         rig
     }
 
-    fn ready(options: Options, parked: bool, filtered: bool) -> Self {
+    fn ready(options: Material, parked: bool, filtered: bool) -> Self {
         let mut rig = Self::new(options, parked, filtered);
         rig.reply("/market/instruments", MARKET);
         rig.reply(
@@ -429,7 +445,7 @@ fn native_get_without_secondary_uses_primary_key_secret_and_passphrase() {
 #[test]
 fn absent_secondary_passphrase_inherits_only_the_primary_passphrase() {
     let mut opts = options(true);
-    opts.read_credentials.as_mut().unwrap().passphrase = None;
+    opts.read.as_mut().unwrap().passphrase = None;
     let mut rig = Rig::ready(opts, false, false);
     assert_eq!(
         request(&rig.released_lookup(NOW)).headers,
@@ -444,7 +460,7 @@ fn absent_secondary_passphrase_inherits_only_the_primary_passphrase() {
 #[test]
 fn explicit_empty_secondary_passphrase_refuses_before_discovery_or_entropy() {
     let mut opts = options(true);
-    opts.read_credentials.as_mut().unwrap().passphrase = Some(String::new());
+    opts.read.as_mut().unwrap().passphrase = Some(String::new());
     let rig = Rig::new(opts, false, false);
     assert!(rig.requests.is_empty());
     assert!(rig.draws.lock().unwrap().is_empty());
@@ -594,16 +610,14 @@ fn native_post_pins_primary_hmac_over_the_exact_caller_body() {
 fn private_start_still_requires_primary_passphrase_with_valid_secondary() {
     let mut opts = options(true);
     opts.passphrase = None;
-    let mut rig = Rig::new(opts, false, false);
-    rig.reply("/market/instruments", MARKET);
-    assert!(
-        rig.requests
-            .iter()
-            .all(|request| !request.url.contains("/account/"))
-    );
+    let rig = Rig::new(opts, false, false);
+    // Refused at startup, before discovery or entropy, naming the Primary.
+    assert!(rig.requests.is_empty());
     assert!(rig.draws.lock().unwrap().is_empty());
     assert!(rig.actions.iter().any(|action| matches!(action,
         Action::Notice(Notice::Event(event)) if event.message=="BloFin requires a passphrase")));
+    assert!(!rig.actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::Event(event)) if event.message.contains("Secondary"))));
 }
 
 #[test]

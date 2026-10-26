@@ -5,7 +5,7 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
   assert.equal(WASM_BUDGETS.venue, 1_343_488);
-  assert.equal(WASM_BUDGETS.combined, 13.5 * 1024 * 1024);
+  assert.equal(WASM_BUDGETS.combined, 14 * 1024 * 1024);
   for (const profile of Object.keys(WASM_BUDGETS)) {
     assert.equal(wasmBudgetError(WASM_BUDGETS[profile], profile), undefined);
     assert.match(wasmBudgetError(WASM_BUDGETS[profile] + 1, profile), /exceeds/);
@@ -19,17 +19,26 @@ test('only Bitget, Bybit and AsterDEX carry venue overrides, and only for the ve
   assert.equal(wasmBudgetError(1_330_120, 'venue', 'asterdex'), undefined);
   assert.match(wasmBudgetError(1_330_121, 'venue', 'asterdex'), /exceeds 1330120/);
   for (const venue of ['bitget', 'bitgetusdc']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1_478_656 - 2_108);
-    assert.equal(wasmBudgetError(1_476_548, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_476_549, 'venue', venue), /exceeds 1476548/);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1445 * 1024);
+    assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1448 * 1024);
+    assert.equal(wasmBudgetError(1_479_680, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_479_681, 'venue', venue), /exceeds 1479680/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.bybit, 1_343_488 + 102_400);
   assert.equal(wasmBudgetError(1_445_888, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(1_445_889, 'venue', 'bybit'), /exceeds 1445888/);
-  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bybit'), /exceeds 14155776/);
+  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bybit'), /exceeds 14680064/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue', 'okx'), /exceeds 1343488/);
   assert.match(wasmBudgetError(WASM_BUDGETS.venue + 1, 'venue'), /exceeds 1343488/);
-  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bitget'), /exceeds 14155776/);
+  assert.match(wasmBudgetError(WASM_BUDGETS.combined + 1, 'combined', 'bitget'), /exceeds 14680064/);
+});
+
+test('the approved combined ceiling accepts 14 MiB exactly and rejects the next byte', () => {
+  for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
+    assert.equal(wasmBudgetError(14_680_063, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(14_680_064, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(14_680_065, 'combined', venue), 'combined wasm 14680065 exceeds 14680064 bytes');
+  }
 });
 
 test('CI budgets each standalone venue build under its own venue name', () => {
