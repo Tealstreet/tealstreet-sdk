@@ -55,8 +55,8 @@ impl WeexFutures {
             return;
         }
         // Identity needs a configured primary; the read itself uses the read key.
-        let (Some(_), Ok(selected)) = (
-            &self.credentials.primary,
+        let (true, Ok(selected)) = (
+            self.slots.has_primary(),
             SelectedRead::select(&self.slots, ReadRole::Read { scope: None }),
         ) else {
             let Ok(context) = cx.admit_http_command(Policy {
