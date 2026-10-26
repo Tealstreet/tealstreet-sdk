@@ -6,8 +6,8 @@ import { parseArgs } from 'node:util';
 
 // Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
-// total package size; overseer 2026-10-21 raised it to 13.5 MiB for the Bitunix family.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_155_776 });
+// total package size; Sam approved the combined 14 MiB ceiling on 2026-10-26.
+export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_064 });
 // Bitget allowance: 1,478,656 less 2,108 measured bytes from #2142/#2145;
 // overseer-approved shrink-only follow-up under Sam's no-TS-fallback directive.
 // Bybit: Sam approved 2026-10-25 (venue + 60 KiB) for the Plan-adoption stack, whose top measured
