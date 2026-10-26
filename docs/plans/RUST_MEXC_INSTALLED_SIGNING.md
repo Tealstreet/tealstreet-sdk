@@ -151,3 +151,11 @@ Kraken1399920 exceeded1399808 due to landed-tip drift; the approved constants
 and exact-boundary tests raise Kraken/KrakenSpot to1400832 (1368KiB). Their
 missing replay ledger was downstream of that family failure, not separate
 infrastructure failure. The MEXC bans exception remains the sole6805 row.
+
+The incoming Bitunix control handoff used MEXC as an unmigrated placeholder.
+Its generic refusal controls now use still-unmigrated Blofin; MEXC instead pins
+real provider admission, declared Primary mapping and unchanged normalization
+MACs. Trusted raw setup carries and consumes optional passphrases for both
+slots; malformed JSON keeps the shared sanitized setup error. Scope remains
+signing/private Reads. The separate local trading draft is unpublished and
+depends on the assigned pacing core changes.

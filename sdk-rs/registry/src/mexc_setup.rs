@@ -18,12 +18,14 @@ pub(super) fn raw(
     ),
     VenueError,
 > {
-    let primary = if options.key.is_some() || options.secret.is_some() {
+    let passphrase = options.passphrase.take().map(Secret::new);
+    let primary = if options.key.is_some() || options.secret.is_some() || passphrase.is_some() {
         let key = zeroize::Zeroizing::new(options.key.take().unwrap_or_default());
         Some(LocalIdentity {
             stable_id: (!key.is_empty()).then(|| mapping(&key)),
             key: Secret::new(key.to_string()),
             secret: Secret::new(options.secret.take().unwrap_or_default()),
+            passphrase,
             ..Default::default()
         })
     } else {
@@ -37,6 +39,7 @@ pub(super) fn raw(
             let identity = LocalIdentity {
                 key: Secret::new(std::mem::take(&mut read.key)),
                 secret: Secret::new(std::mem::take(&mut read.secret)),
+                passphrase: read.passphrase.take().map(Secret::new),
                 ..Default::default()
             };
             read.erase_secrets();
@@ -65,7 +68,7 @@ pub(super) fn json(
 > {
     let input = zeroize::Zeroizing::new(input);
     let mut setup: LocalSetup =
-        serde_json::from_str(&input).map_err(|_| invalid("Invalid MEXC local signer setup"))?;
+        serde_json::from_str(&input).map_err(|_| invalid("Invalid local signer setup"))?;
     #[derive(Deserialize)]
     struct View<'a> {
         #[serde(borrow)]
@@ -76,7 +79,7 @@ pub(super) fn json(
         key: Option<String>,
     }
     let view: View<'_> =
-        serde_json::from_str(&input).map_err(|_| invalid("Invalid MEXC local signer setup"))?;
+        serde_json::from_str(&input).map_err(|_| invalid("Invalid local signer setup"))?;
     if let Some(primary) = setup.primary.as_mut() {
         let key: Key = serde_json::from_str(
             view.primary
