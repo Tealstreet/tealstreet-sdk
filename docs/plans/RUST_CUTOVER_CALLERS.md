@@ -9927,8 +9927,10 @@ admitted). A venue opts in only when `reconcile_uncertain` starts a fresh read
 hang, which is why the default is off. While a symbol stays uncertain the engine
 re-asks the hook with backoff (1 s doubling to 30 s, restarted by a new seal)
 until a post-mark `orders_reconciled` clears it, so a failed reconcile read
-cannot leave the fence standing; hooks stay single-shot and must absorb re-asks
-without restarting a running fresh read. A venue may hold the fence to its
+cannot leave the fence standing; hooks stay single-shot. `Cx::reconcile_reask()`
+is true on a backoff re-ask with no new uncertain write since the last ask: the
+hook must then join any read already running or owed, never start or owe
+another (a slow read would otherwise never complete and release). A venue may hold the fence to its
 native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
 opts in. Not covered yet (Phase B): an Unknown marker for venues with no
 placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
