@@ -108,6 +108,7 @@ struct CredentialSetupPolicy {
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 struct IdentitySetupPolicy {
     trim_credential: Option<bool>,
+    trim_signing: Option<bool>,
     passphrase: Option<SetupFieldPolicy>,
     secret_encoding: Option<KeyEncoding>,
     extra: Option<ExtraKeyPolicy>,
@@ -282,8 +283,8 @@ fn rule(value: &Rule) -> String {
                 |algorithm| format!("Some(safe_cex_engine::signing::Algorithm::{algorithm:?})"),
             );
             format!(
-                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm}, signing: safe_cex_engine::signing::SigningPolicy::{:?} }})",
-                value.trim_credential, value.signing
+                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, trim_signing: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm}, signing: safe_cex_engine::signing::SigningPolicy::{:?} }})",
+                value.trim_credential, value.trim_signing, value.signing
             )
         }
         None => "None".into(),
@@ -418,9 +419,9 @@ mod tests {
                 "evm":{"signerSetup":{"primary":{"signingAlgorithm":"secp256k1Digest"}}}
             }
         }"#).unwrap();
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }) }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: None }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest), signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest), signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: None }"));
         // Lighter's Schnorr key is declarable for Sign typing.
         assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"schnorrDigest"}}}}}"#).unwrap().contains("Algorithm::SchnorrDigest"));
         // MAC algorithms are never declarable.
@@ -503,6 +504,16 @@ mod tests {
             );
             assert!(generate(&rules).is_err(), "{value}");
         }
+    }
+
+    #[test]
+    fn declared_signing_trim_compiles_per_slot() {
+        let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
+            "bitunix":{"signerSetup":{"primary":{"trimCredential":true,"trimSigning":true},"secondary":{"trimCredential":true,"trimSigning":true}}}
+        }}"#).unwrap();
+        assert!(output.contains("IdentitySetupPolicy { trim_credential: Some(true), trim_signing: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }"));
+        let rules = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"trimSigning":"yes"}}}}}"#;
+        assert!(generate(rules).is_err());
     }
 
     #[test]
