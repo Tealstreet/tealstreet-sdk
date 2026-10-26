@@ -393,18 +393,15 @@ mod keyless_serial {
                     assert_eq!(cx.io.core.next_id, before);
                 }
             }
+            let operation = match self.mode {
+                Mode::Read | Mode::ReadAuth | Mode::ReadWithSecondary => Operation::Read,
+                #[cfg(feature = "sign-meta")]
+                Mode::Selected => Operation::Read,
+                _ => Operation::Mutation,
+            };
             let result = cx.admit_serial_plan(
                 &preflight,
-                call(
-                    if matches!(
-                        self.mode,
-                        Mode::Read | Mode::ReadAuth | Mode::ReadWithSecondary | Mode::Selected
-                    ) {
-                        Operation::Read
-                    } else {
-                        Operation::Mutation
-                    },
-                ),
+                call(operation),
                 SerialPolicy {
                     credential: (self.mode == Mode::Mixed).then(credential),
                     pacing: None,

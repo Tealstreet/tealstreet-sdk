@@ -29,12 +29,12 @@ impl ContextRegistry {
             .transpose()
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     pub(in crate::engine) fn keyless_scan_visits(&self) -> usize {
         self.keyless_scan_visits.get()
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    #[cfg(test)]
     pub(in crate::engine) fn keyless_root_count(&self) -> usize {
         self.keyless_roots
     }
