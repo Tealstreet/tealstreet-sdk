@@ -323,6 +323,13 @@ fn lost_write_response_never_replays_and_next_command_refreshes_nonce() {
         |a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
         if error.outcome == Some(Outcome::Unknown))
     ));
+    // The Unknown fences its symbol until the reconcile's orders read lands.
+    for read in actions.iter().filter_map(|a| match a {
+        Action::Http(r) if r.url.contains("accountActiveOrders") => Some(r.clone()),
+        _ => None,
+    }) {
+        reply(&mut e, &read, 200, OPEN);
+    }
     place(&mut e, vec![limit()]);
     assert!(http(&mut e, "nextNonce").url.contains("api_key_index=1"));
 }
