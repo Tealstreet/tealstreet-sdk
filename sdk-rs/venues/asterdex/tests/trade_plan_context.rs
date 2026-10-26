@@ -594,3 +594,76 @@ fn a_non_json_throttle_on_a_write_is_rate_limited() {
         );
     }
 }
+
+/// Refuses only after the switch flips, so a first attempt can be released.
+struct Switchable(
+    std::sync::Arc<dyn safe_cex_engine::signing::Signer>,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+);
+impl safe_cex_engine::signing::Signer for Switchable {
+    fn immediate(&self) -> bool {
+        true
+    }
+    fn sign(
+        &self,
+        request: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        if self.1.load(std::sync::atomic::Ordering::SeqCst) {
+            Box::pin(std::future::ready(Err(
+                safe_cex_engine::signing::SignError::Refused,
+            )))
+        } else {
+            self.0.sign(request)
+        }
+    }
+    fn sign_ready(
+        &self,
+        request: &safe_cex_engine::signing::SignRequest,
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
+        if self.1.load(std::sync::atomic::Ordering::SeqCst) {
+            Some(Err(safe_cex_engine::signing::SignError::Refused))
+        } else {
+            self.0.sign_ready(request)
+        }
+    }
+    fn can_sign(
+        &self,
+        key: &safe_cex_engine::signing::KeyRef,
+        algorithm: safe_cex_engine::signing::Algorithm,
+    ) -> safe_cex_engine::signing::Capability {
+        self.0.can_sign(key, algorithm)
+    }
+}
+
+/// P1 #26's trigger: the first write was released and refused by signature,
+/// then the granted resend's signature is refused before release. The engine
+/// journal keeps a released retryable refusal followed by a failed retry Unknown
+/// (`earlier_released_retryable_refusal_then_failed_retry_is_unknown_*`); this
+/// pins that contract until a ruling changes it.
+#[test]
+fn a_refused_resend_signature_after_a_signature_rejection_is_unknown() {
+    let (venue, provider, identities) = Options {
+        key: Some("synthetic-key".into()),
+        secret: Some("synthetic-secret".into()),
+        ..Options::default()
+    }
+    .build_installed();
+    let refuse = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut e = safe_cex_engine::test_support::seeded_engine(venue);
+    e.set_signer(Some(std::sync::Arc::new(Switchable(
+        provider,
+        refuse.clone(),
+    ))))
+    .unwrap();
+    e.set_identities(identities).unwrap();
+    e.initialize_address_nonce(0.0).unwrap();
+    e.store_mut().set_markets(vec![market()]);
+    let sent = command(&mut e, place());
+    let first = write(&sent, Method::Post, "/order").clone();
+    refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+    let failed = answer(&mut e, &first, 400, SIGNATURE);
+    assert!(failed.requests.is_empty());
+    let error = terminal(&failed).expect("one terminal").unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+}
