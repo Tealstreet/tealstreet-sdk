@@ -18,7 +18,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_0
 // #2219 shared signing encodings: CI 1,445,978, 1413 KiB by overseer ruling.
 // Kraken beta error custody CI: 1,404,713 bytes, rounded up under the standing
 // 5% venue allowance; unrelated venue overrides remain unchanged.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_483_776, bitgetusdc: 1_483_776, bybit: 1_446_912, asterdex: 1_387_520, kraken: 1_404_928, krakenspot: 1_404_928 });
+// AsterDEX host address setup (#2233): CI 1,417,307, rounded up to 1385 KiB under the
+// standing venue allowance; the larger of it and the incoming cap.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_483_776, bitgetusdc: 1_483_776, bybit: 1_446_912, asterdex: 1_418_240, kraken: 1_404_928, krakenspot: 1_404_928 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
