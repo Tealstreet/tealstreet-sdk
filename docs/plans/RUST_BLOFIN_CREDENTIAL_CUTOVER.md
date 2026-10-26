@@ -95,9 +95,11 @@ investigation.
 
 Existing tests keep their assertions. Fixtures that built raw options build
 identities through the trusted setup (`tests/trusted/mod.rs`) instead. Today
-that affects `tests/support/mod.rs`, `tests/trusted/mod.rs`,
-`tests/hmac_dispatch_original.rs` and `tests/startup_auth.rs`. The only
-production constructor is the registry.
+that affects every BloFin test target that constructs `Options` directly
+(about ten: support, trusted, hmac_dispatch_original, startup, startup_auth,
+startup_degraded, security, trading, local_leverage_context, public,
+managed_public and public_supervision). The only production constructor is the
+registry.
 
 ## Gates
 
