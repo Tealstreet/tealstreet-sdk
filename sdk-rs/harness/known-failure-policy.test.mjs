@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assessGateReport, diagnosticKey, validateKnownFailures } from './known-failure-policy.mjs';
+import { readFileSync } from 'node:fs';
+import { assessGateReport, assessCorrectnessReport, diagnosticKey, validateKnownFailures } from './known-failure-policy.mjs';
 import { valueDifferences } from './snapshot-compare.mjs';
 
 const metric = (mode = 'correctness', amount = 10) => ({
@@ -32,6 +33,42 @@ test('known failures are exact venue, tape hash and field declarations', () => {
   const assessment = assessGateReport(passing, manifest());
   assert.deepEqual(assessment.errors, []);
   assert.equal(assessment.resolved.length, 1);
+});
+
+test('Lighter daily bootstrap declarations retain exact tape, field, checkpoint and value bounds', () => {
+  const declared = JSON.parse(readFileSync(new URL('./known-gate-failures.json', import.meta.url), 'utf8'));
+  const entry = declared.failures.find((row) => row.venue === 'lighter' && row.tape.endsWith('/lighter-public.jsonl.gz'));
+  const conditional = entry.diagnostics.find((row) => row.condition === 'lighter-zero-bootstrap');
+  assert.equal(conditional.keys.length, 588);
+  assert.deepEqual(validateKnownFailures(declared), []);
+  const value = { ...report(), venue: 'lighter', tapeSha256: entry.tapeSha256, private: false,
+    correctnessOnly: true, coverage: { correctness: 'complete', performance: 'not-run' } };
+  value.failures = conditional.keys.map((key) => `${key}: ts=0 rust=1.25`);
+  assert.deepEqual(assessCorrectnessReport(value, declared).errors, []);
+  const key = conditional.keys[0];
+  for (const failure of [
+    `${key.replace('checkpoint 0', 'checkpoint 1')}: ts=0 rust=1.25`,
+    `${key}: ts=1 rust=1.25`,
+    `${key}: ts=0 rust=NaN`,
+    `${key}: ts=0 rust=Infinity`,
+    `${key}: ts=0 rust=1e999`,
+    'checkpoint 0 tickers[0].fundingRate: ts=0 rust=1.25',
+    'checkpoint 0 tickers[999].volume: ts=0 rust=1.25',
+  ]) {
+    assert.match(assessCorrectnessReport({ ...value, failures: [failure] }, declared).errors.join('\n'), /unexpected/);
+  }
+  for (const change of [{ venue: 'other' }, { tapeSha256: '0'.repeat(64) }]) {
+    assert.match(assessCorrectnessReport({ ...value, ...change }, declared).errors.join('\n'), /unexpected/);
+  }
+  for (const field of ['condition', 'venue', 'keys']) {
+    const changed = structuredClone(declared);
+    const row = changed.failures.find((item) => item.venue === entry.venue && item.tapeSha256 === entry.tapeSha256);
+    const rule = row.diagnostics.find((item) => item.condition);
+    if (field === 'venue') row.venue = 'other';
+    if (field === 'condition') rule.condition = 'any';
+    if (field === 'keys') rule.keys = ['checkpoint 1 tickers[0].volume'];
+    assert.ok(validateKnownFailures(changed).length);
+  }
 });
 
 test('a declared final ticker field cannot absorb a second final-only field divergence', () => {
