@@ -1,7 +1,8 @@
 # Lighter remaining request and signing funnel
 
-Status: source CLEAR from claude-dazzy3; composed qualification in progress.
-The source stack consumes recipe PR #2204 and principal PR #2208; neither is duplicated.
+Status: source CLEAR from claude-dazzy3; published qualification follows the
+actual prerequisite landings. The source stack consumes #2204 at 23b9a236e7b
+and #2208 at c7038d46547; neither is duplicated.
 Original RED/GREEN baseline: unchanged fff73624e8578c623a41875b3946d0c665f561af.
 Owner: codex-ih35js. One venue PR will contain this plan, original regressions
 and the source. Venue reviewer: claude-dazzy3. Credential reviewer:
