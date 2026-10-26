@@ -220,39 +220,58 @@ Paths are relative to `sdk-rs/venues/<venue>/src/`. "None" means
 batch rows were re-verified by hand. Re-verify each row against current source
 before fixing it, because other lanes may have landed it already.
 
+**Re-verified at `70da1f50e87` (read-only).** Struck rows are fixed at the cited PR.
+Multi-venue rows stay unstruck while any venue in them is open; their per-venue
+status is below.
+
+- Row 16: bybit fixed (#1914), bitget fixed (#2122).
+- Row 17: hyperliquid and paradex open.
+- Row 18: kraken spot open; breakoutprop and txflow open but deprioritized.
+- Row 21: bitrue fixed (#2201); grvt, lighter, woo, kraken futures and coinbase open.
+- Row 34: weex fixed (#1934); okx, bingx and bitget open (the write auth table
+  misses the read side's auth codes); kucoin open but deprioritized.
+- Row 35: apexomni, bitrue, cryptocom, blofin, bingx and backpack fixed (their
+  tables declare `unlisted`); kraken, woo, mexc and polymarket open (no
+  CodeTable).
+- Row 36: binance fixed for writes (#1837); asterdex partly fixed (#2166: code 0
+  is filtered, but the status table is empty); bybit open.
+- Row 37: backpack fixed (#1946); kraken futures, breakoutprop and coinbase open.
+- Expected to close at landing, to be re-checked then: lighter rows 10, 21 and
+  23 and the 21104 resend (#2230); orderly row 24 (Orderly O2).
+
 ### P0: false success, or resending a possibly executed write
 
 | # | Venue | Site | Defect |
 | --- | --- | --- | --- |
-| 1 | cryptocom | `trading.rs:393-405` | `best_effort` PlaceOrders/CancelOrders reach `done` even when every leg failed. Cancel never records IDs, so CancelOrders always returns `done("[]")`. |
-| 2 | backpack | `trading.rs:414,938-941` | Every CancelOrders leg is `optional`, so a command where every cancel failed ends `done("[]")`. |
-| 3 | bybit | `trading.rs:1028-1060` | A 2xx retCode-0 PlaceBatch whose body fails to decode, or has no list, reports success with zero IDs. Leg count is never checked. |
-| 4 | bybit | `trading.rs:1089-1110` | A cancel-batch whose `retExtInfo.list` is missing or short marks every unmatched requested ID cancelled. |
-| 5 | apexomni | `lib.rs:165-178` | Resends a write when the message contains `"sign"`, at any status, including 5xx. |
+| ~~1~~ | ~~cryptocom~~ | ~~`trading.rs:393-405`~~ | ~~`best_effort` PlaceOrders/CancelOrders reach `done` even when every leg failed. Cancel never records IDs, so CancelOrders always returns `done("[]")`.~~ Fixed #2088. |
+| ~~2~~ | ~~backpack~~ | ~~`trading.rs:414,938-941`~~ | ~~Every CancelOrders leg is `optional`, so a command where every cancel failed ends `done("[]")`.~~ Fixed #1946 (superseded: managed Plans, done_plan fails on any failed leg). |
+| ~~3~~ | ~~bybit~~ | ~~`trading.rs:1028-1060`~~ | ~~A 2xx retCode-0 PlaceBatch whose body fails to decode, or has no list, reports success with zero IDs. Leg count is never checked.~~ Fixed #1914. |
+| ~~4~~ | ~~bybit~~ | ~~`trading.rs:1089-1110`~~ | ~~A cancel-batch whose `retExtInfo.list` is missing or short marks every unmatched requested ID cancelled.~~ Fixed #1914. |
+| ~~5~~ | ~~apexomni~~ | ~~`lib.rs:165-178`~~ | ~~Resends a write when the message contains `"sign"`, at any status, including 5xx.~~ Fixed #1891 (writes; the "sign" text match is reads-only now). |
 | 6 | grvt | `lib.rs:918` | Code 1000 re-login and resend, with no status <500 check. |
-| 7 | bybit | `lib.rs:675-698,2396` | Text-matched (`recv_window`, `error sign`) re-sign and resend of writes, including from transport-failure text, outside `RetryPolicy`. |
-| 8 | bitrue | `lib.rs:829-838,905-915` | −1022 re-sign and resend at any status. |
-| 8a | cryptocom | `trading.rs:418-434` (5xx body reaches it through `lib.rs:636`) | 40101 re-sign and resend at any status, including 5xx. |
-| 8b | asterdex | `request.rs:262-285` | −1022/−1021 re-sign or clock resend at any status. The code is compared as `f64` (`== Some(-1022.0)`), with message-text fallback. |
-| 9 | cryptocom | `lib.rs:636-641` | A native code on 408/5xx is classified by the table, so a 500 carrying 306 becomes `rejected`. |
+| ~~7~~ | ~~bybit~~ | ~~`lib.rs:675-698,2396`~~ | ~~Text-matched (`recv_window`, `error sign`) re-sign and resend of writes, including from transport-failure text, outside `RetryPolicy`.~~ Fixed #1914. |
+| ~~8~~ | ~~bitrue~~ | ~~`lib.rs:829-838,905-915`~~ | ~~−1022 re-sign and resend at any status.~~ Fixed #2201. |
+| ~~8a~~ | ~~cryptocom~~ | ~~`trading.rs:418-434` (5xx body reaches it through `lib.rs:636`)~~ | ~~40101 re-sign and resend at any status, including 5xx.~~ Fixed #2088. |
+| ~~8b~~ | ~~asterdex~~ | ~~`request.rs:262-285`~~ | ~~−1022/−1021 re-sign or clock resend at any status. The code is compared as `f64` (`== Some(-1022.0)`), with message-text fallback.~~ Fixed #2166. |
+| ~~9~~ | ~~cryptocom~~ | ~~`lib.rs:636-641`~~ | ~~A native code on 408/5xx is classified by the table, so a 500 carrying 306 becomes `rejected`.~~ Fixed #2088. |
 | 10 | grvt, lighter | `wire.rs:202`; `trading.rs:776-829` | A 408 carrying a native code becomes `rejected`. |
 
 ### P0: accepted IDs or uncertainty lost on a failing multi-leg command
 
 | # | Venue | Site | Defect |
 | --- | --- | --- | --- |
-| 11 | okx | `trading.rs:1001-1023` | `refused()` erases explicit Unknown for 50001/50013/50026 ACKs to None. Accepted IDs are dropped (no partial). |
-| 12 | blofin | `trading.rs:1385-1406,1505` | Accepted row IDs are dropped on failure, and optimistic rows are removed. |
+| ~~11~~ | ~~okx~~ | ~~`trading.rs:1001-1023`~~ | ~~`refused()` erases explicit Unknown for 50001/50013/50026 ACKs to None. Accepted IDs are dropped (no partial).~~ Fixed #2117. |
+| ~~12~~ | ~~blofin~~ | ~~`trading.rs:1385-1406,1505`~~ | ~~Accepted row IDs are dropped on failure, and optimistic rows are removed.~~ Fixed #2157. |
 | 13 | kucoin | `trading.rs:781`; `spot/trading.rs:228` | Accepted IDs are dropped (futures and spot). |
-| 14 | weex | `trading.rs:1536-1575` | Accepted batch row IDs never reach `job.ids` or a partial, though the orders are already stored. |
-| 15 | phemex | `trading.rs:1479-1492` | Accepted IDs are dropped. |
+| ~~14~~ | ~~weex~~ | ~~`trading.rs:1536-1575`~~ | ~~Accepted batch row IDs never reach `job.ids` or a partial, though the orders are already stored.~~ Fixed #1934. |
+| ~~15~~ | ~~phemex~~ | ~~`trading.rs:1479-1492`~~ | ~~Accepted IDs are dropped.~~ Fixed #2130. |
 | 16 | bybit, bitget | `trading.rs:800-830`; `trading.rs:1710,1749,1519` | No partial. Bitget keeps IDs only as Debug text. |
 | 17 | hyperliquid, paradex | `trading.rs:993-1003`; `trading.rs:93-120` | A mixed batch returns before recording accepted oids. |
 | 18 | kraken spot, breakoutprop, txflow | `spot/trading.rs:351-362`; `trading.rs:670-681`; `trading.rs:864-877` | Accepted IDs are dropped entirely. |
-| 19 | asterdex | `trading.rs:426` | `continue_on_error` PlaceOrders with any success reaches `done`. Failed legs appear only in `command_error`. |
-| 20 | backpack | `trading.rs:771-779` | One failed Pair leg makes both legs Unknown and drops the placed ID. |
+| ~~19~~ | ~~asterdex~~ | ~~`trading.rs:426`~~ | ~~`continue_on_error` PlaceOrders with any success reaches `done`. Failed legs appear only in `command_error`.~~ Fixed #2166. |
+| ~~20~~ | ~~backpack~~ | ~~`trading.rs:771-779`~~ | ~~One failed Pair leg makes both legs Unknown and drops the placed ID.~~ Fixed #1946. |
 | 21 | grvt, lighter, woo, kraken futures, bitrue, coinbase | `trading.rs:1393-1405`; `trading.rs:1029-1034`; `trading.rs:1137-1153`; `trading.rs:965-990`; `trading.rs:1029-1050`; `trading.rs:1606-1640` | IDs survive only in message text or hand-written JSON, not structured `partial`. |
-| 22 | bitrue | `wire.rs:61` → `trading.rs:1527` | A malformed 2xx write reply gets None instead of Unknown. |
+| ~~22~~ | ~~bitrue~~ | ~~`wire.rs:61` → `trading.rs:1527`~~ | ~~A malformed 2xx write reply gets None instead of Unknown.~~ Fixed #2201. |
 | 23 | lighter | `account.rs:2087`; `limits.rs:224-231` | ChangeTier write failures have no outcome, even after transport loss or a 5xx. |
 | 24 | orderly | `trading.rs:1781,1513` | −1007 is left None and skips the uncertain-write account reconcile. |
 | 25 | coinbase | `trading.rs:1533-1535` | `DUPLICATE_CLIENT_ORDER_ID` "may name a live order" but is None, not Unknown. |
@@ -266,7 +285,7 @@ before fixing it, because other lanes may have landed it already.
 | 28 | txflow | `lib.rs:889-891` → `trading.rs:772` | A write 4xx becomes `network`/Unknown, and the native body is discarded. |
 | 29 | orderly | `account.rs:1096-1105` | Any 4xx on the Info read permanently deactivates the account. |
 | 30 | kraken spot | `spot/account.rs:669` | Any 401/403 on any private request deactivates the venue. |
-| 31 | breakoutprop | `lib.rs:816` | Login 401/403 carries no kind, so it is emitted as `REQUEST_FAILED`, not `AUTH_REJECTED`. |
+| ~~31~~ | ~~breakoutprop~~ | ~~`lib.rs:816`~~ | ~~Login 401/403 carries no kind, so it is emitted as `REQUEST_FAILED`, not `AUTH_REJECTED`.~~ Fixed #1908. |
 | 32 | paradex | `account.rs:510-521` | Auth refusals are retried every 2 s forever, with no auth kind. |
 | 33 | bitunix | `recovery.rs:209-216` | Read 401/403/404 → `network`. 10007 is `authInvalid` on writes but `invalidInput` on reads. |
 | 34 | okx, bingx, bitget, kucoin, weex | `trading.rs:1072-1078` vs `account.rs:2190-2197`; `account.rs:1729`; `trading.rs:1920-1925`; `wire.rs:302,313`; `trading.rs:376` | Auth tables diverge or are ignored on writes. The OKX write table lacks 50100/50101/50103-50105. KuCoin 400002 (clock skew) arrives as HTTP 401, so the status branch decides `authInvalid` before the table; the fix depends on rule 4 overriding status. Bitget/WEEX native auth codes on writes get kind `rejected`. |
