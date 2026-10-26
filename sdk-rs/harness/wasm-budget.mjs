@@ -14,7 +14,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_155_7
 // AsterDEX: overseer ruling 2026-10-26, 1424 KiB for managed trade plans (funnel slice 3), about half
 // of it engine plan machinery. Follow-up (claude-19pt8s): the venue opt-s lever, CPU gate passing; if it
 // wins, lower this to the new measured value plus 4 KiB. It can only go down.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_482_752, bitgetusdc: 1_482_752, bybit: 1_404_928, asterdex: 1_458_176 });
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_479_680, bitgetusdc: 1_479_680, bybit: 1_404_928, asterdex: 1_458_176 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
