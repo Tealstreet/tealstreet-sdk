@@ -2,7 +2,8 @@
 
 Owner: codex-9czdjh. Reviewer: codex-uufub4 (socket/nonce custody); shared API
 changes additionally need the engine owner. Baseline: actual
-`49a5b54f36232d1c926f4280141d92060db18e2b`. Plan only: no source, feature, inventory,
+`49a5b54f36232d1c926f4280141d92060db18e2b`. Plan landed as #2172; shared timing modes landed as #2177. The local venue
+checkpoint below contains originals only, with no source, feature, inventory,
 hosted activation or signing cutover. Native-drain #2171 and NX #8172 establish
 separate retirement prerequisites, not socket or nonce takeover authority.
 
@@ -110,10 +111,10 @@ the codec must not classify it as an invalid credential or grant a write resend.
 
 ## Shared API dispositions required before source
 
-Overseer ruling: native parity is mandatory for all three cases below. Managed
-sockets owner claude-55ao7t decides which are already expressible by the engine;
-for any gap, that owner names the smallest shared change and the overseer assigns
-it separately. No venue-local Supervisor, watchdog or policy approximation.
+The original plan identified the three gaps below. Shared owner claude-55ao7t
+scoped them and #2177 now supplies all three engine modes. No venue-local
+Supervisor or watchdog is needed. The current better-than-TypeScript standard
+permits tested safety improvements, documented in CALLERS at source cutover.
 
 AuthEvidence::Progress is already present at the baseline; do not rebuild that
 seam. Two native timing/traffic requirements do not fit a blind policy mapping:
@@ -138,9 +139,9 @@ OPEN, while managed Required auth's authenticated transition resets Supervisor's
 since at final ACK. Preserve native OPEN-based 30-second stability/reset
 behavior; the managed-sockets owner identifies the existing expression or smallest shared change. Auth latency
 must not extend that anchor.
-These are review/source gates, not approved new APIs. No generic implementation
-belongs in this docs checkpoint. Any required shared seam gets its own plan,
-originals and owner review before the whole-family activation.
+These shared API gates are closed by landed #2177: Declared traffic, an
+independent text-scope initial-payload completion, and StableAnchor::Open.
+Venue originals, codec source review and whole-family qualification remain.
 
 ## Originals after plan/API direction CLEAR
 
@@ -195,3 +196,31 @@ changes. Delete each own scratch target after measurement, keep sources/logs and
 the size table, and run no competing size builds in this lane. Source CLEAR,
 qualified green CI and auditor exact-tree GO precede guarded SDK landing. This
 plan records source inspection only; no originals, builds or execution claimed.
+
+## Local ingress originals checkpoint
+
+Base: actual `fff73624e85`, after #2177 and #2189. The complete incoming
+`socket_supervision.rs` is an unchanged prefix; one child module adds 17 real
+startup/physical-ingress controls. No runtime, feature, Cargo or inventory change.
+
+The scoped target runs 32 controls: all 15 incoming native controls GREEN, plus
+14 intended assertion REDs and three new native GREENs, zero ignored. The REDs
+pin duplicate OPEN replay, connect/idle/auth equality before delayed timer
+delivery, and unopened Spot financial ingress issuing HTTP. These are safer
+engine-owned admission rules, not timing-text parity work. The GREENs pin
+permissively decoded empty envelopes, malformed-envelope refusal to refresh,
+and all three validated empty initial payloads before the final auth ACK.
+
+Duplicate-OPEN timer and late-OPEN no-send suffixes remain gated behind their
+first RED assertions until source. The inherited harness discards unrelated
+actions, so these controls do not claim exhaustive global noninterference;
+the unopened Spot control separately inspects the full raw action drain for
+HTTP/managed-HTTP work. Strict scoped Clippy and workspace formatting pass.
+The archived source and logs are bound in
+`/tmp/codex-kraken-socket-originals/qualification.json`; its target is deleted.
+
+Source uses the landed shared modes and removes all nine socket inventory
+occurrences together, retaining REST/signing custody separately. CI is the
+family size record; the source PR also needs a composed combined measurement.
+Record the managed-sockets feature-link cost identified by #2189 alongside
+Kraken's measured family result; do not attribute that cost solely to codec code.
