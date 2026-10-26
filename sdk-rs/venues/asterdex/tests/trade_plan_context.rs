@@ -513,13 +513,19 @@ impl safe_cex_engine::signing::Signer for Refusing {
     fn immediate(&self) -> bool {
         self.1
     }
-    fn sign(&self, _: safe_cex_engine::signing::SignRequest) -> safe_cex_engine::signing::SignFuture {
-        Box::pin(std::future::ready(Err(safe_cex_engine::signing::SignError::Refused)))
+    fn sign(
+        &self,
+        _: safe_cex_engine::signing::SignRequest,
+    ) -> safe_cex_engine::signing::SignFuture {
+        Box::pin(std::future::ready(Err(
+            safe_cex_engine::signing::SignError::Refused,
+        )))
     }
     fn sign_ready(
         &self,
         _: &safe_cex_engine::signing::SignRequest,
-    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>> {
+    ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+    {
         Some(Err(safe_cex_engine::signing::SignError::Refused))
     }
     fn can_sign(
@@ -534,26 +540,33 @@ impl safe_cex_engine::signing::Signer for Refusing {
 /// A signer refusal happens before release, so the write is provably not sent.
 #[test]
 fn a_refused_write_signature_is_not_sent() {
-    for options in [
+    for (options, immediate) in [
         Options {
             key: Some("synthetic-key".into()),
             secret: Some("synthetic-secret".into()),
             ..Options::default()
         },
         Options::v3_wallet(),
-    ] {
+    ]
+    .into_iter()
+    .flat_map(|options| [(options.clone(), true), (options, false)])
+    {
         let (venue, provider, identities) = options.build_installed();
         let mut e = safe_cex_engine::test_support::seeded_engine(venue);
         e.set_signer(Some(provider.clone())).unwrap();
         e.set_identities(identities).unwrap();
         e.initialize_address_nonce(0.0).unwrap();
-        e.set_signer(Some(std::sync::Arc::new(Refusing(provider, IMMEDIATE))))
+        e.set_signer(Some(std::sync::Arc::new(Refusing(provider, immediate))))
             .unwrap();
         e.store_mut().set_markets(vec![market()]);
         let failed = command(&mut e, place());
         assert!(failed.requests.is_empty());
         let error = terminal(&failed).expect("one terminal").unwrap_err();
-        assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
+        assert_eq!(
+            error.outcome,
+            Some(Outcome::NotSent),
+            "immediate {immediate}: {error:?}"
+        );
     }
 }
 
@@ -568,6 +581,16 @@ fn a_non_json_throttle_on_a_write_is_rate_limited() {
         let failed = answer(&mut e, &order, status, "Too Many Requests");
         assert!(failed.requests.is_empty());
         let error = terminal(&failed).expect("one terminal").unwrap_err();
-        assert_eq!(error.kind, Some(ErrorKind::RateLimited), "{status}: {error:?}");
+        assert_eq!(
+            error.kind,
+            Some(ErrorKind::RateLimited),
+            "{status}: {error:?}"
+        );
+        // A documented throttle refused the write; it is not an unknown outcome.
+        assert_eq!(
+            error.outcome,
+            Some(Outcome::Rejected),
+            "{status}: {error:?}"
+        );
     }
 }

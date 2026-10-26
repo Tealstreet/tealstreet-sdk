@@ -144,8 +144,19 @@ pub(crate) const ASTER: CodeTable = CodeTable {
     ],
     success: &[Key::Int(200)],
     unlisted: Verdict::Refused(ErrorKind::Rejected),
-    status: &[],
+    status: ASTER_STATUS,
 };
+
+/// Aster's fapi documents Binance's statuses: 4XX for malformed requests, 418 an
+/// IP auto-ban and 429 a rate limit. A bare edge 403 may be another block, so it
+/// is a plain refusal. They apply only where no native code was parsed.
+const ASTER_STATUS: &[(u16, Verdict)] = &[
+    (400, Verdict::Refused(ErrorKind::InvalidInput)),
+    (401, Verdict::Refused(ErrorKind::AuthInvalid)),
+    (403, Verdict::Refused(ErrorKind::Rejected)),
+    (418, Verdict::Refused(ErrorKind::RateLimited)),
+    (429, Verdict::Refused(ErrorKind::RateLimited)),
+];
 
 /// Only while a write still has its single resend: V1 -1022 and -1021.
 pub(crate) const ASTER_RESEND: CodeTable = CodeTable {
@@ -163,7 +174,7 @@ pub(crate) const ASTER_RESEND: CodeTable = CodeTable {
     ],
     success: &[Key::Int(200)],
     unlisted: Verdict::Refused(ErrorKind::Rejected),
-    status: &[],
+    status: ASTER_STATUS,
 };
 enum Call {
     Place {
@@ -927,6 +938,8 @@ impl AsterDex {
             };
             return;
         }
+        // A status-only refusal takes its kind and outcome from the table's status rows.
+        let mut status_error = None;
         if let Some(leg) = leg.filter(|_| !reported) {
             let _ = match &outcome {
                 _ if replied && !(was_place && placed.is_none()) => cx.http_write_fact(
@@ -936,20 +949,26 @@ impl AsterDex {
                     },
                     None,
                 ),
-                Err((code, message)) if !transport && !unproven && !replied && *code != 0 => {
+                Err((code, message)) if !transport && !unproven && !replied => {
                     let native = Native {
                         code: NativeCode::Int(*code),
                         message,
                     };
-                    match cx.classify_write(leg, &ASTER, Some(&native), message.clone()) {
-                        Ok(fact) => cx.http_write_fact(
-                            leg,
-                            WriteFact::Failed {
-                                fact,
-                                known_effects: false,
-                            },
-                            None,
-                        ),
+                    let native = (*code != 0).then_some(&native);
+                    match cx.classify_write(leg, &ASTER, native, message.clone()) {
+                        Ok(fact) => {
+                            if native.is_none() {
+                                status_error = Some(fact.error().clone());
+                            }
+                            cx.http_write_fact(
+                                leg,
+                                WriteFact::Failed {
+                                    fact,
+                                    known_effects: false,
+                                },
+                                None,
+                            )
+                        }
                         Err(error) => Err(error),
                     }
                 }
@@ -995,7 +1014,7 @@ impl AsterDex {
                 Ok(()) => job.successes += 1,
                 Err((code, message)) => {
                     cx.command_error(command, message.clone());
-                    let mut error = failure(code, message);
+                    let mut error = status_error.unwrap_or_else(|| failure(code, message));
                     // An earlier leg that may have executed keeps the command unknown.
                     if unproven
                         || job
