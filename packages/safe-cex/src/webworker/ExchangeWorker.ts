@@ -10,9 +10,9 @@ import throttle from 'lodash/throttle';
 
 import { classifiedError, exchangeErrorTags } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
-import { hostedSigningVenues, isKeylessRemoteSigned } from '../exchanges/hostedSigningVenues';
 import { exchangeRegistry } from '../exchanges/registry';
-import { RustEngineExchange, runsOnRustEngine } from '../exchanges/rust/rust.exchange';
+import { assertBetaAccount } from '../exchanges/rust/betaVenues';
+import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
@@ -333,6 +333,7 @@ export class ExchangeWorker {
     // as `webworker-uncaught` with no phase tag, AND skipped that caller's
     // `!started` cleanup, leaving a half-initialized worker in the map.
     try {
+      assertBetaAccount(this._exchangeName, this._options);
       await virtualClock.start();
       if (startupToken !== this._startupToken) {
         return false;
@@ -342,11 +343,7 @@ export class ExchangeWorker {
       if (!loader) {
         throw new Error(`Unknown exchange: ${this._exchangeName}`);
       }
-      const runsOnRust = runsOnRustEngine(this._exchangeName, this._options);
-      const hosted = isKeylessRemoteSigned(this._exchangeName, this._options)
-        ? hostedSigningVenues[this._exchangeName]
-        : undefined;
-      const Exchange = runsOnRust ? RustEngineExchange : await (hosted ?? loader)();
+      const Exchange = await loader();
       if (startupToken !== this._startupToken) {
         return false;
       }
