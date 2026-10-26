@@ -3296,6 +3296,55 @@ fn engine_re_asks_join_a_slow_reconcile_read_that_still_releases() {
     );
 }
 
+/// Cancel-all after an Unknown placement keeps the engine default
+/// (`fence_uncertain_cancel_all`): Bybit's native cancel-all cannot cancel an
+/// order that lands after it, so it is refused NotSent until the fresh read.
+/// Cancel by id stays admitted throughout.
+#[test]
+fn cancel_all_after_an_unknown_placement_waits_for_the_fresh_read() {
+    let mut h = ready();
+    place(
+        &mut h,
+        61,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let write = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: write,
+        error: "connection reset",
+    });
+    let pages: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    h.command(Command::CancelSymbolOrders {
+        command: 62,
+        symbol: "BTCUSDT".into(),
+    });
+    assert!(
+        h.result(62)
+            .is_some_and(|r| r.as_ref().is_err_and(|e| e.contains("uncertain"))),
+        "cancel-all is refused while BTC is uncertain: {:?}",
+        h.result(62)
+    );
+    assert!(!h.has_request("/v5/order/cancel-all"));
+    const EMPTY: &str = r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[],"nextPageCursor":""}}"#;
+    for id in pages {
+        h.reply(id, 200, EMPTY);
+    }
+    h.command(Command::CancelSymbolOrders {
+        command: 63,
+        symbol: "BTCUSDT".into(),
+    });
+    assert!(
+        h.has_request("/v5/order/cancel-all"),
+        "the fresh read admits cancel-all: {:?}",
+        h.result(63)
+    );
+}
+
 /// A refused snapshot page is re-read once, re-signed with Bybit's corrected
 /// clock, through the classifier (a streamed refusal carries no list).
 #[test]

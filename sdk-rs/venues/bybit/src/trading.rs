@@ -93,11 +93,6 @@ struct Job {
 pub struct TradingState {
     ordinary: HashMap<CommandId, ordinary::Ordinary>,
     mode_version: u64,
-    /// Ordinary trade calls settled (answered or lost); every uncertain seal
-    /// follows one, so an unchanged count marks an engine re-ask.
-    settled: u64,
-    /// `settled` at the last uncertain-write reconcile request.
-    reconciled_at: Option<u64>,
     pub(crate) hyro: crate::hyro::State,
 }
 

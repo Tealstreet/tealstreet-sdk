@@ -677,9 +677,6 @@ impl BybitLinear {
 
     /// Cleanup only: the engine sealed and retired this generation.
     pub(crate) fn on_ordinary_retired(&mut self, owner: &HttpOwnerRetirement) {
-        // An engine-retired job may follow a new uncertain seal: never let the
-        // next reconcile read as a re-ask, whatever the callback order.
-        self.trading.settled += 1;
         let mut settled = Vec::new();
         self.trading.ordinary.retain(|id, entry| {
             let retired = owner.matches_preflight(&entry.preflight);
@@ -712,7 +709,6 @@ impl BybitLinear {
         request: Request,
         response: Response<'_>,
     ) {
-        self.trading.settled += 1;
         let Some(mut entry) = self.take_ordinary(&request) else {
             return;
         };
@@ -987,7 +983,6 @@ impl BybitLinear {
         request: Request,
         error: VenueError,
     ) {
-        self.trading.settled += 1;
         let Some(mut entry) = self.take_ordinary(&request) else {
             return;
         };
@@ -1566,10 +1561,9 @@ impl BybitLinear {
             self.reconcile_hyro_snapshot(cx);
             return;
         }
-        // An engine re-ask (no trade call settled since the last request) joins
-        // the post-mark reads already out; a new seal replaces older ones.
-        let reask = self.trading.reconciled_at == Some(self.trading.settled);
-        self.trading.reconciled_at = Some(self.trading.settled);
+        // An engine re-ask joins the post-mark reads already out; a new seal
+        // replaces older ones.
+        let reask = cx.reconcile_reask();
         let selected = self.category;
         for category in self.categories() {
             self.select_category(category);
