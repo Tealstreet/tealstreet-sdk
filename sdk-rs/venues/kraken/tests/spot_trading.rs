@@ -315,7 +315,12 @@ fn uncertain_write_is_never_replayed_but_signature_rejection_resigns_once() {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+            .any(|a| matches!(a, Action::Http(r) if !r.url.ends_with("OpenOrders")))
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("OpenOrders")))
     );
     assert!(
         actions
@@ -600,7 +605,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"error":["EFuture:Something"]}"#,
-            (None, None),
+            unknown,
             "Kraken Spot: EFuture:Something",
         ),
         (
@@ -796,5 +801,252 @@ mod owned_nonpageable {
             panic!("one explicit nondefinitive lookup, no history marker or I/O: {output:?}");
         };
         assert_eq!(result, r#"{"found":false,"definitive":false}"#);
+    }
+}
+
+#[test]
+fn beta_partial_placement_retains_ids_and_reconciles_uncertainty() {
+    for body in [r#"{"error":["EOrder:Insufficient funds"]}"#, "<html>"] {
+        let (mut e, _, _) = ready(false);
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![opts("limit", 99.), opts("limit", 99.), opts("limit", 99.)],
+            }),
+        );
+        let first = requests(&mut e).pop().unwrap();
+        reply(
+            &mut e,
+            &first,
+            r#"{"error":[],"result":{"txid":["accepted"]}}"#,
+        );
+        let second = requests(&mut e).pop().unwrap();
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: second.id,
+                response: safe_cex_engine::Response {
+                    status: if body == "<html>" { 503 } else { 200 },
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted"]);
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("OpenOrders")))
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder")))
+        );
+    }
+}
+
+#[test]
+fn beta_one_http_auth_failure_does_not_deactivate_spot() {
+    use safe_cex_engine::{ErrorKind, Response};
+    for (status, kind) in [
+        (401, ErrorKind::AuthInvalid),
+        (403, ErrorKind::AuthPermission),
+    ] {
+        let (mut e, _, _) = ready(false);
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![opts("limit", 99.)],
+            }),
+        );
+        let request = requests(&mut e).pop().unwrap();
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: "<html>",
+                },
+            },
+        );
+        let actions = e.drain_plain().collect::<Vec<_>>();
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .expect("typed auth failure");
+        assert_eq!(error.kind, Some(kind));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+        );
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 92,
+                orders: vec![opts("limit", 99.)],
+            }),
+        );
+        let request = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("AddOrder"))
+            .expect("venue still active");
+        reply(
+            &mut e,
+            &request,
+            r#"{"error":[],"result":{"txid":["after-auth"]}}"#,
+        );
+        assert_eq!(done(&mut e, 92).unwrap(), r#"["after-auth"]"#);
+    }
+}
+
+#[test]
+fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
+    let (mut e, _, _) = ready(false);
+    let send = |e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>, command| {
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![opts("limit", 99.)],
+            }),
+        );
+        let request = requests(e).pop().unwrap();
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status: 503,
+                    headers: "",
+                    body: "<html>",
+                },
+            },
+        );
+    };
+    send(&mut e, 81);
+    let old = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("OpenOrders"))
+        .unwrap();
+    send(&mut e, 82);
+    assert!(
+        !requests(&mut e)
+            .iter()
+            .any(|r| r.url.ends_with("OpenOrders"))
+    );
+    reply(&mut e, &old, r#"{"error":[],"result":{"open":{}}}"#);
+    let fresh = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("OpenOrders"))
+        .unwrap();
+    assert_ne!(old.id, fresh.id);
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 83,
+            symbol: "XBT/USD".into(),
+        }),
+    );
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command:83, error}) if error.message.contains("uncertain"))));
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    reply(&mut e, &fresh, r#"{"error":[],"result":{"open":{}}}"#);
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 84,
+            symbol: "XBT/USD".into(),
+        }),
+    );
+    assert!(
+        e.drain_plain()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 84, .. })))
+    );
+}
+
+#[test]
+fn beta_cancel_prefix_survives_a_later_refusal() {
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelOrders {
+            command: 81,
+            ids: vec!["a".into(), "b".into(), "c".into()],
+        }),
+    );
+    let first = requests(&mut e).pop().unwrap();
+    reply(&mut e, &first, r#"{"error":[],"result":{"count":1}}"#);
+    let second = requests(&mut e).pop().unwrap();
+    reply(&mut e, &second, r#"{"error":["EOrder:Unknown order"]}"#);
+    let actions = e.drain_plain().collect::<Vec<_>>();
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("CancelOrder")))
+    );
+}
+
+#[test]
+fn beta_unproven_status_never_grants_a_signature_resend() {
+    for status in [408, 500, 503] {
+        let (mut e, _, _) = ready(false);
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 81,
+                orders: vec![opts("limit", 99.)],
+            }),
+        );
+        let request = requests(&mut e).pop().unwrap();
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body: r#"{"error":["EAPI:Invalid signature"]}"#,
+                },
+            },
+        );
+        let actions = e.drain_plain().collect::<Vec<_>>();
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error, ..}) if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder")))
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+        );
     }
 }

@@ -9670,6 +9670,39 @@ The regression covers coded400,401,403,429,408,500 and malformed gateway bodies.
 Beta public evidence uses explicit Rust through the JS/WASM host, including
 managed HTTP recording; native unit results alone do not certify that path.
 
+### Kraken beta partial writes and request authentication
+
+Kraken Futures and Spot failures retain proven placement, amendment and
+cancellation-command IDs in `VenueError.partial.order_ids`. For cancellation
+commands these name confirmed cancellations, not live placements. An amend-as-
+replace never includes its cancelled original in the replacement-ID partial.
+A failure after any known
+write effect reports `Unknown`; transport loss, unrecognized ACKs and unknown
+native codes also stay explicit `Unknown`. No failed command becomes success or
+loses its accepted prefix. Successful cancellation/replacement result shapes stay
+unchanged. This supersedes the earlier None-after-progress projection for Kraken.
+
+Both venues use the shared pending-placement/order guard and uncertain-write
+reconcile hook. Cancel-all stays fenced until a complete current order read
+clears the engine's original read token. An older in-flight read schedules a fresh
+follow-up instead of clearing a newer uncertainty; malformed or rejected rows
+cannot clear it. Reconciliation adds reads, never a write resend.
+
+A single Spot HTTP 401/403 fails that request with its auth kind and does not
+emit Deactivate. The existing one definitive invalid-signature resend and its
+exhausted-refusal policy remain, as do definitive revoked-key and read-permission
+refusals; 408/5xx cannot grant that resend or terminal auth policy. Futures uses a
+CodeTable on both 2xx error envelopes and non-2xx bodies, retaining native code
+and message while shared 408/5xx precedence preserves uncertainty.
+
+Rust-native tests are regression evidence only. Browser beta readiness requires
+separate JS `EngineHost` plus compiled WASM replay/live-public results, using the
+managed-HTTP recorder fix; no native-host run counts as browser readiness.
+
+### Binance signing residue: legacy test oracle retired
+
+No caller-visible change. Binance already signed every request through the provider. The remaining legacy signing code was a test-only HMAC oracle and fixtures, now replaced by provider-path proofs of the documented vector and of every configured receive window ([RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md)). Signing inventory for Binance: 27 → 4, the four being the dispatch recipe's own lines.
+
 ### A CDN refusal is a block, not a bad key
 
 When a 401/403 carries no native code, the engine's last status fallback
