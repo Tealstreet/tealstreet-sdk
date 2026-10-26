@@ -256,7 +256,8 @@ with otherwise valid fields. This is not a /v1/ prefix grant.
 | Descriptor variant | Method | Exact native target and constraint |
 | --- | --- | --- |
 | paradex.auth | POST | Signed Request path is exactly /v1/auth, empty body. Native HTTP target is /v1/auth/{subkey}, with subkey derived from the provider-confirmed bound public subkey, never an arbitrary path argument. |
-| paradex.order create | POST | /v1/orders, or /v1/orders/batch only for the single-order native representation already allowed under delegated signing; no multi-order batch capability. |
+| paradex.order create | POST | /v1/orders, or /v1/orders/batch for the native single-order representation. |
+| paradex.order batch | POST | /v1/orders/batch with 1..=10 items, each exactly native plain-LIMIT batch eligibility; separately negotiated capability. Amended by the overseer's batch ruling: mode 2 replaces today's live uploaded-key signing, which places these batches (see [RUST_PARADEX_HOSTED_STARK_CONSUMER.md](RUST_PARADEX_HOSTED_STARK_CONSUMER.md)). No other multi-operation expansion. |
 | paradex.order modify | PUT | /v1/orders/{encoded_order_id}, the one encoded component derived from the same typed modify id in the signed preimage and native body. |
 
 The trusted network selects the existing native host. No arbitrary host, route,
@@ -358,9 +359,10 @@ must execute before source; F3 remains the explicitly declared follow-up above.
    post-encode send refusal, including UTF-8 byte length rather than JS length.
    Every excluded Kraken withdrawal/transfer/wallet path under an otherwise
    valid descriptor refuses before callback, alongside exact allowlist positives.
-   Paradex auth/create/modify positives and every excluded operation, changed
-   method/path, auth subkey substitution and multi-order batch also pin the
-   same no-callback refusal; a valid tag never bypasses the closed rules.
+   Paradex auth/create/batch/modify positives and every excluded operation,
+   changed method/path, auth subkey substitution, a 0- or 11-item batch, a
+   non-eligible batch item and an un-negotiated batch also pin the same
+   no-callback refusal; a valid tag never bypasses the closed rules.
    G6 Optional intentional signing absence refuses SigningNotConfigured during
    preparation, before any Action::Sign, sign_meta lookup or v2 frame. Pin that
    ordering without importing Optional behavior into Required Paradex startup.

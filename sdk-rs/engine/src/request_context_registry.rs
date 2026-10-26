@@ -2205,6 +2205,8 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .contexts
             .remove(&context.leg());
+        #[cfg(feature = "repair-mutations")]
+        self.io.repair_leg_finished(context, self.now);
         Ok(())
     }
 }

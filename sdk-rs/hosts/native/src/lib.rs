@@ -167,6 +167,13 @@ impl<V: Venue, T: Transport> Host<V, T> {
     }
 
     /// Feed live configuration alongside transport completions.
+    /// Read-only metadata of the current managed signing task; see
+    /// `Engine::sign_meta`. Descriptive only.
+    #[cfg(feature = "sign-meta")]
+    pub fn sign_meta(&self, task: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
+        self.engine.sign_meta(task)
+    }
+
     pub fn event_sender(&self) -> Events {
         self.events.clone()
     }
