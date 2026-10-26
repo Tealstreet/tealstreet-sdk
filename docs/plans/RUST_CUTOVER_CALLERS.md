@@ -9341,3 +9341,17 @@ terminal follows the existing Plan journal: an accepted prefix yields None,
 and a released attempt followed by an unreleased failed resend may yield Unknown
 rather than whole-command NotSent. No native GRVT constructor or queue adoption
 is enabled by this shared prerequisite.
+
+### Explicit authentication on serial calls
+
+SerialCall declares Preflight or Session authentication. Existing adopters use
+Preflight with their previous read/write policy. A Session call carries no
+credential, signing or nonce authority and uses the retained login Session's
+explicit egress. Installed unsigned-only commands may deliberately use a Session
+root; sign-requiring commands never fall back to it. Credential-bearing login
+Sessions must match the engine's own installed Primary slot and credential ref.
+Mixed roots retain the exact write credential for their later Preflight calls.
+Session calls keep Mutation journal evidence, order locks and Unknown on an
+unproven released send. Their resend freezes codec bytes while refreshing the
+bundle at Bind; Preflight signed calls repeat their existing provider work.
+No current venue enables a new auth mode in this engine slice.

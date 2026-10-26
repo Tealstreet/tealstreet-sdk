@@ -15,6 +15,7 @@ mod serial_call_auth {
     enum Mode {
         #[default]
         Mixed,
+        MixedResend,
         UnsignedOnly,
         ForeignRef,
         SecondarySession,
@@ -26,6 +27,12 @@ mod serial_call_auth {
         SignedSessionCall,
         UnsignedPreflightCall,
         RetireBetween,
+        Resend,
+        ChangedResend,
+        RetiredResend,
+        ForbiddenRecipe,
+        #[cfg(feature = "sign-meta")]
+        SelectedRecipe,
     }
     enum Pending {
         Login(Context),
@@ -84,6 +91,26 @@ mod serial_call_auth {
             Ok(())
         }
     }
+    struct ForbiddenRecipe;
+    impl crate::SignStep for ForbiddenRecipe {
+        fn freshness_ms(&self) -> f64 {
+            panic!("Session call cannot inspect a signing recipe")
+        }
+        fn nonce_claim(&self) -> Option<&crate::nonce::NonceClaim> {
+            panic!("Session call cannot inspect nonce authority")
+        }
+        fn prepare(
+            &mut self,
+            _: &mut Action,
+            _: &crate::DispatchContext<'_>,
+        ) -> Result<SignRequest, SignError> {
+            panic!("Session call cannot prepare provider work")
+        }
+        fn apply(&mut self, _: &mut Action, _: &SignResult) -> Result<(), SignError> {
+            panic!("Session call cannot apply signing")
+        }
+    }
+
     fn primary() -> crate::request_context::Credential {
         crate::request_context::Credential {
             slot: crate::CredentialSlot::Primary,
@@ -119,23 +146,72 @@ mod serial_call_auth {
         work: Vec<SignRequest>,
         errors: Vec<VenueError>,
         revision: u64,
+        resends: usize,
+        auth_at_retire: Option<u32>,
     }
     impl Probe {
         fn issue(&mut self, cx: &mut Cx<'_, Pending>, slot: Slot, stage: usize) {
             let context = cx
                 .plan_leg_context(self.plan.as_ref().unwrap(), &slot)
                 .unwrap();
+            self.issue_context(cx, context, slot, stage);
+        }
+        fn issue_context(
+            &mut self,
+            cx: &mut Cx<'_, Pending>,
+            context: Context,
+            slot: Slot,
+            stage: usize,
+        ) {
             self.observed.push(context.clone());
             let signed = stage == 3 || self.mode == Mode::SignedSessionCall;
             self.before = Some(cx.io.core.next_id);
             let pending = Pending::Call(context.clone(), slot, stage);
-            let result = if signed {
+            #[cfg(feature = "sign-meta")]
+            if self.mode == Mode::SelectedRecipe {
+                let slots = crate::credential_selection::Slots::new(
+                    None,
+                    cx.io.core.identities.secondary.clone(),
+                    Default::default(),
+                );
+                let (selection, _) = slots
+                    .select(crate::credential_selection::CredentialRole::Read { scope: None })
+                    .unwrap();
+                let result = cx.request_selected_managed(
+                    context,
+                    &selection,
+                    self.session.as_ref(),
+                    Method::Post,
+                    "https://venue.test/selected".into(),
+                    None,
+                    Box::new(ForbiddenRecipe),
+                    pending,
+                );
+                self.after = Some(cx.io.core.next_id);
+                self.issue = Some(result.map(drop).map_err(|(_, error)| error));
+                return;
+            }
+            let result = if self.mode == Mode::ForbiddenRecipe {
+                cx.request_signed_managed(
+                    context,
+                    self.session.as_ref(),
+                    Method::Post,
+                    "https://venue.test/forbidden".into(),
+                    None,
+                    Box::new(ForbiddenRecipe),
+                    pending,
+                )
+            } else if signed {
                 cx.request_signed_managed(
                     context,
                     self.session.as_ref(),
                     Method::Post,
                     format!("https://venue.test/{stage}"),
-                    Some("frozen-create".into()),
+                    Some(if self.mode == Mode::MixedResend && self.resends > 0 {
+                        "fresh-signature-create".into()
+                    } else {
+                        "frozen-create".into()
+                    }),
                     Box::new(Recipe {
                         key: KeyRef("primary.signing".into()),
                         login: false,
@@ -149,7 +225,11 @@ mod serial_call_auth {
                     self.session.as_ref(),
                     Method::Post,
                     format!("https://venue.test/{stage}"),
-                    Some(format!("immutable-call-{stage}")),
+                    Some(if self.mode == Mode::ChangedResend && self.resends > 0 {
+                        "changed-call".into()
+                    } else {
+                        format!("immutable-call-{stage}")
+                    }),
                     pending,
                 )
             };
@@ -159,6 +239,9 @@ mod serial_call_auth {
     }
     impl Venue for Probe {
         type Pending = Pending;
+        fn guard_order_mutations(&self) -> bool {
+            true
+        }
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
             let empty = matches!(self.mode, Mode::EmptyMixed | Mode::KeylessPreflight);
             let credential = if empty {
@@ -295,7 +378,7 @@ mod serial_call_auth {
             } else {
                 CallAuth::Session
             };
-            let operation = if self.mode == Mode::Mixed {
+            let operation = if matches!(self.mode, Mode::Mixed | Mode::MixedResend) {
                 Operation::Read
             } else {
                 Operation::Mutation
@@ -317,7 +400,12 @@ mod serial_call_auth {
                 self.issue(cx, slot, 0);
             }
         }
-        fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, _: Response<'_>) {
+        fn on_response(
+            &mut self,
+            cx: &mut Cx<'_, Pending>,
+            pending: Pending,
+            response: Response<'_>,
+        ) {
             let (context, slot, stage) = match pending {
                 Pending::Login(context) => {
                     cx.http_write_result(&context, WriteResult::Accepted { order_ids: vec![] })
@@ -335,6 +423,59 @@ mod serial_call_auth {
             };
             let plan = self.plan.clone().unwrap();
             cx.validate_plan_delivery(&plan, &context).unwrap();
+            if response.body == "auth" {
+                use crate::classify::{CodeTable, Key, Native, NativeCode, Row, Verdict};
+                const TABLE: CodeTable = CodeTable {
+                    rows: &[Row {
+                        key: Key::Int(1000),
+                        verdict: Verdict::RefusedResend(crate::ErrorKind::AuthInvalid),
+                        only: None,
+                    }],
+                    success: &[],
+                    unlisted: Verdict::Unknown(None),
+                    status: &[],
+                };
+                let native = Native {
+                    code: NativeCode::Int(1000),
+                    message: "authentication refused",
+                };
+                let (_, grant) = cx
+                    .http_write_failure(
+                        &context,
+                        &TABLE,
+                        Some(&native),
+                        "authentication refused",
+                        None,
+                    )
+                    .unwrap();
+                if self.mode == Mode::RetiredResend {
+                    self.auth_at_retire = Some(cx.io.core.health.auth_failures);
+                    cx.retire_session(self.session.as_ref().unwrap()).unwrap();
+                }
+                self.before = Some(cx.io.core.next_id);
+                let result = grant.ok_or(Error::RetryForbidden).and_then(|grant| {
+                    cx.serial_plan_session_resend(
+                        &plan,
+                        &slot,
+                        &context,
+                        crate::request_context::SessionResend::Write(grant),
+                    )
+                });
+                self.after = Some(cx.io.core.next_id);
+                self.selected = Some(result.as_ref().map(drop).map_err(|error| *error));
+                match result {
+                    Ok(context) => {
+                        self.resends += 1;
+                        self.issue_context(cx, context, slot, stage);
+                        self.revision += 1;
+                        let _ = cx.session_ready(self.session.as_ref().unwrap());
+                    }
+                    Err(error) => {
+                        let _ = cx.fail_plan(&plan, error.venue_error());
+                    }
+                }
+                return;
+            }
             if context.operation() == Operation::Mutation {
                 cx.http_write_result(&context, WriteResult::Accepted { order_ids: vec![] })
                     .unwrap();
@@ -342,18 +483,23 @@ mod serial_call_auth {
             if self.mode == Mode::RetireBetween {
                 cx.retire_session(self.session.as_ref().unwrap()).unwrap();
             }
-            let last = if self.mode == Mode::Mixed { 3 } else { 1 };
+            let last = if matches!(self.mode, Mode::Mixed | Mode::MixedResend) {
+                3
+            } else {
+                1
+            };
             if stage == last {
+                cx.finish_plan_call(&plan, &slot, &context).unwrap();
                 cx.done_plan(&plan, "[]".into()).unwrap();
                 return;
             }
             let next = stage + 1;
-            let auth = if self.mode == Mode::Mixed && next == 3 {
+            let auth = if matches!(self.mode, Mode::Mixed | Mode::MixedResend) && next == 3 {
                 CallAuth::Preflight
             } else {
                 CallAuth::Session
             };
-            let operation = if self.mode == Mode::Mixed && next == 2 {
+            let operation = if matches!(self.mode, Mode::Mixed | Mode::MixedResend) && next == 2 {
                 Operation::Read
             } else {
                 Operation::Mutation
@@ -411,8 +557,20 @@ mod serial_call_auth {
                 }
             }
         }
-        fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {
-            panic!("no transport failures in this original")
+        fn capture_http_reconciliation(
+            &self,
+            _: &Pending,
+        ) -> Result<crate::request_context::ReconciliationData, Error> {
+            crate::request_context::ReconciliationData::new("serial-call-auth-fixture".into())
+        }
+
+        fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+            match pending {
+                Pending::Call(_, _, _) => {
+                    cx.fail_plan(self.plan.as_ref().unwrap(), error).unwrap();
+                }
+                _ => panic!("no login or provider transport failures in this fixture"),
+            }
         }
         fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
         fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
@@ -454,7 +612,8 @@ mod serial_call_auth {
                     HttpAction::Bind {
                         permit, request, ..
                     } => {
-                        assert!(matches!(e.claim_http(now, permit), Ok(Claim::Released(_))));
+                        let claim = e.claim_http(now, permit);
+                        assert!(matches!(claim, Ok(Claim::Released(_))), "{claim:?}");
                         packets.push(request);
                     }
                     HttpAction::BindGroup { .. } => panic!("no grouped calls"),
@@ -596,6 +755,26 @@ mod serial_call_auth {
         }
         assert_eq!(e.venue.work.len(), 1);
     }
+    fn later_signed_stages(e: &mut Engine<Probe>) {
+        let before = e.venue.work.len();
+        e.handle_command(
+            10.,
+            Command::CancelOrdersWithSymbols {
+                command: 8,
+                orders: vec![],
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            drive(e, 10.).len(),
+            1,
+            "ordinary signed work still releases"
+        );
+        assert_eq!(e.venue.work.len(), before + 1);
+        assert!(!e.io.core.signing.refused());
+    }
+
     fn entry_refuses(mode: Mode) {
         let mut e = ready(mode);
         enter(&mut e);
@@ -603,6 +782,8 @@ mod serial_call_auth {
         assert_eq!(e.venue.before, e.venue.after);
         assert!(drive(&mut e, 2.).is_empty());
         assert!(!e.io.core.signing.refused());
+        assert_eq!(e.io.core.health.auth_failures, 0);
+        later_signed_stages(&mut e);
     }
     #[test]
     fn foreign_session_credential_refuses_before_entry_ids() {
@@ -652,6 +833,127 @@ mod serial_call_auth {
         assert_eq!(e.venue.issue, Some(Err(Error::Invalid)));
         assert_eq!(e.venue.before, e.venue.after);
     }
+    #[test]
+    fn session_auth_resend_keeps_body_and_rereads_new_cookie_without_provider_work() {
+        let mut e = admitted(Mode::Resend);
+        let first = drive(&mut e, 1.).pop().unwrap();
+        auth_reply(&mut e, first.id, 2.);
+        assert_eq!(e.venue.selected, Some(Ok(())));
+        let ids = e.io.core.next_id;
+        auth_reply(&mut e, first.id, 2.);
+        assert_eq!(e.io.core.next_id, ids, "late DATA is inert");
+        let next = drive(&mut e, 2.).pop().unwrap();
+        assert_ne!(first.id, next.id);
+        assert_eq!(first.body, next.body);
+        assert_eq!(first.headers, vec![("Cookie", "cookie-1".into())]);
+        assert_eq!(next.headers, vec![("Cookie", "cookie-2".into())]);
+        assert_eq!(e.venue.work.len(), 1);
+        reply(&mut e, next.id, 3.);
+    }
+    #[test]
+    fn a_mixed_roots_preflight_create_resend_repeats_signing_without_session_fingerprint() {
+        let mut e = admitted(Mode::MixedResend);
+        for stage in 0..3 {
+            let packet = drive(&mut e, 1. + stage as f64).pop().unwrap();
+            reply(&mut e, packet.id, 1.5 + stage as f64);
+        }
+        let create = drive(&mut e, 4.).pop().unwrap();
+        assert_eq!(e.venue.work.len(), 2);
+        auth_reply(&mut e, create.id, 5.);
+        assert_eq!(e.venue.selected, Some(Ok(())));
+        let retry = drive(&mut e, 5.).pop().unwrap();
+        assert_ne!(
+            create.body, retry.body,
+            "provider-signed bytes are not the Session codec fingerprint"
+        );
+        assert_eq!(e.venue.work.len(), 3);
+        assert_eq!(
+            e.venue.observed.last().unwrap().credential(),
+            Some(&primary())
+        );
+        reply(&mut e, retry.id, 6.);
+    }
+    #[test]
+    fn a_released_session_cancel_transport_failure_keeps_write_evidence_and_unknown() {
+        let mut e = admitted(Mode::UnsignedOnly);
+        let cancel = drive(&mut e, 1.).pop().unwrap();
+        assert!(e.venue.observed[0].credential().is_none());
+        assert!(e.io.core.request_contexts.command_writes(7).is_some());
+        #[cfg(feature = "order-locks")]
+        assert!(e.io.core.order_locks.contains(7));
+        e.handle(
+            2.,
+            Event::HttpFailed {
+                request: cancel.id,
+                error: "network",
+            },
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        let terminal = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+                _ => None,
+            })
+            .expect("shared journal seals the released Mutation");
+        assert_eq!(terminal.outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(e.venue.work.len(), 1);
+        assert!(e.venue.selected.is_none());
+    }
+
+    #[test]
+    fn changed_session_resend_body_refuses_before_ids() {
+        let mut e = admitted(Mode::ChangedResend);
+        let first = drive(&mut e, 1.).pop().unwrap();
+        auth_reply(&mut e, first.id, 2.);
+        assert_eq!(e.venue.issue, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.before, e.venue.after);
+        assert!(drive(&mut e, 2.).is_empty());
+        assert_eq!(e.venue.work.len(), 1);
+    }
+    #[test]
+    fn retiring_the_installed_session_before_resend_refuses_without_spend() {
+        let mut e = admitted(Mode::RetiredResend);
+        let first = drive(&mut e, 1.).pop().unwrap();
+        auth_reply(&mut e, first.id, 2.);
+        assert_eq!(e.venue.selected, Some(Err(Error::Revoked)));
+        assert_eq!(e.venue.before, e.venue.after);
+        assert!(drive(&mut e, 2.).is_empty());
+        assert!(!e.io.core.signing.refused());
+        assert_eq!(
+            e.io.core.health.auth_failures,
+            e.venue.auth_at_retire.unwrap() + 1,
+            "the journal terminal preserves the earlier genuine auth refusal"
+        );
+        later_signed_stages(&mut e);
+    }
+    #[test]
+    fn session_call_refuses_before_nonce_or_freshness_inspection() {
+        let e = admitted(Mode::ForbiddenRecipe);
+        assert_eq!(e.venue.issue, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.before, e.venue.after);
+    }
+    #[cfg(feature = "sign-meta")]
+    #[test]
+    fn session_call_refuses_selected_secondary_recipe_before_ids() {
+        let e = admitted(Mode::SelectedRecipe);
+        assert_eq!(e.venue.issue, Some(Err(Error::Invalid)));
+        assert_eq!(e.venue.before, e.venue.after);
+    }
+    fn auth_reply(e: &mut Engine<Probe>, request: RequestId, now: f64) {
+        e.handle(
+            now,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 401,
+                    headers: "",
+                    body: "auth",
+                },
+            },
+        );
+    }
+
     #[test]
     fn retiring_the_installed_session_between_calls_spends_nothing_and_does_not_latch() {
         let mut e = admitted(Mode::RetireBetween);

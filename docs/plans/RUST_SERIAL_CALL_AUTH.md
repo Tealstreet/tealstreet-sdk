@@ -128,3 +128,29 @@ Session tag is ignored. An initial Option<bool> fixture compile error is exclude
 The original credential-Session negative is deliberately amended at source:
 matching installed credentials become valid; foreign or absent installed refs
 remain refused. No old financial or signed-adopter assertion is removed.
+
+## Source checkpoint
+
+Session linkage is revalidated against immutable installed identities at entry,
+issue, continuation and resend. Credential-free Sessions retain their explicit
+egress and cannot carry a write credential; credential-bearing Sessions require
+the installed Primary credential ref and any retained write must equal it.
+Session calls alone carry credential-free Contexts, explicit Session egress and
+the frozen codec fingerprint. Preflight calls keep their prior credential and
+provider rules. No Sessions::open constraint or global recipe validation changes.
+
+The twelve original first assertions are preserved. Source fixture completion
+adds the required genuine reconciliation capture and finish_plan_call before
+done_plan; both were gated by entry in the inert checkpoint. Source controls add
+selected/nonce refusal, refreshed-cookie immutable resend and late duplicate,
+changed-body refusal, retired resend, mixed Preflight create resend with fresh
+provider work, and a released Session Mutation failing Unknown. A terminal after
+a real classified auth refusal retains that earlier journal error and its health
+evidence; the retirement itself neither latches signing nor invents auth evidence.
+The old credential-Session negative still refuses without an installed identity;
+the new matching-identity positive explicitly records the intended amendment.
+
+The first-adopter combined measurement additionally enables serial-plans and
+session-bearer as GRVT will. Report its cost separately; growth above 30K needs
+the overseer. Release-domain pacing, if composed later, keeps its stamping at
+plan_leg_context and its managed-boundary checks for Session calls too.
