@@ -3074,6 +3074,38 @@ mod audit_tests {
             },
         );
         let dropped = engine.venue().trading.jobs.is_empty();
+        // The Unknown fences the symbol; a clean post-mark open-orders snapshot
+        // releases it so the second placement exercises a new owner generation.
+        for _ in 0..4 {
+            let reads: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut engine, 1002.)
+                .into_iter()
+                .filter_map(|action| match action {
+                    Action::Http(http)
+                        if http.url.contains("openOrders")
+                            || http.url.contains("openAlgoOrders") =>
+                    {
+                        Some(http.id)
+                    }
+                    _ => None,
+                })
+                .collect();
+            if reads.is_empty() {
+                break;
+            }
+            for request in reads {
+                engine.handle(
+                    1002.,
+                    Event::HttpResponse {
+                        request,
+                        response: Response {
+                            status: 200,
+                            headers: "",
+                            body: "[]",
+                        },
+                    },
+                );
+            }
+        }
         engine.drain_actions().for_each(drop);
         engine.handle(
             1003.,
