@@ -18,41 +18,98 @@ const ZERO: Pacing = Pacing {
     group: 3,
     minimum_gap_ms: 0.,
 };
+// WOO: one FIFO over ordinary POST (the shared 100 ms clock), PUT (that clock
+// at 200 ms) and algo POST (the shared clock plus a 500 ms algo clock).
+const GLOBAL: Pacing = Pacing {
+    group: 10,
+    minimum_gap_ms: 100.,
+};
+const ALGO: Pacing = Pacing {
+    group: 11,
+    minimum_gap_ms: 500.,
+};
+const ALGO_SET: crate::request_context::PacingSet = crate::request_context::PacingSet {
+    group: 12,
+    constraints: &[GLOBAL, ALGO],
+};
+const POST: Pacing = Pacing {
+    group: 10,
+    minimum_gap_ms: 0.,
+};
+const PUT: Pacing = Pacing {
+    group: 10,
+    minimum_gap_ms: 200.,
+};
+const ALGO_ORDER: Pacing = Pacing {
+    group: 12,
+    minimum_gap_ms: 0.,
+};
+// Two entries on one clock (a 450 ms base and a 1500 ms outer gap). MEXC needs
+// this charging too, but only with Declared membership (the defer_pacing slice):
+// under AllRest or Mutations its cancels would queue behind a 1500 ms head.
+const SUBMIT: Pacing = Pacing {
+    group: 20,
+    minimum_gap_ms: 450.,
+};
+const SUBMIT_BASE: Pacing = Pacing {
+    group: 20,
+    minimum_gap_ms: 0.,
+};
+const SUBMIT_JOB: Pacing = Pacing {
+    group: 20,
+    minimum_gap_ms: 1500.,
+};
 
 /// `D`: 0 no domain, 1 an all-REST domain on the registered group, 2 a domain
 /// naming an unregistered group, 3 a Mutations domain, 4 a Mutations domain
-/// on the registered zero-gap group.
+/// on the registered zero-gap group, 5 WOO's admissible set, 6 two entries
+/// sharing one clock.
 #[derive(Default)]
 struct Fifo<const D: u8>;
 
 impl<const D: u8> Venue for Fifo<D> {
     type Pending = u32;
     fn http_pacing(&self) -> &[Pacing] {
-        &[GROUP, ZERO]
+        match D {
+            5 => &[GLOBAL, ALGO],
+            6 => &[SUBMIT],
+            _ => &[GROUP, ZERO],
+        }
     }
     fn http_release_domain() -> Option<ReleaseDomain> {
         match D {
             1 => Some(ReleaseDomain {
-                pacing: GROUP,
+                pacings: &[GROUP],
                 members: DomainMembers::AllRest,
             }),
             2 => Some(ReleaseDomain {
-                pacing: Pacing {
+                pacings: &[Pacing {
                     group: 9,
                     minimum_gap_ms: GAP,
-                },
+                }],
                 members: DomainMembers::AllRest,
             }),
             3 => Some(ReleaseDomain {
-                pacing: GROUP,
+                pacings: &[GROUP],
                 members: DomainMembers::Mutations,
             }),
             4 => Some(ReleaseDomain {
-                pacing: ZERO,
+                pacings: &[ZERO],
                 members: DomainMembers::Mutations,
+            }),
+            5 => Some(ReleaseDomain {
+                pacings: &[POST, PUT, ALGO_ORDER],
+                members: DomainMembers::AllRest,
+            }),
+            6 => Some(ReleaseDomain {
+                pacings: &[SUBMIT_BASE, SUBMIT_JOB],
+                members: DomainMembers::AllRest,
             }),
             _ => None,
         }
+    }
+    fn http_pacing_sets(&self) -> &[crate::request_context::PacingSet] {
+        if D == 5 { &[ALGO_SET] } else { &[] }
     }
     fn start(&mut self, _: &mut Cx<'_, u32>) {}
     fn on_open(&mut self, _: &mut Cx<'_, u32>, _: SocketId) {}
@@ -659,4 +716,150 @@ fn a_non_member_read_naming_the_group_does_not_join_a_mutations_fifo() {
         "a non-member is never a FIFO member"
     );
     assert_eq!(prepare(&mut e, token, 0.).len(), 1, "it binds at once");
+}
+
+fn paced<const D: u8>(engine: &mut Engine<Fifo<D>>, pacing: Pacing) -> Context {
+    Cx {
+        now: 0.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    }
+    .http_context(Scope::Background, read(Some(pacing)))
+    .unwrap()
+}
+
+/// Queues one member under `pacing`, prepares it as the head, and returns the
+/// Claim result at `at` (releasing it if the floor allows).
+fn head<const D: u8>(engine: &mut Engine<Fifo<D>>, pacing: Pacing, id: u32, at: f64) -> Claim {
+    let context = paced(engine, pacing);
+    let token = queue(engine, context, id, 0.);
+    let bind = prepare(engine, token, 0.);
+    engine.claim_http(at, bind[0].1).unwrap()
+}
+
+fn release<const D: u8>(engine: &mut Engine<Fifo<D>>, pacing: Pacing, id: u32, at: f64) {
+    match head(engine, pacing, id, at) {
+        Claim::Released(_) => {}
+        Claim::WaitUntil(floor) => panic!("expected a release at {at}, floor {floor}"),
+    }
+}
+
+fn wait<const D: u8>(engine: &mut Engine<Fifo<D>>, pacing: Pacing, id: u32, at: f64) -> f64 {
+    match head(engine, pacing, id, at) {
+        Claim::WaitUntil(floor) => floor,
+        _ => panic!("expected a wait at {at}"),
+    }
+}
+
+#[test]
+fn woo_charges_each_release_at_its_own_admissible_pacing() {
+    let mut e = engine::<5>();
+    release(&mut e, PUT, 0, 0.);
+    assert_eq!(wait(&mut e, POST, 1, 0.), 200., "PUT then POST waits 200");
+    let mut e = engine::<5>();
+    release(&mut e, POST, 0, 0.);
+    assert_eq!(wait(&mut e, PUT, 1, 0.), 100., "POST then PUT waits 100");
+}
+
+#[test]
+fn woo_algo_floor_persists_across_ordinary_writes() {
+    let mut e = engine::<5>();
+    release(&mut e, ALGO_ORDER, 0, 0.);
+    assert_eq!(wait(&mut e, POST, 1, 0.), 100., "the shared clock at 100");
+    let mut e = engine::<5>();
+    release(&mut e, ALGO_ORDER, 0, 0.);
+    let token = {
+        let context = paced(&mut e, POST);
+        queue(&mut e, context, 1, 0.)
+    };
+    let bind = prepare(&mut e, token, 0.);
+    assert!(matches!(
+        e.claim_http(100., bind[0].1),
+        Ok(Claim::Released(_))
+    ));
+    assert_eq!(
+        wait(&mut e, ALGO_ORDER, 2, 100.),
+        500.,
+        "the algo clock outlives the ordinary write"
+    );
+}
+
+#[test]
+fn an_inadmissible_pacing_is_invalid_and_spends_nothing() {
+    let mut e = engine::<5>();
+    let before = next_id(&mut e);
+    let outside = Pacing {
+        group: 10,
+        minimum_gap_ms: 150.,
+    };
+    assert!(
+        Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        }
+        .http_context(Scope::Background, read(Some(outside)))
+        .is_err(),
+        "membership is exact: group and gap"
+    );
+    assert_eq!(next_id(&mut e), before + 1, "no ID was spent");
+    assert_eq!(
+        paced(&mut e, PUT).pacing(),
+        Some(PUT),
+        "an admissible entry keeps itself"
+    );
+    assert_eq!(
+        context(&mut e, 0.).pacing(),
+        Some(POST),
+        "an unnamed member takes the first entry"
+    );
+}
+
+#[test]
+fn two_entries_on_one_clock_charge_their_own_gaps() {
+    let mut e = engine::<6>();
+    release(&mut e, SUBMIT_JOB, 0, 0.);
+    assert_eq!(
+        wait(&mut e, SUBMIT_BASE, 1, 0.),
+        1500.,
+        "after a job call, 1500"
+    );
+    let mut e = engine::<6>();
+    release(&mut e, SUBMIT_BASE, 0, 0.);
+    assert_eq!(
+        wait(&mut e, SUBMIT_JOB, 1, 0.),
+        450.,
+        "after a base call, 450"
+    );
+}
+
+#[test]
+fn an_unresolvable_or_empty_admissible_set_refuses_construction() {
+    assert!(
+        super::release_domain::validate(
+            ReleaseDomain {
+                pacings: &[],
+                members: DomainMembers::AllRest,
+            },
+            &crate::request_context::SendPacing::new(&[GROUP]).unwrap(),
+        )
+        .is_err()
+    );
+    assert!(
+        super::release_domain::validate(
+            ReleaseDomain {
+                pacings: &[
+                    GROUP,
+                    Pacing {
+                        group: 13,
+                        minimum_gap_ms: 0.
+                    }
+                ],
+                members: DomainMembers::AllRest,
+            },
+            &crate::request_context::SendPacing::new(&[GROUP]).unwrap(),
+        )
+        .is_err(),
+        "every entry must resolve"
+    );
 }
