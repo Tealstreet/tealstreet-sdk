@@ -13,6 +13,20 @@ spec.loader.exec_module(ban)
 
 
 class SigningBan(unittest.TestCase):
+    def test_a_provider_algorithm_declaration_alone_is_not_a_site(self):
+        def counted(line):
+            return bool(ban.PATTERN.search(ban.DECLARED_ALGORITHM.sub('', line)))
+        for line in ['algorithm: Algorithm::HmacSha256,',
+                     'Preimage::Mac(message) => (Algorithm::HmacSha256, message.as_bytes().to_vec()),',
+                     'algorithm: Algorithm::Ed25519,']:
+            self.assertFalse(counted(line), line)
+        for line in ['Algorithm::HmacSha256 => hmac_sha256(key, message),',
+                     'let mac = Hmac::<Sha256>::new_from_slice(key);',
+                     'algorithm: Algorithm::HmacSha256, key: self.secret.clone(),',
+                     'fn legacy_secret() {}',
+                     'ed25519_dalek::SigningKey::from_bytes(&seed)']:
+            self.assertTrue(counted(line), line)
+
     def test_new_or_duplicated_secret_holder_fails_but_removal_is_allowed(self):
         old_root = ban.ROOT
         with tempfile.TemporaryDirectory() as directory:

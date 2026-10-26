@@ -94,6 +94,49 @@ def rust_counts(source, native_host=False):
     return found, evasions(stream)
 
 
+PROVIDER_IDENTITY = ['safe_cex_engine', '::', 'signing', '::', 'Identity']
+
+
+def provider_import(stream):
+    """Whether the file imports the provider `Identity` from `safe_cex_engine::signing`."""
+    for i, token in enumerate(stream):
+        if token == 'use' and stream[i + 1:i + 5] == PROVIDER_IDENTITY[:4]:
+            end = stream.index(';', i)
+            body = stream[i + 5:end]
+            if body == ['Identity'] or (body[:1] == ['{'] and 'Identity' in body
+                                        and 'as' not in body[body.index('Identity') - 1:body.index('Identity') + 2]):
+                return True
+    return False
+
+
+def read_credential_types(stream):
+    """Type tokens of every `read_credentials: Option<...>` declaration."""
+    found = []
+    for i, token in enumerate(stream):
+        if token == 'read_credentials' and stream[i + 1:i + 4] == [':', 'Option', '<']:
+            depth, end = 1, i + 4
+            while end < len(stream) and depth:
+                depth += (stream[end] == '<') - (stream[end] == '>')
+                end += 1
+            found.append(stream[i + 4:end - 1])
+    return found
+
+
+def identity_crates(files):
+    """Crates whose every `read_credentials` declaration is the provider Identity:
+    its full path, or a bare `Identity` in a file importing that path."""
+    found, provider = collections.defaultdict(list), collections.defaultdict(list)
+    for _, path, native in files:
+        if not native:
+            crate = path.relative_to(ROOT / 'venues').parts[0]
+            stream = strip_test_modules(tokens(path.read_text()))
+            imported = provider_import(stream)
+            for declared in read_credential_types(stream):
+                found[crate].append(declared == PROVIDER_IDENTITY
+                                    or (declared == ['Identity'] and imported))
+    return {crate for crate, typed in found.items() if typed and all(typed)}
+
+
 def ts_counts(source):
     return collections.Counter(term for line in source.splitlines()
                                for term, pattern in TS_PATTERNS.items() if pattern.search(line))
@@ -108,8 +151,11 @@ def sites():
     result, failures = {}, []
     files = [(str(p.relative_to(ROOT)), p, False)
              for p in sorted((ROOT / 'venues').glob('*/src/**/*.rs')) if production(p)]
+    adopted = identity_crates(files)
     for name, path, native in [*files, (NATIVE_HOST, ROOT / NATIVE_HOST, True)]:
         counts, hidden = rust_counts(path.read_text(), native_host=native)
+        if not native and path.relative_to(ROOT / 'venues').parts[0] in adopted:
+            counts.pop('read_credentials', None)
         failures += [f'{name}: {reason}' for reason in hidden]
         if counts:
             result[name] = dict(counts)

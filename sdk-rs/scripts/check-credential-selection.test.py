@@ -28,6 +28,52 @@ class CredentialSelectionBan(unittest.TestCase):
                            ('fn f(read: Option<ReadCredentials>) {}', 'ReadCredentials')]:
             self.assertEqual(counts(site), {term: 1}, site)
 
+    def test_identity_typed_read_credentials_are_adopted_only_crate_wide(self):
+        import tempfile
+        old_root = ban.ROOT
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                ban.ROOT = pathlib.Path(directory)
+                crates = {
+                    'adopted': 'use safe_cex_engine::signing::Identity;\n'
+                               'pub struct Options { pub read_credentials: Option<Identity> }\n'
+                               'fn f(o: &Options) { o.read_credentials.as_ref(); }\n'
+                               'fn g() { struct Identity { id: u64 } }',
+                    'unimported': 'pub struct Options { pub read_credentials: Option<Identity> }',
+                    'pathed': 'pub struct Options { pub read_credentials: Option<safe_cex_engine::signing::Identity> }\n'
+                              'fn f(o: &Options) { o.read_credentials.as_ref(); }',
+                    'raw': 'pub struct Options { pub read_credentials: Option<ReadCredentials> }\n'
+                           'fn f(o: &Options) { o.read_credentials.as_ref(); }',
+                    'mixed': 'pub struct A { pub read_credentials: Option<Identity> }\n'
+                             'pub struct B { pub read_credentials: Option<sign::Credentials> }',
+                    'shadowed': 'type Identity = RawKeys;\n'
+                                'pub struct Options { pub read_credentials: Option<Identity> }',
+                    'renamed': 'use crate::Raw as Identity;\n'
+                               'pub struct Options { pub read_credentials: Option<Identity> }',
+                    'aliased': 'use safe_cex_engine::signing::{Raw as Identity};\n'
+                               'pub struct Options { pub read_credentials: Option<Identity> }',
+                    'undeclared': 'fn f(o: &Options) { o.read_credentials.as_ref(); }',
+                }
+                for crate, source in crates.items():
+                    path = ban.ROOT / f'venues/{crate}/src/lib.rs'
+                    path.parent.mkdir(parents=True)
+                    path.write_text(source)
+                files = [(None, p, False) for p in sorted((ban.ROOT / 'venues').glob('*/src/**/*.rs'))]
+                self.assertEqual(ban.identity_crates(files), {'adopted', 'pathed'})
+                (ban.ROOT / 'hosts/native/src').mkdir(parents=True)
+                (ban.ROOT / ban.NATIVE_HOST).write_text('')
+                ts = ban.ROOT / ban.TS_HOST
+                ts.parent.mkdir(parents=True, exist_ok=True)
+                ts.write_text('')
+                result, _ = ban.sites()
+                for crate in ['raw', 'mixed', 'shadowed', 'renamed', 'aliased', 'unimported', 'undeclared']:
+                    self.assertIn('read_credentials', result[f'venues/{crate}/src/lib.rs'], crate)
+                for crate in ['adopted', 'pathed']:
+                    self.assertNotIn(f'venues/{crate}/src/lib.rs', result, crate)
+                self.assertEqual(result['venues/raw/src/lib.rs'].get('ReadCredentials'), 1)
+            finally:
+                ban.ROOT = old_root
+
     def test_unrelated_neighbouring_edits_do_not_change_counts(self):
         before = 'let read = self.options.read_credentials.as_ref();'
         after = 'let read_key = self\n  .options /* c */ .read_credentials.as_ref();'

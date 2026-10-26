@@ -14,6 +14,9 @@ import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PATTERN = re.compile(r'\b(?:hmac\w*|ed25519\w*|\w*secret\w*)\b', re.I)
+# A dispatch recipe names its provider algorithm (`Algorithm::HmacSha256`); that
+# declaration holds no material. Anything else on the line still counts.
+DECLARED_ALGORITHM = re.compile(r'\bAlgorithm::\w+')
 
 
 def sites():
@@ -23,7 +26,7 @@ def sites():
         if relative.parts[0] not in {'asterdex', 'binance', 'bingx', 'bybit', 'okx', 'bitget', 'phemex', 'bitrue'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
             continue
         for line in path.read_text().splitlines():
-            if not line.strip().startswith('//') and PATTERN.search(line):
+            if not line.strip().startswith('//') and PATTERN.search(DECLARED_ALGORITHM.sub('', line)):
                 digest = hashlib.sha256(line.strip().encode()).hexdigest()
                 found[str(path.relative_to(ROOT))][digest] += 1
     return found
