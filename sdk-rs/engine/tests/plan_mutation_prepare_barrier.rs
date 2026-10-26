@@ -270,6 +270,9 @@ impl Consumer {
     }
 }
 impl Venue for Consumer {
+    fn http_mutation_barriers() -> bool {
+        true
+    }
     type Pending = Context;
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         &[safe_cex_engine::request_context::Pacing {

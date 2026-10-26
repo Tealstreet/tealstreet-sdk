@@ -8,12 +8,11 @@ fn ready() -> (TestEngine, SocketId) {
 fn ready_with_signer(
     fail: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> (TestEngine, SocketId) {
-    use safe_cex_venue_bitunix::{BitunixFutures, Options};
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: Some("replay-key".into()),
         secret: Some("replay-secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     if let Some(fail) = fail {
         e.set_signing_entropy(Box::new(move |bytes| {
             if fail.load(std::sync::atomic::Ordering::SeqCst) {
