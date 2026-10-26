@@ -28,18 +28,21 @@ fn probe(
             };
             let (selection, identity) = venue.slots.select(role).unwrap();
             let slot = selection.slot();
-            let (expected, expected_slot) = if method == Method::Get {
-                (
-                    venue.credentials.read.as_ref().unwrap(),
-                    safe_cex_engine::CredentialSlot::Secondary,
-                )
+            let (prefix, expected_slot) = if method == Method::Get {
+                ("secondary", safe_cex_engine::CredentialSlot::Secondary)
             } else {
-                (
-                    venue.credentials.primary.as_ref().unwrap(),
-                    safe_cex_engine::CredentialSlot::Primary,
-                )
+                ("primary", safe_cex_engine::CredentialSlot::Primary)
             };
-            assert_eq!(identity, expected);
+            let expected = safe_cex_engine::signing::Identity::new(
+                safe_cex_engine::signing::KeyRef(format!("{prefix}.credential")),
+                Some(safe_cex_engine::signing::KeyRef(format!(
+                    "{prefix}.signing"
+                ))),
+            )
+            .with_passphrase(Some(safe_cex_engine::signing::KeyRef(format!(
+                "{prefix}.passphrase"
+            ))));
+            assert_eq!(identity, &expected);
             assert_eq!(slot, expected_slot);
         }
     })
