@@ -321,6 +321,10 @@ mod planned_calls {
             }
         }
     }
+    #[derive(serde::Deserialize)]
+    struct StatusEnvelope<'a> {
+        code: &'a str,
+    }
     impl Venue for Plans {
         type Pending = Context;
         fn status_exempt_refusal(&self, _: &Context, response: Response<'_>) -> bool {
@@ -328,8 +332,8 @@ mod planned_calls {
                 return false;
             }
             self.status_hook_calls.set(self.status_hook_calls.get() + 1);
-            serde_json::from_str::<serde_json::Value>(response.body)
-                .is_ok_and(|value| value.get("code").and_then(|code| code.as_str()) == Some("400005"))
+            serde_json::from_str::<StatusEnvelope<'_>>(response.body)
+                .is_ok_and(|value| value.code == "400005")
         }
         fn start(&mut self, _: &mut Cx<'_, Context>) {}
         fn on_response(
@@ -353,9 +357,9 @@ mod planned_calls {
                     unlisted: Verdict::Unknown(None),
                     status: &[],
                 };
-                let value: serde_json::Value = serde_json::from_str(response.body).unwrap();
+                let value: StatusEnvelope<'_> = serde_json::from_str(response.body).unwrap();
                 let native = Native {
-                    code: NativeCode::Text(value["code"].as_str().unwrap()),
+                    code: NativeCode::Text(value.code),
                     message: "clock refused",
                 };
                 let (verdict, grant) = cx
