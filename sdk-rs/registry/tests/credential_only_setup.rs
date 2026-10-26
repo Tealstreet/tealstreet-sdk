@@ -79,7 +79,10 @@ fn k4_lighter_injected_refs_still_require_the_installed_provider_after_cutover()
             Accept,
         )
         .expect_err("refs alone cannot install a signing provider");
-        assert_eq!(error.message, "Lighter requires its installed primary signer");
+        assert_eq!(
+            error.message,
+            "Lighter requires its installed primary signer"
+        );
         assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
         // Construction has no admitted command or write to project.
         assert_eq!(error.outcome, None);
