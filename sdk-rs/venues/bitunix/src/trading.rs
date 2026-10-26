@@ -1643,8 +1643,16 @@ impl BitunixFutures {
         request: Request,
         error: VenueError,
     ) {
-        if let Some(plan) = self.trading.plan(request.command).cloned() {
-            let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
+        // An unreleased call the engine already stopped leaves it the terminal.
+        if let Some(plan) = self.trading.plan(request.command).cloned()
+            && cx
+                .finish_plan_failed_call(&plan, &request.slot, &request.context)
+                .is_err()
+        {
+            if let Some(live) = self.take_live(request.command) {
+                Self::cleanup(cx, &live.job);
+            }
+            return self.debounce(cx, Axis::Orders);
         }
         self.end(cx, request.command, error);
     }
