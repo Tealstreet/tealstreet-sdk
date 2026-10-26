@@ -9343,6 +9343,20 @@ calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
   (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
   ref is declared at the cutover.
 
+## Scalar-only primary and signing-only authority (#2223)
+
+Shared prerequisite for the Hyperliquid cutover (consumer codex-zs5e83). No
+family declares `source: scalarOnly` yet.
+
+- **Declared asymmetric keys are never emitted.** `LocalSigner` refuses
+  `Present` and `PayloadPart::Credential` for any ref trusted policy declared
+  asymmetric (Ed25519, Es256, Secp256k1Digest, StarkDigest, SchnorrDigest),
+  whichever identity names it. Legacy would hand the raw scalar to such a
+  request. No current recipe does this; full family CI is the pin.
+- **PublicAddress in nonce-claimed work.** A nonce-claimed recipe may now name
+  `PublicAddress` on its claim's own signing ref, for every identity. It emits
+  only the public address.
+
 ## Bitrue reads and listen-key sessions leave the legacy funnel (B1, #2173)
 
 Every Bitrue HTTP request except trading now runs under engine-managed authority. Trading writes stay on the legacy funnel until B2.
@@ -9826,3 +9840,14 @@ Raw compatibility and explicit setup both construct a real installed provider,
 retain private capability, and start managed discovery. Native constructor and
 compiled-family integration controls exercise both paths with the public zkLink
 seed corpus. The cross-venue construction feature guard is a separate follow-up.
+
+### Phemex credentialed smoke sizing
+
+The manual JS/WASM smoke runner reads the explicit monetary minimum
+`minOrderValueRv`, base-quantity step `qtyStepSize` and maximum `maxOrderQtyRq`
+from the matching listed PerpetualV2 row in `/public/products`. Quote and
+settlement must match the selected market; missing, malformed, duplicate,
+nonlinear or superseded limits refuse. It does not infer zero from quantity
+steps. The existing $100 notional cap, post-only placement, empty-account
+preconditions and independent cleanup readback remain unchanged. This enables
+only the credentialed test harness; production order sizing is unchanged.
