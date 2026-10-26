@@ -138,7 +138,17 @@ impl<V: Venue, T: Transport> Drop for SetupRunOwner<V, T> {
                 Box::pin(host.engine.take_address_setup_cleanup())
             })
         });
-        if let Some(cleanup) = cleanup {
+        if let Some(mut cleanup) = cleanup {
+            use std::future::Future;
+            let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+            match cleanup.as_mut().poll(&mut cx) {
+                std::task::Poll::Ready(Ok(())) => return,
+                std::task::Poll::Ready(Err(_)) => {
+                    eprintln!("Address setup cleanup failed after host cancellation");
+                    return;
+                }
+                std::task::Poll::Pending => {}
+            }
             // Cancellation transfers ownership, never retirement evidence. The
             // runtime must stay alive until this actual cleanup driver finishes.
             tokio::spawn(async move {
