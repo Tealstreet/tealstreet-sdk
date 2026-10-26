@@ -189,8 +189,12 @@ pub struct OrderReadProgress {
 #[derive(Default)]
 pub struct AccountState {
     pub(crate) recovery: crate::recovery::State,
-    /// The next order snapshots reconcile an uncertain write: Primary-signed.
+    /// Set while an uncertain write's census is issued: it supersedes any
+    /// census already in flight instead of coalescing into it.
     pub reconcile: bool,
+    /// Regular and TP/SL census still owed to an uncertain write: Primary-signed
+    /// until a complete snapshot of that slot commits.
+    pub owed: [bool; 2],
     /// Regular and TP/SL order snapshots committed since that reconcile.
     pub reconciled: [bool; 2],
     /// Symbols whose leverage/margin mode were read on first candle interest.
@@ -580,6 +584,7 @@ impl BitunixFutures {
         }
         if let Some(slot) = axis.order_slot() {
             if after.is_none()
+                && !self.account.reconcile
                 && let Some(progress) = self.account.order_reads[slot].as_mut()
                 && cx.now < progress.issued + ORDER_STALL_MS
             {
@@ -631,7 +636,9 @@ impl BitunixFutures {
             native: vec![],
             invalid: false,
             baselines: vec![],
-            reconcile: self.account.reconcile && axis.order_slot().is_some(),
+            reconcile: axis
+                .order_slot()
+                .is_some_and(|slot| self.account.owed[slot]),
         };
         if let Some(slot) = axis.order_slot() {
             self.account.order_reads[slot] = Some(OrderReadProgress {
@@ -1352,6 +1359,7 @@ impl BitunixFutures {
         }
         // Both complete Primary snapshots postdate the uncertain write.
         if reconcile && !partial {
+            self.account.owed[slot] = false;
             self.account.reconciled[slot] = true;
             if self.account.reconciled == [true, true] {
                 self.account.reconciled = [false, false];

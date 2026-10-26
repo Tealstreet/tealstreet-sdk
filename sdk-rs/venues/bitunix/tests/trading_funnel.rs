@@ -633,3 +633,104 @@ fn a_lost_fallback_replacement_fences_cancel_all() {
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 122, .. })))
     );
 }
+
+/// P1 money path (#2279): an Unknown placement fences its symbol. A retry is
+/// refused NotSent, a reconcile read started before the seal does not release
+/// it, and the fresh read `reconcile_uncertain` starts does.
+#[test]
+fn an_unknown_placement_fences_retries_until_a_fresh_reconcile() {
+    let (mut e, s) = startup();
+    let place = |command: u32| {
+        Command::PlaceOrders {
+        command,
+        orders: vec![serde_json::from_str(r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","price":90500.04,"amount":0.0021}"#).unwrap()],
+    }
+    };
+    let reads = |actions: &[Action]| -> Vec<HttpRequest> {
+        http(actions)
+            .into_iter()
+            .filter(|r| r.url.ends_with("get_pending_orders"))
+            .collect()
+    };
+    // A stale reconcile: a private order event's census, still in flight.
+    e.handle(
+        100.0,
+        Event::WsMessage {
+            socket: s,
+            text: r#"{"ch":"order","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"other","side":"BUY","type":"LIMIT","qty":"1","price":"90000","dealAmount":"0"}}"#,
+        },
+    );
+    let timer = prepared(&mut e, 100.0)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1100.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .next_back()
+        .expect("the private event schedules its census");
+    e.handle(1100.0, Event::TimerFired { timer });
+    let stale = reads(&prepared(&mut e, 1100.0));
+    assert_eq!(stale.len(), 2, "regular and tpsl census reads");
+
+    e.handle(1200.0, Event::Command(place(201)));
+    let write = post(&http(&prepared(&mut e, 1200.0)), "place_order").expect("the placement");
+    e.handle(
+        1300.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "lost placement ACK",
+        },
+    );
+    let sealed = prepared(&mut e, 1300.0);
+    assert_eq!(
+        failure(&sealed, 201).and_then(|e| e.outcome),
+        Some(Outcome::Unknown)
+    );
+    // reconcile_uncertain supersedes the in-flight census with a fresh one.
+    let fresh = reads(&sealed);
+    assert_eq!(fresh.len(), 2, "the fresh regular and tpsl census, at once");
+
+    let refused = |e: &mut TestEngine, command: u32, at: f64| {
+        e.handle(at, Event::Command(place(command)));
+        let actions = prepared(e, at);
+        assert_eq!(writes_of(&actions, "place_order"), 0, "command {command}");
+        let error = failure(&actions, command).expect("a refusal");
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert!(
+            error.legacy_text().contains("uncertain"),
+            "{}",
+            error.legacy_text()
+        );
+    };
+    refused(&mut e, 202, 1400.0);
+
+    // The census started before the seal answers: not proof, still fenced.
+    for request in &stale {
+        let body = if request.url.contains("/tpsl/") {
+            TPSL
+        } else {
+            ORDERS
+        };
+        answer(&mut e, 1500.0, request, body);
+    }
+    refused(&mut e, 203, 1600.0);
+
+    refused(&mut e, 204, 2350.0);
+    for request in &fresh {
+        let body = if request.url.contains("/tpsl/") {
+            TPSL
+        } else {
+            ORDERS
+        };
+        answer(&mut e, 2400.0, request, body);
+    }
+    e.handle(2500.0, Event::Command(place(205)));
+    assert_eq!(
+        writes_of(&prepared(&mut e, 2500.0), "place_order"),
+        1,
+        "the fresh census releases the fence"
+    );
+}
