@@ -100,6 +100,8 @@ struct Runtime {
     next_batch: Option<f64>,
     snapshot_timeout: Option<f64>,
     snapshot_pending: bool,
+    #[cfg(feature = "socket-native-timing")]
+    initial_payload_timeout: Option<f64>,
 }
 
 #[derive(Default)]
@@ -188,8 +190,59 @@ impl Driver {
             next_batch: None,
             snapshot_timeout,
             snapshot_pending: false,
+            #[cfg(feature = "socket-native-timing")]
+            initial_payload_timeout: None,
         });
         Ok(feed)
+    }
+
+    #[cfg(feature = "socket-native-timing")]
+    pub(crate) fn register_with_native_timing(
+        &mut self,
+        policy: FeedPolicy,
+        timing: crate::socket_lifecycle::NativeTiming,
+    ) -> Result<FeedId, SocketError> {
+        if let Some(timeout) = timing.initial_payload_timeout_ms
+            && (!timeout.is_finite()
+                || timeout <= 0.
+                || policy.role != crate::SocketChannel::Private
+                || policy.auth != crate::socket_lifecycle::AuthMode::Required
+                || policy.controls != crate::socket_lifecycle::ControlPolicy::Native
+                || policy.recovery != AuthRecovery::Reconnect
+                || policy.supervision.auth_timeout_ms.is_none())
+        {
+            return Err(SocketError::InvalidPolicy);
+        }
+        let feed = self.register(policy)?;
+        let runtime = self.runtime_mut(feed);
+        runtime.supervisor.set_stable_anchor(timing.stable_anchor);
+        runtime.initial_payload_timeout = timing.initial_payload_timeout_ms;
+        if let Some(timeout) = timing.initial_payload_timeout_ms {
+            runtime.time.shortest = runtime.time.shortest.min(timeout);
+            runtime.time.longest = runtime.time.longest.max(timeout);
+        }
+        Ok(feed)
+    }
+
+    #[cfg(feature = "socket-native-timing")]
+    pub(crate) fn complete_initial_payload(
+        &mut self,
+        epoch: Epoch,
+        now: f64,
+    ) -> Result<(), SocketError> {
+        if !self.state.current(epoch) {
+            return Err(SocketError::Stale);
+        }
+        let runtime = self.runtime_mut(epoch.feed());
+        if !runtime.supervisor.initial_payload_pending()
+            || !runtime.time.valid(now)
+            || runtime.supervisor.expired(now).is_some()
+        {
+            return Err(SocketError::Stale);
+        }
+        // An earlier watch may still fire; it rechecks the remaining bounds.
+        runtime.supervisor.complete_initial_payload();
+        Ok(())
     }
 
     pub(crate) fn snapshot_connect_ids(&self, feed: FeedId) -> Option<u64> {
@@ -423,6 +476,12 @@ impl Driver {
             }
             Admission::Current(epoch) if ingress == Ingress::Open => {
                 let ready = self.state.opened(epoch).expect("admitted first open");
+                #[cfg(feature = "socket-native-timing")]
+                if let Some(timeout) = self.runtime_mut(epoch.feed()).initial_payload_timeout {
+                    self.runtime_mut(epoch.feed())
+                        .supervisor
+                        .arm_initial_payload(cx.now, timeout);
+                }
                 self.runtime_mut(epoch.feed()).supervisor.opened(cx);
                 effects.push(Effect::Opened(epoch));
                 if let Some(reopened) = ready {
@@ -478,6 +537,17 @@ impl Driver {
         let refresh = self
             .state
             .traffic(epoch, true, matches!(control, Control::Pong));
+        #[cfg(feature = "socket-native-timing")]
+        let refresh = if traffic == TrafficPolicy::Declared {
+            matches!(
+                control,
+                Control::Traffic
+                    | Control::Pong
+                    | Control::Auth(AuthEvidence::Accepted | AuthEvidence::Progress)
+            )
+        } else {
+            refresh
+        };
         let receive = refresh || traffic == TrafficPolicy::TextAfterFirstPong;
         let runtime = self.runtime_mut(epoch.feed());
         if matches!(control, Control::Auth(_)) || refresh && !runtime.supervisor.idle_enabled() {

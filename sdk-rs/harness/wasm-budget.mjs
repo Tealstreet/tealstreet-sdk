@@ -10,12 +10,12 @@ import { parseArgs } from 'node:util';
 export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_064 });
 // Bitget allowance: 1,478,656 less 2,108 measured bytes from #2142/#2145;
 // overseer-approved shrink-only follow-up under Sam's no-TS-fallback directive.
-// Bybit: Sam approved 2026-10-25 (venue + 60 KiB) for the Plan-adoption stack, whose top measured
-// 1,398,660 on 9b05c9ac452; it can only go down.
 // AsterDEX: overseer ruling 2026-10-26, 1424 KiB for managed trade plans (funnel slice 3), about half
 // of it engine plan machinery. Follow-up (claude-19pt8s): the venue opt-s lever, CPU gate passing; if it
 // wins, lower this to the new measured value plus 4 KiB. It can only go down.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_476_548, bitgetusdc: 1_476_548, bybit: 1_404_928, asterdex: 1_458_176 });
+// Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
+// Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
+export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_476_548, bitgetusdc: 1_476_548, bybit: 1_445_888, asterdex: 1_458_176 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
 export const wasmBudgetError = (bytes, profile, venue) => {
