@@ -878,6 +878,69 @@ fn an_engine_reask_restarts_reconciliation_after_native_retries_are_exhausted() 
 }
 
 #[test]
+fn a_new_uncertain_amend_requires_a_census_started_after_its_mark() {
+    let mut instruments: serde_json::Value = serde_json::from_str(INSTRUMENT).unwrap();
+    let mut eth = instruments["data"][0].clone();
+    eth["instId"] = "ETH-USDT".into();
+    eth["baseCurrency"] = "ETH".into();
+    instruments["data"].as_array_mut().unwrap().push(eth);
+    let mut h = Harness::with_instruments(&instruments.to_string());
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"ETH-USDT","orderCategory":"normal","orderId":"22","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"60000","state":"live"}]}"#);
+
+    command(&mut h, place(780, 1.0));
+    reply(&mut h, "batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 780).outcome, Some(Outcome::Unknown));
+    command(
+        &mut h,
+        Command::AmendOrder {
+            command: 781,
+            id: "22".into(),
+            price: Some(61000.),
+            amount: None,
+        },
+    );
+    assert_eq!(count(&h, "cancel-batch-orders"), 1);
+    reply(&mut h, "orders-pending?", 200, r#"{"code":"0","data":[]}"#);
+    reply(&mut h, "cancel-batch-orders", 503, "Service Unavailable");
+    assert_eq!(failure(&h, 781).outcome, Some(Outcome::Unknown));
+    for path in ["orders-tpsl-pending", "orders-algo-pending"] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    let eth_place = |id| {
+        let mut order = limit(1.0);
+        order.symbol = "ETHUSDT".into();
+        Command::PlaceOrders {
+            command: id,
+            orders: vec![order],
+        }
+    };
+    command(&mut h, eth_place(782));
+    assert_eq!(
+        count(&h, "batch-orders"),
+        0,
+        "a post-mark last family cannot make a pre-mark first page fresh"
+    );
+    assert_eq!(failure(&h, 782).outcome, Some(Outcome::NotSent));
+    assert!(failure(&h, 782).message.contains("uncertain"));
+    let reask_at = h.now + 1_000.;
+    fire_until(&mut h, reask_at);
+    for path in [
+        "orders-pending?",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        reply(&mut h, path, 200, r#"{"code":"0","data":[]}"#);
+    }
+    command(&mut h, eth_place(783));
+    assert_eq!(
+        count(&h, "batch-orders"),
+        1,
+        "a wholly fresh census releases"
+    );
+}
+
+#[test]
 fn a_late_or_duplicate_response_after_a_terminal_changes_nothing() {
     let mut h = seeded();
     let intents = command(&mut h, place(7, 1.0));

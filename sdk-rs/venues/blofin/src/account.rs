@@ -1661,9 +1661,9 @@ impl Blofin {
                         rows.extend(kept);
                         self.account.sources = sources;
                         cx.store.set_orders(rows);
-                        // A rejected row may be an uncertain placement; it proves
-                        // nothing. Only a Primary reconcile snapshot clears a fence.
-                        if clean && reconcile {
+                        // A new mark after page one leaves reconcile_owed set.
+                        // Neither it nor a rejected row proves placement absence.
+                        if clean && reconcile && !self.account.reconcile_owed {
                             cx.orders_reconciled(None);
                         } else if reconcile {
                             self.account.reconcile_owed = true;

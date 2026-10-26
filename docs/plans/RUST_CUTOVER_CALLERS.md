@@ -10067,3 +10067,11 @@ paid work. Phemex also pins re-asks while its native expiry-bound timer is owed.
 BloFin joins only an active census or its scheduled retry. After three failed
 attempts leave an idle owed flag, the next engine re-ask starts a fresh Primary
 census without depending on periodic polling; a clean complete census releases.
+
+The fence census freshness proof is single-context for BingX's whole Orders
+snapshot and single-context per symbol for Phemex's activeList; Phemex clears
+only that symbol. BloFin spans pages and three families: every page retains
+the census-start order revision, and a new mark leaves reconcile_owed set.
+Either change blocks clearance and requires a new complete census. A real
+pre-mark first page/post-mark final family control is RED with both guards
+disabled, and green with them intact; ordinary re-asks still join the read.
