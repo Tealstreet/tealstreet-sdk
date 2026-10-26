@@ -1580,6 +1580,7 @@ impl BinanceFutures {
         let mut balance = Balance::default();
         let mut details = Vec::new();
         let mut coins = Vec::new();
+        let mut currencies = Vec::new();
         for asset in assets {
             let wallet = asset.wallet;
             let available = asset.available;
@@ -1629,6 +1630,16 @@ impl BinanceFutures {
                             .map_or(0.0, |coin| coin.notional)
                     },
                 });
+                // Coin units, as TS's per-coin `currencies`; inverse markets read their margin coin.
+                currencies.push(CurrencyBalance {
+                    currency: asset.asset.to_string(),
+                    balance: Balance {
+                        total: wallet,
+                        free: available,
+                        used: initial,
+                        upnl: unrealized,
+                    },
+                });
             }
             if wallet > 0.0 {
                 details.push(format!("{}({wallet} @ {price})", asset.asset));
@@ -1636,6 +1647,8 @@ impl BinanceFutures {
         }
         if self.is_inverse() {
             cx.store.set_coin_balances(coins);
+            currencies.sort_by(|a: &CurrencyBalance, b| a.currency.cmp(&b.currency));
+            cx.store.set_currency_balances(currencies);
         }
         self.note_valuation_wait(cx, missing_price, zero_valued);
         if missing_price {

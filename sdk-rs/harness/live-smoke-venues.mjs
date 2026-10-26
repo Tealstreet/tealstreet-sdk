@@ -110,6 +110,10 @@ register('bitrue', 'BITRUE', {
   mainnet: endpoints('https://fapi.bitrue.com https://fapiws-auth.bitrue.com',
     'wss://fmarket-ws.bitrue.com wss://fapiws.bitrue.com'),
 });
+register('bitunix', 'BITUNIX', {
+  mainnet: endpoints('https://fapi.bitunix.com',
+    'wss://fapi.bitunix.com wss://api.bitunix.com'),
+});
 register('kucoin', 'KUCOIN', {
   mainnet: endpoints('https://api-futures.kucoin.com', 'wss://ws-api-futures.kucoin.com'),
 }, { key: 'KEY', secret: 'SECRET', passphrase: 'PASSPHRASE' });
