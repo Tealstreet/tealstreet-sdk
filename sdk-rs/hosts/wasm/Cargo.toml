@@ -8,6 +8,7 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+address-nonce = ["safe-cex-engine/address-nonce", "safe-cex-venues/address-nonce", "sign-meta"]
 http-mutation-barriers = ["safe-cex-engine/http-mutation-barriers"]
 # Read-only signing-task metadata for hosted signing (Kraken and Paradex).
 sign-meta = ["safe-cex-engine/sign-meta"]

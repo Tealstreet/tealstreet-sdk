@@ -43,26 +43,65 @@ impl NonceKey {
     }
 }
 
-/// One family's nonce policy, declared once here rather than in venue code.
+/// Trusted identity source declared with each nonce policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonceSubjectStrategy {
+    StableId,
+    Address,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonceClock {
+    RawMs,
+    #[cfg(feature = "address-nonce")]
+    ProtocolMs,
+}
+
+/// One family's nonce policy, including the trusted identity source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NonceDomain {
+    subject: NonceSubjectStrategy,
     name: &'static str,
-    floor: NonceFloor,
+    clock: NonceClock,
+    scale: u64,
     limit: u64,
+}
+impl NonceDomain {
+    fn floor(&self) -> NonceFloor {
+        match self.clock {
+            NonceClock::RawMs => NonceFloor::RawMs { scale: self.scale },
+            #[cfg(feature = "address-nonce")]
+            NonceClock::ProtocolMs => NonceFloor::ProtocolMs { scale: self.scale },
+        }
+    }
 }
 
 /// Hyperliquid and TxFlow agents (including vaults) share one sequence per
 /// agent address: raw host milliseconds within the safe-integer range.
 pub const HYPERLIQUID_AGENT: NonceDomain = NonceDomain {
+    subject: NonceSubjectStrategy::Address,
     name: "hyperliquid-agent",
-    floor: NonceFloor::RawMs { scale: 1 },
+    clock: NonceClock::RawMs,
+    scale: 1,
     limit: (1 << 53) - 1,
+};
+
+/// Aster V3 uses calibrated whole milliseconds scaled to microseconds.
+#[cfg(feature = "address-nonce")]
+pub const ASTERDEX_V3: NonceDomain = NonceDomain {
+    subject: NonceSubjectStrategy::Address,
+    name: "asterdex-v3",
+    clock: NonceClock::ProtocolMs,
+    scale: 1000,
+    limit: u64::MAX,
 };
 
 /// Kraken Spot and Futures share a counter for the same trusted stable subject.
 pub const KRAKEN: NonceDomain = NonceDomain {
+    subject: NonceSubjectStrategy::StableId,
     name: "kraken",
-    floor: NonceFloor::RawMs { scale: 1000 },
+    clock: NonceClock::RawMs,
+    scale: 1000,
     limit: u64::MAX,
 };
 
@@ -143,7 +182,7 @@ pub(crate) fn floor(ms: f64, scale: u64, limit: u64) -> Result<u64, NonceError> 
 impl<P> crate::Cx<'_, P> {
     /// Reserve a signing nonce before signing, in one shared monotonic domain.
     pub fn reserve_nonce(&self, domain: &NonceDomain, key: &NonceKey) -> Result<u64, NonceError> {
-        let (ms, scale) = match domain.floor {
+        let (ms, scale) = match domain.floor() {
             NonceFloor::RawMs { scale } => (self.now, scale),
             NonceFloor::ProtocolMs { scale } => (self.protocol_now(), scale),
         };
@@ -206,6 +245,13 @@ pub fn reserve_kraken_legacy(identity: [u8; 32], floor: u64) -> Result<u64, Stri
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reviewed_domains_declare_their_subject_strategy() {
+        assert_eq!(KRAKEN.subject, NonceSubjectStrategy::StableId);
+        assert_eq!(HYPERLIQUID_AGENT.subject, NonceSubjectStrategy::Address);
+        #[cfg(feature = "address-nonce")]
+        assert_eq!(ASTERDEX_V3.subject, NonceSubjectStrategy::Address);
+    }
     use super::*;
 
     #[test]

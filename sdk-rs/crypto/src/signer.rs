@@ -803,7 +803,102 @@ fn implemented(algorithm: Algorithm) -> bool {
     }
 }
 
+#[cfg(feature = "address-nonce")]
+struct LocalAddressSetup {
+    address: Option<Result<[u8; 20], SignError>>,
+    result: Option<Result<SignResult, SignError>>,
+    started: bool,
+}
+#[cfg(feature = "address-nonce")]
+impl safe_cex_engine::signing::OwnedSetupExecution for LocalAddressSetup {
+    fn start(&mut self) -> Result<(), SignError> {
+        if self.started {
+            return Err(SignError::InvalidRequest);
+        }
+        self.started = true;
+        self.result = Some(
+            self.address
+                .take()
+                .ok_or(SignError::InvalidRequest)?
+                .map(|value| SignResult {
+                    receipt: Default::default(),
+                    values: vec![value.to_vec()],
+                    headers: Vec::new(),
+                }),
+        );
+        Ok(())
+    }
+    fn cancel(&mut self) -> Result<(), SignError> {
+        self.address = None;
+        self.started = true;
+        Ok(())
+    }
+    fn poll_result(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<SignResult, SignError>> {
+        if self.started {
+            self.result
+                .take()
+                .map_or(std::task::Poll::Pending, std::task::Poll::Ready)
+        } else {
+            std::task::Poll::Pending
+        }
+    }
+    fn poll_joined(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), SignError>> {
+        if self.started {
+            std::task::Poll::Ready(Ok(()))
+        } else {
+            std::task::Poll::Pending
+        }
+    }
+}
+
 impl Signer for LocalSigner {
+    fn owned_public_address_capability(&self) -> Capability {
+        if cfg!(feature = "address-nonce") {
+            Capability::Supported
+        } else {
+            Capability::Unsupported
+        }
+    }
+    fn create_public_address_setup(
+        &self,
+        request: SignRequest,
+    ) -> Option<Box<dyn safe_cex_engine::signing::OwnedSetupExecution>> {
+        #[cfg(not(feature = "address-nonce"))]
+        {
+            let _ = request;
+            None
+        }
+        #[cfg(feature = "address-nonce")]
+        {
+            let [Operation::PublicAddress { key }] = request.operations.as_slice() else {
+                return None;
+            };
+            if !cfg!(feature = "secp256k1")
+                || request.receipt != Default::default()
+                || request.context != Default::default()
+                || self.declared_key(key, Algorithm::Secp256k1Digest).is_err()
+            {
+                return None;
+            }
+            Some(Box::new(LocalAddressSetup {
+                address: Some(
+                    primitives::secp256k1_address(
+                        self.declared_key(key, Algorithm::Secp256k1Digest).ok()?,
+                    )
+                    .and_then(|bytes| bytes.try_into().map_err(|_| SignError::InvalidResult)),
+                ),
+                result: None,
+                started: false,
+            }))
+        }
+    }
+
     fn immediate(&self) -> bool {
         true
     }
@@ -2811,5 +2906,97 @@ mod tests {
         )
         .unwrap();
         assert!(ids.primary.unwrap().signing_ref().is_err());
+    }
+}
+
+#[cfg(all(test, feature = "address-nonce"))]
+mod owned_address_setup_tests {
+    use super::*;
+    use std::task::{Context as TaskContext, Poll, Waker};
+    fn provider() -> (LocalSigner, KeyRef) {
+        let mut provider = LocalSigner::new();
+        let key = KeyRef("owned-scalar".into());
+        let mut scalar = vec![0; 32];
+        scalar[31] = 1;
+        provider
+            .insert_declared(key.clone(), scalar, Algorithm::Secp256k1Digest)
+            .unwrap();
+        (provider, key)
+    }
+    fn request(key: KeyRef) -> SignRequest {
+        SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::PublicAddress { key }],
+        }
+    }
+    #[test]
+    fn owned_factory_is_dormant_and_agrees_with_independent_scalar_one_address() {
+        let (provider, key) = provider();
+        let work = request(key);
+        let mut owner = provider.create_public_address_setup(work.clone()).unwrap();
+        let mut cx = TaskContext::from_waker(Waker::noop());
+        assert!(owner.poll_result(&mut cx).is_pending());
+        assert!(owner.poll_joined(&mut cx).is_pending());
+        owner.start().unwrap();
+        let Poll::Ready(Ok(result)) = owner.poll_result(&mut cx) else {
+            panic!("immediate actual local result")
+        };
+        assert_eq!(
+            crate::hex(&result.values[0]),
+            "7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        );
+        work.validate_result(&result).unwrap();
+        assert_eq!(owner.poll_joined(&mut cx), Poll::Ready(Ok(())));
+    }
+    #[test]
+    fn dormant_local_handle_stores_only_the_fixed_public_result() {
+        use safe_cex_engine::signing::OwnedSetupExecution;
+        let mut owner = LocalAddressSetup {
+            address: Some(Ok([19; 20])),
+            result: None,
+            started: false,
+        };
+        let public: &Option<Result<[u8; 20], SignError>> = &owner.address;
+        assert_eq!(public, &Some(Ok([19; 20])));
+        owner.cancel().unwrap();
+        assert!(owner.address.is_none());
+        assert!(owner.result.is_none());
+    }
+    #[test]
+    fn direct_factory_rejects_foreign_ref_algorithm_receipt_and_extra_work() {
+        let (mut provider, key) = provider();
+        let work = request(key.clone());
+        let mut cases = Vec::new();
+        cases.push(request(KeyRef("foreign".into())));
+        let mut bad = work.clone();
+        bad.operations.clear();
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.operations
+            .push(Operation::PublicAddress { key: key.clone() });
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.receipt.stamp_ms = Some(1.);
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.receipt.expiry_ms = Some(2.);
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.receipt.nonce = Some(1);
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.context.path = "business".into();
+        cases.push(bad);
+        let mut bad = work.clone();
+        bad.operations.push(Operation::Sha256 { payload: vec![] });
+        cases.push(bad);
+        for bad in cases {
+            assert!(provider.create_public_address_setup(bad).is_none());
+        }
+        provider
+            .insert_declared(key.clone(), vec![1; 32], Algorithm::Ed25519)
+            .unwrap();
+        assert!(provider.create_public_address_setup(request(key)).is_none());
     }
 }
