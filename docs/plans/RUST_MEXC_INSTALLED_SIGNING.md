@@ -133,5 +133,21 @@ Venue growth up to5% uses CI's number rounded up to KiB if needed.
 
 Publish this signing/private-read PR now; hcm reviews the complete packet.
 READY requires correctness/venue replay, hcm CLEAR and the exact accepted-red
-proof.8x5tm1 GO is retained solely for the interim inventory addition, followed
+proof.8x5tm1 GO is retained for registry/WASM bootstrap, the approved Kraken cap and the interim inventory addition, followed
 by the guarded head-matched owner merge. No CPU/certification wait.
+
+## Published constructor correction
+
+Run40284656224 exposed a genuine MEXC family bootstrap omission: the registry
+enabled dispatch signing while the WASM family did not. The family now enables
+the existing host bootstrap; both raw compatibility and explicit local setup
+construct and start through an actual MEXC-only WasmEngine control. No raw
+credential fallback or trading change is introduced. The native host already
+uses registry build and needs no extra feature.
+
+Composition on4ce9a294aa5 keeps incoming Bitunix configuration intact and
+reapplies only this plan's MEXC row, under the explicit maintainer ruling.
+Kraken1399920 exceeded1399808 due to landed-tip drift; the approved constants
+and exact-boundary tests raise Kraken/KrakenSpot to1400832 (1368KiB). Their
+missing replay ledger was downstream of that family failure, not separate
+infrastructure failure. The MEXC bans exception remains the sole6805 row.
