@@ -177,3 +177,14 @@ provider, timer or pending revival. Explicit malformed cases cover a negative
 deadline, the deferred setup owner and secondary SessionAuth. JSON whitespace
 padding pins acceptance at the 1 MiB cap and refusal one byte above it. All 64
 metadata controls and the 20 existing signer/nonce controls pass, zero skipped.
+
+## Publication scope
+
+This PR publishes business metadata forwarding only, not the working hosted
+Kraken adapter. The earlier provisional codec originals remain byte-exact under
+`rust.kraken-hosted-nonce.originals.ts`, outside default test discovery. Run
+those intentionally RED controls from `packages/safe-cex` with
+`corepack yarn vitest run --config config/test/krakenHostedNonceOriginals.config.ts`.
+The independent literal MAC and Bybit controls pass; six unsupported-Kraken
+assertions remain RED until the shared v2 route replaces the provisional codec.
+No default test exclusion or legacy API is changed to make them pass.
