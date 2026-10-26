@@ -161,8 +161,8 @@ record plus current local combined -> auditor exact-tree GO and guarded merge.
 
 ## Local originals checkpoint
 
-On the actual25ca8466d63 landing, the new public_seed_context target has31 tests:
-7 native working controls pass and24 intended custody/policy assertions fail,
+On the actual25ca8466d63 landing, the new public_seed_context target has32 tests:
+7 native working controls plus one exact-cleanup calibration pass and24 intended custody/policy assertions fail,
 with0 ignored or filtered tests. Runtime, Cargo, inventories and every existing
 fixture are unchanged. The explicit NEW20s deadline also excludes an older
 funding response after the next60s cadence; that is an assertion RED, not a
@@ -176,3 +176,9 @@ on the legacy runtime. All infinity variants and the full type matrix must
 execute after source adoption; this checkpoint does not claim they passed.
 Exact original/source/fixture review remains before any production candidate.
 The checkpoint is local and unpushed, with no new PR or CI dispatch.
+
+The cleanup correction captures the physical timer and preparation from genuine
+actions and permits each exact cleanup only once. Calibrators reject foreign,
+duplicate and missing cleanup using a separately issued peer; that peer still
+completes at finite time. Nonfinite Funding delivery also retains its genuinely
+captured independent60s cadence and a finite successful next observation.

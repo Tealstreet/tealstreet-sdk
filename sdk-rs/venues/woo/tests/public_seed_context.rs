@@ -39,33 +39,74 @@ struct Packet {
     request: HttpRequest,
     preparation: Option<Preparation>,
     intent: Option<RoutingIntent>,
+    timer: Option<TimerId>,
 }
-fn packet(actions: &[Action], seed: Seed) -> Packet {
-    actions
-        .iter()
-        .find_map(|action| match action {
-            Action::Http(request) if request.url.ends_with(seed.path()) => Some(Packet {
+fn all_packets(actions: &[Action]) -> Vec<Packet> {
+    let mut timer = None;
+    let mut packets = vec![];
+    for action in actions {
+        match action {
+            Action::SetTimer { timer: issued, .. } => timer = Some(*issued),
+            Action::Http(request) => packets.push(Packet {
                 request: request.clone(),
                 preparation: None,
                 intent: None,
+                timer: None,
             }),
-            Action::ManagedHttp(action) => match action.as_ref() {
-                HttpAction::Prepare {
+            Action::ManagedHttp(action) => {
+                if let HttpAction::Prepare {
                     preparation,
                     request,
                     intent,
-                } if request.url.ends_with(seed.path()) => Some(Packet {
-                    request: request.clone(),
-                    preparation: Some(*preparation),
-                    intent: Some(*intent),
-                }),
-                _ => None,
-            },
-            _ => None,
-        })
+                } = action.as_ref()
+                {
+                    packets.push(Packet {
+                        request: request.clone(),
+                        preparation: Some(*preparation),
+                        intent: Some(*intent),
+                        timer: Some(
+                            timer
+                                .take()
+                                .expect("actual physical timer emitted before Prepare"),
+                        ),
+                    });
+                }
+            }
+            _ => (),
+        }
+    }
+    packets
+}
+fn packet(actions: &[Action], seed: Seed) -> Packet {
+    all_packets(actions)
+        .into_iter()
+        .find(|p| p.request.url.ends_with(seed.path()))
         .unwrap_or_else(|| panic!("actual {seed:?} request: {actions:?}"))
 }
-fn release<V: Venue<Pending = Pending>>(e: &mut Engine<V>, p: &Packet, now: f64) {
+fn exact_cleanup(actions: &[Action], packet: &Packet) -> Result<(), &'static str> {
+    let preparation = packet.preparation.ok_or("no actual preparation")?;
+    let timer = packet.timer.ok_or("no actual physical timer")?;
+    let (mut cleared, mut cancelled) = (false, false);
+    for action in actions {
+        match action {
+            Action::ClearTimer { timer: seen } if *seen == timer && !cleared => cleared = true,
+            Action::ManagedHttp(action) => match action.as_ref() {
+                HttpAction::Cancel {
+                    preparation: seen,
+                    signing: None,
+                } if *seen == preparation && !cancelled => cancelled = true,
+                _ => return Err("foreign, duplicate or new managed work"),
+            },
+            _ => return Err("foreign, duplicate or non-cleanup action"),
+        }
+    }
+    if cleared && cancelled {
+        Ok(())
+    } else {
+        Err("missing exact once-only cleanup")
+    }
+}
+fn release<V: Venue>(e: &mut Engine<V>, p: &Packet, now: f64) {
     if let Some(preparation) = p.preparation {
         e.http_prepared(
             now,
@@ -507,7 +548,7 @@ fn nonfinite_start_creates_no_read_timer_or_diagnostic() {
 fn nonfinite_delivery(failure: bool) {
     for seed in [Seed::Markets, Seed::Tickers, Seed::Funding] {
         for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let (mut e, p, now, _) = issued(seed, true);
+            let (mut e, p, now, issued_actions) = issued(seed, true);
             let before = e.snapshot_frame(now + 3.).to_vec();
             if failure {
                 e.handle(
@@ -526,25 +567,24 @@ fn nonfinite_delivery(failure: bool) {
                 "nonfinite DATA cannot change any Store section"
             );
             let actions: Vec<_> = e.drain_actions().collect();
-            let mut cancelled = 0;
-            for action in actions {
-                match action {
-                    Action::ManagedHttp(action) => match *action {
-                        HttpAction::Cancel { preparation, .. } => {
-                            assert_eq!(Some(preparation), p.preparation);
-                            cancelled += 1;
-                        }
-                        _ => panic!("nonfinite delivery cannot prepare, bind or reissue"),
-                    },
-                    Action::ClearTimer { .. } => (),
-                    other => panic!("nonfinite delivery permits exact cleanup only: {other:?}"),
-                }
-            }
             assert_eq!(
-                cancelled, 1,
-                "the exact released preparation is cancelled once"
+                exact_cleanup(&actions, &p),
+                Ok(()),
+                "only this request's timer and preparation may retire once: {actions:?}"
             );
             assert!(e.http_release(p.request.id).is_none());
+            if seed == Seed::Funding {
+                let cadence = timer_at(&issued_actions, now + 60_000.);
+                e.handle(now + 60_000., Event::TimerFired { timer: cadence });
+                let next = packet(&e.drain_actions().collect::<Vec<_>>(), Seed::Funding);
+                assert!(
+                    next.preparation.is_some(),
+                    "independent cadence remains live after exact cleanup"
+                );
+                release(&mut e, &next, now + 60_000.);
+                response(&mut e, &next, now + 60_001., 200, FUNDING);
+                assert_eq!(e.store().ticker("BTCUSDT").unwrap().funding_rate, 0.002);
+            }
         }
     }
 }
@@ -1034,4 +1074,136 @@ fn owned_deadline_failure_keeps_native_recovery_once_without_data_authority() {
             "only the genuinely returned Pending may recover once"
         );
     }
+}
+
+#[test]
+fn cleanup_matcher_uses_genuine_resources_and_preserves_a_finite_peer() {
+    use safe_cex_engine::request_context::{
+        Context, Egress, Operation, Policy, RetryPolicy, Scope,
+    };
+    use safe_cex_engine::{Command, Cx};
+    use std::cell::Cell;
+    use std::rc::Rc;
+    struct Probe(Rc<Cell<usize>>);
+    impl Venue for Probe {
+        type Pending = Context;
+        fn start(&mut self, cx: &mut Cx<'_, Context>) {
+            for name in ["first", "peer"] {
+                let context = cx
+                    .http_context_with_egress(
+                        Scope::Background,
+                        Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 20_000,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                        Egress::Primary,
+                    )
+                    .unwrap();
+                cx.request_managed(
+                    context.clone(),
+                    None,
+                    Method::Get,
+                    format!("https://fixture.invalid/{name}"),
+                    None,
+                    context,
+                )
+                .unwrap();
+            }
+        }
+        fn on_command(&mut self, _: &mut Cx<'_, Context>, _: Command) {}
+        fn on_open(&mut self, _: &mut Cx<'_, Context>, _: safe_cex_engine::SocketId) {}
+        fn on_close(&mut self, _: &mut Cx<'_, Context>, _: safe_cex_engine::SocketId, _: u16) {}
+        fn on_message(&mut self, _: &mut Cx<'_, Context>, _: safe_cex_engine::SocketId, _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, Context>, _: TimerId) {}
+        fn on_response(&mut self, cx: &mut Cx<'_, Context>, pending: Context, _: Response<'_>) {
+            cx.validate_background_read_http_delivery(&pending).unwrap();
+            cx.finish_http_context(&pending).unwrap();
+            self.0.set(self.0.get() + 1);
+        }
+        fn on_request_failed(&mut self, cx: &mut Cx<'_, Context>, pending: Context, _: &str) {
+            cx.finish_http_context(&pending).unwrap();
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+    let completed = Rc::new(Cell::new(0));
+    let mut e = safe_cex_engine::test_support::seeded_engine(Probe(completed.clone()));
+    e.start(0.);
+    let packets = all_packets(&e.drain_actions().collect::<Vec<_>>());
+    assert_eq!(packets.len(), 2);
+    let first = &packets[0];
+    let peer = &packets[1];
+    release(&mut e, first, 0.);
+    release(&mut e, peer, 0.);
+    e.handle(
+        f64::NAN,
+        Event::HttpFailed {
+            request: first.request.id,
+            error: "cleanup calibration",
+        },
+    );
+    let cleanup: Vec<_> = e.drain_actions().collect();
+    assert_eq!(exact_cleanup(&cleanup, first), Ok(()));
+    let timer = first.timer.unwrap();
+    let preparation = first.preparation.unwrap();
+    let cancel = || {
+        Action::ManagedHttp(Box::new(HttpAction::Cancel {
+            preparation,
+            signing: None,
+        }))
+    };
+    for invalid in [
+        vec![
+            Action::ClearTimer {
+                timer: peer.timer.unwrap(),
+            },
+            cancel(),
+        ],
+        vec![
+            Action::ClearTimer { timer },
+            Action::ClearTimer { timer },
+            cancel(),
+        ],
+        vec![Action::ClearTimer { timer }, cancel(), cancel()],
+        vec![
+            Action::ClearTimer { timer },
+            Action::ManagedHttp(Box::new(HttpAction::Cancel {
+                preparation: peer.preparation.unwrap(),
+                signing: None,
+            })),
+        ],
+        vec![cancel()],
+    ] {
+        assert!(
+            exact_cleanup(&invalid, first).is_err(),
+            "matcher accepted foreign/duplicate/missing cleanup: {invalid:?}"
+        );
+    }
+    e.handle(
+        1.,
+        Event::HttpResponse {
+            request: peer.request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "{}",
+            },
+        },
+    );
+    assert_eq!(
+        completed.get(),
+        1,
+        "unrelated genuinely released peer still completes"
+    );
+    assert_eq!(
+        exact_cleanup(&e.drain_actions().collect::<Vec<_>>(), peer),
+        Ok(())
+    );
 }
