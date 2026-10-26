@@ -624,3 +624,12 @@ test('reply commands carry the effective caller wait into the engine envelope', 
   d.host.command({ op: 'getAccount' });
   assert.equal(d.calls[0].timeoutMs, DEFAULT_COMMAND_TIMEOUT_MS);
 });
+
+
+test('known address setup retirement without negotiated support disposes the host', () => {
+  const r = rig();
+  assert.throws(() => r.host.execute({ op: 'retireAddressSetup', task: 1, token: 'foreign' }), EngineDisposedError);
+  assert.equal(r.host.disposed, true);
+  assert.equal(r.host.commands.size, 0);
+  assert.equal(r.timers.size, 0);
+});
