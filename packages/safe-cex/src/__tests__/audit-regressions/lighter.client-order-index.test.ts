@@ -2,7 +2,7 @@ import type { PlaceOrderOpts } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LighterExchange } from '../../exchanges/lighter/lighter.exchange';
+import { LighterExchange } from '../reference/lighter/lighter.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 
@@ -16,15 +16,15 @@ vi.mock('@tealstreet/lighter-sdk', () => ({
   OrderApi: class {},
   CandlestickApi: class {},
 }));
-vi.mock('../../exchanges/lighter/lighter.api', () => ({
+vi.mock('../reference/lighter/lighter.api', () => ({
   createLighterSDKClient: vi.fn(() => ({ get: vi.fn() })),
 }));
-vi.mock('../../exchanges/lighter/lighter.ws-public', () => ({
+vi.mock('../reference/lighter/lighter.ws-public', () => ({
   LighterPublicWebsocket: class {
     dispose = vi.fn();
   },
 }));
-vi.mock('../../exchanges/lighter/lighter.ws-private', () => ({
+vi.mock('../reference/lighter/lighter.ws-private', () => ({
   LighterPrivateWebsocket: class {
     throttleFetchOrders = vi.fn();
     dispose = vi.fn();

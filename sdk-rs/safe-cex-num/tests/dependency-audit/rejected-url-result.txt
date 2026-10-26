@@ -1,0 +1,37 @@
+   Compiling stable_deref_trait v1.2.1
+   Compiling zerofrom v0.1.8
+   Compiling writeable v0.6.4
+   Compiling yoke v0.8.3
+   Compiling zerovec v0.11.8
+   Compiling litemap v0.8.3
+   Compiling zerotrie v0.2.5
+   Compiling tinystr v0.8.4
+   Compiling icu_locale_core v2.3.0
+   Compiling potential_utf v0.1.6
+   Compiling icu_collections v2.1.1
+   Compiling icu_properties_data v2.1.2
+   Compiling icu_provider v2.3.1
+   Compiling icu_normalizer_data v2.1.1
+   Compiling write16 v1.0.0
+   Compiling utf16_iter v1.0.5
+   Compiling smallvec v1.16.3
+   Compiling icu_properties v2.1.2
+   Compiling icu_normalizer v2.1.1
+   Compiling icu_locale_data v2.1.1
+   Compiling icu_collator_data v2.1.1
+   Compiling icu_locale v2.1.1
+   Compiling idna_adapter v1.2.1
+   Compiling idna v1.1.0
+   Compiling icu_collator v2.1.1
+   Compiling url v2.5.8
+   Compiling safe-cex-num v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/target/num-url-audit/rejected/sdk-rs/safe-cex-num)
+   Compiling safe-cex-transport v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/target/num-url-audit/rejected/sdk-rs/safe-cex-transport)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.20s
+     Running tests/icu_url_audit.rs (sdk-rs/target/num-url-audit-build/debug/deps/icu_url_audit-a25dda76c404c2dc)
+
+running 1 test
+57 live Node URL cases passed
+test extract_domain_matches_node_with_icu_proposal ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+

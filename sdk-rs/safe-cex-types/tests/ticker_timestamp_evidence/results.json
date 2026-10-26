@@ -1,0 +1,164 @@
+{
+  "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+  "env": {
+    "SAFE_CEX_TYPESCRIPT_PATH": "/Users/sam/cs/tealstreet-next/node_modules/typescript"
+  },
+  "gates": [
+    {
+      "gate": "boxed-ticker",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "sdk-rs/Cargo.toml",
+        "-p",
+        "safe-cex-types",
+        "--test",
+        "boxed_ticker",
+        "--jobs",
+        "2"
+      ],
+      "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+      "exit": 0,
+      "seconds": 36.96
+    },
+    {
+      "gate": "scoped-check",
+      "command": [
+        "cargo",
+        "check",
+        "--manifest-path",
+        "sdk-rs/Cargo.toml",
+        "-p",
+        "safe-cex-types",
+        "-p",
+        "safe-cex-num",
+        "-p",
+        "safe-cex-store",
+        "--all-targets",
+        "--jobs",
+        "2"
+      ],
+      "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+      "exit": 0,
+      "seconds": 2.66
+    },
+    {
+      "gate": "num-timestamp",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "sdk-rs/Cargo.toml",
+        "-p",
+        "safe-cex-num",
+        "--test",
+        "ticker_timestamp",
+        "--jobs",
+        "2"
+      ],
+      "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+      "exit": 0,
+      "seconds": 2.24
+    },
+    {
+      "gate": "store-timestamp",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "sdk-rs/Cargo.toml",
+        "-p",
+        "safe-cex-store",
+        "--test",
+        "ticker_timestamp",
+        "--jobs",
+        "2"
+      ],
+      "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+      "exit": 0,
+      "seconds": 31.05
+    },
+    {
+      "gate": "timestamp-controls",
+      "command": [
+        "python3.11",
+        "sdk-rs/safe-cex-types/tests/identity_audit/ticker_timestamp_controls.py"
+      ],
+      "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+      "exit": 0,
+      "seconds": 189.49
+    },
+    {
+      "gate": "boxed-controls",
+      "command": [
+        "python3.11",
+        "sdk-rs/safe-cex-types/tests/identity_audit/boxed_ticker_controls.py"
+      ],
+      "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+      "exit": 0,
+      "seconds": 55.52
+    },
+    {
+      "gate": "host-clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--manifest-path",
+        "sdk-rs/Cargo.toml",
+        "-p",
+        "safe-cex-types",
+        "-p",
+        "safe-cex-num",
+        "-p",
+        "safe-cex-store",
+        "--all-targets",
+        "--jobs",
+        "2",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+      "exit": 0,
+      "seconds": 82.83
+    },
+    {
+      "gate": "wasm-clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--manifest-path",
+        "sdk-rs/Cargo.toml",
+        "-p",
+        "safe-cex-types",
+        "-p",
+        "safe-cex-num",
+        "-p",
+        "safe-cex-store",
+        "--all-targets",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--jobs",
+        "2",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+      "exit": 0,
+      "seconds": 324.33
+    },
+    {
+      "gate": "extractor",
+      "command": [
+        "node",
+        "/Users/sam/.volta/tools/image/yarn/1.22.21/bin/yarn.js",
+        "parity:extract:check"
+      ],
+      "sha": "e571841d02a35e095366d947f2d6367fdce4d7f4",
+      "exit": 0,
+      "seconds": 61.62
+    }
+  ]
+}

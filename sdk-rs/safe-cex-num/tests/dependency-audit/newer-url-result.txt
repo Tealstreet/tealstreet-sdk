@@ -1,0 +1,32 @@
+    Updating crates.io index
+    Blocking waiting for file lock on package cache
+     Locking 6 packages to highest compatible versions
+      Adding icu_collator v2.3.1
+      Adding icu_collator_data v2.3.0
+      Adding icu_locale_fallback v2.3.0
+      Adding icu_locale_fallback_data v2.3.0
+      Adding utf16_iter v1.0.5
+      Adding write16 v1.0.0
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling icu_collections v2.3.0
+   Compiling icu_locale_fallback_data v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_collator_data v2.3.0
+   Compiling icu_locale_fallback v2.3.0
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling icu_collator v2.3.1
+   Compiling url v2.5.8
+   Compiling safe-cex-num v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/target/num-url-audit/newer/sdk-rs/safe-cex-num)
+   Compiling safe-cex-transport v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/target/num-url-audit/newer/sdk-rs/safe-cex-transport)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.38s
+     Running tests/icu_url_audit.rs (sdk-rs/target/num-url-audit-build/debug/deps/icu_url_audit-2f39ae2d9e5b3e49)
+
+running 1 test
+57 live Node URL cases passed
+test extract_domain_matches_node_with_icu_proposal ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+

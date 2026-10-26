@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapParadexFillToIncomeRecords } from '../../exchanges/paradex/paradex.income';
+import { mapParadexFillToIncomeRecords } from '../reference/paradex/paradex.income';
 
 const resolveSymbol = (market: string) => (market === 'DOGE-USD-PERP' ? 'DOGE-USD-PERP' : undefined);
 

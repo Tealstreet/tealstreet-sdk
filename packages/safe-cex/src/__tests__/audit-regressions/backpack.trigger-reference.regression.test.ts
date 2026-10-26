@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType } from '../../types';
 

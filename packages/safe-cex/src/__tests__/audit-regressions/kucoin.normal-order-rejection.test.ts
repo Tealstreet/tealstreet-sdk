@@ -2,7 +2,7 @@ import type { ExchangeOptions } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
+import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 // KuCoin rejects orders as HTTP 200 with a non-'200000' `code`. The normal

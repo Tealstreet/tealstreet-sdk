@@ -1,0 +1,10 @@
+const assert = require('node:assert/strict');
+const {root, load} = require('../../safe-cex-types/scripts/accounts-source.cjs');
+const calendar = load(root + '/packages/safe-cex/src/utils/calendarCandles.ts');
+const op = process.argv[2];
+const times = [-62135596800,-59012928000,-59011459200,1706659200,-0.0001,NaN,Infinity,-Infinity];
+const pairs = [[-62135596800,-59011459200],[0,0],[1706659200,1706745600],[NaN,0],[0,NaN],[Infinity,0],[0,Infinity],[-Infinity,0],[Infinity,-Infinity],[-0.0001,0]];
+const live = calendar.createLiveCandleStart('1M');
+const values = op === 'negativeYearRollover' ? [calendar.nextCalendarPeriodStartMs('1M',-62169897600000), live(-62169897600), live(-62167219200)] : op === 'getNumChartCandlesInRange' ? pairs.map(([from,to])=>calendar[op]('1M',from,to)) : times.map(t=>calendar[op]('1M',t));
+assert.equal(values.length, op === 'negativeYearRollover' ? 3 : op === 'getNumChartCandlesInRange' ? 10 : 8);
+process.stdout.write(JSON.stringify(values.map(value=>Object.is(value,-0)?'-0':String(value))));
