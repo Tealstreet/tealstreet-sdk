@@ -497,4 +497,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Keyless Session serial Plans | Plan and originals; source held | Before admitting a credential-free Session-authenticated serial root or changing SerialPolicy credential optionality. | [RUST_KEYLESS_SERIAL_SESSION.md](RUST_KEYLESS_SERIAL_SESSION.md) |
 
+| RUST_BACKPACK_TRIGGER_REPAIR.md | Backpack snapshot-issued trigger repair; existing core, zero-fill replacement safety, venue-only originals/source in progress. |
+
 | Explicit serial call authentication | Plan; originals and source pending | Before mixing unsigned Session calls and provider-signed calls under one serial root. | [RUST_SERIAL_CALL_AUTH.md](RUST_SERIAL_CALL_AUTH.md) |
