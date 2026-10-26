@@ -2708,7 +2708,10 @@ mod tests {
             (ids.secondary.unwrap(), "read-key", "read-secret"),
         ] {
             assert_eq!(signer.key(&identity.credential).unwrap(), key.as_bytes());
-            assert_eq!(signer.key(identity.signing_ref().unwrap()).unwrap(), secret.as_bytes());
+            assert_eq!(
+                signer.key(identity.signing_ref().unwrap()).unwrap(),
+                secret.as_bytes()
+            );
             let request = SignRequest {
                 receipt: Default::default(),
                 context: Default::default(),
@@ -2744,7 +2747,9 @@ mod tests {
         // Undeclared, the exact bytes stay untouched.
         let (exact, ids) = LocalSigner::from_json(setup.into()).unwrap();
         assert_eq!(
-            exact.key(ids.primary.unwrap().signing_ref().unwrap()).unwrap(),
+            exact
+                .key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
             "\u{a0}yourSecretKey \n".as_bytes()
         );
         // The declared policy wins over contrary caller metadata, and trimming
@@ -2761,13 +2766,21 @@ mod tests {
             off,
         )
         .unwrap();
-        assert_eq!(kept.key(ids.primary.unwrap().signing_ref().unwrap()).unwrap(), b" s ");
+        assert_eq!(
+            kept.key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            b" s "
+        );
         let (hex, ids) = LocalSigner::from_json_with_policy(
             r#"{"primary":{"key":"k","secret":"6162\n","secretEncoding":"hex"}}"#.into(),
             policy,
         )
         .unwrap();
-        assert_eq!(hex.key(ids.primary.unwrap().signing_ref().unwrap()).unwrap(), b"ab");
+        assert_eq!(
+            hex.key(ids.primary.unwrap().signing_ref().unwrap())
+                .unwrap(),
+            b"ab"
+        );
         // Rust White_Space includes NEL (U+0085) but not BOM (U+FEFF).
         for (secret, installed) in [(r"\u0085s\u0085", "s"), (r"\ufeffs", "\u{feff}s")] {
             let (signer, ids) = LocalSigner::from_json_with_policy(
@@ -2776,7 +2789,9 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                signer.key(ids.primary.unwrap().signing_ref().unwrap()).unwrap(),
+                signer
+                    .key(ids.primary.unwrap().signing_ref().unwrap())
+                    .unwrap(),
                 installed.as_bytes()
             );
         }

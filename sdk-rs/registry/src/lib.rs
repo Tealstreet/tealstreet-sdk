@@ -1619,8 +1619,10 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "bitunix")]
         "bitunix" => {
-            if options.key.is_some()
-                || options.secret.is_some()
+            // Empty public placeholders are no credential (as WEEX).
+            if [&options.key, &options.secret]
+                .iter()
+                .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
                 || options.read_credentials.is_some()
             {
                 return Err(invalid(
