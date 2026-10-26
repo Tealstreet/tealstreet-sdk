@@ -3,6 +3,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { BETA_VENUES } from '../../exchanges/rust/betaVenues';
+
 // The TS venue adapters live only in the test-only replay oracle
 // (src/__tests__/reference/<venue>/). The runtime keeps exactly these venue
 // files: signing for rust/legacySigning.ts, the index.ts wallet/builder exports,
@@ -52,6 +54,12 @@ const KEPT_VENUE_FILES = [
 // Pure helpers tealstreet-next imports from source, though the SDK runtime does not:
 // the open-orders Bitget attached TP/SL check and the history-audit Kraken mappers.
 const SOURCE_CONSUMER_FILES = ['bitget/bitget.family.ts', 'kraken/kraken.fills.ts', 'kraken/kraken.income.ts'];
+
+// Kept venue code outside the beta families, each for a named runtime consumer.
+const NON_BETA_KEPT_FAMILIES: Record<string, string> = {
+  grvt: 'index.ts exports the GRVT builder-authorization helpers the web app uses',
+  txflow: 'rust/rust.exchange.ts applies the TxFlow client order ID rule',
+};
 
 const SRC = resolve(__dirname, '../..');
 const EXCHANGES = join(SRC, 'exchanges');
@@ -132,6 +140,12 @@ describe('the TS venue oracle is unreachable from the SDK runtime', () => {
     );
     expect(production).toEqual([...KEPT_VENUE_FILES, ...SOURCE_CONSUMER_FILES].sort());
     expect(production.filter((file) => /\.(?:exchange|ws-private|ws-public)\.ts$/.test(file))).toEqual([]);
+  });
+
+  it('kept venue code belongs to a beta family or a named non-beta consumer', () => {
+    const families = new Set([...KEPT_VENUE_FILES, ...SOURCE_CONSUMER_FILES].map((file) => file.split('/')[0]));
+    const outside = [...families].filter((family) => !(BETA_VENUES as readonly string[]).includes(family)).sort();
+    expect(outside).toEqual(Object.keys(NON_BETA_KEPT_FAMILIES).sort());
   });
 
   it('source-consumer helpers import only shared modules', () => {
