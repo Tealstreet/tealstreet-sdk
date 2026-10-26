@@ -206,7 +206,7 @@ test('gate rejects a missing CI artifact before starting either replay', (t) => 
 
 test('CI retains wasm separately for three days without extending report storage', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
-  const build = workflow.indexOf('name: Build and lint the selected venue family');
+  const build = workflow.indexOf("rust:build-wasm --venue '${{ matrix.family }}'");
   const archive = workflow.indexOf('--archive sdk-rs/hosts/wasm/pkg/ci-replay', build);
   assert.ok(build >= 0 && archive > build);
   assert.ok(archive < workflow.indexOf('name: Check family isolation, every alias and the shipped size'));
