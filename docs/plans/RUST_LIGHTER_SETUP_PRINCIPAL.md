@@ -1,6 +1,7 @@
 # Lighter secret-only setup principal
 
-Status: shared API proposal, API CLEAR from m26ps4 and uufub4 at 25b7d8a4edf; before inert originals and source. Owner:
+Status: local shared source; API and originals CLEAR from m26ps4/uufub4;
+source correction and qualification in progress. Owner:
 codex-ih35js. Credential reviewer: claude-m26ps4; core reviewer:
 codex-uufub4. Base: #2204 head 01cdbacc21200d37eb0c5ddf7b5b06544dc74763.
 
@@ -58,7 +59,9 @@ signing ref exists and public_data_only is false. Its provider-issued opaque
 credential reference is distinct from the signing ref. Provider state retains
 the typed index; no principal material goes into the ordinary key map. Its ref
 name is a fixed provider-owned slot name independent of index digits; different
-indices cannot encode data into the opaque ref name.
+indices cannot encode data into the opaque ref name. Replacing a blank key
+removes its prior provider credential material before repointing the identity,
+so no unowned, presentable whitespace ref remains.
 
 Present, Credential interpolation, MAC/signing, public-key and address operations
 on the principal ref refuse. This stays true if trusted insertion is attempted
@@ -119,7 +122,10 @@ schnorr mode had ten intended assertion REDs and three GREEN controls; feature
 off had four GREEN controls, no ignored tests. Both reviewers read the immutable
 originals and cleared source. Their assertion bodies are unchanged; additive
 source controls cover absent/supplied stable_id and malformed scalar refusal.
-Targets were deleted after execution. No registry, venue, capability or family
+The blank-key cleanup control failed on a29989ff7df at the orphaned key-map
+assertion before the correction; it also requires Present of the old ref to
+refuse after the fix. Targets were deleted after execution.
+No registry, venue, capability or family
 activation is part of this carrier PR.
 
 ## Verification and landing

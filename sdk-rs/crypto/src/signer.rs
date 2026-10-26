@@ -291,6 +291,9 @@ impl LocalSigner {
                 && let Some(primary) = identities.primary.as_mut()
                 && primary.signing_ref().is_ok()
             {
+                if !primary.credential.0.is_empty() {
+                    signer.remove(&primary.credential);
+                }
                 let reference = KeyRef("primary.principal".into());
                 primary.credential = reference.clone();
                 signer.lighter_principal = Some((reference, principal));
