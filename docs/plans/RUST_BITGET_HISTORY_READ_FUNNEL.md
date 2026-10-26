@@ -331,4 +331,22 @@ Repair core2151 and Hyperliquid originals2167 then landed; the PR plain-merges
 actual49a5b54f362 before its READY-time local combined record. The0359 result
 is retained under that pin, never relabeled as the subsequent composition.
 
-Current-gate composition: plain merge of 0a54e37b1e8 adopts #2162 exactly. Bitget public steady CPU now requires pooled q <= 1.023110 against both the tip and anchor 518d3953c09; all old-gate exceptions are superseded. The approved 1,478,656 Bitget/USDC history allowance uses the 2,108 bytes banked by #2142/#2145. It preserves the incoming AsterDEX and Bybit allowances. READY requires exact-head CI family/CPU qualification plus a local combined build on this current-tip composition.
+First counterbalanced composition: plain merge of 0a54e37b1e8 adopts #2162 exactly. Bitget public steady CPU requires pooled q <= 1.023110 against both the tip and anchor 518d3953c09; all old-gate exceptions are superseded. That composition's 1,478,656 Bitget/USDC history allowance uses the 2,108 bytes banked by #2142/#2145 and preserves the incoming AsterDEX and Bybit allowances.
+
+### Qualification after credential-only setup #2175
+
+The plain merge of actual tip 174f6a4c90c into reviewed ee8c9c65c604 is entirely
+automatic, producing tree 9b686e6fcd6f89ddbd060f2cf5d642fcf0a084a1 before the
+budget update. Bitget runtime and tests are unchanged; all incoming setup code
+is retained. The local shipping build on this exact composition records
+1,480,043 bytes for Bitget, web = node, exceeding the previous 1,478,656 cap.
+This is local evidence, not a replacement for the CI family record.
+
+The overseer and auditor require one fresh qualifying run with a provisional
+Bitget/USDC cap of 1,482,752, preserving all other caps and profiles. After that
+run, shrink only the two constants and boundary-test values to its measured
+family size rounded up to KiB. An exact-reviewed cap-only shrink may carry the
+same run without another dispatch; a result above 1,482,752 stops for a ruling.
+READY also requires both counterbalanced comparisons to pass and one local
+combined measurement on the 174f composition. The earlier frozen-head family,
+CPU and combined records retain their original pins.
