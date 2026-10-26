@@ -11,7 +11,8 @@ log = "0.4.32"
 tokio = { version = "1.52.3", default-features = false, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "time", "sync"] }
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
 env_logger = "0.11.10"
-serde_json = { version = "=1.0.152", features = ["float_roundtrip", "preserve_order", "arbitrary_precision"] }
+# Keep shared frame semantics aligned with sdk-rs/Cargo.toml.
+serde_json = { version = "=1.0.154", features = ["float_roundtrip", "preserve_order", "arbitrary_precision"] }
 serde = { version = "1.0.228", features = ["derive"] }
 reqwest = { version = "0.13.4", features = ["json", "multipart", "form"] }
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
