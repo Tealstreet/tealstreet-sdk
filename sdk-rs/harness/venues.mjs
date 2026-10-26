@@ -50,7 +50,8 @@ import {
 } from './kraken-protocol.mjs';
 let krakenRequestAudit;
 
-const root = '../../packages/safe-cex/src/exchanges';
+// TS oracle adapters: test-only, never reachable from the safe-cex runtime.
+const root = '../../packages/safe-cex/src/__tests__/reference';
 
 const lighter = (name) => {
   let verifier;
@@ -276,7 +277,7 @@ const orderly = (alias) => {
     },
     rust: alias,
     ts: {
-      module: `${root}/../__tests__/reference/orderly/exchanges/${name}/${name}.exchange.ts`,
+      module: `${root}/orderly/exchanges/${name}/${name}.exchange.ts`,
       className: orderlyClasses[name],
       name,
     },
@@ -770,7 +771,7 @@ const coinbase = (name) => ({
   currencyBalances: true,
   rust: name,
   ts: {
-    module: `${root}/../__tests__/reference/coinbase/${name}.exchange.ts`,
+    module: `${root}/coinbase/${name}.exchange.ts`,
     className: name === 'coinbasespot' ? 'CoinbaseSpotExchange' : 'CoinbaseExchange',
     name,
   },
@@ -836,7 +837,7 @@ export const VENUES = {
     virtualPrivateClock: true,
     recordPublicCorsDirect: true,
     recordAfterReady: true,
-    ts: { module: `${root}/../__tests__/reference/txflow/txflow.exchange.ts`, className: 'TxFlowExchange', name: 'txflow' },
+    ts: { module: `${root}/txflow/txflow.exchange.ts`, className: 'TxFlowExchange', name: 'txflow' },
     requestKey: typedRequest,
     requestBodies: true,
     matchRequestBody: true,

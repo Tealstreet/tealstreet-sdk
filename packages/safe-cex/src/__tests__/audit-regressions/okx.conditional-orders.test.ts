@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { BROKER_ID, ENDPOINTS } from '../../exchanges/okx/okx.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStopTriggerType, OrderType, PositionMode } from '../../types';

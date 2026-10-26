@@ -1,7 +1,7 @@
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
-import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
-import { BybitSpotExchange } from '../../exchanges/bybit/bybitspot.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
+import { BybitSpotExchange } from '../reference/bybit/bybitspot.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 /**

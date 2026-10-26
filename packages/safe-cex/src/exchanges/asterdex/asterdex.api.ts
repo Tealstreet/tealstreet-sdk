@@ -1,5 +1,5 @@
 import type { IsReadRequest } from '../../utils/retryReadsOnly';
-import type { AsterDEXExchange } from './asterdex.exchange';
+import type { BaseExchange } from '../base';
 import type { AsterDEXAPIVersion } from './asterdex.types';
 
 import * as crypto from 'crypto';
@@ -168,7 +168,7 @@ const getAsterDEXErrorDetail = (message: unknown, code: unknown): string => {
   return rawMessage;
 };
 
-export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
+export const createPublicAPI = (exchange?: BaseExchange): AxiosInstance => {
   const baseURL = exchange?.options?.testnet ? ASTERDEX_ENDPOINTS.REST.TESTNET : ASTERDEX_ENDPOINTS.REST.PRODUCTION;
 
   const api = exchange
@@ -219,7 +219,7 @@ export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
 };
 
 export const createAPI = (
-  exchange: AsterDEXExchange,
+  exchange: BaseExchange,
   options: AsterDEXAPIOptions = {},
   // Transport (proxy/tunnel/overrideProxyUrl) is read from here, defaulting to the
   // primary account. The secondary read-only client passes its own ExchangeOptions so
@@ -498,7 +498,7 @@ export const createAPI = (
 };
 
 // Helper function to create multiple API instances with different rate limits
-export const createAPIInstances = (exchange: AsterDEXExchange) => {
+export const createAPIInstances = (exchange: BaseExchange) => {
   // Resolve Aster REST auth from a primary OR secondary-key ExchangeOptions. For
   // V3 the read-only secondary agent shares the main wallet (applicationId) and
   // differs only in signer address (secondary_apiKey) + private key (secondary_apiSecret).

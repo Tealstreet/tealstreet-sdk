@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
-import { BROKER_ID, ENDPOINTS } from '../../exchanges/apexomni/apexomni.types';
+import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
+import { BROKER_ID, ENDPOINTS } from '../reference/apexomni/apexomni.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 
@@ -29,25 +29,25 @@ vi.mock('zklink-web-sdk-alpha', () => ({
   newRpcSignerWithProvider: vi.fn(() => signer),
 }));
 
-vi.mock('../../exchanges/apexomni/zklink/signer/utils', () => ({
+vi.mock('../reference/apexomni/zklink/signer/utils', () => ({
   initSdk: initSdkMock,
 }));
 
-vi.mock('../../exchanges/apexomni/zklink/signer/transactions/contract', () => ({
+vi.mock('../reference/apexomni/zklink/signer/transactions/contract', () => ({
   signContract: signContractMock,
 }));
 
-vi.mock('../../exchanges/apexomni/apexomni.api', () => ({
+vi.mock('../reference/apexomni/apexomni.api', () => ({
   createAPI: (...args: unknown[]) => createApiMock(...args),
 }));
 
-vi.mock('../../exchanges/apexomni/apexomni.ws-public', () => ({
+vi.mock('../reference/apexomni/apexomni.ws-public', () => ({
   ApexOmniPublicWebsocket: class {
     dispose = vi.fn();
   },
 }));
 
-vi.mock('../../exchanges/apexomni/apexomni.ws-private', () => ({
+vi.mock('../reference/apexomni/apexomni.ws-private', () => ({
   ApexOmniPrivateWebsocket: class {
     throttleFetchOrders = vi.fn();
     dispose = vi.fn();

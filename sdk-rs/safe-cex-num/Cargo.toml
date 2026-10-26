@@ -1,0 +1,31 @@
+[package]
+name = "safe-cex-num"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+safe-cex-types.workspace = true
+indexmap = { version = "2.14.2", features = ["serde"] }
+ryu-js = "1"
+serde.workspace = true
+serde_json = { version = "1.0.152", features = ["float_roundtrip", "preserve_order", "arbitrary_precision", "raw_value"] }
+num-bigint = "0.4.6"
+num-traits = "0.2.19"
+
+
+icu_collator = "=2.3.1"
+icu_provider = { version = "=2.3.1", default-features = false, features = ["baked"] }
+icu_normalizer = { version = "=2.3.0", default-features = false }
+icu_collections = { version = "=2.3.0", default-features = false }
+zerovec = { version = "=0.11.8", default-features = false }
+icu_locale_core = "=2.3.0"
+icu_collator_data = "=2.3.0"
+icu_normalizer_data = "=2.3.0"
+icu_locale_fallback_data = "=2.3.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+trybuild = "1.0.116"

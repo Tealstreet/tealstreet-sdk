@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
-import { BinancePMPrivateWebsocket } from '../../exchanges/binance/binancepm.ws-private';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
+import { BinancePMPrivateWebsocket } from '../reference/binance/binancepm.ws-private';
 import { DefaultStore } from '../../store/store.base';
 import { PositionSide } from '../../types';
 
