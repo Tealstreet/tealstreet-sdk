@@ -15,20 +15,24 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 test('only the declared venue families carry overrides, and only for the venue profile', () => {
   assert.deepEqual(Object.keys(WASM_VENUE_OVERRIDES).sort(), ['asterdex', 'bitget', 'bitgetusdc', 'bybit', 'kraken', 'krakenspot']);
-  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_355 * 1_024);
+  assert.equal(WASM_VENUE_OVERRIDES.asterdex, 1_356 * 1_024);
   assert.equal(wasmBudgetError(1_385_869, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_496, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_386_952, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_387_520, 'venue', 'asterdex'), undefined);
-  assert.match(wasmBudgetError(1_387_521, 'venue', 'asterdex'), /exceeds 1387520/);
+  assert.equal(wasmBudgetError(1_387_670, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_388_544, 'venue', 'asterdex'), undefined);
+  assert.match(wasmBudgetError(1_388_545, 'venue', 'asterdex'), /exceeds 1388544/);
   for (const venue of ['bitget', 'bitgetusdc']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1449 * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1450 * 1024);
     assert.ok(WASM_VENUE_OVERRIDES[venue] <= 1452 * 1024);
     assert.equal(wasmBudgetError(1_481_804, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_482_752, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_482_944, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_483_776, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_483_777, 'venue', venue), /exceeds 1483776/);
+    assert.equal(wasmBudgetError(1_483_869, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(1_484_800, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_484_801, 'venue', venue), /exceeds 1484800/);
   }
   for (const venue of ['kraken', 'krakenspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], 1373 * 1024);
