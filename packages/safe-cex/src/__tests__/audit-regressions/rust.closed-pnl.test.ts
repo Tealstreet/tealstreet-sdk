@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExchangeName, Market } from '../../types';
 import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/host';
 
+import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
+import { mapBitunixClosedPosition } from '../../exchanges/bitunix/bitunix.income';
 import { mapBlofinClosedPosition } from '../../exchanges/blofin/blofin.income';
 import { mapBybitClosedPnl } from '../../exchanges/bybit/bybit.closed-pnl';
 import { mapOkxClosedPosition } from '../../exchanges/okx/okx.closed-pnl';
@@ -44,6 +46,18 @@ const BYBIT_ROWS = [
   { symbol: 'ETHUSDT', side: 'Buy', closedSize: '1', avgEntryPrice: '2000', avgExitPrice: '1990', cumExitValue: '1990', closedPnl: '9', leverage: '5', openFee: '0.1', closeFee: '0.1', createdTime: '1699000000000', updatedTime: '1699000000001' },
   { symbol: 'BTCUSD', side: 'Sell', closedSize: '1000', avgEntryPrice: '95000', avgExitPrice: '96000', cumExitValue: '0.0104', closedPnl: '0.0001', leverage: '10', createdTime: '1700000000000', updatedTime: '1700000000001' },
 ];
+
+const BITUNIX_ROWS = [
+  { positionId: 'p1', symbol: 'BTCUSDT', side: 'BUY', qty: '0.5', maxQty: '0.5', entryPrice: '60000', closePrice: '61000', fee: '1.2', funding: '0', realizedPNL: '498.8', leverage: '10', marginMode: 'CROSS', positionMode: 'ONE_WAY', ctime: '1700000000000', mtime: '1700000500000' },
+  { positionId: 'p2', symbol: 'ETHUSDT', side: 'SELL', qty: '2', maxQty: '3', entryPrice: '2000', closePrice: '1990', fee: '0.4', funding: '-0.1', realizedPNL: '19.6', leverage: '5', marginMode: 'ISOLATION', positionMode: 'HEDGE', ctime: '1700001000000', mtime: '1700002000000' },
+];
+
+/** The TS venue over the same raw rows: its pager is the only thing replaced. */
+const tsBitunix = (rows: Array<Record<string, unknown>>) => {
+  const exchange = new BitunixExchange('bitunix', { key: 'k', secret: 's', tuning: { consoleLogging: false } }, new DefaultStore());
+  vi.spyOn(exchange as unknown as { fetchBitunixHistoryPages: () => Promise<unknown> }, 'fetchBitunixHistoryPages').mockResolvedValue(rows);
+  return exchange;
+};
 
 describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
   it('selects row format and inverse interpretation from the engine record', async () => {
@@ -105,6 +119,23 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
     ]);
   });
 
+  it('bitunix maps raw history-position rows like the TS venue, newest close first', async () => {
+    const { exchange, command } = make('bitunix', BITUNIX_ROWS);
+    const entries = await exchange.fetchClosedPnl({ symbol: 'BTCUSDT', from: 1, to: 2, accountName: 'acct' });
+    expect(command).toHaveBeenCalledWith(
+      { op: 'fetchClosedPositions', symbol: 'BTCUSDT', from: 1, to: 2 },
+      { report: true },
+    );
+    expect(entries).toEqual([
+      mapBitunixClosedPosition(BITUNIX_ROWS[1], 'acct'),
+      mapBitunixClosedPosition(BITUNIX_ROWS[0], 'acct'),
+    ]);
+    const ts = tsBitunix(BITUNIX_ROWS);
+    expect(entries).toEqual(await ts.fetchClosedPnl({ symbol: 'BTCUSDT', from: 1, to: 2, accountName: 'acct' }));
+    ts.dispose();
+    expect(exchange.capabilities.closedPnl).toBe(true);
+  });
+
   it('okx and blofin read an empty symbol account-wide, as TS', async () => {
     for (const name of ['okx', 'blofin'] as const) {
       const { exchange, command } = make(name, []);
@@ -132,7 +163,7 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
 });
 
 
-it.each(['bybit', 'okx', 'blofin'] as const)('%s retains capped empty reported closed-PnL metadata', async (name) => {
+it.each(['bybit', 'okx', 'blofin', 'bitunix'] as const)('%s retains capped empty reported closed-PnL metadata', async (name) => {
   const { exchange } = make(name, Object.defineProperty([], 'incomplete', { value: true }));
   const rows = await exchange.fetchClosedPnl({ symbol: 'BTCUSDT' });
   expect(rows).toEqual([]);

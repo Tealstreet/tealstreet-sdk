@@ -9854,6 +9854,10 @@ a CloudFront host stays an auth kind. Native codes and a venue's own declared
 Bitget, Bitunix) keeps a CDN page as auth. Move the check ahead of the status
 rows if such a venue is ever fronted by CloudFront.
 
+### Bitunix closed positions and journal on Rust
+
+Bitunix on the Rust engine now serves the journal (historical positions) and closed PnL from the venue's reported position history, mapped by TypeScript's own Bitunix mappers, as TypeScript does ([RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md)). The journal previously threw "no journal records path declared", and closed PnL was always empty. Capability records gain `positionHistory: "bitunix"` and `closedPositionFormat: "bitunix"`. A failed journal read throws, as on every other reported-closed venue; a failed closed-PnL read yields `[]`.
+
 ### Bitunix account read classification (P1 #33)
 
 A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
