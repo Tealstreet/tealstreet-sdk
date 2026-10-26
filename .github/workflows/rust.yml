@@ -613,13 +613,13 @@ jobs:
           node sdk-rs/harness/cpu-ci.mjs --command prepare --suite '${{ matrix.venue }}'
           --out '${{ runner.temp }}/cpu-runtime-first' --mode '${{ inputs.replay_artifact == 'combined' && 'combined' || 'family' }}'
       - name: Public data (correctness, CPU and memory)
-        run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
+        run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}' --runs 9
       - name: OKX inverse public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okx --tape sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz --books BTCUSD,ETHUSD
+        run: corepack yarn -s rust:gate:record --venue okx --tape sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 9
       - name: OKX EEA X-Perps public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404
+        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 9
       - name: Account and trading (correctness)
         if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |
@@ -638,9 +638,9 @@ jobs:
       - name: Binance Spot, COIN-M and portfolio margin public variants
         if: matrix.venue == 'binance'
         run: |
-          corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT
-          corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP
-          corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT
+          corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
+          corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP --runs 9
+          corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT --runs 9
       - name: Binance Spot, COIN-M and portfolio margin private variants
         if: matrix.venue == 'binance'
         run: |
@@ -676,7 +676,7 @@ jobs:
         run: corepack yarn rust:test-bitget-parity
       - name: OKX EU X-Perp public products (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404
+        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 9
       - name: OKX account and trading variants (correctness)
         if: matrix.venue == 'okx'
         run: |
@@ -688,12 +688,12 @@ jobs:
       - name: Bybit inverse/spot/demo public data (correctness, CPU and memory)
         if: matrix.venue == 'bybit'
         run: |
-          corepack yarn -s rust:gate:record --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD
-          corepack yarn -s rust:gate:record --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --books BTCUSDT,ETHUSDT
-          corepack yarn -s rust:gate:record --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --books BTCUSDT,ETHUSDT
+          corepack yarn -s rust:gate:record --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 9
+          corepack yarn -s rust:gate:record --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
+          corepack yarn -s rust:gate:record --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
       - name: Hyro documented public contract (live endpoints not configured)
         if: matrix.venue == 'bybit'
-        run: corepack yarn -s rust:gate:record --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT
+        run: corepack yarn -s rust:gate:record --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
       - name: Bybit variants account and trading (documented correctness)
         if: matrix.venue == 'bybit'
         run: |
