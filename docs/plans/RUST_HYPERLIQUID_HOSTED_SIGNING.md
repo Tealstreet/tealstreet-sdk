@@ -8,9 +8,13 @@ activation because the slice crosses registry, provider and WASM host boundaries
 
 ## Post-beta scope and current beta result
 
-Hosted HL/HLSpot accounts are post-beta by the overseer disposition relayed in
-fe7lgm's plan review. Beta stays local-key only, and R1 continues to refuse hosted
-accounts as NotSent. This lane must not block local-key beta gates or smoke.
+The overseer's final 24h-beta ruling supersedes the earlier conflicting hosted
+priority messages: hosted signing beyond the four enabled families (Binance,
+Bybit, OKX, Bitget) is POST-BETA. HL, Kraken and Bitunix hosted are plan-only;
+Paradex hosted stays deferred. Publish this plan, with NO hosted source work
+for this beta. HL/HLSpot beta accounts stay local-key only, and R1 continues to
+refuse hosted accounts as NotSent. Beta fixes and credentialed smoke take priority
+because new engine/credential-core dependencies add critical-path risk.
 
 Enable explicitly selected Rust Hyperliquid and HyperliquidSpot accounts whose
 agent key stays with a browser/hosted provider, through RemoteSigner and an
@@ -75,6 +79,11 @@ follow-up has no invented PR number or assumed landed API:
 | Trusted hosted signing-only construction, install_scalar_only_hosted_primary | m26ps4; follow-up PR after #2223, not published at this checkpoint; registry/src/hosted_signing.rs is the exact trusted ban-scoped caller |
 | Approved descriptor carrier (A), extracted from deferred Paradex mode 2 | m26ps4; standalone shared PR after the hosted carrier, not published at this checkpoint; 9czdjh shared-module review, kuhwxi security review, 8x5tm1 GO; fe7lgm remains a core reviewer |
 | Setup-owner admission in shared JS metadata/v2 channel | 9czdjh; follow-up PR not published at this checkpoint; fe7lgm sign-meta/core review |
+
+Required landing order: #2223 -> trusted hosted construction -> carrier (A) ->
+Setup admission -> HL hosted source. Each owner supplies its exact API pin before
+source; no consumer assumes an out-of-order or unpublished prerequisite landed.
+All HL hosted source remains post-beta under the final scope ruling.
 
 The hosted construction prerequisite requires family policy ScalarOnly, Required
 signing and Secp256k1Digest. It installs genuine credential absence with the
@@ -204,7 +213,8 @@ slot or binding. HL's codec describe recomputes the native digests from it plus
 the trusted binding and requires byte-equality with the ENTIRE original work
 graph, not merely its final digest. Preserve task/preparation lifetime, with
 no global descriptor lookup, fake hash operation or second pending-task map.
-The 4 KiB carrier bound must be checked against supported native batch sizes:
+The 4 KiB carrier bound is m26ps4's capacity gate and must be checked against
+supported native batch sizes before carrier source:
 the present Place/Cancel builder has no explicit matching descriptor-size cap.
 Prove complete supported batches fit the chosen lossless descriptor, or obtain
 a shared-owner disposition before activation. Never silently truncate, split an
