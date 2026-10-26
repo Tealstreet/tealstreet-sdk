@@ -383,7 +383,7 @@ mod serial {
                     &preflight,
                     call(),
                     SerialPolicy {
-                        credential,
+                        credential: Some(credential),
                         pacing: None,
                         refusals_complete: false,
                     },
