@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| Address-keyed dispatch nonce domains | Plan directions CLEAR; local originals checkpoint | Before extending #2093 claims to verified Aster V3 signer and Hyperliquid agent subjects; no non-adopter growth or consumer activation implied | [RUST_ADDRESS_NONCE_DOMAINS.md](RUST_ADDRESS_NONCE_DOMAINS.md) |
 | Per-venue engine feature gating | Plan; Phase 1 managed-sockets, Phase 2 barriers; no source | Before adding a per-venue engine feature, or changing how Engine<V> reaches managed-socket or barrier code. | [RUST_ENGINE_FEATURE_GATING.md](RUST_ENGINE_FEATURE_GATING.md) |
 | WEEX depth and socket custody | Plan/native/API CLEAR; first19 originals13RED/6GREEN local; source held | Remaining Depth observations and both native socket lifecycles; truthful inventory residue disposition and fixed size gates | [RUST_WEEX_DEPTH_SOCKET_CONTEXT.md](RUST_WEEX_DEPTH_SOCKET_CONTEXT.md) |
 | Request macro provenance precision | Plan only; overseer-approved WEEX false-positive correction | Before pruning pure data macro rows while preserving raw sender and cross-venue gate coverage | [RUST_REQUEST_MACRO_PROVENANCE.md](RUST_REQUEST_MACRO_PROVENANCE.md) |
@@ -496,5 +497,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Phemex late cancel repair: final four | Source CLEAR; correctness green; direct overseer landing GO | Before retiring Phemex’s four commandless late-cancel request holdouts. | [RUST_PHEMEX_LATE_REPAIR_CONTEXT.md](RUST_PHEMEX_LATE_REPAIR_CONTEXT.md) |
 
 | Keyless Session serial Plans | Plan and originals; source held | Before admitting a credential-free Session-authenticated serial root or changing SerialPolicy credential optionality. | [RUST_KEYLESS_SERIAL_SESSION.md](RUST_KEYLESS_SERIAL_SESSION.md) |
+
+| RUST_BACKPACK_TRIGGER_REPAIR.md | Backpack snapshot-issued trigger repair; existing core, zero-fill replacement safety, venue-only originals/source in progress. |
 
 | WEEX remaining inventory and identity custody | One immutable Slots owner; conservative inventory retained | Before changing WEEX role selection or claiming remaining lexical rows are raw senders. | [RUST_WEEX_REMAINING_INVENTORY.md](RUST_WEEX_REMAINING_INVENTORY.md) |
