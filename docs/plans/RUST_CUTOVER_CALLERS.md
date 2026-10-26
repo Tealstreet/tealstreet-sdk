@@ -9726,6 +9726,15 @@ pass `None` and are unchanged. Serial is deliberately stricter than Background:
 a non-member serial Read naming a positive-gap domain pacing is Invalid, while a
 Background Read naming it is admitted and kept out of the FIFO.
 
+### Binance COIN-M: per-coin currencies and coinMargined, as in TypeScript
+
+The COIN-M balance now carries a per-coin `currencies` row next to `coins`, in
+coin units: total = walletBalance, free = availableBalance, used =
+initialMargin, upnl = unrealizedProfit. `FetchBalanceInfo` answers
+`{"coinMargined":true}` with no I/O, so `getBalanceSlice` gives an inverse
+market its margin coin's balance and reads zero for a coin the account does
+not hold, instead of the USD total.
+
 ### A CDN refusal is a block, not a bad key
 
 When a 401/403 carries no native code, the engine's last status fallback
