@@ -1,40 +1,9 @@
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
+commit eeb9d170f64080e8088f652f900764fb400653dc
+Merge: 3e5ccf01acb 252bdd037a0
+Author: TraderSamwise <TraderSamwise@protonmail.com>
+Date:   Mon Oct 26 13:20:42 2026 +0800
 
-// Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
-// 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
-// total package size; Sam approved the combined 14 MiB ceiling on 2026-10-26.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_064 });
-// Bitget: CI family size rounded up to KiB under the overseer's standing ceiling of 1448 KiB
-// (1446 KiB after #2204's CI measured 1,479,691).
-// AsterDEX: the venue crate at opt-level "s" (#2178) measured 1,326,024 in CI. Per the overseer's
-// ruling the cap is that plus 4 KiB, below the shared venue budget. It can only go down.
-// Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
-// Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
-export const WASM_VENUE_OVERRIDES = Object.freeze({ bitget: 1_480_704, bitgetusdc: 1_480_704, bybit: 1_445_888, asterdex: 1_330_120 });
-export const wasmBudgetBytes = (profile, venue) =>
-  profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
-export const wasmBudgetError = (bytes, profile, venue) => {
-  if (!Object.hasOwn(WASM_BUDGETS, profile) || !Number.isSafeInteger(bytes) || bytes <= 0) return 'invalid wasm budget input';
-  const budget = wasmBudgetBytes(profile, venue);
-  return bytes > budget ? `${profile} wasm ${bytes} exceeds ${budget} bytes` : undefined;
-};
+    Merge pull request #2193 from Tealstreet/feat/rust-address-nonce-domains
+    
+    feat(engine): verify signer addresses for dispatch nonce domains
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  const { values } = parseArgs({ options: { combined: { type: 'boolean', default: false }, venue: { type: 'string' } } });
-  const profile = values.combined ? 'combined' : 'venue';
-  const { venue } = values;
-  const artifacts = ['web', 'node'].map((target) => {
-    const path = `sdk-rs/hosts/wasm/pkg/${target}/safe_cex_wasm_bg.wasm`;
-    const bytes = readFileSync(path);
-    return { path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), error: wasmBudgetError(bytes.length, profile, venue) };
-  });
-  const report = { profile, venue, budgetBytes: wasmBudgetBytes(profile, venue), artifacts };
-  mkdirSync('sdk-rs/harness/out', { recursive: true });
-  writeFileSync(`sdk-rs/harness/out/wasm-budget-${profile}.json`, JSON.stringify(report, null, 2) + '\n');
-  console.log(JSON.stringify(report, null, 2));
-  if (artifacts.some((artifact) => artifact.error)) process.exit(1);
-}
