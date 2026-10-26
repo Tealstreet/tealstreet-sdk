@@ -49,6 +49,8 @@ def modes():
     grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'order-locks', 'test-support')] = ['explicit nonce control']
     grouped[('dispatch-nonce', 'http-mutation-barriers', 'http-plans', 'serial-plans', 'test-support')] = [
         'Kraken serial nonce prerequisite control']
+    grouped.setdefault(('managed-sockets', 'test-support'), []).append('native socket timing OFF control')
+    grouped[('managed-sockets', 'socket-native-timing', 'test-support')] = ['native socket timing control']
     for family in families:
         tree = subprocess.check_output([
             'cargo', 'tree', '--locked', '--target', 'wasm32-unknown-unknown',

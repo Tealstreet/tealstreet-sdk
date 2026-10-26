@@ -51,13 +51,7 @@
     "6c77d608b079104cc5338cbabb01a7c4a0e24f112ef91ea5483c423808d92bad": 1,
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
-  "venues/bitrue/src/account.rs": {
-    "df3c1d81952c8a455f966081ae19fcca364d48093c5893e69a82108cac16906d": 1,
-    "c5a021da6919a28b758460074e6af502c4c6d47cf4f00443bd987daccb600548": 1,
-    "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
-  },
   "venues/bitrue/src/lib.rs": {
-    "8d7195dd58da632e34e4dc75d236e49b6d1b89cc10c243ec7e670ec59b511d26": 4,
     "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1
   },
   "venues/bitrue/src/trading.rs": {

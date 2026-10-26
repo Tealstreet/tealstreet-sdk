@@ -129,3 +129,13 @@ profiles and all other 27 family argument arrays unchanged. No budget or
 timing-policy change. Use a fresh post-#1722/#1726 baseline; the old checkpoint's
 evidence is superseded.
 [Plan and complete raw/timing evidence](RUST_ASTERDEX_THROUGHPUT.md).
+
+## AsterDEX venue crate at "s" (opt-s follow-up)
+
+After the managed request funnel (#2136, #2148, #2166), the AsterDEX family
+carries the engine plan machinery, and its venue crate's level-3 override
+cost about 117K. The overseer's slice 3 ruling makes "s" the first lever.
+The family keeps size defaults for the host and engine, and its venue crate
+moves from 3 to "s". The counterbalanced CPU gate must pass. If it does, the
+AsterDEX per-venue budget drops to the CI-measured size plus 4 KiB. Local:
+1,444,620 bytes at 3, 1,326,996 at "s", 1,271,168 at "z".
