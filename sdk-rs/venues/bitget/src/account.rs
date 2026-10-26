@@ -105,6 +105,12 @@ pub struct Account {
     route_refused: Option<(String, String)>,
     /// The next private connect asks the host to leave the refused route.
     pub reject_route: bool,
+    /// The venue answered this private connection's login: its close says
+    /// nothing about the route.
+    pub login_answered: bool,
+    /// Private connections in a row that opened but closed before any login
+    /// answer; two mean the route is unusable (TS #8093).
+    unanswered_closes: u8,
     /// Every route was refused: the private socket stops, as TS #8093.
     pub route_exhausted: bool,
     poll: Option<TimerId>,
@@ -1074,6 +1080,28 @@ impl BitgetFutures {
         }
     }
 
+    /// A private connection closed. One that opened and closed before any
+    /// login answer, twice in a row, means the route drops sockets silently:
+    /// the next connect asks the host for the next route.
+    pub(crate) fn private_closed(&mut self, cx: &mut Cx<'_, Pending>, opened: bool) {
+        let answered = std::mem::replace(&mut self.account.login_answered, false);
+        if !opened || answered || self.account.authenticated || self.account.route_exhausted {
+            self.account.unanswered_closes = 0;
+            return;
+        }
+        self.account.unanswered_closes = self.account.unanswered_closes.saturating_add(1);
+        if self.account.unanswered_closes < 2 {
+            return;
+        }
+        self.account.unanswered_closes = 0;
+        self.account.reject_route = true;
+        cx.notice(
+            Level::Warn,
+            code::STREAM_UNAVAILABLE,
+            "Bitget private WS route keeps closing before login; trying the next route",
+        );
+    }
+
     /// The host refused every route: report once and stop the private socket.
     /// Startup is REST-gated, so it still settles; REST polling stands in.
     pub(crate) fn private_route_exhausted(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1568,12 +1596,14 @@ impl BitgetFutures {
         // Bitget answers a refused login with `event: "error"` and a 300xx code.
         let refused = header.event == "error" && !self.account.authenticated;
         if refused || header.event == "login" {
+            self.account.login_answered = true;
             let code = header.code.and_then(|n| n.0);
             if !refused && code == Some(0.0) {
                 if self.account.authenticated {
                     return;
                 }
                 self.account.authenticated = true;
+                self.account.unanswered_closes = 0;
                 self.account.route_refusals = 0;
                 self.account.route_refused = None;
                 self.account.supervisor.authenticated(cx);

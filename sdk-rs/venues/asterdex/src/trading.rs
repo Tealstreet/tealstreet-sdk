@@ -1405,6 +1405,7 @@ pub(crate) fn serial() -> SerialCall {
         operation: Operation::Mutation,
         timeout_ms: 20_000,
         attempts: 2,
+        pacing: None,
     }
 }
 
