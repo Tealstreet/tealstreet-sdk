@@ -9593,3 +9593,4 @@ Every Orderly trading command now runs under an engine-owned root, and the raw k
   - A refusal code Orderly doesn't document now proves nothing. The write is Unknown and reconciles, instead of native's blanket Rejected for any 4xx. Documented refusals stay Rejected.
   - A write lost or retired by the engine restores its rows as uncertain and reconciles; it is never replayed.
 - **Removed:** the O1 one-tick deferral of a snapshot-confirmed placement.
+- **Verified by inspection.** Two further paths end the same way as an unconfirmed pair: a refused protective pause, and a verification read the engine refuses to issue. Both route into the same unconfirmed ending that three controls pin. A venue test can't provoke either refusal, which needs engine-internal state (dazzy3, accepted).

@@ -65,6 +65,7 @@ In `account.rs`, the two `matches!(request, Request::Info)` checks become the `R
 - **Review record (dazzy3's O2 lows).**
   - **L5.** `orders_reconciled` follows the regular-orders snapshot alone. The engine's lock fences placements, which are regular orders; positional pairs stay behind the venue's own detached fence until an algo snapshot satisfies it.
   - **L6.** A read discarded after a later write's revision bump is re-read at the next poll tick, as native. Re-polling at the discard changed which read a native recovery control answers, so it is left for a separate change.
+  - **M3 note.** A parent's verification counts any listed child of that parent. This is exact while a positional parent carries only its own pair, which is the only way Orderly creates one.
   - **L7.** A bulk cancellation is parked at the FIFO front even with 100 queued (native: it supersedes rather than queues). If that park fails, its terminal is NotSent and the superseded commands keep their own NotSent terminals.
 - **Replay:** the private broker tapes (orderly and woofi on mainnet, kodiakfi on testnet) match the base wasm exactly, 912/912 declared known failures.
 - **Engine features:** `condition-waits`, `http-plans`, `order-locks` and `serial-plans`. The combined build already links all four through other venues, so only Orderly's family grows. CI measures it.
