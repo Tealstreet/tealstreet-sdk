@@ -936,7 +936,7 @@ fn explicit_invalid_margin_rejection_refreshes_account_without_resubmitting() {
     assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:7,error}) if error.venue_code.as_deref()==Some("21613")&&error.outcome==Some(Outcome::Rejected))));
 }
 #[test]
-fn unproven_rate_limit_statuses_keep_unknown_and_never_replay() {
+fn proven_rate_limit_refusals_keep_rejected_and_never_replay() {
     use safe_cex_engine::ErrorKind;
     for status in [405, 429] {
         let (mut e, _) = ready_unattributed();
@@ -950,8 +950,9 @@ fn unproven_rate_limit_statuses_keep_unknown_and_never_replay() {
         let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().collect::<Vec<_>>();
         assert_eq!(out.iter().filter(|a| matches!(a,
             Action::Notice(Notice::CommandFailed { command: 7, error })
-                if error.kind == Some(ErrorKind::Internal) && error.outcome == Some(Outcome::Unknown)
-        )).count(), 1, "released throttled writes have no accepted proof");
+                if error.kind == Some(ErrorKind::Rejected) && error.outcome == Some(Outcome::Rejected)
+                    && error.venue_code.as_deref() == Some("23000") && error.message.contains("native throttle")
+        )).count(), 1, "definitive native refusal never resends: {out:?}");
         assert!(!out.iter().any(
             |a| matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))
         ));
@@ -1149,7 +1150,7 @@ fn rate_limits_do_not_enter_nonce_retry_and_failed_prerequisites_are_not_sent() 
         !out.iter()
             .any(|a| matches!(a,Action::SetTimer {at_ms,..} if *at_ms < NOW+500.0))
     );
-    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {error,..}) if error.kind==Some(ErrorKind::Internal)&&error.outcome==Some(Outcome::Unknown))));
+    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {error,..}) if error.kind==Some(ErrorKind::Rejected)&&error.outcome==Some(Outcome::Rejected))), "{out:?}");
     for status in [405, 429] {
         let (mut e, _) = ready_unattributed();
         place(&mut e, vec![limit()]);
