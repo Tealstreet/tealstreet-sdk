@@ -2118,6 +2118,13 @@ impl BitgetFutures {
         });
     }
 
+    /// A complete order read for an Unknown write. One already in flight may
+    /// predate the write, so a UTA account reads again after it.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.orders_dirty = true;
+        self.refresh_orders(cx, false);
+    }
+
     pub(crate) fn note_write(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.uta {
             self.account.orders_dirty = true;
