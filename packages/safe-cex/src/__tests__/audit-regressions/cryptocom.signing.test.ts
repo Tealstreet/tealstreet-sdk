@@ -5,7 +5,7 @@ import {
   generateAuthenticatedRequest,
   generateSignature,
   generateWsAuthMessage,
-} from '../../exchanges/cryptocom/cryptocom.signing';
+} from '../reference/cryptocom/cryptocom.signing';
 import { virtualClock } from '../../utils/virtualClock';
 
 describe('audit regression: Crypto.com request signing', () => {

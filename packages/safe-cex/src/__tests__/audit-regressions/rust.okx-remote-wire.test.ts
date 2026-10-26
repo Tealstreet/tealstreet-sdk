@@ -3,8 +3,8 @@ import type { RemoteSigner, RemoteSignerRequest } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { OKXPrivateWebsocket } from '../../exchanges/okx/okx.ws-private';
-import { OKXBusinessWebsocket } from '../../exchanges/okx/okx.ws-business';
+import { OKXPrivateWebsocket } from '../reference/okx/okx.ws-private';
+import { OKXBusinessWebsocket } from '../reference/okx/okx.ws-business';
 import { createRemoteSignerProvider } from '../../exchanges/rust/remoteSignerProvider';
 import { virtualClock } from '../../utils/virtualClock';
 

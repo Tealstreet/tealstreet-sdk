@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
+import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { Order, OrderSide, OrderType, Position, PositionMode, PositionSide } from '../../types';
 

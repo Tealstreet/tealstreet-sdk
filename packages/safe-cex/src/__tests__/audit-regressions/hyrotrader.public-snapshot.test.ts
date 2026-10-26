@@ -3,8 +3,8 @@ import type { Timeframe } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
-import { HyrotraderExchange } from '../../exchanges/bybit/hyrotrader.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { HyrotraderExchange } from '../reference/bybit/hyrotrader.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 class TestHyroExchange extends HyrotraderExchange {

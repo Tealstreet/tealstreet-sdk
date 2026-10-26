@@ -21,6 +21,9 @@ test('each leaf selects its whole family, including aliases and dependent crates
   assert.deepEqual(select('sdk-rs/venues/bitget/src/lib.rs').replay.map(x => x.venue), ['bitget', 'bitgetusdc']);
   assert.deepEqual(select('sdk-rs/venues/kucoin/src/lib.rs').families, ['kucoin', 'kucoinspot']);
   assert.deepEqual(select('packages/safe-cex/src/exchanges/kraken/message.ts').families, ['kraken']);
+  // The frozen TS replay oracle selects its venue exactly like the runtime helpers.
+  assert.deepEqual(select('packages/safe-cex/src/__tests__/reference/kraken/kraken.exchange.ts').families, ['kraken']);
+  assert.deepEqual(select('packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts').nativeCrates, ['kucoin']);
   for (const [venue, crate] of [['bitgetusdc', 'bitget'], ['bybitinverse', 'bybit'], ['kucoinspot', 'kucoin'], ['krakenspot', 'kraken']]) {
     const result = select(`packages/safe-cex/src/exchanges/${venue}/message.ts`);
     assert.deepEqual(result.nativeCrates, [crate]);
@@ -57,13 +60,19 @@ test('venue feature declarations retain complete engine combinations and wasm ch
 
 test('cross-venue and non-venue TS imports conservatively select the full matrix', () => {
   const sources = [
-    ['packages/safe-cex/src/exchanges/binance/binanceoptions.exchange.ts', "import { options } from '../bybit/bybit.options'"],
+    ['packages/safe-cex/src/__tests__/reference/binance/binanceoptions.exchange.ts', "import { options } from '../bybit/bybit.options'"],
     ['packages/safe-cex/src/transport/engine.ts', "import { site } from '../exchanges/bybit/bybit.site'"],
     ['packages/safe-cex/src/exchanges/bitget/ticker.ts', "import { row } from './wire'"],
   ];
   const externalImports = externallyImportedVenues(sources);
   assert.equal(selectCi({ paths: ['packages/safe-cex/src/exchanges/bybit/bybit.site.ts'], manifests, externalImports }).full, true);
   assert.equal(selectCi({ paths: ['packages/safe-cex/src/exchanges/bitget/ticker.ts'], manifests, externalImports }).full, false);
+  const oracle = externallyImportedVenues([
+    ['packages/safe-cex/src/__tests__/reference/binance/binance.exchange.ts', "import { x } from '../okx/okx.wire'"],
+    ['packages/safe-cex/src/__tests__/reference/okx/okx.exchange.ts', "import { y } from './okx.wire'"],
+  ]);
+  assert.deepEqual([...oracle], ['okx']);
+  assert.equal(selectCi({ paths: ['packages/safe-cex/src/__tests__/reference/okx/okx.wire.ts'], manifests, externalImports: oracle }).full, true);
 });
 
 test('edited integration controls execute, and engine support shared with wire examples builds consumers', () => {
