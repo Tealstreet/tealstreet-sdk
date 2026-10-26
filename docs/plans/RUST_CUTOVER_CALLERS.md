@@ -9840,3 +9840,14 @@ Raw compatibility and explicit setup both construct a real installed provider,
 retain private capability, and start managed discovery. Native constructor and
 compiled-family integration controls exercise both paths with the public zkLink
 seed corpus. The cross-venue construction feature guard is a separate follow-up.
+
+### Phemex credentialed smoke sizing
+
+The manual JS/WASM smoke runner reads the explicit monetary minimum
+`minOrderValueRv`, base-quantity step `qtyStepSize` and maximum `maxOrderQtyRq`
+from the matching listed PerpetualV2 row in `/public/products`. Quote and
+settlement must match the selected market; missing, malformed, duplicate,
+nonlinear or superseded limits refuse. It does not infer zero from quantity
+steps. The existing $100 notional cap, post-only placement, empty-account
+preconditions and independent cleanup readback remain unchanged. This enables
+only the credentialed test harness; production order sizing is unchanged.
