@@ -243,6 +243,11 @@ impl AccountState {
 
 impl Okx {
     pub(crate) fn account_after_uncertain_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        // A backoff re-ask joins any running read: the seal's own ask already
+        // restarted reads, so a running one postdates the write.
+        if cx.reconcile_reask() && self.account.orders_in_flight {
+            return;
+        }
         self.account.join = None;
         self.account.orders_generation += 1;
         self.account.orders_in_flight = false;

@@ -1059,6 +1059,8 @@ fn malformed_future_product_keeps_valid_spot_peer_and_warns() {
         .unwrap(),
     );
     e.start(1000.);
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     let r = requests(&mut e).pop().unwrap();
     reply(
         &mut e,
@@ -1086,6 +1088,7 @@ fn malformed_first_product_page_does_not_hide_a_valid_later_page() {
         .unwrap(),
     );
     e.start(1000.);
+    e.set_log_level(safe_cex_engine::Level::Debug);
     let first = requests(&mut e).pop().unwrap();
     reply(
         &mut e,

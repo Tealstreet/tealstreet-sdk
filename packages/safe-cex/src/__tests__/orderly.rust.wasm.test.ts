@@ -1,3 +1,8 @@
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>(), true);
+});
+
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName } from '../types';
 
@@ -66,7 +71,7 @@ const transport = (validation = 200) => {
   return { native, writes, sockets };
 };
 
-describe('shipping Orderly Rust family', () => {
+describe('retained Orderly Rust family oracle', () => {
   let exchange: RustEngineExchange | undefined;
   afterEach(() => { exchange?.dispose(); vi.restoreAllMocks(); });
 
