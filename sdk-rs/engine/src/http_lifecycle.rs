@@ -1574,13 +1574,17 @@ impl<V: Venue> Engine<V> {
     /// role was captured at admission. Descriptive only: it grants nothing.
     #[cfg(feature = "sign-meta")]
     pub fn sign_meta(&self, task: RequestId) -> Option<crate::sign_meta::SignMeta> {
+        let prepared = self.io.core.signing.prepared_task(task);
         #[cfg(feature = "address-nonce")]
-        if let Some(meta) = self.io.core.address_setup.current_meta(task) {
-            debug_assert!(self.io.core.signing.prepared_task(task).is_none());
-            return Some(meta);
+        {
+            let setup = self.io.core.address_setup.current_meta(task);
+            debug_assert!(prepared.is_none() || setup.is_none());
+            if prepared.is_none() {
+                return setup;
+            }
         }
         use crate::sign_meta::{SignKind, SignMeta};
-        let (request, deadline_ms) = self.io.core.signing.prepared_task(task)?;
+        let (request, deadline_ms) = prepared?;
         let managed = self.io.core.managed_http.get(&request)?;
         if managed.signing_attempt != Some(task) {
             return None;
