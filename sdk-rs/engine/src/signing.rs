@@ -776,6 +776,7 @@ impl SignRequest {
 fn public_key_len(algorithm: Algorithm) -> Option<usize> {
     match algorithm {
         Algorithm::Ed25519 | Algorithm::StarkDigest => Some(32),
+        Algorithm::SchnorrDigest => Some(40),
         _ => None,
     }
 }

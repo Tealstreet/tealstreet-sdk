@@ -4,6 +4,10 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
+#[cfg(feature = "hosted-operation-proof")]
+mod hosted_operation_proof;
+#[cfg(feature = "kraken")]
+mod hosted_operations;
 #[cfg(not(any(
     feature = "grvt",
     feature = "paradex",
