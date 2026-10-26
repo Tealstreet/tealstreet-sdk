@@ -15,6 +15,30 @@ pub fn requests(e: &mut TestEngine) -> Vec<HttpRequest> {
         })
         .collect()
 }
+pub fn released_actions(e: &mut TestEngine, now: f64) -> Vec<Action> {
+    let mut actions: Vec<_> = e.drain_actions().collect();
+    let wakes: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == now => Some(*timer),
+            _ => None,
+        })
+        .collect();
+    for timer in wakes {
+        e.handle(now, Event::TimerFired { timer });
+        actions.extend(e.drain_actions());
+    }
+    actions
+}
+pub fn released_requests(e: &mut TestEngine, now: f64) -> Vec<HttpRequest> {
+    released_actions(e, now)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect()
+}
 pub fn response(e: &mut TestEngine, r: &HttpRequest, now: f64, body: &str) {
     e.handle(
         now,

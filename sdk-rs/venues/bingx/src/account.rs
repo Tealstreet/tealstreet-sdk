@@ -6,7 +6,7 @@ use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
 pub use metadata::{Leg as MetadataLeg, fail as fail_metadata_plan};
 use safe_cex_engine::Level;
-use safe_cex_engine::credential_selection::Slots;
+use safe_cex_engine::credential_selection::{PrimaryReason, Slots};
 use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
@@ -16,6 +16,7 @@ use safe_cex_engine::model::{
     PositionSide, StopTriggerType, TimeInForce,
 };
 use safe_cex_engine::request_context::{Session, SessionPolicy};
+use safe_cex_engine::selected_read::ReadRole;
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
@@ -94,6 +95,7 @@ pub struct Account {
     poll: Option<TimerId>,
     repair: Option<TimerId>,
     orders_revision: u64,
+    orders_snapshot_revision: Option<u64>,
     positions_revision: u64,
     settings_revision: u64,
     balance_revision: u64,
@@ -429,6 +431,7 @@ impl Account {
     }
 
     /// Account snapshot reads run under an engine-issued background Context.
+    #[allow(clippy::too_many_arguments)]
     fn read_snapshot(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -437,8 +440,13 @@ impl Account {
         params: Params,
         request: Request,
         stream: bool,
+        primary: Option<PrimaryReason>,
     ) {
         let scope = auth_scope(&request);
+        let role = match primary {
+            Some(reason) => ReadRole::Primary { reason, scope },
+            None => ReadRole::Read { scope },
+        };
         let at = stream.then(|| {
             if path == OPEN_ORDERS {
                 ArrayAt::EnvelopeFieldOrNested("data", "orders")
@@ -457,7 +465,7 @@ impl Account {
             },
             Pending::Account(request),
             safe_cex_engine::request_context::Scope::Background,
-            scope,
+            role,
         ) {
             Ok(_) => {}
             Err((pending, error)) => {
@@ -504,6 +512,7 @@ impl Account {
                 revision: self.positions_revision,
             },
             false,
+            None,
         );
     }
     fn fetch_balance(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
@@ -523,6 +532,7 @@ impl Account {
                 failed: false,
             },
             true,
+            None,
         );
     }
     fn fetch_positions(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
@@ -546,12 +556,28 @@ impl Account {
                 unavailable: false,
             },
             true,
+            None,
         );
     }
     fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
         if self.orders_in_flight.is_some() {
             return;
         }
+        self.start_order_read(cx, credentials, None);
+    }
+    /// The snapshot that clears an uncertain-write fence is Primary-signed, so a
+    /// read key can never be the read that proves the trading account's orders.
+    pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
+        self.bump_orders();
+        self.start_order_read(cx, credentials, Some(PrimaryReason::PostUnknownOrderRead));
+    }
+    /// A fence needs a new owner even if an older snapshot is still pending.
+    fn start_order_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: &Credentials,
+        primary: Option<PrimaryReason>,
+    ) {
         self.orders_in_flight = Some(self.orders_revision);
         self.read_snapshot(
             cx,
@@ -566,6 +592,7 @@ impl Account {
                 unavailable: false,
             },
             true,
+            primary,
         );
     }
 
@@ -1047,9 +1074,13 @@ impl Account {
                 skipped,
                 unavailable,
             } => {
-                self.orders_in_flight = None;
+                if self.orders_in_flight == Some(revision) {
+                    self.orders_in_flight = None;
+                }
                 if revision != self.orders_revision {
-                    self.fetch_orders(cx, credentials);
+                    if self.orders_snapshot_revision != Some(self.orders_revision) {
+                        self.fetch_orders(cx, credentials);
+                    }
                     return;
                 }
                 if unavailable {
@@ -1070,6 +1101,7 @@ impl Account {
                     }
                 }
                 self.orders_seeded = true;
+                let complete = skipped.is_empty();
                 self.observations.extend(metas);
                 // A malformed row never removes the known open order it names.
                 let unidentified = skipped.iter().any(String::is_empty);
@@ -1090,6 +1122,10 @@ impl Account {
                 });
                 rows.extend(kept);
                 cx.store.set_orders(rows);
+                if complete {
+                    self.orders_snapshot_revision = Some(revision);
+                    cx.orders_reconciled(None);
+                }
             }
         }
     }
@@ -1144,7 +1180,11 @@ impl Account {
             Request::PositionMode { .. } => self.mode_in_flight = false,
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { .. } => self.positions_in_flight = None,
-            Request::OpenOrders { .. } => self.orders_in_flight = None,
+            Request::OpenOrders { revision, .. } => {
+                if self.orders_in_flight == Some(revision) {
+                    self.orders_in_flight = None;
+                }
+            }
         }
     }
 
@@ -1647,22 +1687,6 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
         stop_loss: None,
         extra: None,
     })
-}
-
-/// Tag an account read with the credential slot that actually signs it.
-pub(crate) fn tag_read(
-    cx: &mut Cx<'_, Pending>,
-    id: safe_cex_engine::RequestId,
-    method: Method,
-    credentials: &Credentials,
-    scope: safe_cex_engine::AccountReadScope,
-) {
-    let slot = if method == Method::Get && credentials.read.is_some() {
-        safe_cex_engine::CredentialSlot::Secondary
-    } else {
-        safe_cex_engine::CredentialSlot::Primary
-    };
-    cx.tag_account_read(id, slot, scope);
 }
 
 pub(crate) fn auth_scope(request: &Request) -> Option<safe_cex_engine::AccountReadScope> {
