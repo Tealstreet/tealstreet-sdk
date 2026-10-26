@@ -584,17 +584,10 @@ jobs:
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - uses: actions/download-artifact@v8
-        if: inputs.replay_artifact != 'combined'
         with:
           name: wasm-family-${{ matrix.family }}
           path: sdk-rs/hosts/wasm/pkg/
-      - uses: actions/download-artifact@v8
-        if: inputs.replay_artifact == 'combined'
-        with:
-          name: replay-combined-package
-          path: sdk-rs/hosts/wasm/pkg/
       - name: Verify the same-run matching family capsule
-        if: inputs.replay_artifact != 'combined'
         run: node sdk-rs/harness/ci-wasm.mjs --venue '${{ matrix.venue }}' --verify sdk-rs/hosts/wasm/pkg/ci-replay
       - uses: actions/cache@v6
         with:
@@ -613,12 +606,12 @@ jobs:
       - name: Credentialed lifecycle runner (scripted transport only)
         if: matrix.venue == 'binance'
         run: corepack yarn rust:test-live-smoke
-      - name: Public data (correctness, CPU and memory)
+      - name: Public data (correctness)
         run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
-      - name: OKX inverse public books (correctness, CPU and memory)
+      - name: OKX inverse public books (correctness)
         if: matrix.venue == 'okx'
         run: corepack yarn -s rust:gate:record --venue okx --tape sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz --books BTCUSD,ETHUSD
-      - name: OKX EEA X-Perps public books (correctness, CPU and memory)
+      - name: OKX EEA X-Perps public books (correctness)
         if: matrix.venue == 'okx'
         run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404
       - name: Account and trading (correctness)
@@ -675,7 +668,7 @@ jobs:
       - name: Bitget UTA ledger and Classic/UTA trailing native contracts
         if: matrix.venue == 'bitget'
         run: corepack yarn rust:test-bitget-parity
-      - name: OKX EU X-Perp public products (correctness, CPU and memory)
+      - name: OKX EU X-Perp public products (correctness)
         if: matrix.venue == 'okx'
         run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404
       - name: OKX account and trading variants (correctness)
@@ -686,7 +679,7 @@ jobs:
             corepack yarn -s rust:gate:record --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --books ''
           done
 
-      - name: Bybit inverse/spot/demo public data (correctness, CPU and memory)
+      - name: Bybit inverse/spot/demo public data (correctness)
         if: matrix.venue == 'bybit'
         run: |
           corepack yarn -s rust:gate:record --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD
@@ -732,7 +725,7 @@ jobs:
       - name: Verify complete correctness coverage
         if: always()
         run: node sdk-rs/harness/verify-gates.mjs --suite '${{ matrix.venue }}' --mode correctness
-      - name: Retain strict gate reports and artifact budgets
+      - name: Retain correctness replay reports and artifact budgets
         if: always()
         uses: actions/upload-artifact@v7
         with:
