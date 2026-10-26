@@ -302,3 +302,38 @@ fn lighter_principal_without_schnorr_is_unsupported() {
         Err(SignError::Unsupported)
     ));
 }
+
+#[cfg(feature = "schnorr")]
+#[test]
+fn lighter_principal_preserves_absent_and_supplied_stable_ids() {
+    for stable_id in [None, Some("caller-picked-account".to_owned())] {
+        let mut input = setup(None, true);
+        input.primary.as_mut().unwrap().stable_id = stable_id.clone();
+        let (_, ids, _) = LocalSigner::from_setup_with_lighter_principal(
+            input,
+            policy(),
+            false,
+            LighterPrincipal::new(1).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ids.primary.unwrap().stable_id, stable_id);
+    }
+}
+
+#[cfg(feature = "schnorr")]
+#[test]
+fn lighter_principal_refuses_invalid_scalar_before_installation() {
+    for scalar in ["00".repeat(40), "ff".repeat(40), "01".repeat(39)] {
+        let mut input = setup(None, true);
+        input.primary.as_mut().unwrap().secret = Secret::new(scalar);
+        assert!(matches!(
+            LocalSigner::from_setup_with_lighter_principal(
+                input,
+                policy(),
+                false,
+                LighterPrincipal::new(1).unwrap(),
+            ),
+            Err(SignError::InvalidRequest)
+        ));
+    }
+}

@@ -41,8 +41,10 @@ LocalSigner::from_setup_with_lighter_principal(
 This is a trusted setup constructor, not a new LocalIdentity JSON field. It
 requires the primary SchnorrDigest declaration and refuses a secondary. The
 registry invokes it only under an explicit SetupMapping::Lighter declaration;
-the shared prerequisite adds the mapping kind but does not activate either
-Lighter family row. Bare family-name matching is not the policy.
+the mapping kind and both native/JSON adapters land in the subsequent atomic
+venue cutover, together with its family rows. This small prerequisite adds only
+the typed carrier and trusted crypto constructor; it adds no orphan mapping kind.
+Bare family-name matching is not the policy.
 
 Compute SetupFacts from the original key before decoding or normalization.
 Omitted and null remain Absent; an empty string remains Empty; whitespace
@@ -70,7 +72,8 @@ remain unchanged.
 
 ## Registry and consumer fit
 
-The native and private-JSON registry adapters derive the typed principal from
+In the subsequent venue cutover, the native and private-JSON registry adapters
+derive the typed principal from
 the account options' exact API-key index. A private signing setup with an invalid
 index refuses atomically. Public-only and unsigned setup do not mint a principal
 and do not require an otherwise unused private index. No caller-supplied text
@@ -108,6 +111,16 @@ REDs with ordinary setup as the working control:
 8. Consumer controls retain secret-only account lookup and key-supplied L1
    lookup after stripping, with key-present precedence and no private work in
    public-only mode. Their venue assertions are in the separate cutover.
+
+## Frozen originals and source
+
+Originals at 509f8e0bab0 (tree 74f39ed0c54) compiled and executed before source:
+schnorr mode had ten intended assertion REDs and three GREEN controls; feature
+off had four GREEN controls, no ignored tests. Both reviewers read the immutable
+originals and cleared source. Their assertion bodies are unchanged; additive
+source controls cover absent/supplied stable_id and malformed scalar refusal.
+Targets were deleted after execution. No registry, venue, capability or family
+activation is part of this carrier PR.
 
 ## Verification and landing
 
