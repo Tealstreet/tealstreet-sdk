@@ -13,6 +13,8 @@ fn catalogue_skips_bad_neighbors_and_starts_account_before_ticker_seed() {
         ..Options::default()
     });
     engine.start(0.);
+    // Skipped discovery rows log at Debug.
+    engine.set_log_level(safe_cex_engine::Level::Debug);
     let request = take_http(&mut prepared(&mut engine, 0.));
     reply(
         &mut engine,
@@ -180,6 +182,7 @@ fn nonfinite_or_nonpositive_instrument_rails_are_isolated_from_valid_peers() {
                 .replace("BTC-USDT-SWAP", "BAD-USDT-SWAP");
             let mut e = crate::support::engine(Options::default());
             e.start(0.0);
+            e.set_log_level(safe_cex_engine::Level::Debug);
             let request = take_http(&mut prepared(&mut e, 0.0));
             reply(
                 &mut e,
