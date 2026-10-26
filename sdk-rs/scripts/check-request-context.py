@@ -23,8 +23,9 @@ RAW = re.compile(r'(?:br|cr|r)(\#*)"')
 CHAR = re.compile(r"(?:b)?'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F_]+\}|.)|[^'\\\r\n])'")
 
 
-def tokens(source):
-    """Keep literal bytes atomic; ignore nested comments and formatting."""
+def tokens(source, positions=False):
+    """Keep literal bytes atomic; ignore nested comments and formatting.
+    With `positions`, each token is a (text, source offset) pair."""
     result = []
     i = 0
     while i < len(source):
@@ -72,7 +73,7 @@ def tokens(source):
                 i = match.end()
             else:
                 i += 2 if source.startswith('::', i) else 1
-            result.append(source[start:i])
+            result.append((source[start:i], start) if positions else source[start:i])
     return result
 
 

@@ -8,6 +8,7 @@ production primitive work uses the provider. Test-only sites are frozen too.
 """
 import collections
 import hashlib
+import importlib.util
 import json
 import pathlib
 import re
@@ -15,8 +16,55 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PATTERN = re.compile(r'\b(?:hmac\w*|ed25519\w*|\w*secret\w*)\b', re.I)
 # A dispatch recipe names its provider algorithm (`Algorithm::HmacSha256`); that
-# declaration holds no material. Anything else on the line still counts.
-DECLARED_ALGORITHM = re.compile(r'\bAlgorithm::\w+')
+# declaration holds no material. Only a proven engine enum variant is ignored;
+# calls, other paths and local or aliased `Algorithm`s, and the rest of the line,
+# still count.
+VARIANTS = {'HmacSha256', 'HmacSha512', 'Sha256SecretSuffix', 'Ed25519', 'Es256',
+            'Secp256k1Digest', 'StarkDigest', 'SchnorrDigest', 'ZkLinkContract'}
+ENGINE_ALGORITHM = ['safe_cex_engine', 'signing', 'Algorithm']
+
+
+def _load(name, file):
+    spec = importlib.util.spec_from_file_location(name, pathlib.Path(__file__).with_name(file))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_tokens = _load('request_tokens', 'check-request-context.py').tokens
+rust_scope = _load('rust_scope', 'rust_scope.py')
+
+
+def declared_variants(source):
+    """Line number -> count of proven engine `Algorithm::<variant>` uses."""
+    try:
+        positioned = _tokens(source, positions=True)
+    except ValueError:
+        return collections.Counter()
+    stream = [text for text, _ in positioned]
+    found = collections.Counter()
+    for i in range(len(stream) - 2):
+        if stream[i] != 'Algorithm' or stream[i + 1] != '::' or stream[i + 2] not in VARIANTS:
+            continue
+        if stream[i + 3:i + 4] in (['('], ['::'], ['!'], ['{']):
+            continue
+        qualified = stream[i - 4:i] == ['safe_cex_engine', '::', 'signing', '::']
+        if stream[i - 1:i] == ['::'] and not qualified:
+            continue
+        try:
+            proven = qualified or rust_scope.resolve(stream, 'Algorithm', i, ENGINE_ALGORITHM) == 'provider'
+        except ValueError:
+            proven = False
+        if proven:
+            found[source.count('\n', 0, positioned[i][1]) + 1] += 1
+    return found
+
+
+def counted(line, declared):
+    """Whether a line holds a site after removing its proven declarations."""
+    if declared and len(re.findall(r'\bAlgorithm::\w+', line)) == declared:
+        line = re.sub(r'\bAlgorithm::\w+', '', line)
+    return bool(PATTERN.search(line))
 
 
 def sites():
@@ -25,8 +73,10 @@ def sites():
         relative = path.relative_to(ROOT / 'venues')
         if relative.parts[0] not in {'asterdex', 'binance', 'bingx', 'bybit', 'okx', 'bitget', 'phemex', 'bitrue'} and (path.name == 'sign.rs' or 'sign' in relative.parts[2:-1]):
             continue
-        for line in path.read_text().splitlines():
-            if not line.strip().startswith('//') and PATTERN.search(DECLARED_ALGORITHM.sub('', line)):
+        source = path.read_text()
+        declared = declared_variants(source)
+        for number, line in enumerate(source.splitlines(), 1):
+            if not line.strip().startswith('//') and counted(line, declared[number]):
                 digest = hashlib.sha256(line.strip().encode()).hexdigest()
                 found[str(path.relative_to(ROOT))][digest] += 1
     return found

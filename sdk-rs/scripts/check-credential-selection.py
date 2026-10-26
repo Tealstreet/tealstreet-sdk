@@ -94,47 +94,83 @@ def rust_counts(source, native_host=False):
     return found, evasions(stream)
 
 
+_scope_spec = importlib.util.spec_from_file_location(
+    'rust_scope', pathlib.Path(__file__).with_name('rust_scope.py'))
+rust_scope = importlib.util.module_from_spec(_scope_spec)
+_scope_spec.loader.exec_module(rust_scope)
+
 PROVIDER_IDENTITY = ['safe_cex_engine', '::', 'signing', '::', 'Identity']
 
 
-def provider_import(stream):
-    """Whether the file imports the provider `Identity` from `safe_cex_engine::signing`."""
-    for i, token in enumerate(stream):
-        if token == 'use' and stream[i + 1:i + 5] == PROVIDER_IDENTITY[:4]:
-            end = stream.index(';', i)
-            body = stream[i + 5:end]
-            if body == ['Identity'] or (body[:1] == ['{'] and 'Identity' in body
-                                        and 'as' not in body[body.index('Identity') - 1:body.index('Identity') + 2]):
-                return True
-    return False
+def provider_type(stream, start, end):
+    """Whether stream[start:end] is exactly the engine signing Identity."""
+    declared = stream[start:end]
+    return declared == PROVIDER_IDENTITY or (
+        declared == ['Identity'] and rust_scope.resolve(
+            stream, 'Identity', start, ['safe_cex_engine', 'signing', 'Identity']) == 'provider')
 
 
-def read_credential_types(stream):
-    """Type tokens of every `read_credentials: Option<...>` declaration."""
-    found = []
-    for i, token in enumerate(stream):
-        if token == 'read_credentials' and stream[i + 1:i + 4] == [':', 'Option', '<']:
-            depth, end = 1, i + 4
-            while end < len(stream) and depth:
-                depth += (stream[end] == '<') - (stream[end] == '>')
-                end += 1
-            found.append(stream[i + 4:end - 1])
-    return found
+def opener(stream, index):
+    """Index of the innermost unmatched `{` or `(` before `index`, else -1."""
+    depth = 0
+    for i in range(index - 1, -1, -1):
+        if stream[i] in {'}', ')'}:
+            depth += 1
+        elif stream[i] in {'{', '('}:
+            if not depth:
+                return i
+            depth -= 1
+    return -1
+
+
+def adopted_occurrence(stream, i):
+    """A `read_credentials` token that provably holds or uses the provider Identity."""
+    if stream[i - 1:i] == ['.']:
+        return 'use'
+    if stream[i - 1:i] not in (['{'], [','], ['pub'], [')'], ['(']):
+        return None
+    open_at = opener(stream, i)
+    if open_at < 0:
+        return None
+    declaration = stream[i + 1:i + 4] == [':', 'Option', '<']
+    if declaration:
+        depth, end = 1, i + 4
+        while end < len(stream) and depth:
+            depth += (stream[end] == '<') - (stream[end] == '>')
+            end += 1
+        if stream[end:end + 1] not in ([','], ['}'], [')']) or not provider_type(stream, i + 4, end - 1):
+            return None
+    head = stream[open_at - 2:open_at]
+    if stream[open_at] == '{':
+        if head[:1] in (['struct'], ['union']):
+            return 'declaration' if declaration else None
+        if head[:1] == ['enum'] or stream[open_at - 1:open_at] in ([')'], [']'], ['=']):
+            return None
+        # Struct literal or pattern: the field's declared type decides.
+        return 'use' if stream[i + 1:i + 2] in ([':'], [','], ['}']) else None
+    # A function parameter must itself be declared as the provider Identity.
+    named_fn = head[:1] == ['fn'] or (stream[open_at - 1:open_at] == ['>'] and 'fn' in stream[max(0, open_at - 40):open_at])
+    return 'declaration' if declaration and named_fn else None
 
 
 def identity_crates(files):
-    """Crates whose every `read_credentials` declaration is the provider Identity:
-    its full path, or a bare `Identity` in a file importing that path."""
-    found, provider = collections.defaultdict(list), collections.defaultdict(list)
+    """Crates in which every `read_credentials` token is a proven provider holder
+    or a use of one, and at least one provider declaration exists."""
+    verdict = collections.defaultdict(lambda: [False, True])
     for _, path, native in files:
-        if not native:
-            crate = path.relative_to(ROOT / 'venues').parts[0]
-            stream = strip_test_modules(tokens(path.read_text()))
-            imported = provider_import(stream)
-            for declared in read_credential_types(stream):
-                found[crate].append(declared == PROVIDER_IDENTITY
-                                    or (declared == ['Identity'] and imported))
-    return {crate for crate, typed in found.items() if typed and all(typed)}
+        if native:
+            continue
+        crate = path.relative_to(ROOT / 'venues').parts[0]
+        stream = strip_test_modules(tokens(path.read_text()))
+        for i, token in enumerate(stream):
+            if token.removeprefix('r#') != 'read_credentials':
+                continue
+            kind = None if token != 'read_credentials' else adopted_occurrence(stream, i)
+            if kind is None:
+                verdict[crate][1] = False
+            elif kind == 'declaration':
+                verdict[crate][0] = True
+    return {crate for crate, (declared, proven) in verdict.items() if declared and proven}
 
 
 def ts_counts(source):

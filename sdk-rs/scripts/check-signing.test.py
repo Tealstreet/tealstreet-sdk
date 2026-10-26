@@ -13,19 +13,33 @@ spec.loader.exec_module(ban)
 
 
 class SigningBan(unittest.TestCase):
-    def test_a_provider_algorithm_declaration_alone_is_not_a_site(self):
-        def counted(line):
-            return bool(ban.PATTERN.search(ban.DECLARED_ALGORITHM.sub('', line)))
-        for line in ['algorithm: Algorithm::HmacSha256,',
-                     'Preimage::Mac(message) => (Algorithm::HmacSha256, message.as_bytes().to_vec()),',
-                     'algorithm: Algorithm::Ed25519,']:
-            self.assertFalse(counted(line), line)
-        for line in ['Algorithm::HmacSha256 => hmac_sha256(key, message),',
-                     'let mac = Hmac::<Sha256>::new_from_slice(key);',
-                     'algorithm: Algorithm::HmacSha256, key: self.secret.clone(),',
-                     'fn legacy_secret() {}',
-                     'ed25519_dalek::SigningKey::from_bytes(&seed)']:
-            self.assertTrue(counted(line), line)
+    def test_only_proven_engine_algorithm_variants_are_not_sites(self):
+        def lines(source):
+            declared = ban.declared_variants(source)
+            return [number for number, line in enumerate(source.splitlines(), 1)
+                    if not line.strip().startswith('//') and ban.counted(line, declared[number])]
+        adopted = [
+            'use safe_cex_engine::signing::{Algorithm, KeyRef};\nconst A: Algorithm = Algorithm::HmacSha256;',
+            'fn f() {\n    use super::*;\n    use safe_cex_engine::signing::{Algorithm, KeyRef};\n'
+            '    let a = Algorithm::Ed25519;\n}',
+            'fn f() { let a = safe_cex_engine::signing::Algorithm::HmacSha256; }',
+        ]
+        for source in adopted:
+            self.assertEqual(lines(source), [], source)
+        counted = {
+            'associated call': 'use safe_cex_engine::signing::Algorithm;\nlet m = Algorithm::hmac_sha256(key, msg);',
+            'vendor path': 'let s = vendor::Algorithm::Ed25519(payload, key);',
+            'local enum': 'enum Algorithm { HmacSha256 }\nlet a = Algorithm::HmacSha256;\nlet m = hmac(key);',
+            'aliased': 'use safe_cex_engine::signing::Other as Algorithm;\nlet a = Algorithm::HmacSha256;',
+            'glob only': 'use safe_cex_engine::signing::*;\nlet a = Algorithm::HmacSha256;',
+            'import elsewhere': 'fn g() { use safe_cex_engine::signing::Algorithm; }\n'
+                                'mod m { pub enum Algorithm { HmacSha256 } fn h() { let a = Algorithm::HmacSha256; } }',
+            'same-line secret': 'use safe_cex_engine::signing::Algorithm;\n'
+                                'let s = (Algorithm::HmacSha256, self.secret.clone());',
+            'raw primitive': 'use safe_cex_engine::signing::Algorithm;\nlet mac = Hmac::<Sha256>::new_from_slice(key);',
+        }
+        for name, source in counted.items():
+            self.assertNotEqual(lines(source), [], name)
 
     def test_new_or_duplicated_secret_holder_fails_but_removal_is_allowed(self):
         old_root = ban.ROOT
