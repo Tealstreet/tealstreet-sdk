@@ -70,6 +70,7 @@ impl Venue for Probe {
                 &preflight,
                 SerialCall {
                     auth: CallAuth::Preflight,
+                    pacing: None,
                     operation: RequestOperation::Mutation,
                     timeout_ms: 20_000,
                     attempts: 1,

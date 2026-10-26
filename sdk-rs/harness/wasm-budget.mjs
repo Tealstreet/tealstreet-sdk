@@ -8,9 +8,11 @@ import { parseArgs } from 'node:util';
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
 // total package size; Sam approved the combined 14 MiB ceiling on 2026-10-26.
 export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 14_680_064 });
-// #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB).
+// #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB);
+// #2224 serial call pacing: CI 1,482,920, +1 KiB under the 2 KiB shared-code rule.
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
-// allowance over the opt-s 1,330,120 cap; #2219 signing encodings: CI 1,385,845 rounded up to the KiB.
+// allowance over the opt-s 1,330,120 cap; #2219 signing encodings: CI 1,385,845, then #2224 serial call
+// pacing: CI 1,387,161, rounded up to the KiB.
 // Bybit managed-socket adoption: overseer ruling (ddi2il) 2026-10-26, 1412 KiB, replacing the
 // Plan-adoption allowance; it removes Bybit's legacy socket supervisor and inventory sites.
 // #2219 shared signing encodings: CI 1,445,978, 1413 KiB by overseer ruling.
