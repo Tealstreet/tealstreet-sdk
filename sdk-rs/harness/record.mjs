@@ -6,7 +6,8 @@
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
-import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
+import { EngineHost } from '../hosts/wasm/js/host.mjs';
+import { gateTransport } from './gate-transport.mjs';
 import { loadEngine } from './engine.mjs';
 import { configuredOptions, venueOf } from './venues.mjs';
 import { canonicalUrl } from './requests.mjs';
@@ -54,7 +55,7 @@ write({ type: 'meta', epoch: started, private: false, source: 'live', ...(values
 if (policy.replayOptions) write({ type: 'config', options: policy.replayOptions });
 else if (options.endpoints) write({ type: 'config', options });
 
-let live = nativeTransport();
+let live = gateTransport();
 if (values['tealstreet-ws-route']) {
   const [{ createEngineTransport }, { tealstreetTransport }] = await Promise.all([
     import('../../packages/safe-cex/src/transport/engine.ts'),
