@@ -12,10 +12,8 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::{
-    Command, CommandId, Cx, Fill, Method, OrderSnapshotToken, Response, SocketChannel, SocketId,
-    TimerId, num,
+    Command, CommandId, Cx, Fill, Method, OrderSnapshotToken, Response, SocketId, TimerId, num,
 };
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -148,9 +146,7 @@ struct OrdersJoin {
 pub struct Account {
     /// An algo STOP was skipped because no price existed to classify it.
     stop_awaiting_price: bool,
-    pub(crate) supervisor: Supervisor,
-    authenticated: bool,
-    connection: Connection,
+    pub(super) connection: Connection,
     started: bool,
     ready: bool,
     timer: Option<TimerId>,
@@ -405,12 +401,6 @@ impl Account {
     pub(crate) fn new() -> Self {
         Self {
             skip_logged: RowReports::unbounded(RowRepeat::ChangedMessage),
-            supervisor: Supervisor::new(Config {
-                auth_timeout_ms: Some(10_000.0),
-                idle_timeout_ms: 20_000.0,
-                ping_interval_ms: Some(6_000.0),
-                ..Config::default()
-            }),
             ..Self::default()
         }
     }
@@ -529,25 +519,9 @@ impl Woo {
         self.account.metadata_at.clear();
     }
     fn account_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        let host = if self.options.testnet {
-            "wss://wss.staging.woox.io/v2/ws/private/stream/"
-        } else {
-            "wss://wss.woox.io/v2/ws/private/stream/"
-        };
-        self.account.authenticated = false;
-        self.account.supervisor.connecting(cx);
-        self.account.connection.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(format!(
-                    "{host}{}",
-                    self.options
-                        .application_id
-                        .as_deref()
-                        .unwrap_or("undefined")
-                ))
-                .channel(SocketChannel::Private),
-            ),
-        );
+        if let Err(error) = self.managed_connect(cx, true) {
+            self.socket_error(cx, true, error);
+        }
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if std::mem::replace(&mut self.account.started, true) {
@@ -734,7 +708,6 @@ impl Woo {
         let c = &mut self.account.connection;
         c.open = true;
         c.ping_at = cx.now;
-        self.account.supervisor.opened(cx);
         let Some(text) = crate::sign::websocket_auth(&self.options, cx.now) else {
             return true;
         };
@@ -742,14 +715,13 @@ impl Woo {
         self.account_refresh(cx);
         true
     }
-    pub(crate) fn account_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+    pub(crate) fn account_close(&mut self, _cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.connection.socket != Some(socket) {
             return false;
         }
         let c = &mut self.account.connection;
         c.socket = None;
         c.open = false;
-        self.account.supervisor.retry(cx);
         true
     }
     fn account_classification(
@@ -1830,18 +1802,18 @@ impl Woo {
         if self.account.connection.socket != Some(socket) {
             return false;
         }
-        self.account.supervisor.received(cx.now);
         #[derive(Deserialize)]
         struct Message<'a> {
             #[serde(borrow, default)]
             event: Str<'a>,
             #[serde(borrow, default)]
             topic: Str<'a>,
-            success: Option<bool>,
+            #[serde(rename = "success")]
+            _success: Option<bool>,
             #[serde(borrow)]
             data: Option<&'a RawValue>,
-            #[serde(borrow, default)]
-            message: Str<'a>,
+            #[serde(rename = "message", borrow, default)]
+            _message: Str<'a>,
         }
         let Ok(msg) = serde_json::from_str::<Message<'_>>(text) else {
             return true;
@@ -1852,35 +1824,7 @@ impl Woo {
                 return true;
             }
             "pong" => return true,
-            "auth" => {
-                if msg.success == Some(true) {
-                    if self.account.authenticated {
-                        return true;
-                    }
-                    self.account.authenticated = true;
-                    self.account.supervisor.authenticated(cx);
-                    for topic in ["executionreport", "algoexecutionreportv2"] {
-                        cx.send(
-                            socket,
-                            format!(r#"{{"topic":"{topic}","event":"subscribe"}}"#),
-                        );
-                    }
-                    cx.send(socket, r#"{"event":"ping"}"#);
-                } else {
-                    cx.notice(
-                        Level::Error,
-                        code::AUTH_REJECTED,
-                        if msg.message.is_empty() {
-                            "WOO X private websocket authentication failed".into()
-                        } else {
-                            msg.message.into_owned()
-                        },
-                    );
-                    cx.close(socket);
-                    self.account_close(cx, socket);
-                }
-                return true;
-            }
+            "auth" => return true,
             _ => (),
         }
         let Some(data) = msg.data else {
@@ -1916,28 +1860,6 @@ impl Woo {
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
-        match self.account.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => (),
-            Tick::Reconnect => {
-                self.account_connect(cx);
-                return true;
-            }
-            Tick::Ping => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.send(socket, r#"{"event":"ping"}"#);
-                    self.account.connection.ping_at = cx.now;
-                }
-                return true;
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.account.connection.socket {
-                    cx.close(socket);
-                    self.account_close(cx, socket);
-                }
-                return true;
-            }
-            Tick::Handled => return true,
-        }
         if self.account.refresh == Some(timer) {
             self.account.refresh = None;
             self.account.refresh_attempt += 1;
