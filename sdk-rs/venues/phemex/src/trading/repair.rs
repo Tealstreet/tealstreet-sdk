@@ -417,9 +417,12 @@ impl PhemexPerpetuals {
 }
 
 #[cfg(test)]
+#[path = "../../tests/support/repair_signer.rs"]
+mod repair_test_signer;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
     use safe_cex_engine::repair::RepairRefusal;
     use safe_cex_engine::request_context::{Credential, ReconciliationData};
     use safe_cex_engine::{Action, Engine, Event, SignStep, TimerId, Venue};
@@ -657,15 +660,7 @@ mod tests {
         }
     }
     fn fixture(refuse_send: bool) -> Engine<Fixture> {
-        let (signer, identities) = LocalSigner::from_setup(LocalSetup {
-            primary: Some(LocalIdentity {
-                key: Secret::new("fixture-primary".into()),
-                secret: Secret::new("fixture-material".into()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        })
-        .unwrap();
+        let (signer, identities) = repair_test_signer::primary();
         let venue = PhemexPerpetuals::new(crate::Options {
             credentials: identities.primary.clone(),
             ..Default::default()
