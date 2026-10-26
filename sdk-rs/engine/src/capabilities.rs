@@ -69,6 +69,7 @@ pub enum PositionHistory {
     Okx,
     Blofin,
     WooOrders,
+    Bitunix,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -78,6 +79,7 @@ pub enum ClosedPositionFormat {
     Bybit,
     Okx,
     Blofin,
+    Bitunix,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -317,5 +319,32 @@ mod tests {
             u32::from_le_bytes(payload[4..].try_into().unwrap()),
             6 << 20 | 3 << 24 | 2 << 28
         );
+    }
+
+    #[test]
+    fn bitunix_journal_and_closed_format_append_new_discriminants() {
+        let record = Capabilities {
+            closed_positions: true,
+            position_history: PositionHistory::Bitunix,
+            closed_position_format: ClosedPositionFormat::Bitunix,
+            ..Capabilities::BASE
+        };
+        let mut w = FrameWriter::new(vec![], 0.0);
+        record.write(&mut w);
+        let frame = w.finish();
+        let (_, payload) = sections(&frame).next().unwrap();
+        // Existing discriminants keep their wire values; Bitunix appends to each.
+        assert_eq!(PositionHistory::WooOrders as u32, 6);
+        assert_eq!(ClosedPositionFormat::Blofin as u32, 3);
+        let enums = u32::from_le_bytes(payload[4..8].try_into().unwrap());
+        assert_eq!((enums >> 20) & 0xf, 7);
+        assert_eq!((enums >> 24) & 0xf, 4);
+        assert_ne!(
+            u32::from_le_bytes(payload[..4].try_into().unwrap()) & (1 << 12),
+            0
+        );
+        let json = serde_json::to_value(record).unwrap();
+        assert_eq!(json["positionHistory"], "bitunix");
+        assert_eq!(json["closedPositionFormat"], "bitunix");
     }
 }

@@ -7,17 +7,18 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Notice, SocketId, TimerId, VenueError,
 };
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use support::{META, NOW, reply_at};
 
 const DEPTH: &str = r#"{"code":200,"bids":[{"price":"100","remaining_base_amount":"2"}],"asks":[{"price":"101","remaining_base_amount":"3"}]}"#;
 fn boot(robinhood: bool, testnet: bool) -> (Engine<Lighter>, TimerId, SocketId) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
+    let mut engine = support::engine(Options {
         public_data_only: true,
         robinhood,
         testnet,
         ..Options::default()
-    }));
+    });
     engine.start(NOW);
     let metadata = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW)
         .into_iter()

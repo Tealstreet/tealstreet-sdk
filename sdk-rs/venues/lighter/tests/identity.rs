@@ -140,7 +140,7 @@ fn identity_preserves_large_current_and_legacy_indices_without_requiring_signer_
         r#"{"success":true,"data":{"accountIndex":"9007199254740993","referrer":"exact"}}"#,
     ] {
         let mut e = engine(Options {
-            secret: Some("invalid-unused-signer-secret".into()),
+            remote_signer: true,
             api_key_index: Some("not-a-key-index".into()),
             application_id: Some("9007199254740993".into()),
             ..Default::default()
@@ -158,7 +158,7 @@ fn identity_fallback_order_and_same_row_referrer_survive_failed_candidates() {
     let addr = "0x1111111111111111111111111111111111111111";
     let mut e = engine(Options {
         application_id: Some("10".into()),
-        key: Some(format!("embedded {addr} key")),
+        l1_address: Some(addr.into()),
         api_key_index: Some("7".into()),
         ..Default::default()
     });

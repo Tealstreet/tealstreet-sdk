@@ -12,7 +12,7 @@ fn ready_unattributed() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
     ready_with(options)
 }
 fn http(e: &mut Engine<Lighter>, path: &str) -> HttpRequest {
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(e, NOW);
     let debug = format!("{actions:?}");
     actions
         .into_iter()

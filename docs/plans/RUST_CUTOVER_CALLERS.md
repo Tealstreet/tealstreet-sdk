@@ -9693,6 +9693,55 @@ unproven released send. Their resend freezes codec bytes while refreshing the
 bundle at Bind; Preflight signed calls repeat their existing provider work.
 No current venue enables a new auth mode in this engine slice.
 
+## Lighter managed remaining funnel
+
+Lighter and Lighter-Robinhood use the trusted installed Schnorr provider for
+transaction and auth recipes. The venue retains only public account/API indices,
+validated public L1 metadata and opaque issued identities. Secret-only private
+setup uses #2208's nonpresentable principal; original key presence remains
+unchanged, and a supplied nonblank key keeps its ordinary Present precedence.
+The principal is neither account proof nor a nonce subject. Public account lookup
+still validates the resolved account; private recipes bind that account and API
+index to the actual installed signing ref. Hosted recipe activation stays held.
+
+Every prerequisite and transaction waits for managed preparation. Approval and
+nextNonce reads retain the genuine command Preflight; successful handoff uses
+finish_preflight_call. Serial write DATA records facts before effects and never
+replays transport loss or an unproven result. One definitive current-call 21104
+may wait 150 ms, read a fresh nonce, and rebuild the same unresolved transaction
+once. The job retains its client indices and one-reseed budget through the walk.
+
+Position proof uses shared condition readiness, so its read can start immediately
+after an accepted step; a fill already observed at cancel ACK rejects amendment
+before the old pacing delay. These timing changes cannot authorize a replacement.
+Provider refusal diagnostics may use Rejected rather than RateLimited; definitive
+financial outcomes and native codes remain pinned. Unproven released responses
+stay Unknown without trusting the response body or retrying. Caller history keeps
+accepted prefixes plus incomplete coverage on transport failure, while preparation
+refusal and cursor proof failure reject strictly and discard provisional rows.
+
+Invalid local scalar/index/provider configurations refuse before startup instead
+of silently falling back to unsigned account snapshots. Valid remote-only setups
+retain unsigned account discovery, snapshots and public trades; no hosted signing
+capability is activated. Expired Background reads clear only their native
+inflight state via the engine failure callback, permitting a fresh poll without
+publishing expired DATA or issuing any command terminal.
+
+Lighter's tests/support/reference_signer.rs is a frozen compatibility codec,
+sharing transaction DTOs and cryptographic primitives with production. It is
+not an independent oracle: tests/signing.rs pins it to the TS and Go-WASM corpus.
+
+Retired writes apply nonce invalidation and setting uncertainty before any
+queued Preflight or Plan resumes. A consumed Submit nonce is discarded on
+NotSent as well as released failures, forcing the next job to read nextNonce.
+An explicit HTTP 2xx tier refusal is Rejected, never an unproven Unknown.
+
+Lighter setup keeps bridge-inferred public discovery when the API index is absent,
+while discarding its provider material and identities. Actual private intent
+without an API index refuses; empty or absent material stays public without authority. Unsupported PayloadSigner intent is refused
+before local scalar or setup-JSON validation. Standalone family builds enable
+the host dispatcher as well as the registry dispatcher.
+
 ### Primary key-permission verification reads
 
 `PrimaryReason::KeyPermissions` (`keyPermissions` in signMeta) names a primary
@@ -9805,6 +9854,10 @@ a CloudFront host stays an auth kind. Native codes and a venue's own declared
 Bitget, Bitunix) keeps a CDN page as auth. Move the check ahead of the status
 rows if such a venue is ever fronted by CloudFront.
 
+### Bitunix closed positions and journal on Rust
+
+Bitunix on the Rust engine now serves the journal (historical positions) and closed PnL from the venue's reported position history, mapped by TypeScript's own Bitunix mappers, as TypeScript does ([RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md)). The journal previously threw "no journal records path declared", and closed PnL was always empty. Capability records gain `positionHistory: "bitunix"` and `closedPositionFormat: "bitunix"`. A failed journal read throws, as on every other reported-closed venue; a failed closed-PnL read yields `[]`.
+
 ### Bitunix account read classification (P1 #33)
 
 A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
@@ -9840,6 +9893,25 @@ Raw compatibility and explicit setup both construct a real installed provider,
 retain private capability, and start managed discovery. Native constructor and
 compiled-family integration controls exercise both paths with the public zkLink
 seed corpus. The cross-venue construction feature guard is a separate follow-up.
+
+### Phemex credentialed smoke sizing
+
+The manual JS/WASM smoke runner reads the explicit monetary minimum
+`minOrderValueRv`, base-quantity step `qtyStepSize` and maximum `maxOrderQtyRq`
+from the matching listed PerpetualV2 row in `/public/products`. Quote and
+settlement must match the selected market; missing, malformed, duplicate,
+nonlinear or superseded limits refuse. It does not infer zero from quantity
+steps. The existing $100 notional cap, post-only placement, empty-account
+preconditions and independent cleanup readback remain unchanged. This enables
+only the credentialed test harness; production order sizing is unchanged.
+
+### Isolated WASM construction feature guard
+
+The construction guard checks every declared venue through its actual family
+alias and transitive local Cargo features. Setup mappings declare their required
+bootstrap features; AsterDEX additionally requires address setup and signing
+metadata. Combined default features cannot satisfy an isolated family's check.
+Negative controls pin missing features and reject unknown setup mappings.
 
 ### One re-signed resend of a write signature rejection
 
