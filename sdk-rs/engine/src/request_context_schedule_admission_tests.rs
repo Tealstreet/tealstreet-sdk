@@ -45,7 +45,7 @@ impl Probe {
         }
         .unwrap();
         let serial_policy = || SerialPolicy {
-            credential: credential(),
+            credential: Some(credential()),
             pacing: None,
             refusals_complete: false,
         };
