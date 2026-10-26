@@ -402,6 +402,16 @@ impl LocalSigner {
             if let (Some(identity), Some(algorithm)) = (identity, declared(rule))
                 && let Some(signing) = identity.signing_opt().filter(|key| !key.0.is_empty())
             {
+                // A declared Schnorr key is refused at setup, never reduced,
+                // with the same rule its sign and public-key arms apply.
+                if algorithm == Algorithm::SchnorrDigest
+                    && !signer
+                        .keys
+                        .get(signing)
+                        .is_some_and(|key| crate::lighter::canonical_scalar(key).unwrap_or(false))
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 signer.algorithms.insert(signing.clone(), algorithm);
             }
         }
@@ -657,6 +667,7 @@ impl LocalSigner {
                     match algorithm {
                         Algorithm::Ed25519 => primitives::ed25519_public(key)?,
                         Algorithm::StarkDigest => primitives::stark_public(key)?,
+                        Algorithm::SchnorrDigest => primitives::schnorr_public(key)?,
                         _ => return Err(SignError::InvalidRequest),
                     }
                 }
@@ -733,6 +744,10 @@ pub fn valid_public_value(operation: &Operation, value: &[u8]) -> bool {
             algorithm: Algorithm::StarkDigest,
             ..
         } => crate::starknet::is_public_key(value),
+        Operation::PublicKey {
+            algorithm: Algorithm::SchnorrDigest,
+            ..
+        } => crate::lighter::is_public_key(value),
         _ => false,
     }
 }

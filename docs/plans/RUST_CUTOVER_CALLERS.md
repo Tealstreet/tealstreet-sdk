@@ -9206,3 +9206,27 @@ Every Bitrue HTTP request except trading now runs under engine-managed authority
 - **FetchLeverage join** (fe7lgm's D2 ruling). One Background snapshot serves every joined owner; each owner keeps its own root. Owners complete one tick after the snapshot, from a zero-delay venue timer: a delivery never completes another command's root. Result values are unchanged; this one-tick deferral is the caller-visible timing change. An owner that expired first gets its own Timeout and never blocks the others.
 - **B1 interim (deleted by B2).** While a protective census is pending, an order read's census result and its queue bookkeeping run one tick later from a zero-delay timer, in native order, because the census still completes a legacy trading command.
 - **Fixtures.** Tests drive managed reads through `prepared_actions`, take socket and request IDs from their actions, and read routes from the preparation intent.
+
+## Lighter Schnorr auth recipe and public key (P3 parts 2+3)
+
+Shared prerequisites for the Lighter venue cutover (owner codex-ih35js). Nothing
+calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
+`cfg!(feature = "schnorr")` and declares Lighter's signing ref
+`signingAlgorithm: schnorrDigest` in the same change as the eager-holder removal.
+
+- **Auth token deadline from the signing stamp.** `AuthRecipe` derives the
+  60-second deadline from the dispatch `stamp_ms` (the preparation moment), where
+  legacy `account_auth` uses `cx.now` at issue. The stamp is equal or later, so a
+  parked request's token is valid for 60 s from signing rather than from
+  queueing. Pinned by `re_preparation_replaces_entropy_and_deadline`.
+- **WS subscribe escaping.** The private subscribe frame is serialized, so it is
+  byte-equal to legacy for the real `account_all_orders/{account}` channel but
+  escapes a hostile channel instead of splicing it into JSON.
+- **Canonical public keys.** `lighter::public_key` reduces each little-endian
+  limb below the Goldilocks prime. The field could hold a limb as an unreduced
+  p (it did for the scalar n-1), where Go always reduces; all Go fixture keys
+  are canonical. Pinned by `lighter_public_keys_are_canonically_encoded`.
+- **Declared keys refused at setup.** A ref declared `schnorrDigest` with a
+  non-canonical, zero or wrong-width scalar is refused at trusted setup
+  (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
+  ref is declared at the cutover.

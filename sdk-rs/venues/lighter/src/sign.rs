@@ -703,9 +703,11 @@ pub enum AuthPlacement {
     Query,
     /// The `authorization` request header.
     Header,
-    /// The private subscribe frame on this socket.
+    /// The private subscribe frame on this socket, whose own URL (the venue's
+    /// `ws_url()`) names the signing context; a send has no URL of its own.
     WsSubscribe {
         socket: safe_cex_engine::SocketId,
+        url: String,
         channel: String,
     },
 }
@@ -718,6 +720,7 @@ pub struct AuthRecipe {
     origin: String,
     placement: AuthPlacement,
     message: Option<String>,
+    unsigned: Option<String>,
 }
 impl AuthRecipe {
     pub fn new(
@@ -732,33 +735,48 @@ impl AuthRecipe {
             origin,
             placement,
             message: None,
+            unsigned: None,
         }
     }
     /// The outbound this recipe is bound to: an HTTP request under this
     /// origin's API, or a send on its own socket.
     fn target(&self, outbound: &Action) -> Result<(String, String, String), SignError> {
-        let host = self
-            .origin
-            .split_once("://")
-            .map(|(_, host)| host)
-            .filter(|host| !host.is_empty() && !host.contains('/'))
-            .ok_or(SignError::InvalidRequest)?;
+        let split = |url: &str, scheme: &str| {
+            url.strip_prefix(scheme)
+                .map(|rest| match rest.split_once('/') {
+                    Some((host, path)) => (host.to_owned(), format!("/{path}")),
+                    None => (rest.to_owned(), String::new()),
+                })
+                .filter(|(host, _)| !host.is_empty())
+                .ok_or(SignError::InvalidRequest)
+        };
         match (&self.placement, outbound) {
             (AuthPlacement::Query | AuthPlacement::Header, Action::Http(http)) => {
+                let (host, _) = split(&self.origin, "https://")?;
                 let path = http
                     .url
                     .strip_prefix(self.origin.as_str())
                     .filter(|path| path.starts_with("/api/v1/"))
                     .ok_or(SignError::InvalidRequest)?;
                 let path = path.split_once('?').map_or(path, |(path, _)| path);
-                Ok((http.method.as_str().into(), host.into(), path.into()))
+                Ok((http.method.as_str().into(), host, path.into()))
             }
-            (AuthPlacement::WsSubscribe { socket, .. }, Action::WsSend { socket: actual, .. })
-                if socket == actual =>
-            {
-                Ok(("WS".into(), host.into(), "/stream".into()))
+            (
+                AuthPlacement::WsSubscribe { socket, url, .. },
+                Action::WsSend { socket: actual, .. },
+            ) if socket == actual => {
+                let (host, path) = split(url, "wss://")?;
+                Ok(("WS".into(), host, path))
             }
             _ => Err(SignError::InvalidRequest),
+        }
+    }
+    /// The unsigned outbound a preparation signed for; apply refuses any other.
+    fn unsigned(outbound: &Action) -> String {
+        match outbound {
+            Action::Http(http) => format!("{}\n{:?}", http.url, http.headers),
+            Action::WsSend { text, .. } => text.clone(),
+            _ => String::new(),
         }
     }
 }
@@ -768,19 +786,97 @@ impl SignStep for AuthRecipe {
         outbound: &mut Action,
         dispatch: &DispatchContext<'_>,
     ) -> Result<SignRequest, SignError> {
-        // RED stub: refuses before signing.
-        let _ = (
-            &self.identity,
-            &self.account,
-            &self.message,
-            dispatch,
-            self.target(outbound),
-        );
-        Err(SignError::InvalidRequest)
+        let (method, host, path) = self.target(outbound)?;
+        if let Action::Http(http) = outbound {
+            match self.placement {
+                // An exact `auth` parameter name, never a substring match.
+                AuthPlacement::Query
+                    if http.url.split_once('?').is_some_and(|(_, query)| {
+                        query
+                            .split('&')
+                            .any(|pair| pair.split('=').next() == Some("auth"))
+                    }) =>
+                {
+                    return Err(SignError::InvalidRequest);
+                }
+                AuthPlacement::Header
+                    if http
+                        .headers
+                        .iter()
+                        .any(|(name, _)| name.eq_ignore_ascii_case("authorization")) =>
+                {
+                    return Err(SignError::InvalidRequest);
+                }
+                _ => {}
+            }
+        }
+        let stamp = dispatch.stamp_ms();
+        let deadline = (stamp / 1000.).floor() as u64 + 60;
+        let (message, data) =
+            auth_message(&self.account, deadline).map_err(|_| SignError::InvalidRequest)?;
+        let mut payload = Vec::with_capacity(32 + data.len());
+        payload.resize(32, 0);
+        dispatch.signing_bytes(&mut payload)?;
+        payload.extend_from_slice(&data);
+        self.message = Some(message);
+        self.unsigned = Some(Self::unsigned(outbound));
+        Ok(SignRequest {
+            receipt: SignReceipt {
+                nonce: None,
+                stamp_ms: Some(stamp),
+                expiry_ms: Some(deadline as f64 * 1000.),
+            },
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::SchnorrDigest,
+                key: self.identity.signing_ref()?.clone(),
+                payload: vec![PayloadPart::Bytes { bytes: payload }],
+            }],
+            context: Context {
+                venue: "lighter".into(),
+                method,
+                host,
+                path,
+            },
+        })
     }
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
-        let _ = (outbound, result);
-        Err(SignError::InvalidResult)
+        self.target(outbound)?;
+        let message = self.message.take().ok_or(SignError::InvalidResult)?;
+        if self.unsigned.take().as_deref() != Some(Self::unsigned(outbound).as_str()) {
+            return Err(SignError::InvalidRequest);
+        }
+        let [signature] = result.values.as_slice() else {
+            return Err(SignError::InvalidResult);
+        };
+        if signature.len() != 80 {
+            return Err(SignError::InvalidResult);
+        }
+        let token = format!("{message}:{}", safe_cex_crypto::hex(signature));
+        match (&self.placement, outbound) {
+            (AuthPlacement::Query, Action::Http(http)) => {
+                let separator = if http.url.contains('?') { '&' } else { '?' };
+                http.url = format!("{}{separator}auth={token}", http.url);
+            }
+            (AuthPlacement::Header, Action::Http(http)) => {
+                http.headers.push(("authorization", token));
+            }
+            (AuthPlacement::WsSubscribe { channel, .. }, Action::WsSend { text, .. }) => {
+                #[derive(Serialize)]
+                struct Subscribe<'a> {
+                    r#type: &'a str,
+                    channel: &'a str,
+                    auth: &'a str,
+                }
+                *text = serde_json::to_string(&Subscribe {
+                    r#type: "subscribe",
+                    channel,
+                    auth: &token,
+                })
+                .map_err(|_| SignError::InvalidResult)?;
+            }
+            _ => return Err(SignError::InvalidRequest),
+        }
+        Ok(())
     }
     fn freshness_ms(&self) -> f64 {
         5000.

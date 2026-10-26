@@ -119,6 +119,7 @@ impl Venue for Issue {
                     ORIGIN.into(),
                     AuthPlacement::WsSubscribe {
                         socket: sockets[0],
+                        url: STREAM.into(),
                         channel: "account_all_orders/42".into(),
                     },
                 );
@@ -410,4 +411,29 @@ fn re_preparation_replaces_entropy_and_deadline() {
         .collect();
     assert_eq!(released.len(), 1);
     assert!(released[0].contains(&format!("&auth={}:42:3:", base + 5 + 60)));
+}
+
+/// The WS signing context is the socket's own URL, supplied by the venue; a
+/// send carries no URL, so nothing is derived from the chain id.
+#[test]
+fn ws_signing_context_is_the_supplied_stream_url() {
+    let (local, identity) = identity();
+    let mut engine = Engine::new(
+        Issue {
+            job: Some(Job::Ws { send_on: 0 }),
+            identity,
+        },
+        Some(entropy()),
+    )
+    .unwrap();
+    engine
+        .set_signer(Some(std::sync::Arc::new(Parked(local))))
+        .unwrap();
+    engine.start(NOW);
+    engine.prepare_dispatch(NOW);
+    let (_, work) = sign_work(&mut engine);
+    assert_eq!(work.context.venue, "lighter");
+    assert_eq!(work.context.method, "WS");
+    assert_eq!(work.context.host, "mainnet.zklighter.elliot.ai");
+    assert_eq!(work.context.path, "/stream");
 }
