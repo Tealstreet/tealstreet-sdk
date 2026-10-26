@@ -1044,8 +1044,17 @@ fn payload_signing_rules(
 ) -> Result<(), VenueError> {
     let public = construction::resolve(venue, options)
         .map_or(options.public_data_only, |mode| mode.public_data_only);
-    if !options.payload_signer || public || venue == "paradex" || !supported(venue) {
+    if !options.payload_signer || public || !supported(venue) {
         return Ok(());
+    }
+    // Hosted (device-key) Paradex has no Rust route in this release; its legacy
+    // digest-only delegate is never constructed.
+    if venue == "paradex" {
+        return Err(VenueError::new(
+            "Rust paradex hosted signing is unavailable; configure the account's local Stark key or remove payloadSigner",
+        )
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent));
     }
     let policy = remote_signing_policy(venue);
     let identity_ready = options
