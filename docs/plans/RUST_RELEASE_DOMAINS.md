@@ -1,5 +1,9 @@
 # Venue release domains: FIFO, release-paced REST (`release-domains`)
 
+The feature widens and renames the earlier `serial-pacing` draft:
+`release-domains = ["serial-plans"]`, so it keeps the serial-plans dependency.
+It is non-default.
+
 Owner: claude-dazzy3 (overseer assignment, widened to Coinbase).
 Reviewers: codex-uufub4 (Plan core, nonce and release), codex-zs5e83 (Coinbase owner; ruling: release-anchored 334 ms, one all-REST FIFO domain).
 Base: `feat/rust-rewrite` `b0ee0a9a4d5`. **Plan only; no source.**
@@ -20,12 +24,17 @@ Plan name a registered floor.
 | Gap | 334 ms, measured from the previous dispatch, which is also its send and sign | 334 ms, measured from the previous write's queue time |
 | Bound | queue of 256 | none |
 
-**Ruled anchor:** the gap runs from the previous member's final release, reusing
-the registered `SendPacing` floor that `commit_claim` advances.
-- Coinbase: send and release coincide, so this is native parity.
-- Hyperliquid: a ruled behaviour change. It is never faster than native, but
-  can add latency under delayed host phases; for example, queue 0, Claim 1000,
-  DATA 1001 sends the next write at 1334 instead of 1001. CALLERS records it.
+**Ruled anchor:** the gap runs from the previous member's final Claim release,
+reusing the registered `SendPacing` floor that `commit_claim` advances. This is
+an explicit, overseer-approved behaviour change for **both** venues, not native
+parity:
+- Coinbase anchors at its own dispatch, before any managed Prepare, sign or
+  Bind phase.
+- Hyperliquid anchors at queue time.
+
+Both are never faster than native, and both may add latency under delayed host
+phases. Example: queue 0, Claim 1000, DATA 1001 sends the next request at 1334
+instead of 1001. CALLERS records this for each venue.
 
 There is no venue timer, no shadow floor and no queue-time ledger.
 
@@ -37,6 +46,7 @@ The venue declares, `Self: Sized`, default none, the same shape as
 `socket_capabilities` / `dispatch_nonce`:
 
 ```rust
+// Default `Self: Sized` method, so `Venue` stays dyn compatible (as socket_capabilities).
 fn http_release_domain() -> Option<ReleaseDomain> where Self: Sized { None }
 pub struct ReleaseDomain { pub pacing: Pacing, pub members: DomainMembers }
 pub enum DomainMembers { AllRest, Mutations }
@@ -45,6 +55,13 @@ pub enum DomainMembers { AllRest, Mutations }
 - `pacing.group` must be a group the venue registers in `http_pacing()`.
   Engine construction refuses a domain whose group isn't registered, or whose
   literal gap differs from the registered one.
+- The effective domain pacing is stamped **before** any barrier or serial
+  validation (uufub4 P2-3):
+  - `validate_mutation_group` / `validate_zero` still reject a positive-gap
+    atomic group, including a caller Policy with `pacing: None` inside a domain
+    venue;
+  - no barrier is split, and there are no simultaneous paced barrier releases;
+  - the dispatch-nonce barrier refusal is kept.
 - The **engine stamps** the domain's pacing onto every member Context it issues
   for this venue. That covers command, background, discovery, Preflight call,
   Plan leg and serial call Contexts. A member's own `Policy.pacing` must be
@@ -60,8 +77,19 @@ pub enum DomainMembers { AllRest, Mutations }
   point.
   - Context creation, `plan_leg_context` and call reservation do NOT enter the
     queue, so a leg that is never queued cannot block later native-order work.
-  - A Stale re-prepare keeps the same physical entry and its place.
-  - A real resend is a new physical member and joins at the tail.
+  - A Stale re-prepare keeps the same attempt and its FIFO position, with a fresh
+    preparation and permit. Its deadline, authority and repair budget are
+    unchanged.
+  - A retry after release is a new physical issuance at the tail; it never
+    reclaims the old slot.
+  - There are no ghost heads: a member leaves the index on every terminal.
+- **Hold (uufub4 (c)):**
+  - It shares packet storage and lifecycle plumbing only, not mutation-group
+    membership or atomic release.
+  - It has its own dedicated domain hold and index.
+  - Domain and bearer gates are conjunctive: Bind waits for both.
+  - Each held packet has a single owner and exact cleanup.
+  - No locks or callbacks are held across commits.
 - A member that finishes preparation **holds its packet and permit** instead of
   emitting `Bind`, using the same seam that barrier group members
   (`pump_mutation_group`) and parked bearers use. It emits `Bind` only once it is
@@ -80,8 +108,14 @@ pub enum DomainMembers { AllRest, Mutations }
   call deadline, i.e. NotSent before release.
 - `commit_claim` alone advances the floor. A refused, stale or duplicate claim,
   or a `WaitUntil`, spends nothing.
-- Pacing is checked before any nonce floor commit, so no nonce is reserved for a
-  `WaitUntil` (uufub4's interaction).
+- **Nonce (uufub4 P2-2):**
+  - `reserve_nonce` runs during recipe preparation, so a held or `WaitUntil`
+    member already has its initial reservation.
+  - A `WaitUntil` adds no new reservation, and commits no released-nonce floor
+    and no pacing floor.
+  - A Stale re-prepare CAN reserve a new nonce.
+  - Reserved maxima are never rolled back, and the cumulative 8-repair budget is
+    never reset.
 
 ### 4. Serial Plans
 
@@ -92,13 +126,15 @@ or pacing, and the serial root stays unbounded.
 
 ### 5. Bounds
 
-The domain queue is capped at the existing managed-request capacity. Coinbase's
-native 256 stays a venue admission check, so it refuses before issuance as
-today.
+There are two distinct bounds:
+- Coinbase's native 256-entry unsent queue stays a venue admission check, so it
+  refuses before issuance as today.
+- The engine's managed in-flight cap bounds the domain index.
+They are not the same limit and are not merged.
 
 ### 6. Zero cost when off
 
-- Everything sits behind a non-default `release-domains = ["http-plans"]`
+- Everything sits behind the non-default `release-domains = ["serial-plans"]`
   feature, including the held-Bind branch, the stamping and the serial
   acceptance.
 - With the feature off, the engine is byte-identical, and serial admission still
@@ -177,7 +213,16 @@ All use a registered 334 ms domain group.
 12. **Linearization point.** Create Context/leg A without queueing it, then
     queue B, then queue A: Bind and release order is B, then A. A leg that is
     never queued blocks nothing, and a Stale re-prepare keeps its entry.
-13. **GREEN controls:**
+13. **uufub4's required negatives and evidence:**
+    - **Barrier with omitted pacing:** a barrier Plan in a domain venue with
+      caller `pacing: None` is still refused.
+    - **Zero-gap control:** a zero-gap domain releases without waiting.
+    - **Non-domain control:** a venue with no domain is unchanged.
+    - **Nonce:** released versus reserved nonce evidence across WaitUntil and a
+      Stale re-prepare.
+    - **Repair budget:** stale repairs are cumulative and never reset.
+    - **Cleanup:** mixed-owner terminals remove exactly their own index entries.
+14. **GREEN controls:**
    - with the feature on and no declaration, nothing is held, stamped or paced;
    - with the feature off, serial nonzero pacing is still `Invalid`.
 
@@ -193,9 +238,10 @@ and the 256 bound, Hyperliquid's builder prerequisites.
   `pump_trades` applies 334 ms only to actual /exchange writes (Place, Cancel,
   Leverage, ScheduleCancel), and builder, info, account and history reads don't
   advance `write_at`.
-- (c) **Seam. OPEN for uufub4.** Reusing the hold/assembly helpers is fine for
-  consumer fit, but no barrier or group semantics and no second queue authority
-  may be imported. uufub4 owns the exact core seam.
+- (c) **Seam. RESOLVED by uufub4.** A dedicated domain hold and index that
+  shares packet and lifecycle plumbing only, as specified in section 2.
+- The exact setup and SessionAuth classification for Hyperliquid is pinned with
+  zs5e83 at adoption.
 
 ## Sizes and checks
 
