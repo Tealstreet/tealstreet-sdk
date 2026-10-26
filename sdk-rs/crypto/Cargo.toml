@@ -41,6 +41,8 @@ secp256k1 = []
 stark = []
 # Kraken dispatch recipes require HMAC-SHA512; other families opt in explicitly.
 hmac-sha512 = []
+# Declared signing-key trimming at setup; only Bitunix links it.
+trim-signing = []
 schnorr = []
 
 [dev-dependencies]

@@ -37,6 +37,8 @@ pub struct LocalIdentity {
     #[serde(default)]
     pub trim_credential: bool,
     /// Trim the signing key text once before decoding; policy-declared.
+    /// Linked only by families that declare it (Bitunix).
+    #[cfg(feature = "trim-signing")]
     #[serde(default)]
     pub trim_signing: bool,
     /// Declared extra signing material, e.g. ApeX's zkLink seed.
@@ -57,6 +59,7 @@ impl Default for LocalIdentity {
             stable_id: None,
             secret_encoding: KeyEncoding::default(),
             trim_credential: false,
+            #[cfg(feature = "trim-signing")]
             trim_signing: false,
             extra: LocalExtras::default(),
             signing_from_primary: false,
@@ -142,15 +145,16 @@ impl<'de> serde::Deserialize<'de> for Secret {
 }
 
 /// Unicode White_Space trim into a fresh guarded buffer; the input is wiped on drop.
+#[cfg(feature = "trim-signing")]
 fn trimmed(input: Secret) -> Secret {
     let Some(value) = input.0.as_deref() else {
         return input;
     };
-    if value.trim().len() == value.len() {
+    let text = value.trim();
+    if text.len() == value.len() {
         return input;
     }
-    let text = value.trim().to_owned();
-    Secret::new(text)
+    Secret::new(text.to_owned())
 }
 
 // Decoded buffers stay guarded on every failure, including the second slot.
@@ -180,11 +184,14 @@ impl DecodedIdentity {
                     .to_vec(),
             );
         }
+        #[cfg(feature = "trim-signing")]
         let secret = if identity.trim_signing {
             trimmed(identity.secret)
         } else {
             identity.secret
         };
+        #[cfg(not(feature = "trim-signing"))]
+        let secret = identity.secret;
         Ok(Self {
             key,
             secret: key_material::decode(secret, identity.secret_encoding)?,
@@ -312,6 +319,7 @@ impl LocalSigner {
                 if let Some(trim) = rule.and_then(|rule| rule.trim_credential) {
                     identity.trim_credential = trim;
                 }
+                #[cfg(feature = "trim-signing")]
                 if let Some(trim) = rule.and_then(|rule| rule.trim_signing) {
                     identity.trim_signing = trim;
                 }
@@ -2687,6 +2695,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "trim-signing")]
     #[test]
     fn declared_signing_trim_installs_one_trimmed_material_for_rest_and_login() {
         use safe_cex_engine::signing::IdentitySetupPolicy;
