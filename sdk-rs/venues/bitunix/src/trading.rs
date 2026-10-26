@@ -8,7 +8,7 @@ use crate::{BitunixFutures, Pending, codes, error};
 use safe_cex_engine::classify::{BatchItem, Intent, Native, NativeCode, WriteFact};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::model::*;
-use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
+use safe_cex_engine::request_context::plan::{CallAuth, SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     Context, Credential, HttpOwnerRetirement, Operation, Plan, Policy, Preflight, PreflightPolicy,
     PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
@@ -2504,6 +2504,7 @@ impl BitunixFutures {
 fn serial(step: &Step) -> SerialCall {
     let read = step.read();
     SerialCall {
+        auth: CallAuth::Preflight,
         operation: if read {
             Operation::Read
         } else {
@@ -2601,5 +2602,46 @@ mod split_tests {
         assert!(split_quantities(1e16, 1.0, 1.0, 1e16).is_err());
         assert!(split_quantities(1.0, 0.0, 0.0, 1.0).is_err());
         assert!(split_quantities(1.0, 0.25, 0.0, 0.1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod serial_auth_tests {
+    use super::*;
+
+    #[test]
+    fn serial_reads_and_writes_keep_the_declared_preflight_credential_policy() {
+        let step = |path: &'static str, call: Call| Step {
+            path,
+            body: String::new(),
+            call,
+            delay: 0.0,
+        };
+        let read = step(
+            "/api/v1/futures/trade/get_order_detail",
+            Call::ReconcileReplacement {
+                parent: "one".into(),
+                id: "one__tp".into(),
+                leg: Some("tp"),
+                payload: Box::default(),
+            },
+        );
+        let write = step(
+            "/api/v1/futures/account/change_leverage",
+            Call::Leverage {
+                symbol: "BTCUSDT".into(),
+                value: 5.0,
+            },
+        );
+        for (step, operation, attempts) in [
+            (&read, Operation::Read, 1),
+            (&write, Operation::Mutation, 2),
+        ] {
+            let call = serial(step);
+            assert_eq!(call.auth, CallAuth::Preflight);
+            assert_eq!(call.operation, operation);
+            assert_eq!(call.attempts, attempts);
+            assert_eq!(call.timeout_ms, CALL_MS);
+        }
     }
 }

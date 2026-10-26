@@ -9,7 +9,7 @@ use safe_cex_engine::execution::{Arithmetic, Cursor, ExecutionRounding};
 use safe_cex_engine::history::BackgroundCoverage;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
-use safe_cex_engine::request_context::plan::{CallTerms, RetryWindow, SerialCall, Slot};
+use safe_cex_engine::request_context::plan::{CallAuth, CallTerms, RetryWindow, SerialCall, Slot};
 use safe_cex_engine::request_context::{
     Context, Operation, Plan, Policy, Preflight, RetryPolicy, Scope,
 };
@@ -456,6 +456,8 @@ impl BitunixFutures {
                         &slot,
                         &current,
                         SerialCall {
+                            // Signed with the Preflight's Primary, like every job call.
+                            auth: CallAuth::Preflight,
                             operation: Operation::Read,
                             timeout_ms: crate::trading::CALL_MS,
                             attempts: 1,
