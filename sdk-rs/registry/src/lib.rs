@@ -690,6 +690,8 @@ pub fn prepare_local_signer_for(
     }
     #[cfg(feature = "lighter")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
+        let public = lighter_setup::setup_public_mode(options);
+        payload_signing_rules_in_mode(venue, options, false, public)?;
         return lighter_setup::native(options, signer_setup_policy_for(venue, options));
     }
     let policy = signer_setup_policy_for(venue, options);
@@ -987,7 +989,14 @@ pub fn local_signer_from_json_for_mode(
 > {
     #[cfg(feature = "lighter")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
-        return lighter_setup::json(input, signer_setup_policy_for(venue, options), options);
+        let mut input = zeroize::Zeroizing::new(input);
+        let public = lighter_setup::setup_public_mode(options);
+        payload_signing_rules_in_mode(venue, options, false, public)?;
+        return lighter_setup::json(
+            std::mem::take(&mut *input),
+            signer_setup_policy_for(venue, options),
+            options,
+        );
     }
     let (provider, identities) = local_signer_from_json_with_policy(
         input,
@@ -1054,6 +1063,15 @@ fn payload_signing_rules(
 ) -> Result<(), VenueError> {
     let public = construction::resolve(venue, options)
         .map_or(options.public_data_only, |mode| mode.public_data_only);
+    payload_signing_rules_in_mode(venue, options, provider_ready, public)
+}
+
+fn payload_signing_rules_in_mode(
+    venue: &str,
+    options: &EngineOptions,
+    provider_ready: bool,
+    public: bool,
+) -> Result<(), VenueError> {
     if !options.payload_signer || public || venue == "paradex" || !supported(venue) {
         return Ok(());
     }

@@ -373,3 +373,13 @@ silently degrading that invalid local configuration into unsigned snapshots.
 Valid remote-only configurations keep public account snapshots and unsigned
 public history, with no private signing or order submission. Their controls
 remain separate from the invalid-setup refusal controls.
+
+## First composed CI correction
+
+The original compiled WASM public-startup and payload-refusal controls exposed
+two setup gaps: missing API-index public discovery was rejected at provider
+installation, and PayloadSigner refusal ran after local setup validation. The
+family also enabled registry dispatch without forwarding the WASM host feature.
+The correction preserves those assertion bodies and adds registry controls;
+the host and registry now use the same dispatch path. The historical plan
+reviewer-prose secret-scan match is exempted by its exact commit/path/rule/line.

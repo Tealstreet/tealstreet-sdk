@@ -114,3 +114,7 @@ ea5ec84ee69b5a6e4f7f90322f9afd285a718a0f:sdk-rs/venues/blofin/tests/hmac_dispatc
 # Public Git commit SHA in the Lighter principal plan, beside reviewer prose.
 # Exact historical documentation fingerprint only; no credential bytes.
 25b7d8a4edf1fb1bb7c839783f458b252db6e937:docs/plans/RUST_LIGHTER_SETUP_PRINCIPAL.md:generic-api-key:4
+
+# Public reviewer names in historical Lighter plan prose; no credential material.
+# Exact commit/path/rule/line only.
+94f58d0d64773c6c915a6da1ada5d756442f8871:docs/plans/RUST_LIGHTER_REMAINING_FUNNEL.md:generic-api-key:7

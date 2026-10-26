@@ -9614,3 +9614,9 @@ Retired writes apply nonce invalidation and setting uncertainty before any
 queued Preflight or Plan resumes. A consumed Submit nonce is discarded on
 NotSent as well as released failures, forcing the next job to read nextNonce.
 An explicit HTTP 2xx tier refusal is Rejected, never an unproven Unknown.
+
+Lighter setup keeps bridge-inferred public discovery when the API index is absent,
+while discarding its provider material and identities. Actual private intent
+without an API index refuses; empty or absent material stays public without authority. Unsupported PayloadSigner intent is refused
+before local scalar or setup-JSON validation. Standalone family builds enable
+the host dispatcher as well as the registry dispatcher.

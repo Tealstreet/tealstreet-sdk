@@ -20,12 +20,22 @@ pub(crate) fn capture_lookup(options: &mut EngineOptions) {
     }
 }
 
+pub(crate) fn setup_public_mode(options: &EngineOptions) -> bool {
+    options
+        .public_mode
+        .as_ref()
+        .and_then(|mode| mode.requested)
+        .unwrap_or(options.public_data_only)
+}
+
 fn install_with_facts(
     setup: LocalSetup,
     policy: CredentialSetupPolicy,
     options: &EngineOptions,
 ) -> Result<(Provider, Identities, SetupFacts), VenueError> {
-    let public = crate::construction::signer_setup_public_data_only(options);
+    let missing_index = options.api_key_index.is_none();
+    let public = crate::construction::signer_setup_public_data_only(options)
+        || (missing_index && setup_public_mode(options));
     if !public
         && options
             .lighter_signer_provider
@@ -34,7 +44,7 @@ fn install_with_facts(
     {
         return Err(invalid("Unsupported Lighter signer provider"));
     }
-    let index = if public || setup.primary.is_none() {
+    let index = if public || missing_index || setup.primary.is_none() {
         0
     } else {
         match options
@@ -48,9 +58,36 @@ fn install_with_facts(
     };
     let principal = LighterPrincipal::new(index)
         .map_err(|_| invalid("Lighter requires an API key index in 0..=254"))?;
-    let (signer, identities, facts) =
-        LocalSigner::from_setup_with_lighter_principal(setup, policy, public, principal)
-            .map_err(|_| invalid("Invalid Lighter local signer setup"))?;
+    let (signer, identities, facts) = LocalSigner::from_setup_with_lighter_principal(
+        setup,
+        policy,
+        public || missing_index,
+        principal,
+    )
+    .map_err(|_| {
+        invalid(if missing_index && !public {
+            "Lighter requires an API key index in 0..=254"
+        } else {
+            "Invalid Lighter local signer setup"
+        })
+    })?;
+    if missing_index {
+        if !public
+            && identities
+                .primary
+                .as_ref()
+                .is_some_and(|primary| primary.signing_opt().is_some())
+        {
+            return Err(invalid("Lighter requires an API key index in 0..=254"));
+        }
+        // No API index grants no private authority; retain facts, wipe material.
+        drop(signer);
+        return Ok((
+            std::sync::Arc::new(LocalSigner::new()),
+            Identities::default(),
+            facts,
+        ));
+    }
     Ok((std::sync::Arc::new(signer), identities, facts))
 }
 
@@ -103,7 +140,9 @@ pub(crate) fn json(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use safe_cex_engine::signing::{KeyPresence, Operation, SignError, SignRequest};
+    use safe_cex_engine::signing::{
+        Algorithm, Capability, KeyPresence, Operation, PayloadPart, SignError, SignRequest,
+    };
     use serde_json::{Value, json};
 
     fn engine_options() -> EngineOptions {
@@ -131,6 +170,26 @@ mod tests {
             .sign_ready(&request)
             .unwrap()
             .map(|result| result.values[0].clone())
+    }
+
+    fn assert_no_signing_material(provider: &Provider) {
+        let key = safe_cex_engine::signing::KeyRef("primary.signing".into());
+        assert_eq!(
+            provider.can_sign(&key, Algorithm::SchnorrDigest),
+            Capability::Unsupported
+        );
+        let request = SignRequest {
+            receipt: Default::default(),
+            context: Default::default(),
+            operations: vec![Operation::Sign {
+                algorithm: Algorithm::SchnorrDigest,
+                key,
+                payload: vec![PayloadPart::Bytes {
+                    bytes: [vec![7; 32], b"12345678".to_vec()].concat(),
+                }],
+            }],
+        };
+        assert!(provider.sign_ready(&request).unwrap().is_err());
     }
 
     #[test]
@@ -211,6 +270,113 @@ mod tests {
         )
         .unwrap();
         assert!(identities.primary.is_none());
+    }
+
+    #[test]
+    fn missing_api_index_refuses_a_private_scalar() {
+        for explicit in [false, true] {
+            let mut options = engine_options();
+            options.api_key_index = None;
+            if explicit {
+                options.public_data_only = true;
+                options.public_mode =
+                    Some(serde_json::from_value(json!({"requested":false})).unwrap());
+            }
+            let error = install_with_facts(
+                setup(None),
+                crate::signer_setup_policy_for("lighter", &options),
+                &options,
+            )
+            .err()
+            .expect("a private scalar needs its API index");
+            assert_eq!(
+                error.message,
+                "Lighter requires an API key index in 0..=254"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_api_index_with_empty_or_absent_material_stays_public() {
+        for input in [json!({}), json!({"primary":{"key":"","secret":""}})] {
+            let mut options = engine_options();
+            options.api_key_index = None;
+            let (provider, identities, facts) = install_with_facts(
+                serde_json::from_value(input.clone()).unwrap(),
+                crate::signer_setup_policy_for("lighter", &options),
+                &options,
+            )
+            .unwrap();
+            assert!(identities.primary.is_none());
+            assert_no_signing_material(&provider);
+            assert_eq!(
+                facts.primary_key(),
+                if input.get("primary").is_some() {
+                    KeyPresence::Empty
+                } else {
+                    KeyPresence::Absent
+                }
+            );
+            assert!(
+                present(
+                    &provider,
+                    safe_cex_engine::signing::KeyRef("primary.signing".into())
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn inferred_public_startup_without_an_index_discards_its_scalar() {
+        let mut options = engine_options();
+        options.api_key_index = None;
+        options.public_data_only = true;
+        options.public_mode = Some(serde_json::from_value(json!({"requested":null})).unwrap());
+        let (provider, identities, facts) = install_with_facts(
+            setup(None),
+            crate::signer_setup_policy_for("lighter", &options),
+            &options,
+        )
+        .unwrap();
+        assert!(identities.primary.is_none());
+        assert_no_signing_material(&provider);
+        assert_eq!(facts.primary_key(), KeyPresence::Absent);
+        assert!(
+            present(
+                &provider,
+                safe_cex_engine::signing::KeyRef("primary.signing".into())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn unsupported_payload_signer_precedes_local_scalar_validation() {
+        for venue in ["lighter", "lighter-robinhood"] {
+            let mut options = engine_options();
+            options.payload_signer = true;
+            options.secret = Some("invalid-scalar".into());
+            let error = crate::prepare_local_signer_for(venue, &mut options)
+                .err()
+                .expect("unsupported payload signer");
+            assert_eq!(error.kind, Some(crate::ErrorKind::Unsupported));
+            options.secret = None;
+            options.public_mode = Some(
+                serde_json::from_value(json!({
+                    "requested":null,"apiKeyIndexPresent":true
+                }))
+                .unwrap(),
+            );
+            let error =
+                crate::local_signer_from_json_for_mode(venue, "invalid-json".into(), &options)
+                    .err()
+                    .expect("unsupported payload signer");
+            assert_eq!(error.kind, Some(crate::ErrorKind::Unsupported));
+            options.public_data_only = false;
+            options.public_mode = Some(serde_json::from_value(json!({"requested":true})).unwrap());
+            assert!(crate::local_signer_from_json_for_mode(venue, "{}".into(), &options).is_ok());
+        }
     }
 
     #[test]
