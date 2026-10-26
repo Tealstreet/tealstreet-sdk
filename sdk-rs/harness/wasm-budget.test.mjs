@@ -23,6 +23,9 @@ test('only the declared venue families carry overrides, and only for the venue p
   assert.equal(wasmBudgetError(1_387_670, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_388_544, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_418_240, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_418_676, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_419_317, 'venue', 'asterdex'), undefined);
+  assert.equal(wasmBudgetError(1_420_288, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_419_038, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_419_264, 'venue', 'asterdex'), undefined);
   assert.equal(wasmBudgetError(1_420_478, 'venue', 'asterdex'), undefined);
@@ -42,7 +45,7 @@ test('only the declared venue families carry overrides, and only for the venue p
     assert.match(wasmBudgetError(1_486_849, 'venue', venue), /exceeds 1486848/);
   }
   for (const venue of ['kraken', 'krakenspot']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], 1375 * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], 1376 * 1024);
     assert.equal(wasmBudgetError(1_399_777, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_399_808, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_399_905, 'venue', venue), undefined);
@@ -55,7 +58,9 @@ test('only the declared venue families carry overrides, and only for the venue p
     assert.equal(wasmBudgetError(1_405_952, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_407_904, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(1_408_000, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(1_408_001, 'venue', venue), /exceeds 1408000/);
+    assert.equal(wasmBudgetError(1_408_110, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(1_409_024, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(1_409_025, 'venue', venue), /exceeds 1409024/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.bybit, 1415 * 1024);
   assert.equal(wasmBudgetError(1_446_912, 'venue', 'bybit'), undefined);

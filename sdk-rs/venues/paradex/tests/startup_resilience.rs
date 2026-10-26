@@ -65,6 +65,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
             .unwrap();
         assert_eq!(request.url, original_url);
     }
+    // Skipped discovery rows log at Debug.
+    engine.set_log_level(safe_cex_engine::Level::Debug);
     engine.handle(now, Event::HttpResponse { request: request.id, response: Response { status: 200, headers: "", body: r###"{"results":[{"symbol":"BTC-USD-PERP","base_currency":"BTC","quote_currency":"USD","asset_kind":"PERP","order_size_increment":"0.00001","price_tick_size":"0.1","min_notional":"10","max_order_size":"100","delta1_cross_margin_params":{"imf_base":"0.02"},"maker_fee":""},{"symbol":"ETH-USD-PERP","base_currency":"ETH","quote_currency":"USD","asset_kind":"PERP","order_size_increment":"0.001","price_tick_size":"0.01","min_notional":"10","max_order_size":"1000","initial_margin_fraction":"0.05"},{"symbol":"BTC-USD-250101-100000-C","asset_kind":"OPTION"},{"symbol":"USDC-USD-SPOT","asset_kind":"SPOT"},{"symbol":"OLD-USD-PERP","asset_kind":"PERP","status":"INACTIVE"},{"symbol":"INVALID-USD-PERP","step_size":"malformed"}]}"### } });
     assert!(engine.store().loaded().markets);
     assert_eq!(engine.store().markets().len(), 2);

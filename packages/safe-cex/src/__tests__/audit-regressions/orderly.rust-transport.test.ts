@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { Transport as EngineHostTransport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
