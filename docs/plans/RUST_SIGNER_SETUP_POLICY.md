@@ -31,6 +31,13 @@ opaque identities are installed. Never trim secrets in a venue or recipe.
    separate guard before landing under the owner queue. Integrate actual
    intervening shared changes normally.
 
+Signing-key trim (2026-10-23):
+- `trimSigning` is the per-slot companion of `trimCredential`. It trims the
+  signing-key text once at trusted setup, before decoding, with the same
+  Unicode White_Space semantics.
+- Only family declarations set it. Bitunix declares both fields for both
+  slots, so REST and WS login share one trimmed material.
+
 Architecture gate: this extends the shared credential setup choke point.
 It is not a per-venue signer or normalization workaround. MEXC adoption still
 waits for shared RequestContext actual-release pacing; Phemex separately waits

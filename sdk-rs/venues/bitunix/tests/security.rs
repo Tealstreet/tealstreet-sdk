@@ -1,15 +1,14 @@
-use safe_cex_crypto::secrets::EraseSecrets;
 use safe_cex_venue_bitunix::Options;
 
+/// Construction shape: the venue receives opaque setup identities only. The
+/// exhaustive pattern fails to compile if a raw key or secret field returns.
 #[test]
-fn credential_options_debug_redacts_and_erasure_scrubs_owned_fields() {
-    let mut options = Options {
-        key: Some("audit-secret-sentinel".into()),
-        secret: Some("audit-secret-sentinel".into()),
-        ..Options::default()
-    };
-    assert!(!format!("{options:?}").contains("audit-secret-sentinel"));
-    options.erase_secrets();
-    assert!(options.key.as_ref().is_none_or(String::is_empty));
-    assert!(options.secret.as_ref().is_none_or(String::is_empty));
+fn options_carry_no_raw_credential_fields() {
+    let Options {
+        testnet: _,
+        public_data_only: _,
+        credentials,
+        read_credentials,
+    } = Options::default();
+    assert!(credentials.is_none() && read_credentials.is_none());
 }

@@ -1,5 +1,6 @@
 //! Payload shapes: bitunix.com/api-docs/futures/market/{trading_pairs,tickers,kline}.html
 //! Legacy depthop semantics: exchanges/bitunix/CLAUDE.md, captured 2026-07-15.
+mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, Response, SocketId};
 use safe_cex_venue_bitunix::{BitunixFutures, Options};
 const PAIRS: &str = r#"{"code":0,"data":[{"symbol":"BTCUSDT","base":"BTC","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"},{"symbol":"NOUSDT","base":"NO","quote":"USDT","symbolStatus":"OPEN","basePrecision":0,"quotePrecision":2,"maxLimitOrderVolume":"100","isApiSupported":"false"}]}"#;
@@ -18,10 +19,10 @@ fn response(e: &mut Engine<BitunixFutures>, r: safe_cex_engine::RequestId, body:
     );
 }
 fn ready() -> (Engine<BitunixFutures>, SocketId) {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         public_data_only: true,
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(0.0);
     let r = safe_cex_engine::test_support::prepared_actions(&mut e, 0.)
         .into_iter()
@@ -517,11 +518,11 @@ fn pending_http_actions(actions: &[Action], path: &str) -> safe_cex_engine::Http
         .expect(path)
 }
 fn public_engine(credentials: bool) -> Engine<BitunixFutures> {
-    let mut e = safe_cex_engine::test_support::seeded_engine(BitunixFutures::new(Options {
+    let mut e = support::engine(support::Options {
         key: credentials.then(|| "key".into()),
         secret: credentials.then(|| "secret".into()),
-        ..Options::default()
-    }));
+        ..support::Options::default()
+    });
     e.start(0.0);
     e
 }
