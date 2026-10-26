@@ -275,3 +275,146 @@ fn public_sessions_read_nothing() {
     );
     assert_eq!(outcome(&actions), Some(Ok("[]".into())));
 }
+
+/// dazzy3 nit 1: an unquoted exponent time is JS `String(3e3)` = "3000", so
+/// `parseInt` reads 3000, not 3; the row stays in the window.
+#[test]
+fn an_exponent_number_time_reads_as_js_string_does() {
+    let (mut e, _) = startup();
+    fetch(&mut e, None, Some(2000.0), Some(5000.0));
+    let first = page_request(&mut e, vec![]);
+    let page_rows = vec![
+        r#"{"positionId":"exp","mtime":3e3}"#.to_string(),
+        r#"{"positionId":"frac","mtime":2.5e3}"#.to_string(),
+        r#"{"positionId":"tiny","mtime":1e-7}"#.to_string(),
+    ];
+    let actions = respond(&mut e, &first, 200, &page(&page_rows));
+    let got = rows(
+        &outcome(&actions)
+            .expect("a short page ends the walk")
+            .unwrap(),
+    );
+    let ids: Vec<_> = got.iter().map(|r| r["positionId"].clone()).collect();
+    // `String(1e-7)` is "1e-7": parseInt reads 1, before the window.
+    assert_eq!(ids, ["exp", "frac"]);
+}
+
+fn incomplete(actions: &[Action]) -> bool {
+    actions.iter().any(|a| {
+        matches!(a, Action::Notice(Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+    })
+}
+
+/// dazzy3 nit 3a: the 100-page cap (TS `fetchBitunixHistoryPages`) ends the
+/// walk with every row and marks the result INCOMPLETE.
+#[test]
+fn the_page_cap_returns_every_row_and_marks_incomplete() {
+    let (mut e, _) = startup();
+    fetch(&mut e, None, None, None);
+    let mut actions = vec![];
+    for p in 0..100u64 {
+        let full: Vec<String> = (0..100u64)
+            .map(|i| row(&format!("p{p}-{i}"), 10_000_000 - p * 100 - i))
+            .collect();
+        actions = answer(&mut e, actions, 200, &page(&full));
+        if p < 99 {
+            assert!(outcome(&actions).is_none(), "page {p} continues");
+        }
+    }
+    assert_eq!(rows(&outcome(&actions).unwrap().unwrap()).len(), 10_000);
+    assert!(no_page(&actions), "the cap sends no 101st page");
+    assert!(incomplete(&actions), "the cap is marked INCOMPLETE");
+}
+
+/// dazzy3 nit 3e: a page adding nothing ends the walk as complete, not INCOMPLETE.
+#[test]
+fn a_page_adding_nothing_is_complete() {
+    let (mut e, _) = startup();
+    fetch(&mut e, None, None, None);
+    let full: Vec<String> = (0..100).map(|i| row(&format!("p{i}"), 1_000 + i)).collect();
+    let actions = answer(&mut e, vec![], 200, &page(&full));
+    let actions = answer(&mut e, actions, 200, &page(&full));
+    assert_eq!(rows(&outcome(&actions).unwrap().unwrap()).len(), 100);
+    assert!(!incomplete(&actions));
+}
+
+/// dazzy3 nit 3c: a from-only window drops older rows and ends at the start; a
+/// to-only window drops newer rows and keeps walking older ones.
+#[test]
+fn from_only_and_to_only_windows_filter_their_own_edge() {
+    let (mut e, _) = startup();
+    fetch(&mut e, None, Some(2_000.0), None);
+    let actions = answer(
+        &mut e,
+        vec![],
+        200,
+        &page(&[row("new", 9_000), row("edge", 2_000), row("old", 1_999)]),
+    );
+    let ids: Vec<_> = rows(&outcome(&actions).unwrap().unwrap())
+        .iter()
+        .map(|r| r["positionId"].clone())
+        .collect();
+    assert_eq!(ids, ["new", "edge"], "from is inclusive");
+
+    fetch(&mut e, None, None, Some(5_000.0));
+    let actions = answer(
+        &mut e,
+        vec![],
+        200,
+        &page(&[row("late", 5_001), row("edge", 5_000), row("old", 10)]),
+    );
+    let ids: Vec<_> = rows(&outcome(&actions).unwrap().unwrap())
+        .iter()
+        .map(|r| r["positionId"].clone())
+        .collect();
+    assert_eq!(ids, ["edge", "old"], "to is inclusive");
+}
+
+/// dazzy3 nit 3d: rows without a `positionId` are not deduped against each other.
+#[test]
+fn id_less_rows_are_not_deduped() {
+    let (mut e, _) = startup();
+    fetch(&mut e, None, None, None);
+    let actions = answer(
+        &mut e,
+        vec![],
+        200,
+        &page(&[
+            r#"{"mtime":"3000","realizedPNL":"1"}"#.to_string(),
+            r#"{"mtime":"2000","realizedPNL":"2"}"#.to_string(),
+        ]),
+    );
+    assert_eq!(rows(&outcome(&actions).unwrap().unwrap()).len(), 2);
+}
+
+/// dazzy3 nit 3b: a page delivered again after its command finished, or for a
+/// superseded fetch, is ignored; the live page still completes its own command.
+#[test]
+fn late_and_stale_page_deliveries_are_ignored() {
+    let (mut e, _) = startup();
+    fetch(&mut e, None, None, None);
+    let first = page_request(&mut e, vec![]);
+    let done = respond(&mut e, &first, 200, &page(&[row("a", 3_000)]));
+    assert_eq!(rows(&outcome(&done).unwrap().unwrap()).len(), 1);
+    let late = respond(&mut e, &first, 200, &page(&[row("late", 2_000)]));
+    assert!(
+        outcome(&late).is_none(),
+        "a late delivery completes nothing"
+    );
+    assert!(no_page(&late));
+
+    fetch(&mut e, None, None, None);
+    let live = page_request(&mut e, vec![]);
+    let stale = respond(&mut e, &first, 200, &page(&[row("stale", 2_000)]));
+    assert!(
+        outcome(&stale).is_none(),
+        "the finished page cannot answer a new fetch"
+    );
+    let actions = respond(&mut e, &live, 200, &page(&[row("b", 3_000)]));
+    let ids: Vec<_> = rows(&outcome(&actions).unwrap().unwrap())
+        .iter()
+        .map(|r| r["positionId"].clone())
+        .collect();
+    assert_eq!(ids, ["b"]);
+}
