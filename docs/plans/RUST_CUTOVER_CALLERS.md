@@ -2661,6 +2661,18 @@ metadata/settings or fill-completeness state. Existing TS internal snapshot
 seeding/gap repair is separate; the bounded NX/CLI/MCP audit established no
 direct default producer or new caller argument.
 
+### Hyperliquid mixed batch effects and accepted identities
+
+Rust retains every proven Resting/Filled order ID from a correctly correlated
+batch, even when another row refuses. The failure carries structured partial
+order IDs and Unknown for a mixed result; it never reports the whole batch as
+rejected or resends it. Accepted rows run the normal account reducer. A mixed
+cancel removes successful/terminal legs and restores only refused legs, so a
+cancelled order is never resurrected. All-refused batches retain Rejected with
+no accepted IDs. An accepted earlier physical call followed by a later refusal
+also retains its IDs and projects Unknown. This deliberately fixes the native early-error return; existing
+custody originals that described its dropped-ID behaviour now pin this contract.
+
 ### Hyperliquid signed cancellation scheduling (#1693)
 
 The existing perpetual `scheduleCancel(time?: number | null): Promise<void>`
