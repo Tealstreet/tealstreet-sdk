@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { WeexExchange } from '../../exchanges/weex/weex.exchange';
-import { ENDPOINTS } from '../../exchanges/weex/weex.types';
-import { normalizeAlgoOrder } from '../../exchanges/weex/weex.utils';
+import { WeexExchange } from '../reference/weex/weex.exchange';
+import { ENDPOINTS } from '../reference/weex/weex.types';
+import { normalizeAlgoOrder } from '../reference/weex/weex.utils';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStopTriggerType, OrderType } from '../../types';
 

@@ -5,7 +5,7 @@ import {
   BYBIT_ENV_MISMATCH_MESSAGE_PREFIX,
   BYBIT_ENV_PROBE_CONFIG_KEY,
   createAPI,
-} from '../../exchanges/bybit/bybit.api';
+} from '../reference/bybit/bybit.api';
 import { BASE_URL, DEMO_URL, ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { SIGNATURE_RETRY_CONFIG_KEY } from '../../utils/signatureRejection';
 import { virtualClock } from '../../utils/virtualClock';

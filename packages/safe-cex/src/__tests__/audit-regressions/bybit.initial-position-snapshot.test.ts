@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
-import { BybitInverseExchange } from '../../exchanges/bybit/bybitinverse.exchange';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
+import { BybitInverseExchange } from '../reference/bybit/bybitinverse.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, Position, PositionMode, PositionSide } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';

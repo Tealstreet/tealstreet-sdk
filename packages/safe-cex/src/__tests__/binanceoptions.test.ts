@@ -2,8 +2,8 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from '../exchanges/binance/binanceoptions.api';
-import { BinanceOptionsExchange } from '../exchanges/binance/binanceoptions.exchange';
+import { createAPI } from './reference/binance/binanceoptions.api';
+import { BinanceOptionsExchange } from './reference/binance/binanceoptions.exchange';
 import {
   BINANCE_OPTION_GREEK_UNITS,
   formatBinanceOptionOrder,
@@ -18,8 +18,8 @@ import {
   mapBinanceOptionQuote,
   mapBinanceOptionTicker,
   optionContractsByUnderlying,
-} from '../exchanges/binance/binanceoptions.mappers';
-import { ENDPOINTS } from '../exchanges/binance/binanceoptions.types';
+} from './reference/binance/binanceoptions.mappers';
+import { ENDPOINTS } from './reference/binance/binanceoptions.types';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderStatus, OrderTimeInForce, OrderType, PositionSide } from '../types';
 

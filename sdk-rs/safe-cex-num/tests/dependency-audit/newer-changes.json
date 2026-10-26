@@ -1,0 +1,218 @@
+{
+  "icu_locale_core": {
+    "before": {
+      "version": "2.3.0",
+      "features": [
+        "zerovec"
+      ]
+    },
+    "after": {
+      "version": "2.3.0",
+      "features": [
+        "alloc",
+        "zerovec"
+      ]
+    }
+  },
+  "icu_normalizer": {
+    "before": {
+      "version": "2.3.0",
+      "features": [
+        "compiled_data"
+      ]
+    },
+    "after": {
+      "version": "2.3.0",
+      "features": [
+        "compiled_data",
+        "utf16_iter",
+        "utf8_iter"
+      ]
+    }
+  },
+  "icu_provider": {
+    "before": {
+      "version": "2.3.1",
+      "features": [
+        "baked"
+      ]
+    },
+    "after": {
+      "version": "2.3.1",
+      "features": [
+        "alloc",
+        "baked"
+      ]
+    }
+  },
+  "litemap": {
+    "before": {
+      "version": "0.8.3",
+      "features": []
+    },
+    "after": {
+      "version": "0.8.3",
+      "features": [
+        "alloc"
+      ]
+    }
+  },
+  "potential_utf": {
+    "before": {
+      "version": "0.1.6",
+      "features": [
+        "zerovec"
+      ]
+    },
+    "after": {
+      "version": "0.1.6",
+      "features": [
+        "alloc",
+        "writeable",
+        "zerovec"
+      ]
+    }
+  },
+  "serde": {
+    "before": {
+      "version": "1.0.229",
+      "features": [
+        "default",
+        "derive",
+        "serde_derive",
+        "std"
+      ]
+    },
+    "after": {
+      "version": "1.0.229",
+      "features": [
+        "alloc",
+        "default",
+        "derive",
+        "serde_derive",
+        "std"
+      ]
+    }
+  },
+  "smallvec": {
+    "before": {
+      "version": "1.16.3",
+      "features": [
+        "const_generics"
+      ]
+    },
+    "after": {
+      "version": "1.16.3",
+      "features": [
+        "const_generics",
+        "const_new",
+        "union"
+      ]
+    }
+  },
+  "stable_deref_trait": {
+    "before": {
+      "version": "1.2.1",
+      "features": []
+    },
+    "after": {
+      "version": "1.2.1",
+      "features": [
+        "alloc"
+      ]
+    }
+  },
+  "tinystr": {
+    "before": {
+      "version": "0.8.4",
+      "features": [
+        "zerovec"
+      ]
+    },
+    "after": {
+      "version": "0.8.4",
+      "features": [
+        "alloc",
+        "zerovec"
+      ]
+    }
+  },
+  "writeable": {
+    "before": {
+      "version": "0.6.4",
+      "features": []
+    },
+    "after": {
+      "version": "0.6.4",
+      "features": [
+        "alloc"
+      ]
+    }
+  },
+  "yoke": {
+    "before": {
+      "version": "0.8.3",
+      "features": [
+        "derive",
+        "zerofrom"
+      ]
+    },
+    "after": {
+      "version": "0.8.3",
+      "features": [
+        "alloc",
+        "derive",
+        "zerofrom"
+      ]
+    }
+  },
+  "zerofrom": {
+    "before": {
+      "version": "0.1.8",
+      "features": [
+        "derive"
+      ]
+    },
+    "after": {
+      "version": "0.1.8",
+      "features": [
+        "alloc",
+        "derive"
+      ]
+    }
+  },
+  "zerotrie": {
+    "before": {
+      "version": "0.2.5",
+      "features": [
+        "yoke",
+        "zerofrom"
+      ]
+    },
+    "after": {
+      "version": "0.2.5",
+      "features": [
+        "alloc",
+        "yoke",
+        "zerofrom"
+      ]
+    }
+  },
+  "zerovec": {
+    "before": {
+      "version": "0.11.8",
+      "features": [
+        "derive",
+        "yoke"
+      ]
+    },
+    "after": {
+      "version": "0.11.8",
+      "features": [
+        "alloc",
+        "derive",
+        "yoke"
+      ]
+    }
+  }
+}

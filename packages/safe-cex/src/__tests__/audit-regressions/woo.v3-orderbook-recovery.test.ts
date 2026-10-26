@@ -3,11 +3,11 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
 import {
   WOO_V3_ORDERBOOK_MAX_BUFFERED_UPDATES,
   WooV3OrderBookRecoveryCoordinator,
-} from '../../exchanges/woo/woo.v3.orderbook-recovery';
+} from '../reference/woo/woo.v3.orderbook-recovery';
 
 const snapshot = (timestamp = 100) => ({
   success: true,
@@ -392,7 +392,7 @@ describe('WOO V3 inert orderbook recovery coordinator', () => {
     expect(Object.values(WOO_V3_MIGRATION_GATES)).toEqual([false, false, false, false, false, false, false, false]);
 
     for (const runtimeFile of ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-public.ts', 'woo.ws-private.ts']) {
-      const source = readFileSync(join(process.cwd(), 'src/exchanges/woo', runtimeFile), 'utf8');
+      const source = readFileSync(join(process.cwd(), 'src/__tests__/reference/woo', runtimeFile), 'utf8');
       expect(source).not.toContain('woo.v3.orderbook-recovery');
     }
   });

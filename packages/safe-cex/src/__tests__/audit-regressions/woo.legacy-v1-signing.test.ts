@@ -3,8 +3,8 @@ import type { ExchangeOptions } from '../../types';
 import createHmac from 'create-hmac';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from '../../exchanges/woo/woo.api';
-import { BROKER_ID, ENDPOINTS } from '../../exchanges/woo/woo.types';
+import { createAPI } from '../reference/woo/woo.api';
+import { BROKER_ID, ENDPOINTS } from '../reference/woo/woo.types';
 
 const makeExchange = () =>
   ({

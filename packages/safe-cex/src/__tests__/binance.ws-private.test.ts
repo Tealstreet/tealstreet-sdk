@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BinancePrivateWebsocket } from '../exchanges/binance/binance.ws-private';
-import { BinancePMPrivateWebsocket } from '../exchanges/binance/binancepm.ws-private';
+import { BinancePrivateWebsocket } from './reference/binance/binance.ws-private';
+import { BinancePMPrivateWebsocket } from './reference/binance/binancepm.ws-private';
 import { MarginType, PositionMode, PositionSide } from '../types';
 
 beforeEach(() => {

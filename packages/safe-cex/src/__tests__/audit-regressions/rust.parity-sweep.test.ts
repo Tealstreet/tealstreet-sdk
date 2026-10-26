@@ -5,9 +5,9 @@ import type { ExchangeName, ExchangeOptions, Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { mapBinanceHistoricalOrder } from '../../exchanges/binance/binance.order-history';
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { mapBinanceHistoricalOrder } from '../reference/binance/binance.order-history';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';

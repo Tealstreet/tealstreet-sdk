@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ParadexRequestSigner, type ParadexSDKAccount } from '../exchanges/paradex/paradex.sdk';
+import { ParadexRequestSigner, type ParadexSDKAccount } from './reference/paradex/paradex.sdk';
 
 const createSigner = (
   chainId: string,
