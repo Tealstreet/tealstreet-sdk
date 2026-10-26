@@ -116,3 +116,93 @@ fn retired_login_retry_cannot_sign_on_a_replacement_socket() {
     e.handle(2100.0, Event::TimerFired { timer });
     assert_eq!(login_sends(&e.drain_actions().collect::<Vec<_>>()), 0);
 }
+/// Plan control 5: a login that cannot draw signing entropy sends no frame and
+/// raises no venue STREAM_UNAVAILABLE; the engine's socket path closes it, and
+/// the reconnect re-signs once entropy returns.
+#[test]
+fn an_entropy_failure_sends_no_login_and_the_reconnect_re_signs() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let unavailable = Arc::new(AtomicBool::new(false));
+    let toggle = unavailable.clone();
+    let mut e = support::engine(support::Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        ..Default::default()
+    });
+    e.set_signing_entropy(Box::new(move |bytes| {
+        if toggle.load(Ordering::SeqCst) {
+            Err("controlled signing unavailable".into())
+        } else {
+            bytes.fill(7);
+            Ok(())
+        }
+    }))
+    .unwrap();
+    let (mut e, socket) = startup_with_engine(e);
+    unavailable.store(true, Ordering::SeqCst);
+    e.handle(100.0, Event::WsClosed { socket, code: 1006 });
+    let (mut now, mut connects, mut logins_without, mut logins_with) = (100.0, 0, 0, 0);
+    let mut stream_unavailable = false;
+    let mut timers: Vec<(TimerId, f64)> = Vec::new();
+    for _ in 0..200 {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+        for action in &actions {
+            match action {
+                Action::WsConnect { socket, url, .. } if url.contains("/private/") => {
+                    connects += 1;
+                    // The second private connect proves the engine closed the
+                    // unsigned session itself; entropy returns before it opens.
+                    if connects == 2 {
+                        unavailable.store(false, Ordering::SeqCst);
+                    }
+                    e.handle(now, Event::WsOpened { socket: *socket });
+                }
+                Action::WsClose { socket } => {
+                    e.handle(
+                        now,
+                        Event::WsClosed {
+                            socket: *socket,
+                            code: 1006,
+                        },
+                    );
+                }
+                Action::SetTimer { timer, at_ms } => timers.push((*timer, *at_ms)),
+                Action::ClearTimer { timer } => timers.retain(|(t, _)| t != timer),
+                Action::Notice(Notice::Event(event)) if event.code == code::STREAM_UNAVAILABLE => {
+                    stream_unavailable = true
+                }
+                _ => {}
+            }
+        }
+        let sends = login_sends(&actions);
+        if unavailable.load(Ordering::SeqCst) {
+            logins_without += sends;
+        } else {
+            logins_with += sends;
+        }
+        if logins_with > 0 {
+            break;
+        }
+        if actions.is_empty() {
+            timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let Some((timer, at)) = (!timers.is_empty()).then(|| timers.remove(0)) else {
+                break;
+            };
+            now = now.max(at);
+            e.handle(now, Event::TimerFired { timer });
+        }
+    }
+    assert!(
+        connects >= 2,
+        "the engine closed the unsigned session and reconnected"
+    );
+    assert_eq!(logins_without, 0, "nothing signed without entropy");
+    assert!(!stream_unavailable, "no venue STREAM_UNAVAILABLE");
+    assert_eq!(
+        logins_with, 1,
+        "the reconnect re-signs once entropy returns"
+    );
+}

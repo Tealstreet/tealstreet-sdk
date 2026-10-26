@@ -399,3 +399,62 @@ sources/logs/receipts. No pattern process kills; stop only recorded owned PIDs.
 Scoped tests/strict checks, one freeze push and one PR run, then READY to8x5tm1
 and exact-tree GO before guarded head-matched landing. This document changes no
 runtime, test, Cargo, inventory, flags, transport, infra, resources or deployment.
+
+## SDK operation foundation checkpoint
+
+The shared `@tealstreet/safe-cex-wasm/hosted-operations` module owns one v2
+structured-operation provider/peer channel. Trusted pre-start negotiation supplies
+immutable capabilities and separate installed bindings for each slot. There is
+no Primary fallback. Bindings contain account, network, stable subject, public
+credential, peer-confirmed generation and closed family metadata (`null` for
+Kraken). The origin's engine owner remains local. Setup remains a separate arm;
+this business channel rejects Setup ownership and grants no joined-work evidence.
+
+Codecs own recipe ids, exact descriptor shape, graph construction and result
+verification. The shared layer supports multiple operations and ordered results;
+a mock eleven-value control pins the future Paradex batch boundary, without
+claiming Stark implementation. The peer receives a live clock/check hook and
+rechecks raw deadlines and its own revision after async work. The origin does not
+invent or export the engine revision: per fe7lgm's API disposition, the existing
+prepared_revision check and final Claim remain the authority for Stale/re-sign.
+The business envelope carries the original task, complete receipt, slot, role,
+binding and descriptor. The effective deadline is capped at the original task
+bound and the 5s capture ceiling; it never changes while an invocation is pending.
+
+Both sides reject unknown fields, unsafe ids, illegal owner/role/slot pairs,
+noncanonical nonce strings and changed receipt presence. UTF-8 JSON is bounded
+at 1 MiB. The decoder rejects duplicate keys before accepting a request. Peer
+state is bounded to 64 decisions and active jobs per authenticated account,
+retaining tombstones through the maximum of the original deadline and the
+codec freshness horizon, without evicting live jobs.
+Replay keys canonicalize receipt field presence, so key order or a fresh outer
+id cannot authorize a second signing. Validation refusals return only the closed
+invalidRequest code; post-provider refusals return refused, without signed or
+partial output. Disposal/abort never constitutes a joined-resource acknowledgement.
+
+Kraken uses the single native HTTP preimage builder for recipes and pure work.
+The advisory work context now retains the exact wire path; /derivatives stripping
+happens only inside that builder. Native HTTP bytes and MAC preimages are
+unchanged. This lets the peer enforce the complete native method/path allowlist
+without inferring a wire target from a stripped signing path. The executor owns
+its trusted LocalSigner installation and refs. It accepts the original receipt,
+never reserves or constructs a Claim, and returns the native three-value graph.
+Origin and peer compare Present to the installed public credential and verify
+the public SHA256 intermediate and widths; HMAC verification still relies on
+the venue. No arbitrary digest or fallback algorithm is accepted.
+
+The nondefault hosted-operation-proof build drives actual EngineHost and WASM
+Engine<fixture> using the real Kraken recipe, with a separately installed actual
+WASM peer. It covers genuine nonces above 2^53, final prepare/bind/Claim, reversed
+Claims with repair, timeout and task/resource cleanup. Exact 2^53+1, +3 and MAX
+remain pure codec/MAC vectors; they are not claimed as near-limit reservations.
+This checkpoint changes no construction admission, native private callers, NX
+routing, live credential import or activation. NX consumes this module only
+after the shared PR's reviewer/CI/size/auditor gates.
+
+The Kraken family intentionally ships the pure codec and trusted signing-only
+executor exports. Their presence grants no negotiated peer capability and does
+not connect a live Kraken account to the hosted route. Other family modules do
+not export them; their declarations live in `kraken-engine.d.mts`. A canceled or
+expired origin wait releases its correlation slot even if transport ignores abort;
+late settlement grants no result or joined-resource evidence.

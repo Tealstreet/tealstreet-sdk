@@ -60,6 +60,19 @@ function check(text) {
 
 test('PR replay is affected-only and independent; CPU stays on calibrated landing runners', () => check(source));
 
+test('the Kraken hosted proof runs after the sealed family upload on selected and full builds', () => {
+  const families = job(source, 'families');
+  const proof = families.indexOf('name: Prove the shared operation channel through actual Kraken WASM engines');
+  assert(proof > families.indexOf('name: Retain sealed same-run family build'));
+  const step = families.slice(proof);
+  assert.match(step, /if: matrix.family == 'kraken'/);
+  assert.match(step, /CARGO_BUILD_JOBS: 4/);
+  assert.match(step, /cargo build --locked.*--features hosted-operation-proof/);
+  assert.match(step, /RUNNER_TEMP\/hosted-operation-proof/);
+  assert.match(step, /node --test --test-timeout=10000.*hosted-operation\.integration\.mjs/);
+  assert.doesNotMatch(step, /continue-on-error|github\.event_name|pkg\/web/);
+});
+
 test('correctness commands cannot receive measurement flags or wait for CPU', () => {
   for (const [before, after] of [
     ["RUST_REPLAY_CORRECTNESS_ONLY: 'true'", "RUST_REPLAY_CORRECTNESS_ONLY: 'false'"],
