@@ -24,6 +24,47 @@ enum ManagedRecipe {
         Box<dyn crate::SignStep>,
         Option<std::sync::Arc<crate::nonce::ClaimAuthority>>,
     ),
+    /// A signed recipe with the explicit Selection that chose its credential.
+    #[cfg(feature = "sign-meta")]
+    Selected(
+        Box<dyn crate::SignStep>,
+        crate::credential_selection::Selection,
+    ),
+}
+
+/// The one role source for a managed signing task, checked against its
+/// Context before any ID: a nonce claim's own Selection, or an explicit one.
+#[cfg(feature = "sign-meta")]
+fn sign_role(
+    claim: Option<&crate::nonce::ClaimAuthority>,
+    explicit: Option<crate::credential_selection::Selection>,
+    context: &Context,
+) -> Result<Option<crate::credential_selection::CredentialRole>, Error> {
+    use crate::credential_selection::CredentialRole;
+    let selection = match (claim, explicit) {
+        (Some(_), Some(_)) => return Err(Error::Invalid),
+        #[cfg(feature = "dispatch-nonce")]
+        (Some(claim), None) => claim.selection,
+        // Without dispatch-nonce a claimed recipe was already refused.
+        #[cfg(not(feature = "dispatch-nonce"))]
+        (Some(_), None) => return Err(Error::Invalid),
+        (None, Some(selection)) => selection,
+        (None, None) => return Ok(None),
+    };
+    let role = selection.role();
+    let session = matches!(context.owner(), Owner::Session { .. });
+    let fits = match role {
+        CredentialRole::SessionAuth => session,
+        _ if session => false,
+        CredentialRole::Mutation => context.operation() == Operation::Mutation,
+        CredentialRole::Read { .. } | CredentialRole::PrimaryRead { .. } => {
+            context.operation() == Operation::Read
+        }
+    };
+    if !fits || context.credential().map(|c| c.slot) != Some(selection.slot()) {
+        return Err(Error::Invalid);
+    }
+    Ok(Some(role))
 }
 
 #[cfg(feature = "dispatch-nonce")]
@@ -45,6 +86,9 @@ pub(super) struct Managed {
     #[cfg(feature = "http-mutation-barriers")]
     group: Option<Box<mutation_group::Member>>,
     waiting_route: Option<Prepared>,
+    /// The signing role captured at admission; see `Engine::sign_meta`.
+    #[cfg(feature = "sign-meta")]
+    role: Option<crate::credential_selection::CredentialRole>,
 }
 
 /// A Session-bound packet's generation and the revision its header carries.
@@ -475,6 +519,32 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    /// As `request_signed_managed`, recording the exact credential role of
+    /// `selection` for `Engine::sign_meta`.
+    #[cfg(feature = "sign-meta")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn request_selected_managed(
+        &mut self,
+        context: Context,
+        selection: &crate::credential_selection::Selection,
+        bearer: Option<&Session>,
+        method: Method,
+        url: String,
+        body: Option<String>,
+        step: Box<dyn crate::SignStep>,
+        pending: P,
+    ) -> Result<RequestId, (P, Error)> {
+        self.queue_managed(
+            context,
+            bearer,
+            method,
+            url,
+            body,
+            ManagedRecipe::Selected(step, *selection),
+            pending,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn request_selected_read_managed(
         &mut self,
@@ -645,6 +715,8 @@ impl<P> Cx<'_, P> {
         pending: P,
         #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
+        #[cfg(feature = "sign-meta")]
+        let mut explicit = None;
         let (step, public_headers, selected_claim) = match recipe {
             ManagedRecipe::Unsigned(headers) => (
                 None,
@@ -654,6 +726,11 @@ impl<P> Cx<'_, P> {
             ManagedRecipe::Signed(step) => (Some(step), &[][..], None),
             #[cfg(feature = "dispatch-nonce")]
             ManagedRecipe::SelectedRead(step, claim) => (Some(step), &[][..], Some(claim)),
+            #[cfg(feature = "sign-meta")]
+            ManagedRecipe::Selected(step, selection) => {
+                explicit = Some(selection);
+                (Some(step), &[][..], None)
+            }
         };
         if let Err(error) = self
             .io
@@ -710,6 +787,11 @@ impl<P> Cx<'_, P> {
                 return Err((pending, Error::Invalid));
             }
             nonce_claim
+        };
+        #[cfg(feature = "sign-meta")]
+        let role = match sign_role(nonce_claim.as_deref(), explicit, &context) {
+            Ok(role) => role,
+            Err(error) => return Err((pending, error)),
         };
         if context.credential().is_some() != step.is_some() {
             return Err((pending, Error::Invalid));
@@ -890,6 +972,8 @@ impl<P> Cx<'_, P> {
                 #[cfg(feature = "http-mutation-barriers")]
                 group,
                 waiting_route: None,
+                #[cfg(feature = "sign-meta")]
+                role,
             },
         );
         #[cfg(feature = "session-bearer")]
@@ -1484,6 +1568,38 @@ impl<V: Venue> Engine<V> {
                 at_ms: managed.lifecycle.deadline(),
             });
         }
+    }
+
+    /// Metadata of the CURRENT prepared signing task of a managed request whose
+    /// role was captured at admission. Descriptive only: it grants nothing.
+    #[cfg(feature = "sign-meta")]
+    pub fn sign_meta(&self, task: RequestId) -> Option<crate::sign_meta::SignMeta> {
+        use crate::sign_meta::{SignMeta, SignOwner};
+        let (request, deadline_ms) = self.io.core.signing.prepared_task(task)?;
+        let managed = self.io.core.managed_http.get(&request)?;
+        if managed.signing_attempt != Some(task) {
+            return None;
+        }
+        let role = managed.role?;
+        let context = managed.lifecycle.context();
+        let slot = context.credential()?.slot;
+        let owner = match context.owner() {
+            Owner::Session { generation } => SignOwner::Session { generation },
+            _ => {
+                let attempt = managed.lifecycle.attempt();
+                SignOwner::Managed {
+                    request: attempt.request,
+                    generation: attempt.generation,
+                }
+            }
+        };
+        Some(SignMeta {
+            task,
+            owner,
+            deadline_ms,
+            slot,
+            role,
+        })
     }
 
     pub(super) fn managed_sign_completed(
@@ -2714,6 +2830,8 @@ mod tests {
     include!("request_context_serial_session_tests.rs");
     #[cfg(feature = "condition-waits")]
     include!("request_context_condition_wait_tests.rs");
+    #[cfg(feature = "sign-meta")]
+    include!("sign_meta_tests.rs");
     #[cfg(feature = "repair-mutations")]
     include!("repair_tests.rs");
 
