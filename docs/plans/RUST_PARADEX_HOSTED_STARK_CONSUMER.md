@@ -29,7 +29,13 @@ signs only what it can rebuild from a closed descriptor.
 2. SDK: the Paradex origin moves its delegated path from `payload_request(hash)`
    to managed `Action::Sign` with StarkDigest operations and the descriptor
    (sign-meta gives owner/slot/role). The legacy route and Rust's delegated
-   `orders.len() > 1` refusal are removed in the same cutover; no dual route.
+   `orders.len() > 1` refusal (trading.rs, "payloadSigner ... signs one order
+   per request") are removed in the same cutover. That deliberately changes
+   capability: in Rust the delegated route IS the mode-2 device route, and no
+   Rust payloadSigner path remains to keep the old limit. The batch capability
+   exists only when the peer negotiates `paradex.orderBatch/1`. The legacy
+   TypeScript `payloadSigner` in tealstreet-next safe-cex is untouched and keeps
+   its one-order limit. No dual route.
 3. tealstreet-next device consumer, after Copybara imports step 1 and the shared
    `@tealstreet/safe-cex-wasm/hosted-signing` wire module (codex-9czdjh) lands.
    `buildInitPayload` key exclusion and the public-subkey descriptor ship in this
@@ -106,9 +112,12 @@ asserted rules.
   attached child. clientId is 1..=64 chars with no CR/LF, unique within a
   command (native `validate_caller_ids`).
 - Batch item: exactly native `native_batch` eligibility. That means orderType
-  LIMIT, triggerPrice null, no attached TP/SL legs, not close, instruction not
-  from FOK, and a top-level order (stp and clientId non-null, unique across
-  items). Reduce-only is allowed: flags is `["REDUCE_ONLY"]` or null.
+  LIMIT, triggerPrice null, no attached TP/SL legs, not close, and a top-level
+  order (stp and clientId non-null, unique across items). Reduce-only is
+  allowed: flags is `["REDUCE_ONLY"]` or null. On the wire, instruction is
+  GTC|IOC|POST_ONLY. Native excludes a FOK time-in-force at the origin, but FOK
+  and IOC both emit "IOC", so the peer validates the wire value and the origin
+  applies `native_batch` itself.
 - Modify: id is non-empty and renders the one encoded path component; price is
   always present (native signs `0` for MARKET); triggerPrice follows the
   native modify builder.
