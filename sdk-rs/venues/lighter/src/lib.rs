@@ -803,6 +803,11 @@ impl Venue for Lighter {
     fn guard_order_mutations(&self) -> bool {
         true
     }
+    // An unproven (Unknown) placement may have rested; the engine fences its
+    // symbol until a complete orders snapshot reconciles it.
+    fn guard_pending_placements(&self) -> bool {
+        true
+    }
 
     type Pending = Pending;
     fn on_http_preflight_ready(

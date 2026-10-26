@@ -9936,3 +9936,11 @@ rest without a position. What callers see:
 - Cancelling or amending a leg of a group that is still being confirmed is
   refused NotSent until the placement command finishes.
 
+### Lighter: an Unknown placement fences its symbol
+
+Lighter now opts into `guard_pending_placements`. After a placement whose
+outcome is Unknown (a lost or 5xx `sendTx`), `CancelSymbolOrders` on that
+symbol fails with "Placement outcome is uncertain; reconcile before
+cancel-all" and sends nothing, until the next complete orders snapshot
+reconciles. A further placement on the symbol is still admitted until the
+engine's order-lock acquire also consults the uncertain scope for placements.

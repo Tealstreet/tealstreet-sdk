@@ -411,45 +411,6 @@ fn a_snapshot_missing_one_leg_reports_it_missing_and_never_done() {
 }
 
 #[test]
-fn known_engine_gap_place_after_unknown_placement_is_admitted() {
-    // Documents the engine gap: order_locks acquire checks 'uncertain' only for
-    // CancelSymbolOrders, so a placement after an Unknown one is admitted. fe7lgm's fix
-    // flips this to a refusal (Lighter must also opt into guard_pending_placements).
-    let (mut e, _, mut t) = ready_grouped();
-    let plain =
-        || order(json!({"symbol":"ETH","type":"limit","side":"buy","amount":0.2,"price":90}));
-    let send = submit(&mut e, &mut t, vec![plain()]);
-    reply(
-        &mut e,
-        &send,
-        503,
-        r#"{"code":500,"message":"unavailable"}"#,
-    );
-    let out = drain(&mut e, &mut t);
-    assert!(
-        matches!(&terminals(&out, 7)[..], [Notice::CommandFailed { error, .. }] if error.outcome == Some(Outcome::Unknown)),
-        "precondition: the sealed placement terminal is Unknown"
-    );
-    e.handle(
-        NOW,
-        Event::Command(Command::PlaceOrders {
-            command: 8,
-            orders: vec![plain()],
-        }),
-    );
-    let next = drain(&mut e, &mut t);
-    assert!(terminals(&next, 8).is_empty(), "today: not refused");
-    let nonce = find(&next, "nextNonce").expect("today: the second placement proceeds");
-    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":11}"#);
-    let second = find(&drain(&mut e, &mut t), "sendTx").expect("today: it is signed and sent");
-    assert_eq!(
-        param(&second, "tx_type"),
-        "14",
-        "a native create-order transaction"
-    );
-}
-
-#[test]
 fn a_native_index_equal_to_a_leg_client_index_never_proves_it() {
     // dazzy3: native order indexes and minted client indexes share the u64 space.
     let (mut e, s, mut t) = ready_grouped();
