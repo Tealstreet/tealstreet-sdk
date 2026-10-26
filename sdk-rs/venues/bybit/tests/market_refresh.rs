@@ -484,6 +484,27 @@ mod envelope_rate_limits {
         error
     }
 
+    /// An HTTP status is never a venue code: a non-JSON 403 (Bybit's IP ban)
+    /// fails the refresh rate-limited with no `venue_code`.
+    #[test]
+    fn a_non_json_refresh_failure_carries_no_venue_code() {
+        let mut h = Harness::new();
+        refresh(&mut h, 70);
+        // The prelaunch page stays pending; the trading page fails.
+        let _prelaunch = h.take("status=PreLaunch");
+        let request = h.take("instruments-info");
+        h.event(Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 403,
+                headers: "",
+                body: "<html>403 Forbidden</html>",
+            },
+        });
+        let error = limited_once(&h, 70);
+        assert_eq!(error.venue_code, None, "HTTP 403 is not a Bybit retCode");
+    }
+
     #[test]
     fn refresh_envelope_limits_preserve_catalogue_and_wait_for_the_later_hint() {
         for with_list in [false, true] {
