@@ -78,10 +78,6 @@
     "6c77d608b079104cc5338cbabb01a7c4a0e24f112ef91ea5483c423808d92bad": 1,
     "c873db6fc77d04d3eab3b771caeb9d71cef58a88fd09870a32b33bf5246e69fa": 1
   },
-  "venues/bitrue/src/account.rs": {
-    "adebf191cda07505ad7d8529e3d1e50353f7a3251988cfcd01ba53d93563b444": 1,
-    "4f19e9de3124938051c48304f8476b059f9928dd6f790df05a27c9f821512d93": 1
-  },
   "venues/bitrue/src/lib.rs": {
     "34b6cbe60cecfea179e31290b2eb916f11a7555598d45b795b4633e6afc768fc": 1
   },

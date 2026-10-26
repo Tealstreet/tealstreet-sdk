@@ -10,7 +10,7 @@ Base: `feat/rust-rewrite` `49a5b54f362`. Area plan: [RUST_BITRUE_REQUEST_CONTEXT
 | --- | --- | ---: | --- |
 | request | `lib.rs` | 5 | The one legacy HTTP funnel `issue()` → `cx.request` + `selection.sign`, plus `pending.request` field matches |
 | request | `trading.rs` | 8 | `cx.fail` on a dequeue re-plan, terminal `cx.fail`/`cx.done`, plus 5 `matches!(request.step.effect, ..)` matches |
-| request | `account.rs` | 5 | Client-order lookup `cx.done`, the FetchLeverage join `cx.done`/`cx.fail`, plus 2 `matches!(request, ..)` matches |
+| request | `account.rs` | 5 | Client-order lookup `cx.done`, the FetchLeverage join `cx.done`/`cx.fail`, plus 2 listen-key `matches!(request, ..)` checks (B1 rebinds them) |
 | signing | `sign.rs` | 4 | The test-only local `signature()` HMAC and its vector test |
 | signing | `secondary_tests.rs` | 5 | An oracle over the legacy funnel's method-inferred key choice |
 | signing | `sign/dispatch.rs` | 2 | The dispatch sign step itself; stays, as for OKX and BingX |
@@ -39,7 +39,7 @@ Splitting keeps each size and review scoped: B1 links nothing new; B2 links `ser
 - **Account reads** (snapshot, orders, positions, balance): Background `SelectedRead` with `ReadRole::Read`, so the read key is used when one is configured, by role, never by method.
 - **Native retries kept.**
   - A Network or Timeout failure on a GET retries up to 3 times under the same root through `SelectedRead::retry(ReadFailure)`. The engine bounds it by the root deadline; the 3-attempt count stays the venue's native counter.
-  - Markets keeps no retry (its startup retry stays).
+  - Markets keeps native's 3 GET retries too, plus its startup retry.
 - **-1022.** One re-sign through the same `retry`, only when `codes::resend` proves it from a delivered response (the classifier's status gate, area plan rows 8/22). Never on text or an arbitrary status.
 - **Listen key.**
   - POST and keepalive PUT become Session mutations (`SessionAuth`), as the area plan requires.
@@ -48,11 +48,14 @@ Splitting keeps each size and review scoped: B1 links nothing new; B2 links `ser
     - A late response to a finished earlier POST is refused; no key is adopted from it.
     - The 3-count stays the venue counter, and a 4th is never sent.
   - The keepalive PUT keeps native's retry behaviour exactly.
+  - The Session is opened with `repeat_safe: true`, which disables the engine's one-write guard. Otherwise a lost create leaves an unresolved write that blocks native's retry. A listen key is harmless to re-create, and the venue's sequencing (one create at a time) holds the never-two rule (fe7lgm, accepted).
+  - A -1022 re-sign of the create reuses the same Session generation, like the Network or Timeout retries.
 - **Client-order lookup.** The command's entry Read Context is retained with its query. It completes `done_context` with `{found:true, order}` or `{found:false, definitive:false}`, unchanged, from the store or the Orders read.
 - **FetchLeverage join** (D2, CLEAR: no group core is needed).
   - The one physical snapshot GET is a Background `SelectedRead` with no command owner, and it publishes to the Store. It is never one owner's Context whose DATA the siblings consume, which would be shared response authority.
   - Each joined command keeps its own entry Read Context in `leverage_queries`. It completes `done_context` from the published Store state, or `fail_context` if that read fails or is refused.
   - An expired owner refuses only itself; each owner carries its own deadline and generation, by the retention the WS FIFO reads use (#1830).
+  - The engine refuses any completion inside another root's delivery. So the snapshot records the result for the owners it served, and a zero-delay venue timer completes them. That one-tick deferral is caller-visible timing only; the result values are unchanged (fe7lgm's D2 ruling).
 - **Delivery.** Each response validates its exact Context before Store effects (`validate_http_context` / read-root delivery, as Brackets does today).
 - **Native fact: keys sign the catalog even in public-data-only mode.** With a primary key configured, Markets is Primary-signed whether or not private data is enabled (fe7lgm, kept native).
 - **B1 interim: the census tail runs one tick later** (fe7lgm, accepted; deleted by B2/D4).
@@ -99,7 +102,7 @@ Splitting keeps each size and review scoped: B1 links nothing new; B2 links `ser
 
 ## Signing
 
-- The `sign::signature` vector moves to `tests/` as an independent oracle (the checker scans `src/` only). `secondary_tests.rs` is rewritten over managed selection: role-based (`Read` for account reads, `Mutation` for writes), never method-inferred.
+- The test-only `sign::signature` and its docs vector are deleted, not moved. `dispatch_signer_adoption.rs`'s independent HMAC vectors pin the dispatch recipe's bytes. `secondary_tests.rs` is rewritten over managed selection: role-based (`Read` for account reads, `Mutation` for writes), never method-inferred.
 - `sign.rs` keeps only `Request` (renamed off `request` with B1).
 
 ## Original controls (RED first, per phase)

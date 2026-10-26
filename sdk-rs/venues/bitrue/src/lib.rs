@@ -512,12 +512,16 @@ impl Bitrue {
         };
         let credential = selection.credential(identity.credential.clone());
         let create = matches!(pending.job, Job::Account(account::Request::Listen { .. }));
-        if (create && pending.attempts == 0) || self.account.session.is_none() {
+        // A fresh create opens the Session; its native retries and -1022
+        // re-sign stay operations of that same Session generation (D1).
+        let fresh = create && pending.attempts == 0 && !pending.signature_resent;
+        if fresh || self.account.session.is_none() {
             self.retire_session(cx);
             match cx.open_session(SessionPolicy {
                 credential: Some(credential.clone()),
                 // Bitrue listen keys expire 60 minutes after their last
-                // keepalive: an extra create or keepalive is harmless.
+                // keepalive, so an extra create is harmless. One-write guard
+                // off: a lost create would otherwise block native's retry.
                 repeat_safe: true,
                 private_egress: None,
             }) {

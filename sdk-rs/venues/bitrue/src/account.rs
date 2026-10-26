@@ -149,6 +149,13 @@ impl Request {
             _ => None,
         }
     }
+    /// A listen-key Session operation: its create or keepalive.
+    fn is_session(&self) -> bool {
+        matches!(self, Self::Listen { .. } | Self::Keepalive { .. })
+    }
+    fn is_create(&self) -> bool {
+        matches!(self, Self::Listen { .. })
+    }
     pub(crate) fn reset(&mut self) {
         match self {
             Self::Snapshot { data, .. } => *data = Snapshot::default(),
@@ -165,6 +172,15 @@ impl Request {
             _ => {}
         }
     }
+}
+/// A finished order read's tail: its census result for trading, the failure
+/// a census owner reports, and the read's queue bookkeeping.
+pub(crate) struct CensusTail {
+    symbol: String,
+    revision: u64,
+    ok: bool,
+    diagnostic: Option<(CommandId, String)>,
+    read: OrderRead,
 }
 /// One joined FetchLeverage owner and the result of the snapshot it joined.
 struct Served {
@@ -233,7 +249,7 @@ pub struct Account {
     /// A finished order read's tail, run by `census_timer` outside its
     /// delivery in native order: trading's census, then the read's queue
     /// bookkeeping (B1 interim: B2 runs the census as the job's own reads).
-    pub(crate) census_due: Vec<(String, u64, bool, OrderRead)>,
+    pub(crate) census_due: Vec<CensusTail>,
     census_timer: Option<TimerId>,
     progress_queue: VecDeque<String>,
     terminal: HashMap<String, OrderStatus>,
@@ -871,9 +887,8 @@ impl Bitrue {
         }
         if self.account.census_timer == Some(timer) {
             self.account.census_timer = None;
-            for (symbol, revision, ok, read) in std::mem::take(&mut self.account.census_due) {
-                self.trade_census(cx, &symbol, revision, ok);
-                self.order_finished(cx, symbol, read);
+            for tail in std::mem::take(&mut self.account.census_due) {
+                self.finish_census(cx, tail);
             }
             return true;
         }
@@ -1692,23 +1707,22 @@ impl Bitrue {
             self.account.leverage_timer = Some(cx.set_timer(0.0));
         }
     }
-    fn defer_census(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        symbol: String,
-        revision: u64,
-        ok: bool,
-        read: OrderRead,
-    ) {
+    fn defer_census(&mut self, cx: &mut Cx<'_, Pending>, tail: CensusTail) {
         // Only a pending protective census completes a command from here.
         if !self.census_pending() {
-            self.trade_census(cx, &symbol, revision, ok);
-            return self.order_finished(cx, symbol, read);
+            return self.finish_census(cx, tail);
         }
-        self.account.census_due.push((symbol, revision, ok, read));
+        self.account.census_due.push(tail);
         if self.account.census_timer.is_none() {
             self.account.census_timer = Some(cx.set_timer(0.0));
         }
+    }
+    fn finish_census(&mut self, cx: &mut Cx<'_, Pending>, tail: CensusTail) {
+        if let Some((command, message)) = tail.diagnostic {
+            cx.command_error(command, message);
+        }
+        self.trade_census(cx, &tail.symbol, tail.revision, tail.ok);
+        self.order_finished(cx, tail.symbol, tail.read);
     }
     /// Completes each served owner outside any delivery. An owner the engine
     /// already sealed (expired) refuses its completion; that is a no-op.
@@ -1817,11 +1831,11 @@ impl Bitrue {
         request: Request,
         response: Response<'_>,
     ) {
-        let valid = if matches!(request, Request::Listen { .. } | Request::Keepalive { .. }) {
+        let valid = if request.is_session() {
             (200..300).contains(&response.status)
                 && serde_json::from_str::<Listen<'_>>(response.body).is_ok_and(|p| {
                     p.success()
-                        || (matches!(request, Request::Listen { .. })
+                        || (request.is_create()
                             && p.code.is_empty()
                             && (!p.listen_key.is_empty()
                                 || p.data.as_ref().is_some_and(|d| !d.listen_key.is_empty())))
@@ -2160,7 +2174,16 @@ impl Bitrue {
                         "incomplete open-order snapshot; retaining previous state".into(),
                     )
                 };
-                self.defer_census(cx, symbol, revision, census, read);
+                self.defer_census(
+                    cx,
+                    CensusTail {
+                        symbol,
+                        revision,
+                        ok: census,
+                        diagnostic: None,
+                        read,
+                    },
+                );
             }
         }
     }
@@ -2245,15 +2268,24 @@ impl Bitrue {
                 } else {
                     // A census owned by a placement fails that command, which reports it;
                     // otherwise order_finished logs the failure once per change.
-                    if let Some(command) = self.census_owner(&symbol, revision) {
-                        cx.command_error(command, message);
+                    let diagnostic = self.census_owner(&symbol, revision).map(|command| {
                         self.account
                             .order_backoff
                             .entry(symbol.clone())
                             .or_default()
                             .error = reason.clone();
-                    }
-                    self.defer_census(cx, symbol, revision, false, OrderRead::Failed(reason));
+                        (command, message)
+                    });
+                    self.defer_census(
+                        cx,
+                        CensusTail {
+                            symbol,
+                            revision,
+                            ok: false,
+                            diagnostic,
+                            read: OrderRead::Failed(reason),
+                        },
+                    );
                 }
             }
             _ => {}

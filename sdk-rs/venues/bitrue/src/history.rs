@@ -385,7 +385,13 @@ impl Bitrue {
             let _ = request.owner.reject(cx, VenueError::new("INCOMPLETE: Bitrue native fill page is full before local filters reach the requested limit"));
             return;
         }
+        // A page without its own live leg cannot be admitted; the owner
+        // still ends once, typed, rather than at its root deadline.
+        let refused = || {
+            VenueError::new("Bitrue fill page lost its read authority").kind(ErrorKind::Internal)
+        };
         let Some(leg) = leg else {
+            let _ = request.owner.finish(cx, Err(refused()));
             return;
         };
         match request.owner.admit(cx, leg) {
@@ -395,7 +401,10 @@ impl Bitrue {
                 }
                 page.accept_page();
             }
-            Err(_) => return,
+            Err(_) => {
+                let _ = request.owner.finish(cx, Err(refused()));
+                return;
+            }
         }
         let _ = request.owner.finish_with(cx, Ok(()), |mut rows| {
             rows.sort_by(|a, b| b.time_ms.total_cmp(&a.time_ms));
