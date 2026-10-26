@@ -512,9 +512,7 @@ impl Blofin {
         self.account.fills.get(id).map_or(0.0, |value| value.0)
     }
     pub(crate) fn signed(&self) -> bool {
-        !self.options.public_data_only
-            && self.options.key.as_ref().is_some_and(|s| !s.is_empty())
-            && self.options.secret.as_ref().is_some_and(|s| !s.is_empty())
+        !self.options.public_data_only && self.options.identities.primary.is_some()
     }
     /// One Background read per account leg, signed by the #2084 recipe; the
     /// native revision checks stay the join. A refused selection, admission or
@@ -583,7 +581,13 @@ impl Blofin {
         if !self.signed() {
             return;
         }
-        if self.options.passphrase.as_deref().is_none_or(str::is_empty) {
+        if self
+            .options
+            .identities
+            .primary
+            .as_ref()
+            .is_none_or(|primary| primary.passphrase.is_none())
+        {
             let error =
                 VenueError::new("BloFin requires a passphrase").kind(ErrorKind::InvalidInput);
             self.reject_startup(cx, error, false);
@@ -649,7 +653,7 @@ impl Blofin {
         let Some(kind) = key_rejection(&envelope.code) else {
             return false;
         };
-        let read_key = self.options.read_credentials.is_some();
+        let read_key = self.options.identities.secondary.is_some();
         let which = if read_key {
             "read-only API key"
         } else {
@@ -695,70 +699,40 @@ impl Blofin {
             cx.deactivate();
         }
     }
+    fn private_url(&self) -> &'static str {
+        if self.options.testnet {
+            "wss://demo-trading-openapi.blofin.com/ws/private"
+        } else {
+            "wss://openapi.blofin.com/ws/private"
+        }
+    }
     fn private_connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.startup_rejected {
             return;
         }
-        let url = if self.options.testnet {
-            "wss://demo-trading-openapi.blofin.com/ws/private"
-        } else {
-            "wss://openapi.blofin.com/ws/private"
-        };
+        let url = self.private_url();
         self.account.connection.socket = Some(cx.connect(
             safe_cex_engine::SocketSpec::new(url).channel(safe_cex_engine::SocketChannel::Private),
         ));
         self.account.authenticated = false;
         self.account.supervisor.connecting(cx);
     }
+    /// The login signs through the provider with the Primary, as every
+    /// private request does; a refusal latches the role and the engine closes.
     pub(crate) fn private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         self.account.supervisor.opened(cx);
-        let nonce = match safe_cex_crypto::uuid::uuid_with_entropy(|bytes| {
-            cx.fill_signing_entropy(bytes)
-        }) {
-            Ok(n) => n,
-            Err(e) => {
-                cx.notice(Level::Error, code::STREAM_UNAVAILABLE, e);
-                cx.close(socket);
-                self.private_close(cx, socket);
-                return;
-            }
+        let Some(primary) = self.options.identities.primary.clone() else {
+            cx.close(socket);
+            self.private_close(cx, socket);
+            return;
         };
-        let timestamp = safe_cex_engine::time::wire_stamp_ms(cx.now) as u64;
-        let sign = sign::signature(
-            self.options.secret.as_deref().unwrap_or(""),
-            "/users/self/verify",
-            "GET",
-            &timestamp.to_string(),
-            &nonce,
-            "",
-        );
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Login<'a> {
-            api_key: &'a str,
-            passphrase: &'a str,
-            timestamp: u64,
-            sign: String,
-            nonce: String,
-        }
-        #[derive(Serialize)]
-        struct Auth<'a> {
-            op: &'static str,
-            args: [Login<'a>; 1],
-        }
-        cx.send(
+        cx.send_signed(
             socket,
-            serde_json::to_string(&Auth {
-                op: "login",
-                args: [Login {
-                    api_key: self.options.key.as_deref().unwrap_or(""),
-                    passphrase: self.options.passphrase.as_deref().unwrap_or(""),
-                    timestamp,
-                    sign,
-                    nonce,
-                }],
-            })
-            .unwrap(),
+            String::new(),
+            Box::new(crate::dispatch_signing::WsLogin::new(
+                primary,
+                self.private_url(),
+            )),
         );
         self.account.connection.open = true;
 

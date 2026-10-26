@@ -289,8 +289,17 @@ fn a_selected_identity_without_a_passphrase_ref_refuses_natively_before_any_work
     refuses_every_signed_read(&mut h, "BloFin requires a passphrase");
 }
 
+/// Presence comes from identities: with none, the venue is keyless and runs no
+/// private work at all (no settings read, socket, signature or refusal).
 #[test]
-fn no_selectable_identity_refuses_with_the_native_credentials_text() {
+fn no_identity_runs_no_private_work() {
     let mut h = Harness::with_identities(|ids| *ids = Default::default());
-    refuses_every_signed_read(&mut h, "BloFin requires API credentials");
+    assert!(!h.pending.iter().any(|r| r.url.contains("/account/")));
+    assert!(!h.actions.iter().any(|a| match a {
+        Action::Sign { .. } => true,
+        Action::WsConnect { url, .. } => url.ends_with("/private"),
+        _ => false,
+    }));
+    lookup(&mut h);
+    assert!(result(&h).is_err());
 }

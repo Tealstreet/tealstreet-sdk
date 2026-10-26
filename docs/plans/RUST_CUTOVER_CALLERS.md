@@ -3528,6 +3528,37 @@ each one Background read.
 - **Unchanged.** Query bytes, results, row mapping and account Store effects. No
   new frame or result schema.
 
+### BloFin credential cutover: socket login on dispatch, raw options retired
+
+The private socket login now signs through the dispatch provider (a `WsLogin`
+recipe) with the Primary identity, as every private REST request already did.
+BloFin's options carry only opaque identities; the raw key, secret, passphrase
+and read credentials are gone from the venue
+([RUST_BLOFIN_CREDENTIAL_CUTOVER.md](RUST_BLOFIN_CREDENTIAL_CUTOVER.md)).
+- **Login frame.** Unchanged: the same fields in the same order, with a numeric
+  timestamp, the same `/users/self/verify` HMAC and the Primary key even when a
+  read key is configured.
+- **Login signing failure (better than TypeScript).** No frame is sent and the
+  socket closes.
+  - An entropy failure reconnects and logs in again.
+  - A provider refusal (an installed credential that cannot sign) latches the
+    private role, so the socket never reconnects and there's no retry loop. It
+    reports once through the engine's credential notice and `StartupFailed`.
+  - Native's `STREAM_UNAVAILABLE` notice for a login signing failure is dropped:
+    the engine's own signals already report it.
+- **Presence comes from identities.** Without a usable Primary identity the
+  venue is keyless and runs no private work at all: no settings read, private
+  socket, signature or refusal notice.
+- **Read keys.** An invalid read key is refused at construction by the
+  registry's shared read-key gate, before the venue exists. Native refused it at
+  startup. An explicitly empty read-key passphrase still fails startup with
+  "Secondary read credentials require a passphrase" (`InvalidInput`,
+  `config.invalid`).
+- **Inventories.** BloFin's credential-selection sites go 5 → 0 and its legacy
+  signing sites 11 → 0. Its `sign/` directory joins the migrated signing ban,
+  with the two dispatch HMAC work references frozen as other migrated families'
+  are.
+
 ### BloFin trading writes: Preflight roots and one serial Plan per job (W1)
 
 Every BloFin trading command (place, cancel, cancel-all, amend, leverage, margin
