@@ -9956,7 +9956,11 @@ is true on a backoff re-ask with no new uncertain write since the last ask: the
 hook must then join any read already running or owed, never start or owe
 another (a slow read would otherwise never complete and release). A venue may hold the fence to its
 native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
-opts in. Not covered yet (Phase B): an Unknown marker for venues with no
+opts in. AsterDEX opts in: its hook starts an open-orders read at once, or, when a
+read is already in flight (which predates the seal and cannot clear the fence),
+starts the fresh one as that read completes. It releases only on a clean read,
+so a persistently malformed order row keeps that venue's placements refused
+(cancels by ID stay admitted) until the row parses. Not covered yet (Phase B): an Unknown marker for venues with no
 placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
 until its opt-in) from managed, single-Context and legacy `cx.request` writes,
 and amend roots whose replacement places (zs5e83's audits,
@@ -9995,6 +9999,17 @@ orders response completes the snapshot, so the release token certifies the
 orders read itself. The census is one unpaginated `/v3/open-orders` request, so
 no earlier page can sit behind the token the release is judged on. Cancel-all: store-composed and fenced, as for Crypto.com. Its control is the
 same-named test in `venues/apexomni/tests/trading.rs`.
+
+A census that pages under several contexts records `Cx::order_read_epoch()`
+before its first page and reports through `orders_reconciled_since`, so its
+last page cannot release a mark its first page never saw. OKX adopts it (its
+census already restarts on every mark's immediate reconcile); a venue whose
+census spans contexts should do the same.
+
+Paradex opts in: after an Unknown placement or amend it reads `/orders` and
+releases on a clean snapshot. Cancel-all keeps the engine default (refused
+until reconciled). If `/auth` has been refused (401/403), no order read can run,
+so the fence holds until the account is reconnected or re-keyed.
 
 ## Lighter public beta data
 
@@ -10042,3 +10057,20 @@ The journal refuses a second resend, so a second rejection fails as
 `AuthInvalid`/`Rejected` with no third send. Every other refusal is still never
 resent. Kraken spot already re-signs a trade once on `EAPI:Invalid signature`
 (`spot/account.rs` `private_response`), and Bitunix `10007` landed in #2207.
+
+### Kraken and KrakenSpot uncertain-placement opt-in
+
+Both products opt into the shared Phase B placement/amend fence. An Unknown
+terminal keeps accepted IDs and refuses a later overlapping placement or amend
+NotSent until a complete, clean open-orders read publishes and calls
+`orders_reconciled`. Cancel by ID remains admitted; store-composed cancel-all
+keeps the shared uncertainty guard. A pre-mark read cannot release a newer mark.
+
+The account hook uses `cx.reconcile_reask` to join a running or already-owed
+read. A new seal owes a follow-up behind an older read; engine backoff re-asks
+do not restart a fresh read or perpetually owe another one. Failed or
+malformed reads leave the fence in place until a clean retry. This is local-key
+beta safety; it does not enable hosted signing. Native engine controls prove
+retry/amend refusal, stale/fresh release, held reads across three engine re-asks,
+503 recovery and rejected-row refusal. Browser readiness remains a separate
+JS/WASM host gate.

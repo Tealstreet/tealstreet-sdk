@@ -608,6 +608,12 @@ impl Kraken {
         }
     }
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.reconcile_reask()
+            && (self.account.orders_reconcile
+                || self.account.inflight.contains(&(Scope::Orders as u8)))
+        {
+            return;
+        }
         self.account.orders_reconcile = true;
         self.account_refresh(cx);
     }
