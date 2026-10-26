@@ -1558,6 +1558,7 @@ pub(crate) fn serial_call(operation: Operation) -> SerialCall {
         operation,
         timeout_ms: 20_000,
         attempts: 1,
+        pacing: None,
     }
 }
 impl Lighter {

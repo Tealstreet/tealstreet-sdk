@@ -251,6 +251,9 @@ struct ProductState {
 }
 
 pub struct BybitLinear {
+    /// A Bybit Brazil (`BRA_BTL`) account: REST writes publish their own order
+    /// rows, as on Demo, until its proxied private WS is venue-validated.
+    brazil_site: bool,
     signing_policy: safe_cex_engine::signing_policy::RemoteSigningPolicy,
     recv_window: Option<u32>,
     category: Category,
@@ -403,6 +406,14 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     }
 }
 
+/// Bybit's own `retCode`, when the body carries one. An HTTP status is never a
+/// venue code, so a non-JSON or envelope-less failure has none.
+pub(crate) fn native_code(response: &Response<'_>) -> Option<i64> {
+    serde_json::from_str::<Status>(response.body)
+        .ok()
+        .and_then(|status| status.ret_code)
+}
+
 fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
     use safe_cex_engine::startup::{MAX_RATE_LIMIT_PAUSE_MS, rate_limit_pause_ms};
 
@@ -516,6 +527,7 @@ impl BybitLinear {
             read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
             environment_probe_origin,
+            brazil_site: options.bybit_site_id.as_deref() == Some("BRA_BTL"),
             environment_probe_attempted: false,
             environment_probe: None,
             public: Connection::new(),

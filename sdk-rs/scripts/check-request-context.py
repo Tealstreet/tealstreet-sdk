@@ -14,6 +14,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = 'scripts/request-legacy-sites.json'
@@ -634,6 +635,24 @@ def use_items(stream):
     return result
 
 
+def without_own_crate_alias(stream, source_dir):
+    """`extern crate self as <this package>;` names only the crate itself and imports
+    no macro (`#[macro_use]` stays a hazard token), so it is no ancestor hazard."""
+    try:
+        package = tomllib.loads((source_dir.parent / 'Cargo.toml').read_text())['package']['name']
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return stream
+    alias = ['extern', 'crate', 'self', 'as', package.replace('-', '_'), ';']
+    kept, i = [], 0
+    while i < len(stream):
+        if stream[i:i + 6] == alias:
+            i += 6
+            continue
+        kept.append(stream[i])
+        i += 1
+    return kept
+
+
 def source_macro_hazard(stream, ancestor=False):
     if any(token in {'macro_rules', 'macro_use', 'macro_export', 'macro'} for token in stream):
         return True
@@ -798,7 +817,7 @@ class MacroImportProof:
         """An ancestor's top-level invocation may install textual macros, except a
         workspace macro proven to expand only to `impl` blocks, in a crate whose
         root proof shows `safe_cex_crypto` is the workspace dependency."""
-        stream = self.streams[parent]
+        stream = without_own_crate_alias(self.streams[parent], source_dir)
         if not source_macro_hazard(stream, True):
             return False
         if source_macro_hazard(stream):
@@ -1471,6 +1490,16 @@ def subset(counts, baseline):
     return all(count <= baseline.get(digest, 0) for digest, count in counts.items())
 
 
+def maximum_manifest(manifests):
+    result = {}
+    for value in manifests:
+        for path, counts in value.items():
+            inherited = result.setdefault(path, {})
+            for digest, count in counts.items():
+                inherited[digest] = max(inherited.get(digest, 0), count)
+    return result
+
+
 def check(current, allowed, previous):
     failures = []
     if current != allowed:
@@ -1486,12 +1515,19 @@ def git(*args):
     return subprocess.run(['git', '-C', str(ROOT), *args], text=True, capture_output=True, check=True).stdout
 
 
-def previous_manifests(inventory=None, predecessor=None):
-    """Per-ref baselines; a ref without `inventory` is bounded by `predecessor`."""
+def previous_manifests(inventory=None, predecessor=None, merge_parents=False):
+    """Request inventories may join parent bounds; other consumers keep per-ref bounds."""
     inventory = inventory or MANIFEST
     base = os.environ.get('GITHUB_BASE_REF') or 'feat/rust-rewrite'
     parents = git('rev-list', '--parents', '-n', '1', 'HEAD').split()[1:]
-    refs = ['HEAD', *parents, f'refs/remotes/origin/{base}']
+    remote = f'refs/remotes/origin/{base}'
+    refs = [('HEAD', ['HEAD'])]
+    if parents:
+        if merge_parents:
+            refs.append(('merge parents' if len(parents) > 1 else parents[0], parents))
+        else:
+            refs.extend((parent, [parent]) for parent in parents)
+    refs.append((remote, [remote]))
     if event_file := os.environ.get('GITHUB_EVENT_PATH'):
         event = json.loads(pathlib.Path(event_file).read_text())
         if 'pull_request' in event:
@@ -1499,25 +1535,30 @@ def previous_manifests(inventory=None, predecessor=None):
             exact = event['pull_request']['base']['sha']
             if not re.fullmatch(r'[a-f0-9]{40}', exact):
                 raise ValueError('invalid event base commit')
-            refs.append(exact)
+            refs.append((exact, [exact]))
     previous = []
-    for ref in refs:
-        # A missing ref is not a missing manifest. CI must fetch history first.
-        git('rev-parse', '--verify', f'{ref}^{{commit}}')
-        for name in [inventory, predecessor]:
-            path = git('rev-parse', '--show-prefix').strip() + name if name else None
-            if path and path in git('ls-tree', '--full-name', '--name-only', ref, '--', name).splitlines():
-                previous.append((ref, manifest(git('show', f'{ref}:{path}'))))
-                break
+    for label, group in refs:
+        found = []
+        for ref in group:
+            # A missing ref is not a missing manifest. CI must fetch history first.
+            git('rev-parse', '--verify', f'{ref}^{{commit}}')
+            for name in [inventory, predecessor]:
+                path = git('rev-parse', '--show-prefix').strip() + name if name else None
+                if path and path in git('ls-tree', '--full-name', '--name-only', ref, '--', name).splitlines():
+                    found.append(manifest(git('show', f'{ref}:{path}')))
+                    break
+        if found:
+            previous.append((label, maximum_manifest(found) if len(found) > 1 else found[0]))
     return previous
 
 
 def main():
     try:
         prod, test = request_sites()
-        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests())
+        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests(merge_parents=True))
         failures += ['test inventory: ' + failure for failure in check(
-            test, manifest((ROOT / TEST_MANIFEST).read_text()), previous_manifests(TEST_MANIFEST, MANIFEST))]
+            test, manifest((ROOT / TEST_MANIFEST).read_text()),
+            previous_manifests(TEST_MANIFEST, MANIFEST, merge_parents=True))]
     except InventoryRefusal as refusal:
         failures = [f'cannot verify legacy inventory: {refusal}']
     except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError) as error:
