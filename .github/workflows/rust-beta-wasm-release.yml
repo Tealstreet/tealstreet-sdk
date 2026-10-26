@@ -31,24 +31,25 @@ jobs:
     outputs:
       families: ${{ steps.roster.outputs.families }}
     steps:
-      - name: Refuse anything but an exact commit and a fresh tag
+      - name: Refuse anything but an exact commit and a tag that names it
         env:
           SDK_SHA: ${{ inputs.sdk_sha }}
           TAG: ${{ inputs.tag }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           [[ "$SDK_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sdk_sha must be a full commit SHA"; exit 1; }
           [[ "$TAG" =~ ^rust-beta-wasm-[0-9a-f]{11}$ ]] || { echo "tag must be rust-beta-wasm-<11 hex>"; exit 1; }
           [[ "$TAG" == "rust-beta-wasm-${SDK_SHA:0:11}" ]] || { echo "tag must name sdk_sha"; exit 1; }
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "release $TAG already exists; releases are immutable, choose a new commit"; exit 1
-          fi
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sdk_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Only an authenticated 404 is absence; an existing tag or release, or any API error, fails.
+      - name: Require a fresh tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
       - name: Read the 15 families from beta-venues.mjs
         id: roster
         run: |
@@ -120,7 +121,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sdk_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/download-artifact@v7
         with:
           pattern: beta-wasm-*
@@ -131,17 +140,26 @@ jobs:
           SDK_SHA: ${{ inputs.sdk_sha }}
           TAG: ${{ inputs.tag }}
           FAMILIES: ${{ needs.roster.outputs.families }}
+          SOURCE: ${{ github.workspace }}
         working-directory: ${{ runner.temp }}/assets
         run: |
           node --input-type=module - <<'EOF'
           import { createHash } from 'node:crypto';
           import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+          const { betaWasmInputs } = await import(`${process.env.SOURCE}/sdk-rs/harness/beta-wasm-inputs.mjs`);
           const families = JSON.parse(process.env.FAMILIES);
           const pin = {
             status: 'published',
             sdkSha: process.env.SDK_SHA,
             tag: process.env.TAG,
             assetUrl: 'https://github.com/Tealstreet/tealstreet-sdk/releases/download/{tag}/{asset}',
+            // tealstreet-next recomputes this over its mapped sdk-rs/ and refuses any mismatch.
+            inputs: betaWasmInputs(process.env.SOURCE, {
+              wasmBindgen: process.env.WASM_BINDGEN_VERSION,
+              wasmOpt: 'required',
+              profile: 'release',
+              target: 'wasm32-unknown-unknown',
+            }),
             families: {},
           };
           for (const name of readdirSync('.').sort()) {
@@ -155,14 +173,20 @@ jobs:
           if (missing.length) throw new Error(`families with no assets: ${missing}`);
           writeFileSync('rust-beta-wasm.pin.json', JSON.stringify(pin, null, 2) + '\n');
           EOF
-      - name: Create the release at the exact commit
+      - name: Re-check freshness, then create the tag at the exact commit and read it back
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node sdk-rs/harness/beta-wasm-release-guard.mjs fresh "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
+          node sdk-rs/harness/beta-wasm-release-guard.mjs create "$GITHUB_REPOSITORY" '${{ inputs.tag }}' '${{ inputs.sdk_sha }}'
+      - name: Publish the release on the verified tag
         env:
           GH_TOKEN: ${{ github.token }}
           SDK_SHA: ${{ inputs.sdk_sha }}
           TAG: ${{ inputs.tag }}
         working-directory: ${{ runner.temp }}/assets
         run: |
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$SDK_SHA" \
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Rust beta wasm $TAG" \
             --notes "Rust-only beta bundle wasm families built from $SDK_SHA. Pin: rust-beta-wasm.pin.json (commit it to tealstreet-next scripts/ by PR)." \
             ./*
