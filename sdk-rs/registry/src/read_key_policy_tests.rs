@@ -356,11 +356,11 @@ mod wiring {
     #[test]
     fn the_json_setup_refuses_a_read_identity_for_a_validate_only_family() {
         let setup = r#"{"primary":{"key":"k","secret":"s","passphrase":"p"},"secondary":{"key":"r","secret":"t"}}"#;
-        let private: crate::EngineOptions =
+        let mut private: crate::EngineOptions =
             serde_json::from_str(r#"{"publicDataOnly":false}"#).unwrap();
-        assert!(local_signer_from_json_for_mode("weex", setup.into(), &private).is_ok());
+        assert!(local_signer_from_json_for_mode("weex", setup.into(), &mut private).is_ok());
         let _declared = test_policy::declare("weex", ValidateOnly);
-        let Err(error) = local_signer_from_json_for_mode("weex", setup.into(), &private) else {
+        let Err(error) = local_signer_from_json_for_mode("weex", setup.into(), &mut private) else {
             panic!("a read identity was installed for a ValidateOnly family");
         };
         assert_eq!(error.kind, Some(ErrorKind::InvalidInput));

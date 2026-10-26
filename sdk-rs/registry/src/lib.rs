@@ -673,13 +673,14 @@ pub fn prepare_local_signer_for(
         // Setup resolves the version first; the policy then reads it.
         let setup = asterdex_setup::local_setup(options, public_data_only)?;
         let policy = signer_setup_policy_for(venue, options);
-        return local_signer_from_setup(setup, policy, public_data_only);
+        return local_signer_from_setup(setup, policy, public_data_only, options);
     }
     #[cfg(feature = "apexomni")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::ApexOmni) {
         let setup = apexomni_local_setup(options)?;
         let policy = signer_setup_policy_for(venue, options);
-        let (provider, identities) = local_signer_from_setup(setup, policy, public_data_only)?;
+        let (provider, identities) =
+            local_signer_from_setup(setup, policy, public_data_only, options)?;
         return apexomni_admit(provider, identities);
     }
     let policy = signer_setup_policy_for(venue, options);
@@ -758,7 +759,7 @@ fn apexomni_local_setup(
     let any = options.key.is_some() || options.secret.is_some() || options.passphrase.is_some();
     let primary = (any || seed.is_some()).then(|| {
         let mut identity = LocalIdentity {
-            key: Secret::new(options.key.take().unwrap_or_default()),
+            key: options.key.take().map_or_else(Secret::empty, Secret::new),
             secret: Secret::new(options.secret.take().unwrap_or_default()),
             passphrase: options.passphrase.take().map(Secret::new),
             ..Default::default()
@@ -835,7 +836,7 @@ fn prepare_local_signer_with_policy(
     let primary =
         if options.key.is_some() || options.secret.is_some() || options.passphrase.is_some() {
             Some(LocalIdentity {
-                key: Secret::new(options.key.take().unwrap_or_default()),
+                key: options.key.take().map_or_else(Secret::empty, Secret::new),
                 secret: Secret::new(options.secret.take().unwrap_or_default()),
                 passphrase: options.passphrase.take().map(Secret::new),
                 ..Default::default()
@@ -877,7 +878,12 @@ fn prepare_local_signer_with_policy(
             ..Default::default()
         })
     };
-    local_signer_from_setup(LocalSetup { primary, secondary }, policy, public_data_only)
+    local_signer_from_setup(
+        LocalSetup { primary, secondary },
+        policy,
+        public_data_only,
+        options,
+    )
 }
 
 #[cfg(feature = "dispatch-signing")]
@@ -885,6 +891,7 @@ fn local_signer_from_setup(
     setup: safe_cex_crypto::signer::LocalSetup,
     policy: safe_cex_engine::signing::CredentialSetupPolicy,
     public_data_only: bool,
+    options: &mut EngineOptions,
 ) -> Result<
     (
         safe_cex_engine::signing::Provider,
@@ -892,13 +899,13 @@ fn local_signer_from_setup(
     ),
     VenueError,
 > {
-    let (signer, identities) =
-        safe_cex_crypto::signer::LocalSigner::from_setup_with_policy_and_mode(
-            setup,
-            policy,
-            public_data_only,
-        )
-        .map_err(|_| invalid("Invalid local signer setup"))?;
+    let (signer, identities, facts) = safe_cex_crypto::signer::LocalSigner::from_setup_with_facts(
+        setup,
+        policy,
+        public_data_only,
+    )
+    .map_err(|_| invalid("Invalid local signer setup"))?;
+    options.setup_facts = Some(facts);
     Ok((std::sync::Arc::new(signer), identities))
 }
 /// Separate trusted JS/native provider setup, with fixed parse failures.
@@ -967,7 +974,7 @@ fn admit_json_setup(
 pub fn local_signer_from_json_for_mode(
     venue: &str,
     input: String,
-    options: &EngineOptions,
+    options: &mut EngineOptions,
 ) -> Result<
     (
         safe_cex_engine::signing::Provider,
@@ -975,17 +982,22 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
-    let (provider, identities) = local_signer_from_json_with_policy(
+    options.setup_facts = None;
+    let public_data_only = construction::signer_setup_public_data_only(options);
+    let (signer, identities, facts) = safe_cex_crypto::signer::LocalSigner::from_json_with_facts(
         input,
         signer_setup_policy_for(venue, options),
-        construction::signer_setup_public_data_only(options),
-    )?;
-    admit_json_setup(
-        venue,
-        provider,
-        identities,
-        construction::signer_setup_public_data_only(options),
+        public_data_only,
     )
+    .map_err(|_| invalid("Invalid local signer setup"))?;
+    let result = admit_json_setup(
+        venue,
+        std::sync::Arc::new(signer),
+        identities,
+        public_data_only,
+    )?;
+    options.setup_facts = Some(facts);
+    Ok(result)
 }
 
 /// A ValidateOnly family never installs a read identity, and a public-only
@@ -2112,6 +2124,9 @@ pub struct EngineOptions {
     /// credential-only slots come only from trusted local setup.
     #[serde(default, deserialize_with = "EngineOptions::injected_identities")]
     pub signing: Option<safe_cex_engine::signing::Identities>,
+    /// Non-secret presence facts produced only by trusted local setup.
+    #[serde(skip)]
+    pub setup_facts: Option<safe_cex_engine::signing::SetupFacts>,
     #[serde(default)]
     pub private_only: bool,
     /// The SDK sets this when the account can sign (not public-data-only).
@@ -2567,3 +2582,6 @@ mod read_key_policy_tests;
 #[cfg(all(test, feature = "backpack"))]
 #[path = "backpack_public_read_tests.rs"]
 mod backpack_public_read_tests;
+
+#[cfg(all(test, feature = "dispatch-signing"))]
+mod setup_facts_tests;

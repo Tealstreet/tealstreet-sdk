@@ -969,7 +969,7 @@ impl WasmEngine {
             let (signer, identities) = safe_cex_venues::local_signer_from_json_for_mode(
                 venue,
                 std::mem::take(&mut *input),
-                &options,
+                &mut options,
             )
             .map_err(construction_error)?;
             options.signing = Some(identities);

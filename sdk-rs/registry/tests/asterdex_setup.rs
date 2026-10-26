@@ -117,9 +117,12 @@ fn native_setup_matches_the_ts_mapping_golden() {
             "{name}"
         );
         // The WASM path passes the parsed options, with TS's explicit version.
-        let (ts, ts_ids) =
-            local_signer_from_json_for_mode("asterdex", expected["setup"].to_string(), &options)
-                .unwrap();
+        let (ts, ts_ids) = local_signer_from_json_for_mode(
+            "asterdex",
+            expected["setup"].to_string(),
+            &mut options,
+        )
+        .unwrap();
         assert_eq!(native_ids, ts_ids, "{name}: refs, including any alias");
         let algorithm = if expected["apiVersion"] == "v3" {
             Algorithm::Secp256k1Digest
@@ -355,8 +358,9 @@ fn v1_hmac_secrets_are_not_declared() {
 fn json_setup_without_an_explicit_version_declares_nothing() {
     let case = golden_case("v3 wallet key from the secret");
     let setup = case["expected"]["setup"].to_string();
-    let versionless: EngineOptions = serde_json::from_value(json!({})).unwrap();
-    let (provider, ids) = local_signer_from_json_for_mode("asterdex", setup, &versionless).unwrap();
+    let mut versionless: EngineOptions = serde_json::from_value(json!({})).unwrap();
+    let (provider, ids) =
+        local_signer_from_json_for_mode("asterdex", setup, &mut versionless).unwrap();
     let primary = ids.primary.unwrap();
     assert!(signatures(&provider, &primary, Algorithm::Secp256k1Digest).is_err());
     assert!(wallet_address(&provider, &primary).is_err());

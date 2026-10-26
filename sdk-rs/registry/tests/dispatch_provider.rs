@@ -649,7 +649,7 @@ fn explicit_setup_mode_precedence_bypasses_only_primary_private_requirement() {
             (r#""publicDataOnly":true,"publicMode":{}"#, false),
             (r#""publicDataOnly":false"#, false),
         ] {
-            let intent_options: EngineOptions =
+            let mut intent_options: EngineOptions =
                 serde_json::from_str(&format!("{{{intent}}}")).unwrap();
             let raw_json = format!(r#"{{{intent},"key":"key","secret":"secret","passphrase":""}}"#);
             let mut raw: EngineOptions = serde_json::from_str(&raw_json).unwrap();
@@ -658,7 +658,7 @@ fn explicit_setup_mode_precedence_bypasses_only_primary_private_requirement() {
             assert_eq!(result.is_ok(), public, "{venue}: {intent}");
             let missing = r#"{"primary":{"key":"key","secret":"secret","passphrase":""}}"#;
             assert_eq!(
-                local_signer_from_json_for_mode(venue, missing.into(), &intent_options).is_ok(),
+                local_signer_from_json_for_mode(venue, missing.into(), &mut intent_options).is_ok(),
                 public
             );
             // Even explicit public mode cannot admit incomplete required secondary material.
@@ -667,7 +667,7 @@ fn explicit_setup_mode_precedence_bypasses_only_primary_private_requirement() {
                 local_signer_from_json_for_mode(
                     venue,
                     secondary.into(),
-                    &serde_json::from_str(r#"{"publicDataOnly":true}"#).unwrap(),
+                    &mut serde_json::from_str(r#"{"publicDataOnly":true}"#).unwrap(),
                 )
                 .err()
                 .unwrap(),
