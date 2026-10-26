@@ -9933,8 +9933,9 @@ symbol:
 - `placeOrders` and `amendOrder` fail NotSent with "Placement outcome is
   uncertain; reconcile before placing or amending" and send nothing;
 - `cancelSymbolOrders` fails with "Placement outcome is uncertain; reconcile
-  before cancel-all" and sends nothing; cancelling a known order by id is still
-  admitted.
+  before cancel-all" and sends nothing: Lighter composes cancel-all from known
+  ids, so it would miss the uncertain order. Cancelling a known order by id is
+  still admitted.
 The Unknown starts an active-orders read at once. The fence clears on the first
 complete orders snapshot requested after the write: a read already in flight
 when the write went out, a failed read, or a snapshot with an unmappable row

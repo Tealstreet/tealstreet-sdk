@@ -137,6 +137,9 @@ fn assert_place_admitted(e: &mut Engine<Lighter>, t: &mut Timers, at: f64, comma
     );
 }
 
+// Lighter's cancel-all is composed from the local store (one cancel per known id), so
+// it would skip the uncertain order yet report all cancelled; it stays refused
+// (fence_uncertain_cancel_all default) until reconcile. Cancel by id stays admitted.
 #[test]
 fn cancel_all_after_an_unknown_placement_is_refused_by_the_fence() {
     let (mut e, mut t) = ready_eth();
