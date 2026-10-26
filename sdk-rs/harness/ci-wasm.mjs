@@ -115,6 +115,12 @@ const validatePackage = ({ root, directory, venue, fingerprint, sourceHead, runI
 export const validateCiWasm = ({ root = process.cwd(), directory, venue }) =>
   validatePackage({ root, directory, venue, fingerprint: () => buildInputFingerprint(root) });
 
+export const validateSameRunCiWasm = ({ root = process.cwd(), directory, venue, env = process.env }) => {
+  if (env.GITHUB_ACTIONS !== 'true' || !/^\d+$/.test(env.GITHUB_RUN_ID ?? '')) throw new Error('Same-run CI context required');
+  return validatePackage({ root, directory, venue, fingerprint: () => buildInputFingerprint(root),
+    sourceHead: git(root, 'rev-parse', 'HEAD').trim(), runId: env.GITHUB_RUN_ID });
+};
+
 // Measurement-only source contract; final paired certification separately
 // authenticates the selected landing/anchor and every physical observation.
 export const validatePairedCiWasm = ({ root = process.cwd(), directory, venue, sourceHead, env = process.env }) => {
@@ -128,8 +134,14 @@ export const validatePairedCiWasm = ({ root = process.cwd(), directory, venue, s
 };
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { values } = parseArgs({ options: {
-    venue: { type: 'string' }, archive: { type: 'string' },
+    venue: { type: 'string' }, archive: { type: 'string' }, verify: { type: 'string' },
   } });
+  if (values.verify) {
+    if (!values.venue || values.archive) throw new Error('Select --venue and --verify only');
+    validateSameRunCiWasm({ directory: resolve(values.verify), venue: values.venue });
+    console.log('Verified same-run family archive');
+    process.exit(0);
+  }
   if (!values.venue || !values.archive) throw new Error('Expected --venue VENUE --archive DIRECTORY');
   const metadata = archiveCiWasm({ venue: values.venue, destination: resolve(values.archive) });
   console.log(`Archived CI wasm ${metadata.family} from ${metadata.sourceHead} (${metadata.inputsSha256})`);
